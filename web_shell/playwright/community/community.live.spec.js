@@ -39,6 +39,17 @@ async function noHorizontalOverflow(page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
 }
 
+async function holdRealResponse(page, url) {
+  let release;
+  const gate = new Promise(resolveGate => { release = resolveGate; });
+  await page.route(url, async route => {
+    const response = await route.fetch();
+    await gate;
+    await route.fulfill({ response });
+  }, { times: 1 });
+  return release;
+}
+
 test('members post, comment and react; ownership and data survive reload and backend restart', async ({ page, browser }, testInfo) => {
   const browserErrors = [];
   page.on('pageerror', error => browserErrors.push(error.message));
@@ -48,8 +59,19 @@ test('members post, comment and react; ownership and data survive reload and bac
   const body = `A place to make things together — ${testInfo.project.name} ${Date.now()}`;
   const reply = 'I would love to help with the next community project.';
   let postId;
+  const releaseFeed = await holdRealResponse(page, '**/api/modules/user_posts/list_posts');
+  const releaseComments = await holdRealResponse(memberPage, '**/api/modules/user_posts/list_comments');
   try {
     await signIn(page, 'alice');
+    await expect(page.getByText('Loading conversations…', { exact: true })).toBeVisible();
+    releaseFeed();
+    await expect(page.getByText('Every community starts with a hello.', { exact: true })).toBeVisible();
+    const token = await page.evaluate(() => window.mozaiksAuth.getAccessToken());
+    const workflows = await page.request.get(`${environment.api_url}/api/workflows`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(workflows.status()).toBe(200);
+    expect(await workflows.json()).toEqual({ workflows: [] });
     await page.getByLabel('What would you like to share?', { exact: true }).fill(body);
     const createdPromise = page.waitForResponse(response => response.url().endsWith('/user_posts/create_post') && response.request().method() === 'POST');
     await page.getByRole('button', { name: 'Share post', exact: true }).click();
@@ -64,6 +86,9 @@ test('members post, comment and react; ownership and data survive reload and bac
 
     await signIn(memberPage, 'bob', `/community/${postId}`);
     await expect(memberPage.getByText(body, { exact: true })).toBeVisible();
+    await expect(memberPage.getByText('Loading the conversation…', { exact: true })).toBeVisible();
+    releaseComments();
+    await expect(memberPage.getByText('There is room for your perspective.', { exact: true })).toBeVisible();
     await expect(memberPage.getByRole('button', { name: 'Delete your post', exact: true })).toHaveCount(0);
     await memberPage.getByRole('button', { name: 'Like post', exact: true }).click();
     await expect(memberPage.getByRole('button', { name: 'Unlike post', exact: true })).toBeVisible();
@@ -125,8 +150,11 @@ test('members post, comment and react; ownership and data survive reload and bac
     expect(await readPost(page, postId)).toBeNull();
     await memberPage.reload();
     await expect(memberPage.getByText(body, { exact: true })).toHaveCount(0);
+    await expect(memberPage.getByText('This post is no longer available.', { exact: true })).toBeVisible();
     expect(browserErrors).toEqual([]);
   } finally {
+    releaseFeed();
+    releaseComments();
     // Clean only this test's synthetic post if an assertion interrupted the UI.
     if (postId) await action(page, 'delete_post', { post_id: postId }).catch(() => {});
     await memberContext.close();
@@ -138,11 +166,16 @@ test('failed post preserves its draft and can be retried after connectivity retu
   const draft = `An idea worth keeping — ${testInfo.project.name} ${Date.now()}`;
   await page.getByLabel('What would you like to share?', { exact: true }).fill(draft);
   await context.setOffline(true);
+  await page.getByRole('button', { name: 'Refresh community', exact: true }).click();
+  await expect(page.getByText('The community is unavailable', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Share post', exact: true }).click();
-  await expect(page.getByRole('alert')).toBeVisible();
+  await expect(page.getByRole('form', { name: 'Write a post' }).getByRole('alert')).toBeVisible();
   await expect(page.getByLabel('What would you like to share?', { exact: true })).toHaveValue(draft);
   await page.screenshot({ path: testInfo.outputPath('community-offline-draft.png'), fullPage: true });
   await context.setOffline(false);
+  await page.getByRole('button', { name: 'Retry loading', exact: true }).click();
+  await expect(page.getByText('The community is unavailable', { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel('What would you like to share?', { exact: true })).toHaveValue(draft);
   const createdPromise = page.waitForResponse(response => response.url().endsWith('/user_posts/create_post') && response.request().method() === 'POST');
   await page.getByRole('button', { name: 'Share post', exact: true }).click();
   const created = await (await createdPromise).json();
@@ -164,10 +197,15 @@ test('a new reply stays visible while older comment pages are loaded', async ({ 
       const seeded = await (await action(page, 'add_comment', { post_id: postId, body: `Earlier reply ${index}` })).json();
       expect(seeded.success).toBe(true);
     }
+    await page.route('**/api/modules/user_posts/list_comments', route => route.abort('connectionfailed'), { times: 1 });
     await page.goto(`${environment.base_url}/community/${postId}`);
-    await expect(page.getByText('Earlier reply 50', { exact: true })).toBeVisible();
-    await expect(page.getByText('Earlier reply 51', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('Could not load comments', { exact: true })).toBeVisible();
     await page.getByLabel('Add to the conversation', { exact: true }).fill('My newest reply');
+    await page.getByRole('button', { name: 'Retry comments', exact: true }).click();
+    await expect(page.getByText('Earlier reply 50', { exact: true })).toBeVisible();
+    await expect(page.getByText('Could not load comments', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('Earlier reply 51', { exact: true })).toHaveCount(0);
+    await expect(page.getByLabel('Add to the conversation', { exact: true })).toHaveValue('My newest reply');
     const posted = page.waitForResponse(response => response.url().endsWith('/user_posts/add_comment'));
     await page.getByRole('button', { name: 'Post comment', exact: true }).click();
     const reply = await (await posted).json();

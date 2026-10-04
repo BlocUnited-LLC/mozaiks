@@ -1,0 +1,133 @@
+name: Community acceptance
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  community-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHON_DOTENV_DISABLED: '1'
+      COMMUNITY_LIVE_CONFIG: ${{ github.workspace }}/.local/evidence/community-env/ci/environment.json
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: pip
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: |
+            chat-ui/package-lock.json
+            web_shell/package-lock.json
+      - name: Install pinned Python dependencies
+        run: python -m pip install -e ".[dev]"
+      - name: Install shared UI dependencies
+        working-directory: chat-ui
+        run: npm ci
+      - name: Install shell and browser dependencies
+        working-directory: web_shell
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Pull disposable local service images
+        run: |
+          docker pull mongo:7
+          docker pull quay.io/keycloak/keycloak:26.0
+      - name: Build community and run eight real browser journeys
+        shell: python
+        run: |
+          import json
+          import os
+          import signal
+          import subprocess
+          import sys
+          import time
+          import tomllib
+          from importlib.metadata import version
+          from pathlib import Path
+          from urllib.error import URLError
+          from urllib.request import urlopen
+
+          root = Path.cwd()
+          state_path = Path(os.environ['COMMUNITY_LIVE_CONFIG'])
+          evidence = state_path.parent
+          evidence.parent.mkdir(parents=True, exist_ok=True)
+          launcher = root / 'examples/canonical-apps/community/scripts/live_environment.py'
+          dependencies = tomllib.loads((root / 'pyproject.toml').read_text())['project']['dependencies']
+          required_ag2 = next(item.split('==')[1] for item in dependencies if item.startswith('ag2['))
+          assert version('ag2') == required_ag2
+          preview = None
+          with (evidence.parent / 'ci-owner.log').open('w') as owner_log:
+              owner = subprocess.Popen([sys.executable, str(launcher), 'start', '--evidence-dir', str(evidence)], stdout=owner_log, stderr=subprocess.STDOUT)
+              try:
+                  deadline = time.monotonic() + 180
+                  while True:
+                      if owner.poll() is not None:
+                          raise RuntimeError('Community owner exited before readiness; inspect ci-owner.log')
+                      state = json.loads(state_path.read_text()) if state_path.exists() else {}
+                      if state.get('status') == 'ready':
+                          break
+                      if time.monotonic() > deadline:
+                          raise TimeoutError('Community services did not become ready')
+                      time.sleep(0.5)
+                  assert state['ag2_version'] == required_ag2
+                  env = {**os.environ, **state['frontend_env'], 'COMMUNITY_PYTHON': sys.executable}
+                  shell = root / 'web_shell'
+                  subprocess.run(['npm', 'run', 'build'], cwd=shell, env=env, check=True)
+                  with (evidence / 'preview.log').open('w') as preview_log:
+                      preview = subprocess.Popen(['node', 'node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', '14443', '--strictPort'], cwd=shell, env=env, stdout=preview_log, stderr=subprocess.STDOUT)
+                      deadline = time.monotonic() + 30
+                      while True:
+                          if preview.poll() is not None:
+                              raise RuntimeError('Community preview exited before readiness')
+                          try:
+                              with urlopen(state['base_url'] + '/community', timeout=2) as response:
+                                  assert response.status == 200
+                              break
+                          except URLError:
+                              if time.monotonic() > deadline:
+                                  raise
+                              time.sleep(0.25)
+                      subprocess.run(['npx', 'playwright', 'test', '-c', 'playwright.community.config.js'], cwd=shell, env=env, check=True)
+              finally:
+                  if preview is not None and preview.poll() is None:
+                      preview.terminate()
+                      preview.wait(timeout=15)
+                  if owner.poll() is None:
+                      state = json.loads(state_path.read_text()) if state_path.exists() else {}
+                      if state.get('status') == 'ready':
+                          subprocess.run([sys.executable, str(launcher), 'stop', '--evidence-dir', str(evidence)], check=True, timeout=150)
+                      else:
+                          owner.send_signal(signal.SIGINT)
+                  owner.wait(timeout=90)
+                  state = json.loads(state_path.read_text()) if state_path.exists() else {}
+                  keys = ('source_sha', 'source_changes', 'ag2_version', 'images', 'api_generation', 'status', 'cleanup_status', 'cleanup_errors', 'forced_api_stop')
+                  (evidence.parent / 'ci-provenance.json').write_text(json.dumps({key: state.get(key) for key in keys}, indent=2))
+                  assert state.get('cleanup_status') == 'complete', state.get('cleanup_errors')
+      - name: Retain results and safe evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: community-browser-results
+          retention-days: 7
+          if-no-files-found: warn
+          include-hidden-files: true
+          path: |
+            web_shell/test-results/community-results.json
+            web_shell/test-results/**/*.png
+            .local/evidence/community-env/ci-provenance.json
+            .local/evidence/community-env/ci-owner.log

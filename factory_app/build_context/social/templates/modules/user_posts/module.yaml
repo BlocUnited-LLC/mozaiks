@@ -84,7 +84,9 @@ actions:
 
   - id: list_posts
     api_surface: public_readonly
-    description: List published posts, optionally filtered by author.
+    description: >
+      List published posts, optionally filtered by author. Limits are clamped
+      to 1–99 (default 20); pass next_cursor as before for the next page.
     handler_method: list_posts
     input_schema:
       type: object
@@ -107,7 +109,8 @@ actions:
     api_surface: public_readonly
     description: >
       List published posts by a specific user. Used to hydrate the Posts tab
-      on /me and /u/:username profile pages.
+      on /me and /u/:username profile pages. Limits are clamped to 1–99
+      (default 20); pass next_cursor as before for the next page.
     handler_method: list_user_posts
     input_schema:
       type: object
@@ -192,7 +195,9 @@ actions:
 
   - id: list_comments
     api_surface: public_readonly
-    description: List comments for a post, oldest-first.
+    description: >
+      List comments for a post, oldest-first. Limits are clamped to 1–99
+      (default 50); pass next_cursor as after for the next page.
     handler_method: list_comments
     input_schema:
       type: object

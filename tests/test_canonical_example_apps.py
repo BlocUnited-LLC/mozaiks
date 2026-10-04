@@ -10,6 +10,7 @@ import yaml
 from fastapi.testclient import TestClient
 
 from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import scan_app_contracts
+from mozaiksai.core.account import account_data_registry
 from mozaiksai.core.admin.registry import AdminRegistry, build_admin_shell_routes
 from mozaiksai.core.auth.adapters import registry as auth_registry
 from mozaiksai.core.auth.adapters.base import BaseAuthAdapter, UserClaims
@@ -191,9 +192,11 @@ async def _configure_app(name: str, monkeypatch: pytest.MonkeyPatch) -> Any:
         ("project-hub", {"projects", "tasks"}, {"projects", "tasks"}, set()),
         ("reporting-saas", {"entitlement_dispatch", "reports"}, {"reports"}, set()),
         ("research-ops", {"incidents", "research"}, {"operations", "research"}, {"ResearchWorkflow"}),
+        ("community", {"user_posts"}, set(), set()),
     ],
 )
-async def test_canonical_example_workspace_loads_real_contracts(name, modules, pages, workflows) -> None:
+async def test_canonical_example_workspace_loads_real_contracts(name, modules, pages, workflows, monkeypatch) -> None:
+    monkeypatch.setattr(account_data_registry, "_handlers", {})
     loaded = await AppLoader.load(str(_app_root(name)))
 
     assert loaded.failed_module_names == []
@@ -202,7 +205,7 @@ async def test_canonical_example_workspace_loads_real_contracts(name, modules, p
     assert {workflow.name for workflow in loaded.definition.workflows} == workflows
 
 
-@pytest.mark.parametrize("name", ["project-hub", "reporting-saas", "research-ops"])
+@pytest.mark.parametrize("name", ["project-hub", "reporting-saas", "research-ops", "community"])
 def test_canonical_example_has_no_functional_bundle_gaps(name: str) -> None:
     app_root = _app_root(name)
     files = {
@@ -215,7 +218,7 @@ def test_canonical_example_has_no_functional_bundle_gaps(name: str) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("name", ["project-hub", "reporting-saas"])
+@pytest.mark.parametrize("name", ["project-hub", "reporting-saas", "community"])
 async def test_authenticated_example_routes_resolve_without_navigation(
     name: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:

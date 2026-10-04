@@ -16,6 +16,7 @@ import subprocess
 import sys
 import time
 from datetime import UTC, datetime
+from importlib.metadata import version
 from pathlib import Path
 from urllib.error import URLError
 from urllib.request import urlopen
@@ -68,7 +69,6 @@ def environment(args: argparse.Namespace, evidence: Path) -> tuple[dict, dict]:
     frontend = {
         "PLATFORM_PATH": str(WORKSPACE / "app"),
         "MOZAIKS_APP_WORKSPACE_PATH": str(WORKSPACE),
-        "MOZAIKS_WORKFLOWS_PATH": str(evidence / "empty-workflows"),
         "MOZAIKS_HOST": "platform",
         "MOZAIKS_BACKEND_URL": api,
         "VITE_API_URL": api,
@@ -136,7 +136,7 @@ async def host(args: argparse.Namespace) -> None:
 def run(args: argparse.Namespace, evidence: Path) -> None:
     if not (WORKSPACE / "app/app.json").is_file():
         raise RuntimeError("Build the Common Ground reference app before starting acceptance.")
-    for port in (args.mongo_port, args.oidc_port, args.api_port):
+    for port in (args.mongo_port, args.oidc_port, args.api_port, args.web_port):
         free_port(port)
     images = {key: json.loads(docker("image", "inspect", name))[0]["Id"] for key, name in IMAGES.items()}
     run_id = "community-" + uuid4().hex[:12]
@@ -144,7 +144,6 @@ def run(args: argparse.Namespace, evidence: Path) -> None:
         if docker("ps", "-aq", "--filter", f"name=^/{run_id}-{kind}$"):
             raise RuntimeError("Owned container name already exists.")
     evidence.mkdir(parents=True, exist_ok=False)
-    (evidence / "empty-workflows").mkdir()
     frontend, runtime = environment(args, evidence)
     realm = json.loads((WORKSPACE / "tests/identity-realm.json").read_text(encoding="utf-8"))
     web = f"http://127.0.0.1:{args.web_port}"
@@ -163,7 +162,7 @@ def run(args: argparse.Namespace, evidence: Path) -> None:
         "client_id": "common-ground", "audience": "common-ground-api",
         "users": [{"username": user["username"], "password": user["credentials"][0]["value"]} for user in realm["users"]],
         "frontend_env": frontend, "images": images, "containers": {}, "api_generation": 0,
-        "python": sys.executable, "owner_pid": os.getpid(),
+        "python": sys.executable, "ag2_version": version("ag2"), "owner_pid": os.getpid(),
         "started_at": datetime.now(UTC).isoformat(),
         "rate_limit_note": "600 RPM per loopback client for acceptance; limiting remains enabled; not load qualification.",
     }

@@ -356,6 +356,41 @@ async def test_hidden_newer_posts_do_not_consume_public_pagination(dispatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["list_posts", "list_user_posts", "list_comments"])
+async def test_maximum_requested_page_traverses_105_rows_without_loss(dispatch, action):
+    comments = action == "list_comments"
+    collection = "comments" if comments else "posts"
+    identifier = "comment_id" if comments else "post_id"
+    rows = [
+        {
+            **_post(), identifier: f"record-{index:03}",
+            "created_at": f"2026-10-04T12:{index // 60:02}:{index % 60:02}Z",
+        }
+        for index in range(105)
+    ]
+    dispatch.records[collection].extend(rows)
+    if comments:
+        dispatch.records["posts"].append(_post())
+    params = {"limit": 100, **({"post_id": "post"} if comments else {})}
+    if action == "list_user_posts":
+        params["user_id"] = "alice"
+
+    first = await _execute(dispatch, action, params)
+    assert first["count"] == 99
+    assert first["next_cursor"] == first[collection][-1]["created_at"]
+    second = await _execute(dispatch, action, {
+        **params, "after" if comments else "before": first["next_cursor"],
+    })
+
+    assert second["count"] == 6 and second["next_cursor"] is None
+    identifiers = [row[identifier] for page in (first, second) for row in page[collection]]
+    expected = [row[identifier] for row in rows]
+    assert identifiers == (expected if comments else list(reversed(expected)))
+    assert len(set(identifiers)) == 105
+    assert all(call.args[0]["app_id"] == APP_ID for call in dispatch.collections[collection].find.call_args_list)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("visibility", ["public", "friends", "private"])
 async def test_canonical_pack_still_accepts_explicit_visibility_on_create(dispatch, visibility):
     data = await _execute(dispatch, "create_post", {"body": "A post", "visibility": visibility}, user="alice")

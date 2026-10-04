@@ -1,7 +1,7 @@
 # Common Ground
 
 Common Ground is an interactive community reference for the web-journey
-milestone in ADR 0013. Members can publish posts, open conversations, comment,
+milestone proposed in PR #809's ADR 0013. Members can publish posts, open conversations, comment,
 react and remove their own contributions. It uses the normal Mozaiks platform
 host, data contracts, OIDC sign-in and shared React shell.
 
@@ -22,6 +22,11 @@ public published posts are shared; private, friends, and unknown visibility valu
 remain author-only. Friends-based sharing is not implemented. Hidden or deleted
 posts cannot be read, commented on, reacted to, or expose their comments and
 reaction summaries through these module actions.
+
+Post and comment list limits are clamped to 1–99 so the persistence query can
+reserve its hundredth row for next-page detection. Posts default to 20 and
+comments to 50. Continue with `next_cursor` as `before` for posts or `after`
+for comments until it is null. Account export uses its separate full traversal.
 
 The page keeps a failed submission's draft while it remains mounted. It does
 not promise offline storage, offline posting, or preservation across a full
@@ -63,6 +68,9 @@ The provider must grant `user_posts.read`, `user_posts.create` and
 `user_posts.react`; requesting a scope does not grant it. Configure the matching
 API audience, scope claim and access-token discriminator. The browser client
 uses authorization code with PKCE and an exact callback URI.
+The **signed access token must carry `app_id=common-ground`**. If your issuer
+uses a different claim name, set `AUTH_APP_ID_CLAIM` to that name and require
+the same exact value. The page's app manifest does not supply token identity.
 
 From the repository environment:
 
@@ -70,8 +78,29 @@ From the repository environment:
 mozaiks serve ./examples/canonical-apps/community --host platform
 ```
 
-Follow the CLI's local URLs; the callback URI registered with your provider
-must match the browser origin. No model API key is needed for community actions.
+This starts the API, not the browser app. It also prepares local workspace
+guidance and dotenv files; use a disposable copy of the example for your own
+app rather than treating those files as changes to the canonical example.
+
+In a second terminal under `web_shell/`, export the configured `VITE_OIDC_*`
+values from the workspace's `.env` into that terminal. Vite does not read the
+workspace's `.env` automatically. Then select and build this app explicitly:
+
+```powershell
+$env:PLATFORM_PATH = (Resolve-Path ../examples/canonical-apps/community/app).Path
+$env:MOZAIKS_APP_WORKSPACE_PATH = (Resolve-Path ../examples/canonical-apps/community).Path
+$env:MOZAIKS_HOST = 'platform'
+$env:VITE_API_URL = 'http://127.0.0.1:8000' # Use the API URL printed by serve.
+$env:MOZAIKS_BACKEND_URL = $env:VITE_API_URL
+npm run build
+npm run preview -- --host 127.0.0.1 --port 14443 --strictPort
+```
+
+Open `http://127.0.0.1:14443/community`. Set `VITE_OIDC_REDIRECT_URI` and your
+provider's registered callback to `http://127.0.0.1:14443/auth/callback` before
+building. Set the backend's `FRONTEND_URL`/`REACT_DEV_ORIGIN` to that browser
+origin too. Adjust both app paths if using a copied workspace. No model API key
+is needed for community actions.
 
 ## Reproduce local acceptance
 
@@ -80,6 +109,11 @@ The dedicated launcher uses **already installed** Docker images `mongo:7` and
 frontend dependencies. It creates separate disposable containers on loopback
 ports; it does not adopt or reset your normal development services. The realm
 has two synthetic fixture accounts and is unsuitable for deployment.
+Install Python dependencies with `python -m pip install -e ".[dev]"` and run
+`npm ci` in both `chat-ui/` and `web_shell/`. Install Chromium from `web_shell/`
+with `npx playwright install chromium`. The launcher records the installed AG2
+version; acceptance must use the exact pin in `pyproject.toml` (currently 1.1.2).
+It uses normal workspace workflow discovery, with no synthetic workflow root.
 
 From the checkout root, keep this command running in a terminal:
 
@@ -90,9 +124,9 @@ python examples/canonical-apps/community/scripts/live_environment.py start --evi
 In another terminal, from `web_shell/`, build and serve the actual app:
 
 ```powershell
-$front = Get-Content ../.local/evidence/community-env/my-run/frontend-env.json -Raw | ConvertFrom-Json -AsHashtable
-foreach ($entry in $front.GetEnumerator()) {
-  [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'Process')
+$front = Get-Content ../.local/evidence/community-env/my-run/frontend-env.json -Raw | ConvertFrom-Json
+foreach ($entry in $front.PSObject.Properties) {
+  [Environment]::SetEnvironmentVariable($entry.Name, $entry.Value, 'Process')
 }
 npm run build
 npm run preview -- --host 127.0.0.1 --port 14443 --strictPort
@@ -110,7 +144,10 @@ npx playwright test -c playwright.community.config.js
 
 This suite uses real browser sign-in and actual HTTP/database operations. It
 does not fabricate app data or identity responses. One race test delays an
-actual server response to check that it cannot revive a deleted post. The phone
+actual server response to check that it cannot revive a deleted post. Other
+checks hold real responses or interrupt connectivity to inspect loading and
+retry states. Authentication is local Keycloak authorization code with PKCE;
+this does not qualify a real external identity provider. The phone
 project is a phone-sized Chromium browser, not iOS/Android device acceptance.
 Screenshots and results go under `web_shell/test-results/`; environment and
 process evidence remain under `.local/evidence/community-env/`. Traces contain
@@ -126,7 +163,13 @@ python examples/canonical-apps/community/scripts/live_environment.py stop --evid
 Deterministic contract/dispatch checks also run without Docker:
 
 ```powershell
-pytest -q --no-cov tests/test_community_reference.py tests/test_build_context_social_pack.py
+pytest -q --no-cov tests/test_community_reference.py tests/test_social_post_privacy.py tests/test_build_context_social_pack.py tests/test_canonical_example_apps.py
 ```
 
-Live acceptance is an explicit local gate, not part of the ordinary unit suite.
+`.github/workflows/community.yml` separately builds this app and runs all four
+journeys on desktop and phone Chromium (eight tests) for PRs and main. It
+installs the pinned Python dependencies, uses disposable MongoDB/Keycloak,
+and retains results, screenshots and safe version/cleanup evidence. Raw realm
+credentials, browser traces and runtime environment files are not uploaded.
+This browser gate is separate from the ordinary unit suite; it proves the
+authored reference, not Factory generation or external-provider readiness.

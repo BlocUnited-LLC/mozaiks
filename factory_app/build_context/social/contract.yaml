@@ -154,6 +154,12 @@ runtime_boundaries:
       a post's comments or reaction summary, adding comments, or toggling reactions.
       Caller filters may narrow this access but never remove it. Deleted posts
       and their comments and reaction summaries are unavailable through these actions.
+  - id: post_page_limits
+    rule: >
+      list_posts, list_user_posts, and list_comments clamp requested limits to
+      1–99, reserving one of persistence's 100 rows for next_cursor detection.
+      Post pages default to 20 and use before; comment pages default to 50 and
+      use after. Account export has its own complete traversal and is unchanged.
   - id: user_data_scope
     rule: >
       friends and user_posts declare user_data_scope: true and ship account_data_handler.py.

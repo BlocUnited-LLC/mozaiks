@@ -200,12 +200,16 @@ This project follows a practical pre-1.0 changelog format:
 - Exported app requirements now pin Mozaiks to the version that built the app
   and omit imports supplied by the app's own root folders or Python files.
 
-- Social post templates now let scoped persistence supply app identity, so
-  posts and reactions work through the real module executor. Their response
+- Social post listing now lets scoped persistence supply app identity instead
+  of rejecting a repeated app filter. Post-module response
   schemas also accept the nullable cursor, post and reaction values returned
   by the service. Account export and deletion use those same declared
   collections and reject a mismatched app or user; exports page through all
   matching records.
+  Post and comment pages clamp requested limits to 99 so a request for 100
+  still returns a cursor when more rows exist. The Common Ground reference
+  builds its own JSX and runs eight desktop/phone browser checks in dedicated
+  CI using disposable local MongoDB and Keycloak services.
 
 - `dispatch_module_action` called without an `app` no longer imports the
   platform host as a side effect. On a serving runtime-only host that import
