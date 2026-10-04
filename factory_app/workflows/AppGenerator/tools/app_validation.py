@@ -2473,7 +2473,7 @@ def _build_failure_message(
             "The app build cannot continue: validation ran again on an unchanged bundle "
             "and failed the same way."
             if no_progress
-            else "The app build cannot continue: validation found errors that no repair step can fix."
+            else "The app build cannot continue: the available automatic repair steps could not resolve the validation errors."
         )
         label = "Blocking errors:"
     if not errors:

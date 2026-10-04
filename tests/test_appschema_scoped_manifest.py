@@ -155,6 +155,49 @@ def _planned_custom_candidate(schema_model):
     return typed, task, plan
 
 
+@pytest.mark.parametrize("stage", ["task", "standalone"])
+@pytest.mark.parametrize("path", ["ui/index.js", "ui/route_manifest.json", "ui/pages/custom/../../index.jsx"])
+def test_custom_page_files_cannot_replace_derived_registry(schema_model, stage, path):
+    from tests.test_appgenerator_save_app_schema import save_app_schema_module
+
+    typed, _, _ = _planned_custom_candidate(schema_model)
+    page_files = typed["custom_route_bundle"]["page_files"]
+    # The live failure had one valid page plus an extra authored registry file.
+    page_files.append({**page_files[0], "path": path, "component_name": "registry",
+                       "content": "export default {};"})
+    before = deepcopy(typed)
+    with pytest.raises(ValueError, match="page_files.*ui/pages/custom/.*ui/index.js.*generated.*omit"):
+        if stage == "task":
+            extract_code_file_map_from_payload(typed)
+        else:
+            save_app_schema_module._validate_custom_route_bundle(typed["custom_route_bundle"])
+    assert typed == before
+
+
+def test_custom_registry_feedback_allows_corrected_page_retry(schema_model):
+    typed, task, plan = _planned_custom_candidate(schema_model)
+    page_files = typed["custom_route_bundle"]["page_files"]
+    original_page = deepcopy(page_files[0])
+    page_files.append({**original_page, "path": "ui/index.js", "component_name": "registry",
+                       "content": "export default {};"})
+    with pytest.raises(ValueError, match="ui/index.js.*generated.*omit"):
+        extract_code_file_map_from_payload(typed)
+
+    # A new worker response follows the diagnostic; runtime never drops code.
+    corrected = deepcopy(typed)
+    corrected["custom_route_bundle"]["page_files"] = [original_page]
+    files = extract_code_file_map_from_payload(schema_model.model_validate(corrected).model_dump(mode="json"))
+    admitted = _normalize_owned_page_files_from_plan(
+        [{"filename": path, "content": content} for path, content in files.items()],
+        task=task, base_context={"app_build_plan": plan},
+    )
+    assert {entry["filename"]: entry["content"] for entry in admitted} == files
+    assert files[original_page["path"]] == original_page["content"]
+    assert "import InvestorDealRoom from './pages/custom/deal_room';" in files["ui/index.js"]
+    assert json.loads(files["ui/route_manifest.json"])["pages"][0]["path"] == "/deal-room"
+    assert len(typed["custom_route_bundle"]["page_files"]) == 2
+
+
 @pytest.mark.parametrize("stage", ["admission", "assembly"])
 @pytest.mark.parametrize("mutation", [None, "route", "extra_route", "wrong_file_binding", "missing_file"])
 def test_custom_plan_binding_closes_typed_candidates_at_both_owners(schema_model, stage, mutation):

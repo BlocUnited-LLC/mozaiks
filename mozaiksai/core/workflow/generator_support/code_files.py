@@ -134,10 +134,69 @@ def _build_custom_route_manifest_json(custom_route_bundle: dict[str, Any]) -> di
     return {"pages": list(custom_route_bundle.get("route_manifest") or [])}
 
 
+def validate_custom_page_files(custom_route_bundle: dict[str, Any]) -> None:
+    """Keep authored page files behind the deterministic route/registry owner."""
+    routes = custom_route_bundle.get("route_manifest")
+    page_files = custom_route_bundle.get("page_files")
+    if not isinstance(routes, list) or not routes:
+        raise ValueError("custom_route_bundle.route_manifest must be a non-empty list")
+    if not isinstance(page_files, list) or not page_files:
+        raise ValueError("custom_route_bundle.page_files must be a non-empty list")
+    route_by_id = {entry.get("id"): entry for entry in routes if isinstance(entry, dict)}
+    file_paths: set[str] = set()
+    for index, entry in enumerate(page_files):
+        path = f"custom_route_bundle.page_files[{index}]"
+        if not isinstance(entry, dict):
+            raise ValueError(f"{path} must be an object")
+        file_path = entry.get("path")
+        if not isinstance(file_path, str) or not file_path.strip():
+            raise ValueError(f"{path}.path is required")
+        normalized = file_path.replace("\\", "/")
+        if safe_relpath(normalized) != normalized or not normalized.startswith("ui/pages/custom/"):
+            raise ValueError(
+                f"{path}.path must live under ui/pages/custom/: {file_path!r}. "
+                "ui/index.js and ui/route_manifest.json are generated from the typed route/page pair; "
+                "omit those files from page_files and preserve the approved custom page source and route."
+            )
+        if PurePosixPath(normalized).suffix != ".jsx":
+            raise ValueError(f"{path}.path must end with one of ['.jsx']")
+        if normalized in file_paths:
+            raise ValueError(f"{path}.path must be unique")
+        route_id = entry.get("route_id")
+        if route_id not in route_by_id:
+            raise ValueError(
+                f"{path}.route_id '{route_id}' must reference a declared "
+                "custom_route_bundle.route_manifest[*].id so the route path, component key, "
+                "custom page file, and ui/index.js registration can be generated together"
+            )
+        for field in ("component_name", "registry_key", "purpose", "content"):
+            value = entry.get(field)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{path}.{field} is required")
+        registry_key = entry["registry_key"]
+        owning_route = route_by_id[route_id]
+        owning_component = owning_route.get("component")
+        owning_path = owning_route.get("path")
+        if registry_key != owning_component:
+            raise ValueError(
+                f"{path}.registry_key '{registry_key}' must match route_manifest component "
+                f"'{owning_component}' for route path '{owning_path}'. Expected fix: make "
+                "route_manifest[*].component, page_files[*].registry_key, and the generated "
+                "ui/index.js registerComponent key identical."
+            )
+        refs = entry.get("contract_refs")
+        if refs is not None:
+            if not isinstance(refs, list):
+                raise ValueError(f"{path}.contract_refs must be a list of strings")
+            for ref_index, ref in enumerate(refs):
+                if not isinstance(ref, str) or not ref.strip():
+                    raise ValueError(f"{path}.contract_refs[{ref_index}] must be a non-empty string")
+        file_paths.add(normalized)
+
+
 def _build_custom_ui_index(custom_route_bundle: dict[str, Any]) -> str:
+    validate_custom_page_files(custom_route_bundle)
     page_files = list(custom_route_bundle.get("page_files") or [])
-    if not page_files:
-        return "export function register() {}\n"
 
     imports: list[str] = []
     registrations: list[str] = []

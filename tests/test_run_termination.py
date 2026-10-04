@@ -496,7 +496,7 @@ async def test_blocked_repair_ends_the_run_after_one_validation_with_its_blockin
     message = result.failure_message
     assert message is not None
     assert message.startswith(
-        "The app build cannot continue: validation found errors that no repair step can fix.\nBlocking errors:\n- "
+        "The app build cannot continue: the available automatic repair steps could not resolve the validation errors.\nBlocking errors:\n- "
     )
     assert repair["errors"], repair
     for error in repair["errors"][:10]:
@@ -670,7 +670,7 @@ def test_failure_message_is_written_only_when_the_outcome_ends_the_run(
     assert bridge.get("app_validation_ends_run") is ends_run
     if ends_run:
         assert message == (
-            "The app build cannot continue: validation found errors that no repair step can fix.\n"
+            "The app build cannot continue: the available automatic repair steps could not resolve the validation errors.\n"
             "Blocking errors:\n- handler missing"
         )
     else:
@@ -783,7 +783,7 @@ async def test_replaying_the_live_blocked_validation_ends_the_run_with_its_four_
     assert result.status is RunStatus.FAILED
     assert result.close_reason == "workflow_failed"
     expected = "\n".join([
-        "The app build cannot continue: validation found errors that no repair step can fix.",
+        "The app build cannot continue: the available automatic repair steps could not resolve the validation errors.",
         "Blocking errors:",
         *(f"- {item['error']}" for item in _LIVE_DIAGNOSTICS),
     ])

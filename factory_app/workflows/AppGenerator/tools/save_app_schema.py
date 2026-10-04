@@ -45,12 +45,11 @@ from mozaiksai.core.runtime.persistence.intent_loader import (
 )
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import (
-    _build_custom_route_manifest_json,
-    _build_custom_ui_index,
     _custom_route_bundle_code_files,
     _page_file_stem,
     auth_required_from_strategy,
     data_contract_requires_auth,
+    validate_custom_page_files,
 )
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     pack_owned_output_paths,
@@ -236,7 +235,6 @@ VALID_GRID_GAPS = {"sm", "md", "lg", "1", "2", "3", "4", "6", "8", "10", "12"}
 VALID_MODAL_SIZES = {"small", "medium", "large", "full"}
 VALID_SELECTION_MODES = {"none", "single", "multi"}
 VALID_ASSET_SOURCES = {"local", "remote", "uploaded", "generated", "stock"}
-VALID_CUSTOM_PAGE_EXTENSIONS = {".jsx"}
 VALID_SHELL_MODES = {"standard", "workspace", "conversation", "focused", "immersive", "public"}
 VALID_SHELL_ACTION_SURFACES = {"studio", "app", "user", "workflow_session", "transition", "public", "page"}
 VALID_SHELL_ACTION_WHEN_FIELDS = {
@@ -428,7 +426,6 @@ def _validate_custom_route_bundle(custom_route_bundle: Any) -> None:
     route_ids: set[str] = set()
     route_paths: set[str] = set()
     registry_keys: set[str] = set()
-    route_by_id: dict[str, dict[str, Any]] = {}
     for index, entry in enumerate(route_manifest):
         path = f"custom_route_bundle.route_manifest[{index}]"
         if not isinstance(entry, dict):
@@ -469,51 +466,8 @@ def _validate_custom_route_bundle(custom_route_bundle: Any) -> None:
         route_ids.add(route_id)  # type: ignore[arg-type]
         route_paths.add(route_path)  # type: ignore[arg-type]
         registry_keys.add(component)  # type: ignore[arg-type]
-        route_by_id[route_id] = entry  # type: ignore[index]
 
-    file_paths: set[str] = set()
-    for index, entry in enumerate(page_files):
-        path = f"custom_route_bundle.page_files[{index}]"
-        if not isinstance(entry, dict):
-            raise ValueError(f"{path} must be an object")
-        route_id = entry.get("route_id")
-        if route_id not in route_by_id:
-            raise ValueError(
-                f"{path}.route_id '{route_id}' must reference a declared "
-                "custom_route_bundle.route_manifest[*].id so the route path, component key, "
-                "custom page file, and ui/index.js registration can be generated together"
-            )
-        file_path = entry.get("path")
-        if not _is_non_empty_string(file_path):
-            raise ValueError(f"{path}.path is required")
-        normalized = str(file_path).replace("\\", "/")
-        if not normalized.startswith("ui/pages/custom/"):
-            raise ValueError(f"{path}.path must live under ui/pages/custom/")
-        if Path(normalized).suffix not in VALID_CUSTOM_PAGE_EXTENSIONS:
-            raise ValueError(f"{path}.path must end with one of {sorted(VALID_CUSTOM_PAGE_EXTENSIONS)}")
-        if normalized in file_paths:
-            raise ValueError(f"{path}.path must be unique")
-        if not _is_non_empty_string(entry.get("component_name")):
-            raise ValueError(f"{path}.component_name is required")
-        registry_key = entry.get("registry_key")
-        if not _is_non_empty_string(registry_key):
-            raise ValueError(f"{path}.registry_key is required")
-        owning_route = route_by_id[route_id]
-        owning_component = owning_route.get("component")
-        owning_path = owning_route.get("path")
-        if registry_key != owning_component:
-            raise ValueError(
-                f"{path}.registry_key '{registry_key}' must match route_manifest component "
-                f"'{owning_component}' for route path '{owning_path}'. Expected fix: make "
-                "route_manifest[*].component, page_files[*].registry_key, and the generated "
-                "ui/index.js registerComponent key identical."
-            )
-        if not _is_non_empty_string(entry.get("purpose")):
-            raise ValueError(f"{path}.purpose is required")
-        _validate_string_list(entry.get("contract_refs"), field=f"{path}.contract_refs")
-        if not _is_non_empty_string(entry.get("content")):
-            raise ValueError(f"{path}.content is required")
-        file_paths.add(normalized)
+    validate_custom_page_files(custom_route_bundle)
 
 
 def _validate_action(action: Any, *, path: str) -> None:
@@ -1218,24 +1172,11 @@ def _persist_to_filesystem(
         written.append(f"ui/pages/{name}.yaml")
 
     if custom_route_bundle and isinstance(custom_route_bundle, dict):
-        route_manifest_path = output_dir / "ui" / "route_manifest.json"
-        route_manifest_path.parent.mkdir(parents=True, exist_ok=True)
-        route_manifest_path.write_text(
-            json.dumps(_build_custom_route_manifest_json(custom_route_bundle), indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
-        written.append("ui/route_manifest.json")
-
-        for entry in custom_route_bundle.get("page_files") or []:
-            file_path = output_dir / Path(str(entry["path"]).replace("\\", "/"))
+        for entry in _custom_route_bundle_code_files(custom_route_bundle):
+            file_path = output_dir / entry["filename"]
             file_path.parent.mkdir(parents=True, exist_ok=True)
             file_path.write_text(str(entry["content"]), encoding="utf-8")
-            written.append(str(Path(str(entry["path"]).replace("\\", "/"))).replace("\\", "/"))
-
-        ui_index_path = output_dir / "ui" / "index.js"
-        ui_index_path.parent.mkdir(parents=True, exist_ok=True)
-        ui_index_path.write_text(_build_custom_ui_index(custom_route_bundle), encoding="utf-8")
-        written.append("ui/index.js")
+            written.append(entry["filename"])
 
     # brand/theme_config.json — deep-merge theme_config_patch when provided
     if theme_config_patch and isinstance(theme_config_patch, dict):

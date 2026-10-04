@@ -324,6 +324,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Custom page task builds and standalone saves now share page-file validation
+  and registry materialization. Model-authored registry files fail with guidance
+  to preserve the approved page and let code generate its registration.
+- Exhausted build repair reports the limit of automatic recovery without
+  claiming the validation errors are impossible to fix.
 - Studio shows working activity when an actual AG2 model call begins, including
   repeated calls by the same agent, without exposing hidden agent identities.
 - Authenticated custom-page builds now recognize the exact sign-in and callback

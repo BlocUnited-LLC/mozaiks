@@ -1003,7 +1003,7 @@ agents:
         - have exactly one `custom_route_bundle.page_files` entry for each `route_manifest` entry
         - set `page_files[*].registry_key` to the exact `route_manifest[*].component` value
         - default-export the React component imported by the generated `ui/index.js` registry barrel
-        - never rely on implicit custom page discovery; `ui/route_manifest.json`, `ui/pages/custom/*.jsx`, and `ui/index.js` registration must be emitted together
+        - emit only `ui/pages/custom/*.jsx` in `page_files`; the materializer generates `ui/route_manifest.json` and `ui/index.js` from the typed route/page pair. Task ownership of those derived files does not authorize authoring them in `page_files`. If repair feedback names an extra registry/manifest file, omit that entry while preserving the approved custom page source and route.
         - declare route manifest `meta.routeAuth` for scoped resource custom routes whose path/query ids require an app-owned authorization check before render
         - declare route manifest `meta.ai_context` (one sentence naming what the user is looking at) on every user-facing page, and `meta.ask_context` when someone asking a question on that page would need live data from it: list at most 3 read-only module actions, each owned by a module action declared with `ask_context_safe: true` and `permissions: []`. The runtime resolves them server-side as the requesting user and appends the results to the ask agent's context. Never declare an action that writes, emits events, or can return another user's data.
         - use `PageFrame` from `@mozaiks/chat-ui` — this applies to user-facing custom route pages in `ui/pages/custom/` only; do NOT use `PageFrame` for workspace/app Studio pages in `admin/pages/`

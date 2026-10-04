@@ -1329,10 +1329,15 @@ retained rather than regenerated. Exhausted or unchanged repairs terminate with
 the original assembly cause and repair diagnostics in `app_build_failure_message`.
 The existing attempt cap and no-progress guard remain authoritative.
 
-Both the standalone save tool and task-batch materializer use the same route
-manifest and component registry renderer. The registry is derived from typed
-`page_files` and their registration keys; agents do not supply an extra
-`ui_index` field. Timers with start/pause/resume/reset, canvas interactions, and
+Both the standalone save tool and task-batch materializer validate custom page
+file ownership through `generator_support.code_files.validate_custom_page_files`
+and use the same route manifest, component registry, and page file renderer.
+The registry is derived from typed `page_files` and their registration keys;
+agents do not supply an extra `ui_index` field or put `ui/index.js` or
+`ui/route_manifest.json` inside `page_files`. Non-page and traversal paths are
+rejected before rendering, with feedback to omit the invalid entry while
+preserving the approved page source and route. No authored source is silently
+discarded. Timers with start/pause/resume/reset, canvas interactions, and
 playable controls require real React behavior when no shipped primitive provides
 it. A static Metric cannot substitute for that behavior. Contract checks do not
 prove those interactions work: browser acceptance must exercise them.
