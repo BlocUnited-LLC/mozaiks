@@ -221,7 +221,7 @@ async def test_public_post_uses_authenticated_author_and_app_scope(dispatch, use
 @pytest.mark.asyncio
 async def test_comment_uses_second_user_identity_and_runtime_scope(dispatch):
     dispatch.collections["posts"].find_one.return_value = {
-        "post_id": "post", "author_id": "alice", "status": "published",
+        "post_id": "post", "author_id": "alice", "status": "published", "visibility": "public",
     }
     result = await dispatch.executor.execute(_request(
         "add_comment", {"post_id": "post", "body": "Thanks!"}, user="bob",
@@ -240,7 +240,7 @@ async def test_comment_uses_second_user_identity_and_runtime_scope(dispatch):
 @pytest.mark.asyncio
 async def test_reaction_upsert_and_toggle_preserve_runtime_app_and_user_filters(dispatch):
     posts, reactions = dispatch.collections["posts"], dispatch.collections["reactions"]
-    posts.find_one.return_value = {"post_id": "post", "author_id": "alice", "status": "published"}
+    posts.find_one.return_value = {"post_id": "post", "author_id": "alice", "status": "published", "visibility": "public"}
     reactions.count_documents.return_value = 1
     added = await dispatch.executor.execute(_request(
         "react_to_post", {"post_id": "post", "reaction_type": "like"}, user="bob",
@@ -269,7 +269,12 @@ async def test_public_list_filters_reach_real_persistence_with_one_app_scope(dis
     result = await dispatch.executor.execute(_request("list_posts", {"visibility": "public"}))
     assert result.success and result.data == {"posts": [], "count": 0, "next_cursor": None}
     assert dispatch.collections["posts"].find.call_args.args[0] == {
-        "app_id": APP_ID, "status": "published", "visibility": "public",
+        "app_id": APP_ID, "visibility": "public",
+        "status": {"$eq": "published", "$not": {"$type": "array"}},
+        "$or": [
+            {"visibility": {"$eq": "public", "$not": {"$type": "array"}}},
+            {"author_id": {"$eq": "alice", "$not": {"$type": "array"}}},
+        ],
     }
 
 

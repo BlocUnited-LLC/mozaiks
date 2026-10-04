@@ -17,6 +17,11 @@ The module contract rejects `private` and `friends` visibility before dispatch.
 Use a fresh database; do not point this reference at an existing social app's
 private records. Its app-wide collections permit shared reading. Author checks
 in the service control deletion; normal members receive no moderation grant.
+The canonical posts service also enforces visibility when reading stored records:
+public published posts are shared; private, friends, and unknown visibility values
+remain author-only. Friends-based sharing is not implemented. Hidden or deleted
+posts cannot be read, commented on, reacted to, or expose their comments and
+reaction summaries through these module actions.
 
 The page keeps a failed submission's draft while it remains mounted. It does
 not promise offline storage, offline posting, or preservation across a full

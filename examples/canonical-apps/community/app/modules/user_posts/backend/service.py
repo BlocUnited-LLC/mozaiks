@@ -3,13 +3,18 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from .policy import actor_id, can_delete_comment, can_delete_post, published_posts_query
+from .policy import (
+    actor_id,
+    can_delete_comment,
+    can_delete_post,
+    can_read_post,
+    published_posts_query,
+)
 from .repo import CommentRepo, PostRepo, ReactionRepo
 from .schemas import (
     DEFAULT_REACTION,
     MAX_COMMENT_BODY_LENGTH,
     MAX_POST_BODY_LENGTH,
-    POST_STATUS_DELETED,
     POST_STATUS_PUBLISHED,
     REACTION_TYPES,
     VISIBILITY_PUBLIC,
@@ -67,7 +72,7 @@ class UserPostsService:
 
     async def get_post(self, ctx, *, post_id: str) -> dict:
         post = await self._posts.get(ctx, post_id=post_id)
-        if not post or post.get("status") == POST_STATUS_DELETED:
+        if not can_read_post(post, actor_id(ctx)):
             return {"post": None}
         return {"post": post}
 
@@ -123,7 +128,7 @@ class UserPostsService:
         rtype = reaction_type if reaction_type in REACTION_TYPES else DEFAULT_REACTION
 
         post = await self._posts.get(ctx, post_id=post_id)
-        if not post or post.get("status") == POST_STATUS_DELETED:
+        if not can_read_post(post, user_id):
             return {"success": False, "error": "Post not found.", "action": "none", "reaction_count": 0}
 
         existing = await self._reactions.get(ctx, post_id=post_id, user_id=user_id)
@@ -158,6 +163,9 @@ class UserPostsService:
 
     async def get_reaction_summary(self, ctx, *, post_id: str) -> dict:
         user_id = actor_id(ctx)
+        post = await self._posts.get(ctx, post_id=post_id)
+        if not can_read_post(post, user_id):
+            return {"total": 0, "by_type": {}, "viewer_reaction": None}
         by_type = await self._reactions.count_by_type(ctx, post_id=post_id)
         total = sum(by_type.values())
         viewer = await self._reactions.get(ctx, post_id=post_id, user_id=user_id)
@@ -181,7 +189,7 @@ class UserPostsService:
             }
 
         post = await self._posts.get(ctx, post_id=post_id)
-        if not post or post.get("status") == POST_STATUS_DELETED:
+        if not can_read_post(post, actor_id(ctx)):
             return {"success": False, "error": "Post not found.", "comment": None}
 
         user_id = actor_id(ctx)
@@ -231,6 +239,9 @@ class UserPostsService:
         return {"success": True}
 
     async def list_comments(self, ctx, *, post_id: str, limit: int | None = None, after: str | None = None) -> dict:
+        post = await self._posts.get(ctx, post_id=post_id)
+        if not can_read_post(post, actor_id(ctx)):
+            return {"comments": [], "count": 0, "next_cursor": None}
         bounded = coerce_limit(limit, default=50)
         rows = await self._comments.list(ctx, post_id=post_id, limit=bounded + 1, after=after)
         has_more = len(rows) > bounded

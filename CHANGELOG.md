@@ -20,6 +20,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
+- Social `user_posts` listings and per-post reads, comments, and reactions now
+  enforce published-public-or-author visibility. Caller filters cannot expose
+  another member's private or friends-only records; friends-based sharing remains
+  unsupported. Common Ground uses the same canonical backend repair.
+
 - Updated the AG2 runtime dependency from `1.0.5` to `1.1.2` for every AG2
   extra. Mozaiks pins AG2 exactly, so installations could not take upstream
   fixes on their own. AG2 `1.0.5` is affected by eight AG2 security advisories,
