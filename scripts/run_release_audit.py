@@ -3,25 +3,41 @@
 Chains the following checks:
 
 1. Governance guardrails (source-level)
-2. Build wheel + sdist into a temp directory
+2. Build wheel + sdist
 3. Package content guard (artifact-level)
-4. Smoke-install the wheel into a clean venv
-5. Verify Factory resources resolve from the install
+4. Twine metadata check
+5. Smoke-install the wheel into a clean venv
+6. Verify Factory resources resolve from the install
+7. First run from the install: ``mozaiks init`` -> ``mozaiks serve`` (platform
+   and studio hosts) -> ``/api/health/ready`` -> ``/api/shell-config``, in a
+   scrubbed environment against a throwaway MongoDB server
+8. Offline functional acceptance tests
 
 Returns 0 when all checks pass.  Returns non-zero on the first failure.
 
 Usage::
 
-    python scripts/run_release_audit.py [--skip-build]
+    docker run --rm -d --name mozaiks-release-audit-mongo -p 127.0.0.1:27018:27017 mongo:7
+    python scripts/run_release_audit.py --mongo-uri mongodb://127.0.0.1:27018
 
 Options:
     --skip-build   Re-use an existing dist/ directory instead of rebuilding.
                    Useful when iterating on content guard failures.
+    --mongo-uri    URI of a throwaway MongoDB server, on a non-default port, for
+                   the first-run smoke (or set MOZAIKS_RELEASE_AUDIT_MONGO_URI).
+                   The runtime ignores the database name in the URI and uses
+                   fixed database names (mozaiksai, mozaiks_apps, and
+                   mozaiks_audit once a module action runs, as in a Studio
+                   session) on whatever server it points to, so never point
+                   it at the server you
+                   develop against. Required unless --skip-first-run-smoke is
+                   given.
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -125,6 +141,39 @@ print("All Factory resources resolve from site-packages.")
     _run([str(python), "-c", verify_script], cwd=python.parent)
 
 
+def step_first_run_smoke(python: Path, mongo_uri: str) -> None:
+    print("\n=== 7. First run from the installed package (init -> serve -> ready -> shell-config) ===")
+    # Run outside the checkout so nothing can import the source tree instead of
+    # the wheel under test; the script asserts where every package came from.
+    # Keep inherited package paths and credentials out of the smoke process.
+    # Pass the URI through its environment so it stays out of command output.
+    smoke_env = {
+        key: os.environ[key]
+        for key in (
+            "PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP",
+            "TMPDIR", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
+            "HOMEDRIVE", "HOMEPATH", "LANG", "LC_ALL",
+        )
+        if key in os.environ
+    }
+    smoke_env.update({
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONUNBUFFERED": "1",
+        "MOZAIKS_FIRST_RUN_SMOKE_MONGO_URI": mongo_uri,
+    })
+    work_dir = Path(tempfile.mkdtemp(prefix="mozaiks-release-first-run-"))
+    _run(
+        [
+            str(python),
+            str(REPO_ROOT / "scripts" / "smoke_installed_first_run.py"),
+            "--work-dir",
+            str(work_dir),
+        ],
+        cwd=work_dir,
+        env=smoke_env,
+    )
+
+
 def step_offline_acceptance() -> None:
     """Run offline functional acceptance tests against the source tree.
 
@@ -138,7 +187,7 @@ def step_offline_acceptance() -> None:
     All tests run against source fixtures, not live LLM APIs.
     A subset of these also runs in CI on every PR.
     """
-    print("\n=== 7. Offline functional acceptance tests ===")
+    print("\n=== 8. Offline functional acceptance tests ===")
 
     # Core offline test suites — no cloud, no LLM required.
     offline_test_markers = [
@@ -191,7 +240,26 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="skip offline acceptance tests (not recommended)",
     )
+    parser.add_argument(
+        "--mongo-uri",
+        default=os.environ.get("MOZAIKS_RELEASE_AUDIT_MONGO_URI", ""),
+        help=(
+            "URI of a throwaway MongoDB server, on a non-default port, for the first-run "
+            "smoke (default: $MOZAIKS_RELEASE_AUDIT_MONGO_URI). The runtime ignores the "
+            "database name in the URI and uses fixed database names on that server."
+        ),
+    )
+    parser.add_argument(
+        "--skip-first-run-smoke",
+        action="store_true",
+        help="skip starting the installed app (not recommended: the audit then never boots it)",
+    )
     args = parser.parse_args(argv)
+    if not args.skip_first_run_smoke and not args.mongo_uri:
+        parser.error(
+            "the first-run smoke needs a throwaway MongoDB server: pass --mongo-uri "
+            "(or set MOZAIKS_RELEASE_AUDIT_MONGO_URI), or --skip-first-run-smoke"
+        )
 
     try:
         step_governance()
@@ -201,6 +269,10 @@ def main(argv: list[str] | None = None) -> int:
         step_twine_check(artifacts)
         python = step_smoke_install(wheels)
         step_verify_resources(python)
+        if args.skip_first_run_smoke:
+            print("\n=== 7. First-run smoke SKIPPED (--skip-first-run-smoke): the installed app was never started ===")
+        else:
+            step_first_run_smoke(python, args.mongo_uri)
         if not args.skip_acceptance:
             step_offline_acceptance()
     except SystemExit as exc:
@@ -208,7 +280,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\nRelease audit FAILED (exit {code}).", file=sys.stderr)
         return code
 
-    print("\n=== Release audit PASSED — safe to tag and push. ===")
+    print("\n=== Release audit checks PASSED. Complete the release checklist before tagging. ===")
     return 0
 
 

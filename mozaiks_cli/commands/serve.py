@@ -7,6 +7,7 @@ import shutil
 import sys
 from pathlib import Path
 
+from mozaiks_cli.unauthenticated_bind import warn_if_unauthenticated_bind
 from mozaiks_cli.workspace import load_workspace_dotenv
 
 _HOST_MODULES = {
@@ -20,7 +21,7 @@ def run(args) -> None:
     workspace = Path(getattr(args, "workspace", ".")).resolve()
     host = getattr(args, "host", "platform")
     port = int(getattr(args, "port", 8000))
-    listen = getattr(args, "listen", "0.0.0.0")
+    listen = getattr(args, "listen", "127.0.0.1")
     reload = bool(getattr(args, "reload", False))
 
     app_root = _resolve_app_root(workspace)
@@ -65,12 +66,60 @@ def run(args) -> None:
     raw_log_level = os.environ.get("LOG_LEVEL", "info")
     log_level = raw_log_level.strip().lower() if raw_log_level.strip() else "info"
 
+    _require_reachable_mongo(app_root, workspace=workspace, host=host)
+
     print(f"App root : {app_root}")
     print(f"Host     : {host}  ({listen}:{port})")
     if reload:
         print("Reload   : enabled")
 
+    # The host runs with this process's environment.
+    warn_if_unauthenticated_bind(listen, environ=os.environ, env_file=env_file)
+
     uvicorn.run(app_module, host=listen, port=port, reload=reload, log_level=log_level)
+
+
+def _require_reachable_mongo(app_root: Path, *, workspace: Path, host: str) -> None:
+    """Exit with an actionable message unless the app's MONGO_URI answers a ping.
+
+    Resolves MONGO_URI exactly as the host will (the app's secret contract,
+    then the environment), so an invalid ``app/security/secrets.yaml`` is
+    reported here too instead of as a startup traceback.
+    """
+    from mozaiks_cli import mongo_preflight
+    from mozaiksai.core.secrets import SecretContractError, SecretResolutionError, resolve_secret
+
+    env_file = workspace / ".env"
+    rerun = f'mozaiks serve "{workspace}" --host {host}'
+    try:
+        uri = resolve_secret("MONGO_URI", app_root=app_root)
+    except SecretContractError as exc:
+        print(f"Error: {app_root / 'security' / 'secrets.yaml'} is not a valid secret contract ({exc}).")
+        print("A minimal valid contract is:")
+        print("  version: 1")
+        print("  kind: app_secret_contract")
+        print("  provider:")
+        print("    type: env")
+        print("  secrets: []")
+        sys.exit(1)
+    except SecretResolutionError as exc:
+        print(f"Error: MongoDB is required to serve this app. {exc}")
+        print(f"Set MONGO_URI in your shell or in {env_file}, then rerun:")
+        print(f"  {rerun}")
+        sys.exit(1)
+
+    failure = mongo_preflight.mongo_unreachable(
+        uri, timeout_ms=mongo_preflight.preflight_timeout_ms(os.environ)
+    )
+    if failure is not None:
+        print(f"Error: MongoDB is not reachable at MONGO_URI ({failure.shown_uri}).")
+        print(
+            "Start MongoDB, or set MONGO_URI in your shell or in "
+            f"{env_file} to a reachable server, then rerun:"
+        )
+        print(f"  {rerun}")
+        print(f"Underlying error: {failure.reason}")
+        sys.exit(1)
 
 
 def _resolve_app_root(workspace: Path) -> Path | None:

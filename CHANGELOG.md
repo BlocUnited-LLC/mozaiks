@@ -132,10 +132,50 @@ This project follows a practical pre-1.0 changelog format:
   unknown preset is a usage error (exit 2) that names the valid choices, and
   `app.json` is left untouched.
 - **`mozaiks info`, `mozaiks add` and `mozaiks studio` exit 1 when they
-  fail** (#305). A missing or unreadable `app.json`, an unknown preset, a
-  failed `app.json` write, and a workspace without a valid scaffold printed an
-  error but exited 0, so scripts and CI treated the failure as success. The
-  printed messages are unchanged.
+  fail** (#305). A missing or unreadable `app.json`, a failed `app.json`
+  write, and a workspace without a valid scaffold printed an error but exited
+  0, so scripts and CI treated the failure as success. The printed messages
+  are unchanged. An unknown preset does not reach these commands: the argument
+  parser rejects it with exit 2.
+
+- Fresh CLI scaffolds now boot from an installed wheel with a valid secret
+  contract, stable app ID, and local Studio admin access. Local launchers bind
+  loopback by default, report startup logs, fail fast on unreachable MongoDB,
+  and route the frontend to the selected backend port. Release checks now
+  smoke the installed app's first run.
+  The MongoDB startup error shows `MONGO_URI` as its scheme, `***@` in place
+  of credentials, the hosts and the database name; the query string is never
+  shown. As long as the URI has the `@` that ends its credentials, no
+  credential text is printed, whatever characters the password contains. A URI
+  with a sign that it is malformed (an unescaped `@`, `/` or `?` in the
+  password, options without the `/` that must follow the hosts, a
+  percent-encoded host name), or that the driver rejects as malformed, prints
+  as a placeholder. Next to credentials, a host with no dot and no port prints
+  as `<host not shown>`, because the rest of a password reads the same way
+  after an unescaped `@`; write its port (`mongo:27017`) to have it shown. The
+  driver's own message is repeated only for a failed connection to hosts that
+  are shown. When the driver refuses a well-formed URI, the error points at
+  the DNS lookup of the shown host for `mongodb+srv://`, and at the URI's
+  options otherwise, not at the password's encoding. Known limit: when that
+  `@` is missing (an unquoted `.env` value cut at ` #` before it, or the wrong
+  `@` percent-encoded), the value is a different URI, and credential text
+  standing where its hosts and database name are read is still shown when it
+  reads as an address: next to an `@`, one with a dot, a port or IPv6
+  brackets; with no `@` left in the value, any host name.
+  `mozaiks serve --listen <address>` and `mozaiks studio --open --listen
+  <address>` on a non-loopback address with authentication off now print a
+  warning to stderr before starting: the address; that anyone who can reach
+  it can act as any user with any role, including admin; the roles of a
+  request that claims no identity (`AUTH_ANON_ROLES`), which limit nothing;
+  any identity-provider settings that `AUTH_ENABLED=false` or
+  `AUTH_PROVIDER=none` overrides or that do not select a provider on their
+  own; and how to turn authentication on. The host still starts, and
+  `ENV=production` without authentication is still refused.
+  The release docs and scripts ask for a throwaway MongoDB server, on a
+  non-default port, for the first-run smoke: the runtime ignores the database
+  name in `MONGO_URI` and uses fixed database names on that server
+  (`mozaiksai` and `mozaiks_apps`, and `mozaiks_audit` for the audit records
+  of module actions, such as those a Studio session runs).
 
 - App fonts and colors declared in `theme_config.json` remain active when the
   standalone theme endpoint returns that same config. Only saved custom

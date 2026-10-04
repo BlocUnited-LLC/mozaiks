@@ -93,7 +93,7 @@ services:
     # it shadows the image's frozen site-packages copies of the first-party
     # packages (mozaiksai, mozaiks_cli, factory_app, logs) with the live
     # bind-mounted source.
-    command: ["mozaiks", "serve", ".", "--host", "studio", "--reload"]
+    command: ["mozaiks", "serve", ".", "--host", "studio", "--listen", "0.0.0.0", "--reload"]
     env_file:
       - ../../.env
     ports:

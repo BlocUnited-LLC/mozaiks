@@ -402,6 +402,17 @@ jobs:
 
   package:
     runs-on: ubuntu-latest
+    services:
+      # Throwaway MongoDB server for the installed first-run smoke below.
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd="mongosh --eval 'db.runCommand({ ping: 1 })'"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -503,6 +514,18 @@ jobs:
           mkdir -p /tmp/mozaiks-package-init
           mozaiks init chat --name "CI Package Smoke" --dir /tmp/mozaiks-package-init
           test -f /tmp/mozaiks-package-init/app/brand/theme_config.json
+
+      - name: Smoke installed first run (init, serve, ready, shell-config)
+        # Starts the installed app the way a new user does: scrubbed env, a
+        # fresh scaffold, `mozaiks serve` on the platform and studio hosts.
+        env:
+          MOZAIKS_FIRST_RUN_SMOKE_MONGO_URI: mongodb://localhost:27017/ci_first_run_smoke
+        run: |
+          . .pkg-venv/bin/activate
+          mkdir -p /tmp/mozaiks-first-run
+          cd /tmp/mozaiks-first-run
+          python "$GITHUB_WORKSPACE/scripts/smoke_installed_first_run.py" \
+            --work-dir /tmp/mozaiks-first-run
 
   infra-build:
     # Proves the repo-local infra/ artifacts and a representative generated-app
