@@ -14,6 +14,20 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
+- JWT and Keycloak authentication now require an audience at startup and
+  verify it and an access-token type on every bearer token (`AUTH_AUDIENCE` for JWT,
+  `KEYCLOAK_CLIENT_ID` for Keycloak). Deployments that left these unset must
+  configure them; local runs with `AUTH_ENABLED=false` are unaffected. The
+  unused JWT validator was removed (#523).
+  Generated authenticated deployment manifests and env templates now mark the
+  matching audience setting as required. Bundle validation rejects deployment
+  artifacts that omit or downgrade those requirements.
+  The local Keycloak realm uses a distinct `mozaiks-api` audience, and existing
+  persistent realms can add that client and mapper without deleting data.
+
+- E2B preview template uploads exclude local environment files, dependencies,
+  caches, browser reports, and runtime log output.
+
 - Bounded module collection handles now accept only the arguments the installed
   MongoDB driver defines for each operation. Previously the handle passed a
   caller's keyword and positional arguments straight to the driver, which passes
@@ -35,20 +49,6 @@ This project follows a practical pre-1.0 changelog format:
   which aggregation stages are allowed are unchanged. Bounded handles prevent
   mistakes; they are not a sandbox against hostile code running in the host
   process.
-
-- JWT and Keycloak authentication now require an audience at startup and
-  verify it and an access-token type on every bearer token (`AUTH_AUDIENCE` for JWT,
-  `KEYCLOAK_CLIENT_ID` for Keycloak). Deployments that left these unset must
-  configure them; local runs with `AUTH_ENABLED=false` are unaffected. The
-  unused JWT validator was removed (#523).
-  Generated authenticated deployment manifests and env templates now mark the
-  matching audience setting as required. Bundle validation rejects deployment
-  artifacts that omit or downgrade those requirements.
-  The local Keycloak realm uses a distinct `mozaiks-api` audience, and existing
-  persistent realms can add that client and mapper without deleting data.
-
-- E2B preview template uploads exclude local environment files, dependencies,
-  caches, browser reports, and runtime log output.
 
 - Self-hosted subscription grant and revoke actions are internal-only; HTTP
   callers cannot assign themselves paid entitlements.
