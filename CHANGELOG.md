@@ -21,8 +21,8 @@ This project follows a practical pre-1.0 changelog format:
   `workflows/` serves those, and an app registry that extends
   `mozaiks.default_workflow_registry` still resolves the default workflows.
   `/api/health` now reports workflow counts only, without workflow names,
-  handler metadata or filesystem paths, and starting a chat on a host that
-  serves no workflows returns 404 instead of 503.
+  handler metadata or filesystem paths, and the platform host answers 404, not
+  503, when a chat is started for a workflow it does not serve.
 
 - JWT and Keycloak authentication now require an audience at startup and
   verify it and an access-token type on every bearer token (`AUTH_AUDIENCE` for JWT,

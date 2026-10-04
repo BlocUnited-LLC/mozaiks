@@ -338,13 +338,9 @@ def test_fresh_init_scaffold_starts_on_the_platform_host_with_no_factory_workflo
     tmp_path, mongo_uri, identity_provider,
 ) -> None:
     from mozaiksai.core.secrets.app_secrets import load_secret_contract
-    from mozaiksai.core.secrets.contract import SecretContractError
 
     workspace = _fresh_scaffold(tmp_path / "atlas", starter=False)
-    try:
-        load_secret_contract(app_root=workspace / "app")
-    except SecretContractError as exc:
-        pytest.skip(f"a fresh scaffold's app/security/secrets.yaml does not load yet (#797): {exc}")
+    load_secret_contract(app_root=workspace / "app")
 
     with _platform_host(
         workspace / "app", mongo_uri=mongo_uri, issuer=identity_provider["issuer"], log_path=tmp_path / "host.log",

@@ -408,7 +408,7 @@ not land directly in active runtime paths.
 Workflow resolution is single-root by contract. A running host binds to one
 workflow root via `MOZAIKS_WORKFLOWS_PATH` rather than auto-merging app and
 factory roots. Studio defaults to `factory_app/workflows/`; product/app hosts
-prefer the workspace root's `workflows/`. The first-party
+use the workspace root's `workflows/` and serve none when it is absent. The first-party
 `factory_app/app` bundle should not check in a nested workflows directory.
 External hosted product workspaces define app-local workflows under
 `workflows/`, beside `app/`.
