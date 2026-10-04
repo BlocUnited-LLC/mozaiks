@@ -3,8 +3,9 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-// These checks require actual platform, Mongo and Keycloak services. No app or
-// identity request is fulfilled by Playwright.
+// These checks require actual platform, Mongo and Keycloak services. The stale
+// refresh check delays an actual server response; no records or identity replies
+// are fabricated by Playwright.
 const configPath = resolve(process.env.COMMUNITY_LIVE_CONFIG);
 const environment = JSON.parse(readFileSync(configPath, 'utf8'));
 const user = name => environment.users.find(entry => entry.username === name);
@@ -151,4 +152,78 @@ test('failed post preserves its draft and can be retried after connectivity retu
   await page.screenshot({ path: testInfo.outputPath('community-feed.png'), fullPage: true });
   await noHorizontalOverflow(page);
   await action(page, 'delete_post', { post_id: created.post.post_id });
+});
+
+test('a new reply stays visible while older comment pages are loaded', async ({ page }, testInfo) => {
+  await signIn(page, 'alice');
+  const created = await (await action(page, 'create_post', { body: `A longer conversation — ${testInfo.project.name}` })).json();
+  expect(created.success).toBe(true);
+  const postId = created.post.post_id;
+  try {
+    for (let index = 1; index <= 51; index += 1) {
+      const seeded = await (await action(page, 'add_comment', { post_id: postId, body: `Earlier reply ${index}` })).json();
+      expect(seeded.success).toBe(true);
+    }
+    await page.goto(`${environment.base_url}/community/${postId}`);
+    await expect(page.getByText('Earlier reply 50', { exact: true })).toBeVisible();
+    await expect(page.getByText('Earlier reply 51', { exact: true })).toHaveCount(0);
+    await page.getByLabel('Add to the conversation', { exact: true }).fill('My newest reply');
+    const posted = page.waitForResponse(response => response.url().endsWith('/user_posts/add_comment'));
+    await page.getByRole('button', { name: 'Post comment', exact: true }).click();
+    const reply = await (await posted).json();
+    expect(reply.success).toBe(true);
+    await expect(page.getByTestId(`comment-${reply.comment.comment_id}`)).toBeVisible();
+    await page.getByRole('button', { name: 'More comments', exact: true }).click();
+    await expect(page.getByText('Earlier reply 51', { exact: true })).toBeVisible();
+    const comments = page.locator('[data-comment-id]');
+    await expect(comments).toHaveCount(52);
+    await expect(comments.nth(50)).toContainText('Earlier reply 51');
+    await expect(comments.nth(51)).toContainText('My newest reply');
+    await expect(page.getByLabel('Add to the conversation', { exact: true })).toHaveValue('');
+    await comments.first().getByRole('button', { name: 'Delete your comment', exact: true }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Delete comment', exact: true }).click();
+    await expect(comments).toHaveCount(51);
+    await expect(comments.last()).toContainText('My newest reply');
+  } finally {
+    await action(page, 'delete_post', { post_id: postId });
+  }
+});
+
+test('a delayed real feed response cannot put a confirmed deletion back on screen', async ({ page }, testInfo) => {
+  await signIn(page, 'alice');
+  const created = await (await action(page, 'create_post', { body: `Remove this conversation — ${testInfo.project.name}` })).json();
+  expect(created.success).toBe(true);
+  const postId = created.post.post_id;
+  await page.reload();
+  const post = page.getByTestId(`post-${postId}`);
+  await expect(post).toBeVisible();
+  let release;
+  let captured;
+  const responseGate = new Promise(resolveGate => { release = resolveGate; });
+  const serverResponded = new Promise(resolveCaptured => { captured = resolveCaptured; });
+  const feedUrl = '**/api/modules/user_posts/list_posts';
+  await page.route(feedUrl, async route => {
+    const response = await route.fetch();
+    captured();
+    await responseGate;
+    await route.fulfill({ response });
+  });
+  try {
+    await page.getByRole('button', { name: 'Refresh community', exact: true }).click();
+    await serverResponded;
+    await post.getByRole('button', { name: 'Delete your post', exact: true }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Delete post', exact: true }).click();
+    await expect(post).toHaveCount(0);
+    const delivered = page.waitForResponse(response => response.url().endsWith('/user_posts/list_posts'));
+    release();
+    await (await delivered).finished();
+    // Let the delivered fetch and React's next render reach the screen.
+    await page.evaluate(() => new Promise(resolveFrame => requestAnimationFrame(() => requestAnimationFrame(resolveFrame))));
+    await expect(post).toHaveCount(0);
+    expect(await readPost(page, postId)).toBeNull();
+  } finally {
+    release();
+    await page.unroute(feedUrl);
+    await action(page, 'delete_post', { post_id: postId });
+  }
 });

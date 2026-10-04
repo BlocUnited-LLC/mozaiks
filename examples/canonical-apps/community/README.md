@@ -104,7 +104,8 @@ npx playwright test -c playwright.community.config.js
 ```
 
 This suite uses real browser sign-in and actual HTTP/database operations. It
-does not fulfill app or identity responses with Playwright mocks. The phone
+does not fabricate app data or identity responses. One race test delays an
+actual server response to check that it cannot revive a deleted post. The phone
 project is a phone-sized Chromium browser, not iOS/Android device acceptance.
 Screenshots and results go under `web_shell/test-results/`; environment and
 process evidence remain under `.local/evidence/community-env/`. Traces contain

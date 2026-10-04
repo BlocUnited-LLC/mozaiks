@@ -215,7 +215,15 @@ function PostCard({ post, user, detail = false, onDelete, deleting, revision }) 
   );
 }
 
-function Comments({ postId, user, onDelete, revision, deleting }) {
+function mergeComments(previous, incoming) {
+  const byId = new Map([...previous, ...incoming].map(comment => [comment.comment_id, comment]));
+  return [...byId.values()].sort((left, right) => {
+    if (left.created_at === right.created_at) return left.comment_id.localeCompare(right.comment_id);
+    return left.created_at < right.created_at ? -1 : 1;
+  });
+}
+
+function Comments({ postId, user, onDelete, deletedCommentId, deleting }) {
   const [comments, setComments] = useState([]);
   const [cursor, setCursor] = useState(null);
   const [loaded, setLoaded] = useState(false);
@@ -231,7 +239,7 @@ function Comments({ postId, user, onDelete, revision, deleting }) {
       const result = await socialAction('list_comments', { post_id: postId, limit: 50, ...(after ? { after } : {}) });
       if (!Array.isArray(result.comments)) throw new Error('Comments could not be loaded.');
       if (version !== request.current) return;
-      setComments(previous => after ? [...previous, ...result.comments.filter(item => !previous.some(old => old.comment_id === item.comment_id))] : result.comments);
+      setComments(previous => mergeComments(previous, result.comments));
       setCursor(result.next_cursor);
       setLoaded(true);
     } catch (failure) {
@@ -243,12 +251,28 @@ function Comments({ postId, user, onDelete, revision, deleting }) {
   useEffect(() => {
     void load();
     return () => { request.current += 1; };
-  }, [load, revision]);
+  }, [load]);
+  useEffect(() => {
+    if (!deletedCommentId) return;
+    request.current += 1;
+    setPending(false);
+    setComments(previous => previous.filter(comment => comment.comment_id !== deletedCommentId));
+  }, [deletedCommentId]);
+
+  function created(comment) {
+    request.current += 1;
+    setPending(false);
+    setComments(previous => mergeComments(previous, [comment]));
+    setAnnouncement('Your comment was posted.');
+    // A submission can finish before the initial list. Fetch that page again
+    // without letting an older snapshot discard the confirmed new comment.
+    if (!loaded) void load();
+  }
   return (
     <section aria-labelledby="conversation-heading" className="space-y-5">
       <h2 id="conversation-heading" className="text-xl font-semibold text-foreground">Conversation</h2>
       <SurfaceCard className="bg-card">
-        <DraftComposer kind="comment" postId={postId} onCreated={() => { setAnnouncement('Your comment was posted.'); void load(); }} />
+        <DraftComposer kind="comment" postId={postId} onCreated={created} />
       </SurfaceCard>
       <p role="status" className="text-sm text-muted-foreground">{announcement}</p>
       {!loaded && pending && <LoadingState className={INLINE_STATUS_CLASS} label="Loading the conversation…" />}
@@ -279,7 +303,7 @@ export function CommunityRoom({ user, postId = null }) {
   const [error, setError] = useState('');
   const [announcement, setAnnouncement] = useState('');
   const [deleteTarget, setDeleteTarget] = useState(null);
-  const [commentRevision, setCommentRevision] = useState(0);
+  const [deletedCommentId, setDeletedCommentId] = useState(null);
   const [feedRevision, setFeedRevision] = useState(0);
   const [deleting, setDeleting] = useState(false);
   const [actionError, setActionError] = useState('');
@@ -316,11 +340,13 @@ export function CommunityRoom({ user, postId = null }) {
     setDeleteTarget(current => current?.id === target.id ? null : current);
     setActionError('');
     if (target.kind === 'post') {
+      request.current += 1;
+      setPending(false);
       if (postId) { navigate('/community', { replace: true }); return; }
       setPosts(previous => previous.filter(post => post.post_id !== target.id));
       setAnnouncement('Your post was deleted.');
     } else {
-      setCommentRevision(value => value + 1);
+      setDeletedCommentId(target.id);
       setAnnouncement('Your comment was deleted.');
     }
   }
@@ -348,7 +374,7 @@ export function CommunityRoom({ user, postId = null }) {
             {posts.map(post => <PostCard key={post.post_id} post={post} user={user} detail={Boolean(postId)} onDelete={setDeleteTarget} deleting={deleting} revision={feedRevision} />)}
           </div>
           {cursor && !postId && <Button type="button" variant="outline" disabled={pending} onClick={() => load(cursor)} className="min-h-11 w-full">{pending ? 'Loading…' : 'More conversations'}</Button>}
-          {postId && posts.length > 0 && <Comments postId={postId} user={user} onDelete={setDeleteTarget} revision={commentRevision} deleting={deleting} />}
+          {postId && posts.length > 0 && <Comments postId={postId} user={user} onDelete={setDeleteTarget} deletedCommentId={deletedCommentId} deleting={deleting} />}
         </div>
         <aside aria-label="About this community" className="min-w-0 lg:sticky lg:top-28 lg:self-start">
           <SurfaceCard eyebrow="OUR SHARED SPACE" title="Good company. Open minds." className="bg-primary/5">
