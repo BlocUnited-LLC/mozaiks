@@ -2,6 +2,8 @@
 
 This is a bounded source admission check, not a Python sandbox. It follows
 ordinary import/assignment aliases and collection-returning repo helpers.
+SecurityReadiness reuses the same resolver to read which collections module
+code addresses.
 """
 from __future__ import annotations
 
@@ -16,28 +18,127 @@ from mozaiksai.core.runtime.app.module_loader import ModuleRuntimeExtensionsMani
 _CONSTRUCTORS = {"MongoPersistenceContext", "MongoPersistenceCollection", "ModuleContext", "PersistencePrincipal", "AppData"}
 _AUTHORITY_FACTORIES = {"bind_persistence_principal", "current_persistence_principal"}
 _CORE_BACKENDS = {"handler", "base_handler", "service", "repo", "policy", "schemas", "account_data_handler"}
-_PERSISTENCE = "<persistence>"
-_COLLECTION = "<collection>"
-_COLLECTION_FACTORY = "<collection_factory>"
-_APP_DATA = "<app_data>"
+PERSISTENCE = "<persistence>"
+COLLECTION = "<collection>"
+APP_DATA = "<app_data>"
 _PRINCIPAL = "<principal>"
 _CURSOR = "<cursor>"
 _CURSOR_FACTORY = "<cursor_factory>"
-_PROTECTED = {_PERSISTENCE, _COLLECTION, _APP_DATA, _PRINCIPAL, _CURSOR}
+# A bound collection method, keyed by the handle it belongs to and its name.
+COLLECTION_METHODS = {
+    (PERSISTENCE, "collection"): "<persistence_collection>",
+    (PERSISTENCE, "literal_collection"): "<persistence_literal_collection>",
+    (APP_DATA, "collection"): "<app_data_collection>",
+    (APP_DATA, "literal_collection"): "<app_data_literal_collection>",
+}
+_COLLECTION_FACTORIES = frozenset(COLLECTION_METHODS.values())
+_PROTECTED = {PERSISTENCE, COLLECTION, APP_DATA, _PRINCIPAL, _CURSOR}
 _PRIVATE_STORAGE = {
     "_client_handle", "_owner_scope", "_scope_metadata", "_ownership", "_collections", "_restrict_aggregation",
     "_client", "_principal", "_app_id", "_app_slug", "_database_name", "_bindings", "_options", "_collection_resolver",
 }
 
 
-def _constant_text(node: ast.AST) -> str | None:
+def constant_text(node: ast.AST) -> str | None:
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-        left, right = _constant_text(node.left), _constant_text(node.right)
+        left, right = constant_text(node.left), constant_text(node.right)
         if left is not None and right is not None:
             return left + right
     return None
+
+
+class PersistenceResolver:
+    """Resolve the expressions of one parsed source to the values they may hold.
+
+    A value is a dotted name, an import origin, or one of the persistence
+    markers above. Monotonic propagation catches simple aliases and repo
+    helpers regardless of definition order without pretending to execute
+    generated Python.
+    """
+
+    def __init__(self, tree: ast.Module) -> None:
+        self.nodes = list(ast.walk(tree))
+        self.aliases: dict[str, set[str]] = {}
+        self.returns: dict[str, set[str]] = {}
+        self.methods = {node.name for node in self.nodes if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+        for node in self.nodes:
+            if isinstance(node, ast.Import):
+                for imported in node.names:
+                    self.aliases.setdefault(imported.asname or imported.name.split(".")[0], set()).add(
+                        imported.name if imported.asname else imported.name.split(".")[0],
+                    )
+            elif isinstance(node, ast.ImportFrom):
+                for imported in node.names:
+                    self.aliases.setdefault(imported.asname or imported.name, set()).add(f"{node.module or ''}.{imported.name}")
+        self._propagate()
+
+    def key(self, node: ast.AST) -> str | None:
+        if isinstance(node, ast.Name):
+            return node.id
+        if isinstance(node, ast.Attribute):
+            parent = self.key(node.value)
+            return f"{parent}.{node.attr}" if parent else None
+        return None
+
+    def attribute(self, values: set[str], name: str) -> set[str]:
+        if name == "persistence":
+            return {PERSISTENCE}
+        if name in {"collection", "literal_collection"} and values & {PERSISTENCE, APP_DATA}:
+            return {COLLECTION_METHODS[(handle, name)] for handle in (PERSISTENCE, APP_DATA) if handle in values}
+        if name == "principal" and PERSISTENCE in values:
+            return {_PRINCIPAL}
+        if name in {"find", "aggregate"} and COLLECTION in values:
+            return {_CURSOR_FACTORY}
+        if name in {"sort", "limit", "skip", "batch_size", "clone"} and _CURSOR in values:
+            return {_CURSOR_FACTORY}
+        return {f"{value}.{name}" for value in values}
+
+    def resolve(self, node: ast.AST) -> set[str]:
+        label = self.key(node)
+        if label in self.aliases:
+            return self.aliases[label]
+        if isinstance(node, ast.Name):
+            return {node.id}
+        if isinstance(node, ast.Attribute):
+            return self.attribute(self.resolve(node.value), node.attr)
+        if isinstance(node, ast.Await):
+            return self.resolve(node.value)
+        if isinstance(node, ast.Call):
+            functions = self.resolve(node.func)
+            if functions & _COLLECTION_FACTORIES:
+                return {COLLECTION}
+            if _CURSOR_FACTORY in functions:
+                return {_CURSOR}
+            if any(name.rsplit(".", 1)[-1] == "app_data_from_context" for name in functions):
+                return {APP_DATA}
+            if functions & {"getattr", "builtins.getattr"} and len(node.args) >= 2:
+                name = constant_text(node.args[1])
+                return self.attribute(self.resolve(node.args[0]), name) if name else set()
+            return set().union(*(self.returns.get(name.rsplit(".", 1)[-1], set()) for name in functions))
+        return set()
+
+    def _propagate(self) -> None:
+        for _ in range(len(self.nodes) + 1):
+            changed = False
+            for node in self.nodes:
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target] if isinstance(node, ast.AnnAssign) else []
+                value = getattr(node, "value", None)
+                if targets and value is not None:
+                    values = self.resolve(value)
+                    for target in targets:
+                        label = self.key(target)
+                        if label and values - self.aliases.get(label, set()):
+                            self.aliases.setdefault(label, set()).update(values)
+                            changed = True
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    values = set().union(*(self.resolve(item.value) for item in ast.walk(node) if isinstance(item, ast.Return) and item.value))
+                    if values - self.returns.get(node.name, set()):
+                        self.returns.setdefault(node.name, set()).update(values)
+                        changed = True
+            if not changed:
+                break
 
 
 def _startup_files(files: dict[str, str]) -> set[str]:
@@ -74,69 +175,14 @@ def scan_module_persistence(files: dict[str, str]) -> list[str]:
 
 
 def _scan_source(path: str, tree: ast.Module, startup: set[str]) -> list[str]:
-    nodes = list(ast.walk(tree))
-    aliases: dict[str, set[str]] = {}
-    returns: dict[str, set[str]] = {}
-    methods = {node.name for node in nodes if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    resolver = PersistenceResolver(tree)
+    nodes, resolve, methods = resolver.nodes, resolver.resolve, resolver.methods
     errors: set[tuple[int, str]] = set()
 
     def reject(node: ast.AST, message: str) -> None:
         errors.add((getattr(node, "lineno", 1), message))
 
-    def key(node: ast.AST) -> str | None:
-        if isinstance(node, ast.Name):
-            return node.id
-        if isinstance(node, ast.Attribute):
-            parent = key(node.value)
-            return f"{parent}.{node.attr}" if parent else None
-        return None
-
-    def attribute(values: set[str], name: str) -> set[str]:
-        if name == "persistence":
-            return {_PERSISTENCE}
-        if name in {"collection", "literal_collection"} and values & {_PERSISTENCE, _APP_DATA}:
-            return {_COLLECTION_FACTORY}
-        if name == "principal" and _PERSISTENCE in values:
-            return {_PRINCIPAL}
-        if name in {"find", "aggregate"} and _COLLECTION in values:
-            return {_CURSOR_FACTORY}
-        if name in {"sort", "limit", "skip", "batch_size", "clone"} and _CURSOR in values:
-            return {_CURSOR_FACTORY}
-        return {f"{value}.{name}" for value in values}
-
-    def resolve(node: ast.AST) -> set[str]:
-        label = key(node)
-        if label in aliases:
-            return aliases[label]
-        if isinstance(node, ast.Name):
-            return {node.id}
-        if isinstance(node, ast.Attribute):
-            return attribute(resolve(node.value), node.attr)
-        if isinstance(node, ast.Await):
-            return resolve(node.value)
-        if isinstance(node, ast.Call):
-            functions = resolve(node.func)
-            if _COLLECTION_FACTORY in functions:
-                return {_COLLECTION}
-            if _CURSOR_FACTORY in functions:
-                return {_CURSOR}
-            if any(name.rsplit(".", 1)[-1] == "app_data_from_context" for name in functions):
-                return {_APP_DATA}
-            if functions & {"getattr", "builtins.getattr"} and len(node.args) >= 2:
-                name = _constant_text(node.args[1])
-                return attribute(resolve(node.args[0]), name) if name else set()
-            return set().union(*(returns.get(name.rsplit(".", 1)[-1], set()) for name in functions))
-        return set()
-
     for node in nodes:
-        if isinstance(node, ast.Import):
-            for imported in node.names:
-                aliases.setdefault(imported.asname or imported.name.split(".")[0], set()).add(
-                    imported.name if imported.asname else imported.name.split(".")[0],
-                )
-        elif isinstance(node, ast.ImportFrom):
-            for imported in node.names:
-                aliases.setdefault(imported.asname or imported.name, set()).add(f"{node.module or ''}.{imported.name}")
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             modules = [item.name for item in node.names] if isinstance(node, ast.Import) else [node.module or ""]
             if any(name.split(".")[0] in {"motor", "pymongo"} for name in modules):
@@ -165,28 +211,6 @@ def _scan_source(path: str, tree: ast.Module, startup: set[str]) -> list[str]:
                 candidates = {name.removeprefix("app.").replace(".", "/") + ".py" for name in imported_paths}
                 if candidates & startup:
                     reject(node, "request module code cannot import a startup service's database implementation.")
-
-    # Monotonic propagation catches simple aliases and repo helpers regardless
-    # of definition order without pretending to execute generated Python.
-    for _ in range(len(nodes) + 1):
-        changed = False
-        for node in nodes:
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target] if isinstance(node, ast.AnnAssign) else []
-            value = getattr(node, "value", None)
-            if targets and value is not None:
-                values = resolve(value)
-                for target in targets:
-                    label = key(target)
-                    if label and values - aliases.get(label, set()):
-                        aliases.setdefault(label, set()).update(values)
-                        changed = True
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                values = set().union(*(resolve(item.value) for item in ast.walk(node) if isinstance(item, ast.Return) and item.value))
-                if values - returns.get(node.name, set()):
-                    returns.setdefault(node.name, set()).update(values)
-                    changed = True
-        if not changed:
-            break
 
     for node in nodes:
         if isinstance(node, ast.Attribute):
@@ -222,7 +246,7 @@ def _scan_source(path: str, tree: ast.Module, startup: set[str]) -> list[str]:
         reflection_writers = {"setattr", "builtins.setattr", "delattr", "builtins.delattr", "object.__setattr__", "object.__delattr__"}
         reflective = functions & ({"getattr", "builtins.getattr", "vars", "builtins.vars", "object.__getattribute__"} | reflection_writers)
         if reflective and node.args:
-            reflected_attribute = _constant_text(node.args[1]) if len(node.args) > 1 else None
+            reflected_attribute = constant_text(node.args[1]) if len(node.args) > 1 else None
             if reflected_attribute in _PRIVATE_STORAGE or reflected_attribute == "_collection":
                 reject(node, "private persistence reflection bypasses the runtime boundary.")
             if reflected_attribute == "literal_collection":
@@ -231,7 +255,7 @@ def _scan_source(path: str, tree: ast.Module, startup: set[str]) -> list[str]:
                 if reflected_attribute is None or reflected_attribute.startswith("_") or functions & reflection_writers:
                     reject(node, "private or dynamic persistence reflection bypasses the runtime boundary.")
         if functions & {"__import__", "builtins.__import__", "importlib.import_module"} and node.args:
-            module = _constant_text(node.args[0]) or ""
+            module = constant_text(node.args[0]) or ""
             if module.startswith(("motor", "pymongo", "mozaiksai.core.runtime.persistence", "mozaiksai.core.core_config")):
                 reject(node, "dynamic database imports bypass injected persistence.")
             if path not in startup and module.removeprefix("app.").replace(".", "/") + ".py" in startup:

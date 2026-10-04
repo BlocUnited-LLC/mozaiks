@@ -1,11 +1,12 @@
-"""SecurityReadiness reports a permissionless action exactly when nothing protects it.
+"""SecurityReadiness reports a permissionless action unless what it reaches is protected.
 
-Every case changes one declared contract of the recorded fdfa818e bundle. The
-scanner tests assert which actions are reported and at what severity. The
-real-Mongo tests dispatch the same bundle variants through the module router
-and executor with two users and assert what each caller can reach, so the
-scanner and the runtime are checked against one decision table
-(docs/architecture/app/generated-action-protection.md).
+Every case changes declared contracts or code of the recorded fdfa818e bundle.
+The scanner tests assert which actions are reported and at what severity. The
+real-Mongo tests compose a variant's module router and executor against a
+private database, dispatch actions as different callers, and assert what each
+caller can reach next to the scanner's verdict on the same files
+(docs/architecture/app/generated-action-protection.md). Every variant a
+dispatch test uses loads without a failed module.
 """
 from __future__ import annotations
 
@@ -22,8 +23,10 @@ import yaml
 from fastapi import FastAPI, Request
 
 from factory_app.workflows.SecurityReadiness.tools.inspect_generated_app_security import (
+    _PERMISSION_GAPS,
     inspect_generated_app_security,
 )
+from factory_app.workflows.SecurityReadiness.tools.module_data_reach import read_source
 from tests.test_security_readiness_target_binding import (
     invoke,
     security_build_fixture,  # noqa: F401
@@ -31,6 +34,7 @@ from tests.test_security_readiness_target_binding import (
 
 FIXTURE = Path(__file__).parent / "fixtures" / "runtime_smoke_good_bundle_fdfa818e.json"
 MODULE = "modules/task_management/module.yaml"
+TASKS = "modules/task_management/backend"
 CONTRACT = "data/contract.json"
 PLANS = "config/subscriptions.yaml"
 TASK_ACTIONS = ("create_task", "update_task", "delete_task", "get_tasks", "list_tasks")
@@ -59,33 +63,76 @@ def _action(module: dict[str, Any], action_id: str) -> dict[str, Any]:
     return next(action for action in module["actions"] if action["id"] == action_id)
 
 
+def _surface(contract: dict[str, Any], surface_id: str) -> dict[str, Any]:
+    return next(item for item in contract["surfaces"] if item["surface_id"] == surface_id)
+
+
 def _tasks_collection(contract: dict[str, Any]) -> dict[str, Any]:
-    surface = next(item for item in contract["surfaces"] if item["surface_id"] == "task_management")
-    return surface["collections"][0]
+    return _surface(contract, "task_management")["collections"][0]
 
 
 def _plan(plans: dict[str, Any], plan_id: str) -> dict[str, Any]:
     return next(plan for plan in plans["plans"] if plan["plan_id"] == plan_id)
 
 
+def _owned_collection(owner: str, name: str, entity: str) -> dict[str, Any]:
+    """A per_user collection shaped like the recorded tasks collection."""
+    collection = json.loads(json.dumps(_tasks_collection(json.loads(_recorded()[CONTRACT]))))
+    collection.update(name=name, entity=entity, ownership={"surface_id": owner, "surface_kind": "module"})
+    collection["indexes"] = []
+    return collection
+
+
 # --------------------------------------------------------------------------- bundle variants
 
 
-def with_paid_summary(files: dict[str, str]) -> None:
-    """The T041 shape: a sixth, paid, owner-scoped action whose gate only Pro grants."""
+def as_t041(files: dict[str, str]) -> None:
+    """The recorded T041 shape: update is ungated, and a paid, owner-scoped summary only Pro grants."""
+    summary = {
+        "id": "summarize_tasks", "description": "Summarize current tasks.", "handler_method": "summarize_tasks",
+        "api_surface": None,
+        "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+        "output_schema": {
+            "type": "object",
+            "properties": {"active_count": {"type": "integer"}, "completed_count": {"type": "integer"}},
+            "required": ["active_count", "completed_count"],
+        },
+        "permissions": [], "emits": [], "ask_context_safe": False, "entitlement_gate": SUMMARY_GATE,
+    }
 
-    def add_summary(module: dict[str, Any]) -> None:
-        summary = dict(_action(module, "list_tasks"))
-        summary.update(id="summarize_tasks", handler_method="summarize_tasks", entitlement_gate=SUMMARY_GATE)
+    def change(module: dict[str, Any]) -> None:
+        _action(module, "update_task").pop("entitlement_gate")
         module["actions"].append(summary)
 
-    _yaml(files, MODULE, add_summary)
+    _yaml(files, MODULE, change)
     _yaml(files, PLANS, lambda plans: _plan(plans, "pro")["capabilities"].append(SUMMARY_GATE))
+    files[f"{TASKS}/handler.py"] += (
+        "\n    async def summarize_tasks(self, ctx, **params):\n"
+        "        from . import service\n"
+        "        return await service.summarize_tasks(ctx)\n"
+    )
+    files[f"{TASKS}/service.py"] += (
+        "\nasync def summarize_tasks(ctx):\n"
+        "    active_count = await repo.count_open_tasks(ctx)\n"
+        "    completed_count = await repo.count_completed_tasks(ctx)\n"
+        "    return {'active_count': active_count, 'completed_count': completed_count}\n"
+    )
+    files[f"{TASKS}/repo.py"] += (
+        "\nasync def count_open_tasks(ctx):\n"
+        "    return await ctx.persistence.collection('task_management', 'tasks').count({'status': {'$ne': 'completed'}})\n"
+        "\nasync def count_completed_tasks(ctx):\n"
+        "    return await ctx.persistence.collection('task_management', 'tasks').count({'status': 'completed'})\n"
+    )
 
 
 def without_sign_in(files: dict[str, str]) -> None:
     _json(files, "app.json", lambda app: app.update(authRequired=False))
     files.pop("config/auth.yaml")
+
+
+def without_auth_required(files: dict[str, str]) -> None:
+    """A valid config/auth.yaml alone does not make the app a signed-in app."""
+    _json(files, "app.json", lambda app: app.update(authRequired=False))
 
 
 def with_invalid_auth_contract(files: dict[str, str]) -> None:
@@ -96,6 +143,33 @@ def with_app_wide_tasks(files: dict[str, str]) -> None:
     _json(files, CONTRACT, lambda contract: _tasks_collection(contract).update(tenancy="app_wide", owner_field=None))
 
 
+def with_workspace_tasks(files: dict[str, str]) -> None:
+    def change(contract: dict[str, Any]) -> None:
+        tasks = _tasks_collection(contract)
+        tasks["fields"].append(
+            {"default": None, "enum": None, "name": "workspace_id", "nullable": False, "required": True, "type": "string"}
+        )
+        tasks.update(tenancy="per_workspace", owner_field="workspace_id")
+
+    _json(files, CONTRACT, change)
+
+
+def without_task_owner_field(files: dict[str, str]) -> None:
+    """per_user without an owner field loads, and the runtime does not scope it."""
+    _json(files, CONTRACT, lambda contract: _tasks_collection(contract).pop("owner_field"))
+
+
+def with_app_wide_notes(files: dict[str, str]) -> None:
+    """task_management also declares an app_wide collection that none of the task actions touch."""
+
+    def change(contract: dict[str, Any]) -> None:
+        notes = _owned_collection("task_management", "notes", "Note")
+        notes.update(tenancy="app_wide", owner_field=None)
+        _surface(contract, "task_management")["collections"].append(notes)
+
+    _json(files, CONTRACT, change)
+
+
 def with_default_plan_update(files: dict[str, str]) -> None:
     _yaml(files, PLANS, lambda plans: _plan(plans, "free")["capabilities"].append(UPDATE_GATE))
 
@@ -104,32 +178,91 @@ def without_subscriptions(files: dict[str, str]) -> None:
     files.pop(PLANS)
 
 
+def with_invalid_subscriptions(files: dict[str, str]) -> None:
+    _yaml(files, PLANS, lambda plans: plans.update(default_plan_id="missing"))
+
+
+def _v2_subscriptions(files: dict[str, str], *, second_default_grants_update: bool) -> None:
+    """Two products. A gate the default plan of any product grants admits every signed-in user."""
+
+    def change(plans: dict[str, Any]) -> None:
+        tasks_plans = plans.pop("plans")
+        plans.pop("default_plan_id")
+        extras = [UPDATE_GATE] if second_default_grants_update else ["feature.module.task_management.create_task"]
+        plans.update(
+            schema_version="mozaiks.subscriptions.v2",
+            default_product_id="tasks",
+            products=[
+                {"product_id": "tasks", "label": "Tasks", "default_plan_id": "free", "plans": tasks_plans},
+                {
+                    "product_id": "extras", "label": "Extras", "default_plan_id": "basic",
+                    "plans": [{"plan_id": "basic", "label": "Basic", "capabilities": extras}],
+                },
+            ],
+        )
+
+    _yaml(files, PLANS, change)
+
+
+def with_v2_subscriptions(files: dict[str, str]) -> None:
+    _v2_subscriptions(files, second_default_grants_update=False)
+
+
+def with_v2_second_product_granting_update(files: dict[str, str]) -> None:
+    _v2_subscriptions(files, second_default_grants_update=True)
+
+
 def without_data_contract(files: dict[str, str]) -> None:
     files.pop(CONTRACT)
 
 
-def with_malformed_data_contract(files: dict[str, str]) -> None:
-    def add_unhashable_owner(contract: dict[str, Any]) -> None:
-        surface = next(item for item in contract["surfaces"] if item["surface_id"] == "task_management")
-        surface["collections"].append({"name": "notes", "module_id": {"id": "task_management"}})
-
-    _json(files, CONTRACT, add_unhashable_owner)
-
-
-def without_task_data(files: dict[str, str]) -> None:
-    def drop_tasks(contract: dict[str, Any]) -> None:
-        contract["surfaces"] = [item for item in contract["surfaces"] if item["surface_id"] != "task_management"]
-
-    _json(files, CONTRACT, drop_tasks)
-    files.pop("modules/task_management/backend/repo.py")
+def without_data_contract_or_repo(files: dict[str, str]) -> None:
+    """No contract, and the persistence code lives in store.py rather than repo.py."""
+    files.pop(CONTRACT)
+    files[f"{TASKS}/store.py"] = files.pop(f"{TASKS}/repo.py")
+    files[f"{TASKS}/service.py"] = files[f"{TASKS}/service.py"].replace("import repo", "import store as repo")
 
 
-def with_operator_list(files: dict[str, str]) -> None:
-    _yaml(files, MODULE, lambda module: _action(module, "list_tasks").update(api_surface="admin_internal"))
+def with_unhashable_owner(files: dict[str, str]) -> None:
+    def change(contract: dict[str, Any]) -> None:
+        _surface(contract, "task_management")["collections"].append({"name": "notes", "module_id": {"id": "task_management"}})
+
+    _json(files, CONTRACT, change)
 
 
-def with_blank_surface(files: dict[str, str]) -> None:
-    _yaml(files, MODULE, lambda module: _action(module, "list_tasks").update(api_surface=""))
+def with_duplicate_collection(files: dict[str, str]) -> None:
+    def change(contract: dict[str, Any]) -> None:
+        collections = _surface(contract, "task_management")["collections"]
+        collections.append(dict(collections[0]))
+
+    _json(files, CONTRACT, change)
+
+
+def with_entities_list_tenancy(files: dict[str, str]) -> None:
+    _json(files, CONTRACT, lambda contract: contract.update(
+        entities=[{"module_id": "task_management", "entity_name": "Note", "tenancy": ["per_user"]}],
+    ))
+
+
+def without_task_collections(files: dict[str, str]) -> None:
+    """The contract drops task_management's surface; its repository still addresses tasks."""
+    _json(files, CONTRACT, lambda contract: contract.update(
+        surfaces=[item for item in contract["surfaces"] if item["surface_id"] != "task_management"],
+    ))
+
+
+def _list_tasks_as(**changes: Any) -> Callable[[dict[str, str]], None]:
+    def change(files: dict[str, str]) -> None:
+        _yaml(files, MODULE, lambda module: _action(module, "list_tasks").update(changes))
+
+    return change
+
+
+with_operator_list = _list_tasks_as(api_surface="admin_internal")
+with_blank_surface = _list_tasks_as(api_surface="")
+with_public_mutation_list = _list_tasks_as(api_surface="public_mutation")
+with_padded_public_list = _list_tasks_as(api_surface=" public ")
+with_permissions_mapping = _list_tasks_as(permissions={})
 
 
 def with_declared_permission_and_internal_read(files: dict[str, str]) -> None:
@@ -139,6 +272,112 @@ def with_declared_permission_and_internal_read(files: dict[str, str]) -> None:
         _action(module, "get_tasks").update(api_surface="internal", permissions=[])
 
     _yaml(files, MODULE, change)
+
+
+def with_task_permissions(files: dict[str, str]) -> None:
+    def change(module: dict[str, Any]) -> None:
+        module["permissions"].append({"id": "task_management.manage", "description": "Manage tasks."})
+        for action in module["actions"]:
+            action["permissions"] = ["task_management.manage"]
+
+    _yaml(files, MODULE, change)
+
+
+def with_module_directory_renamed(files: dict[str, str]) -> None:
+    """Contracts name the module id; the directory name does not decide its collections."""
+    for path in [path for path in files if path.startswith("modules/task_management/")]:
+        files[path.replace("modules/task_management/", "modules/tasks/", 1)] = files.pop(path)
+
+
+def under_app_root(files: dict[str, str]) -> None:
+    for path in list(files):
+        files[f"app/{path}"] = files.pop(path)
+
+
+def with_decoy_app_contract(files: dict[str, str]) -> None:
+    """The bundle root holds app.json, so the runtime binds it and never loads app/."""
+    files["app/app.json"] = files["app.json"]
+    files[f"app/{CONTRACT}"] = files[CONTRACT]
+    with_app_wide_tasks(files)
+
+
+def with_decoy_app_auth(files: dict[str, str]) -> None:
+    files["app/app.json"] = files["app.json"]
+    files["app/config/auth.yaml"] = files.pop("config/auth.yaml")
+
+
+DIGEST_HANDLER = (
+    "class TaskDigestModule:\n"
+    "    async def list_digest(self, ctx):\n"
+    "        from . import repo\n"
+    "        return {'items': await repo.list_digest(ctx)}\n"
+)
+READ_TASKS = (
+    "async def list_digest(ctx):\n"
+    "    tasks = ctx.persistence.collection('task_management', 'tasks')\n"
+    "    records = await tasks.find_many({}, limit=100)\n"
+    "    return [{'task_id': record['task_id'], 'user_id': record.get('user_id')} for record in records]\n"
+)
+READ_OWN_DIGESTS = (
+    "async def list_digest(ctx):\n"
+    "    return await ctx.persistence.collection('task_digest', 'digests').find_many({}, limit=100)\n"
+)
+
+
+def _digest(repo: str, *, gate: str | None = None, own_collection: bool = True) -> Callable[[dict[str, str]], None]:
+    """Add task_digest: one permissionless signed-in action whose repository is ``repo``."""
+
+    def change(files: dict[str, str]) -> None:
+        action = {
+            "id": "list_digest", "description": "List the tasks the digest covers.", "handler_method": "list_digest",
+            "api_surface": None,
+            "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+            "output_schema": {"type": "object", "properties": {"items": {"type": "array"}}, "required": ["items"]},
+            "permissions": [], "emits": [], "ask_context_safe": False,
+        }
+        if gate:
+            action["entitlement_gate"] = gate
+        files["modules/task_digest/module.yaml"] = yaml.safe_dump({
+            "schema_version": "mozaiks.module.v1",
+            "module": {
+                "id": "task_digest", "display_name": "Task Digest", "description": "Summarizes tasks.",
+                "handler": "backend.handler:TaskDigestModule", "owner": "app", "type": "standard",
+                "version": "1.0.0", "visibility": "private",
+            },
+            "permissions": [],
+            "actions": [action],
+        }, sort_keys=False)
+        files["modules/task_digest/backend/__init__.py"] = ""
+        files["modules/task_digest/backend/handler.py"] = DIGEST_HANDLER
+        files["modules/task_digest/backend/repo.py"] = repo
+        if own_collection:
+            _json(files, CONTRACT, lambda contract: contract["surfaces"].append({
+                "surface_id": "task_digest", "surface_kind": "module",
+                "collections": [_owned_collection("task_digest", "digests", "Digest")],
+            }))
+
+    return change
+
+
+def with_task_alias(files: dict[str, str]) -> None:
+    """A data alias for the per_user tasks collection's literal name."""
+
+    def change(contract: dict[str, Any]) -> None:
+        _tasks_collection(contract)["mongo_collection"] = "task_records"
+        contract["aliases"].append({"alias": "tasks.records", "collection": "task_records"})
+
+    _json(files, CONTRACT, change)
+
+
+def without_contract_version(files: dict[str, str]) -> None:
+    _json(files, CONTRACT, lambda contract: contract.pop("version"))
+
+
+def with_tasks_shared_with_digest(files: dict[str, str]) -> None:
+    _json(files, CONTRACT, lambda contract: contract.update(shared_collections=[{
+        "owner_module": "task_management", "name": "tasks",
+        "shared_with": [{"module": "task_digest", "access": "read", "purpose": "Digest of tasks."}],
+    }]))
 
 
 def _write(root: Path, files: dict[str, str]) -> None:
@@ -158,19 +397,26 @@ def _variant(*changes: Callable[[dict[str, str]], None]) -> dict[str, str]:
 # --------------------------------------------------------------------------- scanner
 
 
-async def _permission_findings(security_build, files: dict[str, str]) -> dict[str, str]:
+async def _scan(security_build, files: dict[str, str]) -> list[dict[str, Any]]:
     build = security_build.add(files)
     result = await invoke(inspect_generated_app_security, build.bridge)
     assert result["success"] is True
-    return {
+    return [item for item in result["findings"] if item["finding_id"].startswith("module_permissions:")]
+
+
+async def _permission_findings(security_build, files: dict[str, str], *, module: str | None = None) -> dict[str, str]:
+    findings = {
         item["finding_id"].removeprefix("module_permissions:missing:"): item["severity"]
-        for item in result["findings"]
-        if item["finding_id"].startswith("module_permissions:")
+        for item in await _scan(security_build, files)
     }
+    return {key: value for key, value in findings.items() if module is None or key.startswith(f"{module}:")}
 
 
-def _expect(severity: str, actions: tuple[str, ...]) -> dict[str, str]:
-    return {f"task_management:{action}": severity for action in actions}
+def _expect(severity: str, actions: tuple[str, ...], module: str = "task_management") -> dict[str, str]:
+    return {f"{module}:{action}": severity for action in actions}
+
+
+PLAN_ONLY_UPDATE = {**_expect("high", UNGATED), **_expect("medium", ("update_task",))}
 
 
 @pytest.mark.asyncio
@@ -178,8 +424,11 @@ def _expect(severity: str, actions: tuple[str, ...]) -> dict[str, str]:
     "changes",
     [
         pytest.param((), id="recorded_owner_scoped_crud"),
-        pytest.param((with_paid_summary,), id="t041_paid_owner_scoped_summary"),
+        pytest.param((as_t041,), id="t041_paid_owner_scoped_summary"),
         pytest.param((with_declared_permission_and_internal_read,), id="declared_permission_and_internal_read"),
+        pytest.param((with_workspace_tasks,), id="per_workspace_ownership"),
+        pytest.param((with_module_directory_renamed,), id="module_id_not_directory_names_its_collections"),
+        pytest.param((under_app_root,), id="bundle_under_app_root"),
     ],
 )
 async def test_protected_actions_raise_no_permission_finding(security_build, changes) -> None:
@@ -191,8 +440,16 @@ async def test_protected_actions_raise_no_permission_finding(security_build, cha
     ("changes", "expected"),
     [
         pytest.param((without_sign_in,), _expect("high", TASK_ACTIONS), id="no_sign_in"),
+        pytest.param((without_auth_required,), _expect("high", TASK_ACTIONS), id="auth_contract_without_auth_required"),
         pytest.param((with_invalid_auth_contract,), _expect("high", TASK_ACTIONS), id="invalid_auth_contract"),
-        pytest.param((with_app_wide_tasks,), _expect("high", UNGATED), id="app_wide_without_gate"),
+        pytest.param((with_decoy_app_auth,), _expect("high", TASK_ACTIONS), id="auth_contract_outside_bound_root"),
+        pytest.param((with_app_wide_tasks,), PLAN_ONLY_UPDATE, id="app_wide_gate_restricts_by_plan_only"),
+        pytest.param((with_decoy_app_contract,), PLAN_ONLY_UPDATE, id="data_contract_outside_bound_root"),
+        pytest.param((with_app_wide_notes,), PLAN_ONLY_UPDATE, id="module_with_one_app_wide_collection"),
+        pytest.param(
+            (with_app_wide_notes, with_module_directory_renamed), PLAN_ONLY_UPDATE,
+            id="module_id_not_directory_names_declared_collections",
+        ),
         pytest.param(
             (with_app_wide_tasks, with_default_plan_update), _expect("high", TASK_ACTIONS),
             id="app_wide_gate_granted_by_default_plan",
@@ -201,30 +458,227 @@ async def test_protected_actions_raise_no_permission_finding(security_build, cha
             (with_app_wide_tasks, without_subscriptions), _expect("high", TASK_ACTIONS),
             id="app_wide_gate_without_plan_catalog",
         ),
-        pytest.param((without_data_contract,), _expect("high", UNGATED), id="persistence_without_data_contract"),
         pytest.param(
-            (with_malformed_data_contract,), _expect("high", UNGATED), id="persistence_with_malformed_data_contract",
+            (with_app_wide_tasks, with_invalid_subscriptions), _expect("high", TASK_ACTIONS),
+            id="app_wide_gate_with_invalid_plan_catalog",
         ),
-        pytest.param((without_task_data,), _expect("medium", UNGATED), id="no_declared_data_scope"),
+        pytest.param((with_app_wide_tasks, with_v2_subscriptions), PLAN_ONLY_UPDATE, id="app_wide_gate_v2_catalog"),
+        pytest.param(
+            (with_app_wide_tasks, with_v2_second_product_granting_update), _expect("high", TASK_ACTIONS),
+            id="app_wide_gate_granted_by_any_v2_product_default",
+        ),
+        pytest.param((without_task_owner_field,), _expect("high", TASK_ACTIONS), id="per_user_without_owner_field"),
+        pytest.param((without_data_contract,), _expect("high", TASK_ACTIONS), id="persistence_without_data_contract"),
+        pytest.param(
+            (without_data_contract_or_repo,), _expect("high", TASK_ACTIONS), id="no_data_contract_and_no_repo_py",
+        ),
+        pytest.param((with_unhashable_owner,), _expect("high", TASK_ACTIONS), id="contract_raising_type_error"),
+        pytest.param((without_contract_version,), _expect("high", TASK_ACTIONS), id="contract_the_loader_rejects"),
+        pytest.param((with_duplicate_collection,), _expect("high", TASK_ACTIONS), id="contract_raising_value_error"),
+        pytest.param((with_entities_list_tenancy,), _expect("high", TASK_ACTIONS), id="entities_row_with_list_tenancy"),
+        pytest.param((without_task_collections,), _expect("medium", UNGATED), id="no_declared_data_scope"),
         pytest.param((with_operator_list,), _expect("high", ("list_tasks",)), id="operator_action_without_permission"),
         pytest.param((with_blank_surface,), _expect("high", ("list_tasks",)), id="blank_surface"),
+        pytest.param((with_public_mutation_list,), _expect("high", ("list_tasks",)), id="surface_the_loader_rejects"),
+        pytest.param((with_padded_public_list,), _expect("high", ("list_tasks",)), id="padded_public_surface"),
+        pytest.param((with_permissions_mapping,), _expect("high", ("list_tasks",)), id="permissions_not_a_list"),
     ],
 )
 async def test_unprotected_actions_raise_a_finding_at_their_severity(security_build, changes, expected) -> None:
     assert await _permission_findings(security_build, _variant(*changes)) == expected
 
 
+HIGH_DIGEST = _expect("high", ("list_digest",), "task_digest")
+LITERAL = (
+    "async def list_digest(ctx):\n"
+    "    return await ctx.persistence.literal_collection('scratch_notes').find_many({}, limit=100)\n"
+)
+ALIAS = (
+    "from mozaiksai.core.runtime.persistence import app_data_from_context\n\n"
+    "async def list_digest(ctx):\n"
+    "    return await app_data_from_context(ctx).collection('{alias}').find_many({{}}, limit=100)\n"
+)
+HANDLE_PASSED_ON = (
+    "def _tasks(persistence):\n"
+    "    return persistence.collection('task_management', 'tasks')\n\n"
+    "async def list_digest(ctx):\n"
+    "    return await _tasks(ctx.persistence).find_many({}, limit=100)\n"
+)
+HANDLE_ATTRIBUTE = (
+    "async def list_digest(ctx):\n"
+    "    database = getattr(ctx.persistence, 'client')\n"
+    "    return database\n"
+)
+DYNAMIC_IMPORT = (
+    "import importlib\n\n"
+    "async def list_digest(ctx, module_name='modules.task_management.backend.repo'):\n"
+    "    return (await importlib.import_module(module_name).list_tasks(ctx))['items']\n"
+)
+RELATIVE_IMPORT_ELSEWHERE = (
+    "import importlib\n\n"
+    "async def list_digest(ctx):\n"
+    "    task_repo = importlib.import_module('.repo', 'modules.task_management.backend')\n"
+    "    return (await task_repo.list_tasks(ctx))['items']\n"
+)
+IMPORTED_SERVICE = (
+    "from modules.task_management.backend import service as task_service\n\n"
+    "async def list_digest(ctx):\n"
+    "    return (await task_service.list_tasks(ctx))['items']\n"
+)
+RAW_DRIVER = (
+    "from motor.motor_asyncio import AsyncIOMotorClient\n\n"
+    "async def list_digest(ctx):\n"
+    "    client = AsyncIOMotorClient('mongodb://127.0.0.1')\n"
+    "    return await client['app']['tasks'].find({}).to_list(100)\n"
+)
+ALIAS_FROM_PARAMETER = (
+    "from mozaiksai.core.runtime.persistence import app_data_from_context\n\n"
+    "def _records(ctx, alias):\n"
+    "    return app_data_from_context(ctx).collection(alias)\n\n"
+    "async def list_digest(ctx):\n"
+    "    return await _records(ctx, 'billing.unknown').find_many({}, limit=100)\n"
+)
+OWN_MODULE_TASKS = (
+    "async def list_digest(ctx):\n"
+    "    return await ctx.persistence.collection('task_digest', 'tasks').find_many({}, limit=100)\n"
+)
+CONSTANT_MODULE = (
+    "TASKS_MODULE = 'task_management'\n\n"
+    "async def list_digest(ctx):\n"
+    "    return await ctx.persistence.collection(TASKS_MODULE, 'tasks').find_many({}, limit=100)\n"
+)
+NAME_FROM_PARAMETER = (
+    "def _collection(ctx, name):\n"
+    "    return ctx.persistence.collection('task_management', name)\n\n"
+    "async def list_digest(ctx):\n"
+    "    return await _collection(ctx, 'tasks').find_many({}, limit=100)\n"
+)
+
+
 @pytest.mark.asyncio
-async def test_unprotected_finding_describes_the_caller_without_naming_a_bypass(security_build) -> None:
-    build = security_build.add(_variant(with_app_wide_tasks))
-    result = await invoke(inspect_generated_app_security, build.bridge)
-    finding = next(
-        item for item in result["findings"]
-        if item["finding_id"] == "module_permissions:missing:task_management:delete_task"
+@pytest.mark.parametrize(
+    ("changes", "expected"),
+    [
+        pytest.param((with_app_wide_tasks, _digest(READ_TASKS)), HIGH_DIGEST, id="addresses_another_modules_app_wide"),
+        pytest.param((_digest(READ_TASKS),), {}, id="addresses_another_modules_per_user"),
+        pytest.param(
+            (with_app_wide_tasks, _digest(READ_TASKS, own_collection=False)), HIGH_DIGEST,
+            id="declares_nothing_and_addresses_app_wide",
+        ),
+        pytest.param(
+            (with_app_wide_tasks, _digest(READ_OWN_DIGESTS), with_tasks_shared_with_digest), HIGH_DIGEST,
+            id="shared_an_app_wide_collection",
+        ),
+        pytest.param(
+            (_digest(READ_OWN_DIGESTS), with_tasks_shared_with_digest), {}, id="shared_a_per_user_collection",
+        ),
+        pytest.param((_digest(ALIAS.format(alias="billing.subscriptions")),), HIGH_DIGEST, id="addresses_a_data_alias"),
+        pytest.param(
+            (_digest(ALIAS.format(alias="billing.subscriptions"), gate=UPDATE_GATE),),
+            _expect("medium", ("list_digest",), "task_digest"), id="addresses_a_data_alias_behind_a_paid_gate",
+        ),
+        pytest.param((_digest(ALIAS.format(alias="billing.unknown")),), {}, id="addresses_an_undeclared_alias"),
+        pytest.param((_digest(LITERAL),), HIGH_DIGEST, id="addresses_a_literal_collection"),
+        pytest.param((_digest(HANDLE_PASSED_ON),), HIGH_DIGEST, id="passes_a_persistence_handle_on"),
+        pytest.param((_digest(HANDLE_ATTRIBUTE),), HIGH_DIGEST, id="reads_a_handle_attribute_outside_its_api"),
+        pytest.param((_digest(DYNAMIC_IMPORT),), HIGH_DIGEST, id="imports_a_module_chosen_at_run_time"),
+        pytest.param((with_app_wide_tasks, _digest(IMPORTED_SERVICE)), HIGH_DIGEST, id="imports_code_reaching_app_wide"),
+        pytest.param(
+            (with_app_wide_tasks, _digest(RELATIVE_IMPORT_ELSEWHERE)), HIGH_DIGEST,
+            id="imports_another_modules_package_dynamically",
+        ),
+        pytest.param((_digest(IMPORTED_SERVICE),), {}, id="imports_code_reaching_per_user"),
+        pytest.param((_digest(RAW_DRIVER),), HIGH_DIGEST, id="uses_a_raw_database_driver"),
+        pytest.param((with_app_wide_tasks, _digest(OWN_MODULE_TASKS)), {}, id="pair_another_module_declares_is_refused"),
+        pytest.param((_digest(ALIAS_FROM_PARAMETER),), HIGH_DIGEST, id="alias_from_a_parameter_reaches_every_alias"),
+        pytest.param(
+            (with_task_alias, _digest(ALIAS.format(alias="tasks.records"), own_collection=False)),
+            _expect("medium", ("list_digest",), "task_digest"), id="alias_to_an_owned_collection_is_refused",
+        ),
+        pytest.param((with_app_wide_tasks, _digest(CONSTANT_MODULE)), HIGH_DIGEST, id="module_id_from_a_constant"),
+        pytest.param((_digest(NAME_FROM_PARAMETER),), {}, id="name_from_a_parameter_bounded_per_user"),
+        pytest.param(
+            (with_app_wide_notes, _digest(NAME_FROM_PARAMETER)), HIGH_DIGEST,
+            id="name_from_a_parameter_bounded_by_an_app_wide_collection",
+        ),
+    ],
+)
+async def test_reach_includes_every_collection_module_code_addresses(security_build, changes, expected) -> None:
+    files = _variant(with_task_permissions, *changes)
+    assert await _permission_findings(security_build, files, module="task_digest") == expected
+
+
+@pytest.mark.asyncio
+async def test_findings_describe_the_caller_without_naming_a_bypass(security_build) -> None:
+    findings = {
+        item["finding_id"].rsplit(":", 1)[-1]: item
+        for item in await _scan(security_build, _variant(with_app_wide_tasks))
+    }
+    assert findings["delete_task"]["title"] == "Signed-in action reaches shared records without a permission"
+    assert findings["delete_task"]["evidence"] == {"path": MODULE}
+    assert "per_user/per_workspace ownership" in findings["delete_task"]["recommendation"]
+    assert findings["update_task"]["title"] == "Signed-in action reaches shared records restricted by plan only"
+    assert findings["update_task"]["severity"] == "medium"
+    nested = {item["finding_id"]: item for item in await _scan(security_build, _variant(with_app_wide_tasks, under_app_root))}
+    assert nested["module_permissions:missing:task_management:delete_task"]["evidence"] == {"path": f"app/{MODULE}"}
+    # A module without an id is named by its bundle path, under either root.
+    unnamed = _variant(without_sign_in, under_app_root)
+    _yaml(unnamed, f"app/{MODULE}", lambda module: module["module"].pop("id"))
+    ids = {item["finding_id"] for item in await _scan(security_build, unnamed)}
+    assert f"module_permissions:missing:app/{MODULE}:delete_task" in ids
+    for _severity, title, description, recommendation in _PERMISSION_GAPS.values():
+        text = f"{title} {description} {recommendation}".lower()
+        assert not any(word in text for word in ("tenant", "workspace_id", "dev_user", "header", "query string"))
+
+
+# --------------------------------------------------------------------------- code reading
+
+
+@pytest.mark.parametrize(
+    ("body", "unresolved"),
+    [
+        pytest.param("persistence = getattr(ctx, 'persistence', None)\nif persistence is None:\n    return None", False, id="assigned_and_tested"),
+        pytest.param("return ctx.persistence.collection('m', 'c')", False, id="collection_call"),
+        pytest.param("principal = getattr(ctx.persistence, 'principal', None)", False, id="getattr_of_api_attribute"),
+        pytest.param("if not ctx.persistence or ctx.persistence.app_id != 'a':\n    return None", False, id="truth_test"),
+        pytest.param("helper(ctx.persistence)", True, id="positional_argument"),
+        pytest.param("helper(store=ctx.persistence)", True, id="keyword_argument"),
+        pytest.param("handles = [ctx.persistence]", True, id="container"),
+        pytest.param("handle = ctx.persistence or None", True, id="kept_boolean_operand"),
+        pytest.param("handle = (lambda: ctx.persistence)()", True, id="lambda"),
+        pytest.param("client = ctx.persistence.client", True, id="attribute_outside_api"),
+        pytest.param("method = getattr(ctx.persistence, name)", True, id="dynamic_getattr"),
+        pytest.param("factory = ctx.persistence.collection\nreturn use(factory)", True, id="bound_method_passed_on"),
+        pytest.param("exec('ctx.persistence')", True, id="dynamic_code"),
+        pytest.param("rebuilt = type(ctx.persistence)(app_id='a')", True, id="handle_type"),
+        pytest.param("def _handle():\n    return ctx.persistence\nreturn _handle().collection('m', 'c')", False, id="helper_called"),
+        pytest.param("def _handle():\n    return ctx.persistence\nuse(_handle)", True, id="helper_passed_on"),
+        pytest.param("import importlib\nimportlib.import_module('.repo', __name__)", False, id="own_package_import"),
+        pytest.param("import importlib\nimportlib.import_module('.repo', name)", True, id="package_chosen_at_run_time"),
+    ],
+)
+def test_reading_marks_untracked_persistence_use_unresolved(body: str, unresolved: bool) -> None:
+    source = "async def action(ctx, name=None):\n" + "".join(f"    {line}\n" for line in body.splitlines())
+    assert read_source(source).unresolved is unresolved
+
+
+def test_reading_resolves_constant_arguments_and_bounds_the_rest() -> None:
+    source = (
+        "MODULE = 'task_management'\nPREFIX = 'ta'\nOTHER = 'notes'\n\n"
+        "async def action(ctx, name):\n"
+        "    ctx.persistence.collection(MODULE, PREFIX + 'sks')\n"
+        "    ctx.persistence.collection(module_id=MODULE, collection_name=name)\n"
+        "    ctx.persistence.collection(*[MODULE, 'tasks'])\n"
+        "    for OTHER in ('a', 'b'):\n"
+        "        ctx.persistence.collection('task_management', OTHER)\n"
+        "    app_data_from_context(ctx).collection('billing.subscriptions')\n"
     )
-    assert finding["title"] == "Signed-in action reaches shared records without a permission"
-    assert finding["evidence"] == {"path": MODULE}
-    assert "per_user/per_workspace ownership" in finding["recommendation"]
+    assert set(read_source(source).addresses) == {
+        ("<persistence_collection>", ("task_management", "tasks")),
+        ("<persistence_collection>", ("task_management", None)),
+        ("<persistence_collection>", (None, None)),
+        ("<app_data_collection>", ("billing.subscriptions",)),
+    }
 
 
 # --------------------------------------------------------------------------- runtime (real Mongo)
@@ -264,13 +718,11 @@ class _App:
         self.database = database
         self.contract = contract
 
-    async def call(self, action: str, token: str | None = None, **params: Any) -> Any:
+    async def call(self, action: str, token: str | None = None, *, module_id: str = "task_management", **params: Any) -> Any:
         headers = {"Authorization": f"Bearer {token}"} if token else {}
         if action in {"get_tasks", "list_tasks"}:
-            return await self.http.get(f"/api/modules/task_management/{action}", params=params, headers=headers)
-        return await self.http.post(
-            f"/api/modules/task_management/{action}", json={"params": params}, headers=headers,
-        )
+            return await self.http.get(f"/api/modules/{module_id}/{action}", params=params, headers=headers)
+        return await self.http.post(f"/api/modules/{module_id}/{action}", json={"params": params}, headers=headers)
 
     def tasks(self) -> Any:
         from mozaiksai.core.runtime.persistence import MongoPersistenceContext
@@ -279,6 +731,13 @@ class _App:
             app_id=APP_ID, database_name=self.database.name, client=self.database.client, data_contract=self.contract,
         )
         return self.database[names.collection_name("task_management", "tasks")]
+
+    async def seed(self, task_id: str, **values: Any) -> None:
+        now = datetime.now(UTC)
+        await self.tasks().insert_one({
+            "app_id": APP_ID, "task_id": task_id, "title": task_id, "status": "pending",
+            "created_at": now, "updated_at": now, **values,
+        })
 
     async def subscribe(self, user_id: str, plan_id: str) -> None:
         from mozaiksai.core.runtime.persistence.app_data import collection_name_for_alias
@@ -289,8 +748,22 @@ class _App:
         )
 
 
+# token -> (user id, workspace id, extra scopes)
+USERS = {
+    "alice": ("alice", "ws-a", ()),
+    "bob": ("bob", "ws-b", ()),
+    "carol": ("carol", "ws-a", ()),
+    "alice-viewer": ("alice", "ws-a", ("task_management.view",)),
+}
+
+
 async def _compose(tmp_path: Path, files: dict[str, str], mongo: tuple[Any, str], *, signed_in: bool) -> _App:
-    """Compose the bundle the way the platform host does, against a private database."""
+    """Compose the bundle's module router and executor, against a private database.
+
+    Signed-in callers are principals injected through the ``optional_user``
+    dependency, not validated tokens; the platform host's token adapter is not
+    part of this composition.
+    """
     from httpx import ASGITransport, AsyncClient
 
     from mozaiksai.core.audit.audit_logger import AuditLogger
@@ -357,19 +830,15 @@ async def _compose(tmp_path: Path, files: dict[str, str], mongo: tuple[Any, str]
     app.include_router(module_router.router)
 
     if signed_in:
-        def principal(user_id: str, *scopes: str) -> UserPrincipal:
+        def principal(user_id: str, workspace_id: str, scopes: tuple[str, ...]) -> UserPrincipal:
             return UserPrincipal(
                 user_id=user_id, email=None, name=user_id, roles=[],
                 scopes=["openid", "profile", "email", *scopes],
                 raw_claims={"sub": user_id, "app_id": APP_ID}, provider="action_protection_test",
-                app_id=APP_ID, workspace_id=None, auth_provenance="token_validated",
+                app_id=APP_ID, workspace_id=workspace_id, auth_provenance="token_validated",
             )
 
-        users = {
-            "alice": principal("alice"),
-            "bob": principal("bob"),
-            "alice-viewer": principal("alice", "task_management.view"),
-        }
+        users = {token: principal(*identity) for token, identity in USERS.items()}
 
         async def resolve_principal(request: Request) -> UserPrincipal | None:
             header = request.headers.get("authorization") or ""
@@ -430,15 +899,46 @@ async def test_runtime_recorded_bundle_protects_every_permissionless_action(tmp_
 
 
 @pytest.mark.asyncio
+async def test_runtime_t041_paid_summary_counts_only_the_callers_records(tmp_path, mongo, security_build) -> None:
+    files = _variant(as_t041)
+    app = await _compose(tmp_path, files, mongo, signed_in=True)
+    _task_id(await app.call("create_task", "alice", title="alice's", status="pending"))
+    _task_id(await app.call("create_task", "bob", title="bob's", status="completed"))
+
+    assert (await app.call("summarize_tasks")).status_code == 401
+    assert (await app.call("summarize_tasks", "alice")).status_code == 402
+    await app.subscribe("alice", "pro")
+    summary = await app.call("summarize_tasks", "alice")
+    assert summary.status_code == 200, summary.text
+    assert summary.json() == {"active_count": 1, "completed_count": 0}
+
+    assert await _permission_findings(security_build, files) == {}
+
+
+@pytest.mark.asyncio
+async def test_runtime_per_workspace_records_are_shared_inside_one_workspace_only(
+    tmp_path, mongo, security_build,
+) -> None:
+    files = _variant(with_workspace_tasks)
+    app = await _compose(tmp_path, files, mongo, signed_in=True)
+    await app.seed("task-a", workspace_id="ws-a", user_id="alice")
+
+    assert [item["task_id"] for item in (await app.call("list_tasks", "carol")).json()["items"]] == ["task-a"]
+    assert (await app.call("get_tasks", "carol", id="task-a")).status_code == 200
+    assert (await app.call("list_tasks", "bob")).json() == {"items": [], "total": 0}
+    assert (await app.call("get_tasks", "bob", id="task-a")).status_code == 404
+    assert (await app.call("delete_task", "bob", task_id="task-a")).status_code == 404
+    assert await app.tasks().find_one({"task_id": "task-a"}) is not None
+
+    assert await _permission_findings(security_build, files) == {}
+
+
+@pytest.mark.asyncio
 async def test_runtime_app_wide_records_are_reachable_by_any_signed_in_user(tmp_path, mongo, security_build) -> None:
     files = _variant(with_app_wide_tasks)
     app = await _compose(tmp_path, files, mongo, signed_in=True)
-    now = datetime.now(UTC)
     for task_id in ("task-a", "task-b"):
-        await app.tasks().insert_one({
-            "app_id": APP_ID, "task_id": task_id, "title": "alice's", "status": "pending",
-            "created_at": now, "updated_at": now, "user_id": "alice",
-        })
+        await app.seed(task_id, user_id="alice")
 
     assert (await app.call("list_tasks")).status_code == 401
     listed = (await app.call("list_tasks", "bob")).json()
@@ -446,12 +946,39 @@ async def test_runtime_app_wide_records_are_reachable_by_any_signed_in_user(tmp_
     assert (await app.call("get_tasks", "bob", id="task-a")).status_code == 200
     assert (await app.call("delete_task", "bob", task_id="task-a")).status_code == 200
     assert await app.tasks().find_one({"task_id": "task-a"}) is None
-    # The plan-restricted gate is the only thing between a signed-in user and the shared update.
+    # The gate admits callers by plan; a plan holder changes another user's shared record.
     assert (await app.call("update_task", "bob", task_id="task-b", title="free plan")).status_code == 402
     await app.subscribe("bob", "pro")
     assert (await app.call("update_task", "bob", task_id="task-b", title="pro plan")).status_code == 200
+    stored = await app.tasks().find_one({"task_id": "task-b"})
+    assert (stored["user_id"], stored["title"]) == ("alice", "pro plan")
 
-    assert await _permission_findings(security_build, files) == _expect("high", UNGATED)
+    assert await _permission_findings(security_build, files) == PLAN_ONLY_UPDATE
+
+
+@pytest.mark.asyncio
+async def test_runtime_module_reaches_collections_another_module_declares(tmp_path, mongo, security_build) -> None:
+    files = _variant(with_task_permissions, with_app_wide_tasks, _digest(READ_TASKS))
+    app = await _compose(tmp_path, files, mongo, signed_in=True)
+    await app.seed("task-a", user_id="alice")
+
+    assert (await app.call("list_tasks", "bob")).status_code == 403
+    digest = await app.call("list_digest", "bob", module_id="task_digest")
+    assert digest.status_code == 200, digest.text
+    assert digest.json()["items"] == [{"task_id": "task-a", "user_id": "alice"}]
+
+    assert await _permission_findings(security_build, files) == HIGH_DIGEST
+
+
+@pytest.mark.asyncio
+async def test_runtime_contract_refuses_collections_it_does_not_declare(tmp_path, mongo, security_build) -> None:
+    files = _variant(without_task_collections)
+    app = await _compose(tmp_path, files, mongo, signed_in=True)
+
+    assert (await app.call("create_task", "alice", title="alice's", status="pending")).status_code == 403
+    assert (await app.call("list_tasks", "alice")).status_code == 403
+
+    assert await _permission_findings(security_build, files) == _expect("medium", UNGATED)
 
 
 @pytest.mark.asyncio
@@ -466,6 +993,7 @@ async def test_runtime_without_sign_in_neither_ownership_nor_gate_separates_call
     files = _variant(without_sign_in)
     app = await _compose(tmp_path, files, mongo, signed_in=False)
 
+    # Without authentication every caller shares one unverified identity.
     first = _task_id(await app.call("create_task", title="first caller", status="pending"))
     listed = (await app.call("list_tasks")).json()
     assert [item["task_id"] for item in listed["items"]] == [first]
