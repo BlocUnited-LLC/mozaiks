@@ -1,5 +1,5 @@
 schema_version: 1
-ag2_baseline: "1.0.5"
+ag2_baseline: "1.1.2"
 
 # This file is an automation index only. The Markdown ledger owns rationale,
 # upgrade decisions, and history.
@@ -8,7 +8,7 @@ watchpoints:
     ag2_surface: Hub and AgentClient workflow execution
     mozaiks_surface: mozaiksai/core/adapters/ag2_network_runner.py
     status: ACTIVE
-    last_verified_version: "1.0.5"
+    last_verified_version: "1.1.2"
     trigger: AG2 ships a stable high-level workflow runner over Hub and AgentClient.
     replacement_condition: AG2NetworkRunner can shrink to Mozaiks request and result conversion.
     verification_tests:
@@ -18,7 +18,7 @@ watchpoints:
     ag2_surface: Workflow-channel turn failure policy
     mozaiks_surface: mozaiksai/core/adapters/ag2_network_runner.py
     status: ACTIVE
-    last_verified_version: "1.0.5"
+    last_verified_version: "1.1.2"
     trigger: Workflow channels expose a first-class failed result or close policy for turn crashes.
     replacement_condition: Delete the local turn-failure listener mapping.
     verification_tests:
@@ -28,19 +28,18 @@ watchpoints:
     ag2_surface: Round-end packet context updates
     mozaiks_surface: mozaiksai/core/adapters/ag2_network_runner.py
     status: ACTIVE
-    last_verified_version: "1.0.5"
+    last_verified_version: "1.1.2"
     trigger: AG2 exposes a public packet transform or context-update hook before WorkflowAdapter fold.
     replacement_condition: Delete the wrapped default-handler context bridge.
     verification_tests:
       - tests/test_ag2_network_execution_alignment.py
-      - tests/test_workflow_network_graph.py
       - tests/test_ag2_network_tool_routing.py
 
   - watchpoint_id: AG2-WP-004
     ag2_surface: Source-scoped transition condition composition
     mozaiks_surface: mozaiksai/core/adapters/ag2_transition_conditions.py
     status: ACTIVE
-    last_verified_version: "1.0.5"
+    last_verified_version: "1.1.2"
     trigger: AG2 supports FromSpeaker composition with context, tool, or expression conditions.
     replacement_condition: Replace local transition-condition adapters with native composition.
     verification_tests:
@@ -50,7 +49,7 @@ watchpoints:
     ag2_surface: Long-lived sandbox sessions with exposed service ports
     mozaiks_surface: mozaiksai/core/ports/sandbox.py
     status: WATCH
-    last_verified_version: "1.0.5"
+    last_verified_version: "1.1.2"
     trigger: AG2 CodeEnvironment supports long-lived app servers, preview URLs, and session budgets.
     replacement_condition: Re-evaluate SandboxPort adapters as thin AG2 backend bindings.
     verification_tests:
@@ -61,29 +60,28 @@ watchpoints:
     ag2_surface: Native workflow-channel initial target
     mozaiks_surface: mozaiksai/core/adapters/ag2_transition_conditions.py
     status: ACTIVE
-    last_verified_version: "1.0.5"
+    last_verified_version: "1.1.2"
     trigger: Workflow channels can dispatch their initial message to a declared startup target.
     replacement_condition: Delete BootstrapInitialDispatch.
     verification_tests:
       - tests/test_ag2_network_execution_alignment.py
-      - tests/test_workflow_network_graph.py
 
   - watchpoint_id: AG2-WP-007
-    ag2_surface: Per-agent response schema on workflow channels
+    ag2_surface: Response-schema correction on workflow-channel turns
     mozaiks_surface: mozaiksai/core/workflow/outputs/runtime_validation.py
     status: WATCH
-    last_verified_version: "1.0.5"
-    trigger: AG2 workflow agents accept response_schema during channel execution.
-    replacement_condition: Use the native schema for model pressure while retaining Mozaiks artifact validation.
+    last_verified_version: "1.1.2"
+    trigger: Workflow-channel turns validate and correct the reply against the agent's response_schema before AG2 packs the round-end packet.
+    replacement_condition: Let AG2 own channel-turn schema correction; keep Mozaiks fail-closed validation of each packet.
     verification_tests:
-      - tests/test_structured_output_runtime_contracts.py
       - tests/test_structured_output_fail_closed.py
+      - tests/test_ag2_network_tool_routing.py
 
   - watchpoint_id: AG2-WP-008
     ag2_surface: Deterministic task graph scheduling and observation
     mozaiks_surface: mozaiksai/core/adapters/ag2_task_batch_runner.py
     status: DEFERRED
-    last_verified_version: "1.0.5"
+    last_verified_version: "1.1.2"
     trigger: AG2 adds deterministic dependency scheduling and task lineage for pre-authorized workers.
     replacement_condition: Move worker lifecycle execution to AG2 while retaining artifact ownership checks.
     verification_tests:
@@ -94,29 +92,31 @@ watchpoints:
     ag2_surface: Parent and child workflow channel lineage
     mozaiks_surface: mozaiksai/core/workflow/orchestration_patterns.py
     status: DEFERRED
-    last_verified_version: "1.0.5"
+    last_verified_version: "1.1.2"
     trigger: AG2 preserves context, WAL lineage, cancellation, and observation across child workflows.
     replacement_condition: Replace standalone task lifecycle observation with parent/child channel lineage; parent graph progression already stays in one AG2 channel.
     verification_tests:
       - tests/test_runtime_task_batch_smoke.py
-      - tests/test_refinement_task_batch_smoke.py
       - tests/test_ag2_network_execution_alignment.py
 
   - watchpoint_id: AG2-WP-010
     ag2_surface: Typed one-shot Consulting channel
     mozaiks_surface: scripts/smoke_agentgenerator_live_pack.py
     status: DEFERRED
-    last_verified_version: "1.0.5"
+    last_verified_version: "1.1.2"
     trigger: Consulting provides deterministic packet emission, typed response schema, and close behavior.
     replacement_condition: Replace direct one-shot coordinator calls with the native Consulting primitive.
+    # No offline test reaches the direct one-shot calls. Only the paid live smoke
+    # test_live_agentgenerator_pack_smoke does (RUN_LIVE_AGENTGENERATOR_PACK_SMOKE=1);
+    # CI skips it. last_verified_version records an upstream source review only.
     verification_tests:
-      - tests/test_task_batch_contracts.py
+      - tests/test_smoke_agentgenerator_live_pack.py
 
   - watchpoint_id: AG2-WP-011
     ag2_surface: Typed one-shot Consulting channel
     mozaiks_surface: mozaiksai/core/adapters/ag2_agent_runner.py
     status: WATCH
-    last_verified_version: "1.0.5"
+    last_verified_version: "1.1.2"
     trigger: Consulting supports a typed one-question and one-response contract.
     replacement_condition: Adapt refinement LLM checkpoints to the native primitive without moving artifact policy.
     verification_tests:
@@ -126,7 +126,7 @@ watchpoints:
     ag2_surface: App-scoped live channel event subscription
     mozaiks_surface: mozaiksai/core/adapters/ag2_network_runner.py
     status: WATCH
-    last_verified_version: "1.0.5"
+    last_verified_version: "1.1.2"
     trigger: Hub listeners support app-scoped transport projection and chat persistence boundaries.
     replacement_condition: Shrink WAL polling and projection to native event subscription conversion.
     verification_tests:
@@ -136,7 +136,7 @@ watchpoints:
     ag2_surface: Public durable human-client attachment
     mozaiks_surface: mozaiksai/core/adapters/ag2_network_runner.py
     status: ACTIVE
-    last_verified_version: "1.0.5"
+    last_verified_version: "1.1.2"
     trigger: HubClient exposes attach_human or an equivalent public identity-reconnection API.
     replacement_condition: Delete _attach_human_client private-member fallback.
     verification_tests:
@@ -146,13 +146,23 @@ watchpoints:
     ag2_surface: Agent-level middleware across native schema-correction turns
     mozaiks_surface: mozaiksai/core/adapters/ag2_agent_runner.py
     status: WATCH
-    last_verified_version: "1.0.5"
+    last_verified_version: "1.1.2"
     trigger: AG2 changes correction middleware inheritance or exposes complete attempt usage.
     replacement_condition: Keep one native response-accounting path; adopt attempt provenance only after coverage and deduplication proof.
     verification_tests:
       - tests/test_auxiliary_usage_accounting.py
       - tests/test_ag2_usage_middleware.py
       - tests/test_ag2_model_call_limits.py
+
+  - watchpoint_id: AG2-WP-016
+    ag2_surface: Close decided by an accepted packet, applied after dispatch
+    mozaiks_surface: mozaiksai/core/adapters/ag2_network_runner.py
+    status: ACTIVE
+    last_verified_version: "1.1.2"
+    trigger: AG2 reports the close an accept decided before dispatching the packet, or declares ChannelAdapter.on_accepted side-effect free.
+    replacement_condition: Delete _accepted_packet_closes_channel and settle user-bound packets on AG2's own close signal.
+    verification_tests:
+      - tests/test_ag2_on_accepted_recall.py
 
 private_api_register:
   - private_api_id: AG2-PRI-001
@@ -166,7 +176,7 @@ private_api_register:
     verification_tests:
       - tests/test_ag2_network_execution_alignment.py
     replacement_trigger: HubClient exposes attach_human or equivalent public identity reconnection.
-    last_verified_version: "1.0.5"
+    last_verified_version: "1.1.2"
 
   - private_api_id: AG2-PRI-002
     ag2_surface: Network default notify handler
@@ -176,9 +186,9 @@ private_api_register:
     risk: HIGH
     verification_tests:
       - tests/test_ag2_network_execution_alignment.py
-      - tests/test_workflow_network_graph.py
+      - tests/test_ag2_network_tool_routing.py
     replacement_trigger: AG2 exposes a public round-end packet or context-update hook.
-    last_verified_version: "1.0.5"
+    last_verified_version: "1.1.2"
 
   - private_api_id: AG2-PRI-003
     ag2_surface: Task worker channel-state dependency key
@@ -189,4 +199,4 @@ private_api_register:
     verification_tests:
       - tests/test_task_batch_contracts.py
     replacement_trigger: Task execution exposes public typed context-variable injection for standalone asks.
-    last_verified_version: "1.0.5"
+    last_verified_version: "1.1.2"

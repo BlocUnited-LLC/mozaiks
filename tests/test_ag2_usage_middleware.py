@@ -186,3 +186,51 @@ async def test_ag2_usage_middleware_uses_context_preflight_required_tokens(monke
     await middleware.on_llm_call(call_next, [], SimpleNamespace())
 
     assert seen["required_tokens"] == 2500
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cache_read", [None, 0.0], ids=["cache-not-reported", "cache-measured-zero"])
+async def test_ag2_usage_middleware_receipt_for_ag2_anthropic_usage_shape(monkeypatch, cache_read):
+    """AG2-WP-014: the AG2 1.1 Anthropic usage shape gives the same receipt.
+
+    ``ag2.config.anthropic.mappers.normalize_usage`` reports a cache read the
+    provider measured as zero as ``0`` instead of ``None``, and fills
+    ``thinking_tokens`` as a part of ``completion_tokens``, not an addition to it.
+    That mapper imports the Anthropic SDK, which CI does not install, so this
+    builds the ``Usage`` it returns for input 10, output 7 (3 of them thinking).
+    """
+    from ag2.events.types import Usage
+
+    emitted = {}
+
+    async def fake_emit_usage_delta(**payload):
+        emitted.update(payload)
+
+    monkeypatch.setattr(usage_mod.TokenManager, "emit_usage_delta", fake_emit_usage_delta)
+    middleware = usage_mod.MozaiksUsageMiddleware(
+        event=SimpleNamespace(),
+        context=SimpleNamespace(),
+        agent_name="PlannerAgent",
+        workflow_name="AppGenerator",
+        context_variables=dict(_ContextBridge.data),
+        model_name="claude-test",
+    )
+    usage = Usage(
+        prompt_tokens=10.0,
+        completion_tokens=7.0,
+        total_tokens=17.0,
+        cache_read_input_tokens=cache_read,
+        cache_creation_input_tokens=None,
+        thinking_tokens=3.0,
+    )
+
+    async def call_next(events, context):
+        return SimpleNamespace(id="response-1", model="claude-test", usage=usage)
+
+    await middleware.on_llm_call(call_next, [], SimpleNamespace())
+
+    assert emitted["prompt_tokens"] == 10
+    assert emitted["completion_tokens"] == 7
+    assert emitted["total_tokens"] == 17
+    assert emitted["cached"] is False
+    assert emitted["cached_tokens"] == 0

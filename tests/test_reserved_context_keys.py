@@ -7,6 +7,10 @@ and therefore normal workflow declaration loading. No declaration metadata
 (authority_class, writer_ids, persisted, source, trigger metadata) can
 legalize it, and agent views cannot reference it. The runtime auto-tool
 projection needs no declaration.
+
+The same authority rejects the ``ag:`` and ``a2a:`` key prefixes that AG2
+reserves: the runtime key grammar accepts them, and AG2 then drops them from
+every variables payload that crosses an A2A, AG-UI, A2UI, or NLIP transport.
 """
 
 from __future__ import annotations
@@ -15,13 +19,16 @@ from pathlib import Path
 
 import pytest
 
+from mozaiksai.core.workflow.context.authority import build_context_authority_policy
 from mozaiksai.core.workflow.context.schema import load_context_variables_config
 from mozaiksai.core.workflow.context.structured_output_overlay import (
     STRUCTURED_OUTPUT_KEY,
 )
 from mozaiksai.core.workflow.declarative import parse_context_variables_config
+from mozaiksai.core.workflow.declarative.contracts import ToolOutcomeSpec
 from mozaiksai.core.workflow.outputs import structured as _so
 from mozaiksai.core.workflow.reserved_context_keys import (
+    AG2_RESERVED_CONTEXT_PREFIXES,
     RUNTIME_RESERVED_CONTEXT_KEYS,
     STRUCTURED_OUTPUT_CONTEXT_KEY,
     require_application_context_name_allowed,
@@ -159,7 +166,50 @@ def test_first_party_workflow_corpus_declares_no_reserved_keys():
         declared = set((document.get("definitions") or {}).keys())
         for view in (document.get("agents") or {}).values():
             declared.update((view or {}).get("variables") or [])
-        reserved = declared & RUNTIME_RESERVED_CONTEXT_KEYS
+        reserved = {
+            key for key in declared
+            if key in RUNTIME_RESERVED_CONTEXT_KEYS or key.startswith(AG2_RESERVED_CONTEXT_PREFIXES)
+        }
         if reserved:
             offenders.append(f"{path.parent.name}: {sorted(reserved)}")
     assert offenders == []
+
+
+def test_ag2_reserved_prefixes_match_the_pinned_ag2():
+    from ag2.context import RESERVED_VARIABLE_PREFIXES
+
+    assert AG2_RESERVED_CONTEXT_PREFIXES == RESERVED_VARIABLE_PREFIXES
+
+
+def test_runtime_accepts_a_reserved_prefix_key_that_ag2_then_drops_in_transit():
+    """Why authoring has to reject the prefixes: nothing later does."""
+    from ag2.context import strip_reserved_variables
+
+    policy = build_context_authority_policy(
+        workflow_name="ReservedPrefixProbe",
+        definitions={"a2a:peer_url": {"type": "string"}},
+    )
+    assert "a2a:peer_url" in policy.variables
+    sent = {"a2a:peer_url": "https://peer.invalid", "peer_url": "https://peer.invalid"}
+    assert strip_reserved_variables(sent, source="probe", warn=False) == {"peer_url": "https://peer.invalid"}
+
+
+@pytest.mark.parametrize("key", ["ag:approval_state", "a2a:peer_url"])
+def test_every_declaration_surface_rejects_ag2_reserved_prefixes(key: str):
+    state = {"type": "string", "source": {"type": "state", "default": None}}
+    definition = {"definitions": {key: state}}
+    agent_view = {
+        "definitions": {"ordinary_key": state},
+        "agents": {"ProbeAgent": {"variables": ["ordinary_key", key]}},
+    }
+    for document in (definition, agent_view):
+        with pytest.raises(ValueError, match="AG2 reserves"):
+            parse_context_variables_config(document)
+        with pytest.raises(ValueError, match="AG2 reserves"):
+            load_context_variables_config(document)
+    with pytest.raises(ValueError, match="AG2 reserves"):
+        ToolOutcomeSpec.model_validate({
+            "context_key": key, "attempts_key": "probe_attempts",
+            "values": ["ok", "error"], "error_value": "error",
+        })
+    assert require_application_context_name_allowed("peer_url", where="probe") == "peer_url"

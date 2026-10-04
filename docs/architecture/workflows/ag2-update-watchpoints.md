@@ -14,11 +14,11 @@ replacement plan lives in
 
 ## Current Baseline
 
-Reviewed on September 1, 2026 against:
+Reviewed on October 4, 2026 against:
 
-- installed package: `ag2==1.0.5` from the `ag2` import package
-- declared dependencies: `ag2[a2a,openai,tracing]==1.0.5`,
-  `ag2[gemini]==1.0.5`, `ag2[anthropic]==1.0.5`, and `ag2[acp]==1.0.5`
+- installed package: `ag2==1.1.2` from the `ag2` import package
+- declared dependencies: `ag2[a2a,openai,tracing]==1.1.2`,
+  `ag2[gemini]==1.1.2`, `ag2[anthropic]==1.1.2`, and `ag2[acp]==1.1.2`
 - AG2 docs:
   - <https://docs.ag2.ai/docs/user-guide/network/overview/>
   - <https://docs.ag2.ai/docs/user-guide/network/hub_and_identity/>
@@ -33,7 +33,10 @@ Reviewed on September 1, 2026 against:
   - <https://docs.ag2.ai/docs/blog/2026/06/17/AG2-Agent-Harness/>
 
 Every current watchpoint and approved private/internal access was last verified
-against AG2 1.0.5. The exact dependency pin remains authoritative in
+against AG2 1.1.2. A verification stamp means the upstream trigger was rechecked
+against that version's source. It does not mean a test reached the Mozaiks
+surface: the "Required verification" column names only tests that do, and says
+so plainly where none does. The exact dependency pin remains authoritative in
 `pyproject.toml`, `requirements.txt`, and
 `tests/test_ag2_dependency_contract.py`.
 
@@ -94,22 +97,23 @@ intent below remain authoritative for maintainers.
 
 | ID | AG2 surface | Mozaiks surface and current reason | Trigger and deletion/migration condition | Status | Last verified | Required verification |
 | --- | --- | --- | --- | --- | --- | --- |
-| `AG2-WP-001` | `Hub`/`AgentClient` workflow execution | `AG2NetworkRunner` adapts workflow YAML, app/session identity, artifact validation, and `RunResult` semantics. | When AG2 ships a stable high-level workflow runner, shrink this to request/result conversion. | `ACTIVE` | 1.0.5 | `test_ag2_network_execution_alignment.py` |
-| `AG2-WP-002` | Workflow turn-failure policy | The runner maps `HubListener.on_turn_failed` to a failed `RunResult` because the channel otherwise remains alive. | Delete the listener mapping when AG2 exposes a failed channel result or native close policy. | `ACTIVE` | 1.0.5 | `test_ag2_network_execution_alignment.py` |
-| `AG2-WP-003` | Round-end packet context updates | `_install_context_update_handler` wraps AG2's default handler so tool updates reach `EV_PACKET` before `WorkflowAdapter.fold(...)`. | Delete the wrapper when AG2 exposes a public packet transform or context-update hook. | `ACTIVE` | 1.0.5 | `test_ag2_network_execution_alignment.py`, `test_workflow_network_graph.py`, `test_ag2_network_tool_routing.py` |
-| `AG2-WP-004` | Source-scoped transition composition | Local conditions preserve YAML `source_agent` semantics; `SourceScopedToolCalled` remains a native `ToolCalled` subtype for packet recognition. | Replace them when `FromSpeaker` composes natively with context, tool, or expression conditions and native packet construction recognizes that composition. | `ACTIVE` | 1.0.5 | `test_workflow_network_graph.py`, `test_ag2_network_tool_routing.py` |
-| `AG2-WP-005` | Long-lived code environments | `SandboxPort` owns generated-app boot, preview URLs, session lifecycle, and budgets; AG2 tools currently execute snippets/processes. | Re-evaluate as a thin AG2 binding if `CodeEnvironment` gains long-lived servers and exposed ports. | `WATCH` | 1.0.5 | `test_sandbox_boundary_and_persistence.py`, `test_sandbox_shell_contract.py` |
-| `AG2-WP-006` | Workflow startup target | `BootstrapInitialDispatch` performs one initial human-to-agent dispatch without creating a reusable author transition. | Delete it when AG2 channels accept a native initial target. | `ACTIVE` | 1.0.5 | `test_ag2_network_execution_alignment.py`, `test_workflow_network_graph.py` |
-| `AG2-WP-007` | Workflow-agent response schema | Mozaiks validates canonical artifact contracts after packets; AG2 does not provide per-agent channel response pressure. | Adopt native `response_schema` for model pressure while retaining Mozaiks hard validation. | `WATCH` | 1.0.5 | `test_structured_output_runtime_contracts.py`, `test_structured_output_fail_closed.py` |
-| `AG2-WP-008` | Deterministic task graph | `AG2TaskBatchRunner` wraps pre-authorized turns in AG2 `Task`; Mozaiks still dependency-sorts, scopes paths, and merges artifacts. | Move lifecycle execution to AG2 when it supplies deterministic scheduling and lineage; keep product ownership checks. | `DEFERRED` | 1.0.5 | `test_task_batch_contracts.py`, `test_runtime_task_batch_smoke.py` |
-| `AG2-WP-009` | Parent/child workflow lineage | Parent planning and continuation share one AG2 channel; task workers still use standalone AG2 Task lifecycle streams. | Replace standalone task observation when AG2 supplies parent/child context, WAL lineage, cancellation, and observation. | `DEFERRED` | 1.0.5 | `test_runtime_task_batch_smoke.py`, `test_refinement_task_batch_smoke.py`, `test_ag2_network_execution_alignment.py` |
-| `AG2-WP-010` | Typed one-shot Consulting | The approved-generation smoke uses a direct AG2 task call because the single-agent Network coordinator did not close deterministically. | Move to Consulting when typed response, packet emission, and hard-close behavior are stable. | `DEFERRED` | 1.0.5 | `test_task_batch_contracts.py` |
-| `AG2-WP-011` | Typed one-shot Consulting | `AG2StructuredAgentRunner` performs refinement LLM checkpoints while Mozaiks retains artifact policy. | Adopt Consulting when it supports a typed one-question/one-response contract. | `WATCH` | 1.0.5 | `test_ag2_agent_runner.py` |
-| `AG2-WP-012` | App-scoped channel events | Mozaiks projects AG2 WAL events into app-scoped websocket and chat persistence contracts. | Shrink WAL polling when native subscriptions preserve those product boundaries. | `WATCH` | 1.0.5 | `test_ag2_network_execution_alignment.py` |
-| `AG2-WP-013` | Durable human attachment | `_attach_human_client` reconnects hydrated human identity because AG2 lacks public `HubClient.attach_human(...)`. | Delete the private fallback when AG2 exposes public human reattachment. | `ACTIVE` | 1.0.5 | `test_ag2_network_execution_alignment.py` |
+| `AG2-WP-001` | `Hub`/`AgentClient` workflow execution | `AG2NetworkRunner` adapts workflow YAML, app/session identity, artifact validation, and `RunResult` semantics. | When AG2 ships a stable high-level workflow runner, shrink this to request/result conversion. | `ACTIVE` | 1.1.2 | `test_ag2_network_execution_alignment.py` |
+| `AG2-WP-002` | Workflow turn-failure policy | The runner maps `HubListener.on_turn_failed` to a failed `RunResult` because the channel otherwise remains alive. | Delete the listener mapping when AG2 exposes a failed channel result or native close policy. | `ACTIVE` | 1.1.2 | `test_ag2_network_execution_alignment.py` |
+| `AG2-WP-003` | Round-end packet context updates | `_install_context_update_handler` wraps AG2's default handler so tool updates reach `EV_PACKET` before `WorkflowAdapter.fold(...)`. | Delete the wrapper when AG2 exposes a public packet transform or context-update hook. | `ACTIVE` | 1.1.2 | `test_ag2_network_execution_alignment.py`, `test_ag2_network_tool_routing.py` |
+| `AG2-WP-004` | Source-scoped transition composition | Local conditions preserve YAML `source_agent` semantics; `SourceScopedToolCalled` remains a native `ToolCalled` subtype for packet recognition. | Replace them when `FromSpeaker` composes natively with context, tool, or expression conditions and native packet construction recognizes that composition. | `ACTIVE` | 1.1.2 | `test_workflow_network_graph.py`, `test_ag2_network_tool_routing.py` |
+| `AG2-WP-005` | Long-lived code environments | `SandboxPort` owns generated-app boot, preview URLs, session lifecycle, and budgets; AG2 tools currently execute snippets/processes. | Re-evaluate as a thin AG2 binding if `CodeEnvironment` gains long-lived servers and exposed ports. | `WATCH` | 1.1.2 | `test_sandbox_boundary_and_persistence.py`, `test_sandbox_shell_contract.py` |
+| `AG2-WP-006` | Workflow startup target | `BootstrapInitialDispatch` performs one initial human-to-agent dispatch without creating a reusable author transition. | Delete it when AG2 channels accept a native initial target. | `ACTIVE` | 1.1.2 | `test_ag2_network_execution_alignment.py` |
+| `AG2-WP-007` | Channel-turn schema correction | The factory gives each agent its provider `response_schema`, and AG2's channel turn uses it (the notify handler asks without one, so `Agent` falls back to its own). AG2 then packs the raw `reply.body`, so `AgentReply.content()` validation and correction never run on channel turns; `_validate_wal_structured_outputs` validates each packet and fails the run closed. | When channel turns validate and correct against the agent's schema before packing, rely on AG2 for correction; keep Mozaiks packet validation. | `WATCH` | 1.1.2 | `test_structured_output_fail_closed.py`, `test_ag2_network_tool_routing.py` (the two channel-turn response-schema tests) |
+| `AG2-WP-008` | Deterministic task graph | `AG2TaskBatchRunner` wraps pre-authorized turns in AG2 `Task`; Mozaiks still dependency-sorts, scopes paths, and merges artifacts. | Move lifecycle execution to AG2 when it supplies deterministic scheduling and lineage; keep product ownership checks. | `DEFERRED` | 1.1.2 | `test_task_batch_contracts.py`, `test_runtime_task_batch_smoke.py` |
+| `AG2-WP-009` | Parent/child workflow lineage | Parent planning and continuation share one AG2 channel; task workers still use standalone AG2 Task lifecycle streams. | Replace standalone task observation when AG2 supplies parent/child context, WAL lineage, cancellation, and observation. | `DEFERRED` | 1.1.2 | `test_runtime_task_batch_smoke.py`, `test_ag2_network_execution_alignment.py` |
+| `AG2-WP-010` | Typed one-shot Consulting | The approved-generation smoke uses a direct AG2 task call because the single-agent Network coordinator did not close deterministically. | Move to Consulting when typed response, packet emission, and hard-close behavior are stable. | `DEFERRED` | 1.1.2 | None offline. Only the paid live `test_live_agentgenerator_pack_smoke` reaches the direct calls; CI skips it, and it was not run for 1.1.2. The stamp is a source review of Consulting only. |
+| `AG2-WP-011` | Typed one-shot Consulting | `AG2StructuredAgentRunner` performs refinement LLM checkpoints while Mozaiks retains artifact policy. | Adopt Consulting when it supports a typed one-question/one-response contract. | `WATCH` | 1.1.2 | `test_ag2_agent_runner.py` |
+| `AG2-WP-012` | App-scoped channel events | Mozaiks projects AG2 WAL events into app-scoped websocket and chat persistence contracts. | Shrink WAL polling when native subscriptions preserve those product boundaries. | `WATCH` | 1.1.2 | `test_ag2_network_execution_alignment.py` |
+| `AG2-WP-013` | Durable human attachment | `_attach_human_client` reconnects hydrated human identity because AG2 lacks public `HubClient.attach_human(...)`. | Delete the private fallback when AG2 exposes public human reattachment. | `ACTIVE` | 1.1.2 | `test_ag2_network_execution_alignment.py` |
+| `AG2-WP-016` | Close decided by an accepted packet | `_accepted_packet_closes_channel` calls the channel adapter's `on_accepted` a second time, outside the hub's accept, for every packet that hands the turn to the user. AG2 dispatches a packet before it applies the close its accept decided. | Delete the second call when AG2 reports that close before dispatch, or settles it some other public way. | `ACTIVE` | 1.1.2 | `test_ag2_on_accepted_recall.py` |
 
 For `AG2-WP-003`, also recheck explicit broadcast audiences for declared
-self-edges. AG2 1.0.5 `Hub._dispatch` excludes the sender when `audience=None`,
+self-edges. AG2 1.1.2 `Hub._dispatch` excludes the sender when `audience=None`,
 while the default handler can process explicit self-delivery through `can_send`.
 The existing packet adapter includes all participants only for agents with a
 declared self-edge. `test_declared_self_transition_runs_again_and_then_terminates`
@@ -121,7 +125,7 @@ attribution described in [Declarative Config to AG2 Mapping](declarative-ag2-map
 when replacing the packet hook. Ordinary packet updates must not acquire
 deterministic-tool authority merely because a variable permits that writer.
 
-For `AG2-WP-004`, AG2 1.0.5 recognizes static routing tools through a top-level
+For `AG2-WP-004`, AG2 1.1.2 recognizes static routing tools through a top-level
 `isinstance(condition, ToolCalled)` check in its packet builder. A standalone
 condition that delegates only `evaluate()` is insufficient. The registered
 subclass preserves source checking at native graph selection and survives
@@ -130,6 +134,19 @@ execution through native tool events, empty-text turns, wrong-source same-name
 calls, graph rehydration, deterministic precedence, and HITL pause/resume.
 Mozaiks does not replace AG2's tool-event interpretation or packet builder.
 
+For `AG2-WP-016`, the second `on_accepted` call decides every pause, not only
+a rare close. Calling it again is safe only because `on_accepted` has no side
+effects. That is how AG2 1.1.2 implements it, not something its
+`ChannelAdapter` protocol promises. The hub accepts a packet, dispatches it, runs its
+`on_envelope_posted` listeners, and only then applies the close. Ordinary runs
+therefore settle through the `is_terminal()` early return, and no test reached
+the outcome where the second call itself reports the close.
+`test_ag2_on_accepted_recall.py` holds `on_envelope_posted` open until the
+runner has decided, which forces that outcome through both the initial run and
+a continuation. It also checks that the call leaves the adapter state unchanged
+on every pause. On upgrades, recheck the accept order (fold, `on_accepted`,
+dispatch, listeners, transition) and that `on_accepted` stays side-effect free.
+
 ## Private and Internal API Register
 
 Only verified current reliance belongs here. New reliance requires an explicit
@@ -137,9 +154,9 @@ register entry, a protecting test, and an upstream replacement trigger.
 
 | ID | AG2 symbol/surface | Mozaiks caller | Why the public API is insufficient | Risk | Protecting test | Upstream replacement trigger | Last verified |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `AG2-PRI-001` | `HubClient._ensure_connected_async`, `HubClient._cache_passport`, `HubClient._clients` | `_attach_human_client` in `ag2_network_runner.py` | `HubClient.attach(...)` supports agents, but 1.0.5 has no public human-identity reattachment API. | `HIGH` | `test_ag2_network_runner_hydrates_and_continues_same_channel_after_restart` | Public `attach_human(...)` or equivalent durable identity reconnection. | 1.0.5 |
-| `AG2-PRI-002` | `ag2.network.client.handlers.default_handler` | `_install_context_update_handler` in `ag2_network_runner.py` | There is no public round-end packet transform before workflow routing folds context updates. | `HIGH` | `test_ag2_network_execution_alignment.py`, `test_workflow_network_graph.py` | Public packet-transform or context-update hook. | 1.0.5 |
-| `AG2-PRI-003` | `ag2.network.policies.CHANNEL_STATE_DEP` | `AG2TaskBatchRunner` | Standalone `Agent.ask(...)` does not expose a typed public injection surface for the channel-state context expected by the worker. | `MEDIUM` | `test_task_batch_contracts.py` | Public typed task/ask context injection. | 1.0.5 |
+| `AG2-PRI-001` | `HubClient._ensure_connected_async`, `HubClient._cache_passport`, `HubClient._clients` | `_attach_human_client` in `ag2_network_runner.py` | `HubClient.attach(...)` supports agents, but 1.1.2 has no public human-identity reattachment API. | `HIGH` | `test_ag2_network_runner_hydrates_and_continues_same_channel_after_restart` | Public `attach_human(...)` or equivalent durable identity reconnection. | 1.1.2 |
+| `AG2-PRI-002` | `ag2.network.client.handlers.default_handler` | `_install_context_update_handler` in `ag2_network_runner.py` | There is no public round-end packet transform before workflow routing folds context updates. | `HIGH` | `test_ag2_network_execution_alignment.py`, `test_ag2_network_tool_routing.py` | Public packet-transform or context-update hook. | 1.1.2 |
+| `AG2-PRI-003` | `ag2.network.policies.CHANNEL_STATE_DEP` | `AG2TaskBatchRunner` | Standalone `Agent.ask(...)` does not expose a typed public injection surface for the channel-state context expected by the worker. | `MEDIUM` | `test_task_batch_contracts.py` | Public typed task/ask context injection. | 1.1.2 |
 
 ## Supersession and Deletion Queue
 
@@ -157,11 +174,12 @@ it does not justify retaining both paths.
 | `AG2-WP-010` / `AG2-WP-011` | Direct one-shot agent runners | Consulting lacks the verified typed response and close contract needed here. | Stable typed Consulting primitive; replace direct one-shot calls. | Slice 5B / control-plane alignment |
 | `AG2-WP-012` | WAL polling for product event projection | Native subscriptions do not carry Mozaiks app/transport persistence scope. | App-scoped listener contract; shrink to event conversion. | Runtime alignment |
 | `AG2-WP-013` | Private human-client reattachment fallback | No public durable human attach API exists. | Public `attach_human(...)`; delete all three private-member accesses together. | AG2 compatibility |
+| `AG2-WP-016` | Second `on_accepted` call for user-bound packets | The hub dispatches a packet before applying the close its accept decided. | AG2 reports that close before dispatch; delete the second call. | AG2 compatibility |
 
 ## Auxiliary Usage Provenance
 
-`AG2-WP-014` (`WATCH`, verified against installed `ag2==1.0.5` on
-September 13, 2026): `ag2/agent.py` implements schema correction in
+`AG2-WP-014` (`WATCH`, verified against installed `ag2==1.1.2` on
+October 4, 2026): `ag2/agent.py` implements schema correction in
 `AgentReply.content` via `AgentReply.ask`. Per-ask middleware is not
 inherited, but agent-level middleware is reapplied. The auxiliary runner
 therefore registers existing Mozaiks usage middleware and native AG2
@@ -183,6 +201,28 @@ coverage. Current ownership is the existing usage middleware and collector.
 Do not add a second TokenMonitor/UsageEvent collector that duplicates receipts.
 If AG2 supplies complete attempt provenance, require a coverage and
 deduplication proof before replacing this response-only projection.
+
+AG2 1.1.0 changed Anthropic usage normalization: a cache count the provider
+measured as zero is now `0` instead of `None`, and `thinking_tokens` is filled
+from `output_tokens_details` as a part of `output_tokens`, not an addition to
+it. The usage middleware reads only prompt, completion, total, and cache-read
+counts and treats a missing and a zero cache read alike, so receipts are
+unchanged; it does not read `thinking_tokens`, so reasoning is not counted
+twice. No test runs AG2's Anthropic mapper (`normalize_usage` in
+`ag2/config/anthropic/mappers.py`): it imports the Anthropic SDK, which neither
+the `dev` extra nor CI installs, so the upstream half of this paragraph rests on
+reading the source. The Mozaiks half is pinned by
+`test_ag2_usage_middleware_receipt_for_ag2_anthropic_usage_shape`, which gives
+the middleware the `Usage` that mapper returns, with the cache read both absent
+and measured as zero.
+
+In 1.1.2, `AgentReply.content()` correction and the `Usage` type are unchanged.
+`Agent` now applies a continuation's dependencies, variables, and prompt only
+after taking the stream's turn lock, and accepts per-call plugins; agent-level
+middleware is still applied on every turn, correction turns included.
+`ModelResponse.response_id` (new in 1.1.0) identifies a returned response, not
+each provider attempt, so it does not meet the attempt-provenance condition
+above.
 
 ## AG2 Ownership Guard
 
@@ -246,6 +286,62 @@ upstream changelog into this document.
 - [ ] Independent review requested before merge.
 
 ## History
+
+### October 4, 2026
+
+- **AG2 1.1.2 security upgrade, outcome `TEST_ONLY`**: all AG2 extras now share
+  the exact 1.1.2 pin, replacing 1.0.5. AG2 1.0.5 is affected by eight ag2ai
+  security advisories: GHSA-hf3x-42qp-4rq6, GHSA-qrjx-72xx-xhmh,
+  GHSA-fxhh-6rm2-v2pp, and GHSA-2h3q-9p6m-4hm4 (fixed in 1.1.0),
+  GHSA-2h4w-29cv-2cmv and GHSA-rppm-w5cw-6qcg (fixed in 1.1.1), and
+  GHSA-42mf-vpmr-gw5r and GHSA-3ccw-g7ph-hrcr (fixed only in 1.1.2, so 1.1.1 is
+  also affected). Mozaiks code does not use skill installation,
+  `DiskKnowledgeStore`, `FilesystemToolkit`, subtasks, approval middleware, or a
+  wire-served Hub (it uses only the in-process `LocalLink`). It attaches
+  `SandboxShellTool()` with no `allowed`, `readonly`, `blocked`, or `ignore`
+  filter, so there is no filter to bypass: that tool is an unrestricted shell
+  on the host by design. The exact pin still has to move, because
+  installations cannot override it.
+- **No watched surface changed in a way Mozaiks depends on**: every AG2 symbol
+  Mozaiks imports resolves in 1.1.2. Between 1.1.1 and 1.1.2 the hub methods
+  Mozaiks calls (`get_channel`, `adapter_for`, `adapter_state`, `_dispatch`,
+  `_fan_out`, `_transition_channel`, `bind_endpoint`) are unchanged, and so are
+  the default notify handler, Consulting, transition conditions, and
+  `CHANNEL_STATE_DEP`. The hub now rejects sends from non-participants; every
+  Mozaiks send comes from the channel's initiator or an invited agent. A
+  re-attaching `HubClient` now presents an empty credential unless it passes a
+  passport; Mozaiks identities use the `none` scheme and re-bind in process.
+  `WorkflowAdapter` handoffs now prefer an exact agent id over a name. No
+  workaround became deletable.
+- **Compatible behavior changes since 1.0.5**: one agent turn keeps one tool per
+  callable name (the later declaration wins, with a warning); no shipped
+  workflow binds two tools with one name. `SandboxShellTool` runs commands
+  without a shell only when a filter is set; the default tool Mozaiks attaches
+  keeps `sh -c`. The Anthropic usage change and the 1.1.2 continuation change
+  are recorded under `AG2-WP-014`. `HumanInputRequest.timeout` and `.task_id`,
+  `ToolApprovalRequest`, `MessageEnqueued`, `ModelResponse.response_id`,
+  `UsageEvent.parts`, and the OpenAI prompt-cache options are additive and not
+  adopted. AG2 drops context keys prefixed `ag:` or `a2a:` from A2A, AG-UI,
+  A2UI, and NLIP transports; Mozaiks' declarative A2A remote agents send
+  context variables, so every context declaration surface now rejects those
+  prefixes (`reserved_context_keys.py`). `BedrockConfig` now requires
+  aiobotocore; Mozaiks does not use Bedrock.
+- **Dependency floors moved with the extras** (OpenAI SDK 3.9, Anthropic SDK
+  1.6, MCP 2.2). Mozaiks pins none of them; the `a2a-sdk` and
+  `agent-client-protocol` ranges are unchanged.
+- **Ledger reach corrected**: for `AG2-WP-003`, `AG2-WP-006`, `AG2-WP-007`,
+  `AG2-WP-009`, `AG2-WP-010`, `AG2-WP-014`, `AG2-PRI-002`, and the new
+  `AG2-WP-016`, every listed verification test was checked by breaking the
+  watched Mozaiks code and confirming the test fails. Tests that did not reach
+  their watched code were removed: `test_workflow_network_graph.py` from
+  `AG2-WP-003`, `AG2-WP-006`, and `AG2-PRI-002`;
+  `test_refinement_task_batch_smoke.py` from `AG2-WP-009`;
+  `test_structured_output_runtime_contracts.py` from `AG2-WP-007`; and
+  `test_task_batch_contracts.py` from `AG2-WP-010`, which has no offline test.
+  `AG2-WP-007`'s trigger had already fired before 1.0.5: AG2 uses the agent's
+  own `response_schema` on channel turns. The entry now watches the remaining
+  gap, correction on channel turns, with tests that send a real channel turn
+  through an HTTP provider. `AG2-WP-016` records the second `on_accepted` call.
 
 ### September 1, 2026
 
