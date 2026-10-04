@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections.abc import Iterator
 from uuid import uuid4
 
 import pytest
@@ -18,7 +19,7 @@ from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceMa
 
 
 @pytest.fixture
-def mongo_uri() -> str:
+def mongo_uri() -> Iterator[str]:
     uri = os.environ.get("MONGO_URI", "").strip()
     if not uri:
         if os.getenv("MOZAIKS_REQUIRE_REAL_MONGO"):
@@ -35,7 +36,13 @@ def mongo_uri() -> str:
         pytest.skip("MongoDB is unavailable")
     finally:
         client.close()
-    return uri
+    # The process client belongs to whichever event loop opened it; an earlier
+    # test's client would fail on this test's loop.
+    close_mongo_client()
+    try:
+        yield uri
+    finally:
+        close_mongo_client()
 
 
 def test_a_session_is_resumable_only_once_its_first_run_has_events(mongo_uri: str) -> None:
@@ -57,10 +64,7 @@ def test_a_session_is_resumable_only_once_its_first_run_has_events(mongo_uri: st
             await (await pm._coll()).delete_many({"app_id": app_id})
         return created, ran, completed
 
-    try:
-        assert asyncio.run(scenario()) == (False, True, False)
-    finally:
-        close_mongo_client()
+    assert asyncio.run(scenario()) == (False, True, False)
 
 
 def test_a_long_lived_manager_rebinds_after_the_process_client_closes(mongo_uri: str) -> None:
@@ -70,11 +74,8 @@ def test_a_long_lived_manager_rebinds_after_the_process_client_closes(mongo_uri:
         await (await manager._coll()).find_one({"_id": "rebind-probe"})
         return manager.persistence.client
 
-    try:
-        first = asyncio.run(use())
-        close_mongo_client()  # what host shutdown does
-        second = asyncio.run(use())  # the next host start runs on a new event loop
-    finally:
-        close_mongo_client()
+    first = asyncio.run(use())
+    close_mongo_client()  # what host shutdown does
+    second = asyncio.run(use())  # the next host start runs on a new event loop
 
     assert second is not first

@@ -183,6 +183,17 @@ async def _verify_mongo_available() -> None:
         raise RuntimeError("MongoDB is configured but unreachable") from None
 
 
+async def _serve_host(server: uvicorn.Server) -> None:
+    """Serve until shutdown; a failed startup ends this task, not the process.
+
+    Newer uvicorn releases call ``sys.exit`` when lifespan startup fails, and
+    asyncio re-raises ``SystemExit`` out of the event loop instead of keeping
+    it on the task. ``_wait_for_server`` reports the failure instead.
+    """
+    with contextlib.suppress(SystemExit):
+        await server.serve()
+
+
 async def _wait_for_server(
     server: uvicorn.Server,
     serve_task: asyncio.Task[Any],
@@ -936,7 +947,7 @@ async def run_live_workflow_smoke(
 
     port = _find_free_port()
     server = uvicorn.Server(_build_uvicorn_config(app, port))
-    serve_task = asyncio.create_task(server.serve())
+    serve_task = asyncio.create_task(_serve_host(server))
 
     try:
         await _wait_for_server(server, serve_task)

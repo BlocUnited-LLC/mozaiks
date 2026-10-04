@@ -156,6 +156,7 @@ def provider(monkeypatch: pytest.MonkeyPatch) -> _Provider:
 def host(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[SimpleNamespace]:
     """Process-wide host state the runner touches, recorded and restored."""
     from mozaiksai.core.auth import clear_auth_config_cache
+    from mozaiksai.core.core_config import close_mongo_client
     from mozaiksai.core.transport.simple_transport import SimpleTransport
     from mozaiksai.core.workflow import workflow_manager as workflow_manager_module
     from mozaiksai.hosts import runtime
@@ -202,9 +203,13 @@ def host(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[SimpleName
     manager = workflow_manager_module.workflow_manager
     catalog = dict(manager.__dict__)
     clear_auth_config_cache()
+    # The process client belongs to the event loop that opened it; each run
+    # gets its own loop, so none may inherit an earlier test's client.
+    close_mongo_client()
     try:
         yield state
     finally:
+        close_mongo_client()
         manager.__dict__.clear()
         manager.__dict__.update(catalog)
         clear_auth_config_cache()
@@ -385,7 +390,7 @@ def _lifespan_app(events: list[str], *, fail_startup: bool = False, hang_shutdow
 
 async def _serve(app: FastAPI) -> tuple[uvicorn.Server, asyncio.Task[Any]]:
     server = uvicorn.Server(runner._build_uvicorn_config(app, _free_port()))
-    return server, asyncio.create_task(server.serve())
+    return server, asyncio.create_task(runner._serve_host(server))
 
 
 def test_stop_server_runs_lifespan_shutdown_without_forcing() -> None:
@@ -433,3 +438,27 @@ def test_wait_for_server_reports_a_failed_host_startup() -> None:
     with pytest.raises(RuntimeError, match="failed to start"):
         asyncio.run(scenario())
     assert time.monotonic() - started < 10.0
+
+
+class _ExitingServer:
+    """Stands in for uvicorn releases that exit the process on failed startup."""
+
+    started = False
+    should_exit = False
+    force_exit = False
+
+    async def serve(self) -> None:
+        raise SystemExit(3)
+
+
+def test_a_host_that_exits_on_failed_startup_is_reported_not_fatal() -> None:
+    async def scenario() -> None:
+        server: Any = _ExitingServer()
+        task = asyncio.create_task(runner._serve_host(server))
+        try:
+            await runner._wait_for_server(server, task, timeout_seconds=5.0)
+        finally:
+            await runner._stop_server(server, task, timeout_seconds=1.0)
+
+    with pytest.raises(RuntimeError, match="failed to start"):
+        asyncio.run(scenario())
