@@ -1,0 +1,4 @@
+{
+  "chat": { "chat_startup_mode": "ask" },
+  "support": { "enabled": false }
+}

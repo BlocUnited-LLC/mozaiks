@@ -146,6 +146,20 @@ runtime_boundaries:
     rule: >
       Posts are soft-deleted (status=deleted) to preserve comment threads and reaction counts.
       Hard delete is GDPR-only via account_data_handler.
+  - id: post_read_visibility
+    rule: >
+      Published public posts are readable by members. All other visibility values,
+      including private and friends, are author-only; friend-based sharing is not
+      implemented. Apply this policy before listing pagination and before reading
+      a post's comments or reaction summary, adding comments, or toggling reactions.
+      Caller filters may narrow this access but never remove it. Deleted posts
+      and their comments and reaction summaries are unavailable through these actions.
+  - id: post_page_limits
+    rule: >
+      list_posts, list_user_posts, and list_comments clamp requested limits to
+      1–99, reserving one of persistence's 100 rows for next_cursor detection.
+      Post pages default to 20 and use before; comment pages default to 50 and
+      use after. Account export has its own complete traversal and is unchanged.
   - id: user_data_scope
     rule: >
       friends and user_posts declare user_data_scope: true and ship account_data_handler.py.

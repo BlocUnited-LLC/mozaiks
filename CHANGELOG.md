@@ -12,7 +12,18 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Added
+
+- Common Ground, a responsive community reference with posts, comments,
+  reactions and author-controlled deletion, plus reproducible local acceptance
+  against the platform host, MongoDB and OIDC sign-in.
+
 ### Security
+
+- Social `user_posts` listings and per-post reads, comments, and reactions now
+  enforce published-public-or-author visibility. Caller filters cannot expose
+  another member's private or friends-only records; friends-based sharing remains
+  unsupported. Common Ground uses the same canonical backend repair.
 
 - Updated the AG2 runtime dependency from `1.0.5` to `1.1.2` for every AG2
   extra. Mozaiks pins AG2 exactly, so installations could not take upstream
@@ -214,6 +225,17 @@ This project follows a practical pre-1.0 changelog format:
   API proxy at the backend; `mozaiks context index` passes its workspace key.
 - Exported app requirements now pin Mozaiks to the version that built the app
   and omit imports supplied by the app's own root folders or Python files.
+
+- Social post listing now lets scoped persistence supply app identity instead
+  of rejecting a repeated app filter. Post-module response
+  schemas also accept the nullable cursor, post and reaction values returned
+  by the service. Account export and deletion use those same declared
+  collections and reject a mismatched app or user; exports page through all
+  matching records.
+  Post and comment pages clamp requested limits to 99 so a request for 100
+  still returns a cursor when more rows exist. The Common Ground reference
+  builds its own JSX and runs eight desktop/phone browser checks in dedicated
+  CI using disposable local MongoDB and Keycloak services.
 
 - `dispatch_module_action` called without an `app` no longer imports the
   platform host as a side effect. On a serving runtime-only host that import
