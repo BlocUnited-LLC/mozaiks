@@ -209,6 +209,25 @@ Examples:
 - user replies to a pending `tool_call`
 - task batch completion injects the declared result context key
 
+The transport resolves a text reply against the current channel while holding
+the chat execution lease. A request that waited for another first message must
+use the channel that request opened, or receive an explicit refusal if the run
+ended. It must not report success after only saving the text to history.
+
+After a process restart, the bridge first restores the existing AG2 channel and
+settles pending turns through the existing resume path. Only a restored,
+human-waiting channel may receive the incoming reply. The live continuation path
+then persists, echoes, and delivers that reply once. Failed or terminal recovery,
+or a missing channel handle, refuses the reply with a transport error; it does
+not start a replacement run. Recovery without new text remains recovery-only.
+Opening a saved chat without user text is passive observation; it does not
+submit a callback resume. A declared agent continuation can still resume
+without user text through the explicit resume path.
+
+These rules address admission and delivery at the existing execution boundary.
+They do not promise exactly-once external tool effects across arbitrary crashes
+or qualify multiple simultaneous runtime hosts.
+
 ### Builder session resume
 
 Resume means:
