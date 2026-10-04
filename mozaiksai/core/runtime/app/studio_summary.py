@@ -330,7 +330,9 @@ def build_app_list_entry(app_record: dict[str, Any]) -> dict[str, Any]:
     return {
         "build_registry_id": str(app_record.get("build_registry_id") or ""),
         "app_id": app_id,
-        "name": app_record.get("name") or app_id,
+        "name": app_record.get("name"),
+        "name_status": app_record.get("name_status"),
+        "name_source": app_record.get("name_source"),
         "description": app_record.get("description") or _recommend_lifecycle_next_step(lifecycle_state),
         "status": lifecycle_state,
         "lifecycle_label": APP_LIFECYCLE_LABELS.get(lifecycle_state, lifecycle_state.title()),

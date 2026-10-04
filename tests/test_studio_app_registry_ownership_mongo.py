@@ -7,6 +7,7 @@ import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import httpx
@@ -19,6 +20,7 @@ from factory_app.app.modules.app_registry.backend.handler import AppRegistryModu
 from factory_app.app.modules.app_registry.backend.repo import AppRegistryRepo
 from factory_app.app.modules.app_registry.backend.service import AppRegistryService
 from mozaiksai.core.auth import reset_auth_adapter
+from mozaiksai.core.session.build_binding import RunBuildBinding
 
 
 @pytest_asyncio.fixture
@@ -87,6 +89,159 @@ async def _create(host, *, owner="alice"):
     )
     assert response.status_code == 200, response.text
     return response.json()["app"]
+
+
+async def _concept_target(host, *, name=None, name_source=None):
+    record = (await host.service.create_app_record(
+        owner_user_id="alice", name=name, name_source=name_source,
+        status="building", chat_app_id="factory-host", active_chat_id="review-chat",
+        active_workflow_id="ValueEngine", current_build_run={"build_id": "build-current", "phase": "genesis"},
+    ))["app"]
+    binding = RunBuildBinding(build_registry_id=record["build_registry_id"], target_app_id=record["app_id"],
+                              build_id="build-current", phase="genesis")
+    return record, binding
+
+
+async def test_approved_name_updates_same_record_without_changing_lifecycle_or_build(registry_host):
+    host = registry_host
+    record, binding = await _concept_target(host)
+    before = await host.collection.find_one({"_id": record["build_registry_id"]})
+    result = await host.service.apply_approved_concept_name(
+        owner_user_id="alice", execution_app_id="factory-host", binding=binding, name="FocusSprint",
+    )
+    assert result["success"] is True
+    after = await host.collection.find_one({"_id": record["build_registry_id"]})
+    assert after["name"] == "FocusSprint"
+    assert after["name_status"] == "named"
+    assert after["name_source"] == "value_engine_concept"
+    assert {key: value for key, value in after.items() if key not in
+            {"name", "name_status", "name_source", "named_at", "updated_at"}} == {
+        key: value for key, value in before.items() if key not in
+        {"name", "name_status", "name_source", "named_at", "updated_at"}}
+    response = await host.http.get("/api/studio/apps", headers=host.headers("alice"))
+    assert response.status_code == 200, response.text
+    row = next(app for app in response.json()["apps"] if app["app_id"] == binding.target_app_id)
+    assert row["name"] == "FocusSprint"
+    assert row["name_source"] == "value_engine_concept"
+    assert row["name_status"] == "named"
+
+
+async def test_persisted_value_engine_approval_names_the_directory_record(registry_host, monkeypatch):
+    from factory_app.workflows.ValueEngine.tools import manifest
+    from mozaiksai.core.data.persistence.artifact_store import BuilderArtifactStore
+
+    host = registry_host
+    record, binding = await _concept_target(host)
+    before = await host.collection.find_one({"_id": record["build_registry_id"]})
+    store = BuilderArtifactStore()
+    monkeypatch.setattr(store, "_collection", AsyncMock(return_value=host.collection.database["Concepts"]))
+    monkeypatch.setattr(manifest, "BuilderArtifactStore", lambda: store)
+    monkeypatch.setattr(manifest, "persist_summary_artifact", AsyncMock())
+    monkeypatch.setattr(manifest, "AppRegistryService", lambda: host.service)
+
+    async def approve(_tool, payload, **kwargs):
+        assert (await host.collection.find_one({"_id": record["build_registry_id"]}))["name"] is None
+        return {"action": "approve", "approved": True, "review_id": payload["review_id"]}
+
+    monkeypatch.setattr(manifest, "use_ui_tool", approve)
+    context = {
+        "app_id": "factory-host", "user_id": "alice", "chat_id": "review-chat", "workflow_name": "ValueEngine",
+        "run_build_binding": binding.model_dump(), "structured_output": {
+            "app_name": "FocusSprint", "concept_overview": "A focus timer.", "core_features": ["Save focus sessions"],
+        },
+    }
+    assert (await manifest.save_value_manifest(context))["outcome"] == "approved"
+    assert (await store.get_concept(app_id=binding.target_app_id))["status"] == "approved"
+    after = await host.collection.find_one({"_id": record["build_registry_id"]})
+    assert after["current_build_run"] == before["current_build_run"]
+    assert after["build_runs"] == before["build_runs"]
+    response = await host.http.get("/api/studio/apps", headers=host.headers("alice"))
+    row = next(app for app in response.json()["apps"] if app["build_registry_id"] == binding.build_registry_id)
+    assert row["name"] == "FocusSprint"
+    assert row["name_source"] == "value_engine_concept"
+
+
+@pytest.mark.parametrize("name", [None, "", "  ", "Untitled app", "My app"])
+async def test_concept_name_requires_specific_product_name(registry_host, name):
+    host = registry_host
+    record, binding = await _concept_target(host)
+    before = await host.collection.find_one({"_id": record["build_registry_id"]})
+    with pytest.raises(ValueError, match="specific product name"):
+        await host.service.apply_approved_concept_name(
+            owner_user_id="alice", execution_app_id="factory-host", binding=binding, name=name,
+        )
+    assert await host.collection.find_one({"_id": record["build_registry_id"]}) == before
+
+
+@pytest.mark.parametrize("field,value", [
+    ("owner_user_id", "bob"), ("execution_app_id", "foreign-host"),
+    ("build_registry_id", "foreign-registry"), ("target_app_id", "foreign-app"), ("build_id", "old-build"),
+])
+async def test_concept_name_rejects_foreign_or_stale_binding(registry_host, field, value):
+    host = registry_host
+    record, binding = await _concept_target(host)
+    before = await host.collection.find_one({"_id": record["build_registry_id"]})
+    args = {"owner_user_id": "alice", "execution_app_id": "factory-host", "binding": binding, "name": "FocusSprint"}
+    if field in {"owner_user_id", "execution_app_id"}:
+        args[field] = value
+    else:
+        args["binding"] = binding.model_copy(update={field: value})
+    assert (await host.service.apply_approved_concept_name(**args))["success"] is False
+    assert await host.collection.find_one({"_id": record["build_registry_id"]}) == before
+    assert await host.collection.count_documents({}) == 1
+
+
+@pytest.mark.parametrize("source", ["manual", "imported_app"])
+async def test_concept_name_preserves_explicit_name_precedence(registry_host, source):
+    host = registry_host
+    record, binding = await _concept_target(host, name="Owner's chosen name", name_source=source)
+    before = await host.collection.find_one({"_id": record["build_registry_id"]})
+    assert (await host.service.apply_approved_concept_name(
+        owner_user_id="alice", execution_app_id="factory-host", binding=binding, name="FocusSprint",
+    ))["success"] is True
+    assert await host.collection.find_one({"_id": record["build_registry_id"]}) == before
+
+
+async def test_name_update_cannot_overwrite_concurrent_manual_rename(registry_host, monkeypatch):
+    host = registry_host
+    record, binding = await _concept_target(host)
+    original = host.collection.find_one_and_update
+
+    async def rename_before_write(query, update, **kwargs):
+        await host.collection.update_one({"_id": record["build_registry_id"]}, {"$set": {
+            "name": "Manual winner", "name_status": "named", "name_source": "manual",
+        }})
+        return await original(query, update, **kwargs)
+
+    monkeypatch.setattr(host.collection, "find_one_and_update", rename_before_write)
+    result = await host.service.apply_approved_concept_name(
+        owner_user_id="alice", execution_app_id="factory-host", binding=binding, name="FocusSprint",
+    )
+    assert result["success"] is False
+    after = await host.collection.find_one({"_id": record["build_registry_id"]})
+    assert after["name"] == "Manual winner"
+    assert after["current_build_run"]["build_id"] == "build-current"
+
+
+async def test_name_update_cannot_touch_a_build_superseded_during_approval(registry_host, monkeypatch):
+    host = registry_host
+    record, binding = await _concept_target(host)
+    original = host.collection.find_one_and_update
+
+    async def supersede_before_write(query, update, **kwargs):
+        await host.collection.update_one({"_id": record["build_registry_id"]}, {
+            "$set": {"current_build_run.build_id": "new-build"},
+        })
+        return await original(query, update, **kwargs)
+
+    monkeypatch.setattr(host.collection, "find_one_and_update", supersede_before_write)
+    result = await host.service.apply_approved_concept_name(
+        owner_user_id="alice", execution_app_id="factory-host", binding=binding, name="FocusSprint",
+    )
+    assert result["success"] is False
+    after = await host.collection.find_one({"_id": record["build_registry_id"]})
+    assert after["name"] is None
+    assert after["current_build_run"]["build_id"] == "new-build"
 
 
 async def test_another_user_cannot_take_over_existing_app_id(registry_host):

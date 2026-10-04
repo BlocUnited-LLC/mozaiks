@@ -341,6 +341,56 @@ async def test_generated_reads_use_runtime_collection_pagination_and_allowlist(t
         await handler.get_tasks(ctx, id="foreign-id")
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("declared_id", [False, True])
+async def test_generated_reads_preserve_mongo_identity_and_distinct_natural_lookup(tmp_path, monkeypatch, declared_id):
+    from bson import ObjectId
+
+    contract = _contract()
+    collection_contract = contract["surfaces"][0]["collections"][0]
+    collection_contract["fields"][0]["name"] = "reference"
+    collection_contract["search_by"] = None if declared_id else "reference"
+    if declared_id:
+        collection_contract["fields"].append({"name": "task_id", "type": "string", "required": True})
+    output = _output()
+    output["module_contract"]["module_yaml"]["actions"] = []
+    closed = _closed(output, contract)
+    for action in closed["module_contract"]["module_yaml"]["actions"]:
+        properties = action["output_schema"]["properties"]
+        record_schema = properties["items"]["items"] if action["id"].startswith("list_") else properties["item"]
+        assert record_schema["properties"]["_id"] == {"type": "string"}
+        assert "_id" in record_schema["required"]
+
+    files = extract_code_file_map_from_payload(closed)
+    files.update(materialize_module_read_implementations(files, app_build_plan=_plan(), data_contract=contract))
+    package_name = f"generated_natural_lookup_reads_{declared_id}"
+    package = tmp_path / package_name
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    for path, source in files.items():
+        if path.startswith(BACKEND):
+            (package / Path(path).name).write_text(source, encoding="utf-8")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    handler = importlib.import_module(f"{package_name}.handler").TaskManagementHandler()
+    record_id = ObjectId()
+    record = {"_id": record_id, "reference": "natural-key", "title": "Safe", "owner_id": "owner",
+              "future_secret": "private"}
+    if declared_id:
+        record["task_id"] = "generated-task-id"
+    collection = SimpleNamespace(count=AsyncMock(return_value=1), aggregate=AsyncMock(return_value=[record]),
+                                 find_one=AsyncMock(return_value=record))
+    ctx = ModuleContext(app_id="app", user_id="owner")
+    ctx.persistence = SimpleNamespace(collection=lambda *_args: collection)
+    expected = {"_id": str(record_id), "reference": "natural-key", "title": "Safe", "owner_id": "owner"}
+    if declared_id:
+        expected["task_id"] = "generated-task-id"
+    assert await handler.list_tasks(ctx) == {"items": [expected], "total": 1}
+    assert await handler.get_tasks(ctx, id=str(record_id) if declared_id else "natural-key") == {"item": expected}
+    collection.find_one.assert_awaited_once_with(
+        {"_id": {"$in": [str(record_id), record_id]}} if declared_id else {"reference": "natural-key"}
+    )
+
+
 def test_real_context_save_generates_only_owned_read_backend_files():
     files = _files()
     owned = [f"{BACKEND}/handler.py", f"{BACKEND}/service.py", f"{BACKEND}/repo.py"]

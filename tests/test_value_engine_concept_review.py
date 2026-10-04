@@ -14,6 +14,7 @@ from ag2.config.openai.mappers import convert_messages
 from ag2.events import ModelMessage, ModelResponse
 from ag2.knowledge import MemoryKnowledgeStore
 
+from factory_app.app.modules.app_registry.backend.service import AppRegistryService
 from factory_app.workflows.ValueEngine.tools import manifest as module
 from mozaiksai.core.adapters import ag2_network_runner as runner
 from mozaiksai.core.events.unified_event_dispatcher import UnifiedEventDispatcher
@@ -42,8 +43,15 @@ class Context(dict):
         self[key] = value
 
 
+@pytest.fixture(autouse=True)
+def approved_name_writer(monkeypatch):
+    writer = AsyncMock(return_value={"success": True})
+    monkeypatch.setattr(AppRegistryService, "apply_approved_concept_name", writer, raising=False)
+    return writer
+
+
 @pytest.fixture
-def review(monkeypatch):
+def review(monkeypatch, approved_name_writer):
     store = SimpleNamespace(save_concept=AsyncMock(), finish_concept_review=AsyncMock(return_value=True))
     persist = AsyncMock(return_value=SimpleNamespace(id="concept-version"))
     monkeypatch.setattr(module, "BuilderArtifactStore", lambda: store)
@@ -69,7 +77,8 @@ def review(monkeypatch):
         monkeypatch.setattr(module, "use_ui_tool", ui, raising=False)
 
     respond()
-    return SimpleNamespace(context=context, store=store, persist=persist, emitted=emitted, respond=respond)
+    return SimpleNamespace(context=context, store=store, persist=persist, emitted=emitted, respond=respond,
+                           name_writer=approved_name_writer)
 
 
 async def test_approval_is_structured_bound_to_draft_and_persisted(review):
@@ -90,6 +99,11 @@ async def test_approval_is_structured_bound_to_draft_and_persisted(review):
     assert review.persist.await_args.kwargs["summary_payload"]["status"] == "approved"
     assert review.context["app_id"] == "factory-test"
     assert review.context["run_build_binding"]["target_app_id"] == "build-app"
+    args = review.name_writer.await_args.kwargs
+    assert args["owner_user_id"] == "owner"
+    assert args["execution_app_id"] == "factory-test"
+    assert args["binding"].model_dump() == review.context["run_build_binding"]
+    assert args["name"] == "Customer Ledger"
 
 
 @pytest.mark.parametrize("action,outcome", [("request_changes", "changes_requested"), ("cancel", "cancelled")])
@@ -99,6 +113,7 @@ async def test_negative_review_never_approves(review, action, outcome):
     assert result["outcome"] == outcome
     assert review.context["value_manifest"]["status"] != "approved"
     assert review.context["concept_review_feedback"] == "Keep the scope small."
+    review.name_writer.assert_not_awaited()
 
 
 @pytest.mark.parametrize("invalid", [
@@ -111,6 +126,7 @@ async def test_invalid_or_stale_response_cannot_advance(review, invalid):
     result = await module.save_value_manifest(review.context)
     assert result["outcome"] == "blocked"
     review.store.finish_concept_review.assert_not_awaited()
+    review.name_writer.assert_not_awaited()
     assert review.context.get("value_manifest", {}).get("status") != "approved"
 
 
@@ -119,6 +135,7 @@ async def test_a_newer_draft_prevents_approval_of_an_older_review(review):
     result = await module.save_value_manifest(review.context)
     assert result["outcome"] == "blocked"
     assert review.context.get("value_manifest", {}).get("status") != "approved"
+    review.name_writer.assert_not_awaited()
 
 
 async def test_failed_draft_persistence_does_not_request_approval(review):
@@ -357,9 +374,34 @@ async def test_failed_approved_summary_persistence_does_not_advance(review):
     result = await module.save_value_manifest(review.context)
     assert result["outcome"] == "blocked"
     assert review.context.get("value_manifest", {}).get("status") != "approved"
+    review.name_writer.assert_not_awaited()
 
 
-@pytest.mark.parametrize("key", ["chat_id", "user_id", "structured_output"])
+@pytest.mark.parametrize("result", [False, "unavailable"])
+async def test_registry_name_failure_does_not_advance_approved_concept(review, result):
+    if result is False:
+        review.name_writer.return_value = {"success": False}
+    else:
+        review.name_writer.side_effect = RuntimeError("registry unavailable")
+    outcome = await module.save_value_manifest(review.context)
+    assert outcome["outcome"] == "blocked"
+    assert review.context.get("value_manifest", {}).get("status") != "approved"
+    assert review.persist.await_args.kwargs["summary_payload"]["status"] == "approved"
+
+
+async def test_registry_name_is_written_only_after_the_approved_summary(review):
+    async def name(**kwargs):
+        assert review.persist.await_count == 2
+        assert review.persist.await_args.kwargs["summary_payload"]["status"] == "approved"
+        assert review.store.finish_concept_review.await_args.kwargs["status"] == "approved"
+        return {"success": True}
+
+    review.name_writer.side_effect = name
+    assert (await module.save_value_manifest(review.context))["outcome"] == "approved"
+    review.name_writer.assert_awaited_once()
+
+
+@pytest.mark.parametrize("key", ["app_id", "chat_id", "user_id", "structured_output"])
 async def test_missing_required_context_blocks(review, key):
     review.context.pop(key)
     result = await module.save_value_manifest(review.context)

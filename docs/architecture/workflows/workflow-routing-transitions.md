@@ -445,6 +445,17 @@ revised concept is a new draft with a fresh review ID and no approved scope unti
 the owner approves that draft. Cancellation, stale or invalid responses, and the
 existing three-attempt review limit still fail closed.
 
+After a draft-bound approval and its reviewed summary are persisted, ValueEngine
+updates the existing Studio app registry name through its service. The write is
+conditional on the review owner, execution host, target app, registry ID and
+current build ID. It changes only name metadata and timestamps, preserving app
+identity, lifecycle, build history and bindings. Manual/imported names retain
+precedence; stale or foreign bindings cannot rename a record or advance this
+approval tool. Cancel, changes requested and failed review persistence do not
+write a name. Registry list projections retain nullable names and name metadata
+so unnamed builds display a readable draft label until approval. Existing saved
+records are not renamed retroactively by this change.
+
 DesignDocs uses its existing `design_docs_save_feedback` as the terminal failure
 explanation, so a rejected design reports the actionable reason in the workflow UI.
 

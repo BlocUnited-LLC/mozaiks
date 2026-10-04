@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from mozaiksai.core.session.build_binding import BuildTargetReference, RunBuildBinding
 
-from .policy import normalize_optional_text, validate_lifecycle_state
+from .policy import is_generic_app_name, normalize_optional_text, validate_lifecycle_state
 from .schemas import ensure_create_payload, ensure_status_payload
 
 if TYPE_CHECKING:
@@ -231,6 +231,22 @@ class AppRegistryService:
             current_build_run=payload["current_build_run"],
         )
         return {"success": True, "app": app}
+
+    async def apply_approved_concept_name(
+        self, *, owner_user_id: str, execution_app_id: str, binding: RunBuildBinding, name: str,
+    ) -> dict[str, Any]:
+        """Name the existing build target after its concept review is persisted."""
+        approved_name = normalize_optional_text(name)
+        if approved_name is None or is_generic_app_name(approved_name):
+            raise ValueError("An approved concept requires a specific product name")
+        if not normalize_optional_text(execution_app_id):
+            raise ValueError("execution_app_id is required")
+        app = await self.repo.update_concept_name(
+            owner_user_id=owner_user_id, execution_app_id=execution_app_id,
+            build_registry_id=binding.build_registry_id, app_id=binding.target_app_id,
+            expected_build_id=binding.build_id, name=approved_name,
+        )
+        return {"success": app is not None, "app": app}
 
     async def update_build_status(
         self,

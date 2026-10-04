@@ -411,7 +411,7 @@ blank id, or would close a dependency cycle is left to those checks.
 Selected pack inventory is resolved before coverage construction.
 Canonical worker mapping and selected subscription, refinement, and split-admin
 task file requirements are also shared with validation. Explicit approved action
-names reach module workers. Module materialization constructs canonical reads and, for module-written collections, canonical create/update/delete actions with their implementations and schemas from declared collection ownership and typed list/detail intent. The generated record id is the declared `<entity>_id` field (else `id`, else `_id`); `search_by` is only the get lookup and a natural key there is never replaced by a generated id.
+names reach module workers. Module materialization constructs canonical reads and, for module-written collections, canonical create/update/delete actions with their implementations and schemas from declared collection ownership and typed list/detail intent. The generated record id is the declared `<entity>_id` field (else `id`, else `_id`); `search_by` is only the get lookup and a natural key there is never replaced by a generated id. Canonical get falls back to a declared `id`, then Mongo `_id`. Read schemas and responses retain a string `_id` when either generated identity or get lookup needs it. Runtime acceptance checks get using the stored lookup value and mutation using the generated identity; these values may differ.
 Subscription providers must be explicit or already selected, and facade/client
 dependencies follow registered bindings rather than task prose.
 Section hints bind only to actions that exist. A `sections_hint[].data_source`

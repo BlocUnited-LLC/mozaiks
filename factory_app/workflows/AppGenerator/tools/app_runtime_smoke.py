@@ -271,6 +271,12 @@ class _Entity:
     def label(self) -> str:
         return f"{self.module}.{self.collection.get('name')}"
 
+    @property
+    def lookup_field(self) -> str:
+        from mozaiksai.core.workflow.generator_support.data_contract_fields import read_lookup_field
+
+        return read_lookup_field(self.collection)
+
 
 class _RunLogCapture(logging.Handler):
     """Keep the runtime's warning and error records (the child runs one smoke)."""
@@ -912,6 +918,12 @@ def _record_id(entity: _Entity, body: Any) -> Any:
     return body.get(entity.id_field)
 
 
+def _lookup_value(entity: _Entity, stored: Mapping[str, Any] | None) -> str | None:
+    """Use the stored canonical get key; it need not be the generated write id."""
+    value = stored.get(entity.lookup_field) if stored is not None else None
+    return str(value) if value is not None else None
+
+
 async def _stored(run: _SmokeRun, entity: _Entity, record_id: Any) -> dict[str, Any] | None:
     from mozaiksai.core.runtime.persistence import MongoPersistenceContext
 
@@ -1009,6 +1021,8 @@ async def _crud(run: _SmokeRun, entity: _Entity) -> None:
     else:
         run.record(f"{tag}.a_create", True, f"A created {entity.entity} {entity.id_field}={record_id!r}.")
     has_record = stored is not None
+    lookup_value = _lookup_value(entity, stored)
+    no_lookup = f"the stored record has no value for canonical get lookup {entity.lookup_field!r}"
 
     def listed_ids(body: Any) -> list[Any] | None:
         items = _items(body)
@@ -1038,12 +1052,14 @@ async def _crud(run: _SmokeRun, entity: _Entity) -> None:
                    path=None if found_nothing else failure_path())
         if not has_record:
             run.not_run(f"{tag}.a_get", no_record)
+        elif lookup_value is None:
+            run.record(f"{tag}.a_get", False, no_lookup, path=path_repo)
         else:
-            status, body, summary = await run.call("GET", entity.module, actions["get"], a, {"id": record_id})
+            status, body, summary = await run.call("GET", entity.module, actions["get"], a, {"id": lookup_value})
             item = body.get("item") if isinstance(body, Mapping) else None
             if not 200 <= status < 300 or not isinstance(item, Mapping) or item.get(entity.id_field) != record_id:
                 run.record(f"{tag}.a_get", False,
-                           f"{describe(actions['get'], 'A')}(id={record_id!r}): expected 2xx with A's record, got {summary}.",
+                           f"{describe(actions['get'], 'A')}(id={lookup_value!r}): expected 2xx with A's record, got {summary}.",
                            path=failure_path())
             else:
                 run.record(f"{tag}.a_get", True, "A reads its own record by id.")
@@ -1066,15 +1082,17 @@ async def _crud(run: _SmokeRun, entity: _Entity) -> None:
     if owned and "get" in actions:
         if not has_record:
             run.not_run(f"{tag}.b_get_isolated", no_record)
+        elif lookup_value is None:
+            run.not_run(f"{tag}.b_get_isolated", no_lookup)
         else:
-            status, body, summary = await run.call("GET", entity.module, actions["get"], b, {"id": record_id})
+            status, body, summary = await run.call("GET", entity.module, actions["get"], b, {"id": lookup_value})
             item = body.get("item") if isinstance(body, Mapping) else None
             if 200 <= status < 300 and isinstance(item, Mapping) and item:
                 run.record(f"{tag}.b_get_isolated", False,
-                           f"{describe(actions['get'], 'B')}(id={record_id!r}) returned user A's record.", path=path_repo)
+                           f"{describe(actions['get'], 'B')}(id={lookup_value!r}) returned user A's record.", path=path_repo)
             elif status >= 500 or status == 0:
                 run.record(f"{tag}.b_get_isolated", False,
-                           f"{describe(actions['get'], 'B')}(id={record_id!r}): expected 404, got {summary}.",
+                           f"{describe(actions['get'], 'B')}(id={lookup_value!r}): expected 404, got {summary}.",
                            path=failure_path())
             else:
                 run.record(f"{tag}.b_get_isolated", True, f"B cannot read A's record ({status}).")
@@ -1180,7 +1198,8 @@ async def _gated_params(
         record_id = _record_id(entity, body) if 200 <= status < 300 else None
         record_id = record_id if record_id is not None else "smoke-missing-record"
         if operation == "get":
-            return "GET", {"id": record_id}
+            stored = await _stored(run, entity, record_id)
+            return "GET", {"id": _lookup_value(entity, stored) or "smoke-missing-record"}
         return "POST", {entity.id_field: record_id}
     return "POST", _required_params(_input_schema(module, action), {})
 

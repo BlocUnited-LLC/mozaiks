@@ -82,6 +82,8 @@ Covers:
 """
 from __future__ import annotations
 
+import pytest
+
 from mozaiksai.core.runtime.app.studio_summary import (
     _build_connector_summary,
     _flatten_unique_strings,
@@ -470,6 +472,18 @@ class TestRecommendLifecycleNextStep:
 # ---------------------------------------------------------------------------
 
 class TestBuildAppListEntry:
+    @pytest.mark.parametrize("name,status,source", [
+        (None, "provisional", "provisional"), ("FocusSprint", "named", "value_engine_concept"),
+    ])
+    def test_preserves_canonical_name_metadata(self, name, status, source):
+        result = build_app_list_entry({
+            "build_registry_id": "appreg_1", "app_id": "draft-app-58c84bf6",
+            "lifecycle_state": "building", "name": name, "name_status": status, "name_source": source,
+        })
+        assert result["name"] == name
+        assert result["name_status"] == status
+        assert result["name_source"] == source
+
     def test_building_entry_routes_to_chat_scope(self):
         result = build_app_list_entry(
             {

@@ -324,6 +324,14 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Approved concept names now reach the existing Studio app registry through an
+  owner- and build-scoped update, preserving manual/imported names, app identity,
+  lifecycle and history. Unnamed builds retain readable draft labels in the app
+  directory until approval; existing saved records are not renamed retroactively.
+- Generated read actions retain Mongo `_id` when needed for record identity or
+  lookup. Runtime smoke uses the approved get lookup key independently of the
+  generated update/delete identity, preventing false rejection of valid natural
+  keys while retaining record-identity and two-user isolation checks.
 - Reopened failed workflows retain their declared failure explanation in a
   collapsed details panel beside the existing retry action. The metadata read
   keeps the session's user and app scope and exposes no other workflow context.
