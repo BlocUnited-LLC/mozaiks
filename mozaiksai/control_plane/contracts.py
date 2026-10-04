@@ -37,13 +37,26 @@ class RefinementLane(StrEnum):
 ContractSurfaceKind = Literal[
     "module_action",    # module.yaml + handler + service + schemas (+ repo/policy)
     "module_contract",  # module.yaml declarations only (events, capabilities, settings)
-    "page_binding",     # ui/pages/*.yaml + app.json
+    "page_binding",     # saved schema page or registered custom page source
     "data_schema",      # schemas.py + optionally data/contract.json
     "workflow_tool",    # tools.yaml + tool Python file
     "workflow_agent",   # agents.yaml + structured_outputs.yaml + transition_graph.yaml
-    "ui_component",     # ui/{WorkflowName}/components/*.js
+    "ui_component",     # workflow-owned ui_config.yaml
     "app_config",       # app.json, shell.json, theme_config.json
 ]
+
+ContractSurfaceTargetKind = Literal["module", "page", "workflow", "app"]
+
+CONTRACT_SURFACE_TARGET_KINDS: dict[ContractSurfaceKind, ContractSurfaceTargetKind] = {
+    "module_action": "module",
+    "module_contract": "module",
+    "data_schema": "module",
+    "page_binding": "page",
+    "workflow_tool": "workflow",
+    "workflow_agent": "workflow",
+    "ui_component": "workflow",
+    "app_config": "app",
+}
 
 # Canonical dependency ordering — lower runs first.
 CONTRACT_SURFACE_DEPENDENCY_ORDER: dict[str, int] = {
@@ -72,10 +85,8 @@ CONTRACT_SURFACE_CANONICAL_PATHS: dict[str, list[str]] = {
         "modules/{target_id}/module.yaml",
         "modules/{target_id}/contracts/events.yaml",
     ],
-    "page_binding": [
-        "ui/pages/{target_id}.yaml",
-        "app.json",
-    ],
+    # Page paths resolve through the saved schema / route and component registry.
+    "page_binding": [],
     "data_schema": [
         "modules/{target_id}/backend/schemas.py",
     ],
@@ -236,14 +247,25 @@ class ScopeProposal(BaseModel):
     signals: list[str]
 
 
-class ContractSurfaceUpdate(BaseModel):
-    """One contract surface to update as part of a targeted regeneration plan."""
-
+class ContractSurfaceTarget(BaseModel):
+    """Finite surface identity shared by classifier output and execution plans."""
     model_config = ConfigDict(extra="forbid")
 
     kind: ContractSurfaceKind
     target_id: str = Field(min_length=1)
-    target_kind: str = Field(min_length=1)
+    target_kind: ContractSurfaceTargetKind
+
+    @model_validator(mode="after")
+    def validate_target_kind(self) -> ContractSurfaceTarget:
+        expected = CONTRACT_SURFACE_TARGET_KINDS[self.kind]
+        if self.target_kind != expected:
+            raise ValueError(f"{self.kind} requires target_kind={expected}")
+        return self
+
+
+class ContractSurfaceUpdate(ContractSurfaceTarget):
+    """One contract surface to update as part of a targeted regeneration plan."""
+
     affected_paths: list[str] = Field(default_factory=list)
     dependency_order: int = Field(default=0, ge=0)
     rationale: str = Field(min_length=1)

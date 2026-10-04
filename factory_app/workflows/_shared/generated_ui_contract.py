@@ -279,14 +279,17 @@ def _parse_imports_and_local_definitions(
 
 
 def _resolve_relative_import(base_dir: PurePosixPath, source_path: str) -> str:
+    if "\\" in source_path or ":" in source_path or "\x00" in source_path:
+        return ""
     resolved = base_dir.joinpath(source_path)
     parts: list[str] = []
     for part in resolved.parts:
         if part in ("", "."):
             continue
         if part == "..":
-            if parts:
-                parts.pop()
+            if not parts:
+                return ""
+            parts.pop()
             continue
         parts.append(part)
     normalized = PurePosixPath(*parts)
@@ -308,15 +311,25 @@ def _import_path_exists(import_path: str, file_names: set[str]) -> bool:
 
 
 def resolve_registered_component_files(
-    files: dict[str, str], *, source_label: str,
+    files: dict[str, str], *, source_label: str, registry_paths: set[str] | None = None,
 ) -> tuple[dict[str, set[str]], list[str]]:
     """Resolve registry keys through their actual JS binding and local import."""
     registered_files: dict[str, set[str]] = {}
     warnings: list[str] = []
     file_names = set(files)
     for filename, source in files.items():
+        if registry_paths is not None and filename not in registry_paths:
+            continue
         if not filename.endswith(("index.js", "index.jsx")):
             continue
+        matches = list(REGISTER_COMPONENT_RE.finditer(source))
+        call_count = len(re.findall(r"\bregisterComponent\s*\(", source))
+        if call_count != len(matches) or any(not match.group("binding") for match in matches):
+            warnings.append(f"{source_label} {filename} has a dynamic or unresolved component registration.")
+        names = [match.group("name") for match in matches]
+        for name in sorted(set(names)):
+            if names.count(name) > 1:
+                warnings.append(f"{source_label} {filename} registers component '{name}' more than once.")
         registrations = _parse_registered_component_bindings(source)
         bindings, imports = _parse_imports_and_local_definitions(source, filename=filename)
         for component, binding in registrations.items():
@@ -327,7 +340,12 @@ def resolve_registered_component_files(
                 )
                 continue
             import_path = imports.get(binding)
-            if import_path:
+            if import_path is not None:
+                if not import_path:
+                    warnings.append(
+                        f"{source_label} {filename} registers component '{component}' through an unsafe relative import."
+                    )
+                    continue
                 if not _import_path_exists(import_path, file_names):
                     warnings.append(
                         f"{source_label} {filename} registers component '{component}' from missing file '{import_path}'."

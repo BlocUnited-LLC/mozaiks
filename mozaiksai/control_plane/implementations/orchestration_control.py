@@ -43,7 +43,11 @@ from mozaiksai.core.session.trigger_routing import TriggerRoutingContribution
 from mozaiksai.core.usage.context import AuxiliaryUsageContext, resolve_auxiliary_usage_context
 
 from .coding_worker import ScopedRefinementCodingWorker, get_coding_worker
-from .contract_surface_planner import ContractSurfacePlanner, get_contract_surface_planner
+from .contract_surface_planner import (
+    ContractSurfacePlanner,
+    get_contract_surface_planner,
+    validate_contract_surface_plan,
+)
 from .harness_decision import FirstPartyHarnessDecisionPolicy, get_harness_decision_policy
 from .refinement_router import (
     RefinementRequest,
@@ -208,6 +212,8 @@ class OrchestrationControlHarness:
         *,
         refinement_request: RefinementRequest,
         routing_decision: RefinementRoutingDecision,
+        workspace_files: dict[str, str],
+        allowed_paths: list[str] | None = None,
         context_graph_catalog: dict[str, Any] | None = None,
     ) -> tuple[ContractSurfacePlan | None, HarnessDecision]:
         """Run contract surface planning for feature/design changes on app_bundle artifacts.
@@ -227,8 +233,16 @@ class OrchestrationControlHarness:
         plan: ContractSurfacePlan = await self._contract_surface_planner.propose(
             refinement_request=refinement_request,
             routing_decision=routing_decision,
+            workspace_files=workspace_files,
+            allowed_paths=allowed_paths,
             context_graph_catalog=context_graph_catalog,
         )
+        if not plan.fallback_to_workflow:
+            validate_contract_surface_plan(
+                plan=plan, refinement_request=refinement_request,
+                routing_decision=routing_decision, workspace_files=workspace_files,
+                allowed_paths=allowed_paths,
+            )
 
         decision: HarnessDecision = self._decision_policy.for_contract_surface_plan(
             routing_decision=routing_decision,
@@ -242,7 +256,8 @@ class OrchestrationControlHarness:
         plan: ContractSurfacePlan,
         refinement_request: RefinementRequest,
         routing_decision: RefinementRoutingDecision,
-        workspace_files: dict[str, Any] | None = None,
+        workspace_files: dict[str, str],
+        allowed_paths: list[str] | None = None,
     ) -> SurfacePlanExecutionResult:
         """Execute a ContractSurfacePlan surface by surface.
 
@@ -251,8 +266,8 @@ class OrchestrationControlHarness:
         File outputs accumulate across surfaces so later surfaces see the
         updated content from earlier ones.
 
-        workspace_files supplies the current content of workspace files keyed
-        by relative path. Absent paths are treated as new files (empty string).
+        workspace_files is the complete verified saved artifact. The worker
+        revalidates every resolved path and the optional explicit write scope.
 
         Raises RuntimeError when contract_surface is disabled.
         """
@@ -264,7 +279,8 @@ class OrchestrationControlHarness:
                 plan=plan,
                 refinement_request=refinement_request,
                 routing_decision=routing_decision,
-                workspace_files={str(k): str(v) for k, v in (workspace_files or {}).items()},
+                workspace_files=workspace_files,
+                allowed_paths=allowed_paths,
             )
         except (Exception, CancelledError) as exc:
             with CancelScope(shield=True):

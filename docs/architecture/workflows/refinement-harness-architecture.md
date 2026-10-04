@@ -686,6 +686,37 @@ Current first-party handler:
 
 - `mozaiksai/control_plane/implementations/contract_surface_planner.py`
 
+The planner requires the complete verified saved bundle and receives explicit
+allowed write paths separately. Context Graph candidates provide retrieval hints;
+they cannot authorize writes. The classifier receives a deterministic inventory
+of saved targets, and the planner resolves the returned identities before a build
+is allocated. The worker repeats whole-plan admission before its first model call.
+
+| Surface kinds | Target kind | Build family |
+| --- | --- | --- |
+| `module_action`, `module_contract`, `data_schema` | `module` | `app_bundle` |
+| `page_binding` | `page` | `app_bundle` |
+| `app_config` | `app` | `app_bundle` |
+| `workflow_tool`, `workflow_agent`, `ui_component` | `workflow` | `workflow_bundle` |
+
+`page_binding` resolves a schema page by its exact saved schema name. A custom
+React page uses its exact declared route ID in `ui/route_manifest.json`, then the
+existing component resolver follows the `ui/index.js` registration to its local
+`ui/pages/custom/*.jsx` source. Component names do not imply filenames, and a
+filename such as `custom/focus` is not a route identity. Route and registry files
+are supplied to generation as read-only context from the same saved snapshot.
+`ui_component` remains a workflow surface and cannot select an app page.
+The `app_config` target uses the request's owner-resolved artifact app identity;
+`app.json` may omit `appId`, but a conflicting declared identity is rejected.
+
+Missing, empty, unsafe, ambiguous, dynamic, unknown or out-of-scope targets fail
+before generation. Admission checks every surface, including manually constructed
+plans; one invalid surface rejects the whole plan. The worker also rejects generated
+writes outside the admitted paths. New files or undeclared surfaces require the
+existing workflow route rather than guessed path creation. These checks establish
+source ownership, not the generated behavior's correctness: normal validation,
+review and browser acceptance remain required.
+
 ### `coding_requested`
 
 Scoped coding-worker execution for eligible patch refinements.

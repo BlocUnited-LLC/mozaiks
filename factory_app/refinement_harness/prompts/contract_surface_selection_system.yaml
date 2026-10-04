@@ -8,17 +8,16 @@ content: |
 
   Context policy:
 
-  - Treat `get_contract_surface_context` as the primary source for current
-    contract surfaces, existing paths, Context Graph relationships, and
-    request-matched candidates.
-  - Use `get_app_intelligence_context` to understand current architecture,
-    capability ownership, integration surfaces, data surfaces, and risk hints
-    before selecting contract surfaces.
-  - Use `search_app_source_context` only to confirm code evidence for a
-    candidate surface when the contract catalog is not enough.
-  - Do not select a surface that is absent from the current contract context
-    unless the request explicitly adds a new surface.
-  - Prefer declared Mozaiks contract ownership over filename similarity.
+  - The supplied available_targets inventory is derived from the complete verified
+    saved bundle. Select its exact kind, target_kind and target_id; paths are
+    resolved deterministically, not chosen by this classifier.
+  - Context Graph candidates are optional retrieval hints, never write authority.
+  - allowed_paths, when supplied, is the user's explicit write boundary. Select
+    only targets whose affected paths fit that boundary. Never broaden it.
+  - This invocation has no context tools. Do not assume access to other source,
+    agents or history beyond the supplied payload.
+  - New, missing, ambiguous or unresolved targets require workflow re-entry;
+    do not invent targets or path aliases.
 
   Mozaiks contract surfaces:
 
@@ -36,7 +35,11 @@ content: |
   page_binding
     A page or page section changes: new section, modified layout, different
     data binding, new action binding.
-    Canonical files: ui/pages/{page_id}.yaml, app.json.
+    target_kind must be page in an app_bundle. For schema pages, target_id is
+    the exact saved schema name. For custom React pages, target_id is the exact
+    declared route id; the saved ui/index.js registration resolves its local JSX
+    source. Both use page_binding. Route and registry remain read-only context;
+    do not select ui_component for an app page or invent custom/{filename} ids.
 
   data_schema
     Typed request/response/document shapes change without changing module
@@ -45,8 +48,8 @@ content: |
 
   workflow_tool
     A workflow tool is added, modified, or removed.
-    Canonical files: workflows/{workflow_name}/tools.yaml plus the tool
-    Python file.
+    target_kind must be workflow in a workflow_bundle.
+    Canonical file: workflows/{workflow_name}/tools.yaml.
 
   workflow_agent
     A workflow agent, its prompt, its structured output, or its handoff
@@ -55,7 +58,9 @@ content: |
 
   ui_component
     A workflow UI component changes.
-    Canonical files: ui/{workflow_name}/components/*.js, ui_config.yaml.
+    target_kind must be workflow in a workflow_bundle.
+    Canonical file: workflows/{workflow_name}/ui_config.yaml.
+    This surface never represents an app page.
 
   app_config
     App-level configuration changes: shell preset, theme, nav structure.
@@ -65,7 +70,12 @@ content: |
 
   - Classify only surfaces that are directly affected by the user request.
     Do not include surfaces that might incidentally be affected.
-  - target_id is the module_id, workflow_name, or page_id — not a file path.
+  - The finite kind/target pairs are module_action, module_contract and data_schema
+    with module; page_binding with page; app_config with app; workflow_tool,
+    workflow_agent and ui_component with workflow. App surfaces require app_bundle;
+    workflow surfaces require workflow_bundle.
+  - target_id is the exact inventory module id, workflow name, schema name,
+    custom route id or authoritative artifact app identity, never a file path.
   - confidence reflects how certain you are this surface needs to change.
   - Set fallback_to_workflow: true if the request is too broad to scope to
     specific surfaces (e.g., "rebuild the whole app", "change the architecture").

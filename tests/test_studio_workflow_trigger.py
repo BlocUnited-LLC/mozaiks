@@ -1145,7 +1145,7 @@ def test_studio_trigger_endpoint_can_confirm_proposed_multi_file_scope(monkeypat
 
 
 @pytest.mark.parametrize("change_class", ["design", "feature", "core"])
-def test_selected_file_scope_rejects_broader_classification_before_generation(monkeypatch, _owned_build_target, change_class):
+def test_selected_file_scope_rejects_broader_classification_when_surface_refinement_is_unavailable(monkeypatch, _owned_build_target, change_class):
     from mozaiksai.core.auth import reset_auth_adapter
     from mozaiksai.hosts import studio
 
@@ -1154,7 +1154,7 @@ def test_selected_file_scope_rejects_broader_classification_before_generation(mo
     reset_auth_adapter()
     harness = studio.get_orchestration_control_harness()
     monkeypatch.setattr(harness, "_config_loader", lambda: ControlPlaneConfig(
-        enabled=True, classifier={"enabled": True}, coding={"enabled": True}, contract_surface={"enabled": True},
+        enabled=True, classifier={"enabled": True}, coding={"enabled": True}, contract_surface={"enabled": False},
     ))
     classifier = AsyncMock(side_effect=_async_classifier(
         change_class=change_class, rationale="Requires broader contracts", confidence=0.95, signals=[],

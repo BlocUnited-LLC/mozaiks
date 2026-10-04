@@ -12,6 +12,7 @@ Covers:
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -38,11 +39,12 @@ def _make_surface(
     affected_paths: list[str],
     dependency_order: int = 0,
     generation_hint: str = "add feature",
+    target_kind: str = "module",
 ) -> ContractSurfaceUpdate:
     return ContractSurfaceUpdate(
         kind=kind,  # type: ignore[arg-type]
         target_id=target_id,
-        target_kind="module",
+        target_kind=target_kind,
         affected_paths=affected_paths,
         dependency_order=dependency_order,
         rationale=f"update {kind} for {target_id}",
@@ -129,6 +131,43 @@ def _make_worker_with_mock_llm(llm_responses: list[dict[str, Any]]) -> SurfaceRe
     )
 
 
+def _module_workspace(module_id: str) -> dict[str, str]:
+    return {
+        f"modules/{module_id}/module.yaml": (
+            "schema_version: mozaiks.module.v1\n"
+            f"module:\n  id: {module_id}\n  handler: backend.handler:Handler\n"
+            "actions: []\n"
+        ),
+        f"modules/{module_id}/backend/schemas.py": "class Request: pass\n",
+        f"modules/{module_id}/backend/handler.py": "class Handler: pass\n",
+    }
+
+
+def _custom_page_workspace() -> dict[str, str]:
+    return {
+        "ui/route_manifest.json": json.dumps({
+            "pages": [{"id": "Focus", "path": "/", "component": "Focus"}],
+        }),
+        "ui/index.js": (
+            "import FocusView from './pages/custom/focus.jsx';\n"
+            "registerComponent('Focus', FocusView);\n"
+        ),
+        "ui/pages/custom/focus.jsx": "export default function FocusView() { return <p>Focus</p>; }\n",
+    }
+
+
+def _plan_for(surface: ContractSurfaceUpdate, *, build_family: str = "app_bundle") -> ContractSurfacePlan:
+    return ContractSurfacePlan(
+        surfaces=[surface], summary="Update the saved surface", change_class="feature",
+        build_family=build_family, confidence=0.9,
+    )
+
+
+def _prompt_payload(call: dict[str, Any]) -> dict[str, Any]:
+    payload, _ = json.JSONDecoder().raw_decode(call["user_prompt"].split("payload_json:\n", 1)[1])
+    return payload
+
+
 # ---------------------------------------------------------------------------
 # _extract_updated_files
 # ---------------------------------------------------------------------------
@@ -210,14 +249,14 @@ def test_build_current_files_falls_back_to_workspace():
     assert result["modules/projects/module.yaml"] == "workspace version"
 
 
-def test_build_current_files_empty_string_for_new_file():
+def test_build_current_files_requires_saved_source():
     surface = _make_surface("module_action", "projects", ["modules/projects/module.yaml"])
-    result = SurfaceRegenerationWorker._build_current_files(
-        surface=surface,
-        accumulated={},
-        workspace_files=None,
-    )
-    assert result["modules/projects/module.yaml"] == ""
+    with pytest.raises(KeyError, match="modules/projects/module.yaml"):
+        SurfaceRegenerationWorker._build_current_files(
+            surface=surface,
+            accumulated={},
+            workspace_files={},
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -271,6 +310,7 @@ async def test_execute_plan_success_two_surfaces():
         plan=plan,
         refinement_request=request,
         routing_decision=routing,
+        workspace_files=_module_workspace("projects"),
     )
 
     assert result.status == "success"
@@ -339,7 +379,7 @@ async def test_execute_plan_later_surface_sees_earlier_file():
         plan=plan,
         refinement_request=request,
         routing_decision=routing,
-        workspace_files={},
+        workspace_files=_module_workspace("tasks"),
     )
 
     assert result.status == "success"
@@ -396,6 +436,7 @@ async def test_execute_plan_partial_failure():
         plan=plan,
         refinement_request=_make_refinement_request(),
         routing_decision=_make_routing_decision(),
+        workspace_files=_module_workspace("projects"),
     )
 
     assert result.status == "partial"
@@ -427,6 +468,7 @@ async def test_execute_plan_all_failed():
         plan=plan,
         refinement_request=_make_refinement_request(),
         routing_decision=_make_routing_decision(),
+        workspace_files=_module_workspace("x"),
     )
 
     assert result.status == "failed"
@@ -449,6 +491,7 @@ async def test_execute_plan_empty_surfaces():
         plan=plan,
         refinement_request=_make_refinement_request(),
         routing_decision=_make_routing_decision(),
+        workspace_files={},
     )
     assert result.status == "failed"
     assert result.all_files == {}
@@ -485,9 +528,183 @@ async def test_execute_plan_propagates_requires_schema_migration():
         plan=plan,
         refinement_request=_make_refinement_request(),
         routing_decision=_make_routing_decision(),
+        workspace_files=_module_workspace("orders"),
     )
 
     assert result.requires_schema_migration is True
+
+
+# ---------------------------------------------------------------------------
+# execute_plan: saved contract admission and read-only binding context
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("surface_type", ["schema_page", "custom_page", "workflow_agent"])
+async def test_execute_plan_admits_saved_schema_custom_and_workflow_sources(surface_type):
+    build_family = "app_bundle"
+    if surface_type == "schema_page":
+        path = "ui/pages/projects.yaml"
+        workspace = {path: (
+            "schema_version: mozaiks.app_page.v1\nname: projects\nroute: /projects\n"
+            "title: Projects\npage_type: landing\nlayout: full-width\n"
+            "sections:\n  - id: heading\n    primitive: PageHeader\n    config:\n      title: Projects\n"
+        )}
+        surface = _make_surface("page_binding", "projects", [path], target_kind="page")
+        updated = workspace[path].replace("title: Projects", "title: Your projects")
+    elif surface_type == "custom_page":
+        path = "ui/pages/custom/focus.jsx"
+        workspace = _custom_page_workspace()
+        surface = _make_surface("page_binding", "Focus", [path], target_kind="page")
+        updated = "export default function FocusView() { return <p>Ready to focus</p>; }\n"
+    else:
+        build_family = "workflow_bundle"
+        path = "workflows/Support/agents.yaml"
+        workspace = {
+            "workflows/Support/orchestrator.yaml": (
+                "schema_version: mozaiks.orchestrator.v1\nworkflow_name: Support\n"
+            ),
+            path: "agents: []\n",
+        }
+        surface = _make_surface("workflow_agent", "Support", [path], target_kind="workflow")
+        updated = "agents:\n  - name: Helper\n    system_message: Help the user.\n"
+    baseline = dict(workspace)
+    runner = _FakeAgentRunner([{
+        "summary": "Updated saved source", "rationale": "Requested change",
+        "updated_files": [{"path": path, "content": updated}],
+    }])
+    worker = SurfaceRegenerationWorker(
+        agent_runner=runner, config_loader=ControlPlaneConfig, pack_loader=_make_mock_pack,
+    )
+
+    result = await worker.execute_plan(
+        plan=_plan_for(surface, build_family=build_family),
+        refinement_request=_make_refinement_request(artifact_kind=build_family),
+        routing_decision=_make_routing_decision(), workspace_files=workspace,
+        allowed_paths=[path],
+    )
+
+    assert result.status == "success"
+    assert result.all_files == {path: updated}
+    assert len(runner.calls) == 1
+    payload = _prompt_payload(runner.calls[0])
+    assert payload["current_files"] == {path: baseline[path]}
+    assert payload["affected_paths"] == [path]
+    expected_context = {
+        key: baseline[key] for key in ("ui/route_manifest.json", "ui/index.js") if key in baseline
+    }
+    assert payload["read_only_files"] == expected_context
+    assert not set(payload["read_only_files"]) & set(payload["affected_paths"])
+    assert workspace == baseline
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", [
+    "excluded_scope", "empty_scope", "wrong_artifact", "wrong_plane", "wrong_target_kind",
+    "missing_source", "empty_source", "missing_registry", "ambiguous_registration",
+    "later_invalid_surface", "write_registry", "patch_class", "workflow_fallback",
+])
+async def test_execute_plan_rejects_invalid_whole_plan_before_config_or_model(case):
+    path = "ui/pages/custom/focus.jsx"
+    workspace = _custom_page_workspace()
+    surface = _make_surface("page_binding", "Focus", [path], target_kind="page")
+    plan = _plan_for(surface)
+    request = _make_refinement_request()
+    routing = _make_routing_decision()
+    allowed_paths = None
+    if case == "excluded_scope":
+        allowed_paths = ["ui/index.js"]
+    elif case == "empty_scope":
+        allowed_paths = []
+    elif case == "wrong_artifact":
+        plan.build_family = "workflow_bundle"
+    elif case == "wrong_plane":
+        workspace.update({
+            "workflows/Support/orchestrator.yaml": "workflow_name: Support\n",
+            "workflows/Support/tools.yaml": "tools: []\n",
+        })
+        plan.surfaces = [_make_surface(
+            "workflow_tool", "Support", ["workflows/Support/tools.yaml"], target_kind="workflow",
+        )]
+    elif case == "wrong_target_kind":
+        surface.target_kind = "module"
+    elif case == "missing_source":
+        del workspace[path]
+    elif case == "empty_source":
+        workspace[path] = "  \n"
+    elif case == "missing_registry":
+        del workspace["ui/index.js"]
+    elif case == "ambiguous_registration":
+        workspace["ui/index.js"] += (
+            "import OtherView from './pages/custom/other.jsx';\n"
+            "registerComponent('Focus', OtherView);\n"
+        )
+        workspace["ui/pages/custom/other.jsx"] = "export default function OtherView() { return null; }\n"
+    elif case == "later_invalid_surface":
+        # A valid first surface must not consume a model call before the second is rejected.
+        plan.surfaces.append(_make_surface(
+            "module_action", "missing", ["modules/missing/backend/service.py"], dependency_order=4,
+        ))
+    elif case == "write_registry":
+        surface.affected_paths.append("ui/index.js")
+    elif case == "patch_class":
+        routing = _make_routing_decision("patch")
+    elif case == "workflow_fallback":
+        plan.fallback_to_workflow = True
+    baseline = dict(workspace)
+    runner = _FakeAgentRunner()
+    config_loader = MagicMock(side_effect=AssertionError("Invalid plan loaded model configuration"))
+    pack_loader = MagicMock(side_effect=AssertionError("Invalid plan loaded generation prompt"))
+    worker = SurfaceRegenerationWorker(
+        agent_runner=runner, config_loader=config_loader, pack_loader=pack_loader,
+    )
+
+    result = await worker.execute_plan(
+        plan=plan, refinement_request=request, routing_decision=routing,
+        workspace_files=workspace, allowed_paths=allowed_paths,
+    )
+
+    assert result.status == "failed"
+    assert result.all_files == {}
+    assert len(result.surfaces_executed) == len(plan.surfaces)
+    assert all(record.status == "failed" and record.error for record in result.surfaces_executed)
+    assert result.metadata["surfaces_succeeded"] == 0
+    assert result.metadata["surfaces_failed"] == len(plan.surfaces)
+    assert runner.calls == []
+    config_loader.assert_not_called()
+    pack_loader.assert_not_called()
+    assert workspace == baseline
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("read_only_path", ["ui/route_manifest.json", "ui/index.js"])
+async def test_execute_plan_rejects_model_write_to_read_only_page_binding(read_only_path):
+    path = "ui/pages/custom/focus.jsx"
+    workspace = _custom_page_workspace()
+    baseline = dict(workspace)
+    runner = _FakeAgentRunner([{
+        "summary": "Attempted binding edit", "rationale": "Outside the saved source scope",
+        "updated_files": [
+            {"path": path, "content": "export default function FocusView() { return null; }\n"},
+            {"path": read_only_path, "content": "unauthorized binding rewrite"},
+        ],
+    }])
+    worker = SurfaceRegenerationWorker(
+        agent_runner=runner, config_loader=ControlPlaneConfig, pack_loader=_make_mock_pack,
+    )
+    result = await worker.execute_plan(
+        plan=_plan_for(_make_surface("page_binding", "Focus", [path], target_kind="page")),
+        refinement_request=_make_refinement_request(), routing_decision=_make_routing_decision(),
+        workspace_files=workspace, allowed_paths=[path],
+    )
+
+    assert len(runner.calls) == 1
+    assert _prompt_payload(runner.calls[0])["read_only_files"][read_only_path] == baseline[read_only_path]
+    assert result.status == "failed"
+    assert result.all_files == {}
+    assert "outside declared surface scope" in result.surfaces_executed[0].error
+    assert read_only_path in result.surfaces_executed[0].error
+    assert workspace == baseline
 
 
 # ---------------------------------------------------------------------------
@@ -581,10 +798,17 @@ async def test_harness_execute_surface_plan_delegates_to_worker():
         refinement_request=request,
         routing_decision=routing,
         workspace_files={"modules/x/module.yaml": "id: x"},
+        allowed_paths=["modules/x/module.yaml"],
     )
 
     assert result.status == "success"
-    mock_worker.execute_plan.assert_awaited_once()
+    mock_worker.execute_plan.assert_awaited_once_with(
+        plan=plan,
+        refinement_request=request,
+        routing_decision=routing,
+        workspace_files={"modules/x/module.yaml": "id: x"},
+        allowed_paths=["modules/x/module.yaml"],
+    )
 
 
 @pytest.mark.asyncio
@@ -614,4 +838,5 @@ async def test_harness_execute_surface_plan_raises_when_disabled():
             plan=plan,
             refinement_request=_make_refinement_request(),
             routing_decision=_make_routing_decision(),
+            workspace_files={},
         )

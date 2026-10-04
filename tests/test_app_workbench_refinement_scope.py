@@ -44,6 +44,8 @@ if (mode === 'invalid_theme') {
   else if (mode === 'theme') {
     assert.deepEqual(result.coding_request.files, filesMap);
     assert.deepEqual(result.refinement_request.extra.parent_theme_config, theme);
+  } else if (mode === 'app') {
+    assert.deepEqual(result.coding_request, {});
   } else assert.equal(result.coding_request, undefined);
 }
 """

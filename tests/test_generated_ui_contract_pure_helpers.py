@@ -105,6 +105,8 @@ from __future__ import annotations
 
 from pathlib import PurePosixPath
 
+import pytest
+
 from factory_app.workflows._shared.generated_ui_contract import (
     _bundle_file_map,
     _class_literals,
@@ -118,7 +120,50 @@ from factory_app.workflows._shared.generated_ui_contract import (
     _section_children,
     _strings_from_value,
     dedupe,
+    resolve_registered_component_files,
 )
+
+
+def test_registered_component_resolution_can_be_limited_to_app_registry():
+    files = {
+        "ui/index.js": "import { View as Local } from './pages/custom/focus.jsx'; registerComponent('Focus', Local);",
+        "ui/pages/custom/focus.jsx": "export function View() {}",
+        "workflows/Other/ui/index.js": "import Other from './Other.jsx'; registerComponent('Focus', Other);",
+        "workflows/Other/ui/Other.jsx": "export default function Other() {}",
+    }
+    registered, warnings = resolve_registered_component_files(files, source_label="test", registry_paths={"ui/index.js"})
+    assert registered == {"Focus": {"ui/pages/custom/focus.jsx"}}
+    assert warnings == []
+    all_registered, _ = resolve_registered_component_files(files, source_label="test")
+    assert len(all_registered["Focus"]) == 2
+
+
+@pytest.mark.parametrize("extra", [
+    "registerComponent('Focus', Focus);", "registerComponent(key, Focus);",
+    "registerComponent('Other', () => Focus);", "registerComponent(`Other${suffix}`, Focus);",
+])
+def test_registry_duplicate_and_dynamic_calls_report_ambiguity(extra):
+    files = {
+        "ui/index.js": "import Focus from './pages/custom/focus.jsx'; registerComponent('Focus', Focus); " + extra,
+        "ui/pages/custom/focus.jsx": "export default function Focus() {}",
+    }
+    _, warnings = resolve_registered_component_files(files, source_label="test")
+    assert warnings
+
+
+@pytest.mark.parametrize("relative", ["../../ui/pages/custom/focus.jsx", "./pages/../../../../ui/pages/custom/focus.jsx"])
+def test_registry_import_cannot_escape_then_reenter_bundle(relative):
+    files = {
+        "ui/index.js": f"import Focus from '{relative}'; registerComponent('Focus', Focus);",
+        "ui/pages/custom/focus.jsx": "export default function Focus() {}",
+    }
+    registered, warnings = resolve_registered_component_files(files, source_label="test")
+    assert registered == {"Focus": set()}
+    assert any("unsafe relative import" in warning for warning in warnings)
+
+
+def test_relative_import_can_traverse_within_bundle():
+    assert _resolve_relative_import(PurePosixPath("ui/components"), "../pages/custom/focus.jsx") == "ui/pages/custom/focus.jsx"
 
 # ---------------------------------------------------------------------------
 # 1. dedupe

@@ -2684,6 +2684,7 @@ async def trigger_workflow(
     coding_session = None
     contract_surface_plan = None
     surface_result = None
+    baseline_files = None
     persisted_change_request_id = str(trigger_payload.get("change_request_id") or "").strip() or None
     persisted_revision_id = str(trigger_payload.get("revision_id") or "").strip() or None
     action_payload = trigger_payload.get("harness_action")
@@ -2868,7 +2869,14 @@ async def trigger_workflow(
         ):
             raise HTTPException(status_code=409, detail="The recommended workflow has changed. Submit the change again to review the new route.")
         harness_decision = orchestration_control.build_harness_decision(refinement_decision)
-        if explicit_paths and refinement_decision.change_intent.change_class.value != "patch":
+        selected_surface_request = (
+            bool(explicit_paths)
+            and not workflow_continuation
+            and orchestration_control.contract_surface_enabled()
+            and refinement_decision.change_intent.change_class.value in {"design", "feature"}
+            and refinement_request.build_family == "app_bundle"
+        )
+        if explicit_paths and refinement_decision.change_intent.change_class.value != "patch" and not selected_surface_request:
             raise HTTPException(
                 status_code=409,
                 detail="This change needs a broader plan than the selected files allow. Narrow the request, or clear the file limit and submit it for a broader review. No files were changed.",
@@ -2881,19 +2889,27 @@ async def trigger_workflow(
         ):
             inline_binding = None
             try:
+                if baseline_files is None:
+                    baseline_files, skipped = _decode_text_bundle_entries(await _verified_app_bundle(source_version))
+                    if skipped:
+                        raise HTTPException(status_code=409, detail="Inline refinement cannot preserve every file in this bundle")
                 contract_surface_plan, harness_decision = (
                     await orchestration_control.prepare_contract_surface_request(
                         refinement_request=refinement_request,
                         routing_decision=refinement_decision,
+                        workspace_files=baseline_files,
+                        allowed_paths=explicit_paths or None,
                     )
                 )
                 if contract_surface_plan is not None and contract_surface_plan.requires_schema_migration:
                     contract_surface_plan = None
                     harness_decision = orchestration_control.build_harness_decision(refinement_decision)
+                if selected_surface_request and contract_surface_plan is None:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="This change could not be resolved within the selected files. Narrow the request, or clear the file limit to review a broader plan. No files were changed.",
+                    )
                 if contract_surface_plan is not None:
-                    baseline_files, skipped = _decode_text_bundle_entries(await _verified_app_bundle(source_version))
-                    if skipped:
-                        raise HTTPException(status_code=409, detail="Inline refinement cannot preserve every file in this bundle")
                     inline_binding = await _get_app_registry_service().begin_refinement_run(
                         owner_user_id=user_id, app_id=app_id, build_registry_id=build_registry_id,
                         workflow_name=refinement_decision.workflow_id,
@@ -2906,6 +2922,7 @@ async def trigger_workflow(
                         refinement_request=refinement_request,
                         routing_decision=refinement_decision,
                         workspace_files=baseline_files,
+                        allowed_paths=explicit_paths or None,
                     )
                     finalized = await orchestration_control.finalize_surface_output(
                         plan=contract_surface_plan, result=surface_result, refinement_request=refinement_request,
@@ -2926,6 +2943,11 @@ async def trigger_workflow(
                     await _fail_inline_refinement(binding=inline_binding, user_id=user_id)
                     logger.exception("surface_regeneration_failed build=%s", inline_binding.build_id)
                     raise HTTPException(status_code=503, detail="Surface refinement unavailable") from exc
+                if selected_surface_request:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="This change could not be verified within the selected files. No files were changed. Submit a narrower request or review a broader plan.",
+                    ) from exc
                 logger.warning("contract_surface_planner_failed, falling back to workflow: %s", exc)
                 contract_surface_plan = None
                 surface_result = None
@@ -2933,7 +2955,7 @@ async def trigger_workflow(
         resolved_change_class = refinement_decision.change_intent.change_class.value
         resolved_artifact_kind = refinement_request.build_family
         resolved_artifact_version_id = refinement_request.build_record_id
-        if not workflow_continuation and orchestration_control.coding_enabled() and isinstance(trigger_payload.get("coding_request"), dict):
+        if surface_result is None and not workflow_continuation and orchestration_control.coding_enabled() and isinstance(trigger_payload.get("coding_request"), dict):
             coding_payload = dict(trigger_payload["coding_request"])
             coding_request = orchestration_control.build_coding_request(
                 refinement_request=refinement_request,

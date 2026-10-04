@@ -338,9 +338,14 @@ This project follows a practical pre-1.0 changelog format:
 - Entire-app refinement asks the existing harness to propose file scope. Scope
   and workflow approvals are bound to the saved request, artifact and revision,
   then consumed once through the session store before continuing. Selected-file
-  requests that need a broader plan stop without generating outside that scope.
+  requests stop when the saved contracts cannot prove the requested write scope.
   Pending decisions preserve the current candidate's review evidence, and review
   actions wait until the submitted refinement finishes.
+- Visual page refinement resolves the saved route and component registration to
+  the existing page source. Its planner and worker validate finite surface/target
+  pairs and the complete write scope before generation, retaining the route and
+  registry as read-only context. Unknown, ambiguous and unsafe mappings fail
+  before generating files; new surfaces require the broader workflow path.
 - Studio drafts show the registered app's current build and approved description.
   The workbench opens on preview, keeps required continuation and review actions
   visible, and offers code, downloads, and diagnostics on demand. Historical chat
