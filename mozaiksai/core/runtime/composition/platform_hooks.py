@@ -404,7 +404,7 @@ class PlatformHookRegistry:
         workflow_name: str,
         chat_id: str,
         *,
-        phase: Literal["prepare", "resume"] = "prepare",
+        phase: Literal["route", "prepare", "resume"] = "prepare",
         trigger_source: str = "chat",
         build_registry_id: str | None = None,
         source_chat_id: str | None = None,
@@ -415,6 +415,7 @@ class PlatformHookRegistry:
         References are requests, not authority. Hooks see a detached snapshot;
         a later extension may inspect but cannot replace an earlier binding.
         Resume validates persisted facts and cannot install a different value.
+        Route resolves an owned target without creating a build or chat.
         """
         from mozaiksai.core.session.build_binding import BuildTargetReference
 

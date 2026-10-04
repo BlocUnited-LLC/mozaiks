@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import io
 import stat
 import zipfile
@@ -10,11 +9,8 @@ from pathlib import PurePosixPath
 from typing import Any, Literal, overload
 
 from mozaiksai.control_plane.contracts import safe_artifact_relpath
-from mozaiksai.core.artifacts.content_store import (
-    LocalArtifactContentStore,
-    get_artifact_content_store,
-)
-from mozaiksai.core.artifacts.models import BuildRecord, resolve_canonical_bundle_entry
+from mozaiksai.core.artifacts.content_store import read_verified_artifact_bundle
+from mozaiksai.core.artifacts.models import BuildRecord
 
 _BINARY_ASSET_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".woff", ".woff2", ".ttf", ".pdf", ".mp3", ".mp4"}
 _MAX_FILE_BYTES = 2_000_000
@@ -44,22 +40,7 @@ async def read_artifact_bundle(
     artifact: BuildRecord, *, include_binary: bool = False,
 ) -> tuple[dict[str, str], list[dict[str, Any]]] | tuple[dict[str, str | bytes], list[dict[str, Any]]]:
     metadata = artifact.commit_metadata.metadata
-    entry = resolve_canonical_bundle_entry(artifact)
-    if metadata.get("content_ref"):
-        content_store = get_artifact_content_store()
-        if metadata.get("content_backend") != content_store.backend_name:
-            raise ValueError("artifact_bundle_content_backend_mismatch")
-        reference = metadata["content_ref"]
-    else:
-        content_store = LocalArtifactContentStore()
-        reference = metadata.get("artifact_path")
-    if not reference:
-        raise ValueError("artifact_bundle_content_missing")
-    raw = await content_store.get_bundle(reference)
-    if hashlib.sha256(raw).hexdigest() != entry.sha256:
-        raise ValueError("artifact_bundle_digest_mismatch")
-    if len(raw) > _MAX_TOTAL_BYTES:
-        raise ValueError("artifact_bundle_archive_too_large")
+    raw = await read_verified_artifact_bundle(artifact, max_bytes=_MAX_TOTAL_BYTES)
     prefix = f"{metadata['bundle_name']}/"
     files: dict[str, str | bytes] = {}
     diagnostics: list[dict[str, Any]] = []

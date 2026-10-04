@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -59,6 +60,60 @@ async def test_request_readiness_requires_build_validation_pass(monkeypatch, bui
     assert result["integration_tests_passed"] is (build_status == "passed")
     assert context["integration_tests_passed"] is (build_status == "passed")
     assert result["app_validation_result"]["validation_status"] == build_status
+
+
+@pytest.mark.parametrize("strategy_input", [None, "omitted"])
+@pytest.mark.parametrize("available,expected", [("docker", "docker"), ("local", "local"), (None, "skip")])
+async def test_compiled_request_defers_to_runtime_default(monkeypatch, strategy_input, available, expected):
+    from mozaiksai.core.workflow.context.adapter import create_context_container
+    from mozaiksai.core.workflow.generator_support import app_validation_strategy
+    from mozaiksai.core.workflow.outputs.structured import load_workflow_structured_outputs
+
+    monkeypatch.delenv("MOZAIKS_APP_VALIDATION_STRATEGY", raising=False)
+    monkeypatch.setattr(app_validation_strategy, "docker_app_validation_available", lambda: available == "docker")
+    monkeypatch.setattr(app_validation_strategy, "local_app_validation_available", lambda: available == "local")
+    sandbox = AsyncMock(return_value=factory_validation._base_result(strategy="docker", status="passed"))
+    local = AsyncMock(return_value=factory_validation._base_result(strategy="local", status="passed"))
+    monkeypatch.setattr(factory_validation, "_run_sandbox_validation", sandbox)
+    monkeypatch.setattr(factory_validation, "_run_local_validation", local)
+    models, _ = load_workflow_structured_outputs("AppGenerator")
+    raw = {"start_dev_server": False, "timeout_seconds": 120, "commands": None}
+    if strategy_input != "omitted":
+        raw["validation_strategy"] = strategy_input
+    request = models["AppValidationRequest"].model_validate(raw).model_dump(mode="json")
+    context = create_context_container(initial={})
+    result = await factory_validation.validate_app_build(
+        files={"README.md": "synthetic candidate"}, context_variables=context, **request,
+    )
+    assert result["validation_strategy"] == expected
+    assert context.get("app_validation_strategy_used") == expected
+    assert result["validation_status"] == ("skipped" if expected == "skip" else "passed")
+    assert sandbox.await_count == (expected == "docker")
+    assert local.await_count == (expected == "local")
+    if expected == "skip":
+        assert "no sandbox or local npm" in result["warnings"][0]
+        assert "explicitly" not in result["warnings"][0]
+
+
+@pytest.mark.parametrize("source", ["context", "environment", "request"])
+async def test_explicit_skip_is_preserved_even_when_docker_is_available(monkeypatch, source):
+    from mozaiksai.core.workflow.generator_support import app_validation_strategy
+
+    monkeypatch.delenv("MOZAIKS_APP_VALIDATION_STRATEGY", raising=False)
+    if source == "environment":
+        monkeypatch.setenv("MOZAIKS_APP_VALIDATION_STRATEGY", "skip")
+    monkeypatch.setattr(app_validation_strategy, "docker_app_validation_available", lambda: True)
+    sandbox = AsyncMock()
+    monkeypatch.setattr(factory_validation, "_run_sandbox_validation", sandbox)
+    context = {"app_validation_strategy": "skip"} if source == "context" else {}
+    result = await factory_validation.validate_app_build(
+        files={"README.md": "synthetic candidate"}, context_variables=context,
+        validation_strategy="skip" if source == "request" else None,
+    )
+    assert result["validation_strategy"] == "skip"
+    assert result["validation_status"] == "skipped"
+    assert result["success"] is False
+    sandbox.assert_not_awaited()
 
 
 def _detection(*commands):

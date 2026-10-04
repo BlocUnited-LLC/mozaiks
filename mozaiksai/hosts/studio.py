@@ -7,6 +7,7 @@ CLI and by the hosted Mozaiks product. It adds Studio shell routes and
 workflow triggering on top of the headless platform host.
 """
 
+import io
 import os
 import stat
 import zipfile
@@ -18,6 +19,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Literal
 from uuid import uuid4
 
+from anyio import CancelScope
 from fastapi import BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, TypeAdapter, ValidationError
@@ -71,6 +73,7 @@ from mozaiksai.control_plane.app_intelligence_jobs import (
     save_app_intelligence_index_job,
 )
 from mozaiksai.control_plane.dry_run import RefinementDryRunPlan, RefinementExecutionPlan
+from mozaiksai.control_plane.implementations.coding_worker import resolve_coding_validation_strategy
 from mozaiksai.control_plane.review import load_refinement_review_record
 from mozaiksai.core.app_context.models import SourceRef
 from mozaiksai.core.app_context.refresh import ContextRefreshPlan, ContextRefreshScope
@@ -80,6 +83,10 @@ from mozaiksai.core.artifacts import (
     ChangeClassification,
     RefinementSessionStatus,
     get_artifact_store,
+)
+from mozaiksai.core.artifacts.content_store import (
+    ContentNotFoundError,
+    read_verified_artifact_bundle,
 )
 from mozaiksai.core.auth import UserPrincipal, require_user_scope
 from mozaiksai.core.auth.anonymous_access import ANONYMOUS_PROVENANCE, STUDIO_PUBLIC_MESSAGE
@@ -332,6 +339,19 @@ def _artifact_bundle_path_from_version(version) -> Path | None:  # noqa: ANN001
     return path if path.exists() else None
 
 
+async def _verified_bundle_for_restore(version) -> bytes:  # noqa: ANN001
+    try:
+        return await read_verified_artifact_bundle(version)
+    except (ValueError, ContentNotFoundError, OSError) as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Artifact archive identity or content could not be verified. "
+                "Revalidate and save a canonical app bundle before restoring or promoting it."
+            ),
+        ) from exc
+
+
 def _version_metadata(version) -> dict[str, Any]:
     commit_metadata = getattr(version, "commit_metadata", None)
     metadata = getattr(commit_metadata, "metadata", None)
@@ -386,23 +406,10 @@ def _validation_override_required(version) -> bool:  # noqa: ANN001
     return version.validation_status in {ArtifactValidationStatus.PENDING, ArtifactValidationStatus.SKIPPED}
 
 
-def _is_coding_produced_artifact(version) -> bool:  # noqa: ANN001
-    """True when this artifact version was produced by the refinement coding lane.
-
-    Covers both the coding worker's staged bundles (``bundle_mode``) and
-    staged-refinement artifacts carrying a ``refinement`` metadata envelope.
-    """
-    metadata = _version_metadata(version)
-    if str(metadata.get("bundle_mode") or "").strip() == "staged_refinement_bundle":
-        return True
-    return isinstance(metadata.get("refinement"), dict)
-
-
 def _enforce_artifact_validation_gate(
     version,  # noqa: ANN001
     *,
     action: str,
-    allow_validation_override: bool = False,
 ) -> None:
     if version.validation_status == ArtifactValidationStatus.FAILED:
         raise HTTPException(
@@ -410,25 +417,16 @@ def _enforce_artifact_validation_gate(
             detail=f"Artifact cannot be {action}; validation_status='failed'.",
         )
     if version.validation_status == ArtifactValidationStatus.PASSED:
-        return
-    if allow_validation_override and _validation_override_required(version):
-        # Coding-produced artifacts (structured or ACP provider output) must
-        # pass real validation; an override would let unvalidated model output
-        # into acceptance/promotion, so it is refused outright.
-        if _is_coding_produced_artifact(version):
+        if action in {"promoted", "restored"} and version.app_validation_status != "passed":
             raise HTTPException(
                 status_code=409,
-                detail=(
-                    f"Artifact cannot be {action}; coding-produced artifacts require "
-                    "validation_status='passed' and do not accept a validation override."
-                ),
+                detail="This candidate needs passed whole-app build validation before activation.",
             )
         return
     raise HTTPException(
         status_code=409,
         detail=(
-            f"Artifact cannot be {action}; validation_status='passed' is required "
-            "unless an explicit validation override is supplied."
+            f"Artifact cannot be {action}; validation_status='passed' is required."
         ),
     )
 
@@ -450,13 +448,13 @@ def _resolve_bundle_restore_target(version) -> Path:  # noqa: ANN001
     return target
 
 
-def _restore_bundle_to_target(*, zip_path: Path, target_dir: Path, workspace_layout: bool = False) -> dict[str, list[str]]:
+def _restore_bundle_to_target(*, bundle_bytes: bytes, target_dir: Path, workspace_layout: bool = False) -> dict[str, list[str]]:
     restored: list[str] = []
     skipped: list[str] = []
     target_dir.mkdir(parents=True, exist_ok=True)
     target_root = target_dir.resolve()
 
-    with zipfile.ZipFile(zip_path, "r") as archive:
+    with zipfile.ZipFile(io.BytesIO(bundle_bytes), "r") as archive:
         planned: list[tuple[zipfile.ZipInfo, str]] = []
         for info in archive.infolist():
             if info.is_dir():
@@ -634,6 +632,7 @@ async def _build_artifact_review_payload(
     can_promote = (
         version.lifecycle_status == ArtifactLifecycleStatus.CURRENT
         and version.validation_status == ArtifactValidationStatus.PASSED
+        and version.app_validation_status == "passed"
         and current_zip is not None
     )
     validation_override_required = _validation_override_required(version)
@@ -641,7 +640,9 @@ async def _build_artifact_review_payload(
     if version.validation_status == ArtifactValidationStatus.FAILED:
         validation_blocker = "Validation failed. Reject or revise this artifact before accepting it."
     elif validation_override_required:
-        validation_blocker = "Validation has not passed. Run validation or use an explicit operator override."
+        validation_blocker = "Required checks have not passed. This draft cannot be activated yet."
+    elif version.lifecycle_status == ArtifactLifecycleStatus.CURRENT and version.app_validation_status != "passed":
+        validation_blocker = "Whole-app build validation must pass for this candidate before activation."
 
     review_package = build_refinement_review_package(
         app_id=app_id,
@@ -1954,6 +1955,7 @@ async def get_build_artifact_bundle(
         "bundle_path": str(zip_path),
         "generated_files": generated_files,
         "skipped_files": skipped_files,
+        "workbench_ui": {"component": "AppWorkbench", "workflow_name": "AppGenerator"},
         "workbench": {
             "app_id": host_app_id,
             "target_app_id": app_id,
@@ -1996,10 +1998,7 @@ async def get_build_artifact_review(
 
 
 class BuildArtifactAcceptanceRequest(BaseModel):
-    allow_validation_override: bool = Field(
-        default=False,
-        description="Allow accepting skipped or pending validation with an explicit operator override.",
-    )
+    model_config = ConfigDict(extra="forbid")
     notes: str | None = Field(default=None, max_length=2000)
 
 
@@ -2021,11 +2020,9 @@ async def accept_build_artifact_version(
         raise HTTPException(status_code=409, detail="Rejected artifact versions cannot be accepted.")
     if version.lifecycle_status != ArtifactLifecycleStatus.DRAFT:
         raise HTTPException(status_code=409, detail="Only draft artifact versions can be accepted.")
-    allow_validation_override = bool(body.allow_validation_override) if body is not None else False
     _enforce_artifact_validation_gate(
         version,
         action="accepted",
-        allow_validation_override=allow_validation_override,
     )
 
     refinement_metadata = _refinement_metadata_from_version(version)
@@ -2045,7 +2042,6 @@ async def accept_build_artifact_version(
                 record_store=artifact_store,
                 accepted_by=principal.user_id,
                 notes=body.notes if body is not None else None,
-                allow_validation_override=allow_validation_override,
             )
         except (AcceptedStagedAppBundleBuildRecordError, ValueError) as exc:
             logger.warning("accept_staged_refinement conflict app=%s version=%s: %s", app_id, artifact_version_id, exc)
@@ -2122,10 +2118,7 @@ async def reject_build_artifact_version(
 
 
 class BuildArtifactPromotionRequest(BaseModel):
-    allow_validation_override: bool = Field(
-        default=False,
-        description="Allow promoting skipped or pending validation with an explicit operator override.",
-    )
+    model_config = ConfigDict(extra="forbid")
 
 
 @app.post("/api/studio/build/artifacts/{artifact_version_id}/promote")
@@ -2147,24 +2140,11 @@ async def promote_build_artifact_version(
         raise HTTPException(status_code=409, detail="Only accepted current artifact versions can be promoted.")
     if version.build_family != "app_bundle":
         raise HTTPException(status_code=400, detail=f"Unsupported artifact kind for restore: {version.build_family}")
-    allow_validation_override = bool(body.allow_validation_override) if body is not None else False
     _enforce_artifact_validation_gate(
         version,
         action="promoted",
-        allow_validation_override=allow_validation_override,
     )
 
-    zip_path = _artifact_bundle_path_from_version(version)
-    if zip_path is None:
-        raise HTTPException(
-            status_code=400,
-            detail="This artifact version has no restorable file path. Only versions generated after artifact persistence was added can be promoted.",
-        )
-    if not version.files_manifest:
-        raise HTTPException(
-            status_code=400,
-            detail="Artifact versions must include a file manifest before promotion.",
-        )
     metadata = _version_metadata(version)
     promotion_build_registry_id = build_registry_id
     if metadata.get("build_registry_id") != promotion_build_registry_id:
@@ -2199,9 +2179,10 @@ async def promote_build_artifact_version(
             raise HTTPException(status_code=409, detail="Selected artifact is not the current build under review")
     refinement_metadata = _refinement_metadata_from_version(version)
 
+    bundle_bytes = await _verified_bundle_for_restore(version)
     target_dir = _resolve_bundle_restore_target(version)
     try:
-        restore_summary = _restore_bundle_to_target(zip_path=zip_path, target_dir=target_dir, workspace_layout=True)
+        restore_summary = _restore_bundle_to_target(bundle_bytes=bundle_bytes, target_dir=target_dir, workspace_layout=True)
     except HTTPException:
         raise
     except Exception as exc:
@@ -2306,26 +2287,13 @@ async def restore_artifact_version(
         raise HTTPException(status_code=409, detail="Artifact does not belong to the selected build")
     if version.lifecycle_status not in {ArtifactLifecycleStatus.CURRENT, ArtifactLifecycleStatus.SUPERSEDED}:
         raise HTTPException(status_code=409, detail="Only previously accepted artifacts can be restored")
-    _enforce_artifact_validation_gate(version, action="restored", allow_validation_override=False)
+    _enforce_artifact_validation_gate(version, action="restored")
 
-    artifact_path = (version.commit_metadata.metadata or {}).get("artifact_path")
-    if not artifact_path:
-        raise HTTPException(
-            status_code=400,
-            detail="This artifact version has no restorable file path.",
-        )
-
-    zip_path = Path(artifact_path)
-    if not zip_path.exists():
-        raise HTTPException(
-            status_code=400,
-            detail=f"Artifact file no longer exists on disk: {artifact_path}",
-        )
-
+    bundle_bytes = await _verified_bundle_for_restore(version)
     target_dir = _resolve_bundle_restore_target(version)
 
     try:
-        _restore_bundle_to_target(zip_path=zip_path, target_dir=target_dir, workspace_layout=True)
+        _restore_bundle_to_target(bundle_bytes=bundle_bytes, target_dir=target_dir, workspace_layout=True)
     except HTTPException:
         raise
     except Exception as exc:
@@ -2593,10 +2561,11 @@ async def _complete_inline_refinement(*, binding: RunBuildBinding, user_id: str,
 
 async def _fail_inline_refinement(*, binding: RunBuildBinding, user_id: str) -> None:
     try:
-        await _get_app_registry_service().update_build_status(
-            owner_user_id=user_id, build_registry_id=binding.build_registry_id,
-            expected_build_id=binding.build_id, status="needs_revision",
-        )
+        with CancelScope(shield=True):
+            await _get_app_registry_service().update_build_status(
+                owner_user_id=user_id, build_registry_id=binding.build_registry_id,
+                expected_build_id=binding.build_id, status="needs_revision",
+            )
     except Exception:
         logger.exception("Could not record inline refinement failure for build=%s", binding.build_id)
 
@@ -2747,6 +2716,12 @@ async def trigger_workflow(
             if not snapshot or snapshot.get("active_revision_id") != persisted_revision_id:
                 raise HTTPException(status_code=409, detail="Refinement revision is no longer active")
 
+        coding_payload = trigger_payload.get("coding_request")
+        if orchestration_control.coding_enabled() and isinstance(coding_payload, dict):
+            try:
+                resolve_coding_validation_strategy(coding_payload.get("validation_strategy"))
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
         try:
             refinement_decision = await orchestration_control.route_refinement_request(refinement_request)
         except Exception as exc:

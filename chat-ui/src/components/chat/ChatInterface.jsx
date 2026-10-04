@@ -204,7 +204,9 @@ const ModernChatInterface = ({
   const [buttonText, setButtonText] = useState('SEND');
   const [isScrolledUp, setIsScrolledUp] = useState(false);
   const navigate = useNavigate();
-  const formattedWorkflowName = workflowName ? workflowName.charAt(0).toUpperCase() + workflowName.slice(1) : null;
+  const formattedWorkflowName = workflowName
+    ? workflowName.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ')
+    : null;
   const conversationSubtitle = conversationMode === 'ask'
     ? (generalChatSummary?.label || 'Ask Session')
     : `${formattedWorkflowName || 'AI-Powered Workflow'}${workflowHasChildren ? ' · Pack' : ''}`;
@@ -705,15 +707,20 @@ const ModernChatInterface = ({
                   }
                 }}
                 disabled={modeTogglePending}
+                aria-label={conversationMode === 'ask' ? 'Switch to Workflow' : 'View workflow output'}
                 className={`hidden md:block group relative p-2 md:p-3 rounded-lg bg-gradient-to-r from-[rgba(var(--color-primary-rgb),0.1)] to-[rgba(var(--color-secondary-rgb),0.1)] border border-[rgba(var(--color-primary-light-rgb),0.3)] hover:border-[rgba(var(--color-primary-light-rgb),0.6)] transition-all duration-300 backdrop-blur-sm artifact-hover-glow flex-shrink-0 ${modeTogglePending ? 'opacity-60 cursor-not-allowed pointer-events-none' : ''}`}
                 title={modeTogglePending ? 'Switching modes…' : (conversationMode === 'ask' ? 'Switch to Workflow Mode' : (artifactToggleLabel || 'Toggle Artifact Canvas'))}
               >
                 <img
                   src={brandLogoSrc}
-                  className="w-8 h-8 md:w-10 md:h-10 opacity-70 group-hover:opacity-100 transition-all duration-300 group-hover:scale-105"
-                  alt={conversationMode === 'ask' ? 'Switch to Workflow' : 'Artifact Canvas'}
+                  className="mx-auto w-8 h-8 md:w-10 md:h-10 opacity-70 group-hover:opacity-100 transition-all duration-300 group-hover:scale-105"
+                  alt=""
+                  aria-hidden="true"
                   onError={applyBrandImageFallback}
                 />
+                {conversationMode === 'workflow' && (
+                  <span aria-hidden="true" className="block mt-1 text-[10px] font-medium text-[var(--color-text-primary)]">Results</span>
+                )}
                 <div className="absolute inset-0 bg-[rgba(var(--color-primary-light-rgb),0.1)] rounded-lg blur opacity-0 group-hover:opacity-100 transition-opacity duration-300 -z-10"></div>
               </button>
               <button
@@ -730,15 +737,20 @@ const ModernChatInterface = ({
                   }
                 }}
                 disabled={modeTogglePending}
+                aria-label={conversationMode === 'ask' ? 'Switch to Workflow' : 'View workflow output'}
                 className={`md:hidden group relative p-2 rounded-lg bg-gradient-to-r from-[rgba(var(--color-primary-rgb),0.15)] to-[rgba(var(--color-secondary-rgb),0.15)] border transition-all duration-300 backdrop-blur-sm flex-shrink-0 ${modeTogglePending ? 'opacity-60 cursor-not-allowed pointer-events-none' : ''} ${hasUnseenArtifact && conversationMode === 'workflow' ? 'border-[rgba(var(--color-secondary-rgb),0.8)] shadow-[0_0_12px_rgba(var(--color-secondary-rgb),0.6)] animate-pulse' : 'border-[rgba(var(--color-primary-light-rgb),0.35)] hover:border-[rgba(var(--color-primary-light-rgb),0.7)]'}`}
                 title={modeTogglePending ? 'Switching modes…' : (conversationMode === 'ask' ? 'Switch to Workflow Mode' : (artifactToggleLabel || 'Toggle Artifact Canvas'))}
               >
                 <img
                   src={brandLogoSrc}
-                  className={`w-7 h-7 transition-all duration-300 group-hover:scale-105 ${hasUnseenArtifact && conversationMode === 'workflow' ? 'opacity-100' : 'opacity-80 group-hover:opacity-100'}`}
-                  alt={conversationMode === 'ask' ? 'Switch to Workflow' : 'Artifact Canvas'}
+                  className={`mx-auto w-7 h-7 transition-all duration-300 group-hover:scale-105 ${hasUnseenArtifact && conversationMode === 'workflow' ? 'opacity-100' : 'opacity-80 group-hover:opacity-100'}`}
+                  alt=""
+                  aria-hidden="true"
                   onError={applyBrandImageFallback}
                 />
+                {conversationMode === 'workflow' && (
+                  <span aria-hidden="true" className="block mt-1 text-[10px] font-medium text-[var(--color-text-primary)]">Results</span>
+                )}
               </button>
             </>
           )}

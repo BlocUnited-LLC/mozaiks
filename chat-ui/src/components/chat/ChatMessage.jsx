@@ -176,6 +176,21 @@ function ChatMessage({ message, message_from, agentName: agentNameRaw, isTokenMe
     if (!(message_from === 'system' && attachment)) return null;
   }
 
+  if (message_from === 'system' && messageMetadata.event_type === 'workflow_failure') {
+    return (
+      <div className="message-container">
+        <section className="workflow-failure-message" aria-label="Workflow failure">
+          <h3>This step couldn’t finish</h3>
+          <p>Review the details below for what needs attention.</p>
+          <details>
+            <summary>View failure details</summary>
+            <div className="message-body" dangerouslySetInnerHTML={renderMarkdown(message)} />
+          </details>
+        </section>
+      </div>
+    );
+  }
+
   // System attachment indicator branch
   if (message_from === 'system' && attachment) {
     const filename = attachment.filename || 'Attachment';
@@ -215,7 +230,7 @@ function ChatMessage({ message, message_from, agentName: agentNameRaw, isTokenMe
             <div className="message-header justify-end">
               <span className="msg-sender-chip user">You</span>
             </div>
-            <div className="message-body w-full flex justify-start text-left font-semibold">
+            <div className="message-body w-full flex justify-start text-left">
               {renderMessageContent(message)}
             </div>
           </div>
@@ -265,7 +280,7 @@ function ChatMessage({ message, message_from, agentName: agentNameRaw, isTokenMe
               </button>
             )}
           </div>
-          <div className="message-body w-full flex font-semibold">
+          <div className="message-body w-full flex">
             {renderMessageContent(message)}
           </div>
           {traceOpen && traceItems.length > 0 && (

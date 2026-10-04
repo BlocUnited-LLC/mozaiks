@@ -154,7 +154,7 @@ async def test_refinement_retry_uses_saved_request_and_baseline_with_fresh_execu
     retry.service.begin_refinement_run.assert_not_awaited()
     retry.store.get_build_record.assert_awaited_once_with(app_id="target", build_record_id="baseline")
     # A retry still lands on InterviewAgent, and its revision prompt - not a new
-    # runtime override - supplies the patch -> NEXT behavior.
+    # runtime override - supplies the patch interview readiness behavior.
     #
     # The entry agent is now resolved from the transition graph rather than named
     # in orchestrator.yaml, because that is the only point where a user who asked
@@ -185,7 +185,7 @@ async def test_refinement_retry_uses_saved_request_and_baseline_with_fresh_execu
         resolve_next_agent(
             graph,
             current_agent_name="user",
-            context_variables={"build_mode": "revision", "interview_complete": False},
+            context_variables={"build_mode": "revision", "interview_outcome": "blocked"},
             agent_name_by_id={v: k for k, v in agent_ids.items()},
             participant_order=["user", *agent_names],
         )
@@ -194,7 +194,7 @@ async def test_refinement_retry_uses_saved_request_and_baseline_with_fresh_execu
     agent = yaml.safe_load((directory / "agents.yaml").read_text(encoding="utf-8"))["agents"][0]
     prompt = "\n".join(section["content"] for section in agent["prompt_sections"])
     assert "ContextVariables.build_mode` equals `revision`" in prompt
-    assert "`patch`: confirm the targeted change only; emit NEXT immediately." in prompt
+    assert "`patch`: acknowledge the targeted change briefly and return `outcome: ready`." in prompt
     assert "initial_agent_name_override" not in fresh
 
 

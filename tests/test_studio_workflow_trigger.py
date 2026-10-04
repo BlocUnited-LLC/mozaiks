@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -1668,10 +1669,10 @@ def test_studio_artifact_review_marks_skipped_validation_as_override_required(mo
     body = response.json()
     assert body["review"]["can_accept"] is False
     assert body["review"]["validation_override_required"] is True
-    assert "Validation has not passed" in body["review"]["validation_blocker"]
+    assert "Required checks have not passed" in body["review"]["validation_blocker"]
     assert body["review"]["actions"][0]["id"] == "accept"
     assert body["review"]["actions"][0]["enabled"] is False
-    assert "Validation has not passed" in body["review"]["actions"][0]["reason"]
+    assert "Required checks have not passed" in body["review"]["actions"][0]["reason"]
 
 
 def test_studio_artifact_accept_endpoint_marks_current_and_updates_session(monkeypatch, tmp_path: Path):
@@ -1727,6 +1728,19 @@ def test_studio_artifact_promote_endpoint_restores_bundle_and_updates_session(mo
     from mozaiksai.hosts import studio as studio_app
 
     store = _build_review_store(tmp_path, lifecycle_status=ArtifactLifecycleStatus.CURRENT)
+    bundle_path = Path(store.child_version.commit_metadata.metadata["artifact_path"])
+    store.child_version = ArtifactVersionDoc.model_validate({
+        **store.child_version.model_dump(mode="python"),
+        "app_validation_status": "passed",
+        "files_manifest": [{
+            "path": "GeneratedApp/GeneratedApp.zip", "content_type": "application/zip",
+            "sha256": hashlib.sha256(bundle_path.read_bytes()).hexdigest(),
+        }],
+        "commit_metadata": {
+            **store.child_version.commit_metadata.model_dump(mode="python"),
+            "metadata": {**store.child_version.commit_metadata.metadata, "bundle_name": "GeneratedApp"},
+        },
+    })
     runtime_root = tmp_path / "runtime_app"
     monkeypatch.setattr(studio_app, "get_artifact_store", lambda: store)
     monkeypatch.setattr(studio_app, "resolve_app_root", lambda: runtime_root)
@@ -1971,9 +1985,35 @@ def test_studio_trigger_endpoint_invokes_surface_regeneration_for_feature_change
 async def test_cancelled_inline_refinement_releases_bound_build_without_promotion(
     monkeypatch, _owned_build_target, cancel_at,
 ):
-    from mozaiksai.core.auth.dependencies import UserPrincipal
+    import anyio
+    import httpx
+
+    from mozaiksai.control_plane.implementations import orchestration_control
+    from mozaiksai.core.auth import reset_auth_adapter
     from mozaiksai.hosts import studio
 
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+    reset_auth_adapter()
+    started = asyncio.Event()
+    events = []
+    cleanup = []
+
+    async def wait_for_cancellation(*args, **kwargs):
+        started.set()
+        await asyncio.Event().wait()
+
+    async def record_event(**kwargs):
+        await anyio.lowlevel.checkpoint()
+        events.append(kwargs)
+
+    async def save_status(**kwargs):
+        await anyio.lowlevel.checkpoint()
+        cleanup.append(kwargs)
+        return {"success": True}
+
+    _owned_build_target.update_build_status.side_effect = save_status
+    monkeypatch.setattr(orchestration_control, "record_refinement_event", record_event)
     harness = studio.get_orchestration_control_harness()
     monkeypatch.setattr(harness, "_config_loader", lambda: ControlPlaneConfig(
         enabled=True, classifier={"enabled": True}, coding={"enabled": True},
@@ -1986,16 +2026,16 @@ async def test_cancelled_inline_refinement_releases_bound_build_without_promotio
         ),
     ))
     if cancel_at == "coding":
-        monkeypatch.setattr(harness, "execute_coding_request", AsyncMock(side_effect=asyncio.CancelledError))
+        monkeypatch.setattr(harness, "_coding_worker", SimpleNamespace(execute=wait_for_cancellation))
     else:
         monkeypatch.setattr(harness, "prepare_contract_surface_request", AsyncMock(return_value=(
             SimpleNamespace(requires_schema_migration=False), None,
         )))
         monkeypatch.setattr(harness, "execute_surface_plan", AsyncMock(
-            side_effect=asyncio.CancelledError if cancel_at == "surface_execution" else None,
+            side_effect=wait_for_cancellation if cancel_at == "surface_execution" else None,
             return_value=SimpleNamespace(status="success"),
         ))
-        monkeypatch.setattr(harness, "finalize_surface_output", AsyncMock(side_effect=asyncio.CancelledError))
+        monkeypatch.setattr(harness, "finalize_surface_output", wait_for_cancellation)
     original = _BaselineStore.versions["av_456"].model_dump(mode="json")
     trigger_payload = {
         "refinement_request": {
@@ -2005,13 +2045,17 @@ async def test_cancelled_inline_refinement_releases_bound_build_without_promotio
     }
     if cancel_at == "coding":
         trigger_payload["coding_request"] = {"files": {"app/ui/pages/Dashboard.jsx": "ignored"}}
-    body = studio.WorkflowTriggerRequest(
-        build_registry_id="appreg_1", trigger_source="refinement", trigger_payload=trigger_payload,
-    )
-    principal = UserPrincipal(user_id="demo-user", email=None, name=None, roles=[], scopes=[], raw_claims={})
-
-    with pytest.raises(asyncio.CancelledError):
-        await studio.trigger_workflow(body, principal=principal)
+    assert any(middleware.cls.__name__ == "BaseHTTPMiddleware" for middleware in studio.app.user_middleware)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=studio.app), base_url="http://test") as client:
+        task = asyncio.create_task(client.post("/api/workflows/trigger", json={
+            "build_registry_id": "appreg_1", "trigger_source": "refinement", "trigger_payload": trigger_payload,
+        }))
+        try:
+            await asyncio.wait_for(started.wait(), timeout=5)
+        finally:
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(task, timeout=5)
 
     _owned_build_target.update_build_status.assert_awaited_once_with(
         owner_user_id="demo-user", build_registry_id="appreg_1",
@@ -2019,3 +2063,49 @@ async def test_cancelled_inline_refinement_releases_bound_build_without_promotio
     )
     _owned_build_target.promote_build.assert_not_awaited()
     assert _BaselineStore.versions["av_456"].model_dump(mode="json") == original
+    assert cleanup == [{
+        "owner_user_id": "demo-user", "build_registry_id": "appreg_1",
+        "expected_build_id": "build_1", "status": "needs_revision",
+    }]
+    if cancel_at == "coding":
+        cancelled = [event for event in events if event["event_kind"] == "cancelled"]
+        received = [event for event in events if event["event_kind"] == "request_received"]
+        assert len(cancelled) == len(received) == 1
+        assert cancelled[0]["request_id"] == received[0]["request_id"]
+        assert cancelled[0]["request_id"] != "unknown"
+        assert cancelled[0]["outcome"] == "cancelled"
+
+
+@pytest.mark.parametrize("strategy", ["docker", "e2b", "unsupported"])
+def test_studio_rejects_coding_validation_strategy_before_classification(monkeypatch, _owned_build_target, strategy):
+    from mozaiksai.core.auth import reset_auth_adapter
+    from mozaiksai.hosts import studio
+
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+    reset_auth_adapter()
+    harness = studio.get_orchestration_control_harness()
+    monkeypatch.setattr(harness, "coding_enabled", lambda: True)
+    classify = AsyncMock()
+    execute = AsyncMock()
+    monkeypatch.setattr(harness, "route_refinement_request", classify)
+    monkeypatch.setattr(harness, "execute_coding_request", execute)
+
+    response = TestClient(studio.app).post("/api/workflows/trigger", json={
+        "build_registry_id": "appreg_1", "trigger_source": "refinement",
+        "trigger_payload": {
+            "refinement_request": {
+                "artifact_kind": "app_bundle", "artifact_version_id": "av_456",
+                "raw_user_request": "Update dashboard", "source_surface": "app_build",
+            },
+            "coding_request": {
+                "files": {"app/ui/pages/Dashboard.jsx": "ignored"}, "validation_strategy": strategy,
+            },
+        },
+    })
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == f"Unsupported coding validation strategy: {strategy}"
+    classify.assert_not_awaited()
+    execute.assert_not_awaited()
+    _owned_build_target.begin_refinement_run.assert_not_awaited()

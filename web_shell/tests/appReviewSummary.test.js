@@ -40,7 +40,7 @@ test('missing review evidence is visible as Missing, never Skipped', () => {
   assert.match(html, /<button disabled=""/);
 });
 
-test('explicit skipped runtime validation remains distinct from passed checks', () => {
+test('explicit skipped validation blocks activation even with an inconsistent readiness flag', () => {
   const html = render({
     app_validation_status: 'skipped', app_validation_strategy_used: 'skip',
     app_bundle_acceptance_status: 'passed', integration_tests_passed: true,
@@ -51,7 +51,22 @@ test('explicit skipped runtime validation remains distinct from passed checks', 
   for (const label of ['Bundle acceptance', 'Integration checks', 'Security readiness']) {
     assert.match(html, new RegExp(`${label}</span><span>Passed</span>`));
   }
-  assert.doesNotMatch(html, /Missing|disabled=""/);
+  assert.doesNotMatch(html, /Missing/);
+  assert.match(html, /<button disabled=""/);
+  assert.match(html, /This draft needs attention/);
+});
+
+test('review needs an explicit positive readiness decision and does not claim deployment', () => {
+  const payload = {
+    app_validation_status:'passed', app_bundle_acceptance_status:'passed', integration_tests_passed:true,
+    artifact_version_id:'artifact', build_registry_id:'owned-build',
+  };
+  assert.match(render(payload), /<button disabled=""/);
+  const ready = render({...payload, can_promote:true});
+  assert.doesNotMatch(ready, /disabled=""|your build is live/);
+  assert.match(ready, /Ready for your decision/);
+  assert.match(ready, /<details[^>]*>/);
+  assert.doesNotMatch(ready, /<details[^>]*open/);
 });
 
 test('failed checks stay Failed and promotion remains disabled', () => {
@@ -94,6 +109,7 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
       import AppWorkbench from ${JSON.stringify(path.join(root, 'factory_app/workflows/AppGenerator/ui/AppWorkbench.js'))};
       const delivery = new URLSearchParams(location.search).get('delivery') || 'files';
       const payload = {artifact_version_id:'baseline', build_registry_id:'owned-build',
+        refinement_result:window.initialRefinement,
         files:delivery==='files' ? [{name:'app.zip'}] : [],
         stage:delivery==='confirm' || delivery==='custom-confirm' ? 'confirm' : 'files_ready',
         ...(delivery==='custom-confirm' ? {actions:[
@@ -116,6 +132,21 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
   });
   let scenario;
   const requests = [];
+  const triggerResult = () => ({
+    execution_mode:scenario.mode || 'coding_worker',
+    ...(scenario.mode === 'surface_regeneration' ? {surface_result:{
+      status:{validated:'success', planned:'partial', failed:'failed'}[scenario.status],
+      all_files:{'README.md':'Candidate contents'},
+      metadata:{...(scenario.saved ? {build_record_id:'candidate'} : {}), validation_result:{validation_status:scenario.validation}},
+      surfaces_executed:scenario.status === 'failed' ? [{status:'failed', error:'Required checks failed.'}] : [],
+    }} : {coding_worker:{
+      status:scenario.status, applied_files:{'README.md':'Candidate contents'},
+      metadata:scenario.saved ? {build_record_id:'candidate'} : {},
+      error:scenario.status === 'failed' ? 'Required checks failed.' : null,
+    }}),
+    harness_decision:{decision_type:'auto_patch', message:'Inspect the refinement result.',
+      actions:scenario.saved ? [{action_id:'review_patch', action_type:'review_patch', label:'Review patch'}] : []},
+  });
   const review = id => ({
     lifecycle_status:'draft', validation_status: id === 'baseline' ? 'passed' : scenario.validation,
     review_status: id === 'baseline' ? 'validated' : scenario.status,
@@ -130,7 +161,8 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
       res.setHeader('Content-Type','text/javascript'); res.end(fixture.outputFiles[0].text); return;
     }
     if (req.url === '/' || req.url.startsWith('/?')) {
-      res.setHeader('Content-Type','text/html'); res.end('<div id="root"></div><script src="/fixture.js"></script>'); return;
+      res.setHeader('Content-Type','text/html');
+      res.end(`<div id="root"></div><script>window.initialRefinement=${req.url.includes('initial=true') ? JSON.stringify(triggerResult()) : 'null'}</script><script src="/fixture.js"></script>`); return;
     }
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
@@ -138,13 +170,7 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
     res.setHeader('Content-Type','application/json');
     if (req.url === '/fixture-response') {res.end('{"accepted":true}'); return;}
     if (req.url === '/fixture-trigger') {
-      res.end(JSON.stringify({execution_mode:'coding_worker', coding_worker:{
-        status:scenario.status, applied_files:{'README.md':'Candidate contents'},
-        metadata:scenario.saved ? {build_record_id:'candidate'} : {},
-        error:scenario.status === 'failed' ? 'Required checks failed.' : null,
-      }, harness_decision:{decision_type:'auto_patch', message:'Inspect the refinement result.',
-        actions:scenario.saved ? [{action_id:'review_patch', action_type:'review_patch', label:'Review patch'}] : []},
-      }));
+      res.end(JSON.stringify(triggerResult()));
       return;
     }
     const match = req.url.match(/^\/api\/studio\/build\/artifacts\/(baseline|candidate)\/(review|reject|accept)\?build_registry_id=owned-build$/);
@@ -188,7 +214,7 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
       } finally {await page.close();}
     });
   }
-  for (const item of [
+  for (const mode of ['coding_worker', 'surface_regeneration']) for (const item of [
     {status:'planned', validation:'pending', saved:true, message:'Draft saved; validation is incomplete.', tone:'amber'},
     {status:'failed', validation:'failed', saved:true, message:'Draft saved; validation failed.', tone:'red'},
     {status:'validated', validation:'passed', saved:true, message:'Draft validated and saved for review.', tone:'emerald'},
@@ -197,8 +223,8 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
     {status:'validated', validation:'passed', saved:false, message:'Validation passed, but no saved draft is available.', tone:'amber'},
     {status:'failed', validation:'failed', saved:true, reviewError:true, message:'Draft saved; validation failed.', tone:'red'},
   ]) {
-    await t.test(`${item.status}, saved=${item.saved}, reviewError=${Boolean(item.reviewError)}`, async () => {
-      scenario = item;
+    await t.test(`${mode}: ${item.status}, saved=${item.saved}, reviewError=${Boolean(item.reviewError)}`, async () => {
+      scenario = {...item, mode};
       requests.length = 0;
       const page = await browser.newPage();
       page.on('pageerror', error => console.error(error.stack));
@@ -244,6 +270,25 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
         assert.ok(!requests.some(r => r.method === 'POST' && r.url.includes('/baseline/')));
         assert.ok(!requests.some(r => r.url === '/fixture-response'), 'Refinement review must not answer the original delivery workflow');
       } finally { await page.close(); }
+    });
+  }
+  for (const validation of ['passed', 'skipped']) {
+    await t.test(`AppReview handoff uses actual ${validation} validation for a saved surface draft`, async () => {
+      // An inconsistent success label must never override missing build proof.
+      scenario = {mode:'surface_regeneration', status:'validated', validation, saved:true};
+      requests.length = 0;
+      const page = await browser.newPage();
+      try {
+        await page.goto(`http://127.0.0.1:${server.address().port}/?initial=true`);
+        await expect(page.getByRole('status', {name:'Refinement result'})).toContainText(
+          validation === 'passed' ? 'Draft validated and saved for review.' : 'Draft saved; validation is incomplete.');
+        await expect(page.getByLabel('Preview version')).toHaveText(validation === 'passed' ? 'candidate' : 'baseline');
+        await expect(page.getByLabel('Editor contents')).toHaveText(validation === 'passed' ? 'Candidate contents' : 'Original contents');
+        await page.getByRole('button', {name:'Review patch',exact:true}).click();
+        await expect(page.getByRole('region', {name:'Artifact review'})).toContainText('Version candidate');
+        assert.equal(requests.filter(r => r.url === '/fixture-trigger').length, 0);
+        assert.ok(!requests.some(r => r.method === 'POST'));
+      } finally {await page.close();}
     });
   }
 });

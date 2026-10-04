@@ -45,6 +45,9 @@ from mozaiksai.core.runtime.persistence.intent_loader import (
 )
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import (
+    _build_custom_route_manifest_json,
+    _build_custom_ui_index,
+    _custom_route_bundle_code_files,
     _page_file_stem,
     auth_required_from_strategy,
     data_contract_requires_auth,
@@ -53,13 +56,32 @@ from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     pack_owned_output_paths,
 )
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
+    _key_value_entries_to_dict as _key_value_entries_to_dict,
+)
+from mozaiksai.core.workflow.generator_support.page_plan_utils import (
+    _normalize_action_data as _normalize_action_data,
+)
+from mozaiksai.core.workflow.generator_support.page_plan_utils import (
+    _normalize_blank_optional_strings as _normalize_blank_optional_strings,
+)
+from mozaiksai.core.workflow.generator_support.page_plan_utils import (
+    _normalize_config_actions as _normalize_config_actions,
+)
+from mozaiksai.core.workflow.generator_support.page_plan_utils import (
+    _normalize_page_section as _normalize_page_section,
+)
+from mozaiksai.core.workflow.generator_support.page_plan_utils import (
+    _normalize_route_auth,
+    _strip_none,
+    _to_plain,
     compile_page_data_sources,
     materialize_modal_targets,
     module_action_index_from_context,
-    promote_table_primitive,
     resolve_modal_action_targets,
-    resource_table_only_fields,
     workflow_names_from_context,
+)
+from mozaiksai.core.workflow.generator_support.page_plan_utils import (
+    normalize_page_schema as _normalize_page_schema,
 )
 from mozaiksai.core.workflow.ui_primitives import (
     validate_page_ui_primitives,
@@ -148,143 +170,6 @@ def _normalize_list(value: Any) -> list[Any]:
     if not isinstance(value, list):
         return []
     return list(value)
-
-
-def _to_plain(value: Any) -> Any:
-    """Detach structured output and immutable runtime views for serialization."""
-    return detach(value)
-
-
-def _strip_none(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {
-            key: _strip_none(item)
-            for key, item in value.items()
-            if item is not None
-        }
-    if isinstance(value, list):
-        return [_strip_none(item) for item in value if item is not None]
-    return value
-
-
-def _key_value_entries_to_dict(value: Any) -> Any:
-    """Normalize strict key/value lists into runtime object payloads."""
-    value = _to_plain(value)
-    if value is None or isinstance(value, dict):
-        return _strip_none(value)
-    if isinstance(value, list):
-        normalized: dict[str, Any] = {}
-        for entry in value:
-            if not isinstance(entry, dict):
-                continue
-            key = entry.get("key")
-            if not _is_non_empty_string(key):
-                continue
-            normalized[str(key)] = _strip_none(entry.get("value"))
-        return normalized
-    return value
-
-
-def _normalize_action_data(action: Any) -> Any:
-    action = _strip_none(_to_plain(action))
-    if not isinstance(action, dict):
-        return action
-    for field in ("context_variables", "payload"):
-        if field in action:
-            action[field] = _key_value_entries_to_dict(action.get(field))
-    return _strip_none(action)
-
-
-def _normalize_config_actions(config: dict[str, Any]) -> dict[str, Any]:
-    for field in ("action", "submit_action", "cancel_action"):
-        if field in config:
-            config[field] = _normalize_action_data(config.get(field))
-    if isinstance(config.get("actions"), list):
-        config["actions"] = [_normalize_action_data(action) for action in config["actions"]]
-    empty = config.get("empty")
-    if isinstance(empty, dict) and "action" in empty:
-        empty["action"] = _normalize_action_data(empty.get("action"))
-    return config
-
-
-_OPTIONAL_STRING_KEYS = {
-    "api_endpoint",
-    "cancel_label",
-    "color",
-    "description",
-    "event_type",
-    "height",
-    "href",
-    "icon",
-    "id",
-    "message",
-    "placeholder",
-    "size",
-    "subtitle",
-    "submit_label",
-    "title",
-    "url",
-    "variant",
-    "width",
-    "workflow_id",
-}
-
-
-def _normalize_blank_optional_strings(value: Any) -> Any:
-    if isinstance(value, dict):
-        normalized: dict[str, Any] = {}
-        for key, item in value.items():
-            if key in _OPTIONAL_STRING_KEYS and isinstance(item, str) and not item.strip():
-                normalized[key] = None
-            else:
-                normalized[key] = _normalize_blank_optional_strings(item)
-        return _strip_none(normalized)
-    if isinstance(value, list):
-        return [_normalize_blank_optional_strings(item) for item in value]
-    return value
-
-
-def _normalize_page_section(section: Any) -> Any:
-    section = _strip_none(_to_plain(section))
-    if not isinstance(section, dict):
-        return section
-    config = section.get("config")
-    if isinstance(config, dict):
-        config = _normalize_blank_optional_strings(config)
-        config = _normalize_config_actions(config)
-        children = config.get("children")
-        if isinstance(children, list):
-            config["children"] = [_normalize_page_section(child) for child in children]
-        section["config"] = _strip_none(config)
-    if promote_table_primitive(section):
-        _logger.info(
-            "[AppGenerator] page section %r promoted DataTable -> ResourceTable for %s",
-            section.get("id"),
-            sorted(resource_table_only_fields() & set(section.get("config") or {})),
-        )
-    return _strip_none(section)
-
-
-def _normalize_page_schema(page: Any) -> Any:
-    page = _strip_none(_to_plain(page))
-    if not isinstance(page, dict):
-        return page
-    meta = page.get("meta")
-    if isinstance(meta, dict) and "routeAuth" in meta:
-        meta["routeAuth"] = _normalize_route_auth(meta.get("routeAuth"))
-    sections = page.get("sections")
-    if isinstance(sections, list):
-        page["sections"] = [_normalize_page_section(section) for section in sections]
-    return _strip_none(page)
-
-
-def _normalize_route_auth(route_auth: Any) -> Any:
-    route_auth = _strip_none(_to_plain(route_auth))
-    if not isinstance(route_auth, dict):
-        return route_auth
-    if "params" in route_auth:
-        route_auth["params"] = _key_value_entries_to_dict(route_auth.get("params"))
-    return _strip_none(route_auth)
 
 
 def _normalize_custom_route_bundle(bundle: Any) -> Any:
@@ -650,77 +535,6 @@ def _validate_custom_route_bundle(custom_route_bundle: Any) -> None:
         if not _is_non_empty_string(entry.get("content")):
             raise ValueError(f"{path}.content is required")
         file_paths.add(normalized)
-
-
-def _build_custom_route_manifest_json(custom_route_bundle: dict[str, Any]) -> dict[str, Any]:
-    return {"pages": list(custom_route_bundle.get("route_manifest") or [])}
-
-
-def _build_custom_ui_index(custom_route_bundle: dict[str, Any]) -> str:
-    page_files = list(custom_route_bundle.get("page_files") or [])
-    if not page_files:
-        return "export function register() {}\n"
-
-    imports: list[str] = []
-    registrations: list[str] = []
-    registry_keys: list[str] = []
-    for entry in page_files:
-        file_path = str(entry["path"]).replace("\\", "/")
-        rel_path = file_path[len("ui/") :]
-        module_path = "./" + rel_path[:-4] if rel_path.endswith(".jsx") else "./" + rel_path[:-3]
-        component_name = entry["component_name"]
-        registry_key = entry["registry_key"]
-        registry_keys.append(registry_key)
-        purpose = str(entry.get("purpose") or "").replace("\\", "\\\\").replace("'", "\\'")
-        imports.append(f"import {component_name} from '{module_path}';")
-        registrations.append(
-            "  registerComponent("
-            f"'{registry_key}', {component_name}, "
-            "{\n"
-            f"    description: '{purpose}',\n"
-            "  }\n"
-            "  );"
-        )
-
-    lines = imports + [
-        "",
-        "export function register(registerComponent) {",
-        "  if (typeof registerComponent !== 'function') return;",
-        f"  console.info('[mozaiks/app-ui] Registering custom route components: {', '.join(registry_keys)}');",
-        *registrations,
-        "}",
-        "",
-    ]
-    return "\n".join(lines)
-
-
-def _custom_route_bundle_code_files(custom_route_bundle: Any) -> list[dict[str, str]]:
-    if not isinstance(custom_route_bundle, dict):
-        return []
-    files: list[dict[str, str]] = [
-        {
-            "filename": "ui/route_manifest.json",
-            "content": json.dumps(
-                _build_custom_route_manifest_json(custom_route_bundle),
-                indent=2,
-                ensure_ascii=False,
-            ),
-        },
-        {
-            "filename": "ui/index.js",
-            "content": _build_custom_ui_index(custom_route_bundle),
-        },
-    ]
-    for entry in custom_route_bundle.get("page_files") or []:
-        if not isinstance(entry, dict):
-            continue
-        files.append(
-            {
-                "filename": str(entry.get("path") or "").replace("\\", "/"),
-                "content": str(entry.get("content") or ""),
-            }
-        )
-    return files
 
 
 def _validate_action(action: Any, *, path: str) -> None:

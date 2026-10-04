@@ -53,14 +53,6 @@ ALLOWED_REAL_STORE_SMOKE_APP_ID_PREFIXES = (
 )
 
 
-def _configure_event_loop_policy() -> None:
-    if os.name != "nt":
-        return
-    selector_policy = getattr(asyncio, "WindowsSelectorEventLoopPolicy", None)
-    if selector_policy is not None:
-        asyncio.set_event_loop_policy(selector_policy())
-
-
 class MemoryArtifactStore:
     def __init__(self) -> None:
         self._versions: dict[tuple[str, str], list[ArtifactVersionDoc]] = {}
@@ -781,7 +773,6 @@ async def run_live_real_store_factory_artifact_lineage_smoke(
 
 
 def main() -> int:
-    _configure_event_loop_policy()
     parser = argparse.ArgumentParser(
         description="Run the factory artifact-lineage smoke for AgentGenerator to AppGenerator handoff."
     )

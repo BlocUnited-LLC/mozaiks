@@ -124,6 +124,42 @@ class TestRawFrontendSourcePath:
         result = _raw_frontend_source_path(self._task(paths))
         assert result == "app/ui/components/Form.tsx"
 
+    @staticmethod
+    def _custom_task():
+        return {
+            "task_id": "pages", "task_type": "page_bundle", "initial_agent": "AppSchemaAgent",
+            "owned_paths": ["app.json", "ui/route_manifest.json", "ui/index.js", "ui/pages/custom/timer.jsx"],
+        }
+
+    def test_canonical_custom_page_owner_is_admitted(self):
+        _validate_build_tasks([self._custom_task()])
+
+    @pytest.mark.parametrize("missing", ["ui/route_manifest.json", "ui/index.js"])
+    def test_custom_page_without_its_registry_owner_is_rejected(self, missing):
+        task = self._custom_task()
+        task["owned_paths"].remove(missing)
+        with pytest.raises(ValueError, match="raw frontend source"):
+            _validate_build_tasks([task])
+
+    @pytest.mark.parametrize("path", [
+        "ui/pages/timer.jsx", "ui/pages/custom/timer.tsx", "ui/pages/custom/theme.css",
+        "ui/pages/custom/../escape.jsx", "ui/pages/custom/nested/timer.jsx", "ui/pages/custom/Timer.jsx",
+    ])
+    def test_custom_bundle_does_not_admit_other_raw_frontend_files(self, path):
+        task = self._custom_task()
+        task["owned_paths"].append(path)
+        with pytest.raises(ValueError, match="raw frontend source"):
+            _validate_build_tasks([task])
+
+    @pytest.mark.parametrize(("task_type", "agent"), [
+        ("page_bundle", "ControllerAgent"), ("api_surface", "ControllerAgent"),
+    ])
+    def test_custom_page_cannot_move_to_an_unrelated_worker(self, task_type, agent):
+        task = self._custom_task()
+        task.update(task_type=task_type, initial_agent=agent)
+        with pytest.raises(ValueError, match="non-schema owner|raw frontend source"):
+            _validate_build_tasks([task])
+
 
 # ---------------------------------------------------------------------------
 # 2. _normalized_owned_paths

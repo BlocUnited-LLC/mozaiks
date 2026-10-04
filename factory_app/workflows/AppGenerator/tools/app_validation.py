@@ -2338,7 +2338,7 @@ async def validate_app_build(
     if strategy == "skip":
         result = _base_result(strategy="skip", status="skipped")
         result["strategy_reason"] = strategy_reason
-        result["warnings"].append("App validation was explicitly skipped by strategy.")
+        result["warnings"].append(f"App validation did not execute: {strategy_reason}.")
         _persist_validation_context(context_variables=context_variables, result=result)
         return result
 
@@ -2446,14 +2446,22 @@ def _blocking_errors(acceptance: dict[str, Any], validation: dict[str, Any] | No
     return list(dict.fromkeys(_readable_error(error) for error in errors if error))
 
 
-def _build_failure_message(errors: list[str], *, no_progress: bool, infrastructure: bool) -> str:
+def _build_failure_message(
+    errors: list[str], *, no_progress: bool, infrastructure: bool, unverified: bool,
+) -> str:
     if infrastructure:
         headline = (
-            "The app build cannot continue: the validation environment was unavailable. "
-            "This is an environment problem, not a defect in the app; retry the build "
-            "once validation infrastructure is available."
+            "The app build is unverified: the validation environment was unavailable. "
+            "Restore the validation environment and run validation again before "
+            "exporting or promoting this app."
         )
         label = "Validation environment errors:"
+    elif unverified:
+        headline = (
+            "The app build is unverified: required validation did not complete. "
+            "Run the required validation before exporting or promoting this app."
+        )
+        label = "Incomplete validation:"
     else:
         headline = (
             "The app build cannot continue: validation ran again on an unchanged bundle "
@@ -2511,18 +2519,21 @@ def _record_validation_outcome(
         acceptance.get("status") == "pending"
         or (acceptance.get("passed") is True and (validation or {}).get("validation_status") in {"pending", "skipped"})
     )
+    infrastructure = not passed and bool((validation or {}).get(INFRASTRUCTURE_FAILURE))
     ends_run = (
         repair.get("target_agent") is None
         and recovery_request is None
-        and (unverified or no_progress or repair.get("status") == "blocked")
+        and (unverified or infrastructure or no_progress or repair.get("status") == "blocked")
     )
+    _context_set(context_variables, "app_validation_ends_run", ends_run)
     _context_set(
         context_variables,
         "app_build_failure_message",
         _build_failure_message(
             _blocking_errors(acceptance, validation),
             no_progress=no_progress,
-            infrastructure=bool(unverified or (validation or {}).get(INFRASTRUCTURE_FAILURE)),
+            infrastructure=infrastructure,
+            unverified=unverified,
         )
         if ends_run
         else None,

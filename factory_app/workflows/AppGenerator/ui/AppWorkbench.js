@@ -20,6 +20,20 @@ import { studioFetch } from '../../../app/admin/pages/studioApi.js';
 
 const THEME_FILE_PATH = 'brand/theme_config.json';
 
+const refinementOutput = (response) => {
+  if (response?.execution_mode === 'coding_worker') return response.coding_worker || null;
+  if (response?.execution_mode !== 'surface_regeneration' || !response.surface_result) return null;
+  const result = response.surface_result;
+  return {
+    ...result,
+    status: result.status === 'failed' ? 'failed'
+      : result.status === 'success' && result.metadata?.validation_result?.validation_status === 'passed'
+        ? 'validated' : 'planned',
+    applied_files: result.all_files,
+    error: result.surfaces_executed?.find((surface) => surface.status === 'failed')?.error,
+  };
+};
+
 const AppWorkbench = ({
   payload = {},
   onResponse,
@@ -68,7 +82,7 @@ const AppWorkbench = ({
     payload?.artifact_version_id || payload?.artifactVersionId || null
   );
   const artifactReviewRef = useRef(null);
-  const codingResult = refinementResult?.coding_worker;
+  const codingResult = refinementOutput(refinementResult);
   const savedDraftId = codingResult?.metadata?.build_record_id;
   const confirmationOnly = payload?.stage === 'confirm';
   const hasDownloadFiles = Array.isArray(payload?.files) && payload.files.some(Boolean);
@@ -143,12 +157,12 @@ const AppWorkbench = ({
       return 'Validation passed. Review code, preview, and export.';
     }
     if (validationStatus === 'skipped') {
-      return 'Validation was explicitly skipped. Review the generated bundle before export.';
+      return 'This draft has not been validated. Required checks must pass before export or activation.';
     }
     if (validationStatus === 'failed') {
       return 'Validation failed. Review errors and retry.';
     }
-    return 'Validation is pending. Review the bundle and wait for validation or skip explicitly.';
+    return 'Checks are incomplete. Review the draft; export and activation require passed checks.';
   }, [payload, validationStatus]);
 
   const panelClass = workflowSurfaceStyles.darkPanel;
@@ -235,13 +249,13 @@ const AppWorkbench = ({
       if (themeSource != null) {
         triggerPayload.coding_request = {
           files: { [THEME_FILE_PATH]: themeSource },
-          validation_strategy: validationStrategy || 'skip',
+          ...(validationStrategy === 'local' ? { validation_strategy: 'local' } : {}),
         };
       }
     } else if (limitToSelectedFile && selectedPath && scopeFiles[selectedPath] != null) {
       triggerPayload.coding_request = {
         files: scopeFiles,
-        validation_strategy: validationStrategy || 'skip',
+        ...(validationStrategy === 'local' ? { validation_strategy: 'local' } : {}),
       };
     }
 
@@ -258,14 +272,14 @@ const AppWorkbench = ({
       if (workflowStartError) setRefinementError(workflowStartError);
       return;
     }
-    if (response.execution_mode === 'coding_worker') {
-      const result = response.coding_worker;
+    const result = refinementOutput(response);
+    if (result) {
       const nextVersionId = result?.metadata?.build_record_id;
       if (nextVersionId) setReviewArtifactVersionId(nextVersionId);
       if (result?.status === 'validated' && nextVersionId) {
         const appliedFiles = result.applied_files || {};
         if (typeof appliedFiles === 'object' && Object.keys(appliedFiles).length > 0) {
-          setFilesMap({ ...(filesMap || {}), ...appliedFiles });
+          setFilesMap((current) => ({ ...(current || {}), ...appliedFiles }));
         }
         setActiveArtifactVersionId(nextVersionId);
       }
@@ -276,6 +290,12 @@ const AppWorkbench = ({
       setRefinementResult(response);
     }
   };
+
+  // AppReview can hand an already finished inline refinement to this surface.
+  // It must use the same saved-draft/validation rules as a request made here.
+  useEffect(() => {
+    if (payload.refinement_result) handleRefinementResponse(payload.refinement_result);
+  }, [payload.refinement_result]);
 
   const handleApplyScopedRefinement = async () => {
     setRefinementError(null);
@@ -502,10 +522,15 @@ const AppWorkbench = ({
                 <div className="mt-1">The editor and preview still show version {artifactVersionId}. Inspect the saved draft below.</div>
               )}
               {codingResult.error && <div className="mt-1">{codingResult.error}</div>}
+              {savedDraftId && (
+                <button type="button" className="mt-2 underline" onClick={() => handleHarnessDecisionAction({ action_type: 'review_patch' })}>
+                  Review patch
+                </button>
+              )}
             </div>
           )}
 
-          {refinementResult?.harness_decision && (
+          {!codingResult && refinementResult?.harness_decision && (
             <div className="mt-3">
               <HarnessDecisionCard
                 decision={refinementResult.harness_decision}

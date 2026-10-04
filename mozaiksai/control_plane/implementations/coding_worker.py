@@ -53,6 +53,14 @@ _ELIGIBLE_ARTIFACT_KINDS = {"app_bundle", "workflow_bundle", "theme_capture"}
 # integration tracked in docs/architecture/workflows/ag2-update-watchpoints.md.
 _VALIDATION_STRATEGIES = {"skip", "local"}
 
+
+def resolve_coding_validation_strategy(raw: str | None) -> str:
+    """Resolve the source-validation modes this coding worker can execute."""
+    normalized = str(raw or "").strip().lower() or "skip"
+    if normalized not in _VALIDATION_STRATEGIES:
+        raise ValueError(f"Unsupported coding validation strategy: {normalized}")
+    return normalized
+
 # Theme files live inside the app_bundle workspace. We alias the theme_capture artifact
 # kind so the coding worker can locate and patch these files without requiring a
 # separate staged theme workspace. Workspace scope tools fall back to the app_bundle
@@ -167,7 +175,7 @@ class ScopedRefinementCodingWorker:
             )
 
         try:
-            resolved_strategy = self._resolve_validation_strategy(
+            resolved_strategy = resolve_coding_validation_strategy(
                 request.validation_strategy or proposal.validation_strategy_hint or "skip"
             )
             resolved_plan = self._plan_from_proposal(
@@ -175,7 +183,7 @@ class ScopedRefinementCodingWorker:
                 proposal=proposal,
                 resolved_strategy=resolved_strategy,
             )
-            applied_files = {change.path: change.content for change in proposal.changed_files}
+            applied_files = {change.path: change.content for change in resolved_plan.updated_files}
         except Exception as exc:
             return CodingWorkerResult(
                 eligible=True,
@@ -298,13 +306,24 @@ class ScopedRefinementCodingWorker:
         if len(set(changed_paths)) != len(changed_paths):
             raise ValueError("Coding provider returned duplicate file changes")
         allowed_paths = set(request.files)
-        if set(proposal.owned_paths) - allowed_paths or set(changed_paths) - set(proposal.owned_paths):
-            raise ValueError("Coding provider returned changes outside the approved file scope")
+        outside_scope = sorted(set(changed_paths) - allowed_paths)
+        if outside_scope:
+            raise ValueError("Coding provider returned changes outside the approved file scope: " + ", ".join(outside_scope))
+        unowned = sorted(set(changed_paths) - set(proposal.owned_paths))
+        if unowned:
+            raise ValueError("Coding provider returned changes outside its declared owned_paths: " + ", ".join(unowned))
+        baseline = request.baseline_files if request.baseline_files is not None else request.files
+        changes = [
+            change for change in proposal.changed_files
+            if change.path not in baseline or change.content != baseline[change.path]
+        ]
+        if not changes:
+            raise ValueError("Coding provider returned no effective file changes")
         return CodingWorkerPlan(
             summary=proposal.summary,
-            owned_paths=list(proposal.owned_paths),
+            owned_paths=[path for path in proposal.owned_paths if path in allowed_paths],
             updated_files=[
-                FileUpdate(path=change.path, content=change.content) for change in proposal.changed_files
+                FileUpdate(path=change.path, content=change.content) for change in changes
             ],
             validation_strategy=cast(Any, resolved_strategy),
             validation_commands=list(proposal.validation_commands),
@@ -314,14 +333,11 @@ class ScopedRefinementCodingWorker:
         )
 
     @staticmethod
-    def _resolve_validation_strategy(raw: str) -> str:
-        normalized = str(raw or "").strip().lower() or "skip"
-        if normalized not in _VALIDATION_STRATEGIES:
-            raise ValueError(f"Unsupported coding validation strategy: {normalized}")
-        return normalized
-
-    @staticmethod
     def _check_eligibility(request: CodingWorkerRequest) -> tuple[bool, str | None]:
+        try:
+            resolve_coding_validation_strategy(request.validation_strategy)
+        except ValueError as exc:
+            return False, str(exc)
         if not str(request.app_id or "").strip():
             return False, "app_id is required"
         if str(request.change_class or "").strip().lower() not in _ELIGIBLE_CHANGE_CLASSES:

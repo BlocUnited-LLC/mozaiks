@@ -557,6 +557,9 @@ async def test_offline_generated_build_acceptance_gate_loads_runtime_app(tmp_pat
     """
 
     monkeypatch.setenv("MOZAIKS_APP_VALIDATION_STRATEGY", "skip")
+    monkeypatch.setattr(
+        validate_app_bundle_from_request.__globals__["app_runtime_smoke"], "resolve_smoke_mongo_uri", lambda: None,
+    )
     files = _generated_build_files()
     context = ContextVariablesBridge(
         {
@@ -727,6 +730,9 @@ def test_scan_flags_unknown_entitlement_gate() -> None:
 
 @pytest.mark.asyncio
 async def test_offline_saas_build_acceptance_gate_passes(monkeypatch) -> None:
+    monkeypatch.setattr(
+        validate_app_bundle_from_request.__globals__["app_runtime_smoke"], "resolve_smoke_mongo_uri", lambda: None,
+    )
     """Happy-path acceptance gate for a self-hosted SaaS app with entitlement gating."""
     monkeypatch.setenv("MOZAIKS_APP_VALIDATION_STRATEGY", "skip")
     files = _generated_saas_build_files()

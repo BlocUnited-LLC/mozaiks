@@ -14,6 +14,8 @@ from __future__ import annotations
 from asyncio import CancelledError
 from typing import Any
 
+from anyio import CancelScope
+
 from mozaiksai.control_plane.config import ControlPlaneConfig, load_control_plane_config
 from mozaiksai.control_plane.contracts import (
     CodingWorkerRequest,
@@ -257,17 +259,58 @@ class OrchestrationControlHarness:
         if not self.contract_surface_enabled():
             raise RuntimeError("Contract surface planning is disabled in app/config/refinement_policy.yaml")
 
-        return await self._surface_regeneration_worker.execute_plan(
-            plan=plan,
-            refinement_request=refinement_request,
-            routing_decision=routing_decision,
-            workspace_files={str(k): str(v) for k, v in (workspace_files or {}).items()},
-        )
+        try:
+            return await self._surface_regeneration_worker.execute_plan(
+                plan=plan,
+                refinement_request=refinement_request,
+                routing_decision=routing_decision,
+                workspace_files={str(k): str(v) for k, v in (workspace_files or {}).items()},
+            )
+        except (Exception, CancelledError) as exc:
+            with CancelScope(shield=True):
+                await record_refinement_event(
+                    event_kind="cancelled" if isinstance(exc, CancelledError) else "failed",
+                    request_id=refinement_request.request_id,
+                    app_id=str(refinement_request.app_id or ""),
+                    change_class=plan.change_class,
+                    outcome="cancelled" if isinstance(exc, CancelledError) else "error",
+                    error=str(exc) if not isinstance(exc, CancelledError) else None,
+                )
+            raise
 
     def build_harness_decision(self, routing_decision: RefinementRoutingDecision) -> HarnessDecision:
         return self._decision_policy.for_workflow_route(routing_decision)
 
     async def finalize_surface_output(
+        self, *, plan: ContractSurfacePlan, result: SurfacePlanExecutionResult,
+        refinement_request: RefinementRequest, routing_decision: RefinementRoutingDecision,
+        workspace_files: dict[str, str], run_build_binding: RunBuildBinding,
+    ) -> CodingWorkerResult:
+        try:
+            finalized = await self._finalize_surface_output(
+                plan=plan, result=result, refinement_request=refinement_request,
+                routing_decision=routing_decision, workspace_files=workspace_files,
+                run_build_binding=run_build_binding,
+            )
+        except (Exception, CancelledError) as exc:
+            with CancelScope(shield=True):
+                await record_refinement_event(
+                    event_kind="cancelled" if isinstance(exc, CancelledError) else "failed",
+                    request_id=refinement_request.request_id,
+                    app_id=str(refinement_request.app_id or ""),
+                    change_class=plan.change_class,
+                    outcome="cancelled" if isinstance(exc, CancelledError) else "error",
+                    error=str(exc) if not isinstance(exc, CancelledError) else None,
+                )
+            raise
+        await self._record_inline_result(
+            request_id=refinement_request.request_id, app_id=str(refinement_request.app_id or ""),
+            target_app_id=run_build_binding.target_app_id, change_class=plan.change_class,
+            result=finalized,
+        )
+        return finalized
+
+    async def _finalize_surface_output(
         self, *, plan: ContractSurfacePlan, result: SurfacePlanExecutionResult,
         refinement_request: RefinementRequest, routing_decision: RefinementRoutingDecision,
         workspace_files: dict[str, str], run_build_binding: RunBuildBinding,
@@ -331,6 +374,7 @@ class OrchestrationControlHarness:
             start_preview=bool(raw.get("start_preview", False)),
             context_seed={
                 **dict(routing_decision.context_seed or {}),
+                "request_id": refinement_request.request_id,
                 "refinement_request": refinement_request.model_dump(mode="python"),
                 "routing_decision": routing_decision.model_dump(mode="python"),
             },
@@ -413,11 +457,7 @@ class OrchestrationControlHarness:
         if not self.coding_enabled():
             raise RuntimeError("Refinement coding worker is disabled in app/config/refinement_policy.yaml")
 
-        refinement_payload = request.context_seed.get("refinement_request")
-        request_id = (
-            str(refinement_payload.get("request_id") or "").strip()
-            if isinstance(refinement_payload, dict) else ""
-        ) or "unknown"
+        request_id = str(request.context_seed.get("request_id") or "").strip() or "unknown"
 
         try:
             with ControlPlaneBuildTimer(
@@ -427,13 +467,14 @@ class OrchestrationControlHarness:
             ):
                 result = await self._coding_worker.execute(request)
         except CancelledError:
-            await record_refinement_event(
-                event_kind="cancelled",
-                request_id=request_id,
-                app_id=request.app_id,
-                change_class=request.change_class,
-                outcome="cancelled",
-            )
+            with CancelScope(shield=True):
+                await record_refinement_event(
+                    event_kind="cancelled",
+                    request_id=request_id,
+                    app_id=request.app_id,
+                    change_class=request.change_class,
+                    outcome="cancelled",
+                )
             raise
         except Exception as exc:
             await record_refinement_event(
@@ -446,6 +487,17 @@ class OrchestrationControlHarness:
             )
             raise
 
+        await self._record_inline_result(
+            request_id=request_id, app_id=request.app_id, target_app_id=request.artifact_app_id,
+            change_class=request.change_class, result=result,
+        )
+        return result
+
+    @staticmethod
+    async def _record_inline_result(
+        *, request_id: str, app_id: str, target_app_id: str, change_class: str,
+        result: CodingWorkerResult,
+    ) -> None:
         provider = result.metadata.get("coding_provider")
         usage = provider.get("usage") if isinstance(provider, dict) else None
         token_count = usage.get("total_tokens") if isinstance(usage, dict) else None
@@ -453,7 +505,7 @@ class OrchestrationControlHarness:
             stage="coding_worker",
             token_count=token_count,
             request_id=request_id,
-            app_id=request.app_id,
+            app_id=app_id,
         )
         event_kind, outcome = {
             "validated": ("completed", "ok"),
@@ -464,20 +516,19 @@ class OrchestrationControlHarness:
         await record_refinement_event(
             event_kind=event_kind,
             request_id=request_id,
-            app_id=request.app_id,
-            change_class=request.change_class,
+            app_id=app_id,
+            change_class=change_class,
             outcome=outcome,
             error=result.error,
             metadata={
                 "coding_status": result.status,
                 "validation_status": (result.validation_result or {}).get("validation_status"),
                 "build_record_id": result.metadata.get("build_record_id"),
-                "target_app_id": request.artifact_app_id,
+                "target_app_id": target_app_id,
                 "blocked_reason": result.blocked_reason,
                 "token_count": token_count,
             },
         )
-        return result
 
     async def persist_revision_invalidation(
         self,

@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import { studioFetch } from '../../../../app/admin/pages/studioApi.js';
 import brownfieldImage from '../../../../app/brand/assets/brownfield.jpg';
 import greenfieldImage from '../../../../app/brand/assets/greenfield.jpg';
 import {
@@ -44,7 +45,7 @@ const MONETIZATION_SELECTION = {
 };
 
 function buildResolveContext(monetizationSelected) {
-  if (!monetizationSelected) return {};
+  if (!monetizationSelected) return { monetization_enabled: false, builder_options: {} };
   return {
     monetization_enabled: true,
     builder_options: {
@@ -60,9 +61,37 @@ function buildResolveContext(monetizationSelected) {
 
 export default function AppTypeSelector({ transition, onResolve, overlayTitleId, overlayDescriptionId }) {
   const options = Array.isArray(transition?.options) ? transition.options : [];
-  const [monetizationSelected, setMonetizationSelected] = useState(false);
+  const [monetizationSelected, setMonetizationSelected] = useState(transition?.context?.monetization_enabled === true);
+  const [opening, setOpening] = useState(false);
+  const [error, setError] = useState(null);
+  const openingRef = useRef(false);
+  const registryRef = useRef(transition?.context?.build_registry_id || null);
   const motion = useTransitionMotion();
   const resolveContext = buildResolveContext(monetizationSelected);
+  const startJourney = async (optionId) => {
+    if (openingRef.current) return;
+    openingRef.current = true;
+    setOpening(true);
+    setError(null);
+    try {
+      if (!registryRef.current) {
+        const response = await studioFetch('/api/studio/apps', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
+        });
+        const result = await response.json();
+        if (!response.ok || !result?.app?.build_registry_id) {
+          throw new Error(result?.detail || 'Your app workspace could not be created. Please try again.');
+        }
+        registryRef.current = result.app.build_registry_id;
+      }
+      await onResolve(optionId, resolveContext, { build_registry_id: registryRef.current });
+    } catch (err) {
+      setError(err.message || 'Your app could not be opened. Please try again.');
+    } finally {
+      openingRef.current = false;
+      setOpening(false);
+    }
+  };
 
   return (
     <TransitionChoicePanel
@@ -88,6 +117,8 @@ export default function AppTypeSelector({ transition, onResolve, overlayTitleId,
         <button
           type="button"
           role="switch"
+          aria-label="Build with monetization"
+          disabled={opening}
           aria-checked={monetizationSelected}
           onClick={() => setMonetizationSelected((value) => !value)}
           className={[
@@ -106,6 +137,8 @@ export default function AppTypeSelector({ transition, onResolve, overlayTitleId,
         </button>
       </div>
       </div>
+      {error && <p role="alert" className="w-full text-sm text-destructive">{error}</p>}
+      {opening && <p role="status" className="w-full text-sm text-muted-foreground">Opening your app workspace…</p>}
       {options.map((option, index) => {
             const meta = OPTION_VIEW[option.id] || {
               label: toLabel(option.id),
@@ -123,8 +156,8 @@ export default function AppTypeSelector({ transition, onResolve, overlayTitleId,
                 cta={meta.cta || 'Continue'}
                 badge={meta.badge || ''}
                 helperText={meta.helperText || ''}
-                disabled={meta.disabled === true}
-                onResolve={(optionId) => onResolve(optionId, resolveContext)}
+                disabled={opening || meta.disabled === true}
+                onResolve={startJourney}
                 entered={motion.entered}
                 prefersReducedMotion={motion.prefersReducedMotion}
                 delayMs={120 + index * 80}

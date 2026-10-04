@@ -474,6 +474,34 @@ def test_assembly_preserves_recorded_scope_without_comparing_descriptive_text(mo
     assert "UnapprovedExpansion" not in json.dumps([call["commit_metadata"] for call in store.calls])
 
 
+@pytest.mark.parametrize("preserve_approved", [False, True])
+def test_final_inventory_must_resolve_approved_capabilities_before_save(monkeypatch, preserve_approved):
+    context = _context()
+    context["agent_augmentation_plan"]["ai_accessible_capabilities"] = ["work_order_triage"]
+    context["current_app_context_version_id"] = "previous-context"
+    original_capability = context["structured_output"]["capability_specs"][0]
+    extra = {**original_capability, "capability_id": "billing_admin", "label": "Billing administration"}
+    context["structured_output"]["capability_specs"] = [original_capability, extra] if preserve_approved else [extra]
+    store = _FakeArtifactStore()
+    monkeypatch.setattr(save_module, "get_artifact_store", lambda: store)
+
+    async def emit(**kwargs):
+        assert preserve_approved, "Rejected inventory must not emit a saved overview"
+
+    monkeypatch.setattr(save_module, "emit_app_intelligence_enriched_overview_card", emit)
+    result = asyncio.run(save_module.save_existing_app_artifacts(context_variables=context))
+    assert result["success"] is preserve_approved
+    if preserve_approved:
+        assert context["agent_augmentation_plan"]["ai_accessible_capabilities"] == ["work_order_triage"]
+        assert {item["capability_id"] for item in context["capability_specs"]} == {"work_order_triage", "billing_admin"}
+    else:
+        assert "missing confirmed AI-accessible capabilities: work_order_triage" in result["error"]
+        assert result["outcome"] == "failed"
+        assert store.calls == []
+        assert context["current_app_context_version_id"] == "previous-context"
+        assert context["brownfield_app_context_artifact_version_refs"] == {}
+
+
 def test_existing_app_context_persistence_has_no_graph_database_or_sequence_dependency() -> None:
     mapper_text = (
         ROOT / "factory_app/workflows/ExistingAppDiscovery/tools/app_context_mapping.py"

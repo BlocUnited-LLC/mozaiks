@@ -92,12 +92,14 @@ Covers helpers NOT already tested in test_generated_ui_contract.py:
     - whitespace only → False
     - valid string → True
 
-  _parse_registered_components:
-    - no registerComponent → empty set
-    - single call → component name returned
-    - multiple calls → all names returned
+  _parse_registered_component_bindings:
+    - no registerComponent → empty mapping
+    - single call → registry key mapped to local binding
+    - multiple calls → all bindings returned
     - double-quoted name → included
     - backtick-quoted name → included
+    - distinct registry key and binding → exact mapping preserved
+    - missing binding → None so the audit can reject it
 """
 from __future__ import annotations
 
@@ -111,7 +113,7 @@ from factory_app.workflows._shared.generated_ui_contract import (
     _looks_like_local_card_shell,
     _non_empty_string,
     _parse_public_imports,
-    _parse_registered_components,
+    _parse_registered_component_bindings,
     _resolve_relative_import,
     _section_children,
     _strings_from_value,
@@ -533,34 +535,36 @@ class TestNonEmptyString:
 
 
 # ---------------------------------------------------------------------------
-# 12. _parse_registered_components
+# 12. _parse_registered_component_bindings
 # ---------------------------------------------------------------------------
 
-class TestParseRegisteredComponents:
-    def test_no_register_call_returns_empty_set(self):
-        assert _parse_registered_components("const x = 1;") == set()
+class TestParseRegisteredComponentBindings:
+    def test_no_register_call_returns_empty_mapping(self):
+        assert _parse_registered_component_bindings("const x = 1;") == {}
 
     def test_single_quoted_name(self):
-        result = _parse_registered_components("registerComponent('MyWidget', MyWidget);")
-        assert "MyWidget" in result
+        result = _parse_registered_component_bindings("registerComponent('MyWidget', MyWidget);")
+        assert result == {"MyWidget": "MyWidget"}
 
     def test_double_quoted_name(self):
-        result = _parse_registered_components('registerComponent("DashboardCard", DashboardCard);')
-        assert "DashboardCard" in result
+        result = _parse_registered_component_bindings('registerComponent("DashboardCard", DashboardCard);')
+        assert result == {"DashboardCard": "DashboardCard"}
 
     def test_backtick_quoted_name(self):
-        result = _parse_registered_components("registerComponent(`StatusPanel`, StatusPanel);")
-        assert "StatusPanel" in result
+        result = _parse_registered_component_bindings("registerComponent(`StatusPanel`, StatusPanel);")
+        assert result == {"StatusPanel": "StatusPanel"}
 
     def test_multiple_calls_all_returned(self):
         code = (
             "registerComponent('Comp1', Comp1);\n"
             "registerComponent('Comp2', Comp2);\n"
         )
-        result = _parse_registered_components(code)
-        assert "Comp1" in result
-        assert "Comp2" in result
+        result = _parse_registered_component_bindings(code)
+        assert result == {"Comp1": "Comp1", "Comp2": "Comp2"}
 
-    def test_returns_set(self):
-        result = _parse_registered_components("registerComponent('X', X);")
-        assert isinstance(result, set)
+    def test_registry_key_maps_to_distinct_local_binding(self):
+        result = _parse_registered_component_bindings("registerComponent('timer', TimerPage, { description: 'Timer' });")
+        assert result == {"timer": "TimerPage"}
+
+    def test_missing_binding_is_retained_for_audit_rejection(self):
+        assert _parse_registered_component_bindings("registerComponent('TimerPage');") == {"TimerPage": None}

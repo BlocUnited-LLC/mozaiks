@@ -3528,7 +3528,8 @@ const ChatPage = () => {
             sender:'system',
             agentName:'System',
             content:`⚠️ ${errorMessage}`,
-            isStreaming:false
+            isStreaming:false,
+            metadata: { event_type: 'workflow_failure' }
           }]);
           return;
         }
@@ -3603,6 +3604,7 @@ const ChatPage = () => {
         const requestExtra = (
           detail.extra && typeof detail.extra === 'object' && !Array.isArray(detail.extra)
         ) ? detail.extra : {};
+        const buildRegistryId = detail.build_registry_id || requestExtra.build_registry_id || null;
         if (!revisionText) return;
         const resolvedAppId = (
           appId ||
@@ -3628,7 +3630,7 @@ const ChatPage = () => {
         const triggerPayload = {
           refinement_request: refinementRequest,
         };
-        authFetch('/api/workflows/trigger', {
+        return authFetch('/api/workflows/trigger', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -3636,15 +3638,50 @@ const ChatPage = () => {
             app_id: resolvedAppId,
             user_id: resolvedUserId,
             source_chat_id: currentChatId,
+            ...(buildRegistryId ? { build_registry_id: buildRegistryId } : {}),
             trigger_payload: triggerPayload,
           }),
         }, { auth })
           .then(async (res) => {
             if (!res.ok) {
-              console.error('❌ [ChatPage] revision trigger failed:', res.status);
-              return;
+              throw new Error('The revision could not be started. Please retry from the app review.');
             }
             const triggerData = await res.json();
+            if (['coding_worker', 'surface_regeneration'].includes(triggerData.execution_mode)) {
+              const result = triggerData.execution_mode === 'coding_worker'
+                ? triggerData.coding_worker : triggerData.surface_result;
+              if (!result || !artifactVersionId || !buildRegistryId) {
+                throw new Error('The revision response was incomplete. Reopen the app review to inspect its current state.');
+              }
+              const bundleResponse = await authFetch(
+                `/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/bundle?build_registry_id=${encodeURIComponent(buildRegistryId)}`,
+                {}, { auth },
+              );
+              if (!bundleResponse.ok) {
+                throw new Error('The revision result could not be opened. Reopen the app review to inspect it.');
+              }
+              const bundle = await bundleResponse.json();
+              const workbenchUI = bundle.workbench_ui;
+              if (typeof workbenchUI?.component !== 'string' || !workbenchUI.component.trim()
+                  || typeof workbenchUI?.workflow_name !== 'string' || !workbenchUI.workflow_name.trim()) {
+                throw new Error('The revision result has no registered review surface. Reopen the app review.');
+              }
+              await dynamicUIHandler.processUIEvent({
+                type: 'ui.render', component: workbenchUI.component, workflow_name: workbenchUI.workflow_name,
+                tool_call_id: `refinement-${triggerData.refinement_session_id || artifactVersionId}`,
+                display: 'artifact', awaiting_response: false, interaction_type: 'ui_surface',
+                payload: {
+                  ...bundle.workbench,
+                  artifact_version_id: artifactVersionId, artifact_kind: artifactKind, artifact_key: artifactKey,
+                  build_registry_id: buildRegistryId, refinement_result: triggerData,
+                },
+              });
+              setPendingHarnessDecision(null);
+              setPendingHarnessDecisionError(null);
+              setLoading(false);
+              setPendingWorkflowReply(null);
+              return;
+            }
             if (triggerData.execution_mode === 'workflow' && triggerData.chat_id && triggerData.workflow_id) {
               setCurrentChatId(triggerData.chat_id);
               setActiveChatId(triggerData.chat_id);
@@ -3679,8 +3716,13 @@ const ChatPage = () => {
           })
           .catch((err) => {
             console.error('❌ [ChatPage] revision trigger error:', err);
+            setLoading(false);
+            setPendingWorkflowReply(null);
+            setMessagesWithLogging(prev => [...prev, {
+              id: `revision-error-${Date.now()}`, sender: 'system', agentName: 'System', isStreaming: false,
+              content: err.message || 'The revision could not be started. Please retry from the app review.',
+            }]);
           });
-        return;
       }
       case 'error': {
         setPendingWorkflowReply(null);

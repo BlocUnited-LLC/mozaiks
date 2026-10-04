@@ -686,6 +686,9 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("MOZAIKS_APP_VALIDATION_STRATEGY", "skip")
+    monkeypatch.setattr(
+        validate_app_bundle_from_request.__globals__["app_runtime_smoke"], "resolve_smoke_mongo_uri", lambda: None,
+    )
     # A previously loaded app's regular package must not shadow this replay's
     # authored services package. The scoped path also restores loader additions.
     prior_app = tmp_path / "prior-app"

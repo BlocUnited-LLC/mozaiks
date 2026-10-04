@@ -325,7 +325,13 @@ agents:
       - Core features (MVP scope)
       - Deferred features (future scope)
       - Unique differentiators vs competitors
-      - Brand/experience intent when the concept implies a clear visual direction
+      - Brand/experience intent: preserve explicit user visual constraints in
+        `brand_intent.style_summary`, including requested palette or exact colors,
+        fonts and density. Set `appearance_hint` to the requested dark/light/system
+        appearance when supplied. Do not replace concrete preferences with vague
+        words such as modern or professional. Distinguish proposed details from
+        user choices and fill only unspecified details. Example values below are
+        illustrative, never defaults that override this user's supplied intent.
       - Technical constraints
       - Planned API endpoints
       - UI capability requirements (one statement per major page need)
@@ -403,10 +409,10 @@ agents:
           "Simple UI focused on daily action"
         ],
         "brand_intent": {
-          "style_summary": "Focused productivity product with a calm modern interface",
+          "style_summary": "User requested warm off-white surfaces, forest-green accents, Source Sans 3 typography and compact spacing",
           "brand_keywords": ["minimal", "clear", "professional"],
           "experience_goals": ["reduce overwhelm", "support daily focus"],
-          "appearance_hint": "system"
+          "appearance_hint": "light"
         },
         "constraints": ["Web-first", "Single-user MVP", "OpenAI API for reasoning"],
         "api_endpoints": [

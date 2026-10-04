@@ -44,8 +44,12 @@ from mozaiksai.core.ports.orchestration import RunStatus
 from mozaiksai.core.transport import workflow_bridge as _bridge_mod
 from mozaiksai.core.transport.simple_transport import SimpleTransport
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge, _workflow_tool_invocation
-from mozaiksai.core.workflow.context.authority import build_context_authority_policy
+from mozaiksai.core.workflow.context.authority import (
+    ContextAuthorityError,
+    build_context_authority_policy,
+)
 from mozaiksai.core.workflow.orchestration_patterns import _run_complete_event
+from mozaiksai.core.workflow.outputs.structured import load_workflow_structured_outputs
 from tests.test_ag2_network_execution_alignment import _DeterministicAgent
 from tests.test_ag2_network_idle_deadline import _run_on_virtual_clock
 from tests.test_generated_app_functional_acceptance import _basic_crud_files
@@ -404,11 +408,17 @@ async def _run_appgenerator_validation(
     speakers: list[str] = []
     validations: list[dict[str, Any]] = []
     pauses: list[dict[str, Any]] = []
+    models, _ = load_workflow_structured_outputs("AppGenerator")
+    request_body = {
+        "start_dev_server": False, "timeout_seconds": 120, "commands": None,
+        **({"validation_strategy": "skip"} if validation_request is None else validation_request),
+    }
+    output = {"AppValidationRequest": request_body, "agent_message": "Running validation checks."}
 
     class _Agent(Agent):
         async def ask(self, *msg: Any, **kwargs: Any) -> SimpleNamespace:
             speakers.append(self.name)
-            return SimpleNamespace(body="Running validation checks.")
+            return SimpleNamespace(body=json.dumps(output))
 
     async def output_hook(agent_name: str, envelope: Any) -> None:
         if agent_name != "AppValidationAgent":
@@ -417,8 +427,11 @@ async def _run_appgenerator_validation(
             if on_validation is not None:
                 validations.append(on_validation(bridge))
             else:
+                parsed = models["AppValidationRequestCall"].model_validate_json(
+                    envelope.event_data["body"],
+                ).model_dump(mode="json")
                 validations.append(await validate_app_bundle_from_request(
-                    validation_request or {"validation_strategy": "skip", "start_dev_server": False},
+                    parsed["AppValidationRequest"],
                     context_variables=bridge,
                 ))
 
@@ -457,12 +470,12 @@ def _assert_readable(message: str) -> None:
 @pytest.fixture
 def runtime_smoke_passed(monkeypatch):
     """Isolate build-failure termination from the separate runtime smoke gate."""
-    from factory_app.workflows.AppGenerator.tools import app_runtime_smoke
-
     smoke = AsyncMock(return_value={
         "status": "passed", "passed": True, "failed_tests": [], "checks": [],
     })
-    monkeypatch.setattr(app_runtime_smoke, "run_app_runtime_smoke", smoke)
+    monkeypatch.setattr(
+        validate_app_bundle_from_request.__globals__["app_runtime_smoke"], "run_app_runtime_smoke", smoke,
+    )
     return smoke
 
 
@@ -546,7 +559,7 @@ async def test_unavailable_validation_infrastructure_ends_the_run_as_an_environm
     """(b) An environment outage ends the run without blaming the app.
 
     The bundle passes acceptance; E2B is requested with no key configured, so
-    the gate reports the validation infrastructure unavailable both times.
+    the gate reports the validation infrastructure unavailable and ends once.
     """
     monkeypatch.delenv("E2B_API_KEY", raising=False)
     monkeypatch.delenv("MOZAIKS_APP_VALIDATION_STRATEGY", raising=False)
@@ -557,23 +570,63 @@ async def test_unavailable_validation_infrastructure_ends_the_run_as_an_environm
     )
     result = run.result
 
-    assert run.speakers == ["AppValidationAgent", "AppValidationAgent"]
-    assert runtime_smoke_passed.await_count == 2
-    assert [item["app_bundle_acceptance_result"]["passed"] for item in run.validations] == [True, True]
+    assert run.speakers == ["AppValidationAgent"]
+    assert runtime_smoke_passed.await_count == 1
+    assert [item["app_bundle_acceptance_result"]["passed"] for item in run.validations] == [True]
     assert [item["app_validation_result"]["errors"] for item in run.validations] == (
-        [["Validation infrastructure unavailable."]] * 2
+        [["Validation infrastructure unavailable."]]
     )
-    [pause] = run.pauses
-    assert pause["app_build_failure_message"] is None
+    assert run.pauses == []
     assert result.status is RunStatus.FAILED
     assert result.close_reason == "workflow_failed"
     assert result.failure_message == (
-        "The app build cannot continue: the validation environment was unavailable. "
-        "This is an environment problem, not a defect in the app; retry the build "
-        "once validation infrastructure is available.\n"
+        "The app build is unverified: the validation environment was unavailable. "
+        "Restore the validation environment and run validation again before "
+        "exporting or promoting this app.\n"
         "Validation environment errors:\n"
         "- Validation infrastructure unavailable."
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", ["explicit_skip", "automatic_skip", "required_check_pending"])
+async def test_unverified_validation_ends_once_without_user_pause_or_export(
+    monkeypatch, runtime_smoke_passed, case,
+) -> None:
+    from mozaiksai.core.workflow.generator_support import app_validation_strategy
+
+    monkeypatch.delenv("MOZAIKS_APP_VALIDATION_STRATEGY", raising=False)
+    monkeypatch.setattr(app_validation_strategy, "docker_app_validation_available", lambda: False)
+    monkeypatch.setattr(app_validation_strategy, "local_app_validation_available", lambda: False)
+    if case == "required_check_pending":
+        runtime_smoke_passed.return_value = {
+            "status": "skipped", "passed": None, "failed_tests": [], "checks": [],
+            "reason": "Synthetic runtime prerequisite unavailable",
+        }
+    run = await _run_appgenerator_validation(
+        _appgen_bundle(_basic_crud_files()), chat_id=f"appgen-unverified-{case}",
+        validation_request={"validation_strategy": "skip"} if case == "explicit_skip" else {},
+    )
+    assert run.speakers == ["AppValidationAgent"]
+    assert run.pauses == []
+    assert len(run.validations) == 1
+    assert runtime_smoke_passed.await_count == 1
+    assert run.result.status is RunStatus.FAILED
+    assert run.result.close_reason == "workflow_failed"
+    assert run.result.context_variables["app_validation_ends_run"] is True
+    assert run.result.context_variables["app_validation_no_progress"] is False
+    assert run.result.context_variables["integration_tests_passed"] is False
+    assert run.result.failure_message.startswith(
+        "The app build is unverified: required validation did not complete.",
+    )
+    assert "environment was unavailable" not in run.result.failure_message
+    assert "not a defect" not in run.result.failure_message
+    event = _run_complete_event(
+        workflow_name="AppGenerator", chat_id=f"appgen-unverified-{case}",
+        runner_result=run.result, pause_agent=None,
+    )
+    assert event["error"] == run.result.failure_message
+    assert event["awaiting_user_input"] is False
 
 
 def test_failure_message_errors_are_one_bounded_line_without_host_temp_paths() -> None:
@@ -610,9 +663,11 @@ def test_failure_message_is_written_only_when_the_outcome_ends_the_run(
     acceptance["bundle_repair"] = {**acceptance["bundle_repair"], "diagnostics": [{"error": "handler missing"}]}
     with _workflow_tool_invocation(bridge):
         bridge.set("app_build_failure_message", "a previous run's message")
+        bridge.set("app_validation_ends_run", True)
         _record_validation_outcome(bridge, files={"app.json": "{}"}, acceptance=acceptance,
                                    validation=None, passed=False)
     message = bridge.get("app_build_failure_message")
+    assert bridge.get("app_validation_ends_run") is ends_run
     if ends_run:
         assert message == (
             "The app build cannot continue: validation found errors that no repair step can fix.\n"
@@ -620,6 +675,23 @@ def test_failure_message_is_written_only_when_the_outcome_ends_the_run(
         )
     else:
         assert message is None
+
+
+def test_validation_terminal_decision_rejects_model_writes_and_clears_on_success():
+    _, policy, _ = _appgenerator_contract()
+    bridge = ContextVariablesBridge({}, authority_policy=policy)
+    bridge._bind_run(("AppGenerator", "appgen-run-end", "protected-end"), policy)
+    with pytest.raises(ContextAuthorityError), _workflow_tool_invocation(bridge, writer_id="structured_output"):
+        bridge.set("app_validation_ends_run", False)
+    with _workflow_tool_invocation(bridge):
+        bridge.set("app_validation_ends_run", True)
+        bridge.set("app_build_failure_message", "Previous failure")
+        _record_validation_outcome(
+            bridge, files={"app.json": "{}"}, acceptance={"status": "passed", "passed": True},
+            validation={"validation_status": "passed"}, passed=True,
+        )
+    assert bridge.get("app_validation_ends_run") is False
+    assert bridge.get("app_build_failure_message") is None
 
 
 # The validation the live run repeated, as recorded in its AG2 WAL (channel

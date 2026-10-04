@@ -1,5 +1,17 @@
 schema_version: mozaiks.structured_outputs.v1
 models:
+  AppInterviewResult:
+    type: model
+    description: A concise clarification of a missing implementation blocker or confirmation that the approved app scope is ready.
+    fields:
+      agent_message:
+        type: str
+        description: One short product question or readiness confirmation. Do not repeat known scope or expose pack IDs or routing markers.
+      outcome:
+        type: literal
+        values: [needs_input, ready]
+        description: Use needs_input only for a missing blocker; ready when the approved brief and existing context are sufficient to implement.
+
   AppPageDataSource:
     type: model
     fields:
@@ -1954,16 +1966,18 @@ models:
       message:
         type: str
         description: Error message.
+  AppValidationStrategy:
+    type: literal
+    values:
+    - e2b
+    - docker
+    - local
+    - skip
   AppValidation:
     type: model
     fields:
       validation_strategy:
-        type: literal
-        values:
-        - e2b
-        - docker
-        - local
-        - skip
+        type: AppValidationStrategy
         description: Validation strategy requested or resolved for this run.
       validation_status:
         type: literal
@@ -1971,7 +1985,7 @@ models:
         - passed
         - failed
         - skipped
-        description: Outcome of the validation strategy. `skipped` is explicit and not a failure.
+        description: Outcome of the validation strategy. `skipped` leaves build execution unverified and blocks export.
       preview_url:
         type: union
         variants:
@@ -2003,13 +2017,12 @@ models:
     type: model
     fields:
       validation_strategy:
-        type: literal
-        values:
-        - e2b
-        - docker
-        - local
-        - skip
-        description: Requested validation strategy. Copy context app_validation_strategy when provided. Operator environment policy takes precedence over this request.
+        type: union
+        variants:
+        - AppValidationStrategy
+        - 'null'
+        default: null
+        description: Copy a non-null context app_validation_strategy when supplied; otherwise null lets the runtime choose its available default. Do not invent a strategy. Operator environment policy takes precedence over this request.
       start_dev_server:
         type: bool
         description: Set false for canonical apps; interactive preview sessions are managed separately.
@@ -6560,7 +6573,7 @@ models:
         description: AppGenerator integration readiness checkpoint result.
 
 registry:
-  InterviewAgent: null
+  InterviewAgent: AppInterviewResult
   AppPlanAgent: AppBuildPlanOutput
   AppSchemaAgent: AppSchemaOutput
   AppUIQualityAgent: AppUIQualityReviewRequest

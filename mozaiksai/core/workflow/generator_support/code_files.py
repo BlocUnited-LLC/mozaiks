@@ -119,6 +119,85 @@ def _page_file_stem(page: dict[str, Any]) -> str:
     return normalized or "page"
 
 
+def planned_page_path(page: dict[str, Any]) -> str:
+    """Materialized file identity for a page's approved rendering surface."""
+    stem = _page_file_stem(page)
+    if page.get("ui_surface") == "custom_react_page":
+        return f"ui/pages/custom/{stem}.jsx"
+    return f"ui/pages/{stem}.yaml"
+
+
+def _build_custom_route_manifest_json(custom_route_bundle: dict[str, Any]) -> dict[str, Any]:
+    return {"pages": list(custom_route_bundle.get("route_manifest") or [])}
+
+
+def _build_custom_ui_index(custom_route_bundle: dict[str, Any]) -> str:
+    page_files = list(custom_route_bundle.get("page_files") or [])
+    if not page_files:
+        return "export function register() {}\n"
+
+    imports: list[str] = []
+    registrations: list[str] = []
+    registry_keys: list[str] = []
+    for entry in page_files:
+        file_path = str(entry["path"]).replace("\\", "/")
+        rel_path = file_path[len("ui/") :]
+        module_path = "./" + rel_path[:-4] if rel_path.endswith(".jsx") else "./" + rel_path[:-3]
+        component_name = entry["component_name"]
+        registry_key = entry["registry_key"]
+        registry_keys.append(registry_key)
+        purpose = str(entry.get("purpose") or "").replace("\\", "\\\\").replace("'", "\\'")
+        imports.append(f"import {component_name} from '{module_path}';")
+        registrations.append(
+            "  registerComponent("
+            f"'{registry_key}', {component_name}, "
+            "{\n"
+            f"    description: '{purpose}',\n"
+            "  }\n"
+            "  );"
+        )
+
+    lines = imports + [
+        "",
+        "export function register(registerComponent) {",
+        "  if (typeof registerComponent !== 'function') return;",
+        f"  console.info('[mozaiks/app-ui] Registering custom route components: {', '.join(registry_keys)}');",
+        *registrations,
+        "}",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def _custom_route_bundle_code_files(custom_route_bundle: Any) -> list[dict[str, str]]:
+    if not isinstance(custom_route_bundle, dict):
+        return []
+    files: list[dict[str, str]] = [
+        {
+            "filename": "ui/route_manifest.json",
+            "content": json.dumps(
+                _build_custom_route_manifest_json(custom_route_bundle),
+                indent=2,
+                ensure_ascii=False,
+            ),
+        },
+        {
+            "filename": "ui/index.js",
+            "content": _build_custom_ui_index(custom_route_bundle),
+        },
+    ]
+    for entry in custom_route_bundle.get("page_files") or []:
+        if not isinstance(entry, dict):
+            continue
+        files.append(
+            {
+                "filename": str(entry.get("path") or "").replace("\\", "/"),
+                "content": str(entry.get("content") or ""),
+            }
+        )
+    return files
+
+
 def _materialize_app_schema_file_map(
     payload: dict[str, Any],
     *,
@@ -155,9 +234,12 @@ def _materialize_app_schema_file_map(
             )
         )
 
+    from .page_plan_utils import normalize_page_schema
+
     for page in pages:
         if not isinstance(page, dict):
             continue
+        page = normalize_page_schema(page)
         file_map[f"ui/pages/{_page_file_stem(page)}.yaml"] = yaml.dump(
             page,
             allow_unicode=True,
@@ -175,27 +257,11 @@ def _materialize_app_schema_file_map(
         if isinstance(value, dict):
             file_map[path] = json.dumps(value, indent=2, ensure_ascii=False)
 
-    custom_route_bundle = payload.get("custom_route_bundle")
-    if isinstance(custom_route_bundle, dict):
-        route_manifest = custom_route_bundle.get("route_manifest")
-        if route_manifest is not None:
-            file_map["ui/route_manifest.json"] = json.dumps(
-                route_manifest,
-                indent=2,
-                ensure_ascii=False,
-            )
-        page_files = custom_route_bundle.get("page_files")
-        if isinstance(page_files, list):
-            for item in page_files:
-                if not isinstance(item, dict):
-                    continue
-                safe = safe_relpath(str(item.get("path") or ""))
-                content = item.get("content")
-                if safe and content is not None:
-                    file_map[safe] = str(content)
-        ui_index = custom_route_bundle.get("ui_index")
-        if ui_index is not None:
-            file_map["ui/index.js"] = str(ui_index)
+    for entry in _custom_route_bundle_code_files(payload.get("custom_route_bundle")):
+        safe = safe_relpath(entry["filename"])
+        if safe is None:
+            raise ValueError("Custom route file must be an app-relative path")
+        file_map[safe] = entry["content"]
 
     return file_map
 
@@ -624,13 +690,14 @@ def discard_pack_owned_outputs(payload: Any, pack_paths: frozenset[str]) -> tupl
             dropped.add(path)
     routes = result.get("custom_route_bundle")
     if isinstance(routes, dict):
-        if "ui/route_manifest.json" in pack_paths and routes.get("route_manifest") is not None:
-            routes["route_manifest"] = None
-            dropped.add("ui/route_manifest.json")
-        if "ui/index.js" in pack_paths and routes.get("ui_index") is not None:
-            routes["ui_index"] = None
-            dropped.add("ui/index.js")
-        if "page_files" in routes:
+        if {"ui/route_manifest.json", "ui/index.js"} & pack_paths:
+            # Both registries are derived from the typed bundle. Filter their
+            # actual materialized paths; a nonexistent ui_index field cannot
+            # suppress the generated registry.
+            rendered = keep_entries(_custom_route_bundle_code_files(routes), "filename")
+            result["code_files"] = [*(result.get("code_files") or []), *rendered]
+            result["custom_route_bundle"] = None
+        elif "page_files" in routes:
             routes["page_files"] = keep_entries(routes["page_files"], "path")
     if "ui/index.js" in pack_paths and result.get("registration_barrel") is not None:
         result["registration_barrel"] = None

@@ -211,6 +211,7 @@ function TransitionRoute({ route }) {
   const [currentTransitionId, setCurrentTransitionId] = useState(null);
   const [currentJourneyId, setCurrentJourneyId] = useState(route.sequence || null);
   const [accumulatedContext, setAccumulatedContext] = useState({});
+  const [buildRegistryId, setBuildRegistryId] = useState(null);
   const entryTransitionId = route.transition || null;
   const resolvedAppId = resolveRouteAppId(config, user);
   const resolvedUserId = resolveRouteUserId(user);
@@ -222,8 +223,11 @@ function TransitionRoute({ route }) {
   }, [entryTransitionId]);
 
   const handleNavigate = useCallback(
-    async (option_id = null, contextVariables = {}) => {
+    async (option_id = null, contextVariables = {}, launchOptions = {}) => {
       const mergedContext = { ...accumulatedContext, ...contextVariables };
+      if (option_id != null) setAccumulatedContext(mergedContext);
+      const selectedRegistryId = launchOptions.build_registry_id || buildRegistryId;
+      if (selectedRegistryId) setBuildRegistryId(selectedRegistryId);
 
       try {
         const res = await authFetch('/api/transitions/resolve', {
@@ -236,6 +240,7 @@ function TransitionRoute({ route }) {
             context_variables: mergedContext,
             app_id: resolvedAppId,
             user_id: resolvedUserId,
+            ...(selectedRegistryId ? { build_registry_id: selectedRegistryId } : {}),
           }),
         }, { auth });
 
@@ -254,8 +259,7 @@ function TransitionRoute({ route }) {
           return true;
         }
 
-        if (data.resolution_type === 'workflow' && data.chat_id && data.workflow_id) {
-          setAccumulatedContext({});
+        if (['workflow', 'chat_session'].includes(data.resolution_type) && data.chat_id && data.workflow_id) {
           navigate(buildWorkflowChatPath(data.workflow_id, data.chat_id));
           return true;
         }
@@ -269,12 +273,13 @@ function TransitionRoute({ route }) {
         throw err;
       }
     },
-    [accumulatedContext, auth, currentJourneyId, currentTransitionId, navigate, resolvedAppId, resolvedUserId]
+    [accumulatedContext, auth, buildRegistryId, currentJourneyId, currentTransitionId, navigate, resolvedAppId, resolvedUserId]
   );
 
   if (!currentTransitionId) return null;
 
-  return <TransitionScreen transitionId={currentTransitionId} onNavigate={handleNavigate} />;
+  return <TransitionScreen transitionId={currentTransitionId} onNavigate={handleNavigate}
+    context={{ ...accumulatedContext, ...(buildRegistryId ? { build_registry_id: buildRegistryId } : {}) }} />;
 }
 
 function WorkflowEntryRoute({ route }) {

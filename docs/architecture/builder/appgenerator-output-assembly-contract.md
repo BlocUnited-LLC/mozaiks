@@ -1,5 +1,23 @@
 # AppGenerator Output Assembly Contract
 
+## Typed Intake Readiness
+
+Guided intake returns `AppInterviewResult`: a short `agent_message` and an
+`outcome` of `needs_input` or `ready`. `record_app_interview` validates that
+declared output and the matching user-facing message. The runtime auto-tool
+outcome contract writes the closed `interview_outcome` and
+`interview_attempts` state, with at most ten attempts. Invalid tool results,
+tool errors, and exhausted clarification attempts resolve to `blocked`.
+
+The workflow graph sends `ready` to AppPlanAgent, `needs_input` to the user,
+and `blocked` or an unmatched outcome to `workflow_failed`. A reply to a
+clarification returns to InterviewAgent. Existing validation recovery retains
+priority, and an explicit autonomous choice still routes directly to planning.
+Readiness does not depend on an exact text marker or another approval after
+the scope is already known. AppGenerator no longer declares `interview_complete`.
+The interviewer preserves approved scope and asks only for missing blockers;
+pack IDs and routing mechanics remain outside the user-facing message.
+
 ## Typed Page Data Sources
 
 AppGenerator sections select `config.data_source: {module_id, action_id}` from
@@ -608,6 +626,14 @@ AppGenerator should compile these inputs in priority order:
 
 `ThemeCapture` produces canonical visual evidence only.
 
+Its launch context retains the approved `value_manifest`. The interview,
+analysis and assembly stages all receive `value_manifest.brand_intent`, which
+preserves explicit palette, appearance, typography and density choices. Defaults
+fill unspecified slots; later explicit user corrections supersede earlier
+preferences. The interview returns `needs_input` whenever it asks for a decision
+or confirmation, and `ready` only when no unanswered question remains. Readiness
+continues through the typed output and deterministic tool, not message parsing.
+
 It emits:
 
 - `theme`
@@ -1139,8 +1165,9 @@ CRUD and ownership tests remain necessary for end-to-end acceptance.
 
 ### 7. AppValidation Strategy
 
-`AppValidationAgent` must use an explicit validation strategy contract instead of
-implicit E2B-only behavior.
+`AppValidationAgent` copies a supplied `app_validation_strategy` into its typed
+request, or emits null when none is supplied. The existing runtime resolver owns
+defaults; the agent must not infer a strategy from the conversation.
 
 Canonical strategy values:
 
@@ -1157,16 +1184,19 @@ Canonical status values:
 
 Rules:
 
-- Studio/hosted environments may prefer `e2b` when sandbox credentials are available.
-- Local environments with a running Docker daemon resolve to `docker`, which also
-  exposes a preview URL (see
-  [app-validation-sandboxes.md](app-validation-sandboxes.md)).
-- CLI/local environments may resolve to `local` or explicit `skip`.
-- generation/export must not be blocked solely because E2B is unavailable.
-- `skip` is explicit and deterministic; it is not a hidden fallback and it is not
-  reported as `passed`.
-- export gating must allow only `passed` or explicit `skipped`, and still requires
-  integration readiness and wiring checks to pass.
+- Operator policy takes precedence over tool and context inputs. E2B requires an
+  explicit selection; credentials alone never select paid infrastructure.
+- Without a selected strategy, the runtime chooses a reachable Docker daemon,
+  then local npm, then `skip` if neither is available. Build results record the
+  resolved strategy and its reason.
+- Interactive previews are separate Studio sessions, not build-validation URLs
+  (see [app-validation-sandboxes.md](app-validation-sandboxes.md)).
+- `skip` leaves execution unverified. It blocks export and promotion even when
+  deterministic integration checks pass. Required pending checks also block.
+- The deterministic tool owns `app_validation_ends_run` and the corresponding
+  failure message. When required validation cannot complete and no recovery or
+  repair is selected, the AG2 graph terminates the run as failed once. It does
+  not wait for a human reply or claim the app has no defects.
 
 Materialization rule:
 
@@ -1246,7 +1276,8 @@ planned repair; staging never implies promotion or successful live acceptance.
 
 Do:
 
-- keep persistent pages declarative
+- keep ordinary persistent pages declarative; preserve stateful interaction through
+  the existing `custom_react_page` contract when primitives cannot express it
 - stack primary record tables below page headers with `layout: full-width`;
   `grid` means peer top-level columns, not full-width rows
 - keep shell content separate from shell styling
@@ -1256,7 +1287,7 @@ Do:
 Do not:
 
 - generate raw React files for persistent pages by default
-- generate any AppGenerator-managed raw React page/component files for persistent pages
+- emit custom page React outside `AppSchemaOutput.custom_route_bundle`
 - place header/footer action content in `theme_config.json`
 - place spacing/padding/density tokens in `shell.json`
 - place reusable media inventory in `theme_config.json` or `shell.json`
@@ -1268,6 +1299,30 @@ Do not:
 
 Without this split, AppGenerator either under-specifies visual/media control or mixes styling, shell behavior, and asset inventory.
 The contract above keeps bundle generation deterministic, keeps ThemeCapture reusable, and gives the runtime a stable set of artifacts to consume.
+
+### Interactive page materialization
+
+`AppBuildPage.ui_surface` determines the required page artifact: a declarative
+page uses `ui/pages/<route-derived-stem>.yaml`; a custom page uses
+`ui/pages/custom/<route-derived-stem>.jsx`. New-app plan review keeps all custom
+pages, `ui/route_manifest.json`, and `ui/index.js` under one page-bundle worker so
+the shared registry cannot be split across concurrent writers. This does not
+give that worker ownership of shell components or other frontend source.
+
+Task admission and assembly both bind each owned custom page to its exact
+approved route and canonical page file through the generated registry. New
+custom registries reject additional routes absent from the plan. Scoped
+revisions may retain unchanged route entries from the hydrated baseline; pack
+templates outside the task remain under their existing pack ownership. Failed
+tasks still reach the partial-bundle acceptance gate for actionable repair.
+
+Both the standalone save tool and task-batch materializer use the same route
+manifest and component registry renderer. The registry is derived from typed
+`page_files` and their registration keys; agents do not supply an extra
+`ui_index` field. Timers with start/pause/resume/reset, canvas interactions, and
+playable controls require real React behavior when no shipped primitive provides
+it. A static Metric cannot substitute for that behavior. Contract checks do not
+prove those interactions work: browser acceptance must exercise them.
 
 
 

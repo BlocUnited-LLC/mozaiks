@@ -903,6 +903,15 @@ async def generate_and_download(
             "bundle_errors": acceptance_result.get("bundle_scan", {}).get("errors") or [],
         }
 
+    export_gate = resolve_export_gate(context_variables, files=files_map)
+    if not export_gate["allow_export"]:
+        return {
+            "status": "error",
+            "outcome": "blocked",
+            "message": "This draft is not ready for export. " + " ".join(export_gate["reasons"]),
+            "export_gate": export_gate,
+        }
+
     bundle_name = str(_context_get(context_variables, "app_name") or "GeneratedApp")
 
     # Normalize bundle name to a safe folder name

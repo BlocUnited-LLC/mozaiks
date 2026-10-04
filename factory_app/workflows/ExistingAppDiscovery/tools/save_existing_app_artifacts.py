@@ -145,6 +145,16 @@ async def save_existing_app_artifacts(
             or (data.get("agent_augmentation_plan") or {}).get("adoption_level") != level
         ):
             raise ValueError("Assembler adoption level conflicts with the confirmed plan")
+        capability_ids = {
+            capability["capability_id"] for capability in data.get("capability_specs") or []
+            if isinstance(capability, dict) and isinstance(capability.get("capability_id"), str)
+        }
+        missing_capabilities = set(approved_plan["ai_accessible_capabilities"]) - capability_ids
+        if missing_capabilities:
+            raise ValueError(
+                "Final capability inventory is missing confirmed AI-accessible capabilities: "
+                + ", ".join(sorted(missing_capabilities))
+            )
         if level in {"ecosystem", "gradual_modernization"}:
             if not context_variables.get("decomposition_complete"):
                 raise ValueError("No confirmed module decomposition was recorded")

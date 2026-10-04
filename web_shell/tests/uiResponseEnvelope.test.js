@@ -24,6 +24,107 @@ const { DynamicUIHandler } = await import('data:text/javascript;base64,' + Buffe
 const chatPage = await fs.readFile(path.resolve(shell, '../chat-ui/src/pages/ChatPage.js'), 'utf8');
 await transform(chatPage, { loader: 'jsx' });
 
+async function routeRevisionResult(triggerData, {
+  triggerStatus = 200, bundleStatus = 200,
+  workbenchUI = { component: 'ReviewWorkspace', workflow_name: 'ExampleBuilder' },
+} = {}) {
+  const start = chatPage.indexOf("case 'chat.revision_requested': {");
+  const eventCase = chatPage.slice(start, chatPage.indexOf("case 'error': {", start));
+  const body = eventCase.slice(eventCase.indexOf('{') + 1, eventCase.lastIndexOf('}'));
+  const requests = [];
+  const updates = [];
+  const messages = [];
+  const state = {};
+  const handler = new DynamicUIHandler();
+  handler.uiUpdateCallbacks.add(update => updates.push(update));
+  const setters = Object.fromEntries([
+    'CurrentChatId', 'ActiveChatId', 'CurrentWorkflowName', 'ActiveWorkflowName', 'ConversationMode',
+    'WorkflowCompleted', 'PendingHarnessDecision', 'PendingHarnessDecisionError', 'Loading', 'PendingWorkflowReply',
+  ].map(name => [`set${name}`, value => {state[name] = value;}]));
+  await vm.runInNewContext(`(function(){${body}})();`, {
+    data: {data: {refinement_request: 'Update the title', artifact_kind: 'app_bundle', artifact_key: 'app_bundle',
+      artifact_version_id: 'baseline', source_surface: 'app_review', extra: {build_registry_id: 'owned-build'}}},
+    appId: 'studio-host', user: {id: 'owner'}, config: {}, auth: {fixture: true}, currentChatId: 'review-chat',
+    dynamicUIHandler: handler, console: {error() {}}, ...setters,
+    rememberWorkflowChatSession: (chatId, workflow) => {state.remembered = [chatId, workflow];},
+    buildPendingHarnessDecision: decision => decision,
+    setMessagesWithLogging: update => {messages.splice(0, messages.length, ...update(messages));},
+    authFetch: async (url, options, authOptions) => {
+      requests.push({url, options, authOptions});
+      return url === '/api/workflows/trigger'
+        ? Response.json(triggerData, {status: triggerStatus})
+        : Response.json({workbench_ui: workbenchUI,
+          workbench: {artifact_version_id: 'baseline', generated_files: {'page.json': 'before'}}}, {status: bundleStatus});
+    },
+  });
+  return {requests, updates, messages, state};
+}
+
+for (const [mode, resultKey, statuses] of [
+  ['coding_worker', 'coding_worker', ['validated', 'planned', 'failed']],
+  ['surface_regeneration', 'surface_result', ['success', 'partial', 'failed']],
+]) {
+  for (const status of statuses) {
+    test(`revision event opens the canonical workbench for ${mode} ${status} without rerunning or promoting`, async () => {
+      const response = {execution_mode: mode, refinement_session_id: 'session-1',
+        [resultKey]: {status, metadata: {build_record_id: 'saved-candidate'}, applied_files: {'page.json': 'after'}}};
+      const {requests, updates, messages, state} = await routeRevisionResult(response);
+      assert.equal(requests.length, 2);
+      const trigger = JSON.parse(requests[0].options.body);
+      assert.equal(trigger.source_chat_id, 'review-chat');
+      assert.equal(trigger.build_registry_id, 'owned-build');
+      assert.equal(trigger.trigger_payload.refinement_request.artifact_version_id, 'baseline');
+      assert.equal(requests[1].url, '/api/studio/build/artifacts/baseline/bundle?build_registry_id=owned-build');
+      assert.equal(updates.length, 1);
+      assert.equal(updates[0].component_type, 'ReviewWorkspace');
+      assert.equal(updates[0].workflow_name, 'ExampleBuilder');
+      assert.equal(updates[0].display, 'artifact');
+      assert.equal(updates[0].payload.awaiting_response, false);
+      assert.equal(updates[0].payload.artifact_version_id, 'baseline');
+      assert.equal(updates[0].payload.build_registry_id, 'owned-build');
+      assert.deepEqual(updates[0].payload.generated_files, {'page.json': 'before'});
+      assert.deepEqual(updates[0].payload.refinement_result, response);
+      assert.equal(state.Loading, false);
+      assert.equal(state.PendingWorkflowReply, null);
+      assert.equal(state.CurrentChatId, undefined);
+      assert.deepEqual(messages, []);
+    });
+  }
+}
+
+test('revision workflow and harness decisions retain their existing routing behavior', async () => {
+  const workflow = await routeRevisionResult({execution_mode: 'workflow', chat_id: 'next-chat', workflow_id: 'DesignDocs'});
+  assert.equal(workflow.requests.length, 1);
+  assert.deepEqual(workflow.state.remembered, ['next-chat', 'DesignDocs']);
+  assert.equal(workflow.updates.length, 0);
+  const decision = {decision_id: 'choose-scope'};
+  const harness = await routeRevisionResult({execution_mode: 'harness_decision', harness_decision: decision});
+  assert.equal(harness.requests.length, 1);
+  assert.deepEqual(harness.state.PendingHarnessDecision, decision);
+  assert.equal(harness.updates.length, 0);
+});
+
+for (const options of [{triggerStatus: 409}, {bundleStatus: 403}]) {
+  test(`revision errors reach the user without implying saved output was activated (${JSON.stringify(options)})`, async () => {
+    const {updates, messages, state} = await routeRevisionResult({execution_mode: 'coding_worker', coding_worker: {status: 'planned'}}, options);
+    assert.equal(updates.length, 0);
+    assert.equal(messages.length, 1);
+    assert.match(messages[0].content, /could not be started|result could not be opened/);
+    assert.equal(state.Loading, false);
+    assert.equal(state.PendingWorkflowReply, null);
+  });
+}
+
+for (const workbenchUI of [null, {}, {component: 'ReviewWorkspace', workflow_name: ' '}]) {
+  test(`revision rejects an absent review surface (${JSON.stringify(workbenchUI)})`, async () => {
+    const {updates, messages} = await routeRevisionResult(
+      {execution_mode: 'coding_worker', coding_worker: {status: 'planned'}}, {workbenchUI},
+    );
+    assert.equal(updates.length, 0);
+    assert.match(messages[0].content, /no registered review surface/);
+  });
+}
+
 for (const eventType of ['tool_call', 'ui.render']) {
   for (const outcome of ['accepted', 'offline', 401, 403, 404, 500, 'unconfirmed']) {
     test(`live ${eventType} requires HTTP acknowledgement without a socket (${outcome})`, async () => {

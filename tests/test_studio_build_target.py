@@ -116,7 +116,7 @@ def test_promotion_does_not_touch_factory(studio, monkeypatch, tmp_path):
         output.writestr("tracker/workflows/Inbox/orchestrator.yaml", "name: Inbox\n")
         output.writestr("tracker/Dockerfile", "FROM scratch\n")
         output.writestr("tracker/requirements.txt", "mozaiks\n")
-    module._restore_bundle_to_target(zip_path=archive, target_dir=target, workspace_layout=True)
+    module._restore_bundle_to_target(bundle_bytes=archive.read_bytes(), target_dir=target, workspace_layout=True)
     assert (target / "app" / "app.json").is_file()
     assert (target / "workflows" / "Inbox" / "orchestrator.yaml").is_file()
     assert (target / "Dockerfile").is_file()
@@ -204,7 +204,7 @@ def test_workspace_layout_is_not_nested_again(studio, tmp_path):
         output.writestr("app/config/auth.yaml", "version: 1\n")
         output.writestr("Dockerfile", "FROM scratch\n")
     target = tmp_path / "workspace"
-    module._restore_bundle_to_target(zip_path=archive, target_dir=target, workspace_layout=True)
+    module._restore_bundle_to_target(bundle_bytes=archive.read_bytes(), target_dir=target, workspace_layout=True)
     assert (target / "app/app.json").is_file()
     assert not (target / "app/app").exists()
     assert (target / "Dockerfile").is_file()

@@ -1,8 +1,15 @@
 """Keep AG2 workflow transcript replies visible to provider message mappers."""
 
 from ag2.events import BaseEvent, ModelMessage, ModelResponse
-from ag2.network import ChannelMetadata, Envelope, WorkflowAdapter
-from ag2.network.views.base import EnvelopeRenderer, NameResolver, ViewPolicy, default_name_resolver
+from ag2.network import (
+    ChannelMetadata,
+    Envelope,
+    EnvelopeRenderer,
+    NameResolver,
+    ViewPolicy,
+    WorkflowAdapter,
+    default_name_resolver,
+)
 
 
 class _AssistantResponseView:

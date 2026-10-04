@@ -4,7 +4,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import os
 import re
 import sys
 import tempfile
@@ -58,14 +57,6 @@ class SmokeContext:
 
     def to_dict(self) -> dict[str, Any]:
         return dict(self.data)
-
-
-def _configure_event_loop_policy() -> None:
-    if os.name != "nt":
-        return
-    selector_policy = getattr(asyncio, "WindowsSelectorEventLoopPolicy", None)
-    if selector_policy is not None:
-        asyncio.set_event_loop_policy(selector_policy())
 
 
 def _json_safe(value: Any) -> Any:
@@ -452,7 +443,7 @@ async def create_ticket(ctx, **params):
     )
     created = await repo.insert_ticket(ctx, record)
     await _emit(ctx, "domain.support_ticket.created", created)
-    return {{"ticket": created}}
+    return {{"item": created}}
 
 
 async def request_batch_triage(ctx, **params):
@@ -478,8 +469,8 @@ async def insert_ticket(ctx, record):
     collection = _collection(ctx)
     if collection is None:
         return record
-    result = await collection.insert_one(record)
-    return {**record, "ticket_id": str(result.inserted_id)}
+    await collection.insert_one(dict(record))
+    return record
 """,
     }
     # backend/schemas.py is code-rendered from the data contract below.
@@ -798,7 +789,6 @@ async def run_deterministic_appgenerator_acceptance_smoke() -> dict[str, Any]:
 
 
 def main() -> int:
-    _configure_event_loop_policy()
     parser = argparse.ArgumentParser(
         description=(
             "Run the live AgentGenerator to deterministic AppGenerator acceptance smoke. "

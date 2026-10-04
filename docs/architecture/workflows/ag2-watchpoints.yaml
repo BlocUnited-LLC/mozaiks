@@ -170,7 +170,7 @@ watchpoints:
     status: ACTIVE
     last_verified_version: "1.0.5"
     trigger: Native workflow views emit assistant history that provider mappers preserve.
-    replacement_condition: Delete WorkflowHistoryAdapter when native Chat and Responses history tests pass across human reply and durable reopen.
+    replacement_condition: Delete WorkflowHistoryAdapter when native projection emits preserved assistant ModelResponse events with no bare ModelMessage, and provider history tests pass across human reply and durable reopen.
     verification_tests:
       - tests/test_ag2_workflow_provider_history.py
 

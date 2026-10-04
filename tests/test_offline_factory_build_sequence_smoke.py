@@ -115,12 +115,15 @@ def _factory_workflows_root() -> Path:
 @pytest.fixture
 def completed_validation_boundaries(monkeypatch):
     """Execution fixtures for lineage unit tests; admission and context writes stay real."""
+    from scripts.smoke_factory_artifact_lineage import validate_app_bundle_from_request
+
+    validator_globals = validate_app_bundle_from_request.__globals__
     smoke = AsyncMock(return_value={
         "status": "passed", "passed": True, "failed_tests": [], "checks": [],
     })
     build = AsyncMock(return_value=app_validation._base_result(strategy="local", status="passed"))
-    monkeypatch.setattr(app_runtime_smoke, "run_app_runtime_smoke", smoke)
-    monkeypatch.setattr(app_validation, "_run_local_validation", build)
+    monkeypatch.setattr(validator_globals["app_runtime_smoke"], "run_app_runtime_smoke", smoke)
+    monkeypatch.setitem(validator_globals, "_run_local_validation", build)
     return smoke, build
 
 

@@ -14,6 +14,41 @@ const shell = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const root = path.dirname(shell);
 const ui = path.join(root, 'chat-ui/src');
 
+const failureDetails = [
+  'dashboard.yaml: timer action is not declared.',
+  'app.json: required planned artifact is missing.',
+  'dashboard.yaml: required planned artifact is missing.',
+  'Generated app bundles must include app.json.',
+  'app.json: authRequired must be true for scoped collections.',
+  'modules/session_tracker/backend/schemas.py: example runtime logic is not allowed.',
+  'app_runtime_load: AppLoader.load() failed because app.json was not found.',
+];
+const failureText = `The app build cannot continue.\n\n**Blocking errors:**\n\n${failureDetails.map(line => `- ${line}`).join('\n')}\n\n`
+  + '```html\n<img src=x onerror="window.failureInjected=true">\n```\n\n'
+  + '<svg onload="window.failureInjected=true"></svg>\n<script>window.failureInjected=true</script>\n'
+  + '[Unsafe link](javascript:window.failureInjected=true)';
+
+async function failureMessageFromEvent() {
+  const source = await fs.readFile(path.join(ui, 'pages/ChatPage.js'), 'utf8');
+  const completion = source.split("case 'run_complete':")[1].split("case 'chat.revision_requested':")[0];
+  let messages = [{ id: 'thinking', isThinking: true }];
+  vm.runInNewContext(`(() => { switch (data.type) { case 'run_complete': ${completion} } })()`, {
+    data: { type: 'run_complete', data: { status: 2, error: failureText } },
+    currentChatId: 'failed-chat', currentWorkflowName: 'ExampleWorkflow',
+    isFailedWorkflowSession: status => status === 2,
+    setLoading() {}, setPendingWorkflowReply() {}, hydrateServerArtifactForChat() {},
+    setMessagesWithLogging: update => { messages = update(messages); },
+  });
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].metadata.event_type, 'workflow_failure');
+  assert.equal(messages[0].content, `⚠️ ${failureText}`);
+  return messages[0];
+}
+
+test('terminal failure metadata identifies the card and preserves the complete server message', async () => {
+  await failureMessageFromEvent();
+});
+
 for (const scenario of [
   { name: 'failed session with stale loading', failed: true, loading: true, output: true, expected: false },
   { name: 'failed session with tool output only', failed: true, loading: false, output: true, expected: false },
@@ -119,7 +154,6 @@ test('failed workflow retry uses the existing authenticated launch path', async 
     '../adapters/api': `const platform = { getAccessToken: () => { throw Error('unexpected token fallback'); } }; ${authHelpers}`,
     'react-router-dom': `export const useNavigate = () => window.fixture.navigate;
       export const useParams = () => ({});`,
-    './ChatMessage': 'export default function ChatMessage() { return null; }',
     '../../core/ui/UIToolRenderer': 'export default function UIToolRenderer() { return null; }',
     '../../styles/brandAssets': `export const getBrandLogoSrc = () => '';
       export const applyBrandImageFallback = () => {};`,
@@ -142,6 +176,7 @@ test('failed workflow retry uses the existing authenticated launch path', async 
       return new Response(JSON.stringify(fixture.next.body), { status: fixture.next.status });
     };
     function Fixture() {
+      const [messages, setMessages] = useState([]);
       const [scope, setScope] = useState({ appId: 'execution-host', userId: 'operator', chatId: 'failed-chat',
         workflowName: 'ExampleWorkflow', surface: 'studio', mode: 'workflow', blocked: false });
       const retry = useFailedWorkflowRetry(scope);
@@ -150,9 +185,10 @@ test('failed workflow retry uses the existing authenticated launch path', async 
         window.fixture.setScope = (patch) => setScope(previous => ({ ...previous, ...patch }));
         window.fixture.observe = retry.observeSessionMeta;
         window.fixture.retry = retry.retry;
+        window.fixture.setMessages = setMessages;
       });
       return <main style={{ height: '100vh', maxWidth: 960, margin: '0 auto', display: 'flex', flexDirection: 'column' }}>
-        <ChatInterface messages={[]} onSendMessage={() => {}} workflowName={scope.workflowName}
+        <ChatInterface messages={messages} onSendMessage={() => {}} workflowName={scope.workflowName}
           loading={false} connectionStatus="disconnected" conversationMode={scope.mode}
           hideHeader={true} plainContainer={true}
           failedWorkflowRetry={retry.available ? retry : null} />
@@ -162,7 +198,7 @@ test('failed workflow retry uses the existing authenticated launch path', async 
   `;
   const bundle = await build({
     stdin: { contents: entry, resolveDir: shell, loader: 'jsx' }, bundle: true, write: false,
-    jsx: 'automatic', loader: { '.js': 'jsx', '.png': 'dataurl' }, nodePaths: [path.join(shell, 'node_modules')],
+    jsx: 'automatic', loader: { '.js': 'jsx', '.png': 'dataurl', '.css': 'empty' }, nodePaths: [path.join(shell, 'node_modules')],
     alias: { react: path.join(shell, 'node_modules/react'), 'react-dom': path.join(shell, 'node_modules/react-dom') },
     define: { 'process.env.NODE_ENV': '"test"' },
     plugins: [{ name: 'mock-host-boundaries', setup(builder) {
@@ -179,7 +215,8 @@ test('failed workflow retry uses the existing authenticated launch path', async 
   );
   const html = `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1">
     <style>${styles.css}
-      :root {--color-text-primary:#172026;--color-primary-light:#0d7666;--color-error:#b91c1c;}
+      ${await fs.readFile(path.join(ui, 'components/chat/ChatMessage.css'), 'utf8')}
+      :root {--color-text-primary:#172026;--color-text-secondary:#52616b;--color-surface:#f5f7f8;--color-primary-light:#0d7666;--color-error:#b91c1c;}
       body {margin:0;background:white;font-family:Arial;}
     </style></head><body><div id="root"></div><script src="/fixture.js"></script></body></html>`;
   const server = http.createServer((req, res) => {
@@ -240,6 +277,45 @@ test('failed workflow retry uses the existing authenticated launch path', async 
     });
   }
   for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
+    await t.test(`failure card keeps full safe details available and one retry at ${viewport.width}px`, async () => {
+      const page = await open(viewport);
+      const message = await failureMessageFromEvent();
+      await page.evaluate(message => window.fixture.setMessages([message]), message);
+      await observe(page);
+      const card = page.getByRole('region', { name: 'Workflow failure', exact: true });
+      await card.waitFor();
+      assert.equal(await card.getByRole('heading', { name: 'This step couldn’t finish' }).count(), 1);
+      const details = card.locator('details');
+      const summary = details.locator('summary');
+      assert.equal(await summary.textContent(), 'View failure details');
+      assert.equal(await details.getAttribute('open'), null);
+      assert.equal(await card.locator('.message-body').isVisible(), false);
+      assert.equal(await retryButton(page).count(), 1);
+      assert.equal(await card.getByRole('button').count(), 0);
+      assert.ok((await card.boundingBox()).height < 220, 'closed failure card should stay compact');
+      const screenshotDir = path.join(shell, 'test-results/failed-workflow-retry');
+      await fs.mkdir(screenshotDir, { recursive: true });
+      await page.screenshot({ path: path.join(screenshotDir, `failure-card-${viewport.width}.png`), fullPage: true });
+      await summary.focus();
+      await page.keyboard.press('Enter');
+      assert.equal(await details.getAttribute('open'), '');
+      const body = card.locator('.message-body');
+      assert.equal(await body.isVisible(), true);
+      assert.deepEqual(await body.locator('li').allTextContents(), failureDetails);
+      assert.equal(await body.locator('strong').textContent(), 'Blocking errors:');
+      assert.equal(await body.locator('pre code').textContent(), '<img src=x onerror="window.failureInjected=true">\n');
+      assert.equal(await body.locator('script, [onload], [onerror], a[href^="javascript:"]').count(), 0);
+      assert.equal(await page.evaluate(() => Boolean(window.failureInjected)), false);
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
+      await summary.click();
+      assert.equal(await body.isVisible(), false);
+      assert.deepEqual(await page.evaluate(() => window.fixture.requests), []);
+      // Ordinary system prose is not classified from words such as "failed".
+      await page.evaluate(message => window.fixture.setMessages([{ ...message, metadata: {} }]), message);
+      await card.waitFor({ state: 'detached' });
+      assert.equal(await page.getByText('Blocking errors:', { exact: true }).isVisible(), true);
+      await page.close();
+    });
     await t.test(`submits once with selectors only and navigates after acknowledgement at ${viewport.width}px`, async () => {
       const page = await open(viewport);
       await observe(page);

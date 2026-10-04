@@ -442,21 +442,34 @@ async def test_journey_orchestrator_inherits_context_and_applies_launch_provider
 
 
 def test_theme_handoff_drops_source_progress_but_preserves_launch_inputs():
+    brand_intent = {
+        "style_summary": "Navy #14213D surfaces, coral #FF7F50 accents, DM Sans type, compact spacing",
+        "appearance_hint": "dark", "brand_keywords": ["focused"], "experience_goals": ["fast scanning"],
+    }
     source = {
         "_id": "source-chat", "app_id": "factory", "user_id": "alice",
         "workflow_name": "ValueEngine", "interview_complete": True,
         "concept_review_outcome": "approved", "app_name": "Client Ledger",
         "builder_options": {"monetization_enabled": False},
         "run_build_binding": {"target_app_id": "tracker"},
+        "value_manifest": {"app_name": "Client Ledger", "brand_intent": brand_intent},
     }
     projected = _journey_mod._project_launch_context(source, "ThemeCapture")
     assert projected == {
         "app_name": "Client Ledger", "builder_options": {"monetization_enabled": False},
+        "value_manifest": source["value_manifest"],
     }
     from mozaiksai.core.session.launcher import validate_context_for_workflow
     from mozaiksai.core.workflow.context.authority import ContextAuthorityError
 
     assert validate_context_for_workflow("ThemeCapture", projected) == projected
+    context = yaml.safe_load((Path(__file__).resolve().parents[1] / "factory_app/workflows/ThemeCapture/context_variables.yaml").read_text(encoding="utf-8"))
+    from mozaiksai.core.workflow.context.context_utils import render_exposure_fragment
+
+    for agent in ("ThemeInterviewAgent", "ThemeAnalysisAgent", "ThemeConfigAssemblerAgent"):
+        exposed = render_exposure_fragment({}, projected, context["agents"][agent]["variables"])
+        for expected in ("#14213D", "#FF7F50", "DM Sans", "compact", "dark"):
+            assert expected in exposed, f"{agent} lost {expected} at the context boundary"
     with pytest.raises(ContextAuthorityError):
         validate_context_for_workflow("ThemeCapture", {"interview_outcome": "ready"})
 

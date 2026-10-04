@@ -693,17 +693,12 @@ async def test_launch_transition_starts_workflow_chat(monkeypatch):
 async def test_value_engine_to_theme_capture_keeps_host_after_target_router_retarget(monkeypatch):
     host = "mozaiks-platform"
     target = "release-greenfield-value-target"
-    binding = {
-        "build_registry_id": "appreg_value",
-        "target_app_id": target,
-        "build_id": "build_value",
-        "phase": "genesis",
-    }
 
     class _Hooks:
         async def call_chat_session_fields(self, **kwargs):  # noqa: ANN003
             assert kwargs["app_id"] == host
-            return {"run_build_binding": binding}
+            assert kwargs["phase"] == "route"
+            return {"target_app_id": target}
 
     class _Router:
         def __init__(self):

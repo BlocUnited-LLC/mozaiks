@@ -23,7 +23,7 @@ description: >
 task_contracts:
   page_bundle:
     owner_agent: AppSchemaAgent
-    summary: Declarative persistent app UI bundle for the page_bundle task.
+    summary: Persistent app UI through declarative pages or the bounded custom route bundle.
     required_outputs:
       - ui/pages/*.yaml
     optional_outputs:
@@ -39,6 +39,7 @@ task_contracts:
       - config/asset_manifest.json
     hard_constraints:
       - Persistent app pages stay declarative by default.
+      - Stateful local interactions such as start/pause/resume/reset timers, canvas input, and playable controls require the existing custom_react_page surface when shipped primitives cannot express their behavior. A Metric is display-only; never invent timer or action fields on it. The page_bundle owns the route-derived ui/pages/custom/<stem>.jsx plus ui/route_manifest.json and ui/index.js together; ordinary pages remain YAML.
       - Page filenames are case-sensitive lowercase identities derived by the canonical materializer from the final route segment (or the page name for /), with non-alphanumeric runs replaced by underscores. Copy exact planner-injected paths into owned_paths; display titles are not filenames. Never emit both uppercase and lowercase variants.
       - Emit exactly the current task's owned_paths. Required page outputs apply only to pages in that scope; a manifest-only task may emit pages as an empty list.
       - AppSchemaOutput.manifest is AppManifest or explicit null. A task owning app.json must emit AppManifest; otherwise emit null, which materializes neither app.json nor provenance.yaml. Do not emit a placeholder manifest or silently discard out-of-scope files.

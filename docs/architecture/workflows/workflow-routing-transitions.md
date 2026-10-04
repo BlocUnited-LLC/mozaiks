@@ -48,6 +48,21 @@ the runtime validates the bearer token and checks that the requested scope
 matches the authenticated principal. Local no-auth operation remains governed
 by runtime configuration, not by a browser-side bypass.
 
+### Starting a Factory app from Studio
+
+The Factory app-type selector registers a draft through `POST /api/studio/apps`
+before resolving the chosen journey. Its third `onResolve` argument carries
+`{build_registry_id}` as launch metadata. The shell retains that selector across
+chained transitions and retries and sends it at the top level of
+`POST /api/transitions/resolve`, outside workflow context.
+
+The existing `chat_session_fields` hook has a read-only `route` phase to resolve
+the owned target before selecting a target-scoped router. It does not allocate a
+build or an active chat. The `prepare` phase establishes the build binding when
+the actual workflow and chat are known. Missing or foreign targets fail closed.
+Retrying a failed transition keeps the draft and user choices; it does not
+register another app or relax target ownership.
+
 ### Failed Workflow Retry
 
 Studio's existing `POST /api/workflows/trigger` accepts `retry_failed: true`

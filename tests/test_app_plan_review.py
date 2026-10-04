@@ -74,6 +74,55 @@ def test_complete_plan_is_cached_without_losing_typed_fields():
     assert context.get("app_build_plan")["revenue_model"] == "free"
 
 
+def test_custom_page_plan_materializes_the_approved_surface_without_a_phantom_yaml():
+    plan = _plan()
+    plan["pages"][0]["ui_surface"] = "custom_react_page"
+    context = _context()
+
+    result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+
+    assert result["outcome"] == "ready", result
+    tasks = [task for task in context.get("app_task_batch_items") if task["task_type"] == "page_bundle"]
+    assert len(tasks) == 1
+    paths = set(tasks[0]["owned_paths"])
+    assert {"app.json", "ui/pages/custom/reports.jsx", "ui/route_manifest.json", "ui/index.js"} <= paths
+    assert "ui/pages/reports.yaml" not in paths
+
+
+def test_custom_bundle_cannot_split_registry_and_components_across_workers():
+    plan = _plan()
+    plan["pages"][0]["ui_surface"] = "custom_react_page"
+    task = next(task for task in plan["build_tasks"] if task["task_type"] == "page_bundle")
+    task["owned_paths"] = ["app.json", "ui/route_manifest.json", "ui/index.js"]
+    second = {**task, "task_id": "custom-page", "owned_paths": ["ui/pages/custom/reports.jsx"]}
+    plan["build_tasks"].append(second)
+    with pytest.raises(ValueError, match="complete custom route"):
+        validate_plan_coverage(plan, _context())
+
+    context = _context()
+    result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+    assert result["outcome"] == "ready", result
+    accepted = detach(context.get("app_build_plan"))
+    validate_plan_coverage(accepted, context)
+    paths = [path for task in accepted["build_tasks"] for path in task["owned_paths"]]
+    assert len(paths) == len(set(paths))
+
+
+@pytest.mark.parametrize("registry_path", ["ui/route_manifest.json", "ui/index.js"])
+def test_custom_page_cannot_take_over_selected_pack_registry(monkeypatch, registry_path):
+    from factory_app.workflows.AppGenerator.tools import app_plan_review
+
+    plan = _plan()
+    plan["pages"][0]["ui_surface"] = "custom_react_page"
+    before = deepcopy(plan["build_tasks"])
+    monkeypatch.setattr(app_plan_review, "pack_owned_output_paths", lambda context: frozenset({registry_path}))
+    with pytest.raises(ValueError, match="selected-pack registry ownership"):
+        app_plan_review._repair_coverage(plan, _context())
+    assert plan["build_tasks"] == before
+    with pytest.raises(ValueError, match="selected-pack registry ownership"):
+        validate_plan_coverage(plan, _context())
+
+
 def test_review_queues_synthesized_module_workers_with_actual_prerequisites():
     plan = _plan()
     page = next(task for task in plan["build_tasks"] if task["task_type"] == "page_bundle")
@@ -470,3 +519,99 @@ def test_repair_budget_is_finite():
     assert review(AppBuildPlan=_plan(), context_variables=context)["outcome"] == "blocked"
     assert context.get("app_plan_attempts") == 3
     assert context.get("app_plan_ready") is False
+
+def _mislabelled_persistence_plan():
+    plan = _plan()
+    page = next(task for task in plan["build_tasks"] if task["task_type"] == "page_bundle")
+    task = {**deepcopy(page), "task_id": "persist-approved-contract", "task_type": "persistence_contract",
+            "initial_agent": "DatabaseAgent", "surface_id": "main", "surface_kind": "module",
+            "capability_pack_id": None, "owned_paths": ["data/contract.json"], "depends_on": []}
+    plan["build_tasks"].append(task)
+    return plan, task
+
+
+def test_persistence_serializer_uses_existing_structural_identity_without_approving_a_module():
+    plan, task = _mislabelled_persistence_plan()
+    context = _context()
+    approved = deepcopy(detach(context.get("design_surface_map")))
+    result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+    assert result["outcome"] == "ready", result
+    accepted = next(item for item in context.get("app_task_batch_items") if item["task_id"] == task["task_id"])
+    assert accepted["surface_id"] == "data_contract"
+    assert accepted["surface_kind"] == "module"
+    assert list(accepted["owned_paths"]) == ["data/contract.json"]
+    assert accepted["capability_pack_id"] is None
+    assert detach(context.get("design_surface_map")) == approved
+    assert all(pack["surface_id"] != "main" for pack in context.get("app_build_plan")["capability_packs"])
+
+
+@pytest.mark.parametrize("defect", ["extra_path", "module_task", "capability", "wrong_agent", "no_approved_contract"])
+def test_structural_persistence_label_cannot_authorize_other_work(defect):
+    plan, task = _mislabelled_persistence_plan()
+    context = _context()
+    if defect == "extra_path":
+        task["owned_paths"].append("modules/invented/module.yaml")
+    elif defect == "module_task":
+        task.update(task_type="module_contract", initial_agent="ConfigMiddlewareAgent",
+                    owned_paths=["modules/main/module.yaml"])
+    elif defect == "capability":
+        task["capability_pack_id"] = "reports"
+    elif defect == "wrong_agent":
+        task["initial_agent"] = "ConfigMiddlewareAgent"
+    else:
+        context.set("data_contract", None)
+    result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+    assert result["outcome"] == "needs_revision", result
+    assert "unapproved surface 'main'" in result["error"]
+    assert not context.get("app_task_batch_items")
+
+
+@pytest.mark.parametrize("defect", [None, "unapproved_route", "extra_module"])
+def test_custom_page_structural_label_uses_only_the_approved_route(defect):
+    plan = _plan()
+    plan["pages"][0]["ui_surface"] = "custom_react_page"
+    task = next(task for task in plan["build_tasks"] if task["task_type"] == "page_bundle")
+    task.update(surface_id="page_named_label", surface_kind="ui_only", capability_pack_id=None,
+                owned_paths=["app.json", "ui/pages/custom/reports.jsx", "ui/route_manifest.json", "ui/index.js"])
+    context = _context()  # The approved ExperienceSpec has no rendering-surface field.
+    if defect == "unapproved_route":
+        plan["pages"][0]["route"] = "/invented"
+        task["owned_paths"][1] = "ui/pages/custom/invented.jsx"
+    elif defect == "extra_module":
+        task["owned_paths"].append("modules/invented/module.yaml")
+    result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+    if defect:
+        assert result["outcome"] == "needs_revision", result
+        assert "unapproved surface 'page_named_label'" in result["error"]
+        assert not context.get("app_task_batch_items")
+    else:
+        assert result["outcome"] == "ready", result
+        accepted = next(item for item in context.get("app_task_batch_items") if item["task_type"] == "page_bundle")
+        assert accepted["surface_id"] == "page_bundle"
+        assert "ui/pages/custom/reports.jsx" in accepted["owned_paths"]
+        assert "ui/pages/reports.yaml" not in accepted["owned_paths"]
+
+
+def test_blocked_plan_projects_feedback_to_existing_terminal_failure_message():
+    plan, task = _mislabelled_persistence_plan()
+    task["owned_paths"].append("modules/invented/module.yaml")
+    context = _context()
+    for attempt in range(1, 4):
+        result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+        assert result["outcome"] == ("needs_revision" if attempt < 3 else "blocked")
+        if attempt < 3:
+            assert context.get("app_build_failure_message") is None
+    message = context.get("app_build_failure_message")
+    assert message.startswith("The app build cannot continue: the implementation plan has unresolved contract errors.")
+    assert context.get("app_plan_feedback") in message
+    assert "unapproved surface 'main'" in message
+    assert not context.get("app_task_batch_items")
+    review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+    assert context.get("app_build_failure_message") == message
+
+
+def test_ready_plan_clears_stale_terminal_failure_message():
+    context = _context()
+    context.set("app_build_failure_message", "Prior blocked plan")
+    assert review_app_build_plan(AppBuildPlan=_plan(), context_variables=context)["outcome"] == "ready"
+    assert context.get("app_build_failure_message") is None

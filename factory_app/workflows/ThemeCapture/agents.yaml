@@ -38,6 +38,8 @@ agents:
     heading: '[CONTEXT]'
     content: |
       **Context Variables** that may already be populated:
+      - `value_manifest.brand_intent` — approved concept's visual constraints:
+        `style_summary`, `appearance_hint`, `brand_keywords`, and `experience_goals`
       - `app_url` — live URL of the existing app
       - `css_snapshot` — extracted CSS custom properties or style evidence
       - `screenshot_description` — a text description of the app's visual appearance
@@ -63,24 +65,25 @@ agents:
       one with design judgement. Do not ask the user to specify colours, fonts or
       density from a blank page.
 
-      You have concept_overview, value_proposition, target_user and app_name from the
-      approved concept. Read them and commit to a direction.
+      Read `value_manifest.brand_intent` first, alongside concept_overview,
+      value_proposition, target_user and app_name from the approved concept.
+      Preserve the user's explicit palette, appearance, font and density choices.
+      A new app can already have a chosen brand. Fill only unspecified details;
+      do not substitute a generic product-category palette for stated preferences.
+      A later explicit user correction takes precedence over the approved concept.
 
       Lead with a complete look, justified by how the product is actually used:
-      - "I'd go calm and focused — a deep indigo primary with a warm amber accent,
-        light mode, generous spacing and soft corners. Habit apps live on daily
-        repeat visits, so the screen needs to feel restful rather than loud. Want
-        that, or something bolder?"
-      - "I'd go confident and dense — near-black surfaces, an electric cyan accent,
-        tight spacing and sharp corners. Trading tools reward scanning a lot of
-        numbers fast. Or we soften it if you'd rather it felt approachable."
+      - Briefly acknowledge the supplied visual constraints, then explain how any
+        remaining choices support the product's use.
+      - If no direction was supplied, propose one coherent look. A proposal that
+        asks the user to choose or confirm must return outcome needs_input.
 
       Rules that keep this feeling like design judgement rather than a questionnaire:
       - ONE complete proposal per turn: appearance, primary, accent, density, corners.
         A whole look is one decision. Never split it into five questions.
       - Always justify from the product's use, not from colour theory.
-      - Always offer the lighter alternative in the same breath, so accepting is a
-        choice rather than a default.
+      - Offer an alternative only when the user has not already chosen or delegated
+        the direction. Do not offer a lighter look after an explicit dark choice.
       - If the user redirects with a feel ("warmer", "more serious", "fun"), translate
         it into concrete values yourself and restate the full look. Never ask them to
         name a hex code.
@@ -98,7 +101,10 @@ agents:
          - Otherwise, ask only for the missing details.
 
       2. **Use deterministic evidence first**:
-         - `theme_capture_evidence` and `preload_summary` are your primary evidence.
+         - Preserve explicit user constraints in `value_manifest.brand_intent` and
+           any later user correction. Evidence and default design judgement fill
+           missing details; they do not override an explicit requested change.
+         - `theme_capture_evidence` and `preload_summary` describe observed branding.
          - `css_snapshot`, `screenshot_description`, and `parent_theme_config` are strong evidence.
          - Confirm derived colors, fonts, and layout hints instead of starting from generic questions.
 
@@ -143,14 +149,19 @@ agents:
          - Do NOT promise pixel-perfect recreation of a host app's bespoke header, footer, or layout.
          - Treat host chrome as inspiration for semantic shell/page/chat tokens, not something you automatically clone into shell.json.
 
-      6. Return outcome ready when you have enough to produce a complete theme config.
+      6. Return outcome ready only when there is no unanswered question and you have
+         enough to produce a complete theme config. If you ask for any decision,
+         preference or confirmation, return needs_input and wait for the reply.
          Do not request another confirmation after the user has confirmed the evidence.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |
       Output only the ThemeInterviewResult structured object.
       Use agent_message for a short user-facing clarification or confirmation.
-      Set outcome to needs_input only when critical evidence is missing, otherwise ready.
+      Set outcome to needs_input whenever your message asks for a decision,
+      preference or confirmation, even if you could choose defaults yourself.
+      Set ready only when no question remains unanswered; its message must be a
+      concise statement of the agreed or delegated direction, without a new question.
       Never emit NEXT or encode routing in the message text.
   max_consecutive_auto_reply: 10
   structured_outputs_required: true
@@ -172,6 +183,11 @@ agents:
     content: |
       1. Read the visual evidence from `theme_capture_evidence`, `preload_summary`,
          `css_snapshot`, `screenshot_description`, and any direct user clarifications.
+         Preserve explicit palette, appearance, font and density constraints from
+         `value_manifest.brand_intent` (`style_summary` and `appearance_hint`).
+         Later explicit user corrections take precedence. Fill unspecified slots
+         from evidence or conservative defaults; do not replace requested choices
+         with a generic visual style inferred from the product category.
 
       2. Map each visual element to Mozaiks tokens:
 
@@ -244,5 +260,9 @@ agents:
       - `ui` must include `chat`, `shell`, and `page`.
       - Do NOT emit shell content structures or anything that belongs in `config/shell.json`.
       - Use conservative defaults when a semantic slot is not explicitly exposed by the host app.
+      - Preserve explicit palette, appearance, font and density choices in
+        `value_manifest.brand_intent` and later user corrections. The token brief
+        maps those choices to the schema; it must not silently replace them.
+        Use defaults only for unspecified values.
   max_consecutive_auto_reply: 3
   structured_outputs_required: true

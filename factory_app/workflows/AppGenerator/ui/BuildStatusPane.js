@@ -84,15 +84,15 @@ const BuildStatusPane = ({
 
   const exportGateNote = useMemo(() => {
     if (validationStatus === 'failed') {
-      return 'Export is blocked server-side until validation is rerun successfully or explicitly skipped, and integration checks pass.';
+      return 'Fix the reported issue and run validation again before exporting.';
     }
-    if (!['passed', 'skipped'].includes(validationStatus)) {
-      return 'Export is blocked server-side until validation completes with a pass or explicit skip.';
+    if (validationStatus !== 'passed') {
+      return 'Required validation must pass before you can export or activate this draft.';
     }
     if (integrationPassed !== true) {
       return integrationPassed == null
-        ? 'Export is blocked server-side until integration checks run and pass.'
-        : 'Export is blocked server-side until integration checks pass.';
+        ? 'Integration checks still need to run before export.'
+        : 'Integration checks must pass before export.';
     }
     return null;
   }, [integrationPassed, validationStatus]);

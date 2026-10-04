@@ -215,6 +215,14 @@ This project follows a practical pre-1.0 changelog format:
   outcome keys. AG2 reserves those prefixes and drops such keys from A2A,
   AG-UI, A2UI, and NLIP transports, so a declared key passed validation and
   then never reached a remote agent. No shipped workflow uses either prefix.
+- Studio concept and app review screens put the decision before supporting details.
+  The default workspace uses readable body text and quieter panels while retaining
+  the Mozaiks wordmark; generated previews keep their own app branding.
+- New-app entry creates an owned Studio draft before launching the build journey.
+  Transition preflight resolves that target without creating or resuming a run.
+- Export and activation require completed acceptance and app-build validation.
+  Restore and activation verify the owned archive's identity and digest before
+  using it. Skipped checks and records without completed validation cannot certify a release.
 - Artifact preview ownership and capacity now persist in MongoDB across Studio
   workers and restarts. Preview allocation uses a bounded queue and positive
   shared limits; interrupted updates require cleanup before reuse. Operators
@@ -309,6 +317,13 @@ This project follows a practical pre-1.0 changelog format:
   logger, plus an unreachable duplicate artifact lookup branch.
 
 ### Fixed
+
+- Factory interviews use typed readiness and retain explicit brand preferences
+  across workflow transitions. Custom interactive page plans now own their React
+  files and shared route registry together, using the same deterministic registry
+  renderer as standalone app saves.
+- AG2 knowledge-store writes are serialized per session so a delayed earlier
+  snapshot cannot overwrite the active channel state needed after restart.
 
 - A copied `.env.example` now imports the hosts and points the local shell's
   API proxy at the backend; `mozaiks context index` passes its workspace key.

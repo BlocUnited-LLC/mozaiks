@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
 import json
 import stat
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -19,6 +21,7 @@ from mozaiksai.core.artifacts import (
     RefinementSessionDoc,
     RefinementSessionStatus,
 )
+from mozaiksai.core.artifacts.models import canonical_bundle_archive_path
 from mozaiksai.core.auth import reset_auth_adapter
 from mozaiksai.hosts import shell_config
 
@@ -50,6 +53,7 @@ def _version(
     metadata: dict[str, object] = {
         "artifact_path": str(zip_path), "build_registry_id": "appreg_1",
         "target_app_id": "app_1", "build_id": "build_1", "phase": "refinement",
+        "bundle_name": "GeneratedApp",
     }
     metadata.update(commit_metadata_extra or {})
     if refinement_request_id is not None:
@@ -74,7 +78,13 @@ def _version(
             "canonical_inputs_version": {},
             "lifecycle_status": lifecycle_status.value,
             "validation_status": validation_status.value,
-            "files_manifest": files_manifest or [],
+            "app_validation_status": "passed",
+            "files_manifest": files_manifest if files_manifest is not None else [{
+                "path": canonical_bundle_archive_path("GeneratedApp"),
+                "sha256": hashlib.sha256(zip_path.read_bytes()).hexdigest(),
+                "size_bytes": zip_path.stat().st_size,
+                "content_type": "application/zip",
+            }],
             "commit_metadata": ArtifactCommitMetadata(
                 message="Refinement artifact",
                 source_workflow="AppGenerator",
@@ -223,6 +233,26 @@ def test_restore_materializes_accepted_version_without_claiming_rollback(monkeyp
     assert not runtime_root.exists()
 
 
+def test_bundle_advertises_the_registered_review_surface(monkeypatch, tmp_path):
+    archive = tmp_path / "bundle.zip"
+    _write_bundle_zip(archive, {"app.json": '{"appId":"app_1"}'})
+    version = _version(artifact_version_id="av_review", zip_path=archive)
+    studio, client = _promote_client(monkeypatch, tmp_path / "factory", _PromoteStore(version))
+    monkeypatch.setattr(studio, "_build_artifact_review_payload", AsyncMock(return_value={
+        "review": {}, "refinement_session": None, "change_request": None,
+    }))
+
+    response = client.get(f"/api/studio/build/artifacts/{version.id}/bundle?build_registry_id=appreg_1")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    surface = body["workbench_ui"]
+    index = Path(__file__).resolve().parents[1] / "factory_app/workflows" / surface["workflow_name"] / "ui/index.js"
+    assert f"as {surface['component']}" in index.read_text(encoding="utf-8")
+    assert body["workbench"]["artifact_version_id"] == version.id
+    assert body["workbench"]["generated_files"] == {"app.json": '{"appId":"app_1"}'}
+
+
 @pytest.mark.parametrize("status", [ArtifactLifecycleStatus.DRAFT, ArtifactLifecycleStatus.DELETED])
 def test_restore_rejects_unaccepted_version(monkeypatch, tmp_path, status):
     bundle_zip = tmp_path / "unaccepted.zip"
@@ -235,6 +265,121 @@ def test_restore_rejects_unaccepted_version(monkeypatch, tmp_path, status):
     )
     assert response.status_code == 409
     assert not (tmp_path / "workspaces").exists()
+
+
+def _restore_or_promote(client, version, action):
+    if action == "restore":
+        return client.post(
+            "/api/studio/build/restore?build_registry_id=appreg_1",
+            json={"artifact_version_id": version.id},
+        )
+    return client.post(f"/api/studio/build/artifacts/{version.id}/promote?build_registry_id=appreg_1")
+
+
+@pytest.mark.parametrize("action", ["restore", "promote"])
+@pytest.mark.parametrize("fault", ["changed_archive", "missing_identity", "legacy_manifest", "wrong_archive_path"])
+def test_archive_integrity_failure_leaves_workspace_and_registry_unchanged(monkeypatch, tmp_path, action, fault):
+    archive = tmp_path / "bundle.zip"
+    _write_bundle_zip(archive, {"app.json": '{"appId":"app_1"}', "ui/title.txt": "approved"})
+    version = _version(artifact_version_id="av_verified", zip_path=archive)
+    if fault == "changed_archive":
+        _write_bundle_zip(archive, {"app.json": '{"appId":"app_1"}', "ui/title.txt": "unapproved"})
+    elif fault == "missing_identity":
+        version.commit_metadata.metadata.pop("bundle_name")
+    elif fault == "legacy_manifest":
+        version.files_manifest[0].content_type = "text/plain"
+    else:
+        version.files_manifest[0].path = "another/another.zip"
+    store = _PromoteStore(version)
+    studio, client = _promote_client(monkeypatch, tmp_path / "factory", store)
+    target = tmp_path / "workspaces/app_1/av_verified"
+    (target / "app").mkdir(parents=True)
+    (target / "app/existing.txt").write_bytes(b"preserve me")
+    registry = studio._get_app_registry_service()
+    before = dict(registry.app)
+
+    response = _restore_or_promote(client, version, action)
+
+    assert response.status_code == 409
+    assert "Revalidate and save a canonical app bundle" in response.json()["detail"]
+    assert sorted(path.relative_to(target).as_posix() for path in target.rglob("*")) == ["app", "app/existing.txt"]
+    assert (target / "app/existing.txt").read_bytes() == b"preserve me"
+    assert registry.app == before
+    assert registry.promote_calls == []
+    assert store.updated_sessions == []
+
+
+@pytest.mark.parametrize("action", ["restore", "promote"])
+def test_restore_consumes_verified_bytes_even_if_archive_path_changes(monkeypatch, tmp_path, action):
+    archive = tmp_path / "bundle.zip"
+    _write_bundle_zip(archive, {"app.json": '{"appId":"app_1"}', "ui/title.txt": "approved"})
+    version = _version(artifact_version_id="av_once", zip_path=archive)
+    studio, client = _promote_client(monkeypatch, tmp_path / "factory", _PromoteStore(version))
+    restore = studio._restore_bundle_to_target
+
+    def replace_source_after_verification(**kwargs):
+        _write_bundle_zip(archive, {"app.json": '{"appId":"app_1"}', "ui/title.txt": "unapproved"})
+        return restore(**kwargs)
+
+    monkeypatch.setattr(studio, "_restore_bundle_to_target", replace_source_after_verification)
+    response = _restore_or_promote(client, version, action)
+    assert response.status_code == 200, response.text
+    assert (Path(response.json()["target_path"]) / "app/ui/title.txt").read_text() == "approved"
+
+
+@pytest.mark.parametrize("action", ["restore", "promote"])
+def test_restore_uses_canonical_content_backend_without_local_path(monkeypatch, tmp_path, action):
+    from mozaiksai.core.artifacts import content_store
+
+    archive = tmp_path / "bundle.zip"
+    _write_bundle_zip(archive, {"app.json": '{"appId":"app_1"}'})
+    version = _version(artifact_version_id="av_remote", zip_path=archive)
+    version.commit_metadata.metadata.pop("artifact_path")
+    version.commit_metadata.metadata.update(content_ref="owned-archive", content_backend="memory")
+    backend = SimpleNamespace(backend_name="memory", get_bundle=AsyncMock(return_value=archive.read_bytes()))
+    monkeypatch.setattr(content_store, "get_artifact_content_store", lambda: backend)
+    _, client = _promote_client(monkeypatch, tmp_path / "factory", _PromoteStore(version))
+    response = _restore_or_promote(client, version, action)
+    assert response.status_code == 200, response.text
+    assert (Path(response.json()["target_path"]) / "app/app.json").is_file()
+    backend.get_bundle.assert_awaited_once_with("owned-archive")
+
+
+@pytest.mark.parametrize("action", ["restore", "promote"])
+@pytest.mark.parametrize("fault", ["foreign_owner", "wrong_registry"])
+def test_artifact_scope_is_checked_before_reading_archive(monkeypatch, tmp_path, action, fault):
+    archive = tmp_path / "bundle.zip"
+    _write_bundle_zip(archive, {"app.json": '{"appId":"app_1"}'})
+    version = _version(artifact_version_id="av_scoped", zip_path=archive)
+    studio, client = _promote_client(monkeypatch, tmp_path / "factory", _PromoteStore(version))
+    registry = studio._get_app_registry_service()
+    if fault == "foreign_owner":
+        monkeypatch.setattr(registry, "get_app_record", AsyncMock(return_value={"app": None}))
+    else:
+        version.commit_metadata.metadata["build_registry_id"] = "another_registry"
+    reader = AsyncMock(side_effect=AssertionError("Archive must not be read before scope checks"))
+    monkeypatch.setattr(studio, "read_verified_artifact_bundle", reader)
+    response = _restore_or_promote(client, version, action)
+    assert response.status_code == (404 if fault == "foreign_owner" else 409)
+    reader.assert_not_awaited()
+    assert registry.promote_calls == []
+    assert not (tmp_path / "workspaces").exists()
+
+
+@pytest.mark.asyncio
+async def test_verified_archive_reader_enforces_byte_limit(tmp_path):
+    from mozaiksai.core.artifacts.content_store import (
+        ContentIntegrityError,
+        read_verified_artifact_bundle,
+    )
+
+    archive = tmp_path / "bundle.zip"
+    _write_bundle_zip(archive, {"app.json": '{"appId":"app_1"}'})
+    version = _version(artifact_version_id="av_bounded", zip_path=archive)
+    raw = archive.read_bytes()
+    assert await read_verified_artifact_bundle(version, max_bytes=len(raw)) == raw
+    with pytest.raises(ContentIntegrityError, match="archive_too_large"):
+        await read_verified_artifact_bundle(version, max_bytes=len(raw) - 1)
 
 
 def test_promote_restores_current_app_bundle_from_staged_refinement(monkeypatch, tmp_path: Path) -> None:
@@ -252,10 +397,6 @@ def test_promote_restores_current_app_bundle_from_staged_refinement(monkeypatch,
         lifecycle_status=ArtifactLifecycleStatus.CURRENT,
         validation_status=ArtifactValidationStatus.PASSED,
         refinement_request_id="refine_123",
-        files_manifest=[
-            {"path": "GeneratedApp/src/App.jsx", "sha256": "sha-app", "size_bytes": 62},
-            {"path": "GeneratedApp/package.json", "sha256": "sha-pkg", "size_bytes": 16},
-        ],
     )
     session = _session(artifact_version_id=version.id, status=RefinementSessionStatus.VALIDATED)
     runtime_root = tmp_path / "runtime_app"
@@ -305,9 +446,6 @@ def test_promote_refuses_override_for_coding_produced_artifacts(monkeypatch, tmp
         lifecycle_status=ArtifactLifecycleStatus.CURRENT,
         validation_status=ArtifactValidationStatus.SKIPPED,
         refinement_request_id="refine_skipped_validation",
-        files_manifest=[
-            {"path": "GeneratedApp/src/App.jsx", "sha256": "sha-app", "size_bytes": 62},
-        ],
     )
     runtime_root = tmp_path / "runtime_app"
     store = _PromoteStore(version)
@@ -327,12 +465,11 @@ def test_promote_refuses_override_for_coding_produced_artifacts(monkeypatch, tmp
         json={"allow_validation_override": True},
     )
 
-    assert overridden.status_code == 409
-    assert "coding-produced" in overridden.json()["detail"]
+    assert overridden.status_code == 422
     assert not (runtime_root / "GeneratedApp" / "src" / "App.jsx").exists()
 
 
-def test_promote_allows_override_for_non_coding_artifacts(monkeypatch, tmp_path: Path) -> None:
+def test_promote_rejects_override_for_non_coding_artifacts(monkeypatch, tmp_path: Path) -> None:
     bundle_zip = tmp_path / "bundle.zip"
     _write_bundle_zip(
         bundle_zip,
@@ -345,9 +482,6 @@ def test_promote_allows_override_for_non_coding_artifacts(monkeypatch, tmp_path:
         zip_path=bundle_zip,
         lifecycle_status=ArtifactLifecycleStatus.CURRENT,
         validation_status=ArtifactValidationStatus.SKIPPED,
-        files_manifest=[
-            {"path": "GeneratedApp/src/App.jsx", "sha256": "sha-app", "size_bytes": 62},
-        ],
     )
     runtime_root = tmp_path / "runtime_app"
     store = _PromoteStore(version)
@@ -361,9 +495,29 @@ def test_promote_allows_override_for_non_coding_artifacts(monkeypatch, tmp_path:
         json={"allow_validation_override": True},
     )
 
-    assert allowed.status_code == 200
-    assert allowed.json()["promoted"] is True
-    assert (runtime_root / "GeneratedApp" / "src" / "App.jsx").exists()
+    assert allowed.status_code == 422
+    assert not (runtime_root / "GeneratedApp" / "src" / "App.jsx").exists()
+
+
+@pytest.mark.parametrize("build_status", [None, "pending", "skipped", "failed"])
+@pytest.mark.parametrize("operation", ["promote", "restore"])
+def test_legacy_contract_pass_cannot_activate_without_passed_build(monkeypatch, tmp_path, build_status, operation):
+    archive = tmp_path / "bundle.zip"
+    _write_bundle_zip(archive, {"app.json": '{"appId":"app_1"}'})
+    version = _version(
+        artifact_version_id="av_unverified", zip_path=archive,
+    ).model_copy(update={"app_validation_status": build_status})
+    studio, client = _promote_client(monkeypatch, tmp_path / "factory", _PromoteStore(version))
+    monkeypatch.setattr(studio, "_restore_bundle_to_target", lambda **kwargs: pytest.fail("unverified candidate restored"))
+    response = (
+        client.post("/api/studio/build/artifacts/av_unverified/promote?build_registry_id=appreg_1")
+        if operation == "promote"
+        else client.post("/api/studio/build/restore?build_registry_id=appreg_1",
+                         json={"artifact_version_id": "av_unverified"})
+    )
+    assert response.status_code == 409
+    assert "whole-app build validation" in response.json()["detail"]
+    assert not studio._get_app_registry_service().promote_calls
 
 
 def test_promote_restores_artifact_and_marks_app_registry_active(monkeypatch, tmp_path: Path) -> None:
@@ -380,9 +534,6 @@ def test_promote_restores_artifact_and_marks_app_registry_active(monkeypatch, tm
         lifecycle_status=ArtifactLifecycleStatus.CURRENT,
         validation_status=ArtifactValidationStatus.PASSED,
         refinement_request_id="refine_registry",
-        files_manifest=[
-            {"path": "GeneratedApp/src/App.jsx", "sha256": "sha-app", "size_bytes": 62},
-        ],
     )
     runtime_root = tmp_path / "runtime_app"
     store = _PromoteStore(version)
@@ -507,10 +658,6 @@ def test_promote_restores_generated_app_bundle_as_loadable_platform_root(monkeyp
         lifecycle_status=ArtifactLifecycleStatus.CURRENT,
         validation_status=ArtifactValidationStatus.PASSED,
         refinement_request_id="refine_platform_root",
-        files_manifest=[
-            {"path": path, "sha256": f"sha-{index}", "size_bytes": len(content)}
-            for index, (path, content) in enumerate(bundle_entries.items(), start=1)
-        ],
     )
     runtime_root = tmp_path / "active_app"
     store = _PromoteStore(version)
@@ -566,9 +713,6 @@ def test_promote_rejects_registry_record_not_in_review(monkeypatch, tmp_path: Pa
         zip_path=bundle_zip,
         lifecycle_status=ArtifactLifecycleStatus.CURRENT,
         validation_status=ArtifactValidationStatus.PASSED,
-        files_manifest=[
-            {"path": "GeneratedApp/src/App.jsx", "sha256": "sha-app", "size_bytes": 60},
-        ],
     )
     runtime_root = tmp_path / "runtime_app"
     store = _PromoteStore(version)
@@ -626,28 +770,18 @@ def test_promote_rejects_non_app_bundle_artifact(monkeypatch, tmp_path: Path) ->
 
 
 def test_promote_rejects_missing_artifact_path(monkeypatch, tmp_path: Path) -> None:
-    version = ArtifactVersionDoc.model_validate(
-        {
-            "_id": "av_missing_1",
-            "app_id": "app_1",
-            "build_family": "app_bundle",
-            "build_key": "app_bundle",
-            "version_number": 2,
-            "lineage_root_id": "av_missing_1",
-            "canonical_inputs_version": {},
-            "lifecycle_status": ArtifactLifecycleStatus.CURRENT.value,
-            "validation_status": ArtifactValidationStatus.PASSED.value,
-            "files_manifest": [],
-            "commit_metadata": {"metadata": {"refinement": {"request_id": "refine_missing"}}},
-        }
-    )
+    archive = tmp_path / "bundle.zip"
+    _write_bundle_zip(archive, {"app.json": '{"appId":"app_1"}'})
+    version = _version(artifact_version_id="av_missing_1", zip_path=archive)
+    version.commit_metadata.metadata.pop("artifact_path")
     store = _PromoteStore(version)
     _, client = _promote_client(monkeypatch, tmp_path / "runtime_app", store)
 
     response = client.post("/api/studio/build/artifacts/av_missing_1/promote?build_registry_id=appreg_1")
 
-    assert response.status_code == 400
-    assert "no restorable file path" in response.json()["detail"]
+    assert response.status_code == 409
+    assert "Revalidate and save a canonical app bundle" in response.json()["detail"]
+    assert not (tmp_path / "workspaces").exists()
 
 
 def test_promote_rejects_missing_file_manifest(monkeypatch, tmp_path: Path) -> None:
@@ -665,8 +799,9 @@ def test_promote_rejects_missing_file_manifest(monkeypatch, tmp_path: Path) -> N
 
     response = client.post("/api/studio/build/artifacts/av_no_manifest_1/promote?build_registry_id=appreg_1")
 
-    assert response.status_code == 400
-    assert "file manifest" in response.json()["detail"]
+    assert response.status_code == 409
+    assert "Revalidate and save a canonical app bundle" in response.json()["detail"]
+    assert not (tmp_path / "workspaces").exists()
 
 
 def test_promote_skips_metadata_and_backup_entries(monkeypatch, tmp_path: Path) -> None:
@@ -688,9 +823,6 @@ def test_promote_skips_metadata_and_backup_entries(monkeypatch, tmp_path: Path) 
         lifecycle_status=ArtifactLifecycleStatus.CURRENT,
         validation_status=ArtifactValidationStatus.PASSED,
         refinement_request_id="refine_789",
-        files_manifest=[
-            {"path": "GeneratedApp/src/App.jsx", "sha256": "sha-app", "size_bytes": 58},
-        ],
     )
     store = _PromoteStore(version)
     runtime_root = tmp_path / "runtime_app"
@@ -726,9 +858,6 @@ def test_promote_blocks_path_traversal_entries(monkeypatch, tmp_path: Path) -> N
         lifecycle_status=ArtifactLifecycleStatus.CURRENT,
         validation_status=ArtifactValidationStatus.PASSED,
         refinement_request_id="refine_111",
-        files_manifest=[
-            {"path": "GeneratedApp/src/App.jsx", "sha256": "sha-app", "size_bytes": 60},
-        ],
     )
     store = _PromoteStore(version)
     runtime_root = tmp_path / "runtime_app"
@@ -759,9 +888,6 @@ def test_promote_blocks_absolute_path_entries(monkeypatch, tmp_path: Path) -> No
         lifecycle_status=ArtifactLifecycleStatus.CURRENT,
         validation_status=ArtifactValidationStatus.PASSED,
         refinement_request_id="refine_222",
-        files_manifest=[
-            {"path": "GeneratedApp/src/App.jsx", "sha256": "sha-app", "size_bytes": 60},
-        ],
     )
     store = _PromoteStore(version)
     runtime_root = tmp_path / "runtime_app"
@@ -792,9 +918,6 @@ def test_promote_skips_symlink_entries(monkeypatch, tmp_path: Path) -> None:
         lifecycle_status=ArtifactLifecycleStatus.CURRENT,
         validation_status=ArtifactValidationStatus.PASSED,
         refinement_request_id="refine_333",
-        files_manifest=[
-            {"path": "GeneratedApp/src/App.jsx", "sha256": "sha-app", "size_bytes": 59},
-        ],
     )
     store = _PromoteStore(version)
     runtime_root = tmp_path / "runtime_app"

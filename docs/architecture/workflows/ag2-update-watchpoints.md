@@ -244,7 +244,10 @@ unchanged; the wrapper adds no usage or tool-execution events.
 `tests/test_ag2_workflow_provider_history.py` captures actual provider mapper
 payloads through real Agent/Hub execution, human continuation, and disk-backed
 reopen without paid model calls. It also covers self-edges and privacy/window
-preservation. The strict expected-failure native-provider tests are the
+preservation, including peer messages retaining their user role. The strict
+expected-failure native projection test checks the provider-neutral event shape:
+own assistant messages must be preserved as `ModelResponse`, with no bare
+`ModelMessage` left for any provider mapper to drop. It is the
 retirement signal: when they unexpectedly pass on an AG2 upgrade, remove the
 local adapter and registration, remove those expected-failure markers, and
 keep continuation/reopen tests passing on the native adapter. No dependency

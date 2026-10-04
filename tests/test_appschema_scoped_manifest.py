@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,18 +11,25 @@ from ag2.network.policies import CHANNEL_STATE_DEP
 from pydantic import ValidationError
 
 from factory_app.workflows.AppGenerator.tools.app_plan_review import validate_plan_coverage
+from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import (
+    _apply_planned_page_contracts,
+)
 from factory_app.workflows.AppGenerator.tools.assembly_phase import _merge_code_files
 from factory_app.workflows.AppGenerator.tools.save_app_schema import save_app_schema
 from mozaiksai.core.runtime.app.provenance import (
     build_default_app_provenance,
     dump_app_provenance_yaml,
 )
-from mozaiksai.core.workflow.generator_support.code_files import extract_code_file_map_from_payload
+from mozaiksai.core.workflow.generator_support.code_files import (
+    discard_pack_owned_outputs,
+    extract_code_file_map_from_payload,
+)
 from mozaiksai.core.workflow.outputs.structured import (
     build_models_from_config,
     get_provider_response_model,
 )
 from mozaiksai.core.workflow.task_batches import (
+    _normalize_owned_page_files_from_plan,
     _validate_task_output_ownership,
     execute_task_batches_for_trigger,
     parse_task_batches_config,
@@ -108,8 +116,147 @@ def test_null_manifest_materializes_only_owned_pages_without_mutating_payload():
     before = json.dumps(payload, sort_keys=True)
     files = extract_code_file_map_from_payload(payload)
     assert set(files) == {"ui/pages/customers.yaml"}
-    assert yaml.safe_load(files["ui/pages/customers.yaml"]) == _page()
+    expected_page = _page()
+    expected_page.pop("roles")
+    expected_page.pop("navigation")
+    assert yaml.safe_load(files["ui/pages/customers.yaml"]) == expected_page
     assert json.dumps(payload, sort_keys=True) == before
+
+
+def test_typed_custom_bundle_builds_runtime_route_manifest_and_registry(schema_model):
+    from tests.test_appgenerator_save_app_schema import _custom_route_bundle
+
+    output = _output()
+    output["custom_route_bundle"] = _custom_route_bundle()
+    # The declared output has no ui_index field; both save paths must derive it.
+    typed = schema_model.model_validate(output).model_dump(mode="json")
+    files = extract_code_file_map_from_payload(typed)
+    assert set(files) == {"ui/route_manifest.json", "ui/index.js", "ui/pages/custom/InvestorDealRoom.jsx"}
+    routes = json.loads(files["ui/route_manifest.json"])
+    assert routes["pages"][0]["path"] == "/deal-room"
+    assert "import InvestorDealRoom from './pages/custom/InvestorDealRoom';" in files["ui/index.js"]
+    assert "registerComponent('InvestorDealRoomPage', InvestorDealRoom" in files["ui/index.js"]
+    _validate_task_output_ownership(
+        _batch_config().batches[0], {**_task(), "owned_paths": list(files)}, typed,
+    )
+
+
+def _planned_custom_candidate(schema_model):
+    from tests.test_appgenerator_save_app_schema import _custom_route_bundle
+
+    output = _output()
+    output["custom_route_bundle"] = _custom_route_bundle()
+    output["custom_route_bundle"]["page_files"][0]["path"] = "ui/pages/custom/deal_room.jsx"
+    typed = schema_model.model_validate(output).model_dump(mode="json")
+    files = extract_code_file_map_from_payload(typed)
+    task = {**_task(), "task_id": "custom_pages", "owned_paths": list(files)}
+    plan = {"pages": [{"name": "Deal room", "route": "/deal-room", "ui_surface": "custom_react_page"}],
+            "build_tasks": [task]}
+    return typed, task, plan
+
+
+@pytest.mark.parametrize("stage", ["admission", "assembly"])
+@pytest.mark.parametrize("mutation", [None, "route", "extra_route", "wrong_file_binding", "missing_file"])
+def test_custom_plan_binding_closes_typed_candidates_at_both_owners(schema_model, stage, mutation):
+    typed, task, plan = _planned_custom_candidate(schema_model)
+    bundle = typed["custom_route_bundle"]
+    if mutation == "route":
+        bundle["route_manifest"][0]["path"] = "/invented"
+    elif mutation == "extra_route":
+        bundle["route_manifest"].append({**bundle["route_manifest"][0], "id": "invented", "path": "/invented"})
+    files = extract_code_file_map_from_payload(schema_model.model_validate(typed).model_dump(mode="json"))
+    if mutation == "wrong_file_binding":
+        files["ui/index.js"] = files["ui/index.js"].replace("./pages/custom/deal_room", "./pages/custom/other")
+        files["ui/pages/custom/other.jsx"] = "export default function Other() { return null; }"
+    elif mutation == "missing_file":
+        files.pop("ui/pages/custom/deal_room.jsx")
+    entries = [{"filename": path, "content": content} for path, content in files.items()]
+
+    def validate():
+        if stage == "admission":
+            return _normalize_owned_page_files_from_plan(entries, task=task, base_context={"app_build_plan": plan})
+        return _apply_planned_page_contracts(entries, plan)
+
+    if mutation:
+        with pytest.raises(ValueError, match="unapproved custom route|canonical page file|owned custom page"):
+            validate()
+    else:
+        assert {entry["filename"]: entry["content"] for entry in validate()} == files
+
+
+@pytest.mark.parametrize("stage", ["admission", "assembly"])
+@pytest.mark.parametrize("change_baseline_route", [False, True])
+@pytest.mark.parametrize("build_mode", ["revision", "initial"])
+def test_scoped_custom_revision_retains_only_unchanged_baseline_routes(schema_model, stage, change_baseline_route, build_mode):
+    typed, task, plan = _planned_custom_candidate(schema_model)
+    baseline_route = {**typed["custom_route_bundle"]["route_manifest"][0],
+                      "id": "existing", "path": "/existing", "component": "ExistingPage"}
+    baseline = {"ui/route_manifest.json": json.dumps({"pages": [baseline_route]})}
+    preserved = deepcopy(baseline_route)
+    if change_baseline_route:
+        preserved["component"] = "InvestorDealRoomPage"
+    typed["custom_route_bundle"]["route_manifest"].append(preserved)
+    files = extract_code_file_map_from_payload(schema_model.model_validate(typed).model_dump(mode="json"))
+    entries = [{"filename": path, "content": content} for path, content in files.items()]
+    context = {"app_build_plan": plan, "generated_files": baseline, "build_mode": build_mode}
+
+    def validate():
+        if stage == "admission":
+            return _normalize_owned_page_files_from_plan(entries, task=task, base_context=context)
+        return _apply_planned_page_contracts(entries, plan, context_variables=context)
+
+    if change_baseline_route or build_mode != "revision":
+        with pytest.raises(ValueError, match="unapproved custom route '/existing'"):
+            validate()
+    else:
+        assert {entry["filename"]: entry["content"] for entry in validate()} == files
+
+
+@pytest.mark.parametrize("pack_paths", [
+    frozenset({"ui/index.js"}), frozenset({"ui/route_manifest.json"}),
+    frozenset({"ui/index.js", "ui/route_manifest.json", "ui/pages/custom/deal_room.jsx"}),
+])
+def test_pack_filter_removes_derived_custom_registries_without_ui_index_field(schema_model, pack_paths):
+    typed, _, _ = _planned_custom_candidate(schema_model)
+    before = deepcopy(typed)
+    original = extract_code_file_map_from_payload(typed)
+    filtered, dropped = discard_pack_owned_outputs(typed, pack_paths)
+    assert set(dropped) == pack_paths
+    assert extract_code_file_map_from_payload(filtered) == {
+        path: content for path, content in original.items() if path not in pack_paths
+    }
+    assert typed == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("route,expected_status", [("/deal-room", "completed"), ("/invented", "failed")])
+async def test_detached_custom_worker_rejects_unapproved_route_before_admission(schema_model, route, expected_status):
+    typed, task, plan = _planned_custom_candidate(schema_model)
+    typed["custom_route_bundle"]["route_manifest"][0]["path"] = route
+
+    class Worker:
+        async def ask(self, message, **kwargs):
+            return SimpleNamespace(body=json.dumps(typed))
+
+    context = {"app_build_plan": plan, "app_task_batch_items": [task]}
+    async def execute():
+        await execute_task_batches_for_trigger(
+            workflow_name="AppGenerator", trigger_agent="AppPlanAgent", batches_config=_batch_config(),
+            agents={"WorkerAgent": Worker()}, context_variables=context, fresh_agents_per_task=False,
+        )
+
+    if route == "/invented":
+        with pytest.raises(RuntimeError, match="unapproved custom route"):
+            await execute()
+    else:
+        await execute()
+    assert context["app_task_batch_status"] == expected_status
+    results = context["app_task_batch_results"]
+    if route == "/invented":
+        assert "unapproved custom route" in json.dumps(results)
+        assert "custom_pages" not in results
+    else:
+        assert "custom_pages" in results
 
 
 @pytest.mark.parametrize("manifest", [False, "preserve existing", []])

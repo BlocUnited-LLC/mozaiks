@@ -9,6 +9,7 @@ deletions become scope violations instead of accepted changes.
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -180,3 +181,32 @@ def test_harvest_of_untouched_workspace_is_clean_and_unmodified(tmp_path: Path) 
     assert len(harvest.files) == len(_FILES)
     assert all(f.op == "update" and f.modified is False for f in harvest.files)
     assert harvest.total_content_bytes == sum(len(c.encode("utf-8")) for c in _FILES.values())
+
+
+@pytest.mark.skipif(os.name != "nt", reason="NTFS junction regression requires Windows")
+def test_harvest_rejects_directory_junction_without_reading_or_changing_target(tmp_path):
+    workspace = _workspace(tmp_path)
+    link = workspace.workspace_root / "app/ui/pages"
+    (link / "Dashboard.jsx").unlink()
+    link.rmdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    source = outside / "Dashboard.jsx"
+    source.write_bytes(b"EXTERNAL CONTENT MUST NOT ENTER HARVEST")
+    def quote(value):
+        return "'" + str(value).replace("'", "''") + "'"
+    subprocess.run([
+        "powershell", "-NoProfile", "-NonInteractive", "-Command",
+        f"New-Item -ItemType Junction -Path {quote(link)} -Target {quote(outside)} | Out-Null",
+    ], check=True, capture_output=True, text=True)
+    try:
+        assert link.is_junction()
+        harvest = harvest_coding_workspace(workspace)
+        assert not harvest.clean
+        assert any(v.path == "app/ui/pages" and v.kind == "symlink" for v in harvest.violations)
+        assert all("EXTERNAL CONTENT" not in (file.content or "") for file in harvest.files)
+        assert source.read_bytes() == b"EXTERNAL CONTENT MUST NOT ENTER HARVEST"
+    finally:
+        # Remove only the owned junction itself; its external target is untouched.
+        link.rmdir()
+    assert source.read_bytes() == b"EXTERNAL CONTENT MUST NOT ENTER HARVEST"

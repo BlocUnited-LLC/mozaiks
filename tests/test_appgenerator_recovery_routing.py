@@ -37,7 +37,7 @@ def _next(graph, source, **context):
 @pytest.mark.parametrize("status", ["partial", "completed", "failed", "running"])
 def test_user_reentry_with_execution_evidence_returns_to_validation(graph, participation, status):
     assert _next(
-        graph, "user", coding_participation=participation, interview_complete=False,
+        graph, "user", coding_participation=participation, interview_outcome="blocked",
         app_task_batch_status=status,
         app_task_batch_results={"_meta": {"evidence_version": 1, "status": status}},
     ) == "AppValidationAgent"
@@ -49,7 +49,7 @@ def test_user_reentry_with_execution_evidence_returns_to_validation(graph, parti
 ])
 def test_fresh_user_entry_keeps_participation_route(graph, evidence, participation, target):
     assert _next(
-        graph, "user", coding_participation=participation, interview_complete=False,
+        graph, "user", coding_participation=participation, interview_outcome="blocked",
         **evidence,
     ) == target
 
@@ -110,8 +110,10 @@ async def test_rejected_batch_correction_revalidates_and_selects_independent_art
                  bundle_repair_target="ModelAgent") == "ModelAgent"
     assert counts["task_reports_services"] == 2
     assert counts["task_reports_models"] == 1
+    # The validation gate commits the terminal outcome after checking all repair owners.
     assert _next(graph, "AppValidationAgent", app_task_recovery_status="idle",
-                 bundle_repair_status="blocked", bundle_repair_target=None) == "terminate"
+                 bundle_repair_status="blocked", bundle_repair_target=None,
+                 app_validation_ends_run=True) == "terminate"
 
 
 @pytest.mark.parametrize("owner,quality,status_key", [

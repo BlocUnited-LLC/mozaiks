@@ -100,11 +100,30 @@ strategies fail; static-only checks, skipped commands, and partially executed
 checks cannot produce a validated result. A saved draft identifies reviewable
 work, not a promoted application. Persistence failure cannot emit completion.
 
-The workbench uses `coding_worker.metadata.build_record_id` as its review target.
+Contract-surface regeneration uses that same worker finalizer and audit writer.
+Generation alone does not emit completion: `surface_result.status=success` is
+returned only after the finalizer validates and saves the draft; incomplete
+validation becomes `partial`, and failure becomes `failed`. Exceptions and
+cancellation in either generation or finalization emit the corresponding
+terminal audit event. Tracking remains best-effort; saved records own the facts.
+
+The workbench uses `coding_worker.metadata.build_record_id` or
+`surface_result.metadata.build_record_id` as its review target. Surface success
+also requires a passed validation result before replacing the editor/preview.
 Its **Review patch** action opens that saved candidate; it does not submit another
 coding request. Review, accept, and reject continue through the existing artifact
 lifecycle APIs. A validated coding attempt alone does not certify the entire
 application or replace independent runtime acceptance.
+
+AppReview revision responses open the same workbench with the original bundle
+and the inline result. They do not start another workflow or automatically
+accept the candidate. A failed or partial saved draft remains reviewable while
+the original bundle stays in the editor and preview.
+
+The opt-in ACP workspace harvester rejects symbolic links and Windows reparse
+points, including directory junctions, before traversal or file reads. A linked
+workspace root is rejected too. These are scope violations; linked targets are
+never harvested or deleted by the harvester.
 
 #### Current readiness and promotion boundaries
 

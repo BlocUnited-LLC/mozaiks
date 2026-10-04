@@ -142,10 +142,13 @@ async def test_view_retains_ag2_window_peer_labels_and_private_visibility():
     assert len(projected) == len(native) == 7
     assert type(projected[0]).__name__ == "CompactionSummary"
     payload = _provider_payload("chat", projected)
-    assert "[peer]: visible peer contribution" in str(payload)
+    peer_rows = [row for row in payload if "[peer]: visible peer contribution" in str(row.get("content"))]
+    assert len(peer_rows) == 1
+    assert peer_rows[0]["role"] == "user"
     assert "PRIVATE_OTHER_PARTICIPANT" not in str(projected)
     assert "old turn 0" not in str(payload)
     assert _has_assistant_question(payload)
+    assert sum(row.get("role") == "assistant" for row in payload) == 1
 
 
 @pytest.mark.asyncio
@@ -170,13 +173,17 @@ async def test_view_preserves_existing_responses_tool_events_and_message_metadat
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("provider", ["chat", "responses"])
 @pytest.mark.xfail(strict=True, raises=AssertionError, reason="AG2-WP-015: remove local view adapter when native provider history preserves assistant replies")
-async def test_upstream_native_assistant_history_retirement_gate(provider):
+async def test_upstream_native_assistant_history_retirement_gate():
     adapter = WorkflowAdapter()
     metadata = _metadata()
     projected = await adapter.default_view_policy(metadata, "host").project(
         [_packet("host", QUESTION)], participant_id="host", channel=metadata,
         render_envelope=adapter.render_envelope,
     )
-    assert _has_assistant_question(_provider_payload(provider, projected))
+    # This event-shape requirement applies to every provider mapper, including
+    # optional providers whose SDK is not installed in this test environment.
+    assert not any(isinstance(event, ModelMessage) for event in projected)
+    assert any(isinstance(event, ModelResponse) and event.message.content == QUESTION for event in projected)
+    for provider in ("chat", "responses"):
+        assert _has_assistant_question(_provider_payload(provider, projected))

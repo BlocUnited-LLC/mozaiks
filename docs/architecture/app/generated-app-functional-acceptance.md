@@ -244,8 +244,10 @@ lists it in `validation_evidence.skipped` and `skipped_checks` with that reason.
 It is neither completed nor failed. The aggregate acceptance remains `pending`
 with `passed: false` until required checks complete; an actual contract failure
 still makes it `failed`. A skipped smoke contributes no app-code repair
-diagnostic. Missing validation infrastructure must be restored and the check
-rerun against the candidate before it becomes ready. No accepted snapshot
+diagnostic. Missing validation infrastructure must be restored before a build
+can become ready. There is no persisted-draft revalidation endpoint yet: run
+the build workflow to produce a new validated artifact; this may use model calls.
+No accepted snapshot
 digest is issued for an unverified candidate.
 
 Source refinement follows the same distinction. Every selected, applicable

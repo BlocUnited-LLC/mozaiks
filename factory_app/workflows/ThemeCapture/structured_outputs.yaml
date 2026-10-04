@@ -19,7 +19,7 @@ models:
       outcome:
         type: literal
         values: [needs_input, ready]
-        description: Use needs_input only for missing critical branding evidence; ready when the confirmed evidence is sufficient.
+        description: Use needs_input whenever agent_message asks for a decision, preference or confirmation. Use ready only when sufficient evidence is agreed or delegated and no question remains unanswered.
 
   ColorVariant:
     type: model

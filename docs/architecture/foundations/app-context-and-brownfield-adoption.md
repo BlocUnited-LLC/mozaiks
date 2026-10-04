@@ -91,6 +91,11 @@ Discovery snapshots are evidence, not authority. The existing repo remains the
 source of truth until explicit transfer through staged patch, generated overlay,
 migration approval, or PR approval.
 
+The final discovery inventory must resolve every capability ID in the recorded,
+human-confirmed AI-accessible capability list. A missing approved reference fails
+before artifact persistence or current-version registration. Extra discovered
+capabilities may remain in the inventory; they do not enlarge the approved list.
+
 ## Brownfield Build Paths
 
 After discovery, the user chooses how Mozaiks should build with the existing

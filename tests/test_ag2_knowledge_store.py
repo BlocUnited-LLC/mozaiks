@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import pytest
@@ -97,6 +98,39 @@ async def test_mongo_ag2_knowledge_store_append_returns_utf8_byte_offset() -> No
     assert query["path"] == "/channels/wal"
     assert update_pipeline[0]["$set"]["content"]["$concat"][1] == "\nnext"
     assert options["upsert"] is True
+
+
+@pytest.mark.asyncio
+async def test_mongo_ag2_knowledge_store_preserves_concurrent_metadata_write_order() -> None:
+    """A slower pending-state write must not overwrite AG2's later active state."""
+    class DelayedCollection(_Collection):
+        def __init__(self) -> None:
+            super().__init__()
+            self.pending_started = asyncio.Event()
+            self.release_pending = asyncio.Event()
+            self.content: str | None = None
+
+        async def update_one(self, query: Any, update: Any, **kwargs: Any) -> None:
+            content = update["$set"]["content"]
+            if content == "pending":
+                self.pending_started.set()
+                await self.release_pending.wait()
+            self.content = content
+
+    collection = DelayedCollection()
+    store = MongoAG2KnowledgeStore(app_id="app-1", chat_id="chat-1", collection=collection)
+    path = "/channels/channel-1/metadata.json"
+    pending = asyncio.create_task(store.write(path, "pending"))
+    await collection.pending_started.wait()
+    active = asyncio.create_task(store.write(path, "active"))
+    try:
+        # Give the later write a scheduling turn while the earlier I/O is pending.
+        await asyncio.sleep(0)
+    finally:
+        collection.release_pending.set()
+        await asyncio.gather(pending, active)
+
+    assert collection.content == "active"
 
 
 @pytest.mark.asyncio
