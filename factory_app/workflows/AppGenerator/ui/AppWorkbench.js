@@ -68,6 +68,7 @@ const AppWorkbench = ({
   const [artifactReview, setArtifactReview] = useState(payload?.review || null);
   const [artifactReviewBusy, setArtifactReviewBusy] = useState(false);
   const [artifactReviewError, setArtifactReviewError] = useState(null);
+  const [artifactReviewNotice, setArtifactReviewNotice] = useState(null);
   const artifactValidationResult = artifactReview?.validation_result || null;
   const artifactValidationCommands = Array.isArray(artifactValidationResult?.command_results)
     ? artifactValidationResult.command_results
@@ -83,6 +84,9 @@ const AppWorkbench = ({
     payload?.artifact_version_id || payload?.artifactVersionId || null
   );
   const artifactReviewRef = useRef(null);
+  const reviewNotes = Array.isArray(artifactReview?.risk_notes)
+    ? artifactReview.risk_notes.filter(note => note && note !== artifactReview.validation_blocker)
+    : [];
   const codingResult = refinementOutput(refinementResult);
   const savedDraftId = codingResult?.metadata?.build_record_id;
   const confirmationOnly = payload?.stage === 'confirm';
@@ -111,6 +115,15 @@ const AppWorkbench = ({
   const artifactVersionId = activeArtifactVersionId;
   const buildRegistryId = payload?.build_registry_id;
   const artifactQuery = `?build_registry_id=${encodeURIComponent(buildRegistryId || '')}`;
+  const reviewIdentity = `${buildRegistryId || ''}/${reviewArtifactVersionId || ''}`;
+  const reviewIdentityRef = useRef(reviewIdentity);
+  reviewIdentityRef.current = reviewIdentity;
+  const selectionIdentity = JSON.stringify([buildRegistryId, payload?.artifact_version_id || payload?.artifactVersionId]);
+  const selectionRef = useRef({ identity: selectionIdentity });
+  if (selectionRef.current.identity !== selectionIdentity) selectionRef.current = { identity: selectionIdentity };
+  const refinementSelectionRef = useRef(null);
+  const currentWorkflowError = refinementSelectionRef.current === selectionRef.current ? workflowStartError : null;
+  const anotherVersionIsRefining = refinementStarting && refinementSelectionRef.current !== selectionRef.current;
   const artifactKind = payload?.artifact_kind || payload?.artifactKind || 'app_bundle';
   const artifactKey = payload?.artifact_key || payload?.artifactKey || artifactKind;
 
@@ -126,7 +139,7 @@ const AppWorkbench = ({
     validationStrategy,
     integrationTestResult,
     integrationPassed,
-  } = useAppValidationWorkbench(payload, config, codingResult);
+  } = useAppValidationWorkbench(payload, config, codingResult, activeArtifactVersionId);
 
   const {
     sandboxStatus,
@@ -143,11 +156,14 @@ const AppWorkbench = ({
     setActiveArtifactVersionId(payload?.artifact_version_id || payload?.artifactVersionId || null);
     setReviewArtifactVersionId(payload?.artifact_version_id || payload?.artifactVersionId || null);
     setRefinementResult(null);
+    setRefinementError(null);
   }, [payload?.artifact_version_id, payload?.artifactVersionId]);
 
   useEffect(() => {
-    setArtifactReview(payload?.review || null);
-  }, [payload?.review]);
+    if (reviewArtifactVersionId === (payload?.artifact_version_id || payload?.artifactVersionId || null)) {
+      setArtifactReview(payload?.review || null);
+    }
+  }, [payload?.review, payload?.artifact_version_id, payload?.artifactVersionId, reviewArtifactVersionId]);
 
   const headerText = useMemo(() => payload?.title || 'App Workbench', [payload]);
 
@@ -185,6 +201,7 @@ const AppWorkbench = ({
 
   useEffect(() => {
     let cancelled = false;
+    setArtifactReviewNotice(null);
     async function loadReview() {
       if (!reviewArtifactVersionId || !buildRegistryId) {
         if (!cancelled) {
@@ -271,7 +288,7 @@ const AppWorkbench = ({
   // inspectable even when validation prevents advancing the preview baseline.
   const handleRefinementResponse = (response) => {
     if (!response) {
-      if (workflowStartError) setRefinementError(workflowStartError);
+      if (currentWorkflowError) setRefinementError(currentWorkflowError);
       return;
     }
     const result = refinementOutput(response);
@@ -301,7 +318,6 @@ const AppWorkbench = ({
 
   const handleApplyScopedRefinement = async () => {
     setRefinementError(null);
-    setRefinementResult(null);
     if (!artifactVersionId) {
       setRefinementError('This build has not been saved as a refinable version yet. Wait for generation to finish, then try again.');
       return;
@@ -310,17 +326,18 @@ const AppWorkbench = ({
       setRefinementError('Describe the change you want first.');
       return;
     }
+    const selection = selectionRef.current;
+    refinementSelectionRef.current = selection;
     const response = await startWorkflow(
       null,
       {},
       { trigger_source: 'refinement', build_registry_id: buildRegistryId, trigger_payload: buildRefinementTriggerPayload() }
     );
-    handleRefinementResponse(response);
+    if (selectionRef.current === selection) handleRefinementResponse(response);
   };
 
   const handleThemeRefinement = async () => {
     setRefinementError(null);
-    setRefinementResult(null);
     if (!artifactVersionId) {
       setRefinementError('This build has not been saved as a refinable version yet. Wait for generation to finish, then try again.');
       return;
@@ -329,12 +346,14 @@ const AppWorkbench = ({
       setRefinementError('Describe the theme change you want first.');
       return;
     }
+    const selection = selectionRef.current;
+    refinementSelectionRef.current = selection;
     const response = await startWorkflow(
       null,
       {},
       { trigger_source: 'refinement', build_registry_id: buildRegistryId, trigger_payload: buildRefinementTriggerPayload(null, 'theme_config') }
     );
-    handleRefinementResponse(response);
+    if (selectionRef.current === selection) handleRefinementResponse(response);
   };
 
   const handleHarnessDecisionAction = async (action) => {
@@ -350,18 +369,24 @@ const AppWorkbench = ({
     }
     if (!action || !refinementRequest.trim() || !artifactVersionId) return;
     setRefinementError(null);
+    const selection = selectionRef.current;
+    refinementSelectionRef.current = selection;
     const response = await startWorkflow(
       null,
       {},
       { trigger_source: 'refinement', build_registry_id: buildRegistryId, trigger_payload: buildRefinementTriggerPayload({ action_id: action.action_id }) }
     );
-    handleRefinementResponse(response);
+    if (selectionRef.current === selection) handleRefinementResponse(response);
   };
 
   const handleArtifactReviewAction = async (action) => {
     if (!reviewArtifactVersionId || !action) return;
+    const identity = reviewIdentity;
+    const selection = selectionRef.current;
+    const isCurrent = () => selectionRef.current === selection && reviewIdentityRef.current === identity;
     setArtifactReviewBusy(true);
     setArtifactReviewError(null);
+    setArtifactReviewNotice(null);
     try {
       const response = await studioFetch(`/api/studio/build/artifacts/${encodeURIComponent(reviewArtifactVersionId)}/${action}${artifactQuery}`, {
         method: 'POST',
@@ -370,11 +395,20 @@ const AppWorkbench = ({
       if (!response.ok) {
         throw new Error(body.detail || `Artifact ${action} failed.`);
       }
-      setArtifactReview(body.review || null);
+      const confirmation = { accept: 'accepted', reject: 'rejected', promote: 'promoted' }[action];
+      if (body[confirmation] !== true) throw new Error(`Artifact ${action} was not confirmed. Refresh the review before retrying.`);
+      if (isCurrent()) {
+        setArtifactReview(body.review || null);
+        setArtifactReviewNotice(action === 'promote'
+          ? body.restart_required
+            ? 'Version activated. Restart the app to load this version.'
+            : 'Version activated.'
+          : action === 'accept' ? 'Draft accepted. Activate it when you are ready.' : 'Draft rejected.');
+      }
     } catch (error) {
-      setArtifactReviewError(error instanceof Error ? error.message : `Artifact ${action} failed.`);
+      if (isCurrent()) setArtifactReviewError(error instanceof Error ? error.message : `Artifact ${action} failed.`);
     } finally {
-      setArtifactReviewBusy(false);
+      if (isCurrent()) setArtifactReviewBusy(false);
     }
   };
 
@@ -489,7 +523,7 @@ const AppWorkbench = ({
               disabled={!canApplyScopedRefinement || refinementStarting}
               onClick={handleApplyScopedRefinement}
             >
-              {refinementStarting ? 'Applying…' : 'Apply change'}
+              {anotherVersionIsRefining ? 'Working on another version…' : refinementStarting ? 'Applying…' : 'Apply change'}
             </button>
             <button
               type="button"
@@ -506,9 +540,9 @@ const AppWorkbench = ({
             </div>
           </div>
 
-          {(refinementError || workflowStartError) && (
+          {(refinementError || currentWorkflowError) && (
             <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
-              {refinementError || workflowStartError}
+              {refinementError || currentWorkflowError}
             </div>
           )}
 
@@ -537,7 +571,7 @@ const AppWorkbench = ({
               <HarnessDecisionCard
                 decision={refinementResult.harness_decision}
                 busy={refinementStarting}
-                error={refinementError || workflowStartError}
+                error={refinementError || currentWorkflowError}
                 onAction={handleHarnessDecisionAction}
                 className="border-white/10 bg-black/20"
               />
@@ -547,6 +581,7 @@ const AppWorkbench = ({
 
         <section ref={artifactReviewRef} tabIndex={-1} aria-label="Artifact review">
         {artifactReviewBusy && <p role="status" className="text-xs text-[var(--color-text-muted)]">Loading artifact review…</p>}
+        {artifactReviewNotice && <p role="status" className="mb-3 text-sm text-emerald-200">{artifactReviewNotice}</p>}
         {artifactReviewError && (
           <div role="alert" className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
             {artifactReviewError}
@@ -557,7 +592,13 @@ const AppWorkbench = ({
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="text-sm font-semibold text-white">Review this draft</div>
-                <div className="mt-1 text-xs text-[var(--color-text-muted)]">Accept the draft when you are satisfied. Activation is a separate step.</div>
+                <div className="mt-1 text-xs text-[var(--color-text-muted)]">
+                  {artifactReview.can_accept
+                    ? 'Accept the draft when you are satisfied. Activation is a separate step.'
+                    : artifactReview.can_promote
+                      ? 'Review this version before making it the active app.'
+                      : 'Review the saved version and its checks.'}
+                </div>
               </div>
               <div className="text-[10px] text-[var(--color-text-muted)]">
                 {artifactReview.changed_file_count || 0} changed file{artifactReview.changed_file_count === 1 ? '' : 's'}
@@ -596,6 +637,15 @@ const AppWorkbench = ({
               <div className="mt-3 rounded-xl border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs text-amber-100">
                 {artifactReview.validation_blocker}
               </div>
+            )}
+
+            {reviewNotes.length > 0 && (
+              <details className="mt-3 text-xs text-[var(--color-text-muted)]">
+                <summary className="cursor-pointer text-amber-200">Review notes ({reviewNotes.length})</summary>
+                <ul className="mt-2 space-y-2 break-words [overflow-wrap:anywhere]">
+                  {reviewNotes.map((note, index) => <li key={index}>{note}</li>)}
+                </ul>
+              </details>
             )}
 
             {(artifactValidationCommands.length > 0 || artifactValidationFallbacks.length > 0) && (

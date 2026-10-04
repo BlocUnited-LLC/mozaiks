@@ -330,8 +330,15 @@ the shared pending harness decision UI before launching any downstream workflow.
 
 The App Workbench opens on the draft preview and change request. Code, raw
 diffs, validation commands, and export tools remain available through explicit
-controls; accepting and activating a draft remain separate, server-authorized
-actions. Delivery confirmation remains visible when the workflow requires it.
+controls. Refinement acceptance and activation remain separate, server-authorized
+actions. A genesis artifact can already be the current version; the user still
+reviews it and explicitly activates it. Delivery confirmation remains visible
+when the workflow requires it.
+Build and integration warning details start collapsed, with their count visible;
+failed and skipped checks remain visible. Expanding integration warnings reveals
+the full list without changing the validation result or promotion gate.
+Review notes, including text-diff omissions, remain available separately from
+the always-visible validation blocker.
 A failed preview attempt stops status observation and keeps its original error
 until an explicit retry, stop, or version change. Preview errors are shown as
 collapsed plain-text details. The chat typing indicator follows current loading

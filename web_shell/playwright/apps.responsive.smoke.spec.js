@@ -912,6 +912,33 @@ function buildMetricDetailPayload(appId, metricId) {
   };
 }
 
+function savedBuildBundle(versionId = 'ver-17') {
+  const pending = versionId === 'ver-16';
+  return {
+    app_id: APP_ID,
+    artifact_version_id: versionId,
+    build_family: 'app_bundle',
+    build_key: 'app_bundle',
+    workbench_ui: { component: 'AppWorkbench', workflow_name: 'AppGenerator' },
+    workbench: {
+      app_id: appConfig.appId, target_app_id: APP_ID, build_registry_id: 'demo_campaign_revision',
+      artifact_version_id: versionId, build_family: 'app_bundle', build_key: 'app_bundle',
+      title: `Saved build ${versionId}`,
+      generated_files: { 'README.md': `# Saved fixture ${versionId}` },
+      app_validation_status: pending ? 'pending' : 'passed',
+      app_validation_strategy_used: 'local',
+      validation_result: { validation_status: pending ? 'pending' : 'passed', validation_strategy: 'local' },
+      integration_test_result: { passed: !pending, checks: [], failed_tests: [] },
+    },
+    review: {
+      lifecycle_status: 'draft', validation_status: pending ? 'pending' : 'passed', review_status: pending ? 'pending' : 'validated',
+      can_accept: !pending, can_reject: true, can_promote: false, changed_file_count: 1,
+      validation_blocker: pending ? 'Required runtime checks have not passed.' : null,
+      risk_notes: ['Review the saved app before activation.'],
+    },
+  };
+}
+
 async function mockStudioApis(page) {
   await page.route('**/api/shell-config', async (route) => {
     await route.fulfill({
@@ -1069,6 +1096,15 @@ async function mockStudioApis(page) {
       contentType: 'application/json',
       body: JSON.stringify(payload.buildHistory),
     });
+  });
+
+  await page.route('**/api/studio/build/artifacts/*/bundle?**', async (route) => {
+    const versionId = new URL(route.request().url()).pathname.split('/').at(-2);
+    await route.fulfill({ json: savedBuildBundle(versionId) });
+  });
+  await page.route('**/api/studio/build/artifacts/*/review?**', async (route) => {
+    const versionId = new URL(route.request().url()).pathname.split('/').at(-2);
+    await route.fulfill({ json: { review: savedBuildBundle(versionId).review } });
   });
 
   await page.route('**/api/studio/integrations?**', async (route) => {
@@ -1882,14 +1918,42 @@ test('app access route stays responsive across desktop and mobile widths', async
   }
 });
 
-test('app build review route stays responsive across desktop and mobile widths', async ({ page }) => {
+test.describe('saved artifact review', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.route('**/api/modules/user_onboarding/get_onboarding_status**', route => route.fulfill({
+      json: buildOnboardingStatusPayload({ dismissed: true }),
+    }));
+  });
+
+test('app build review route stays responsive across desktop and mobile widths', async ({ page }, testInfo) => {
+  const mutations = [];
+  page.on('request', request => {
+    if (request.method() === 'POST' && /\/api\/(workflows|artifacts|sandbox|studio\/build)/.test(request.url())) mutations.push(request.url());
+  });
   await page.goto(`/apps/${APP_ID}/activity`);
   const main = page.locator('main');
 
   await expect(main.getByRole('heading', { name: 'Build Review', exact: true })).toBeVisible();
+  await expect(main.getByText('Saved build ver-17', { exact: true })).toBeVisible();
+  await expect(main.getByRole('button', { name: 'Start draft preview', exact: true })).toBeVisible();
+  await expect(main.getByRole('button', { name: 'Accept artifact', exact: true })).toBeVisible();
+  await expect(main.getByRole('button', { name: /Download Bundle|Confirm app bundle/ })).toHaveCount(0);
+  await expect(main.getByRole('heading', { name: 'Build versions' })).toBeHidden();
+  expect(mutations).toEqual([]);
+  await expectNoHorizontalOverflow(page);
+  await page.screenshot({ path: testInfo.outputPath('saved-build-review.png'), fullPage: true });
+
+  await main.getByLabel('Opened version', { exact: true }).selectOption('ver-16');
+  await expect(main.getByText('Saved build ver-16', { exact: true })).toBeVisible();
+  await expect(main.getByText('Saved build ver-17', { exact: true })).toHaveCount(0);
+  await expect(main.getByText('Required runtime checks have not passed.', { exact: true })).toBeVisible();
+  await expect(main.getByRole('button', { name: 'Accept artifact', exact: true })).toHaveCount(0);
+  await expect(main.getByRole('button', { name: 'Activate this draft', exact: true })).toHaveCount(0);
+  expect(mutations).toEqual([]);
+
+  await main.getByText('Build history and preservation reports', { exact: true }).click();
   await expect(main.getByRole('heading', { name: 'Build versions' })).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Selected artifact review' })).toBeVisible();
-  await expect(main.getByText('Build artifact').first()).toBeVisible();
+  await expect(main.getByText('No carry-forward preservation report for this build.').first()).toBeVisible();
   await expectNoHorizontalOverflow(page);
 
   const viewport = page.viewportSize();
@@ -1900,6 +1964,242 @@ test('app build review route stays responsive across desktop and mobile widths',
   } else {
     await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeHidden();
   }
+});
+
+test('saved build review retries errors and starts preview only on explicit action', async ({ page }) => {
+  let attempts = 0;
+  const previewRequests = [];
+  await page.route('**/api/studio/build/artifacts/ver-17/bundle?**', async route => {
+    attempts += 1;
+    expect(new URL(route.request().url()).searchParams.get('build_registry_id')).toBe('demo_campaign_revision');
+    await route.fulfill(attempts === 1
+      ? { status: 503, json: { detail: 'Saved archive temporarily unavailable.' } }
+      : { json: savedBuildBundle() });
+  });
+  await page.route('**/api/artifacts/*/sandbox?**', async route => {
+    previewRequests.push(route.request().url());
+    await route.fulfill({ status: 409, json: { detail: 'Preview fixture does not provision a sandbox.' } });
+  });
+  await page.goto(`/apps/${APP_ID}/activity`);
+  await expect(page.getByText('Saved archive temporarily unavailable.', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Retry opening build' }).click();
+  await expect(page.getByText('Saved build ver-17', { exact: true })).toBeVisible();
+  expect(attempts).toBe(2);
+  expect(previewRequests).toEqual([]);
+  await page.getByRole('button', { name: 'Start draft preview', exact: true }).click();
+  await page.getByText('Preview details', { exact: true }).click();
+  await expect(page.getByText('Preview fixture does not provision a sandbox.', { exact: true })).toBeVisible();
+  expect(previewRequests).toHaveLength(1);
+  expect(new URL(previewRequests[0]).pathname).toBe('/api/artifacts/ver-17/sandbox');
+  expect(new URL(previewRequests[0]).searchParams.get('build_registry_id')).toBe('demo_campaign_revision');
+});
+
+for (const mismatch of ['version', 'app', 'registry']) {
+  test(`saved build review rejects a mismatched ${mismatch} response`, async ({ page }) => {
+    await page.route('**/api/studio/build/artifacts/ver-17/bundle?**', async route => {
+      const body = savedBuildBundle();
+      if (mismatch === 'version') body.artifact_version_id = 'other-version';
+      if (mismatch === 'app') body.workbench.target_app_id = 'other-app';
+      if (mismatch === 'registry') body.workbench.build_registry_id = 'other-registry';
+      await route.fulfill({ json: body });
+    });
+    await page.goto(`/apps/${APP_ID}/activity`);
+    await expect(page.getByText('The saved build response does not match the selected app and version.', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Start draft preview', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Accept artifact', exact: true })).toHaveCount(0);
+  });
+}
+
+test('saved build review ignores a late response from an earlier selection', async ({ page }) => {
+  let releaseOld;
+  let oldRequested = false;
+  const oldGate = new Promise(resolve => { releaseOld = resolve; });
+  await page.route('**/api/studio/build/artifacts/ver-16/bundle?**', async route => {
+    oldRequested = true;
+    await oldGate;
+    await route.fulfill({ json: savedBuildBundle('ver-16') }).catch(() => {});
+  });
+  try {
+    await page.goto(`/apps/${APP_ID}/activity`);
+    await expect(page.getByText('Saved build ver-17', { exact: true })).toBeVisible();
+    await page.getByLabel('Opened version', { exact: true }).selectOption('ver-16');
+    await expect.poll(() => oldRequested).toBe(true);
+    await expect(page.getByText('Saved build ver-17', { exact: true })).toBeHidden();
+    await page.getByLabel('Opened version', { exact: true }).selectOption('ver-17');
+    await expect(page.getByText('Saved build ver-17', { exact: true })).toBeVisible();
+    releaseOld();
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await expect(page.getByText('Saved build ver-16', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('Saved build ver-17', { exact: true })).toBeVisible();
+  } finally { releaseOld(); }
+});
+
+test('saved build review retains preview ownership when switching versions', async ({ page }) => {
+  const commands = [];
+  await page.route('**/preview-fixture', route => route.fulfill({ contentType: 'text/html', body: '<h1>Isolated preview fixture</h1>' }));
+  await page.routeWebSocket('**/ws/sandbox/**', socket => socket.close());
+  await page.route('**/api/artifacts/*/sandbox?**', async route => {
+    const versionId = new URL(route.request().url()).pathname.split('/').at(-2);
+    commands.push(`allocate:${versionId}`);
+    await route.fulfill({ json: { sandboxId: `sandbox-${versionId}` } });
+  });
+  await page.route('**/api/sandbox/**', async route => {
+    const parts = new URL(route.request().url()).pathname.split('/');
+    const action = parts.at(-1);
+    const sandboxId = parts.at(-2);
+    commands.push(`${action}:${sandboxId}`);
+    await route.fulfill({ json: action === 'start' || action === 'status'
+      ? { status: 'running', previewUrl: new URL('/preview-fixture', page.url()).href }
+      : { status: action === 'stop' ? 'stopped' : 'synced' } });
+  });
+  await page.goto(`/apps/${APP_ID}/activity`);
+  await page.getByRole('button', { name: 'Start draft preview', exact: true }).click();
+  await expect(page.getByRole('link', { name: 'Open draft preview', exact: true })).toBeVisible();
+  expect(commands).toEqual(['allocate:ver-17', 'sync:sandbox-ver-17', 'start:sandbox-ver-17']);
+  await page.getByLabel('Opened version', { exact: true }).selectOption('ver-16');
+  await expect(page.getByText('Saved build ver-16', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Start draft preview', exact: true }).click();
+  await expect(page.getByRole('link', { name: 'Open draft preview', exact: true })).toBeVisible();
+  expect(commands.filter(command => !command.startsWith('status:'))).toEqual([
+    'allocate:ver-17', 'sync:sandbox-ver-17', 'start:sandbox-ver-17',
+    'stop:sandbox-ver-17', 'allocate:ver-16', 'sync:sandbox-ver-16', 'start:sandbox-ver-16',
+  ]);
+});
+
+test('saved build review preserves candidate source through a failed selection and parent refresh', async ({ page }) => {
+  let failOtherVersion = true;
+  let triggerCount = 0;
+  let releaseNextRefinement;
+  const nextRefinementGate = new Promise(resolve => { releaseNextRefinement = resolve; });
+  const receipts = [];
+  const candidateReview = {
+    ...savedBuildBundle().review, coding_summary: 'Candidate A2 review evidence',
+    can_accept: true, can_promote: false, lifecycle_status: 'draft',
+  };
+  const parentReview = { ...savedBuildBundle().review, can_accept: false, can_promote: true, lifecycle_status: 'current' };
+  const acceptedVersions = [];
+  await page.routeWebSocket('**/ws/sandbox/**', socket => socket.close());
+  await page.route('**/api/studio/build/artifacts/ver-17/bundle?**', route => route.fulfill({ json: { ...savedBuildBundle(), review: parentReview } }));
+  await page.route('**/api/studio/build/artifacts/ver-17/review?**', route => route.fulfill({ json: { review: parentReview } }));
+  await page.route('**/api/studio/build/artifacts/candidate-a2/review?**', route => route.fulfill({ json: { review: candidateReview } }));
+  await page.route('**/api/studio/build/artifacts/*/accept?**', async route => {
+    acceptedVersions.push(new URL(route.request().url()).pathname.split('/').at(-2));
+    await route.fulfill({ json: { accepted: true, review: { ...candidateReview, can_accept: false, can_promote: true, lifecycle_status: 'current' } } });
+  });
+  await page.route('**/api/workflows/trigger', async route => {
+    triggerCount += 1;
+    if (triggerCount > 1) {
+      await nextRefinementGate;
+      return route.fulfill({ status: 503, json: { detail: 'Next refinement unavailable.' } });
+    }
+    return route.fulfill({ json: {
+      execution_mode: 'coding_worker', coding_worker: {
+        status: 'validated', metadata: { build_record_id: 'candidate-a2' },
+        applied_files: { 'README.md': '# Validated candidate A2' },
+        validation_result: { validation_status: 'passed', validation_strategy: 'docker', app_bundle_acceptance_result: { passed: true }, app_validation_result: { validation_status: 'passed', validation_strategy: 'docker' } },
+      },
+    } });
+  });
+  await page.route('**/api/studio/build/artifacts/ver-16/bundle?**', route => route.fulfill(failOtherVersion
+    ? { status: 503, json: { detail: 'Version B temporarily unavailable.' } }
+    : { json: savedBuildBundle('ver-16') }));
+  await page.route('**/api/artifacts/*/sandbox?**', async route => {
+    const versionId = new URL(route.request().url()).pathname.split('/').at(-2);
+    receipts.push({ action: 'allocate', versionId });
+    await route.fulfill({ json: { sandboxId: `sandbox-${versionId}` } });
+  });
+  await page.route('**/api/sandbox/**', async route => {
+    const action = new URL(route.request().url()).pathname.split('/').at(-1);
+    if (action === 'sync') receipts.push({ action, files: route.request().postDataJSON().files });
+    // Observe the real hook's source/identity binding without provisioning a preview.
+    await route.fulfill(action === 'start'
+      ? { status: 409, json: { detail: 'Preview fixture does not provision a sandbox.' } }
+      : { json: { status: action === 'stop' ? 'stopped' : 'synced' } });
+  });
+  await page.goto(`/apps/${APP_ID}/activity`);
+  await page.getByPlaceholder('Describe the change').fill('Make candidate A2.');
+  await page.getByRole('button', { name: 'Apply change', exact: true }).click();
+  await expect(page.getByText('Draft validated and saved for review.', { exact: true })).toBeVisible();
+  await expect(page.getByText('Version candidate-a2', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Candidate A2 review evidence', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Accept artifact', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Activate this draft', exact: true })).toHaveCount(0);
+  await expect(page.getByText('Strategy: docker', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Apply change', exact: true }).click();
+  try {
+    await expect.poll(() => triggerCount).toBe(2);
+    await expect(page.getByText('Strategy: docker', { exact: true })).toBeVisible();
+    await expect(page.getByText('Draft validated and saved for review.', { exact: true })).toBeVisible();
+  } finally { releaseNextRefinement(); }
+  await expect(page.getByText('Next refinement unavailable.', { exact: true })).toBeVisible();
+  await expect(page.getByText('Strategy: docker', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Start draft preview', exact: true }).click();
+  await expect.poll(() => receipts.filter(item => item.action === 'sync').length).toBe(1);
+  await page.getByLabel('Opened version', { exact: true }).selectOption('ver-16');
+  await expect(page.getByText('Version B temporarily unavailable.', { exact: true })).toBeVisible();
+  await page.getByLabel('Opened version', { exact: true }).selectOption('ver-17');
+  await expect(page.getByText('Saved build ver-17', { exact: true })).toBeVisible();
+  await expect(page.getByText('Version candidate-a2', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Candidate A2 review evidence', { exact: true })).toBeVisible();
+  await expect(page.getByText('Strategy: docker', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Accept artifact', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Activate this draft', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Start draft preview', exact: true }).click();
+  await expect.poll(() => receipts.filter(item => item.action === 'sync').length).toBe(2);
+  expect(receipts.filter(item => item.action === 'allocate').map(item => item.versionId)).toEqual(['candidate-a2', 'candidate-a2']);
+  expect(receipts.filter(item => item.action === 'sync').map(item => item.files)).toEqual([
+    [{ path: 'README.md', content: '# Validated candidate A2' }],
+    [{ path: 'README.md', content: '# Validated candidate A2' }],
+  ]);
+  await page.getByRole('button', { name: 'Accept artifact', exact: true }).click();
+  await expect.poll(() => acceptedVersions).toEqual(['candidate-a2']);
+
+  failOtherVersion = false;
+  await page.getByLabel('Opened version', { exact: true }).selectOption('ver-16');
+  await expect(page.getByText('Version ver-16', { exact: true }).first()).toBeVisible();
+  await page.getByRole('button', { name: 'Start draft preview', exact: true }).click();
+  await expect.poll(() => receipts.filter(item => item.action === 'sync').length).toBe(3);
+  expect(receipts.filter(item => item.action === 'allocate').at(-1).versionId).toBe('ver-16');
+  expect(receipts.filter(item => item.action === 'sync').at(-1).files).toEqual([{ path: 'README.md', content: '# Saved fixture ver-16' }]);
+});
+
+for (const actionLabel of ['Apply change', 'Redesign theme']) {
+  test(`saved build review ignores an old ${actionLabel} result after selection changes`, async ({ page }) => {
+    let releaseResponse;
+    let triggerRequested = false;
+    const responseGate = new Promise(resolve => { releaseResponse = resolve; });
+    const reviewRequests = [];
+    page.on('request', request => {
+      if (/\/api\/studio\/build\/artifacts\/[^/]+\/review/.test(request.url())) reviewRequests.push(request.url());
+    });
+    await page.route('**/api/workflows/trigger', async route => {
+      triggerRequested = true;
+      expect(route.request().postDataJSON().trigger_payload.refinement_request.artifact_version_id).toBe('ver-17');
+      await responseGate;
+      await route.fulfill({ json: {
+        execution_mode: 'coding_worker', coding_worker: {
+          status: 'validated', metadata: { build_record_id: 'old-selection-candidate' },
+          applied_files: { 'README.md': 'Old selection candidate files' },
+          validation_result: { validation_status: 'passed', app_bundle_acceptance_result: { passed: true }, app_validation_result: { validation_status: 'passed' } },
+        },
+      } });
+    });
+    try {
+      await page.goto(`/apps/${APP_ID}/activity`);
+      await page.getByPlaceholder('Describe the change').fill('Update the opened draft.');
+      await page.getByRole('button', { name: actionLabel, exact: true }).click();
+      await expect.poll(() => triggerRequested).toBe(true);
+      await page.getByLabel('Opened version', { exact: true }).selectOption('ver-16');
+      await expect(page.getByText('Saved build ver-16', { exact: true })).toBeVisible();
+      releaseResponse();
+      await expect(page.getByRole('button', { name: 'Apply change', exact: true })).toBeEnabled();
+      await expect(page.getByText('Draft validated and saved for review.', { exact: true })).toHaveCount(0);
+      await expect(page.getByText('Version ver-16', { exact: true }).first()).toBeVisible();
+      expect(reviewRequests.some(url => url.includes('old-selection-candidate'))).toBe(false);
+    } finally { releaseResponse(); }
+  });
+}
+
 });
 
 test('mobile app Studio navigation keeps route transitions stable', async ({ page }) => {

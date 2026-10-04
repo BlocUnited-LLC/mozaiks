@@ -50,7 +50,7 @@ const pickDefaultFile = (filesMap) => {
   return keys.sort((a, b) => a.localeCompare(b))[0];
 };
 
-export function useAppValidationWorkbench(payload, themeConfig, candidateResult = null) {
+export function useAppValidationWorkbench(payload, themeConfig, candidateResult = null, activeArtifactVersionId = null) {
   const workbench = useMemo(() => {
     if (!payload || typeof payload !== 'object') return {};
     return payload.workbench && typeof payload.workbench === 'object' ? payload.workbench : payload;
@@ -68,7 +68,13 @@ export function useAppValidationWorkbench(payload, themeConfig, candidateResult 
   }, [workbench]);
 
   const [filesMap, setFilesMap] = useState(initialFiles);
-  useEffect(() => setFilesMap(initialFiles), [initialFiles]);
+  const sourceArtifactVersionId = payload?.artifact_version_id || payload?.artifactVersionId || null;
+  const showingSourceArtifact = activeArtifactVersionId === sourceArtifactVersionId;
+  // A refreshed parent payload must not overwrite files belonging to an active
+  // refinement candidate. A newly opened version resumes ordinary hydration.
+  useEffect(() => {
+    if (showingSourceArtifact) setFilesMap(initialFiles);
+  }, [initialFiles, showingSourceArtifact]);
 
   // A refinement carries evidence for its own exact snapshot. Never fill gaps
   // from the parent bundle, even while the editor keeps that previous version.

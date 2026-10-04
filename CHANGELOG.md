@@ -324,10 +324,18 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- App-owned home pages now render at `/` through the existing authentication
+  guard; apps without a declared home page retain the chat fallback.
+- Saved app builds open the shared preview, refinement and review workbench
+  directly from Studio. Version switches preserve preview cleanup and reject
+  late results from a previously opened version. Parent refreshes preserve a
+  newer draft's files and review evidence.
 - Studio drafts show the registered app's current build and approved description.
   The workbench opens on preview, keeps required continuation and review actions
   visible, and offers code, downloads, and diagnostics on demand. Historical chat
   messages no longer keep the typing indicator active after the run pauses.
+  Warning details and review notes are expandable; failed and skipped checks
+  remain visible, and complete warning lists stay accessible.
 - Draft preview dependency installation works with the disposable image's Debian
   Python, retaining the sandbox user and pinned runtime dependency constraints.
   Failed previews preserve their original error until retry or dismissal.

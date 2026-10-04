@@ -33,7 +33,10 @@ async function fixture(t) {
       registerComponent('BrownfieldPathSelector', BrownfieldPathSelector);
       registerComponent('BrownfieldRepoInput', BrownfieldRepoInput);
       registerComponent('ChatPage', () => <h1>Workflow opened</h1>);
-      createRoot(document.getElementById('root')).render(<BrowserRouter><RouteRenderer isAuthenticated /></BrowserRouter>);
+      registerComponent('FocusPage', () => <h1>Focus app</h1>);
+      registerComponent('LoginPage', () => <h1>Sign in</h1>);
+      registerComponent('DashboardPage', () => <h1>Dashboard app</h1>);
+      createRoot(document.getElementById('root')).render(<BrowserRouter><RouteRenderer isAuthenticated={window.fixtureIsAuthenticated !== false} /></BrowserRouter>);
     `, resolveDir: shell, loader: 'jsx' },
     bundle: true, write: false, format: 'esm', jsx: 'automatic',
     loader: { '.js': 'jsx', '.jpg': 'dataurl', '.png': 'dataurl', '.svg': 'dataurl' },
@@ -49,7 +52,7 @@ async function fixture(t) {
       builder.onResolve({ filter: /(?:NavigationProvider|ChatUIContext|layout\/(?:Header|Footer|MobileBottomBar)|styles\/useTheme|styles\/brandAssets)$/ }, args => ({ path: args.path, namespace: 'host-context' }));
       builder.onLoad({ filter: /.*/, namespace: 'host-context' }, args => ({ contents:
         args.path.endsWith('NavigationProvider')
-          ? `const entry=${JSON.stringify({ ...entry, meta: { appShell: false } })};entry.transition=window.fixtureEntryTransition||entry.transition;const navigation={pages:[entry],loading:false,navigation:{}};export const useNavigation=()=>navigation;`
+          ? `const entry=${JSON.stringify({ ...entry, meta: { appShell: false } })};entry.transition=window.fixtureEntryTransition||entry.transition;const navigation=window.fixtureNavigation||{pages:[entry],loading:false,navigation:{}};export const useNavigation=()=>navigation;`
           : args.path.endsWith('ChatUIContext')
             ? `const context={user:{id:'owner',app_id:'studio-host'},config:{appId:'studio-host'},auth:{getAccessToken:()=> 'fixture-token'},loading:false};export const useChatUI=()=>context;`
             : args.path.endsWith('useTheme') ? 'export const useTheme=()=>({});'
@@ -75,7 +78,10 @@ async function fixture(t) {
   t.after(() => browser.close());
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
 
-  return async (subtest, { createFailure = false, resolveFailure = false, holdCreate = false, holdResolve = false, entryTransition = null } = {}) => {
+  return async (subtest, {
+    createFailure = false, resolveFailure = false, holdCreate = false, holdResolve = false,
+    entryTransition = null, navigation = null, isAuthenticated = true, startPath = '/create',
+  } = {}) => {
     const page = await browser.newPage({ reducedMotion: 'reduce' });
     subtest.after(() => page.close());
     const calls = { creates: [], resolves: [], errors: [], unexpected: [] };
@@ -83,7 +89,11 @@ async function fixture(t) {
     let releaseResolve;
     const creationGate = holdCreate ? new Promise(resolve => { releaseCreate = resolve; }) : Promise.resolve();
     const resolutionGate = holdResolve ? new Promise(resolve => { releaseResolve = resolve; }) : Promise.resolve();
-    await page.addInitScript(value => { window.fixtureEntryTransition = value; }, entryTransition);
+    await page.addInitScript(value => {
+      window.fixtureEntryTransition = value.entryTransition;
+      window.fixtureNavigation = value.navigation;
+      window.fixtureIsAuthenticated = value.isAuthenticated;
+    }, { entryTransition, navigation, isAuthenticated });
     page.on('pageerror', error => calls.errors.push(error.message));
     subtest.after(() => {
       assert.deepEqual(calls.errors, []);
@@ -93,7 +103,7 @@ async function fixture(t) {
       const request = route.request();
       const url = new URL(request.url());
       const json = (body, status = 200) => route.fulfill({ status, json: body });
-      if (url.origin === baseUrl && ['/create', '/fixture.js'].includes(url.pathname)) return route.continue();
+      if (url.origin === baseUrl && (request.isNavigationRequest() || url.pathname === '/fixture.js')) return route.continue();
       if (url.origin !== baseUrl) { calls.unexpected.push(request.url()); return route.abort(); }
       if (url.pathname === '/api/studio/apps' && request.method() === 'POST') {
         calls.creates.push({ body: request.postDataJSON(), headers: request.headers() });
@@ -128,14 +138,70 @@ async function fixture(t) {
       calls.unexpected.push(request.url());
       return route.abort();
     });
-    await page.goto(`${baseUrl}/create`);
-    if (!entryTransition) await expect(page.getByRole('heading', { name: 'Choose Your App Journey' })).toBeVisible();
+    await page.goto(`${baseUrl}${startPath}`);
+    if (!entryTransition && !navigation) await expect(page.getByRole('heading', { name: 'Choose Your App Journey' })).toBeVisible();
     return { page, calls, releaseCreate, releaseResolve };
   };
 }
 
 const greenfield = page => page.getByRole('button', { name: /Build Something New/ });
 const brownfield = page => page.getByRole('button', { name: /Existing App/ });
+
+test('declared app root routes preserve shell authentication and chat fallbacks', async t => {
+  const open = await fixture(t);
+  const rootPage = { path: '/', component: 'FocusPage', meta: { appShell: false } };
+  const loginPage = { path: '/login', component: 'LoginPage', meta: { appShell: false, requiresAuth: false } };
+  const navigation = { pages: [rootPage, loginPage], loading: false, landing_spot: '/', navigation: {} };
+
+  await t.test('an authenticated declared root renders its component and retains core chat paths', async subtest => {
+    const { page } = await open(subtest, { navigation, startPath: '/' });
+    await expect(page.getByRole('heading', { name: 'Focus app' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Workflow opened' })).toHaveCount(0);
+    for (const corePath of ['/chat/example/workflow', '/app/example/workflow']) {
+      await page.goto(new URL(corePath, page.url()).href);
+      await expect(page.getByRole('heading', { name: 'Workflow opened' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Focus app' })).toHaveCount(0);
+    }
+  });
+
+  await t.test('a declared root requires auth by default and preserves the return path', async subtest => {
+    const { page } = await open(subtest, { navigation, isAuthenticated: false, startPath: '/?view=timer#focus' });
+    await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
+    assert.equal(new URL(page.url()).pathname, '/login');
+    assert.equal(new URL(page.url()).searchParams.get('returnTo'), '/?view=timer#focus');
+    await expect(page.getByRole('heading', { name: 'Focus app' })).toHaveCount(0);
+  });
+
+  await t.test('an explicitly public declared root renders without signing in', async subtest => {
+    const publicNavigation = { ...navigation, pages: [{ ...rootPage, meta: { ...rootPage.meta, requiresAuth: false } }] };
+    const { page } = await open(subtest, { navigation: publicNavigation, isAuthenticated: false, startPath: '/' });
+    await expect(page.getByRole('heading', { name: 'Focus app' })).toBeVisible();
+    assert.equal(new URL(page.url()).pathname, '/');
+  });
+
+  await t.test('an absent declared root retains the chat fallback', async subtest => {
+    const { page } = await open(subtest, { navigation: { ...navigation, pages: [] }, startPath: '/' });
+    await expect(page.getByRole('heading', { name: 'Workflow opened' })).toBeVisible();
+  });
+
+  await t.test('an unregistered declared root reports the missing component instead of showing chat', async subtest => {
+    const { page } = await open(subtest, {
+      navigation: { ...navigation, pages: [{ ...rootPage, component: 'MissingFocusPage' }] }, startPath: '/',
+    });
+    await expect(page.getByRole('heading', { name: 'Component Not Registered' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Workflow opened' })).toHaveCount(0);
+  });
+
+  await t.test('an explicit non-root landing spot retains redirect precedence', async subtest => {
+    const { page } = await open(subtest, {
+      navigation: { ...navigation, landing_spot: '/dashboard', pages: [rootPage, { path: '/dashboard', component: 'DashboardPage', meta: { appShell: false } }] },
+      startPath: '/',
+    });
+    await expect(page.getByRole('heading', { name: 'Dashboard app' })).toBeVisible();
+    assert.equal(new URL(page.url()).pathname, '/dashboard');
+    await expect(page.getByRole('heading', { name: 'Focus app' })).toHaveCount(0);
+  });
+});
 
 test('registered app journeys use the normal factory selectors and shell transition router', async t => {
   const open = await fixture(t);

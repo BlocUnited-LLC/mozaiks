@@ -796,6 +796,46 @@ Saved archives use the same canonical identity and digest checks as normal build
 The existing Studio lifecycle registers the exact candidate for review; explicit
 acceptance and promotion remain separate from generating or validating edits.
 
+## App root route acceptance
+
+When `app.json` declares `startup.landing_spot: "/"`, a page declared at `/`
+renders through the shared component registry and route authentication wrapper.
+Authentication is required by default; only `meta.requiresAuth: false` makes a
+page public. A missing registered component reports the binding error instead of
+silently opening Chat.
+
+Chat remains the root fallback when the app declares no root page. The explicit
+`/chat/*` and `/app/*` routes retain their core chat owner. An explicit non-root
+landing spot retains its redirect from `/`.
+
+The browser regressions in `appJourneyStart.browser.test.js` exercise the actual
+renderer with declared routes, authentication states, and landing redirects.
+These isolated component tests do not qualify a generated app's preview,
+interactions, or persistence; those still require the generated bundle's live
+acceptance journey.
+
+## Saved build review
+
+Studio's app Build Review page loads the selected saved app bundle through the
+authenticated artifact bundle endpoint. It verifies the returned app, registry,
+and version binding before rendering the endpoint's registered Workbench through
+the shared UI-tool renderer. Opening or changing a selection does not resume a
+workflow or start a preview. Preview remains an explicit Workbench action.
+
+The existing Workbench owns scoped refinement and server-gated acceptance and
+activation. Saved review has no workflow export-confirmation response. Build
+history and preservation reports remain available in a disclosure; failed bundle
+loads offer a retry, and cancelled or stale selections cannot display another
+version's payload. Responsive browser fixtures exercise this composition with
+mocked HTTP boundaries; live preview and generated app behavior require their
+own acceptance evidence.
+
+Within the Workbench, a completed refinement retains its own files, validation
+and review identity when the original saved-version payload refreshes or a later
+request fails. Responses from a previously opened version cannot replace the
+current selection. Server-confirmed acceptance and activation show separate
+receipts; activation reports when an app restart is required.
+
 ## Remaining Gaps
 
 P0: none identified by this pass in the covered deterministic fixtures.
