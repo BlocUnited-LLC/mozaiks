@@ -213,13 +213,17 @@ class GeneralModeMixin:
             "general_chat_label": general_label,
         }
 
-        await self._persist_general_message(
+        user_message_id = await self._persist_general_message(
             general_chat_id=str(general_chat_id),
             app_id=str(app_id),
             role="user",
             content=user_message,
             user_id=str(user_id) if user_id else None,
             metadata=metadata_base,
+        )
+        user_metadata = (
+            {**metadata_base, "general_message_id": user_message_id}
+            if user_message_id else metadata_base
         )
 
         await self.send_event_to_ui(
@@ -228,7 +232,7 @@ class GeneralModeMixin:
                 "agent": "user",
                 "content": user_message,
                 "chat_id": chat_id,
-                "metadata": metadata_base,
+                "metadata": user_metadata,
             },
             chat_id,
         )
@@ -280,7 +284,7 @@ class GeneralModeMixin:
             "general_chat_label": general_label,
         }
 
-        await self._persist_general_message(
+        assistant_message_id = await self._persist_general_message(
             general_chat_id=str(general_chat_id),
             app_id=str(app_id),
             role="assistant",
@@ -288,6 +292,8 @@ class GeneralModeMixin:
             user_id=str(user_id) if user_id else None,
             metadata=assistant_metadata,
         )
+        if assistant_message_id:
+            assistant_metadata = {**assistant_metadata, "general_message_id": assistant_message_id}
 
         await self.send_chat_message(
             response.get("content", ""),
@@ -326,10 +332,10 @@ class GeneralModeMixin:
         content: str,
         user_id: str | None,
         metadata: dict[str, Any] | None = None,
-    ) -> None:
+    ) -> str | None:
         pm = self._get_or_create_persistence_manager()
         try:
-            await pm.append_general_message(
+            message = await pm.append_general_message(
                 general_chat_id=general_chat_id,
                 app_id=app_id,
                 role=role,
@@ -337,9 +343,12 @@ class GeneralModeMixin:
                 user_id=user_id,
                 metadata=metadata,
             )
+            message_id = message.get("event_id") if isinstance(message, dict) else None
+            return message_id if isinstance(message_id, str) else None
         except Exception as persist_err:
             logger.debug(
                 "Failed to persist general agent message for %s: %s",
                 general_chat_id,
                 persist_err,
             )
+            return None
