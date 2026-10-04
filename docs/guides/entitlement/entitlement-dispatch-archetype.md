@@ -40,22 +40,25 @@ Payment Provider Webhook
 services/adapters/payments/{provider}.py
   (normalizes webhook to domain event)
         │
-        ▼ subscription.activated / subscription.cancelled
+        ▼ domain.subscription.activated / domain.subscription.cancelled
 contracts/reactions.yaml
-  (routes event to module action)
+  (routes event to a handler method)
         │
         ▼
 entitlement_dispatch module
   activate_subscription / deactivate_subscription
         │
         ▼
-MongoDB collection (assignment_store_alias)
+MongoDB collection (assignment_store.data_alias → data/contract.json)
   ← ConfiguredEntitlementAdapter reads here at action dispatch time
         │
         ▼
 module_executor.py enforces entitlement gate
-  (grants or denies capability at runtime)
+  (grants or denies capability at runtime; skipped when AUTH_ENABLED=false)
 ```
+
+The gate is enforced only when authentication is enabled; see
+[Subscriptions](../configs/subscriptions.md#how-it-works).
 
 The `entitlement_dispatch` module owns only the **write path**. The read path
 (`ConfiguredEntitlementAdapter`) and enforcement (`module_executor.py`) are
@@ -89,41 +92,46 @@ service.
 
 ## Assignment Record Schema
 
-Write records with these fields to the collection declared in
-`config/subscriptions.yaml → assignment_store.data_alias`.
+Write records with these fields to the collection that
+`config/subscriptions.yaml → assignment_store.data_alias` resolves to.
+`data_alias` is a data-contract alias, not a collection name: declare it in
+`data/contract.json`, for example
+`"aliases": [{"alias": "billing.subscriptions", "collection": "billing_subscriptions"}]`.
+If the alias is not declared, the adapter fails closed and denies every gated
+action for every user.
 
 The field names are configured in `assignment_store` via `user_id_field`,
-`tenant_id_field`, `workspace_id_field`. The defaults used here assume a
-user-scoped app (`user_id_field: "user_id"`).
+`tenant_id_field`, `workspace_id_field`. `user_id_field` has no default; set
+`user_id_field: user_id` in `assignment_store` for a user-scoped app. Without
+it, the adapter does not look records up by user, so one record entitles every
+user of the app.
 
 ```python
 {
     # Required: identifies who holds the grant
     "app_id":    str,           # the app this grant belongs to (app_id_field, default "app_id")
-    "user_id":   str | None,    # user-scoped grant (user_id_field — set in subscriptions.yaml)
+    "user_id":   str,           # user-scoped grant (user_id_field: user_id in subscriptions.yaml)
     "tenant_id": str | None,    # org-scoped grant (tenant_id_field, default "tenant_id")
     "workspace_id": str | None, # workspace-scoped grant (workspace_id_field)
 
-    # Required: what was granted
+    # Required: what was granted and its state
     "plan_id":   str,           # e.g. "pro", "enterprise"
-    "granted_capabilities": list[str],  # capability_id strings — SNAPSHOT from plan catalog
-                                        # e.g. ["dashboard.view", "reports.export"]
+    "status":    str,           # active when it matches assignment_store.active_statuses
+                                # (default: active, pending, trialing)
 
-    # Required: lifecycle
-    "status":    str,           # must match one of assignment_store.active_statuses
-                                # e.g. "active" | "cancelled" | "expired"
-    "granted_at": str,          # ISO-8601 timestamp, e.g. "2026-07-17T00:00:00Z"
-    "expires_at": str | None,   # ISO-8601 or None for perpetual grants
-
-    # Optional: traceability
+    # Optional
+    "expires_at": str | None,   # ISO-8601; a past value denies like an inactive status
+    "granted_capabilities": list[str],  # snapshot that overrides the plan catalog
+    "granted_at": str,          # ISO-8601; stored for audit, not read by the adapter
     "external_subscription_id": str | None,  # provider's subscription ID for idempotency
 }
 ```
 
-**Critical:** `granted_capabilities` must be a **snapshot** copied from the
-plan catalog at activation time. Do not store a reference to the plan — the
-catalog may change. `ConfiguredEntitlementAdapter` may use the snapshot rather
-than re-reading the catalog at check time.
+`granted_capabilities` is optional. When a record has a non-empty list, the
+adapter grants exactly those capabilities and ignores the plan catalog for that
+record, so a stale snapshot wins over a changed plan. When it is absent, the
+adapter grants the capabilities of `plan_id` from `subscriptions.yaml`. The
+shipped pack does not write a snapshot.
 
 ---
 
@@ -132,7 +140,8 @@ than re-reading the catalog at check time.
 ### `activate_subscription`
 
 - Input: `{ user_id, plan_id, granted_at?, expires_at?, external_subscription_id? }`
-- Copies `granted_capabilities` from the matching plan in `config/subscriptions.yaml`
+- Optionally copies `granted_capabilities` from the matching plan as a snapshot
+  (see above)
 - Writes (or upserts) the assignment record with `status=active`
 - Must be idempotent — duplicate events for the same user/plan must not create
   duplicate records. Use `external_subscription_id` for deduplication.
@@ -145,87 +154,121 @@ than re-reading the catalog at check time.
 - Does not delete the record — keep audit trail
 - API surface: `internal`
 
+A cancelled or expired record does not fall back to the default plan: the
+adapter denies every gated capability for that user, including capabilities the
+default plan grants to users who never subscribed. Do not gate capabilities the
+default plan grants, or have deactivation write the default plan as an active
+assignment.
+
 ### `get_entitlement_status`
 
 - Returns: `{ plan_id, status, granted_capabilities }` for the requesting user
 - No entitlement gate — this action is itself free to call
-- Safe to expose as `api_surface: user` for authenticated UI callers
+- Omit `api_surface` so authenticated UI callers can invoke it
 
 ---
 
 ## Minimal `module.yaml` Example
 
 ```yaml
-module_id: entitlement_dispatch
-label: Entitlement Dispatch
-version: 1
-description: >
-  Self-hosted write path for subscription entitlement grants.
-  Writes assignment records that ConfiguredEntitlementAdapter reads.
+schema_version: mozaiks.module.v1
+module:
+  id: entitlement_dispatch
+  display_name: Entitlement Dispatch
+  version: 1.0.0
+  type: entitlement_dispatch
+  description: >
+    Self-hosted write path for subscription entitlement grants.
+    Writes assignment records that ConfiguredEntitlementAdapter reads.
+  handler: backend.handler:EntitlementDispatchHandler
+
+permissions: []
 
 actions:
-  - action_id: activate_subscription
-    api_surface: internal
+  - id: activate_subscription
     description: >
       Activates a subscription grant. Called via reactions.yaml when
-      a subscription.activated event is received.
-    inputs:
-      - name: user_id
-        type: string
-        required: true
-      - name: plan_id
-        type: string
-        required: true
-      - name: external_subscription_id
-        type: string
-        required: false
-      - name: expires_at
-        type: string
-        required: false
-
-  - action_id: deactivate_subscription
+      a domain.subscription.activated event is received.
+    handler_method: activate_subscription
     api_surface: internal
+    permissions: []
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [user_id, plan_id]
+      properties:
+        user_id: { type: string }
+        plan_id: { type: string }
+        granted_at: { type: string }
+        external_subscription_id: { type: string }
+        expires_at: { type: string }
+
+  - id: deactivate_subscription
     description: >
       Cancels an active subscription grant. Called via reactions.yaml when
-      a subscription.cancelled or subscription.expired event is received.
-    inputs:
-      - name: user_id
-        type: string
-        required: true
-      - name: reason
-        type: string
-        required: false
+      a domain.subscription.cancelled or domain.subscription.expired event
+      is received.
+    handler_method: deactivate_subscription
+    api_surface: internal
+    permissions: []
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [user_id]
+      properties:
+        user_id: { type: string }
+        reason: { type: string }
 
-  - action_id: get_entitlement_status
-    api_surface: user
+  - id: get_entitlement_status
     description: Read-only status check for the requesting user. No entitlement gate.
+    handler_method: get_entitlement_status
 ```
+
+Every action needs `id`, `description`, and `handler_method`; inputs are a JSON
+Schema under `input_schema`. `api_surface` accepts `public`, `public_readonly`,
+`internal`, or `admin_internal`; omit it for actions that authenticated UI and
+API callers invoke. The shipped pack template at
+`factory_app/build_context/entitlement_dispatch/templates/modules/entitlement_dispatch/module.yaml`
+is the generator's source of truth for this module. It declares only
+`activate_subscription` and `deactivate_subscription`, with different inputs
+from this example.
 
 ---
 
 ## `contracts/reactions.yaml` Example
 
 ```yaml
+schema_version: mozaiks.reactions.v1
 reactions:
-  - event: subscription.activated
-    action: entitlement_dispatch.activate_subscription
-    field_map:
-      user_id: event.user_id
-      plan_id: event.plan_id
-      external_subscription_id: event.provider_subscription_id
+  - id: activate_on_subscription_activated
+    event_type: domain.subscription.activated
+    target:
+      kind: handler
+      handler_method: activate_subscription
 
-  - event: subscription.cancelled
-    action: entitlement_dispatch.deactivate_subscription
-    field_map:
-      user_id: event.user_id
-      reason: "cancelled"
+  - id: deactivate_on_subscription_cancelled
+    event_type: domain.subscription.cancelled
+    target:
+      kind: handler
+      handler_method: deactivate_subscription
 
-  - event: subscription.expired
-    action: entitlement_dispatch.deactivate_subscription
-    field_map:
-      user_id: event.user_id
-      reason: "expired"
+  - id: deactivate_on_subscription_expired
+    event_type: domain.subscription.expired
+    target:
+      kind: handler
+      handler_method: deactivate_subscription
 ```
+
+Every reaction needs an `id`, an `event_type` with a canonical prefix
+(`domain.`, `platform.`, `hosted.`, or `mozaikspay.`), and a `target`. A
+`handler` target calls the module's handler method directly, with the event's
+`payload` as keyword arguments. There is no field mapping, so the billing
+adapter must publish payloads whose keys match the method's parameters, such as
+`{"user_id": "...", "plan_id": "pro"}` for `domain.subscription.activated` and
+`{"user_id": "...", "reason": "cancelled"}` for
+`domain.subscription.cancelled`. A reaction does not go through the action's
+`input_schema`. If `reactions.yaml` fails validation, the module does not load
+and every action on it returns HTTP 503.
 
 ---
 
@@ -243,8 +286,8 @@ The app-facing facade or adapter can either:
 
 - apply a verified provider-neutral `BillingFulfillmentCommand` directly through
   the OSS fulfillment ingress
-- normalize the verified billing fact into `subscription.activated` /
-  `subscription.cancelled` domain events that this module reacts to
+- normalize the verified billing fact into `domain.subscription.activated` /
+  `domain.subscription.cancelled` domain events that this module reacts to
 
 No provider-specific code lives in `entitlement_dispatch`. If the integration
 can call the OSS fulfillment ingress directly, prefer
@@ -264,7 +307,9 @@ write path, or use a different billing provider with this module.
 - **No payment provider calls.** This module receives only normalized domain
   events. Provider webhooks are handled in `services/adapters/payments/`.
 - **Idempotent writes.** Duplicate activation events must upsert, not insert.
-- **Snapshot capabilities.** Store the plan snapshot at activation time.
+- **Snapshots override the catalog.** If you store `granted_capabilities`,
+  refresh it when the plan changes; otherwise omit it and let the adapter
+  read the plan catalog.
 - **Read path is OSS.** Do not reimplement `ConfiguredEntitlementAdapter` —
   it ships with the mozaiks runtime.
 

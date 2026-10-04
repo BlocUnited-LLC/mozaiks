@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - Python 3.11+
-- Node.js 18+
+- Node.js 20.19+ or 22.12+ (required by the Vite 8 frontend toolchain)
 - Docker Desktop — [download here](https://www.docker.com/products/docker-desktop/) (used to run MongoDB)
 
 Mozaiks installs Tree-sitter parser packages with the core framework checkout
@@ -17,12 +17,16 @@ No separate parser setup is required.
 === "Windows"
 
     ```powershell
+    git clone https://github.com/BlocUnited-LLC/mozaiks.git
+    cd mozaiks
     python -m pip install -e ".[dev]"
     ```
 
 === "macOS / Linux"
 
     ```bash
+    git clone https://github.com/BlocUnited-LLC/mozaiks.git
+    cd mozaiks
     python -m pip install -e ".[dev]"
     ```
 
@@ -53,26 +57,22 @@ state. The easiest way to start one is via Docker:
 
     ```powershell
     $env:MONGO_URI="mongodb://localhost:27017/mozaiks"
-    $env:GEMINI_API_KEY="your-key-here"
+    $env:OPENAI_API_KEY="sk-..."
     ```
 
 === "macOS / Linux"
 
     ```bash
     export MONGO_URI="mongodb://localhost:27017/mozaiks"
-    export GEMINI_API_KEY="your-key-here"
+    export OPENAI_API_KEY="sk-..."
     ```
 
-!!! tip "Free LLM key — Google Gemini"
-    The default provider is **Google Gemini**, which has a free tier (no credit card required).
-    Get your key at [aistudio.google.com](https://aistudio.google.com) → **Get API key**.
+!!! note "LLM provider"
+    Builds call OpenAI today: the runtime builds OpenAI clients only. The
+    default model is `gpt-5-nano`; set `DEFAULT_LLM_MODEL` to use another
+    OpenAI model. Gemini and Anthropic keys are not used for builds yet.
 
-!!! note "Other providers"
     Using Atlas? Replace `MONGO_URI` with your Atlas connection string.
-
-    Prefer OpenAI? Set `OPENAI_API_KEY=sk-...` and `LLM_PRIMARY_API_TYPE=openai` instead.
-
-    Using Anthropic? Set `ANTHROPIC_API_KEY=sk-ant-...` and `LLM_PRIMARY_API_TYPE=anthropic`.
 
 ## 4. Create your workspace and open Studio
 
@@ -91,7 +91,8 @@ Replace `my-workspace` with whatever you want to name your app folder:
     ```
 
 This scaffolds the workspace, starts the backend and frontend, and opens
-Studio in your browser at `http://localhost:3000`.
+Studio in your browser at `http://127.0.0.1:3000/apps`. While it runs,
+`http://localhost:3000` reaches the same Studio.
 
 ## 5. Build your first app
 
@@ -160,10 +161,8 @@ not replace them.
     scripts directory to be on PATH, which some systems don't configure automatically.
 
 ??? "Builds fail or hang"
-    Make sure your LLM API key is set in the current shell session. The default
-    provider is Google Gemini — set `GEMINI_API_KEY`. If you switched to OpenAI
-    or Anthropic, set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` respectively.
-    You can open Studio without a key but builds will not run.
+    Make sure `OPENAI_API_KEY` is set in the current shell session; builds call
+    OpenAI only. You can open Studio without a key but builds will not run.
 
 ---
 

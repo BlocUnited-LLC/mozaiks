@@ -12,14 +12,15 @@ Use one setup path at a time:
 
 | Path | Use When | Environment |
 | --- | --- | --- |
-| Public package install | You want to create and use local Mozaiks workspaces | Python owns the installed package; run `python -m mozaiks quickstart` and `python -m mozaiks studio` |
+| Public package install (after the first PyPI release) | You want to create and use local Mozaiks workspaces | Mozaiks is installed into your Python environment; until the release, use an editable install from a checkout. Run `python -m mozaiks quickstart` and `python -m mozaiks studio` |
 | Repo contributor setup | You are changing Mozaiks itself | `.venv` lives inside the `mozaiks/` repo; run repo scripts like `scripts\run-studio.ps1` |
 | Standalone workspace setup | A generated app workspace is being developed as its own repo | `.venv` lives inside that app workspace; run that workspace's `scripts/run-studio` |
 
 Do not create a shared `.venv` in the parent folder that contains multiple
 repos. Put the environment in the repo or workspace that owns it. For the
 public package path, install Mozaiks into the Python environment you normally
-use for command-line tools.
+use for command-line tools. Mozaiks is not on PyPI yet, so that means
+`python -m pip install -e <path-to-mozaiks>` from a clone.
 
 Studio requires MongoDB at startup. Docker Desktop is not required when you use
 MongoDB Atlas or a native local MongoDB server, but the repo convenience scripts
@@ -33,9 +34,9 @@ set `MONGO_URI` and launch repo scripts with `-SkipInfra`.
 ## Prerequisites
 
 - Python 3.11+
-- Node.js 18+
+- Node.js 20.19+ or 22.12+ (required by the Vite 8 frontend toolchain)
 - MongoDB Atlas or a local MongoDB server
-- one LLM provider key — `GEMINI_API_KEY` (free, default), `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY`
+- an OpenAI API key (`OPENAI_API_KEY`); builds call OpenAI only today
 
 Tree-sitter parser packages are installed with Mozaiks itself. They are the
 baseline parser path for source-backed App Intelligence; deterministic
@@ -105,42 +106,38 @@ Set the minimum required environment:
 === "Windows"
 
     ```powershell
-    $env:GEMINI_API_KEY="your-key-here"
-    $env:MONGO_URI="mongodb://localhost:27017/mozaiks"
-    ```
-
-=== "macOS / Linux"
-
-    ```bash
-    export GEMINI_API_KEY="your-key-here"
-    export MONGO_URI="mongodb://localhost:27017/mozaiks"
-    ```
-
-!!! tip "Free LLM key — Google Gemini"
-    The default provider is **Google Gemini** (free tier, no credit card required).
-    Get your key at [aistudio.google.com](https://aistudio.google.com) → **Get API key**.
-
-To use OpenAI or Anthropic instead, set the matching key and override the provider:
-
-=== "Windows"
-
-    ```powershell
     $env:OPENAI_API_KEY="sk-..."
-    $env:LLM_PRIMARY_API_TYPE="openai"
-    # or
-    $env:ANTHROPIC_API_KEY="sk-ant-..."
-    $env:LLM_PRIMARY_API_TYPE="anthropic"
+    $env:MONGO_URI="mongodb://localhost:27017/mozaiks"
+    $env:AUTH_ENABLED="false"
+    $env:AUTH_ANON_ROLES="admin,user"
     ```
 
 === "macOS / Linux"
 
     ```bash
     export OPENAI_API_KEY="sk-..."
-    export LLM_PRIMARY_API_TYPE="openai"
-    # or
-    export ANTHROPIC_API_KEY="sk-ant-..."
-    export LLM_PRIMARY_API_TYPE="anthropic"
+    export MONGO_URI="mongodb://localhost:27017/mozaiks"
+    export AUTH_ENABLED="false"
+    export AUTH_ANON_ROLES="admin,user"
     ```
+
+Builds call OpenAI only today. The default model is `gpt-5-nano`; set
+`DEFAULT_LLM_MODEL` to use another OpenAI model. The two `AUTH_` settings run
+Studio without sign-in for local development and give the anonymous user the
+admin role. Without them, Studio shows "Unable to open this app".
+
+If the repo also has a `.env`, the backend script loads it too; values set in
+the shell win. A `.env` copied from `.env.example` sets
+`DEFAULT_LLM_MODEL=gemini-2.0-flash`, and the runtime would send that model
+name to OpenAI, so change it to an OpenAI model such as `gpt-5-nano`.
+
+Install the frontend dependencies once, from the repo root (the same commands
+in every shell):
+
+```bash
+npm --prefix chat-ui install
+npm --prefix web_shell install
+```
 
 Start the repo development Studio from Windows PowerShell:
 
@@ -164,10 +161,9 @@ Open:
 http://localhost:3000/apps
 ```
 
-After Studio starts, run the local smoke in a new terminal:
+After Studio starts, run the local smoke from the repo root in a new terminal:
 
 ```powershell
-cd C:\Repos\BlocUnitedRepo\mozaiks
 .\scripts\smoke-studio-local.ps1
 ```
 
@@ -326,13 +322,16 @@ connection string.
 
 ### LLM key errors
 
-Set the key matching the provider you are using:
+Builds call OpenAI only today, whatever provider is configured elsewhere. Set
+`OPENAI_API_KEY`, and make sure `DEFAULT_LLM_MODEL`, when set, names an OpenAI
+model (the default is `gpt-5-nano`). Gemini and Anthropic keys are not used for
+builds yet.
 
-| Provider | Key variable | Notes |
-|---|---|---|
-| Google Gemini (default) | `GEMINI_API_KEY` | Free tier — get key at [aistudio.google.com](https://aistudio.google.com) |
-| OpenAI | `OPENAI_API_KEY` | Also set `LLM_PRIMARY_API_TYPE=openai` |
-| Anthropic | `ANTHROPIC_API_KEY` | Also set `LLM_PRIMARY_API_TYPE=anthropic` |
+If the backend log says `GEMINI_API_KEY / GOOGLE_API_KEY / LLM_PRIMARY_API_KEY
+is not set`, the environment has `LLM_PRIMARY_API_TYPE=google` (the
+`.env.example` value). That setting changes only the startup check and the
+Studio integrations summary; set it to `openai` so both report the key builds
+actually use.
 
 ### Port already in use
 
