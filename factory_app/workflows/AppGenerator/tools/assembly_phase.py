@@ -18,6 +18,7 @@ from typing import Any
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     extract_code_file_entries_from_payload,
 )
+from factory_app.workflows.AppGenerator.tools.module_api_template import get_module_api_template
 from factory_app.workflows.AppGenerator.tools.render_auth_scaffold import materialize_auth_scaffold
 from mozaiksai.core.workflow.generator_support.code_files import (
     compile_data_contract,
@@ -106,6 +107,7 @@ def _merge_code_files(
     ))
     if "app.json" in file_map:
         file_map.update(materialize_auth_scaffold(file_map, data_contract=data_contract))
+        file_map.setdefault("ui/lib/moduleApi.js", get_module_api_template())
     return [{"filename": name, "content": content} for name, content in sorted(file_map.items())]
 
 

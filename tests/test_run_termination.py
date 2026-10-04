@@ -396,6 +396,7 @@ async def _run_appgenerator_validation(
     *,
     chat_id: str,
     on_validation: Any = None,
+    on_repair: Any = None,
     validation_request: dict[str, Any] | None = None,
 ) -> SimpleNamespace:
     """Run AppGenerator from AppValidationAgent with the real graph and gate.
@@ -422,7 +423,11 @@ async def _run_appgenerator_validation(
 
     async def output_hook(agent_name: str, envelope: Any) -> None:
         if agent_name != "AppValidationAgent":
-            raise AssertionError(f"unexpected turn: {agent_name}")
+            if on_repair is None:
+                raise AssertionError(f"unexpected turn: {agent_name}")
+            with _workflow_tool_invocation(bridge):
+                on_repair(agent_name, bridge)
+            return
         with _workflow_tool_invocation(bridge):
             if on_validation is not None:
                 validations.append(on_validation(bridge))
@@ -512,44 +517,37 @@ async def test_blocked_repair_ends_the_run_after_one_validation_with_its_blockin
 
 
 @pytest.mark.asyncio
-async def test_validating_an_unchanged_bundle_again_with_the_same_result_ends_the_run(
+async def test_failed_build_with_no_approved_owner_ends_once_without_user_pause(
     monkeypatch, runtime_smoke_passed,
 ) -> None:
-    """(b) A failed build, a user reply, the same failed build: the run ends.
-
-    The bundle passes acceptance and its build fails, so validation hands the
-    turn to the user. Nothing in a reply changes the bundle. The second build
-    names a different temp workspace, which is per-run noise, not a new result.
-    """
+    """Passed acceptance cannot turn an unowned build failure into a user pause."""
     from mozaiksai.core import adapters
 
     sandbox = _FailingBuildSandbox()
     monkeypatch.setattr(adapters, "get_sandbox_adapter", lambda strategy: sandbox)
-
     run = await _run_appgenerator_validation(
-        _appgen_bundle(_basic_crud_files()), chat_id="appgen-no-progress",
+        _appgen_bundle(_basic_crud_files()), chat_id="appgen-unowned-build",
         validation_request={"validation_strategy": "docker", "start_dev_server": False},
     )
-    result = run.result
-
-    assert run.speakers == ["AppValidationAgent", "AppValidationAgent"]
-    assert runtime_smoke_passed.await_count == 2
-    assert [item["app_bundle_acceptance_result"]["passed"] for item in run.validations] == [True, True]
-    first, second = (item["app_validation_result"]["errors"] for item in run.validations)
-    assert first != second  # the raw stderr names a different temp workspace each time
-    [pause] = run.pauses
-    assert pause["app_validation_no_progress"] is False
-    assert pause["app_build_failure_message"] is None
-    assert result.status is RunStatus.FAILED
-    assert result.close_reason == "workflow_failed"
-    assert result.context_variables["app_validation_no_progress"] is True
-    message = result.failure_message
-    assert message.startswith(
-        "The app build cannot continue: validation ran again on an unchanged bundle and failed the same way.\n"
-        "Blocking errors:\n- "
-    )
-    assert "<temp>" in message
-    _assert_readable(message)
+    assert run.speakers == ["AppValidationAgent"]
+    assert runtime_smoke_passed.await_count == 1
+    assert run.pauses == []
+    [validation] = run.validations
+    assert validation["app_bundle_acceptance_result"]["passed"] is True
+    assert validation["app_validation_result"]["validation_status"] == "failed"
+    assert validation["bundle_repair"]["status"] == "blocked"
+    assert run.result.status is RunStatus.FAILED
+    assert run.result.close_reason == "workflow_failed"
+    assert run.result.context_variables["app_validation_ends_run"] is True
+    assert run.result.context_variables["integration_tests_passed"] is False
+    assert run.result.failure_message.startswith("The app build cannot continue:")
+    assert "Rollup failed to resolve import" in run.result.failure_message
+    _assert_readable(run.result.failure_message)
+    event = _run_complete_event(workflow_name="AppGenerator", chat_id="appgen-unowned-build",
+                                runner_result=run.result, pause_agent=None)
+    assert event["status"] == "failed"
+    assert event["awaiting_user_input"] is False
+    assert event["error"] == run.result.failure_message
 
 
 @pytest.mark.asyncio
@@ -878,3 +876,63 @@ async def test_design_docs_exhausted_save_reports_its_last_rejection() -> None:
     finally:
         if result.live_run is not None:
             await result.live_run.close()
+
+
+@pytest.mark.asyncio
+async def test_owned_build_failure_routes_to_approved_agent_then_stops_identical_failed_repair(monkeypatch):
+    from factory_app.workflows.AppGenerator.tools import app_validation
+    from mozaiksai.core import adapters
+    from mozaiksai.core.workflow.context.frozen import detach
+
+    page = "ui/pages/custom/focus.jsx"
+    files = {"app.json": "{}", page: "export default function Focus() { return null; }"}
+    initial = _appgen_bundle(files)
+    initial["app_build_plan"]["build_tasks"][0]["owned_paths"] = ["app.json", page]
+    acceptance = {key: {"passed": True} for key in (
+        "bundle_scan", "agent_backend", "module_wiring", "module_implementation",
+        "module_runtime_quality", "functional_completeness", "workflow_integration",
+        "app_runtime_load", "app_runtime_smoke",
+    )}
+    acceptance.update(status="passed", passed=True, skipped_checks=[],
+                      bundle_repair={"status": "passed", "target_agent": None})
+    monkeypatch.setattr(app_validation, "save_auth_scaffold", AsyncMock())
+    monkeypatch.setattr(app_validation, "run_app_bundle_acceptance_gate", AsyncMock(return_value=acceptance))
+
+    class Sandbox(_FailingBuildSandbox):
+        async def run_command(self, **kwargs):
+            return SimpleNamespace(success=False, stdout="", stderr=(
+                "\x1b[31m[UNRESOLVED_IMPORT] \x1b[0mCould not resolve '../../lib/moduleApi.js' "
+                "in ../../../workspace/app/ui/pages/custom/focus.jsx\n"
+            ))
+
+    monkeypatch.setattr(adapters, "get_sandbox_adapter", lambda strategy: Sandbox())
+    repaired = []
+
+    def record_unchanged_repair(agent_name, bridge):
+        if agent_name == "AppUIQualityAgent":
+            assert bridge.get("bundle_repair_target") == "AppSchemaAgent"
+            return
+        assert agent_name == "AppSchemaAgent"
+        repair = detach(bridge.get("bundle_repair_result"))
+        assert repair["active"]["allowed_paths"] == ["app.json", page]
+        assert repair["attempt"] == 1
+        repaired.append(repair)
+        # A synthetic settled response deliberately leaves the same defect.
+        # The native graph must revalidate and block identical further repairs.
+        repair["active"]["status"] = "responded"
+        bridge.set("bundle_repair_result", repair)
+
+    run = await _run_appgenerator_validation(
+        initial, chat_id="appgen-owned-build", on_repair=record_unchanged_repair,
+        validation_request={"validation_strategy": "docker", "start_dev_server": False},
+    )
+    assert run.speakers == ["AppValidationAgent", "AppSchemaAgent", "AppUIQualityAgent", "AppValidationAgent"]
+    assert len(repaired) == 1
+    assert run.pauses == []
+    assert [item["app_bundle_acceptance_result"]["passed"] for item in run.validations] == [True, True]
+    assert run.validations[0]["bundle_repair"]["target_agent"] == "AppSchemaAgent"
+    assert run.validations[1]["bundle_repair"]["status"] == "blocked"
+    assert run.validations[1]["bundle_repair"]["no_progress"] is True
+    assert run.result.status is RunStatus.FAILED
+    assert run.result.close_reason == "workflow_failed"
+    assert "ui/pages/custom/focus.jsx" in run.result.failure_message

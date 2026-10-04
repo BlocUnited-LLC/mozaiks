@@ -16,6 +16,7 @@ import hashlib
 import json
 import logging
 import os
+import posixpath
 import re
 import shlex
 import subprocess
@@ -192,10 +193,17 @@ async def _run_local_command(
     return int(process.returncode or 0), stdout, stderr
 
 
-def parse_build_errors(build_output: str) -> list[dict[str, Any]]:
+def _strip_ansi(value: str) -> str:
+    return re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", value)
+
+
+def parse_build_errors(
+    build_output: str, *, app_root: str | None = None, cwd: str | None = None,
+) -> list[dict[str, Any]]:
     if not isinstance(build_output, str) or not build_output:
         return []
 
+    build_output = _strip_ansi(build_output)
     errors: list[dict[str, Any]] = []
 
     ts_pattern = r"([^\s]+):(\d+):(\d+)\s*[-–]\s*error\s+\w+:\s*(.+)"
@@ -220,6 +228,35 @@ def parse_build_errors(build_output: str) -> list[dict[str, Any]]:
             }
         )
 
+    vite_patterns = (
+        r"\[UNRESOLVED_IMPORT\]\s+(Could not resolve .+?) in ([^\r\n]+)",
+        r'(?:\[vite\]: )?(Rollup failed to resolve import .+?) from "([^"\r\n]+)"',
+        r'((?:Could not resolve|Could not load) .+?) from "([^"\r\n]+)"',
+    )
+    for pattern in vite_patterns:
+        for match in re.finditer(pattern, build_output):
+            item = {"file": match.group(2).strip(), "message": match.group(1).strip()}
+            if item not in errors:
+                errors.append(item)
+
+    # Vite/Rolldown names the exporting file in the headline, but the source
+    # location identifies the importer that must correct its binding.
+    missing_export = r"\[MISSING_EXPORT\]\s+([^\r\n]+)\r?\n[^\r\n]*\[\s*(.+):(\d+):(\d+)\s*\]"
+    for match in re.finditer(missing_export, build_output):
+        errors.append({
+            "file": match.group(2).strip(), "line": int(match.group(3)),
+            "column": int(match.group(4)), "message": match.group(1).strip(),
+        })
+
+    if app_root is not None and cwd is not None:
+        root = posixpath.normpath(app_root.replace("\\", "/")).rstrip("/") + "/"
+        for error in errors:
+            filename = str(error["file"]).replace("\\", "/")
+            absolute = filename.startswith("/") or re.match(r"^[A-Za-z]:/", filename)
+            resolved = posixpath.normpath(filename if absolute else posixpath.join(cwd.replace("\\", "/"), filename))
+            # Only the actual staged app root can produce a canonical repair path.
+            # Similar suffixes outside that root remain unowned diagnostics.
+            error["file"] = resolved[len(root):] if resolved.startswith(root) else resolved
     return errors
 
 
@@ -975,7 +1012,11 @@ async def _run_sandbox_validation(
             if run_result.stderr and "warning" in run_result.stderr.lower():
                 result["warnings"].append(run_result.stderr)
 
-        result["parsed_errors"] = parse_build_errors(result.get("build_output", ""))
+        result["parsed_errors"] = parse_build_errors(
+            result.get("build_output", ""),
+            app_root=f"{root}/app" if canonical and root is not None else None,
+            cwd=cwd if canonical else None,
+        )
 
         if not canonical and result["validation_status"] == "passed":
             try:
@@ -1105,7 +1146,11 @@ async def _run_local_validation(
                 if stderr and "warning" in stderr.lower():
                     result["warnings"].append(stderr)
 
-            result["parsed_errors"] = parse_build_errors(result.get("build_output", ""))
+            result["parsed_errors"] = parse_build_errors(
+                result.get("build_output", ""),
+                app_root=(root / "app").as_posix() if canonical else None,
+                cwd=cwd if canonical else None,
+            )
 
             if not canonical and result["validation_status"] == "passed":
                 scripts = _read_package_scripts_from_dir(root)
@@ -2425,7 +2470,7 @@ def _host_temp_paths() -> re.Pattern[str]:
 
 def _scrubbed_error(error: Any) -> str:
     """One line, with this host's temp paths removed: per-run noise, not app content."""
-    return " ".join(_host_temp_paths().sub("<temp>", str(error)).split())
+    return " ".join(_host_temp_paths().sub("<temp>", _strip_ansi(str(error))).split())
 
 
 def _readable_error(error: Any) -> str:
@@ -2437,7 +2482,8 @@ def _readable_error(error: Any) -> str:
 
 def _blocking_errors(acceptance: dict[str, Any], validation: dict[str, Any] | None) -> list[str]:
     """Keep the original cause alongside ownership and validation diagnostics."""
-    diagnostics = (acceptance.get("bundle_repair") or {}).get("diagnostics") or []
+    repair = (validation or {}).get("bundle_repair") or acceptance.get("bundle_repair") or {}
+    diagnostics = repair.get("diagnostics") or []
     errors = [acceptance["error"]] if acceptance.get("error") else []
     errors.extend(item.get("error") for item in diagnostics if isinstance(item, dict))
     if not any(errors):
@@ -2500,7 +2546,7 @@ def _record_validation_outcome(
     to act. When this outcome ends the run, the gate also writes the message
     that names the blocking errors; otherwise it clears it.
     """
-    repair = acceptance.get("bundle_repair") or {}
+    repair = (validation or {}).get("bundle_repair") or acceptance.get("bundle_repair") or {}
     recovery_request = acceptance.get("task_recovery_request")
     fingerprint = {
         "bundle": _digest(files),
@@ -2526,11 +2572,7 @@ def _record_validation_outcome(
         or (acceptance.get("passed") is True and (validation or {}).get("validation_status") in {"pending", "skipped"})
     )
     infrastructure = not passed and bool((validation or {}).get(INFRASTRUCTURE_FAILURE))
-    ends_run = (
-        repair.get("target_agent") is None
-        and recovery_request is None
-        and (unverified or infrastructure or no_progress or repair.get("status") == "blocked")
-    )
+    ends_run = not passed and repair.get("target_agent") is None and recovery_request is None
     _context_set(context_variables, "app_validation_ends_run", ends_run)
     _context_set(
         context_variables,
@@ -2620,6 +2662,20 @@ async def validate_app_bundle_from_request(
     app_runtime_load_result = acceptance_result["app_runtime_load"]
     runtime_smoke_result = acceptance_result["app_runtime_smoke"]
     bundle_repair = acceptance_result.get("bundle_repair")
+    if acceptance_result.get("passed") and validation.get("validation_status") == "failed":
+        diagnostics = [
+            {"path": item["file"], "error": f"{item['file']}: {item['message']}"}
+            for item in validation.get("parsed_errors") or []
+            if not validation.get(INFRASTRUCTURE_FAILURE) and isinstance(item, dict) and item.get("file") and item.get("message")
+        ]
+        if not diagnostics:
+            diagnostics = [{"error": _scrubbed_error(error)} for error in validation.get("errors") or []]
+        bundle_repair = _prepare_bundle_repair(
+            {"passed": False, "diagnostics": diagnostics}, context_variables,
+            select_repairs=not validation.get(INFRASTRUCTURE_FAILURE),
+        )
+        validation["bundle_repair"] = bundle_repair
+        _persist_validation_context(context_variables=context_variables, result=validation)
     validation_passed = str(validation.get("validation_status") or "").strip().lower() == "passed"
     combined_passed = bool(validation_passed and acceptance_result.get("passed"))
     _context_set(context_variables, "integration_tests_passed", combined_passed)

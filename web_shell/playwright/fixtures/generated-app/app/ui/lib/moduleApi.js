@@ -8,9 +8,10 @@
  * Keep in sync with module_api_template.py.
  */
 
-export const API_BASE =
+export const API_BASE = (
   (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL) ||
-  'http://localhost:8000'
+  ''
+).replace(/\/+$/, '')
 
 export function getAccessToken() {
   if (typeof window !== 'undefined' && window.mozaiksAuth?.getAccessToken) {

@@ -324,6 +324,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Generated apps receive their shared API helper before build validation. Preview
+  requests default to the app's own origin, and frontend build errors enter the
+  existing bounded repair path or finish with a failure explanation.
 - Approved concept names now reach the existing Studio app registry through an
   owner- and build-scoped update, preserving manual/imported names, app identity,
   lifecycle and history. Unnamed builds retain readable draft labels in the app

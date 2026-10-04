@@ -35,6 +35,17 @@ the run once rather than asking for a reply that would repeat the same checks.
 Messages distinguish incomplete validation from an unavailable environment and
 do not assert that an unverified app is defect-free.
 
+Build execution failures use that same approved-task repair policy after acceptance
+passes. TypeScript, webpack and supported Vite diagnostics resolve only against the
+actual staged app root and build working directory; ANSI formatting grants no path
+authority. A repair requires one approved owner and accepted task/prerequisite
+evidence, within the existing attempt and no-progress limits. Unknown or unowned
+paths, exhausted repair, and incomplete/unavailable validation end as failed with
+an explanation, without an empty request for user input. Acceptance remains a
+separate passed result when only the later build failed; combined readiness stays
+false until both gates pass. A successful static acceptance does not erase build
+errors or authorize export.
+
 All sandbox strategies route through the `SandboxPort` seam
 (`mozaiksai/core/ports/sandbox.py`, Tier 1 stable) and its adapters.
 Sandboxes are **ephemeral workspaces, never truth stores** — outcomes

@@ -36,7 +36,6 @@ from factory_app.workflows.AppGenerator.tools.export_app_code import (
     export_app_code_to_github,
     resolve_export_gate,
 )
-from factory_app.workflows.AppGenerator.tools.module_api_template import get_module_api_template
 from factory_app.workflows.AppGenerator.tools.requirements_scanner import scan_requirements
 from factory_app.workflows.AppGenerator.tools.schema_migration import inject_migration_into_bundle
 from logs.logging_config import get_workflow_logger
@@ -817,12 +816,6 @@ async def generate_and_download(
     # Inject requirements.txt if the agents did not produce one.
     if "requirements.txt" not in files_map:
         files_map["requirements.txt"] = scan_requirements(files_map)
-
-    # Inject the canonical moduleApi.js helper if the agents did not produce one.
-    # Custom-route JSX files import moduleAction from this path. The template
-    # includes structured error body parsing so callers can branch on error_code.
-    if "ui/lib/moduleApi.js" not in files_map:
-        files_map["ui/lib/moduleApi.js"] = get_module_api_template()
 
     # Inject any pending migration file produced by DatabaseAgent during refinement.
     pending_migration: dict[str, Any] | None = None

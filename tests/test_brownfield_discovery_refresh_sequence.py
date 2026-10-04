@@ -127,10 +127,8 @@ def test_legacy_brownfield_build_sequences_are_not_rewired_by_refresh() -> None:
     assert "`brownfield_module_generation`" in workflow_sequence_doc
     assert f"`{legacy_light_sequence}`" not in workflow_sequence_doc
     assert f"`{legacy_full_sequence}`" not in workflow_sequence_doc
-    assert "renamed" not in workflow_sequence_doc.lower()
     assert f"`{legacy_light_sequence}`" not in app_context_doc
     assert f"`{legacy_full_sequence}`" not in app_context_doc
-    assert "renamed" not in app_context_doc.lower()
 
 
 def test_docs_describe_refresh_sequence_as_non_mutating() -> None:

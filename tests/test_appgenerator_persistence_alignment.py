@@ -127,6 +127,8 @@ def test_persistence_serializer_identity_agrees_across_planner_schema_and_catalo
     for text in guidance:
         assert "surface_id=data_contract" in text
         assert "capability_pack_id=null" in text
+    assert "`initial_agent: DatabaseAgent`" in guidance[0]
+    for text in guidance[1:]:
         assert "initial_agent=DatabaseAgent" in text
     assert "data/contract.json serializer" in fields["capability_pack_id"]["description"]
 

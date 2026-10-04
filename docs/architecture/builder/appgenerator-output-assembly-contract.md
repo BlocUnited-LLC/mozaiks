@@ -50,6 +50,15 @@ Wiring and runtime-quality validators remain the acceptance backstop.
 
 ## Page Output and Action Binding Acceptance
 
+Assembly supplies the canonical `ui/lib/moduleApi.js` client before acceptance
+and frontend build validation when the admitted app does not already provide
+it. Export retains that validated client instead of adding it afterward.
+Custom pages import its named `moduleAction` export; there is no default export.
+With no `VITE_API_URL`, or an empty value, requests use the app's own origin and
+the shell API proxy. An explicit absolute or origin-relative base is supported;
+WebSocket URLs resolve against that same base. The template never defaults to
+another local server on port 8000.
+
 AppSchemaAgent receives accepted module actions with their declared input and
 output schemas and entitlement gates. A metric's `value_key` selects a declared
 output field. A table's `data_key` selects a declared array, and its columns
