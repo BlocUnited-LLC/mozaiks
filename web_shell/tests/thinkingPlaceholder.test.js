@@ -6,8 +6,8 @@
  * case on workflow_failed — left the bubble on screen permanently, which is
  * what a live ThemeCapture run showed above its final message.
  *
- * These tests execute the production pause event branches and terminal
- * reducers, then render their messages through the production component.
+ * These tests execute the production pause, interactive UI, and terminal
+ * activity handling, then render their messages through the production component.
  */
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -75,6 +75,58 @@ const pauseEvent = (source, event, state) => {
   return state;
 };
 
+// Execute the shared activity-handling prefix before component rendering.
+// Both transport event kinds must reach this same subscriber.
+const uiEvent = (source, update, state) => {
+  const start = source.indexOf("        if (update.type === 'tool_call' || update.type === 'ui.render') {");
+  const end = source.indexOf('          const toolName =', start);
+  assert.ok(start !== -1 && end > start, 'shared UI subscriber was not found');
+  vm.runInNewContext(`${source.slice(start, end)} }`, {
+    update, dispatchSurfaceEvent: null,
+    setPendingWorkflowReply: () => {},
+    setLoading: value => { state.loading = value; },
+    setMessagesWithLogging: reducer => { state.messages = reducer(state.messages); },
+  });
+  return state;
+};
+
+const interactiveEvents = ['tool_call', 'ui.render'].flatMap(type => [
+  {type, awaiting_response:true, payload:{review_id:'current-review'}},
+  {type, payload:{awaiting_response:true, review_id:'current-review'}},
+]);
+for (const [index, update] of interactiveEvents.entries()) {
+  test(`interactive UI event ${index + 1} stops activity without agent text and remains repeatable`, async () => {
+    const source = await fs.readFile(chatPage, 'utf8');
+    const state = {messages:withThinking(), loading:true};
+    const realMessage = state.messages[0];
+    uiEvent(source, update, state);
+    assert.equal(state.loading, false);
+    assert.deepEqual(state.messages, [realMessage]);
+    const messages = state.messages;
+    uiEvent(source, update, state);
+    assert.equal(state.messages, messages, 'repeated waiting event must preserve real messages');
+    assert.equal(state.loading, false);
+  });
+}
+
+for (const type of ['tool_call', 'ui.render']) {
+  test(`noninteractive ${type} UI events leave ongoing activity intact`, async () => {
+    const source = await fs.readFile(chatPage, 'utf8');
+    for (const update of [
+      {type, awaiting_response:false, payload:{awaiting_response:true}},
+      {type, payload:{awaiting_response:false}},
+      {type, payload:{}},
+      {type, awaiting_response:'true', payload:{}},
+    ]) {
+      const messages = withThinking();
+      const state = {messages, loading:true};
+      uiEvent(source, update, state);
+      assert.equal(state.loading, true);
+      assert.equal(state.messages, messages);
+    }
+  });
+}
+
 const pauseSequences = [['awaiting_reply'], ['run_complete'], ['awaiting_reply', 'run_complete']];
 for (const sequence of pauseSequences) {
   test(`${sequence.join(' then ')} removes thinking while preserving the question and reply state`, async () => {
@@ -131,7 +183,7 @@ test('the success reducer leaves an untouched list identity-stable', async () =>
   assert.equal(run(snippet, clean), clean, 'must return the same array when nothing changed');
 });
 
-test('the active thinking bubble disappears on completion and while waiting for a reply', async (t) => {
+test('the active thinking bubble disappears on completion and while waiting for a reply or review', async (t) => {
   const component = path.resolve(shell, '../chat-ui/src/components/chat/ChatMessage.jsx');
   const bundle = await build({
     stdin: {resolveDir: shell, loader: 'jsx', contents: `
@@ -175,6 +227,7 @@ test('the active thinking bubble disappears on completion and while waiting for 
       for (const event of sequence) pauseEvent(source, event, state);
       return state.messages;
     }),
+    ...interactiveEvents.map(update => messages => uiEvent(source, update, {messages, loading:true}).messages),
   ];
   for (const width of [1440, 390]) {
     const page = await browser.newPage({viewport: {width, height: 844}});

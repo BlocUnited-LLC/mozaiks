@@ -324,8 +324,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
-- Studio clears its working indicator when a workflow asks for input, so the
-  prompt and reply box are not accompanied by a stale processing status.
+- Studio clears working and typing indicators when a workflow asks for input
+  or displays an interactive approval, keeping the user's next action clear.
+- The activation response uses the same verified app archive as the activation
+  itself, avoiding a second fetch or an error after a successful activation if
+  the original archive changes.
 
 - Scoped refinements now validate the complete edited app through the existing
   acceptance and build checks, save a canonical verified archive, and carry that

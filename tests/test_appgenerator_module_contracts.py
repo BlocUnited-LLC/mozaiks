@@ -314,7 +314,9 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_removed_operation
     assert "app_validation_strategy" in source
     assert "validation_status" in source
     assert "validate_app_build" in source
-    assert "passed` or explicit `skipped`" in source
+    assert "Deterministic acceptance and build execution have both passed" in source
+    assert "Skipped or pending checks do not permit export" in source
+    assert "passed` or explicit `skipped`" not in source
     assert "provider-neutral outputs from the deployment contract" in source
     assert "Deployment, DNS/domain, billing, wallet, and platform operations may be supplied by managed platform capabilities" in source
     assert "Do not generate provider adapters for those operations into a customer app bundle" in source

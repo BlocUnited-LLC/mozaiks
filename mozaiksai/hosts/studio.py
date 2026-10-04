@@ -568,8 +568,13 @@ async def _build_artifact_review_payload(
     app_id: str,
     version,
     artifact_store,
+    verified_bundle_snapshots: dict[str, bytes] | None = None,
 ) -> dict[str, Any]:  # noqa: ANN001
-    current_zip = await _bundle_source_for_review(version)
+    # Promotion reuses the selected and parent records' verified snapshots.
+    snapshots = verified_bundle_snapshots or {}
+    current_zip: bytes | Path | None = snapshots.get(version.id)
+    if current_zip is None:
+        current_zip = await _bundle_source_for_review(version)
     current_files: dict[str, str] = {}
     current_skipped: list[str] = []
     if current_zip is not None:
@@ -583,7 +588,11 @@ async def _build_artifact_review_payload(
             app_id=app_id,
             build_record_id=version.parent_build_record_id,
         )
-        parent_zip = await _bundle_source_for_review(parent_version) if parent_version is not None else None
+        parent_zip: bytes | Path | None = None
+        if parent_version is not None:
+            parent_zip = snapshots.get(parent_version.id)
+            if parent_zip is None:
+                parent_zip = await _bundle_source_for_review(parent_version)
         if parent_zip is not None:
             parent_files, parent_skipped = _decode_text_bundle_entries(parent_zip)
 
@@ -2198,6 +2207,13 @@ async def promote_build_artifact_version(
     refinement_metadata = _refinement_metadata_from_version(version)
 
     bundle_bytes = await _verified_app_bundle(version)
+    verified_bundle_snapshots = {version.id: bundle_bytes}
+    if version.parent_build_record_id:
+        parent_version = await artifact_store.get_build_record(
+            app_id=app_id, build_record_id=version.parent_build_record_id,
+        )
+        if parent_version is not None and parent_version.build_family == "app_bundle":
+            verified_bundle_snapshots[parent_version.id] = await _verified_app_bundle(parent_version)
     target_dir = _resolve_bundle_restore_target(version)
     try:
         restore_summary = _restore_bundle_to_target(bundle_bytes=bundle_bytes, target_dir=target_dir, workspace_layout=True)
@@ -2250,6 +2266,7 @@ async def promote_build_artifact_version(
         app_id=app_id,
         version=version,
         artifact_store=artifact_store,
+        verified_bundle_snapshots=verified_bundle_snapshots,
     )
     logger.info(
         "Promoted app_id=%s artifact_version_id=%s (%s/%s) restored=%s skipped=%s refinement_request_id=%s",

@@ -4785,6 +4785,13 @@ const ChatPage = () => {
             dispatchSurfaceEvent(update);
           }
           const { tool_name, payload = {}, tool_call_id, workflow_name, onResponse, display } = update;
+          // Interactive tools wait inside the run, without an awaiting_reply event.
+          if ((update.awaiting_response ?? payload.awaiting_response) === true) {
+            setLoading(false);
+            setMessagesWithLogging(prev => (
+              prev.some(m => m?.isThinking) ? prev.filter(m => !m?.isThinking) : prev
+            ));
+          }
           const toolName = tool_name || payload.tool_name || update.component_type || update.component || null;
           const toolCallId = tool_call_id || payload.tool_call_id || null;
           const componentType =

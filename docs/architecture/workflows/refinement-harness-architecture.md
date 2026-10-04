@@ -149,6 +149,11 @@ caller connecting them to the scoped coding worker. This inventory does not
 establish that those exported APIs can be removed or that every promotion path
 runs Factory acceptance.
 
+Studio verifies the selected app bundle and its available app-bundle parent
+before changing the workspace or registry. The promotion response builds its
+review diff from those same verified bytes, keyed by saved BuildRecord ID;
+an independent review request verifies the archives again.
+
 Checkpoints are triggered by events, not by agent turns. Each checkpoint is a
 discrete unit of work with a declared handler and optional LLM backing.
 

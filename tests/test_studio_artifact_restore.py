@@ -115,14 +115,20 @@ def _session(
 
 
 class _PromoteStore:
-    def __init__(self, version: ArtifactVersionDoc, *, sessions: list[RefinementSessionDoc] | None = None) -> None:
+    def __init__(
+        self, version: ArtifactVersionDoc, *, sessions: list[RefinementSessionDoc] | None = None,
+        parent_version: ArtifactVersionDoc | None = None,
+    ) -> None:
         self.version = version
+        self.parent_version = parent_version
         self.sessions = list(sessions or [])
         self.updated_sessions: list[dict[str, object]] = []
 
     async def get_build_record(self, *, app_id: str, build_record_id: str):
         if build_record_id == self.version.id:
             return self.version
+        if self.parent_version is not None and build_record_id == self.parent_version.id:
+            return self.parent_version
         return None
 
     async def list_refinement_sessions(self, *, app_id: str, result_build_record_id: str, limit: int = 20):
@@ -301,7 +307,8 @@ def test_archive_integrity_failure_leaves_workspace_and_registry_unchanged(monke
     response = _restore_or_promote(client, version, action)
 
     assert response.status_code == 409
-    assert "Revalidate and save a canonical app bundle" in response.json()["detail"]
+    assert "Artifact archive identity or content could not be verified" in response.json()["detail"]
+    assert "Save a canonical app bundle" in response.json()["detail"]
     assert sorted(path.relative_to(target).as_posix() for path in target.rglob("*")) == ["app", "app/existing.txt"]
     assert (target / "app/existing.txt").read_bytes() == b"preserve me"
     assert registry.app == before
@@ -325,6 +332,10 @@ def test_restore_consumes_verified_bytes_even_if_archive_path_changes(monkeypatc
     response = _restore_or_promote(client, version, action)
     assert response.status_code == 200, response.text
     assert (Path(response.json()["target_path"]) / "app/ui/title.txt").read_text() == "approved"
+    if action == "promote":
+        changed = next(item for item in response.json()["review"]["changed_files"] if item["path"] == "ui/title.txt")
+        assert "+approved" in changed["diff_preview"]
+        assert "unapproved" not in changed["diff_preview"]
 
 
 @pytest.mark.parametrize("action", ["restore", "promote"])
@@ -343,6 +354,69 @@ def test_restore_uses_canonical_content_backend_without_local_path(monkeypatch, 
     assert response.status_code == 200, response.text
     assert (Path(response.json()["target_path"]) / "app/app.json").is_file()
     backend.get_bundle.assert_awaited_once_with("owned-archive")
+
+
+@pytest.mark.parametrize("fault", ["changed_archive", "missing_archive"])
+def test_promote_verifies_parent_before_changing_workspace_or_registry(monkeypatch, tmp_path, fault):
+    parent_archive = tmp_path / "parent.zip"
+    archive = tmp_path / "bundle.zip"
+    _write_bundle_zip(parent_archive, {"app.json": '{"appId":"app_1"}', "ui/title.txt": "previous"})
+    _write_bundle_zip(archive, {"app.json": '{"appId":"app_1"}', "ui/title.txt": "approved"})
+    parent = _version(artifact_version_id="av_parent_1", zip_path=parent_archive)
+    version = _version(artifact_version_id="av_parent_guard", zip_path=archive)
+    store = _PromoteStore(version, parent_version=parent, sessions=[
+        _session(artifact_version_id=version.id, status=RefinementSessionStatus.ACCEPTED),
+    ])
+    studio, client = _promote_client(monkeypatch, tmp_path / "factory", store)
+    target = tmp_path / "workspaces/app_1/av_parent_guard"
+    (target / "app").mkdir(parents=True)
+    (target / "app/existing.txt").write_bytes(b"preserve me")
+    registry = studio._get_app_registry_service()
+    before = dict(registry.app)
+    if fault == "changed_archive":
+        _write_bundle_zip(parent_archive, {"app.json": '{"appId":"app_1"}', "ui/title.txt": "unapproved"})
+    else:
+        parent_archive.unlink()
+
+    response = _restore_or_promote(client, version, "promote")
+
+    assert response.status_code == 409
+    assert "Artifact archive identity or content could not be verified" in response.json()["detail"]
+    assert sorted(path.relative_to(target).as_posix() for path in target.rglob("*")) == ["app", "app/existing.txt"]
+    assert (target / "app/existing.txt").read_bytes() == b"preserve me"
+    assert registry.app == before
+    assert registry.promote_calls == []
+    assert store.updated_sessions == []
+
+
+def test_promote_review_uses_verified_parent_bytes_if_source_changes(monkeypatch, tmp_path):
+    parent_archive = tmp_path / "parent.zip"
+    archive = tmp_path / "bundle.zip"
+    _write_bundle_zip(parent_archive, {"app.json": '{"appId":"app_1"}', "ui/title.txt": "previous"})
+    _write_bundle_zip(archive, {"app.json": '{"appId":"app_1"}', "ui/title.txt": "approved"})
+    parent = _version(artifact_version_id="av_parent_1", zip_path=parent_archive)
+    version = _version(artifact_version_id="av_parent_snapshot", zip_path=archive)
+    store = _PromoteStore(version, parent_version=parent, sessions=[
+        _session(artifact_version_id=version.id, status=RefinementSessionStatus.ACCEPTED),
+    ])
+    studio, client = _promote_client(monkeypatch, tmp_path / "factory", store)
+    restore = studio._restore_bundle_to_target
+
+    def replace_parent_after_verification(**kwargs):
+        _write_bundle_zip(parent_archive, {"app.json": '{"appId":"app_1"}', "ui/title.txt": "unapproved"})
+        return restore(**kwargs)
+
+    monkeypatch.setattr(studio, "_restore_bundle_to_target", replace_parent_after_verification)
+    response = _restore_or_promote(client, version, "promote")
+
+    assert response.status_code == 200, response.text
+    assert (Path(response.json()["target_path"]) / "app/ui/title.txt").read_text() == "approved"
+    changed = next(item for item in response.json()["review"]["changed_files"] if item["path"] == "ui/title.txt")
+    assert "-previous" in changed["diff_preview"]
+    assert "+approved" in changed["diff_preview"]
+    assert "unapproved" not in changed["diff_preview"]
+    assert response.json()["review"]["review_status"] == "promoted"
+    assert studio._get_app_registry_service().app["lifecycle_state"] == "active"
 
 
 @pytest.mark.parametrize("action", ["restore", "promote"])
@@ -780,7 +854,8 @@ def test_promote_rejects_missing_artifact_path(monkeypatch, tmp_path: Path) -> N
     response = client.post("/api/studio/build/artifacts/av_missing_1/promote?build_registry_id=appreg_1")
 
     assert response.status_code == 409
-    assert "Revalidate and save a canonical app bundle" in response.json()["detail"]
+    assert "Artifact archive identity or content could not be verified" in response.json()["detail"]
+    assert "Save a canonical app bundle" in response.json()["detail"]
     assert not (tmp_path / "workspaces").exists()
 
 
@@ -800,7 +875,8 @@ def test_promote_rejects_missing_file_manifest(monkeypatch, tmp_path: Path) -> N
     response = client.post("/api/studio/build/artifacts/av_no_manifest_1/promote?build_registry_id=appreg_1")
 
     assert response.status_code == 409
-    assert "Revalidate and save a canonical app bundle" in response.json()["detail"]
+    assert "Artifact archive identity or content could not be verified" in response.json()["detail"]
+    assert "Save a canonical app bundle" in response.json()["detail"]
     assert not (tmp_path / "workspaces").exists()
 
 
