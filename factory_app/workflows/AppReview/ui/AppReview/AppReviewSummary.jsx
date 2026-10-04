@@ -20,11 +20,11 @@ const STATUS_TONE = {
   attention_required: 'warning',
 };
 
-function ValidationRow({ label, status }) {
-  const tone = status ? STATUS_TONE[status] || 'default' : 'warning';
-  const label_text = status
+function ValidationRow({ label, status, statusLabel, statusTone }) {
+  const tone = statusTone ?? (status ? STATUS_TONE[status] || 'default' : 'warning');
+  const label_text = statusLabel ?? (status
     ? status.charAt(0).toUpperCase() + status.slice(1)
-    : 'Missing';
+    : 'Missing');
   return (
     <div className="flex items-center justify-between border-b border-border/40 py-2 last:border-0">
       <span className="text-sm text-muted-foreground">{label}</span>
@@ -69,8 +69,17 @@ export default function AppReviewSummary({ payload = {} }) {
   }, [payload]);
 
   const securitySummary = payload.security_readiness_summary || {};
-  const securityStatus = securitySummary.status || (securitySummary.finding_count > 0 ? 'attention_required' : null);
   const securityFindings = Array.isArray(securitySummary.findings) ? securitySummary.findings : [];
+  const securityFindingCount = Math.max(securitySummary.finding_count || 0, securityFindings.length);
+  let securityStatus = securitySummary.status || null;
+  if (securityFindingCount > 0 && (!securityStatus || securityStatus === 'passed')) {
+    securityStatus = 'attention_required';
+  }
+  const securityStatusLabel = {
+    passed: 'No findings',
+    attention_required: 'Needs review',
+    not_assessed: 'Not assessed',
+  }[securityStatus];
   const validationStatus = payload.app_validation_status || null;
   const acceptanceStatus = payload.app_bundle_acceptance_status || null;
   const integrationStatus =
@@ -104,16 +113,26 @@ export default function AppReviewSummary({ payload = {} }) {
         <ValidationRow label="Bundle acceptance" status={acceptanceStatus} />
         <ValidationRow label="Build validation" status={validationStatus} />
         <ValidationRow label="Integration checks" status={integrationStatus} />
-        <ValidationRow label="Security readiness" status={securityStatus} />
+        <ValidationRow
+          label="Security scan (advisory)"
+          status={securityStatus}
+          statusLabel={securityStatusLabel}
+          statusTone={securityStatus === 'passed' ? 'default' : securityStatus === 'not_assessed' ? 'warning' : undefined}
+        />
       </div>
 
-      {securityFindings.length > 0 && (
+      {securityFindingCount > 0 && (
         <div className="mb-4 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3">
-          <p className="text-sm font-medium text-warning">Security readiness needs attention</p>
+          <p className="text-sm font-medium text-warning">Review security findings</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            {securityFindings.length} advisory finding{securityFindings.length === 1 ? '' : 's'} recorded for review.
+            {securityFindingCount} advisory finding{securityFindingCount === 1 ? '' : 's'} recorded for review.
           </p>
         </div>
+      )}
+      {(securityStatus === 'passed' || securityStatus === 'attention_required' || securityFindingCount > 0) && (
+        <p className="mb-4 text-xs text-muted-foreground">
+          An automated scan cannot establish that the app is secure.
+        </p>
       )}
 
       {payload.app_validation_preview_url && (

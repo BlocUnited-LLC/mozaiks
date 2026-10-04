@@ -196,6 +196,8 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- App review labels security scans as advisory, shows zero findings without a
+  green pass, and keeps missing, unassessed, skipped, and failed results distinct.
 - A copied `.env.example` now imports the hosts and points the local shell's
   API proxy at the backend; `mozaiks context index` passes its workspace key.
 - Exported app requirements now pin Mozaiks to the version that built the app
