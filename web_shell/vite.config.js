@@ -126,6 +126,38 @@ function ensureTailwindSourceLinks(entries) {
   return linkRoot;
 }
 
+function isLoopbackAddress(address) {
+  return address === '::1' || address.startsWith('127.') || address.startsWith('::ffff:127.');
+}
+
+// The address of a client that is not on this machine, or null for a local one.
+function remoteClientAddress(req) {
+  const address = req.socket?.remoteAddress ?? '';
+  return isLoopbackAddress(address) ? null : address || 'unknown';
+}
+
+// Dev-proxy `configure` hook: give the backend the address of a client that is
+// not on this machine (see the proxy entries below).
+function markRemoteClients(proxy) {
+  // HTTP: 'start' is emitted for every proxied request before the outgoing
+  // request is built from req.headers. Not 'proxyReq': http-proxy-3 skips that
+  // event for a request that carries an Expect header, and never emits it on
+  // its fetch path (FORCE_FETCH_PATH=true), so such a request would arrive
+  // unmarked and look local.
+  proxy.on('start', (req) => {
+    const address = remoteClientAddress(req);
+    if (address) req.headers['x-forwarded-for'] = address;
+  });
+  // WebSocket upgrade: 'proxyReqWs' is emitted for every upgrade before the
+  // request is sent. Never forward another machine's request unmarked.
+  proxy.on('proxyReqWs', (proxyReq, req) => {
+    const address = remoteClientAddress(req);
+    if (!address) return;
+    if (proxyReq.headersSent) return proxyReq.destroy();
+    proxyReq.setHeader('X-Forwarded-For', address);
+  });
+}
+
 // Favicon — read from brand/theme_config.json if available (best-effort; runtime
 // theme loading via /api/theme-config is the authoritative source).
 export default defineConfig(({ mode }) => {
@@ -340,9 +372,17 @@ export default defineConfig(({ mode }) => {
     fs: {
       allow: viteFsAllow,
     },
+    // With authentication off the backend grants development access
+    // (AUTH_ANON_ACCESS=local) only to requests from this machine, and treats
+    // ANY forwarding header as "not this machine". Every proxied request reaches
+    // it from this dev server's loopback connection, so markRemoteClients marks
+    // the clients that are elsewhere: another machine's request carries its
+    // address in X-Forwarded-For (replacing whatever it sent), while a browser
+    // on this machine passes through with no header added. (xfwd would add the
+    // header for every client and so refuse local browsers too.)
     proxy: {
-      '/api': { target: apiUrl, changeOrigin: true },
-      '/ws':  { target: apiUrl.replace('http', 'ws'), ws: true },
+      '/api': { target: apiUrl, changeOrigin: true, configure: markRemoteClients },
+      '/ws':  { target: apiUrl.replace('http', 'ws'), ws: true, configure: markRemoteClients },
     },
   },
 

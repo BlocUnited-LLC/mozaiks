@@ -558,7 +558,8 @@ def _run_backend_ps1() -> str:
 param(
   [int]$Port = 8000,
   # Loopback by default: local dev runs auth-off with an anonymous admin.
-  # Pass -BindHost 0.0.0.0 to listen on all interfaces.
+  # -BindHost 0.0.0.0 listens on all interfaces, but with authentication off
+  # the backend refuses other machines unless AUTH_ANON_ACCESS=open.
   [string]$BindHost = "127.0.0.1",
   [string]$WorkspacePath = "",
   [switch]$ForceStop,
@@ -700,7 +701,9 @@ def _run_frontend_ps1() -> str:
 
 param(
   [int]$Port = 3000,
-  # Loopback by default; pass -BindHost 0.0.0.0 to listen on all interfaces.
+  # Loopback by default. -BindHost 0.0.0.0 listens on all interfaces, but with
+  # authentication off the backend refuses other machines unless
+  # AUTH_ANON_ACCESS=open.
   [string]$BindHost = "127.0.0.1",
   [string]$BackendUrl = "http://127.0.0.1:8000",
   [string]$WorkspacePath = "",

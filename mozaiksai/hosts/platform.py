@@ -607,8 +607,8 @@ async def health_check(request: Request):
 
 
 @app.get("/api/shell-config")
-async def get_shell_config(surface: str | None = None):
-    return await build_shell_config(surface=surface or "platform")
+async def get_shell_config(request: Request, surface: str | None = None):
+    return await build_shell_config(surface=surface or "platform", client_scope=request.scope)
 
 
 @app.get("/api/me")

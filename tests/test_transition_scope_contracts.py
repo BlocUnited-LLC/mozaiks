@@ -28,6 +28,8 @@ def test_resolve_scope_from_principal_accepts_dev_body_scope() -> None:
         raw_claims={},
         provider="none",
         app_id=None,
+        # The auth-off development principal (this machine, AUTH_ANON_ACCESS=local).
+        auth_provenance="local_development",
     )
 
     app_id, user_id = platform_app.resolve_scope_from_principal(
@@ -50,6 +52,8 @@ def test_resolve_scope_from_principal_uses_default_user_for_anonymous_scope() ->
         raw_claims={},
         provider="none",
         app_id=None,
+        # The auth-off development principal (this machine, AUTH_ANON_ACCESS=local).
+        auth_provenance="local_development",
     )
 
     app_id, user_id = platform_app.resolve_scope_from_principal(
@@ -60,6 +64,26 @@ def test_resolve_scope_from_principal_uses_default_user_for_anonymous_scope() ->
 
     assert app_id == "demo-app"
     assert user_id == "demo-user"
+
+
+def test_resolve_scope_from_principal_binds_an_anonymous_visitor_to_itself() -> None:
+    visitor = UserPrincipal(
+        user_id="anonymous",
+        email=None,
+        name="Anonymous User",
+        roles=[],
+        scopes=["access_as_user"],
+        raw_claims={},
+        provider="none",
+        app_id=None,
+    )
+
+    assert platform_app.resolve_scope_from_principal(
+        visitor, app_id="demo-app", default_user_id="demo-user"
+    ) == ("demo-app", "anonymous")
+    with pytest.raises(HTTPException) as refused:
+        platform_app.resolve_scope_from_principal(visitor, app_id="demo-app", user_id="demo-user")
+    assert refused.value.status_code == 403
 
 
 def test_resolve_scope_from_principal_rejects_mismatched_bound_app_scope() -> None:
@@ -113,6 +137,8 @@ async def test_transition_resolve_workflow_response_includes_context_variables(m
         raw_claims={},
         provider="none",
         app_id=None,
+        # The auth-off development principal (this machine, AUTH_ANON_ACCESS=local).
+        auth_provenance="local_development",
     )
     selected_context = {
         "app_type": "brownfield_app",

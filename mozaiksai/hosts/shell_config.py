@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -932,8 +933,14 @@ def _apply_dynamic_shell_navigation(
     }
 
 
-async def build_shell_config(*, surface: str = "platform") -> dict:
-    """Compose app-shell config from platform-owned manifests."""
+async def build_shell_config(
+    *, surface: str = "platform", client_scope: Mapping[str, Any] | None = None
+) -> dict:
+    """Compose app-shell config from platform-owned manifests.
+
+    ``client_scope`` is the requesting client's ASGI scope; the auth
+    projection uses it (see ``build_app_auth_projection``).
+    """
     app_root = resolve_app_root()
     ai_path = app_root / "config" / "ai.json"
 
@@ -946,7 +953,7 @@ async def build_shell_config(*, surface: str = "platform") -> dict:
     }
     app_manifest = _load_app_manifest()
     auth_contract = load_app_auth_contract(app_root, auth_required=app_manifest.get("authRequired", False))
-    result["auth"] = await build_app_auth_projection(auth_contract)
+    result["auth"] = await build_app_auth_projection(auth_contract, client_scope=client_scope)
     shell_shortcuts: dict[str, Any] | None = None
     shell_navigation: dict[str, Any] | None = None
     shell_chrome: dict[str, Any] | None = None

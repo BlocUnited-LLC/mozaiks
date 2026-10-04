@@ -36,7 +36,19 @@ from fastapi import WebSocket
 
 from logs.logging_config import get_core_logger
 from mozaiksai.core.auth.adapters import AuthError, UserClaims, get_auth_adapter
-from mozaiksai.core.auth.adapters.registry import is_auth_enabled
+from mozaiksai.core.auth.adapters.registry import (
+    ResolvedAuthConfig,
+    is_auth_enabled,
+    resolve_auth_config,
+)
+from mozaiksai.core.auth.anonymous_access import (
+    ANONYMOUS_PROVENANCE,
+    DEVELOPMENT_ACCESS_PROVENANCES,
+    LOCAL_DEVELOPMENT_PROVENANCE,
+    AnonymousGrant,
+    anonymous_claims,
+    resolve_anonymous_grant,
+)
 
 logger = get_core_logger("auth.websocket")
 
@@ -211,6 +223,17 @@ class WebSocketUser:
     chat_id: str | None = None
     tenant_id: str | None = None
     workspace_id: str | None = None
+    # How this identity came into existence; same vocabulary as
+    # UserPrincipal.auth_provenance.
+    auth_provenance: str = ANONYMOUS_PROVENANCE
+
+    @property
+    def is_authenticated(self) -> bool:
+        return self.auth_provenance == "token_validated"
+
+    @property
+    def has_local_development_access(self) -> bool:
+        return self.auth_provenance in DEVELOPMENT_ACCESS_PROVENANCES
 
     def has_role(self, role: str) -> bool:
         return role in self.roles
@@ -243,7 +266,12 @@ class WebSocketUser:
         return str(self.workspace_id) == str(path_workspace_id)
 
     @classmethod
-    def from_claims(cls, claims: UserClaims) -> "WebSocketUser":
+    def from_claims(
+        cls,
+        claims: UserClaims,
+        *,
+        auth_provenance: str = ANONYMOUS_PROVENANCE,
+    ) -> "WebSocketUser":
         """Create WebSocketUser from adapter UserClaims."""
         return cls(
             user_id=claims.user_id,
@@ -257,7 +285,19 @@ class WebSocketUser:
             chat_id=claims.chat_id,
             tenant_id=claims.tenant_id,
             workspace_id=claims.workspace_id,
+            auth_provenance=auth_provenance,
         )
+
+
+async def _anonymous_grant_or_close(
+    websocket: WebSocket, config: ResolvedAuthConfig
+) -> AnonymousGrant | None:
+    """Decide an unauthenticated connection; close it (before accept) when refused."""
+    grant = resolve_anonymous_grant(websocket.scope, config)
+    if grant.refused:
+        await websocket.close(code=WS_CLOSE_POLICY_VIOLATION, reason=grant.ws_reason or "")
+        return None
+    return grant
 
 
 async def authenticate_websocket(
@@ -299,31 +339,25 @@ async def authenticate_websocket(
             await accept_websocket(websocket)
             # Use websocket.state.user_id
     """
-    # Get the configured auth adapter
-    adapter = get_auth_adapter()
-
-    # Check if auth is enabled
     if not is_auth_enabled():
-        # No auth mode - create anonymous user
-        logger.debug("Auth disabled - using anonymous WebSocket user (provider: %s)", adapter.name)
-        try:
-            claims = await adapter.validate_token("")  # NoAuthAdapter ignores token
-            user = WebSocketUser.from_claims(claims)
-        except Exception as _anon_exc:
-            # Fallback if adapter doesn't support empty token
-            logger.debug("WS_AUTH_ADAPTER_EMPTY_TOKEN_FAILED adapter=%s — using anonymous fallback: %s", adapter.name, _anon_exc)
-            user = WebSocketUser(
-                user_id="anonymous",
-                email=None,
-                name="Anonymous User",
-                roles=[],
-                scopes=["access_as_user"],
-                raw_claims={},
-                provider="none",
-            )
-
+        # Authentication off: the anonymous access policy mints or refuses.
+        config = resolve_auth_config()
+        grant = await _anonymous_grant_or_close(websocket, config)
+        if grant is None:
+            return None
+        claims = await anonymous_claims(grant, config, get_auth_adapter())
+        user = WebSocketUser.from_claims(
+            claims,
+            auth_provenance=(
+                LOCAL_DEVELOPMENT_PROVENANCE if grant.development_access else ANONYMOUS_PROVENANCE
+            ),
+        )
+        logger.debug("Auth disabled - anonymous WebSocket user (provenance=%s)", user.auth_provenance)
         _bind_user_to_websocket(websocket, user)
         return user
+
+    # Get the configured auth adapter
+    adapter = get_auth_adapter()
 
     # Extract token
     token = access_token
@@ -378,7 +412,7 @@ async def authenticate_websocket(
         return None
 
     # Build user context
-    user = WebSocketUser.from_claims(claims)
+    user = WebSocketUser.from_claims(claims, auth_provenance="token_validated")
 
     # Bind to websocket.state for downstream access
     _bind_user_to_websocket(websocket, user)
@@ -468,19 +502,39 @@ async def authenticate_websocket_with_path_user(
 
     Returns:
         WebSocketUser if authenticated and user_id matches, None otherwise
+
+    With authentication off, a connection granted development access takes
+    the path user_id as its identity. An anonymous visitor is the configured
+    anonymous user and, like a token user, may only name itself in the path.
     """
-    # Auth bypass for local development - use path user_id as identity
     if not is_auth_enabled():
-        logger.debug("Auth disabled - using path user_id for WebSocket")
-        user = WebSocketUser(
-            user_id=path_user_id,
-            email=None,
-            name=None,
-            roles=[],
-            scopes=["access_as_user"],
-            raw_claims={},
-            provider="none",
-        )
+        config = resolve_auth_config()
+        grant = await _anonymous_grant_or_close(websocket, config)
+        if grant is None:
+            return None
+        if grant.development_access:
+            logger.debug("Auth disabled - development access, using path user_id for WebSocket")
+            user = WebSocketUser(
+                user_id=path_user_id,
+                email=None,
+                name=None,
+                roles=[],
+                scopes=["access_as_user"],
+                raw_claims={},
+                provider="none",
+                auth_provenance=LOCAL_DEVELOPMENT_PROVENANCE,
+            )
+        else:
+            user = WebSocketUser.from_claims(
+                await anonymous_claims(grant, config, get_auth_adapter()),
+                auth_provenance=ANONYMOUS_PROVENANCE,
+            )
+            if not verify_user_owns_resource(user.user_id, path_user_id):
+                logger.warning(
+                    "WebSocket visitor tried to connect as path user %s", path_user_id
+                )
+                await websocket.close(code=WS_CLOSE_POLICY_VIOLATION, reason="user_id mismatch")
+                return None
         _bind_user_to_websocket(websocket, user)
         return user
 

@@ -381,6 +381,25 @@ def _build_connector_summary(connectors: list[dict[str, Any]]) -> dict[str, int]
     return summary
 
 
+def _resolved_auth_mode() -> tuple[bool, str | None]:
+    """Whether authentication is on, and its provider, as the runtime resolves them.
+
+    Display only. It reads the runtime's single auth resolution rather than
+    parsing AUTH_ENABLED again, so an auto-detected provider shows as on and
+    implicit demo mode shows as off. An invalid configuration shows as off:
+    the host refuses to start with it and reports why.
+    """
+    from mozaiksai.core.auth.adapters.base import AuthError
+    from mozaiksai.core.auth.adapters.registry import resolve_auth_config
+    from mozaiksai.core.environment import EnvironmentConfigError
+
+    try:
+        config = resolve_auth_config()
+    except (AuthError, EnvironmentConfigError):
+        return False, None
+    return config.enabled, config.provider if config.enabled else None
+
+
 async def build_integrations_summary(*, app_id: str | None = None) -> dict:
     def _mask(value: str, show: int = 6) -> str:
         if len(value) <= show:
@@ -405,8 +424,7 @@ async def build_integrations_summary(*, app_id: str | None = None) -> dict:
     internal_key = os.getenv("INTERNAL_API_KEY", "")
     backend_url = os.getenv("MOZAIKS_BACKEND_URL", "")
 
-    auth_enabled = os.getenv("AUTH_ENABLED", "false").lower() in ("1", "true", "yes", "on")
-    auth_provider = os.getenv("AUTH_PROVIDER", "")
+    auth_enabled, auth_provider = _resolved_auth_mode()
     keycloak_url = os.getenv("KEYCLOAK_URL", "")
     keycloak_realm = os.getenv("KEYCLOAK_REALM", "")
     keycloak_client_id = os.getenv("KEYCLOAK_CLIENT_ID", "")

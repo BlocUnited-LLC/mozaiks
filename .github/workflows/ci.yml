@@ -565,6 +565,7 @@ jobs:
           docker run -d --name mozaiks-repo-host-smoke \
             --network host \
             -e AUTH_ENABLED=false \
+            -e AUTH_ANON_ACCESS=open \
             -e RATE_LIMIT_ENABLED=false \
             -e OPENAI_API_KEY=sk-test-placeholder \
             -e MONGO_URI=mongodb://localhost:27017/ci_mozaiks \

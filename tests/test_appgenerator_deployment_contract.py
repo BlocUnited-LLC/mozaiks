@@ -267,6 +267,95 @@ def test_public_deployment_contract_does_not_require_runtime_auth() -> None:
     assert "VITE_OIDC_DISCOVERY_URL" in manifest["public_env"]
 
 
+def test_public_app_image_declares_anonymous_visitors_without_development_access() -> None:
+    """The image itself carries the posture, so every deployment of the bundle
+    (including one that passes only the required env) serves visitors, not
+    development access, and never starts in implicit demo mode. It is the
+    only auth setting the image carries, so an operator who adds identity
+    provider settings turns authentication on."""
+    from io import StringIO
+
+    from dotenv import dotenv_values
+
+    from mozaiksai.core.auth.adapters.registry import resolve_auth_config
+
+    result = generate_deployment_artifacts(
+        app_id="demo_app",
+        deployment_profile="production_container",
+        include_dockerfiles=True,
+        include_workflow=True,
+        include_compose=True,
+    )
+    artifacts = result["artifacts"]
+
+    assert result["bundle_errors"] == [] and result["deploy_target_spec_errors"] == []
+    assert result["deployment_manifest"]["auth"]["runtime_env"] == {"AUTH_ANON_ACCESS": "public"}
+    dockerfile = artifacts["Dockerfile"].splitlines()
+    assert "ENV AUTH_ANON_ACCESS=public" in dockerfile
+    assert dockerfile.index("ENV AUTH_ANON_ACCESS=public") < len(dockerfile) - 2
+    assert not any("AUTH_ENABLED" in line for line in dockerfile)
+    for path in ENV_EXAMPLE_PATHS:
+        values = dotenv_values(stream=StringIO(artifacts[path]))
+        assert values["AUTH_ANON_ACCESS"] == "public" and "AUTH_ENABLED" not in values
+        resolved = resolve_auth_config(environ={key: value or "" for key, value in values.items()})
+        assert (resolved.source, resolved.anonymous_access) == ("explicit_disable", "public")
+    # The deployed templates say why ENV stays unset; the local one has no ENV to warn about.
+    for path, environment in ((".env.staging.example", "staging"), (".env.production.example", "production")):
+        assert (
+            f"# Leave ENV unset: AUTH_ANON_ACCESS=public is refused with ENV={environment}."
+            in artifacts[path].splitlines()
+        )
+    assert "Leave ENV unset" not in artifacts[".env.example"]
+
+    image = {"AUTH_ANON_ACCESS": "public"}
+    operator = {"MOZAIKS_OIDC_AUTHORITY": "https://idp.example.invalid", "AUTH_AUDIENCE": "api"}
+    assert resolve_auth_config(environ={**image, **operator}).provider == "jwt"
+
+
+def test_authenticated_app_image_declares_no_anonymous_posture() -> None:
+    result = generate_deployment_artifacts(app_id="demo_app", auth_required=True)
+
+    assert "runtime_env" not in result["deployment_manifest"]["auth"]
+    assert "AUTH_ANON_ACCESS" not in result["artifacts"]["Dockerfile"]
+    for path in ENV_EXAMPLE_PATHS:
+        assert "AUTH_ANON_ACCESS" not in result["artifacts"][path]
+
+
+@pytest.mark.parametrize(
+    ("auth_required", "runtime_env"),
+    [
+        (False, {}),
+        (False, {"AUTH_ANON_ACCESS": "open"}),
+        (False, {"AUTH_ENABLED": "false", "AUTH_ANON_ACCESS": "public"}),
+        (True, {"AUTH_ANON_ACCESS": "public"}),
+        (True, {}),
+    ],
+)
+def test_deploy_spec_rejects_a_non_canonical_runtime_posture(auth_required, runtime_env) -> None:
+    from factory_app.workflows.AppGenerator.tools.deployment_contract import (
+        build_deploy_target_spec,
+        validate_deploy_target_spec,
+    )
+
+    spec = build_deploy_target_spec(app_id="demo_app", auth_required=auth_required)
+    spec["auth"]["runtime_env"] = runtime_env
+
+    assert any(error.startswith("auth.runtime_env must be") for error in validate_deploy_target_spec(spec))
+
+
+def test_deploy_spec_without_a_runtime_posture_still_validates() -> None:
+    """Manifests stored before the posture existed carry no runtime_env."""
+    from factory_app.workflows.AppGenerator.tools.deployment_contract import (
+        build_deploy_target_spec,
+        validate_deploy_target_spec,
+    )
+
+    spec = build_deploy_target_spec(app_id="demo_app", auth_required=False)
+    spec["auth"].pop("runtime_env")
+
+    assert not any("runtime_env" in error for error in validate_deploy_target_spec(spec))
+
+
 def test_authenticated_deployment_contract_includes_oidc_runtime_env_and_readiness() -> None:
     result = generate_deployment_artifacts(
         app_id="demo_app",

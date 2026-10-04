@@ -136,6 +136,23 @@ unchanged. The standard module executor does not supply `app_slug`, so account
 handlers using the same module/entity IDs with `collection_name_for` also use
 its default slug. Custom naming inputs are not inferred from app display names.
 
+### Preview auth posture
+
+A public app (no auth contract) is previewed as its visitors see it. The
+preview environment sets `AUTH_ENABLED=false`, `AUTH_PROVIDER=none` and
+`AUTH_ANON_ACCESS=public` unconditionally and drops `AUTH_ANON_ROLES`, so a
+forwarded `MOZAIKS_PREVIEW_ENV_*` value can neither give the preview
+development access nor stop it starting. `AUTH_ANON_SCOPES` is kept, so a
+preview matches its deployment: pages and module actions run with the
+visitor's scopes and admin pages stay closed. An app with an auth contract
+keeps authentication on in its preview.
+
+This matters most on E2B: the SDK makes a sandbox's ports public by default,
+so anyone who holds a preview URL can reach the preview. The posture is set
+inside the sandbox by the packaged runtime, so it takes effect only in a
+`mozaiks-sandbox:local` image and an E2B template rebuilt from a revision that
+includes it; rebuild both after upgrading.
+
 The preview regression writes through the executor's real scoped persistence
 context, then calls the account routes through a registered canonical handler
 against an in-memory Mongo substitute. It checks export, owned deletion, repeat

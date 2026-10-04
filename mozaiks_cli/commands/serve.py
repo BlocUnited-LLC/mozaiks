@@ -7,7 +7,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from mozaiks_cli.unauthenticated_bind import warn_if_unauthenticated_bind
+from mozaiks_cli.unauthenticated_bind import check_unauthenticated_start
 from mozaiks_cli.workspace import load_workspace_dotenv
 
 _HOST_MODULES = {
@@ -53,6 +53,13 @@ def run(args) -> None:
         print(f"Created {env_file} from .env.example — fill in your OPENAI_API_KEY and MONGO_URI before use.")
     load_workspace_dotenv(workspace)
 
+    # The host runs with this process's environment; say now, before anything
+    # starts, if it would refuse to start or whom it would serve.
+    refusal = check_unauthenticated_start(listen, environ=os.environ, env_file=env_file, host=host)
+    if refusal is not None:
+        print(refusal, file=sys.stderr, flush=True)
+        sys.exit(1)
+
     try:
         import uvicorn
     except ImportError:
@@ -72,9 +79,6 @@ def run(args) -> None:
     print(f"Host     : {host}  ({listen}:{port})")
     if reload:
         print("Reload   : enabled")
-
-    # The host runs with this process's environment.
-    warn_if_unauthenticated_bind(listen, environ=os.environ, env_file=env_file)
 
     uvicorn.run(app_module, host=listen, port=port, reload=reload, log_level=log_level)
 

@@ -54,10 +54,11 @@ MongoDB collection (assignment_store.data_alias → data/contract.json)
         │
         ▼
 module_executor.py enforces entitlement gate
-  (grants or denies capability at runtime; skipped when AUTH_ENABLED=false)
+  (grants or denies capability at runtime; skipped only for requests with
+   development access, such as this machine with AUTH_ENABLED=false)
 ```
 
-The gate is enforced only when authentication is enabled; see
+The gate is enforced for every caller without development access; see
 [Subscriptions](../configs/subscriptions.md#how-it-works).
 
 The `entitlement_dispatch` module owns only the **write path**. The read path

@@ -300,6 +300,7 @@ class TestProviderDetectionFailClosed:
         for var in (
             "AUTH_ENABLED",
             "AUTH_PROVIDER",
+            "AUTH_ANON_ACCESS",
             "SUPABASE_URL",
             "KEYCLOAK_URL",
             "KEYCLOAK_REALM",
@@ -400,8 +401,13 @@ class TestProviderDetectionFailClosed:
         monkeypatch.setenv("AUTH_PROVIDER", "none")
         assert is_auth_explicitly_disabled() is True
 
-        # Enabled deployments are never "explicitly disabled".
+        # Choosing whom an unauthenticated host serves is explicit too.
         monkeypatch.delenv("AUTH_PROVIDER", raising=False)
+        monkeypatch.setenv("AUTH_ANON_ACCESS", "public")
+        assert is_auth_explicitly_disabled() is True
+
+        # Enabled deployments are never "explicitly disabled".
+        monkeypatch.delenv("AUTH_ANON_ACCESS", raising=False)
         monkeypatch.setenv("AUTH_ENABLED", "true")
         monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
         assert is_auth_explicitly_disabled() is False

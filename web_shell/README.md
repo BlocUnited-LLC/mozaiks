@@ -48,8 +48,9 @@ the commands they wrap, shown below.
 `http://localhost:8000/api/shell-config`, then runs the frontend in the
 current terminal. By default it first starts the Docker Compose `mongo`,
 `keycloak-db`, and `keycloak` services; pass `-SkipInfra` when MongoDB is
-already running. `run-backend.ps1` and `run-frontend.ps1` bind `0.0.0.0`
-(all interfaces); see the note below about local authentication.
+already running. `run-backend.ps1` and `run-frontend.ps1` bind `127.0.0.1`
+(this machine only) unless you pass `-BindHost`; see the note below about
+local authentication.
 
 **macOS / Linux (bash or zsh)**
 
@@ -73,8 +74,9 @@ only, and `.env.example` ships Gemini values for both.
 `.env.example` sets `AUTH_ENABLED=false` and `AUTH_ANON_ROLES=admin,user`,
 which run Studio without sign-in and give the anonymous user the admin role.
 Without a `.env`, drop the flag and export `MONGO_URI`, `AUTH_ENABLED=false`,
-and `AUTH_ANON_ROLES=admin,user` yourself; otherwise Studio shows "Unable to
-open this app". With auth enabled, startup requires a configured provider and
+and `AUTH_ANON_ROLES=admin,user` yourself: with no auth setting at all the
+backend refuses to start, and without `AUTH_ANON_ROLES` the admin pages are
+refused. With auth enabled, startup requires a configured provider and
 its audience: `AUTH_AUDIENCE` for the generic JWT/OIDC provider, or
 `KEYCLOAK_CLIENT_ID` for the Keycloak provider (see `.env.example`).
 
@@ -85,8 +87,15 @@ npm --prefix web_shell run dev -- --host 127.0.0.1 --port 3000 --strictPort
 ```
 
 These commands bind to this machine only. With the local auth settings above,
-anyone who can reach the backend or the Vite server gets the anonymous admin
-identity, so bind `0.0.0.0` only inside a container or on a network you trust.
+the backend gives the anonymous admin identity only to requests from this
+machine (`AUTH_ANON_ACCESS=local`, the default) and refuses every other
+request. Open the app at `http://localhost:3000` or `http://127.0.0.1:3000`.
+If you bind Vite to `0.0.0.0`, its dev proxy marks requests from other
+machines (`X-Forwarded-For`), so the backend refuses them too. To serve other
+machines, configure authentication, or set `AUTH_ANON_ACCESS=public`
+(anonymous visitors without development access, not for Studio) or
+`AUTH_ANON_ACCESS=open` (development access for every client that can
+connect, only where the network itself limits who that is).
 
 Either way, that starts:
 

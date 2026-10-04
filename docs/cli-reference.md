@@ -142,7 +142,7 @@ mozaiks studio [-h] [--dir DIRECTORY] [--json] [--open] [--backend-port BACKEND_
 | `--backend-port BACKEND_PORT` | Backend port used with `--open` (default: `8000`) |
 | `--frontend-port FRONTEND_PORT` | Frontend port used with `--open` (default: `3000`) |
 | `--no-browser` | With `--open`, start the services without opening a browser |
-| `--listen LISTEN` | Interface the backend and frontend bind with `--open` (default: `127.0.0.1`, this machine only; use `0.0.0.0` for all interfaces). With authentication off, anyone who can reach that address can act as any user with any role, so the launcher prints a warning first. |
+| `--listen LISTEN` | Interface the backend and frontend bind with `--open` (default: `127.0.0.1`, this machine only; use `0.0.0.0` for all interfaces). With authentication off, other machines are refused unless `AUTH_ANON_ACCESS=open` (development access for every client); the launcher refuses `AUTH_ANON_ACCESS=local` on such an address and warns before it starts with `open`. |
 
 === "Windows"
 
@@ -321,7 +321,7 @@ mozaiks serve [-h] [--host {runtime,platform,studio}] [--port PORT] [--listen LI
 | `workspace` | Workspace root (default: current directory) |
 | `--host` | Host layer to start (default: `platform`). `studio` needs `factory_app`, which a Mozaiks repo checkout provides. |
 | `--port PORT` | Port to listen on (default: `8000`) |
-| `--listen LISTEN` | Interface to bind (default: `127.0.0.1`, this machine only). Use `--listen 0.0.0.0` to listen on all interfaces, for example in a container. With authentication off, anyone who can reach that address can act as any user with any role, so `serve` prints a warning before it starts. |
+| `--listen LISTEN` | Interface to bind (default: `127.0.0.1`, this machine only). Use `--listen 0.0.0.0` to listen on all interfaces, for example in a container. With authentication off, other machines are refused unless `AUTH_ANON_ACCESS` is `public` (anonymous visitors) or `open` (development access for every client); `serve` refuses `AUTH_ANON_ACCESS=local` on such an address and warns before it starts with `open`. With no authentication configuration at all, `serve` refuses to start. |
 | `--reload` | Enable uvicorn auto-reload (development only) |
 
 ```bash

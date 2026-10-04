@@ -35,9 +35,12 @@ Quick Start:
 
 Configuration (environment variables):
 
-    # Provider Selection (auto-detected if not set)
+    # Provider Selection (auto-detected if not set; nothing set refuses to start)
     AUTH_PROVIDER=none|jwt|supabase|keycloak
     AUTH_ENABLED=true|false   # false = same as AUTH_PROVIDER=none
+    # With authentication off: whom the host serves (see anonymous_access.py).
+    # Set with no provider configured, it also turns authentication off.
+    AUTH_ANON_ACCESS=local|public|open   # local (default): this machine only
 
     # Generic JWT Configuration
     AUTH_JWKS_URL=https://.../.well-known/jwks.json
