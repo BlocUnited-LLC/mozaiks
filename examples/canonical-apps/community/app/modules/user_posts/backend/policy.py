@@ -12,7 +12,7 @@ def actor_id(ctx) -> str:
 
 def published_posts_query(ctx, *, author_id: str | None = None, visibility: str | None = None) -> dict[str, Any]:
     # ctx.persistence owns app scoping and rejects caller-supplied app_id filters.
-    # Mongo scalar equality also matches array elements; legacy arrays grant no access.
+    # Mongo scalar equality also matches array elements; array-valued fields grant no access.
     q: dict[str, Any] = {
         "status": {"$eq": POST_STATUS_PUBLISHED, "$not": {"$type": "array"}},
         "$or": [
