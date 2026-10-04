@@ -57,6 +57,28 @@ This project follows a practical pre-1.0 changelog format:
 - E2B preview template uploads exclude local environment files, dependencies,
   caches, browser reports, and runtime log output.
 
+- Bounded module collection handles now accept only the arguments the installed
+  MongoDB driver defines for each operation. Previously the handle passed a
+  caller's keyword and positional arguments straight to the driver, which passes
+  a keyword it does not recognize into the server command it builds; an
+  unchecked argument, or a raw query command envelope in a read filter, could
+  change what that command addressed, so an app running beside owner-scoped
+  collections could reach data outside its boundary. Each method now takes its
+  primary arguments (filter, update, document, pipeline and so on) by position
+  or by the driver's keyword, never both, plus only the options the driver
+  defines for that operation, and refuses anything else before the driver
+  builds a command. Every option that existing callers in this repository and
+  its factory templates pass is still accepted. An option the driver does not
+  define for an operation is now refused even where the server would accept it,
+  for example `hint` on an aggregation or `let` on a count. Aggregation
+  pipelines, on bounded handles and on owner-scoped collections, are copied
+  once into plain documents (a stage that is not a document, or a key that is
+  not a string, is refused), and that copy is both what the stage validator
+  checks and what the driver sends. Which collections a handle may open and
+  which aggregation stages are allowed are unchanged. Bounded handles prevent
+  mistakes; they are not a sandbox against hostile code running in the host
+  process.
+
 - Self-hosted subscription grant and revoke actions are internal-only; HTTP
   callers cannot assign themselves paid entitlements.
 

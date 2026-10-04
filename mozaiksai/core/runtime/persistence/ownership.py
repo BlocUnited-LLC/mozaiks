@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -73,6 +73,40 @@ _READ_STAGES = frozenset({
     "$addFields", "$set", "$unset", "$replaceRoot", "$replaceWith", "$count",
     "$bucket", "$bucketAuto", "$sortByCount", "$sample", "$facet", "$setWindowFields",
 })
+
+
+def _plain_copy(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        document: dict[str, Any] = {}
+        for key, item in list(value.items()):
+            if not isinstance(key, str):
+                raise PersistenceScopeError("Aggregation documents require string keys")
+            # A str subclass can compare and hash as one name while its encoded
+            # content is another; keep only the content.
+            document[str.__str__(key)] = _plain_copy(item)
+        return document
+    if isinstance(value, (list, tuple)):
+        return [_plain_copy(item) for item in value]
+    return value
+
+
+def canonical_pipeline(pipeline: Iterable[Any]) -> list[dict[str, Any]]:
+    """Read a caller's pipeline exactly once into plain lists and dicts.
+
+    The validator and the driver must see the same content. A caller's mapping
+    or sequence can answer differently each time it is read, and a lazy cursor
+    reads it again long after validation, so every mapping becomes a ``dict``
+    and every list or tuple a ``list`` in a single pass. Validate the returned
+    copy and send that same copy. Any other value is passed through untouched,
+    which keeps ObjectId, datetime, Decimal128, Regex, Binary and key order as
+    the caller gave them.
+    """
+    stages: list[dict[str, Any]] = []
+    for stage in list(pipeline):
+        if not isinstance(stage, Mapping):
+            raise PersistenceScopeError("Aggregation stages must be documents")
+        stages.append(_plain_copy(stage))
+    return stages
 
 
 def validate_owned_pipeline(pipeline: Sequence[Mapping[str, Any]]) -> None:

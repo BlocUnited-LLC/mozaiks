@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable, Mapping, Sequence
-from copy import deepcopy
 from typing import Any
 
 from mozaiksai.core.core_config import get_mongo_client
@@ -20,6 +19,7 @@ from .intent_loader import DataContract
 from .naming import collection_name_for, scope_filter_for, scope_metadata
 from .ownership import (
     CollectionOwnership,
+    canonical_pipeline,
     collection_bindings,
     collection_ownership,
     owned_update,
@@ -164,7 +164,8 @@ class MongoPersistenceCollection:
         return int(await self._collection.count_documents(self._scoped_query(query), **self._options))
 
     async def aggregate(self, pipeline: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
-        stages = deepcopy(list(pipeline or []))
+        # One plain copy is both what is validated and what the driver receives.
+        stages = canonical_pipeline(pipeline or [])
         if self._restrict_aggregation:
             validate_owned_pipeline(stages)
         scoped_pipeline: list[Mapping[str, Any]] = [{"$match": self._scoped_query({})}]

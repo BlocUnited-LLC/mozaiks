@@ -271,6 +271,19 @@ In mixed apps, literal access to an owned physical collection is rejected.
 Unowned aliases remain usable through a bounded Mongo-compatible facade that
 supports their existing operations and safe aggregation cursors; it prevents
 foreign-collection stages and database introspection from exposing owned rows.
+Each method binds its call against the installed driver's contract for that
+operation: primary arguments (filter, update, document, pipeline and so on) by
+position or by the driver's keyword but not both, plus only the options the
+driver defines for that operation (such as sessions, comments, sorts, upserts,
+index hints, time limits, `skip`/`limit` for counts, and
+`allowDiskUse`/`batchSize` for aggregations). Any other option, a surplus
+positional argument, or a raw query command envelope in a read filter is refused
+before the driver builds a command. An aggregation pipeline, on this facade and
+on owner-scoped collections, is copied once into plain documents, and that copy
+is both what the stage validator checks and what the driver sends.
+Bounded handles keep a module's mistakes inside its own collections; they are
+not a sandbox against hostile code running in the host process, which can reach
+the database by other means.
 Apps with no owned collections retain raw alias behavior. Scoped shared
 collections must declare their owning surface; missing ownership fails loading.
 Index changes on owned collections remain host startup work: module calls cannot
