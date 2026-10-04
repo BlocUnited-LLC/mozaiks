@@ -27,7 +27,14 @@ required_checks:
   - id: module_permissions_declared
     severity: high
     control_area: permissions
-    rule: Module actions that expose private or mutating APIs must declare permissions that resolve to module.yaml permissions entries.
+    rule: >-
+      Action permissions must resolve to module.yaml permissions entries. A non-public action
+      without permissions needs one unless declared contracts already protect it: an internal
+      surface with an explicit empty list, or an authenticated (absent or null) surface in an app
+      whose app.json and config/auth.yaml declare sign-in, when every data/contract.json collection
+      of its module is per_user or per_workspace or its entitlement_gate is a capability the
+      default plan does not grant. Operator (admin_internal) actions always need a permission.
+      The finding is medium when sign-in bounds the caller but the module declares no collections.
   - id: tenant_scope_for_persistent_modules
     severity: high
     control_area: tenant_isolation

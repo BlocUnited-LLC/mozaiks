@@ -406,6 +406,24 @@ This project follows a practical pre-1.0 changelog format:
   field no longer fail with Mongo error 54. Session feedback, which those
   workspaces dropped silently while reporting success, is now stored.
 
+- SecurityReadiness no longer reports a signed-in module action as missing a
+  permission when the bundle's own contracts already protect it (#817). The
+  permission rule now reads what the runtime enforces: sign-in (`app.json`
+  `authRequired` with a valid `config/auth.yaml`), collection ownership in
+  `data/contract.json`, and entitlement gates in `config/subscriptions.yaml`.
+  An action on the authenticated surface without permissions is reported as
+  high when the app declares no sign-in or when any signed-in user can reach
+  records its module does not own per user or per workspace, and as medium
+  when its module declares no collections at all. A gate protects only when
+  the default plan does not grant it. Operator-only actions, malformed
+  surfaces and undeclared permission ids are reported as before. On a recorded
+  generated app, six high findings for owner-scoped create, read, update,
+  delete and a paid summary no longer appear. Tests dispatch every changed
+  case through the module router and executor against a real database with
+  two users, so the scanner is checked against what each caller can reach.
+  [Generated Action Protection](docs/architecture/app/generated-action-protection.md)
+  holds the decision table.
+
 - AppGenerator no longer rejects a module contract task because its output
   repeats a companion contract as a raw file. A live run's `task_management`
   contract set `module_contract.reactions_yaml` to null, as its module declares

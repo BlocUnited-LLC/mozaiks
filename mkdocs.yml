@@ -190,6 +190,7 @@ nav:
               - Admin System: architecture/app/admin-system.md
               - Account, Admin & Platform Services: architecture/app/account-admin-and-platform-services.md
               - Tenant Auth & Scope: architecture/app/tenant-auth-and-scope.md
+              - Generated Action Protection: architecture/app/generated-action-protection.md
               - App-Local Refinement Harness: architecture/app/refinement-harness.md
           - Module System:
               - architecture/modules-systems/index.md

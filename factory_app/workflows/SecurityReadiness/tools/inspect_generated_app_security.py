@@ -8,6 +8,12 @@ import yaml
 
 from factory_app.app.modules.security_readiness.backend.schemas import summarize_findings
 from factory_app.workflows._shared.artifact_bundle import read_artifact_bundle
+from mozaiksai.core.runtime.app.auth_contract import (
+    AppAuthContractError,
+    validate_app_auth_contract,
+)
+from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
+from mozaiksai.core.runtime.persistence.intent_loader import index_data_contract_by_entity
 
 from .build_artifact import (
     context_get as _context_get,
@@ -27,7 +33,45 @@ _SECRET_VALUE_PATTERNS = (
     re.compile(r"(?i)(?:sk_live|rk_live|ghp_|github_pat_|xox[baprs]-)[A-Za-z0-9_./+=-]{12,}"),
 )
 
+_OWNED_TENANCIES = frozenset({"per_user", "per_workspace"})
 
+# What a non-public action without permissions exposes, keyed by the declared
+# contract that fails to bound its caller. See
+# docs/architecture/app/generated-action-protection.md for the decision table.
+_PERMISSION_GAPS: dict[str, tuple[str, str, str, str]] = {
+    "private": (
+        "high",
+        "Private module action has no permission gate",
+        "Action {action} in {module} is not public but declares no permissions.",
+        "Declare explicit module permissions for private or mutating actions.",
+    ),
+    "no_sign_in": (
+        "high",
+        "Non-public module action in an app without sign-in",
+        "Action {action} in {module} is not public and declares no permissions, and the app declares "
+        "no sign-in, so no declared contract identifies or limits its caller.",
+        "Declare sign-in with app.json authRequired and config/auth.yaml, declare a module permission, "
+        "or declare the action public or public_readonly if anyone may call it.",
+    ),
+    "shared_data": (
+        "high",
+        "Signed-in action reaches shared records without a permission",
+        "Any signed-in user can call action {action} in {module}: it declares no permissions and no "
+        "entitlement gate that the default plan withholds, and the module's declared data includes "
+        "collections that are not owned per user or per workspace.",
+        "Declare a module permission, an entitlement gate the default plan does not grant, or "
+        "per_user/per_workspace ownership for the collection in data/contract.json.",
+    ),
+    "undeclared_scope": (
+        "medium",
+        "Signed-in action has no declared permission or data scope",
+        "Any signed-in user can call action {action} in {module}: it declares no permissions and no "
+        "entitlement gate that the default plan withholds, and the module declares no collections "
+        "that bound what it reaches.",
+        "Declare a module permission or an entitlement gate, or declare the collections it uses with "
+        "per_user/per_workspace ownership in data/contract.json.",
+    ),
+}
 
 
 def _finding(
@@ -90,6 +134,90 @@ def _declares_deployment(files: dict[str, str]) -> bool:
         path in files
         for path in ("Dockerfile", "deployment.manifest.json", ".github/workflows/deploy.yml")
     )
+
+
+def _declares_sign_in(files: dict[str, str]) -> bool:
+    """True only for the app.json and config/auth.yaml pair the runtime loads as sign-in."""
+    if _app_json(files).get("authRequired") is not True:
+        return False
+    contract = _yaml_file(files, "app/config/auth.yaml")
+    if not contract or contract.get("__parse_error__"):
+        return False
+    try:
+        validate_app_auth_contract(contract)
+    except AppAuthContractError:
+        return False
+    return True
+
+
+def _default_plan_capabilities(files: dict[str, str]) -> frozenset[str] | None:
+    """Capabilities a signed-in user holds without a subscription assignment.
+
+    None without a valid subscriptions contract: the runtime then wires no
+    entitlement adapter and every entitlement gate passes.
+    """
+    contract = _yaml_file(files, "app/config/subscriptions.yaml")
+    if not contract or contract.get("__parse_error__"):
+        return None
+    try:
+        config = SubscriptionsConfig.model_validate(contract)
+    except ValueError:
+        return None
+    if config.products:
+        return frozenset().union(
+            *(product.capabilities_for_plan(product.default_plan_id) for product in config.products)
+        )
+    return config.capabilities_for_plan(config.default_plan_id or "")
+
+
+def _module_collection_ownership(files: dict[str, str]) -> dict[str, list[bool]] | None:
+    """Whether each module's declared collections are owner-scoped by runtime persistence.
+
+    None without a valid data/contract.json: persistence then binds no declared
+    ownership to any collection.
+    """
+    text = files.get("app/data/contract.json") or files.get("data/contract.json")
+    if not text:
+        return None
+    try:
+        contract = json.loads(text)
+        index = index_data_contract_by_entity(contract) if isinstance(contract, dict) else None
+    except ValueError:
+        return None
+    if index is None:
+        return None
+    ownership: dict[str, list[bool]] = {}
+    for (module_id, _entity), collection in index.items():
+        ownership.setdefault(module_id, []).append(
+            collection.get("tenancy") in _OWNED_TENANCIES and bool(collection.get("owner_field"))
+        )
+    return ownership
+
+
+def _module_data_reach(
+    files: dict[str, str], module_id: str, module_root: str, ownership: dict[str, list[bool]] | None,
+) -> str:
+    """owned, shared, or none: the records a module's actions can reach by contract."""
+    if ownership is None:
+        return "shared" if f"{module_root}/backend/repo.py" in files else "none"
+    scoped = ownership.get(module_id)
+    if not scoped:
+        return "none"
+    return "owned" if all(scoped) else "shared"
+
+
+def _authenticated_action_gap(
+    action: dict[str, Any], *, sign_in: bool, reach: str, default_capabilities: frozenset[str] | None,
+) -> str | None:
+    """The unprotected exposure of an authenticated-surface action without permissions."""
+    if not sign_in:
+        return "no_sign_in"
+    gate = str(action.get("entitlement_gate") or "").strip()
+    if gate and default_capabilities is not None and gate not in default_capabilities:
+        return None
+    if reach == "owned":
+        return None
+    return "shared_data" if reach == "shared" else "undeclared_scope"
 
 
 def _scan_raw_secret_values(files: dict[str, str]) -> list[dict[str, Any]]:
@@ -177,6 +305,9 @@ def _scan_module_contracts(files: dict[str, str]) -> list[dict[str, Any]]:
     module_paths = sorted(
         path for path in files if path.startswith(("app/modules/", "modules/")) and path.endswith("/module.yaml")
     )
+    sign_in = _declares_sign_in(files)
+    default_capabilities = _default_plan_capabilities(files)
+    ownership = _module_collection_ownership(files)
     for path in module_paths:
         try:
             module = yaml.safe_load(files[path])
@@ -201,6 +332,8 @@ def _scan_module_contracts(files: dict[str, str]) -> list[dict[str, Any]]:
             if isinstance(item, dict)
         }
         module_id = str((module.get("module") or {}).get("id") or path).strip()
+        module_root = path.rsplit("/", 1)[0]
+        reach = _module_data_reach(files, module_id, module_root, ownership)
         for action in module.get("actions") or []:
             if not isinstance(action, dict):
                 continue
@@ -214,16 +347,29 @@ def _scan_module_contracts(files: dict[str, str]) -> list[dict[str, Any]]:
             # Reaction-only internal actions are authorized by the event bus.
             if action.get("api_surface") == "internal" and action.get("permissions") == []:
                 continue
+            # An absent or null surface is authenticated HTTP. Sign-in, owned
+            # collections, or a plan-restricted gate can protect it; every
+            # other surface still needs a declared permission.
+            gap: str | None = None
             if not permissions:
+                gap = "private"
+                raw_permissions = action.get("permissions")
+                loadable = raw_permissions is None or isinstance(raw_permissions, list)
+                if action.get("api_surface") is None and loadable:
+                    gap = _authenticated_action_gap(
+                        action, sign_in=sign_in, reach=reach, default_capabilities=default_capabilities,
+                    )
+            if gap is not None:
+                severity, title, description, recommendation = _PERMISSION_GAPS[gap]
                 findings.append(
                     _finding(
                         finding_id=f"module_permissions:missing:{module_id}:{action_id}",
-                        severity="high",
+                        severity=severity,
                         control_area="permissions",
-                        title="Private module action has no permission gate",
-                        description=f"Action {action_id or '<unknown>'} in {module_id} is not public but declares no permissions.",
+                        title=title,
+                        description=description.format(action=action_id or "<unknown>", module=module_id),
                         evidence_path=path,
-                        recommendation="Declare explicit module permissions for private or mutating actions.",
+                        recommendation=recommendation,
                     )
                 )
             unknown = sorted(set(permissions) - declared_permissions)
@@ -239,7 +385,6 @@ def _scan_module_contracts(files: dict[str, str]) -> list[dict[str, Any]]:
                         recommendation="Add the permission declarations or correct the action permission ids.",
                     )
                 )
-        module_root = path.rsplit("/", 1)[0]
         repo_path = f"{module_root}/backend/repo.py"
         policy_path = f"{module_root}/backend/policy.py"
         if repo_path in files and policy_path not in files:
