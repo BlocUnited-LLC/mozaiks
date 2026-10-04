@@ -156,7 +156,8 @@ class ModuleRequest:
     authority: ModuleDispatchAuthority = field(kw_only=True)
     provenance: ModuleDispatchProvenance | None = None
     # Trusted ownership identity is never inferred from requested dispatch
-    # metadata, action inputs, roles, or permission bypass authority.
+    # metadata, action inputs, roles, or permission bypass authority. It also
+    # keys enforce-mode entitlement lookups; the scope fields above do not.
     persistence_principal: PersistencePrincipal | None = None
 
 
@@ -517,16 +518,20 @@ class ModuleExecutor:
 
         # Entitlement check — only when the action declares an entitlement_gate.
         # Enforce-mode dispatch always runs it; trusted_bypass authorities
-        # (closed server-owned kinds only) skip both checks.
+        # (closed server-owned kinds only) skip both checks. The plan lookup
+        # is keyed only by the verified identity: requested user, tenant and
+        # workspace scope never select a plan, and a dispatch without a
+        # verified identity holds only what the app grants everyone.
         if dispatch_authority.permission_mode == "enforce":
             capability_id = self._action_entitlements.get(request.module, {}).get(request.action)
             if capability_id:
+                identity = request.persistence_principal
                 ent_result = await self._entitlement_checker.check(
                     capability_id,
                     app_id=request.app_id,
-                    user_id=request.user_id,
-                    tenant_id=request.tenant_id,
-                    workspace_id=request.workspace_id,
+                    user_id=identity.user_id if identity else None,
+                    tenant_id=identity.tenant_id if identity else None,
+                    workspace_id=identity.workspace_id if identity else None,
                 )
                 entitlement_check = ModuleEntitlementCheck(
                     checked=True,

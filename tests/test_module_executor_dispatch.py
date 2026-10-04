@@ -25,6 +25,7 @@ from mozaiksai.core.runtime.composition.module_executor import (
 from mozaiksai.core.runtime.composition.workflow_trigger_guard import (
     WORKFLOW_TRIGGER_TRACE_KEY,
 )
+from mozaiksai.core.runtime.persistence.adapter import PersistencePrincipal
 from tests.module_authority_test_helpers import enforce_authority, trusted_framework_authority
 
 # ---------------------------------------------------------------------------
@@ -65,6 +66,7 @@ def _request(
     workspace_id: str | None = None,
     authority: ModuleDispatchAuthority | None = None,
     provenance: ModuleDispatchProvenance | None = None,
+    persistence_principal: PersistencePrincipal | None = None,
 ) -> ModuleRequest:
     return ModuleRequest(
         module=module,
@@ -76,6 +78,7 @@ def _request(
         workspace_id=workspace_id,
         authority=authority if authority is not None else trusted_framework_authority(),
         provenance=provenance,
+        persistence_principal=persistence_principal,
     )
 
 
@@ -272,7 +275,11 @@ class TestEntitlementGate:
             action_method_map={"echo": "echo"},
             action_entitlements={"echo": "wallet.payout"},
         )
-        result = await ex.execute(_request(module="wallet", authority=enforce_authority("wallet.manage")))
+        result = await ex.execute(_request(
+            module="wallet",
+            authority=enforce_authority("wallet.manage"),
+            persistence_principal=PersistencePrincipal(user_id="user-1"),
+        ))
         assert result.success is True
         granted_checker.check.assert_awaited_once_with(
             "wallet.payout",
@@ -283,7 +290,38 @@ class TestEntitlementGate:
         )
 
     @pytest.mark.asyncio
-    async def test_entitlement_check_receives_workspace_scope(self):
+    async def test_entitlement_check_is_keyed_by_the_verified_identity(self):
+        granted_checker = MagicMock()
+        granted_checker.check = AsyncMock(return_value=EntitlementResult(granted=True))
+        ex = ModuleExecutor(entitlement_checker=granted_checker)
+        ex.register(
+            "wallet",
+            _EchoHandler(),
+            action_method_map={"echo": "echo"},
+            action_entitlements={"echo": "wallet.payout"},
+        )
+        result = await ex.execute(
+            _request(
+                module="wallet",
+                tenant_id="tenant-requested",
+                workspace_id="workspace-requested",
+                authority=enforce_authority("wallet.manage"),
+                persistence_principal=PersistencePrincipal(
+                    user_id="user-1", workspace_id="workspace-1", tenant_id="tenant-1",
+                ),
+            )
+        )
+        assert result.success is True
+        granted_checker.check.assert_awaited_once_with(
+            "wallet.payout",
+            app_id="app-1",
+            user_id="user-1",
+            tenant_id="tenant-1",
+            workspace_id="workspace-1",
+        )
+
+    @pytest.mark.asyncio
+    async def test_requested_scope_without_a_verified_identity_never_keys_the_check(self):
         granted_checker = MagicMock()
         granted_checker.check = AsyncMock(return_value=EntitlementResult(granted=True))
         ex = ModuleExecutor(entitlement_checker=granted_checker)
@@ -305,9 +343,9 @@ class TestEntitlementGate:
         granted_checker.check.assert_awaited_once_with(
             "wallet.payout",
             app_id="app-1",
-            user_id="user-1",
-            tenant_id="tenant-1",
-            workspace_id="workspace-1",
+            user_id=None,
+            tenant_id=None,
+            workspace_id=None,
         )
 
     @pytest.mark.asyncio

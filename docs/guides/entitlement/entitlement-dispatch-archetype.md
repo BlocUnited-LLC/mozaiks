@@ -106,6 +106,14 @@ The field names are configured in `assignment_store` via `user_id_field`,
 it, the adapter does not look records up by user, so one record entitles every
 user of the app.
 
+Gated dispatch looks records up by the caller's verified identity only. A
+tenant-scoped record entitles callers whose token is bound to that tenant
+(`AUTH_TENANT_ID_CLAIM`, default `tid`). A workspace-scoped record entitles
+callers whose token is bound to that workspace (`AUTH_WORKSPACE_ID_CLAIM`,
+default `workspace_id`), or whose workspace a host-verified membership
+assertion supplies. A tenant or workspace named in the request never selects a
+record.
+
 ```python
 {
     # Required: identifies who holds the grant

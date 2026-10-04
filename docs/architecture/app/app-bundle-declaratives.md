@@ -83,7 +83,8 @@ disabled enforcement, so a malformed contract can never silently grant gated
 actions. Schema: `mozaiks.subscriptions.v1`.
 Assignment stores may declare `tenant_id_field`, `workspace_id_field`, and
 `user_id_field`; the configured adapter checks exact scoped assignments before
-falling back to broader tenant, workspace, user, or app-level records.
+falling back to broader tenant, workspace, user, or app-level records. Module
+dispatch keys that lookup by the caller's verified identity only.
 
 Plans may also declare `usage_limits` for meters such as `ai_tokens`. These
 limits are deterministic app intent used by admin, billing, and selected

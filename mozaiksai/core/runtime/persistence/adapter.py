@@ -24,12 +24,16 @@ class PersistencePrincipal:
     """Authenticated ownership identity, separate from requested dispatch scope.
 
     Runtime authentication or an explicit local development identity supplies
-    the actor. Only a host's verified membership assertion may select workspace.
+    the actor. ``tenant_id`` is the tenant the validated credential is bound
+    to; requested dispatch scope never sets it. Only a host's verified
+    membership assertion may select workspace. Persistence ownership and
+    module entitlement lookups read this identity.
     """
 
     user_id: str
     workspace_id: str | None = None
     source: Literal["authenticated", "development"] = "authenticated"
+    tenant_id: str | None = None
 
     @classmethod
     def from_authenticated_user(cls, principal: UserPrincipal | None) -> PersistencePrincipal | None:
@@ -45,7 +49,11 @@ class PersistencePrincipal:
         except AuthError:
             return None
         if principal.is_authenticated and auth_enabled:
-            return cls(user_id=principal.user_id, workspace_id=principal.workspace_id)
+            return cls(
+                user_id=principal.user_id,
+                workspace_id=principal.workspace_id,
+                tenant_id=principal.tenant_id or None,
+            )
         return cls._development(principal.user_id)
 
     @classmethod
@@ -75,7 +83,11 @@ class PersistencePrincipal:
                     return None
             except (TypeError, ValueError):
                 return None
-        return cls(user_id=principal.user_id, workspace_id=principal.workspace_id)
+        return cls(
+            user_id=principal.user_id,
+            workspace_id=principal.workspace_id,
+            tenant_id=principal.tenant_id or None,
+        )
 
     @classmethod
     def _development(cls, user_id: str) -> PersistencePrincipal | None:
@@ -95,6 +107,7 @@ class PersistencePrincipal:
             return self
         return PersistencePrincipal(
             user_id=self.user_id, workspace_id=scope["_verified_workspace_id"], source=self.source,
+            tenant_id=self.tenant_id,
         )
 
 
