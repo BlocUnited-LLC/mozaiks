@@ -109,28 +109,26 @@ export MONGO_URI="mongodb://localhost:27017/mozaiks"
 export MONGO_URI="<your MongoDB connection string>"
 ```
 
-### 3. Set an LLM key
+### 3. Set an OpenAI key
 
-Builds call an LLM, but you do not need to begin with a paid provider. The
-default example uses Google Gemini because the Gemini API offers a free tier
-([current pricing and limits](https://ai.google.dev/gemini-api/docs/pricing)):
+Builds call OpenAI today: the runtime builds OpenAI clients only, so set
+`OPENAI_API_KEY`:
 
 **Windows (PowerShell)**
 
 ```powershell
-$env:GEMINI_API_KEY="your-key-here"
+$env:OPENAI_API_KEY="sk-..."
 ```
 
 **macOS / Linux (bash or zsh)**
 
 ```bash
-export GEMINI_API_KEY="your-key-here"
+export OPENAI_API_KEY="sk-..."
 ```
 
-Mozaiks is not tied to Gemini. OpenAI and Anthropic work too — set
-`OPENAI_API_KEY` or `ANTHROPIC_API_KEY` instead and select the provider in
-Studio or via `--provider`. Each provider sets its own pricing and usage
-limits.
+The default model is `gpt-5-nano`; set `DEFAULT_LLM_MODEL` to use another
+OpenAI model. Gemini and Anthropic keys are not used for builds yet, and the
+provider you pick in Studio or with `--provider` is recorded for display only.
 
 Variables set this way last only for the current terminal session. Run
 step 4 in the same terminal, or set them again in a new one.
@@ -149,7 +147,8 @@ python -m mozaiks quickstart --dir .\mozaiks-workspace
 python -m mozaiks quickstart --dir ./mozaiks-workspace
 ```
 
-This creates the `mozaiks-workspace` folder and starts the local Studio.
+This creates the `mozaiks-workspace` folder, starts the local Studio, and opens
+it in your browser.
 
 `mozaiks-workspace` is the local workspace folder Mozaiks uses for generated
 output, config, and launch scripts. It is not the app itself. The app is
@@ -157,8 +156,8 @@ created later from inside Studio.
 
 ### 5. Start your Genesis Build
 
-Open `http://localhost:3000/apps` and click `Create App`, then describe what you
-want to build. The workflow walks you through the build steps and stages the
+In Studio (`http://127.0.0.1:3000/apps`), click `Create App`, then describe
+what you want to build. The workflow walks you through the build steps and stages the
 generated artifacts for review. In-progress builds stay in **Apps**, so you can
 always pick up where you left off.
 
@@ -170,7 +169,8 @@ for examples ranging from a typo fix to a major product rethink.
 
 If setup fails, check three things first: use `python -m mozaiks` if the
 `mozaiks` command is unavailable, make sure `MONGO_URI` points to a reachable
-MongoDB instance, and set an LLM API key before running builds.
+MongoDB instance, and set an LLM API key before running builds. Builds use
+`OPENAI_API_KEY` only today.
 
 ### Where To Go Next
 
@@ -225,7 +225,6 @@ for you:
 | `ArtifactStore` | read/write named artifact blobs | local filesystem + S3 |
 | `AppBackendPort` | runtime to backend request/emit/health | generic HTTP adapter |
 | `SandboxPort` | isolated execution sessions | Docker adapter |
-| `SslProviderPort` | certificate provisioning | protocol only |
 
 Swap any of them for your own without forking the runtime.
 

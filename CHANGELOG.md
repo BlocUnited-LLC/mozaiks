@@ -186,7 +186,13 @@ This project follows a practical pre-1.0 changelog format:
   commands next to the PowerShell ones. `pip install -e ".[docs]"` with
   `python -m mkdocs serve` is the one documented docs recipe. CONTRIBUTING
   documents the ruff and mypy commands CI runs. The CLI reference covers every
-  command.
+  command, with sample output taken from real runs.
+- Setup docs no longer present Gemini as the default provider: builds call
+  OpenAI only today, so they ask for `OPENAI_API_KEY`. The manual `web_shell`
+  commands bind `127.0.0.1`. The subscriptions and entitlement guides now say
+  that gates apply only with authentication on, that `assignment_store` needs
+  `user_id_field: user_id` for per-user plans and a data alias declared in
+  `data/contract.json`, and give a `reactions.yaml` example that loads.
 
 ### Fixed
 

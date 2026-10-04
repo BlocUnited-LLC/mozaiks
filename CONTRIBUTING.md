@@ -116,9 +116,11 @@ python -m pytest tests/test_your_file.py -q
 
 **Coverage gate note:** The local `pyproject.toml` configuration sets a
 repository-wide minimum coverage threshold of 30% (`--cov-fail-under=30`,
-measured against `mozaiksai`). However, **CI enforces a stricter 70% gate**
-(`--cov-fail-under=70` in `.github/workflows/ci.yml`). CI is authoritative —
-your pull request must pass the 70% threshold regardless of local results.
+measured against `mozaiksai`). However, **CI enforces a stricter 70% gate** on
+the combined coverage of its test shards: each shard runs with
+`--cov-fail-under=0`, and the `test` job in `.github/workflows/ci.yml` then
+runs `coverage report --fail-under=70`. CI is authoritative — your pull request
+must pass the 70% threshold regardless of local results.
 
 Running a narrow test file against the global threshold will often report a
 coverage failure even when every test you ran passes. That failure reflects
@@ -247,7 +249,7 @@ Prefer the narrowest test slice that matches the layer you changed.
 Focused guidance validation:
 
 ```bash
-python -m pytest tests/test_contributor_guidance_framing.py tests/test_module_reactions_docs_contract.py tests/test_admin_ui_two_tier_contract.py tests/test_claude_guidance_operating_system.py tests/test_contributor_quickstart.py tests/test_runtime_change_skill.py tests/test_factory_build_workflow_skill.py tests/test_control_plane_refinement_skill.py tests/test_existing_app_discovery_skill.py tests/test_appgenerator_change_skill.py tests/test_agentgenerator_change_skill.py tests/test_contributor_skill_routing_map.py -q
+python -m pytest tests/test_contributor_guidance_framing.py tests/test_module_reactions_docs_contract.py tests/test_admin_ui_two_tier_contract.py tests/test_claude_guidance_operating_system.py tests/test_contributor_quickstart.py tests/test_runtime_change_skill.py tests/test_factory_build_workflow_skill.py tests/test_control_plane_refinement_skill.py tests/test_existing_app_discovery_skill.py tests/test_appgenerator_change_skill.py tests/test_agentgenerator_change_skill.py tests/test_contributor_skill_routing_map.py -q --no-cov
 ```
 
 ## Boundary Warnings

@@ -46,6 +46,9 @@ cp .env.example .env  # or Copy-Item on Windows
 ```
 
 Set `OPENAI_API_KEY=sk-...` in `.env`. If $ARGUMENTS contains an API key, use it.
+Also set `LLM_PRIMARY_API_TYPE=openai` and `DEFAULT_LLM_MODEL=gpt-5-nano` in
+`.env`: `.env.example` ships Gemini values for both, but builds call OpenAI only,
+and the runtime would send `gemini-2.0-flash` to OpenAI.
 
 ### 2. Python + Repo Dependencies
 ```bash

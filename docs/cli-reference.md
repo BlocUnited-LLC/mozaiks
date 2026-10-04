@@ -26,7 +26,11 @@ The single command most users need:
     ```
 
 Scaffolds the workspace, starts the backend and frontend, and opens Studio at
-`http://localhost:3000`.
+`http://127.0.0.1:3000/apps`.
+
+Run it with `--dir` from a Mozaiks source checkout. Without `--dir` there,
+`quickstart` and `onboard` create no workspace: they rewrite the config of the
+repository's own Studio bundle under `factory_app/app` instead.
 
 ## Quick Reference Table
 
@@ -69,11 +73,15 @@ mozaiks quickstart [-h] [--dir DIRECTORY] [--preset {engine,chat,integrated,full
 | `--dir DIRECTORY` | Workspace root to create or configure (default: current directory) |
 | `--preset` | Scaffold preset used when the workspace has no valid app bundle (default: `chat`) |
 | `--name NAME` | App name stored in the scaffold (default: workspace folder name) |
-| `--provider` | Default AI provider stored in the workspace config |
-| `--model MODEL` | Default model name stored in the workspace config |
+| `--provider` | Default AI provider recorded in `app/config/ai.json` (display only; see below) |
+| `--model MODEL` | Default model name recorded in `app/config/ai.json` (display only; see below) |
 | `--backend-port BACKEND_PORT` | Backend port (default: `8000`) |
 | `--frontend-port FRONTEND_PORT` | Frontend port (default: `3000`) |
 | `--no-browser` | Start the services without opening a browser |
+
+The provider and model are shown by [`studio`](#studio), but builds do not
+read them yet: the runtime builds OpenAI clients only, with `OPENAI_API_KEY`
+and the model in `DEFAULT_LLM_MODEL` (default `gpt-5-nano`).
 
 === "Windows"
 
@@ -96,16 +104,25 @@ Quickstart workspace: /path/to/my-workspace
 Bootstrapping workspace and opening Studio. Use Studio to create your first app.
 ```
 
-The scaffold and config lines from `onboard` follow, then:
+The key warning also names `GEMINI_API_KEY` and `ANTHROPIC_API_KEY`, but only
+`OPENAI_API_KEY` makes builds work today. The scaffold and config lines from
+`onboard` follow, then:
 
 ```text
+Setup complete.
+Opening Studio...
+Backend running (pid 12345); log: /path/to/my-workspace/logs/studio-backend.log
+Frontend running (pid 12346); log: /path/to/my-workspace/logs/studio-frontend.log
+
 Studio launched.
-  Backend: http://localhost:8000
-  Studio: http://localhost:3000/apps
+  Backend: http://127.0.0.1:8000
+  Studio: http://127.0.0.1:3000/apps
 ```
 
-The first launch installs the frontend's npm dependencies when they are
-missing, so it can take a few minutes.
+Both servers listen on `127.0.0.1` only and write their output to the two log
+files under the workspace's `logs/` folder. The first launch installs the
+frontend's npm dependencies when they are missing, so it can take a few
+minutes. To bind another interface, use [`studio --open --listen`](#studio).
 
 ### `studio`
 
@@ -114,7 +131,7 @@ with `--open`.
 
 ```text
 mozaiks studio [-h] [--dir DIRECTORY] [--json] [--open] [--backend-port BACKEND_PORT]
-               [--frontend-port FRONTEND_PORT] [--no-browser]
+               [--frontend-port FRONTEND_PORT] [--no-browser] [--listen LISTEN]
 ```
 
 | Flag | Effect |
@@ -125,6 +142,7 @@ mozaiks studio [-h] [--dir DIRECTORY] [--json] [--open] [--backend-port BACKEND_
 | `--backend-port BACKEND_PORT` | Backend port used with `--open` (default: `8000`) |
 | `--frontend-port FRONTEND_PORT` | Frontend port used with `--open` (default: `3000`) |
 | `--no-browser` | With `--open`, start the services without opening a browser |
+| `--listen LISTEN` | Interface the backend and frontend bind with `--open` (default: `127.0.0.1`, this machine only; use `0.0.0.0` for all interfaces). With authentication off, anyone who can reach that address can act as any user with any role, so the launcher prints a warning first. |
 
 === "Windows"
 
@@ -144,7 +162,7 @@ Without `--open` or `--json`, it prints a summary like this:
 App Overview
 
 Workspace:         /path/to/my-workspace/app
-Route:             /apps/app/overview
+Route:             /apps/my-app/overview
 Local Only:        True
 App:               My App
 Provider / Model:  not configured / not configured
@@ -154,10 +172,14 @@ Runtime Readiness: entry_point_configured
 
 Next Step:
   Confirm your default provider and model in app/config/ai.json before starting build work.
+
+Use 'python -m mozaiks studio --json' for machine-readable output.
+Launch Studio with: python -m mozaiks studio --dir <workspace> --open
 ```
 
-If the folder has no valid scaffold, `studio` lists the missing files and tells
-you to run `onboard` first.
+The route uses the `appId` that `init` derives from the app name (`My App`
+becomes `my-app`). If the folder has no valid scaffold, `studio` lists the
+missing files, tells you to run `onboard` first, and exits with `1`.
 
 ### `onboard`
 
@@ -213,8 +235,10 @@ Updated app/config/refinement_policy.yaml
 Setup complete.
 ```
 
-`onboard` refuses to create a scaffold in the root of the Mozaiks framework
-repository itself; pass `--dir` to target a workspace folder.
+Always pass `--dir` when you run `onboard` from a Mozaiks source checkout.
+Without it, `onboard` does not create a workspace: it finds the repository's
+own Studio bundle under `factory_app/app` and rewrites its `config/ai.json`
+and `config/refinement_policy.yaml`.
 
 ### `init`
 
@@ -267,9 +291,17 @@ virtual environment with `source .venv/bin/activate`, copy the env file with
 `cp .env.example .env`, and open Studio with
 `python -m mozaiks studio --dir . --open`.
 
+Until Mozaiks is published on PyPI, the printed step
+`python -m pip install -r requirements.txt` fails, because the generated
+`requirements.txt` pins `mozaiks==0.2.0`. Install Mozaiks into the workspace's
+virtual environment from your checkout first
+(`python -m pip install -e <path-to-mozaiks>`); pip then treats that pin as
+already satisfied.
+
 The `full` preset includes the admin portal, so `init` also asks for an admin
-email (press Enter to skip). `init` refuses to write into a folder that already
-contains a scaffold, or into the framework repository root.
+email (press Enter to skip). `init` refuses, with exit code `1`, to write into
+a folder that already contains a scaffold, or into the framework repository
+root.
 
 ## Runtime Command
 
@@ -289,7 +321,7 @@ mozaiks serve [-h] [--host {runtime,platform,studio}] [--port PORT] [--listen LI
 | `workspace` | Workspace root (default: current directory) |
 | `--host` | Host layer to start (default: `platform`). `studio` needs `factory_app`, which a Mozaiks repo checkout provides. |
 | `--port PORT` | Port to listen on (default: `8000`) |
-| `--listen LISTEN` | Interface to bind (default: `0.0.0.0`) |
+| `--listen LISTEN` | Interface to bind (default: `127.0.0.1`, this machine only). Use `--listen 0.0.0.0` to listen on all interfaces, for example in a container. With authentication off, anyone who can reach that address can act as any user with any role, so `serve` prints a warning before it starts. |
 | `--reload` | Enable uvicorn auto-reload (development only) |
 
 ```bash
@@ -308,15 +340,19 @@ exists, then prints:
 
 ```text
 App root : /path/to/my-app/app
-Host     : platform  (0.0.0.0:8000)
+Host     : platform  (127.0.0.1:8000)
 ```
 
-The uvicorn startup log follows.
+The uvicorn startup log follows. Before printing these lines, `serve` checks
+that MongoDB is reachable at `MONGO_URI`. If it is not, `serve` prints
+`Error: MongoDB is not reachable at MONGO_URI (...)` with the command to rerun,
+and exits with `1`.
 
 ## App Configuration Commands
 
 Run `info` and `add` from the workspace root, the folder that contains
-`app/app.json`.
+`app/app.json`. Anywhere else, both print `No app/app.json found.` and exit
+with `1`.
 
 ### `info`
 
@@ -355,6 +391,8 @@ To enable more features, run:
   mozaiks add --preset <higher-tier>
 ```
 
+A console that cannot print `✓` and `✗` shows `[x]` and `[ ]` instead.
+
 `python -m mozaiks info --available` prints the presets:
 
 ```text
@@ -387,6 +425,9 @@ python -m mozaiks add --preset <preset>
 | --- | --- |
 | `feature` | One of `modules`, `event_bus`, `auth`, `admin`, `chat_ui`. Sets `features.<feature>` to `true`. |
 | `--preset PRESET` | One of `engine`, `chat`, `integrated`, `full`. Sets `preset` and removes per-feature overrides. |
+
+Give exactly one of `feature` or `--preset`. Neither, both, or an unknown
+value is a usage error and exits with `2`.
 
 ```bash
 python -m mozaiks add auth
@@ -433,19 +474,23 @@ Without a mode or a prompt, `gen` asks for the mode, a multi-line description,
 the output directory (default `./generated-<mode>`), and the validation
 strategy.
 
-`gen` needs `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `AZURE_OPENAI_API_KEY` in
-the environment. `MONGO_URI` is optional; without it, generation still runs,
-but build records, artifacts, and usage events are not saved.
+`gen` refuses to start unless `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or
+`AZURE_OPENAI_API_KEY` is set (`Error: No LLM API key found.`, exit code `1`).
+The runtime builds OpenAI clients only, though, so a run that reaches a model
+needs `OPENAI_API_KEY`. `MONGO_URI` is optional; without it, generation still
+runs, but build records, artifacts, and usage events are not saved.
 
 `gen` only runs one-shot workflows. Before any model call it reads the
 workflow's own config, and a workflow that waits for a user reply is refused,
 because the terminal cannot answer it. Both modes run the factory
 AgentGenerator workflow, which opens by interviewing the user, so the run
-stops there and points you to Studio:
+stops there, points you to Studio, and exits with `1`:
 
 ```bash
 python -m mozaiks gen workflow --prompt "A support assistant that drafts refund replies"
 ```
+
+After the run banner, the output ends:
 
 ```text
 Error: AgentGenerator is a conversational workflow: it asks clarifying questions and waits for your reply.
@@ -457,6 +502,9 @@ Detected from the workflow's own config:
 
 Run this generation in Studio instead:
     mozaiks studio --dir . --open
+    Studio drives the conversation and supports replies.
+
+To start the run anyway and drive it elsewhere, pass --allow-interactive (the run will still pause at the first question).
 ```
 
 `--allow-interactive` starts the run anyway. It pauses at the first question,
@@ -528,8 +576,10 @@ mozaiks context index [-h] --app-id APP_ID [--workspace WORKSPACE]
 | `--workspace WORKSPACE` | Workspace root to scan (default: current directory) |
 | `--artifact-key ARTIFACT_KEY` | Artifact key for the indexed app bundle (default: `app_intelligence_workspace`) |
 | `--draft` | Register the `AppContextVersion` as a draft instead of making it current |
-| `--generated-artifacts-root GENERATED_ARTIFACTS_ROOT` | Override where the indexed source bundle is written |
+| `--generated-artifacts-root GENERATED_ARTIFACTS_ROOT` | Override where the indexed source bundle is written (default: `MOZAIKS_GENERATED_ARTIFACTS_PATH`, else `generated/`; a relative path resolves against the Mozaiks installation, not the workspace) |
 | `--json` | Print the full result as JSON |
+
+Run from a freshly initialized workspace:
 
 ```bash
 python -m mozaiks context index --app-id my-app --workspace . --draft
@@ -538,14 +588,18 @@ python -m mozaiks context index --app-id my-app --workspace . --draft
 ```text
 App Intelligence index registered.
   app_id: my-app
-  app_bundle_artifact_version_id: ...
-  source_context_artifact_version_id: ...
-  app_intelligence_artifact_version_id: ...
-  app_context_version_id: ...
-  graph_artifact_version_id: ...
-  indexed_file_count: ...
-  health_status: ...
-  artifact_path: ...
+  app_bundle_artifact_version_id: av_...
+  source_context_artifact_version_id: av_...
+  app_intelligence_artifact_version_id: av_...
+  app_context_version_id: ctx_my_app_av_...
+  graph_artifact_version_id: av_...
+  indexed_file_count: 30
+  health_status: warning
+  core_surface_file_count: 10
+  warning: context_graph_sensitive_paths_skipped
+  scan_warnings:
+    - context_graph_sensitive_files_skipped:3
+  artifact_path: /path/to/mozaiks/generated/app_intelligence/my-app/<timestamp>/artifact.zip
 ```
 
 Health warnings, blockers, and scan warnings are listed above `artifact_path`

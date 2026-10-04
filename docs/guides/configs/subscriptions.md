@@ -18,7 +18,14 @@ module-owned commercial/service boundary.
 2. Module actions declare an `entitlement_gate`.
 3. At startup, Mozaiks loads `app/config/subscriptions.yaml`.
 4. The runtime checks the current assignment store before dispatching gated
-   module actions.
+   module actions. A call whose capability no active plan grants returns
+   HTTP 402 with `detail.error_code: ENTITLEMENT_REQUIRED`.
+
+Gates are enforced only when authentication is enabled. With
+`AUTH_ENABLED=false`, the value `.env.example` and `mozaiks init` ship, HTTP
+calls to `/api/modules/...` run as trusted local development and skip
+permission and entitlement checks, so a gated action succeeds for everyone.
+Turn authentication on to test gating.
 
 Payment providers, invoices, taxes, payouts, and settlement stay behind app or
 managed-capability integrations. The subscriptions file defines the app's
@@ -82,6 +89,7 @@ products:
     default_plan_id: starter
     assignment_store:
       data_alias: billing.platform_subscriptions
+      user_id_field: user_id
     plans:
       - plan_id: starter
         label: Starter
@@ -100,6 +108,7 @@ products:
     default_plan_id: included
     assignment_store:
       data_alias: billing.ai_subscriptions
+      user_id_field: user_id
     token_wallets:
       - wallet_id: ai_tokens
         label: AI token balance
@@ -156,6 +165,18 @@ pricing_catalog:
       add_on_ids: [hero_weekly]
 ```
 
+`assignment_store` decides who holds a plan:
+
+- `data_alias` is a data-contract alias, not a collection name. Declare it in
+  `app/data/contract.json`, for example
+  `"aliases": [{"alias": "billing.platform_subscriptions", "collection": "billing_platform_subscriptions"}]`,
+  and write assignment records to that collection. If the alias is not
+  declared, the adapter fails closed and denies every gated action, including
+  capabilities the default plan grants.
+- `user_id_field` is unset by default, which makes an assignment app- or
+  tenant-wide: one record entitles every user in that scope. Set
+  `user_id_field: user_id` for per-user plans; generated apps always do.
+
 ## What Goes Here
 
 | Concern | Field |
@@ -164,7 +185,7 @@ pricing_catalog:
 | Plans | `products[].plans[]` |
 | Capability gates | `products[].plans[].capabilities[]` |
 | Current assignment store | `products[].assignment_store` |
-| Usage caps | `products[].plans[].usage_limits[]` |
+| Usage limits (display only; not enforced yet) | `products[].plans[].usage_limits[]` |
 | Included token grants | `products[].plans[].token_allowances[]` |
 | Token wallet metadata | `products[].token_wallets[]` |
 | Top-up products | `products[].top_up_products[]` |

@@ -48,7 +48,8 @@ the commands they wrap, shown below.
 `http://localhost:8000/api/shell-config`, then runs the frontend in the
 current terminal. By default it first starts the Docker Compose `mongo`,
 `keycloak-db`, and `keycloak` services; pass `-SkipInfra` when MongoDB is
-already running.
+already running. `run-backend.ps1` and `run-frontend.ps1` bind `0.0.0.0`
+(all interfaces); see the note below about local authentication.
 
 **macOS / Linux (bash or zsh)**
 
@@ -59,25 +60,38 @@ Terminal 1 — infrastructure and backend:
 # Skip this when MongoDB is already running, or start only `mongo`.
 docker compose -f infra/compose/docker-compose.yml up -d mongo keycloak-db keycloak
 
-python -m uvicorn mozaiksai.hosts.studio:app --host 0.0.0.0 --port 8000 --env-file .env
+python -m uvicorn mozaiksai.hosts.studio:app --host 127.0.0.1 --port 8000 --env-file .env
 ```
 
 Importing `mozaiksai` never reads a `.env`, so `--env-file .env` is how the
 backend gets the repo `.env`, as `run-backend.ps1` does. Values already set in
-the shell win. Drop the flag if the repo has no `.env`. `.env.example` sets
-`AUTH_ENABLED=false`; with auth enabled, startup also requires `AUTH_AUDIENCE`
-(see `.env.example`).
+the shell win. Create the file with `cp .env.example .env`, then set
+`OPENAI_API_KEY`, and change `LLM_PRIMARY_API_TYPE` to `openai` and
+`DEFAULT_LLM_MODEL` to an OpenAI model such as `gpt-5-nano`: builds call OpenAI
+only, and `.env.example` ships Gemini values for both.
 
-Terminal 2 — frontend, once `http://localhost:8000/api/shell-config` responds:
+`.env.example` sets `AUTH_ENABLED=false` and `AUTH_ANON_ROLES=admin,user`,
+which run Studio without sign-in and give the anonymous user the admin role.
+Without a `.env`, drop the flag and export `MONGO_URI`, `AUTH_ENABLED=false`,
+and `AUTH_ANON_ROLES=admin,user` yourself; otherwise Studio shows "Unable to
+open this app". With auth enabled, startup requires a configured provider and
+its audience: `AUTH_AUDIENCE` for the generic JWT/OIDC provider, or
+`KEYCLOAK_CLIENT_ID` for the Keycloak provider (see `.env.example`).
+
+Terminal 2 — frontend, once `http://127.0.0.1:8000/api/shell-config` responds:
 
 ```bash
-npm --prefix web_shell run dev -- --host 0.0.0.0 --port 3000 --strictPort
+npm --prefix web_shell run dev -- --host 127.0.0.1 --port 3000 --strictPort
 ```
+
+These commands bind to this machine only. With the local auth settings above,
+anyone who can reach the backend or the Vite server gets the anonymous admin
+identity, so bind `0.0.0.0` only inside a container or on a network you trust.
 
 Either way, that starts:
 
-- the Studio host backend on `http://localhost:8000`
-- the Vite frontend on `http://localhost:3000/apps`
+- the Studio host backend on `http://127.0.0.1:8000`
+- the Vite frontend on `http://127.0.0.1:3000/apps`
 
 ## Other Dev Modes
 
@@ -90,7 +104,7 @@ Frontend only:
 
 ```bash
 # macOS / Linux, and any shell
-npm --prefix web_shell run dev -- --host 0.0.0.0 --port 3000 --strictPort
+npm --prefix web_shell run dev -- --host 127.0.0.1 --port 3000 --strictPort
 ```
 
 Split backend/frontend terminals on Windows:

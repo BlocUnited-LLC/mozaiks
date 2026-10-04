@@ -19,10 +19,10 @@ chat-ui/
 └── postcss.config.js       PostCSS configuration
 
 src/
-├── index.js           Full web entrypoint (`@mozaiks/chat-ui`): components, pages, providers, hooks
+├── index.js           Full web entrypoint (`@mozaiks/chat-ui`): app shell, chat components, page renderer, auth adapter and pages, providers, hooks
 ├── runtimeBridge.js   Runtime WebSocket URL and auth-protocol helpers for host apps
 ├── main.jsx           Standalone demo entry (onboarding tour with no-op callbacks)
-├── demo.css           Styles for the standalone demo
+├── demo.css           Tailwind stylesheet that nothing imports; the demo does not use it
 ├── @chat-workflows/   Workflow UI registry fed by the host (see Workflow UI Components below)
 ├── adapters/          API, WebSocket auth, and UI tool response adapters
 ├── admin/             Admin portal sections, panels, and app studio model
@@ -120,9 +120,11 @@ export { default as MyComponent } from './MyComponent.jsx';
 
 ## Import Surfaces
 
-Use the package entrypoint that matches the host you are building.
+Use the package entrypoint that matches the host you are building. The package
+is private and not published to npm; in this repo, `web_shell/vite.config.js`
+aliases `@mozaiks/chat-ui` to `chat-ui/src`.
 
-- `@mozaiks/chat-ui` — full web entrypoint; exports browser UI, pages, routing helpers, browser auth adapters, and app shell components.
+- `@mozaiks/chat-ui` — full web entrypoint; exports the app shell (`MozaiksApp`), chat components, the page renderer, the browser auth adapter and auth pages (`LoginPage`, `AuthCallbackPage`), providers, and hooks. Other pages, such as `ChatPage` and `AdminPage`, are not exported from the root.
 - `@mozaiks/chat-ui/core` — portable shared-core entrypoint; exports transport, state, adapters, providers, and hooks intended for non-browser hosts such as React Native.
 - `@mozaiks/chat-ui/platform` — platform bridge; lets a non-browser host inject synchronous storage, auth token lookup, runtime config overrides, and base URLs.
 - `@mozaiks/chat-ui/ui` — web-safe UI primitives for Studio, app pages, and custom routes.
@@ -158,7 +160,7 @@ configurePlatform({
 
 Use a synchronous store for `storage`. `AsyncStorage` is not suitable for the current shared core because some reads happen synchronously during initialization.
 
-Web-only auth adapters (e.g. `mockAuthAdapter`) should not be imported from a native host. Auth is host-injected via the `authAdapter` prop.
+Web-only auth code (`createAuthAdapter`, `LoginPage`, and `AuthCallbackPage` from `@mozaiks/chat-ui/auth`) should not be imported from a native host. Auth is host-injected via the `authAdapter` prop.
 
 ## Dev Demo
 
