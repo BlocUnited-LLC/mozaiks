@@ -3499,6 +3499,9 @@ const ChatPage = () => {
       case 'awaiting_reply': {
         const payload = data.data || {};
         setLoading(false);
+        setMessagesWithLogging(prev => (
+          prev.some(m => m?.isThinking) ? prev.filter(m => !m?.isThinking) : prev
+        ));
         setPendingWorkflowReply({
           agent: payload.source_agent || payload.agent || 'Agent',
           prompt: payload.prompt || '',
@@ -3540,6 +3543,9 @@ const ChatPage = () => {
         );
         if (!isTerminalCompletion) {
           setLoading(false);
+          setMessagesWithLogging(prev => (
+            prev.some(m => m?.isThinking) ? prev.filter(m => !m?.isThinking) : prev
+          ));
           setPendingWorkflowReply(prev => prev || {
             agent: data.agent || data.data?.agent || 'Agent',
             prompt: data.prompt || data.data?.prompt || '',

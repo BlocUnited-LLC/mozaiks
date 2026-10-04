@@ -324,6 +324,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Studio clears its working indicator when a workflow asks for input, so the
+  prompt and reply box are not accompanied by a stale processing status.
+
 - Scoped refinements now validate the complete edited app through the existing
   acceptance and build checks, save a canonical verified archive, and carry that
   candidate's evidence into Studio review. Operator execution policy wins over

@@ -1,13 +1,13 @@
 /**
- * A finished run has nobody thinking.
+ * Finished runs and runs waiting for the user have nobody thinking.
  *
  * The "..." placeholder is appended when an agent hands off, and was only ever
  * removed when a NEXT agent spoke. A run that ends before that — the common
  * case on workflow_failed — left the bubble on screen permanently, which is
  * what a live ThemeCapture run showed above its final message.
  *
- * These tests pull the two terminal reducers out of ChatPage.js and run them,
- * so they assert behaviour rather than the presence of a string.
+ * These tests execute the production pause event branches and terminal
+ * reducers, then render their messages through the production component.
  */
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -24,8 +24,8 @@ const chatPage = path.join(path.dirname(shell), 'chat-ui/src/pages/ChatPage.js')
 
 // Anchor on a single-line fragment (the checkout is CRLF, so multi-line
 // literals will not match), then walk back to the start of the call.
-const reducerAt = (source, anchor, endMarker) => {
-  const hit = source.indexOf(anchor);
+const reducerAt = (source, anchor, endMarker, last = false) => {
+  const hit = last ? source.lastIndexOf(anchor) : source.indexOf(anchor);
   assert.notEqual(hit, -1, `could not locate anchor: ${anchor}`);
   const start = source.lastIndexOf('setMessagesWithLogging(', hit);
   assert.notEqual(start, -1, 'could not find the enclosing setMessagesWithLogging call');
@@ -50,6 +50,53 @@ const run = (snippet, messages) => {
   return captured;
 };
 
+const eventSource = (source, event) => {
+  const start = source.indexOf(`      case '${event}': {`);
+  assert.notEqual(start, -1, `could not locate event: ${event}`);
+  const end = source.indexOf("      case '", start + 12);
+  assert.notEqual(end, -1, `could not locate end of event: ${event}`);
+  return source.slice(start, end);
+};
+
+const successReducer = source => reducerAt(
+  eventSource(source, 'run_complete'), 'prev.some(m => m?.isThinking)', '));', true,
+);
+
+const pauseEvent = (source, event, state) => {
+  const data = event === 'awaiting_reply'
+    ? {data:{source_agent:'ExampleAgent', prompt:'What do you want to build?', reason:'awaiting_user_reply'}}
+    : {status:'paused', agent:'ExampleAgent', prompt:'What do you want to build?', reason:'awaiting_user_reply'};
+  vm.runInNewContext(`(() => { switch (event) { ${eventSource(source, event)} } })()`, {
+    event, data, Date, isFailedWorkflowSession: () => false,
+    setLoading: value => { state.loading = value; },
+    setPendingWorkflowReply: value => { state.pending = typeof value === 'function' ? value(state.pending) : value; },
+    setMessagesWithLogging: reducer => { state.messages = reducer(state.messages); },
+  });
+  return state;
+};
+
+const pauseSequences = [['awaiting_reply'], ['run_complete'], ['awaiting_reply', 'run_complete']];
+for (const sequence of pauseSequences) {
+  test(`${sequence.join(' then ')} removes thinking while preserving the question and reply state`, async () => {
+    const source = await fs.readFile(chatPage, 'utf8');
+    const state = {messages:withThinking(), loading:true, pending:null};
+    const question = {id:'question', sender:'agent', content:'What do you want to build?'};
+    state.messages.push(question);
+    for (const event of sequence) pauseEvent(source, event, state);
+    assert.equal(state.messages.filter(message => message.isThinking).length, 0);
+    assert.equal(state.messages.at(-1), question);
+    assert.equal(state.loading, false);
+    assert.equal(state.pending.agent, 'ExampleAgent');
+    assert.equal(state.pending.prompt, question.content);
+
+    const cleanMessages = state.messages;
+    const pending = state.pending;
+    pauseEvent(source, 'run_complete', state);
+    assert.equal(state.messages, cleanMessages, 'a repeated pause must leave real messages identity-stable');
+    assert.equal(state.pending, pending, 'paused run completion must preserve the existing reply request');
+  });
+}
+
 test('the failure reducer drops the thinking placeholder and reports the error', async () => {
   const source = await fs.readFile(chatPage, 'utf8');
   const snippet = reducerAt(source, '[...prev.filter(m => !m?.isThinking), {', '}]);');
@@ -64,7 +111,7 @@ test('the failure reducer drops the thinking placeholder and reports the error',
 
 test('the success reducer drops the thinking placeholder', async () => {
   const source = await fs.readFile(chatPage, 'utf8');
-  const snippet = reducerAt(source, 'prev.some(m => m?.isThinking)', '));');
+  const snippet = successReducer(source);
 
   const result = run(snippet, withThinking());
 
@@ -77,14 +124,14 @@ test('the success reducer leaves an untouched list identity-stable', async () =>
   // Returning a fresh array on every run_complete would re-render the whole
   // transcript for nothing.
   const source = await fs.readFile(chatPage, 'utf8');
-  const snippet = reducerAt(source, 'prev.some(m => m?.isThinking)', '));');
+  const snippet = successReducer(source);
 
   const clean = [{ id: 'a1', sender: 'agent', content: 'done' }];
 
   assert.equal(run(snippet, clean), clean, 'must return the same array when nothing changed');
 });
 
-test('the active thinking bubble has readable activity and disappears with the real terminal reducers', async (t) => {
+test('the active thinking bubble disappears on completion and while waiting for a reply', async (t) => {
   const component = path.resolve(shell, '../chat-ui/src/components/chat/ChatMessage.jsx');
   const bundle = await build({
     stdin: {resolveDir: shell, loader: 'jsx', contents: `
@@ -121,8 +168,13 @@ test('the active thinking bubble has readable activity and disappears with the r
   t.after(() => browser.close());
   const source = await fs.readFile(chatPage, 'utf8');
   const reducers = [
-    reducerAt(source, 'prev.some(m => m?.isThinking)', '));'),
-    reducerAt(source, '[...prev.filter(m => !m?.isThinking), {', '}]);'),
+    messages => run(successReducer(source), messages),
+    messages => run(reducerAt(source, '[...prev.filter(m => !m?.isThinking), {', '}]);'), messages),
+    ...pauseSequences.map(sequence => messages => {
+      const state = {messages, loading:true, pending:null};
+      for (const event of sequence) pauseEvent(source, event, state);
+      return state.messages;
+    }),
   ];
   for (const width of [1440, 390]) {
     const page = await browser.newPage({viewport: {width, height: 844}});
@@ -138,7 +190,7 @@ test('the active thinking bubble has readable activity and disappears with the r
       await expect(status).toHaveText('Working on this step…', {timeout: 1000});
       await expect(status).toBeVisible();
       await expect(status.locator('[aria-hidden="true"]')).toHaveCount(1);
-      await page.evaluate(messages => window.setMessages(messages), run(reducer, messages));
+      await page.evaluate(messages => window.setMessages(messages), reducer(messages));
       await expect(status).toHaveCount(0);
       await expect(page.getByText('Here is the summary.', {exact: true})).toBeVisible();
     }
