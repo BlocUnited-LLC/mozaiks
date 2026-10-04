@@ -108,6 +108,14 @@ def without_data_contract(files: dict[str, str]) -> None:
     files.pop(CONTRACT)
 
 
+def with_malformed_data_contract(files: dict[str, str]) -> None:
+    def add_unhashable_owner(contract: dict[str, Any]) -> None:
+        surface = next(item for item in contract["surfaces"] if item["surface_id"] == "task_management")
+        surface["collections"].append({"name": "notes", "module_id": {"id": "task_management"}})
+
+    _json(files, CONTRACT, add_unhashable_owner)
+
+
 def without_task_data(files: dict[str, str]) -> None:
     def drop_tasks(contract: dict[str, Any]) -> None:
         contract["surfaces"] = [item for item in contract["surfaces"] if item["surface_id"] != "task_management"]
@@ -194,6 +202,9 @@ async def test_protected_actions_raise_no_permission_finding(security_build, cha
             id="app_wide_gate_without_plan_catalog",
         ),
         pytest.param((without_data_contract,), _expect("high", UNGATED), id="persistence_without_data_contract"),
+        pytest.param(
+            (with_malformed_data_contract,), _expect("high", UNGATED), id="persistence_with_malformed_data_contract",
+        ),
         pytest.param((without_task_data,), _expect("medium", UNGATED), id="no_declared_data_scope"),
         pytest.param((with_operator_list,), _expect("high", ("list_tasks",)), id="operator_action_without_permission"),
         pytest.param((with_blank_surface,), _expect("high", ("list_tasks",)), id="blank_surface"),

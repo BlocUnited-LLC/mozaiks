@@ -161,7 +161,7 @@ def _default_plan_capabilities(files: dict[str, str]) -> frozenset[str] | None:
         return None
     try:
         config = SubscriptionsConfig.model_validate(contract)
-    except ValueError:
+    except (TypeError, ValueError):
         return None
     if config.products:
         return frozenset().union(
@@ -182,7 +182,7 @@ def _module_collection_ownership(files: dict[str, str]) -> dict[str, list[bool]]
     try:
         contract = json.loads(text)
         index = index_data_contract_by_entity(contract) if isinstance(contract, dict) else None
-    except ValueError:
+    except (TypeError, ValueError):
         return None
     if index is None:
         return None
