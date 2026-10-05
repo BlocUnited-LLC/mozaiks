@@ -1457,6 +1457,24 @@ def _validate_plan_surface_inventory(plan: dict[str, Any], context: Any) -> None
         context_variables=context, data_contract=detach(context.get("data_contract")),
     )
     approved = _approved_surface_ids(context)
+    design = detach(context.get("design_surface_map")) or {}
+    ui_surfaces = {
+        surface["surface_id"]: surface for surface in design.get("surfaces") or []
+        if surface.get("surface_id") and surface.get("surface_kind") == "ui_only"
+    }
+    ui_hints = {
+        hint for surface in ui_surfaces.values()
+        for hint in surface.get("source_capability_packs") or []
+    }
+    selected_packs = {
+        _pack_id_from_descriptor(pack) for pack in detach(context.get("capability_packs")) or []
+    }
+    hint_guidance = (
+        "source_capability_packs are descriptive hints, not selected provider registrations. "
+        "Use capability_packs=[] when no backend/provider capability is approved, "
+        "and preserve the approved pages and their behavior in page_bundle tasks."
+    )
+    errors: list[str] = []
     unapproved: set[str] = set()
     for entries, is_task in (
         (plan.get("capability_packs") or [], False),
@@ -1464,6 +1482,30 @@ def _validate_plan_surface_inventory(plan: dict[str, Any], context: Any) -> None
     ):
         for entry in entries:
             surface_id = str(entry.get("surface_id") or "")
+            if surface_id in ui_surfaces:
+                identity = entry.get("task_id") if is_task else _pack_id_from_descriptor(entry)
+                if (
+                    entry.get("surface_kind") != "ui_only"
+                    or (is_task and (
+                        entry.get("task_type") != "page_bundle"
+                        or any(path.startswith("modules/") for path in _normalized_owned_paths(entry))
+                    ))
+                    or (not is_task and entry.get("capability_source") == "generated_module")
+                ):
+                    errors.append(
+                        f"{identity}: surface {surface_id!r} is approved ui_only; preserve its kind "
+                        "and page_bundle behavior. It grants no module ownership (including modules/ "
+                        "paths) or generated_module capability. " + hint_guidance
+                    )
+                elif (
+                    not is_task
+                    and entry.get("capability_source") in {"managed_capability", "framework_pack", "operator_pack"}
+                    and _pack_id_from_descriptor(entry) not in selected_packs
+                ):
+                    errors.append(
+                        f"{identity}: approved ui_only surface {surface_id!r} does not select "
+                        f"provider {identity!r}. " + hint_guidance
+                    )
             if surface_id in approved:
                 continue
             if (
@@ -1480,7 +1522,6 @@ def _validate_plan_surface_inventory(plan: dict[str, Any], context: Any) -> None
                 continue
             unapproved.add(surface_id)
     if unapproved:
-        errors = []
         for surface_id in sorted(unapproved):
             message = (
                 f"unapproved surface {surface_id!r}: remove its capability and tasks "
@@ -1490,7 +1531,10 @@ def _validate_plan_surface_inventory(plan: dict[str, Any], context: Any) -> None
             )
             if re.search(r"(?:^|[_-])(?:auth|authentication|login|signin)(?:$|[_-])", surface_id.lower()):
                 message += " Authentication is platform-provided and needs no generated module."
+            if surface_id in ui_hints:
+                message += " " + hint_guidance
             errors.append(message)
+    if errors:
         raise ValueError("Plan surface inventory errors:\n- " + "\n- ".join(errors))
 
 
