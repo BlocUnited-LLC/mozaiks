@@ -4,14 +4,17 @@ This experimental fixture packages [Common Ground](../canonical-apps/community/R
 with Capacitor. It exercises the existing Mozaiks web shell and app bundle, using
 the same React components and backend contracts as the browser reference.
 
-The scope is a web build, a generated Android project, and verification that the
-project contains the exact web assets. Native sign-in, complete mobile operation,
-APK compilation, and store release have not been qualified. This fixture does
+The scope is a web build, a generated Android project, verification of copied
+web assets, and a diagnostic debug APK build in CI. Native sign-in, complete
+mobile operation, and store release have not been qualified. This fixture does
 not enable a Factory mobile target or install a CapabilityPack.
 
 The [mobile packaging workflow](../../.github/workflows/mobile-reference.yml)
-repeats these checks with an invalid backend URL and retains the asset report.
-It requires no backend, Android SDK, signing credentials, or app-store account.
+repeats these checks with an invalid backend URL, then uses the runner's JDK 21
+and Android SDK 36 to compile a debug APK. It retains the asset report and the APK
+with its SHA-256 digest. No backend, release signing credentials, or app-store
+account is used. This APK is a packaging diagnostic; the invalid backend means
+it cannot open a working community session.
 
 ## Prepare the project
 
@@ -77,7 +80,9 @@ Set-Location android
 ```
 
 The expected output is `android/app/build/outputs/apk/debug/app-debug.apk`.
-A successful build would still need emulator and physical-device acceptance.
+A successful build still needs emulator and physical-device acceptance.
+The asset verifier deliberately does not attest to compilation: the Gradle job
+result and APK digest provide that separate evidence.
 The sample uses an invalid backend URL until a reachable development backend
 and the client integration gaps below are addressed.
 

@@ -27,8 +27,8 @@ concurrency:
 
 jobs:
   android-project:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     env:
       PLATFORM_PATH: ${{ github.workspace }}/examples/canonical-apps/community/app
       MOZAIKS_APP_WORKSPACE_PATH: ${{ github.workspace }}/examples/canonical-apps/community
@@ -64,6 +64,15 @@ jobs:
           npm run android:add
           npm run android:sync
           node verify-assets.mjs > packaging-evidence.json
+      - name: Compile the diagnostic APK with runner-provided tools
+        working-directory: examples/mobile-reference/android
+        run: |
+          export JAVA_HOME="$JAVA_HOME_21_X64"
+          export PATH="$JAVA_HOME/bin:$PATH"
+          test -d "$ANDROID_HOME/platforms/android-36"
+          java -version
+          ./gradlew --no-daemon assembleDebug
+          sha256sum app/build/outputs/apk/debug/app-debug.apk > ../apk.sha256
       - name: Retain packaging evidence
         uses: actions/upload-artifact@v7
         with:
@@ -71,3 +80,12 @@ jobs:
           retention-days: 7
           if-no-files-found: error
           path: examples/mobile-reference/packaging-evidence.json
+      - name: Retain diagnostic APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: mobile-reference-debug-apk
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            examples/mobile-reference/android/app/build/outputs/apk/debug/app-debug.apk
+            examples/mobile-reference/apk.sha256
