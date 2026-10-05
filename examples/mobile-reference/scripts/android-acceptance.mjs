@@ -26,10 +26,24 @@ function stage(name) {
   console.log(JSON.stringify({ stage: name }));
 }
 
+function safeFailureMessage(error, privateValues) {
+  let message = String(error?.message || error).split(/\r?\n/, 1)[0].replace(/\u001b\[[0-9;]*m/g, '');
+  for (const value of privateValues) if (value) message = message.split(value).join('[redacted]');
+  return message
+    .replace(/\b[A-Za-z][A-Za-z\d+.-]*:[^\s"'<>]+/g, '[uri]')
+    .replace(/(?:\/[^\s"'<>?]*)?\?[^\s"'<>]+/g, '[query]')
+    .replace(/\b(?:Bearer|Basic)\s+\S+/gi, '[credential]')
+    .replace(/\b(?:code|state|nonce|password|client_secret|access_token|id_token|refresh_token)\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi, '[credential]')
+    .replace(/\b[A-Za-z\d_-]{8,}\.[A-Za-z\d_-]{8,}\.[A-Za-z\d_-]{8,}\b/g, '[token]')
+    .replace(/\b[A-Za-z\d+/_=-]{24,}(?:\.[A-Za-z\d+/_=-]+)*/g, '[opaque]')
+    .slice(0, 240);
+}
+
 let device;
 let browser;
 let page;
 let postId;
+const privateValues = [];
 const started = Date.now();
 try {
   const configPath = path.resolve(process.env.COMMUNITY_LIVE_CONFIG);
@@ -45,6 +59,7 @@ try {
   assert.match(environment.auth_issuer, /^http:\/\/127\.0\.0\.1:\d+\/realms\/common-ground$/);
   const member = environment.users.find(user => user.username === 'alice');
   assert.ok(member?.password);
+  privateValues.push(member.password);
   Object.assign(proof, {
     source_sha: environment.source_sha,
     apk_sha256: createHash('sha256').update(readFileSync(apk)).digest('hex'),
@@ -69,11 +84,16 @@ try {
   browser = await device.launchBrowser({ pkg: 'com.android.chrome' });
   browser.setDefaultTimeout(45_000);
   const observed = { authorizations: 0, logouts: 0 };
+  let latestAuthorizationState;
   proof.external_browser_requests = observed;
   browser.on('request', request => {
     const url = new URL(request.url());
     if (`${url.origin}/realms/common-ground` !== environment.auth_issuer) return;
-    if (url.pathname.endsWith('/protocol/openid-connect/auth')) observed.authorizations += 1;
+    if (url.pathname.endsWith('/protocol/openid-connect/auth')) {
+      observed.authorizations += 1;
+      latestAuthorizationState = url.searchParams.get('state');
+      privateValues.push(latestAuthorizationState);
+    }
     if (url.pathname.endsWith('/protocol/openid-connect/logout')) observed.logouts += 1;
   });
   stage('launch-native-webview');
@@ -104,7 +124,8 @@ try {
       found = undefined;
       for (const candidate of browser.pages().reverse()) {
         const url = new URL(candidate.url());
-        if (url.origin === new URL(environment.auth_issuer).origin && url.pathname.startsWith('/realms/common-ground/')
+        if (url.origin === new URL(environment.auth_issuer).origin && url.pathname === '/realms/common-ground/protocol/openid-connect/auth'
+            && latestAuthorizationState && url.searchParams.get('state') === latestAuthorizationState
             && await candidate.getByLabel('Username or email', { exact: true }).isVisible().catch(() => false)) {
           found = candidate;
           break;
@@ -153,11 +174,16 @@ try {
   proof.post_id = postId;
   await page.screenshot({ path: path.join(evidence, '03-native-community-post.png') });
 
-  stage('reload-and-delete-post');
+  stage('reload-native-webview');
   await page.reload();
+  stage('wait-for-reloaded-post');
   const post = page.getByTestId(`post-${postId}`);
-  await expect(post.getByText(body, { exact: true })).toBeVisible();
+  // A reload boots the shell and loads the feed again. Expect's timeout is
+  // independent of page.setDefaultTimeout; the emulator's first boot takes
+  // longer than its default five seconds. Wait for this actual persisted post.
+  await expect(post.getByText(body, { exact: true })).toBeVisible({ timeout: 45_000 });
   proof.checks.post_survives_webview_reload = true;
+  stage('delete-post');
   await post.getByRole('button', { name: 'Delete your post', exact: true }).click();
   await page.getByRole('dialog').getByRole('button', { name: 'Delete post', exact: true }).click();
   await expect(post).toHaveCount(0);
@@ -167,7 +193,7 @@ try {
   proof.checks.authenticated_delete = true;
 
   stage('external-browser-logout');
-  await page.getByTitle('Alice Gardener', { exact: true }).click();
+  await page.getByTitle('Alice', { exact: true }).click();
   await page.getByRole('button', { name: 'Sign Out', exact: true }).click();
   await expect.poll(() => page.evaluate(async () => !(await window.mozaiksAuth?.getAccessToken())), { timeout: 45_000 }).toBe(true);
   await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
@@ -198,10 +224,26 @@ try {
   stage('complete');
 } catch (error) {
   proof.status = 'failed';
-  // Playwright errors can include callback URLs or filled values. Persist only
-  // the stage and error class, never a raw stack, trace, browser log or token.
+  // No raw stack, trace or browser log: these can contain callback URLs and
+  // filled credentials. The first line is redacted before it leaves memory.
   proof.failure_type = error?.name || 'Error';
-  console.error(JSON.stringify({ status: proof.status, stage: proof.stage, failure_type: proof.failure_type }));
+  proof.failure_message = safeFailureMessage(error, privateValues);
+  if (page && new URL(page.url()).origin === origin) {
+    proof.failure_ui = await page.evaluate(async targetPost => ({
+      has_auth_adapter: Boolean(window.mozaiksAuth),
+      authenticated: Boolean(await window.mozaiksAuth?.getAccessToken?.()),
+      has_post: [...document.querySelectorAll('[data-testid]')].some(element => element.dataset.testid === `post-${targetPost}`),
+      has_textarea: Boolean(document.querySelector('textarea')),
+      has_sign_in: [...document.querySelectorAll('button')].some(element => element.textContent.trim() === 'Sign in'),
+    }), postId).catch(() => null);
+    // Capture only the app WebView, never the external browser with filled
+    // credentials. Mask inputs and error/code surfaces as an additional guard.
+    proof.failure_screenshot = await page.screenshot({
+      path: path.join(evidence, 'failure-webview.png'), timeout: 5_000,
+      mask: [page.locator('input, textarea, [role="alert"], pre, code')],
+    }).then(() => true, () => false);
+  }
+  console.error(JSON.stringify({ status: proof.status, stage: proof.stage, failure_type: proof.failure_type, failure_message: proof.failure_message }));
   process.exitCode = 1;
 } finally {
   proof.elapsed_seconds = Math.round((Date.now() - started) / 100) / 10;
