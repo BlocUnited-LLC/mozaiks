@@ -47,7 +47,7 @@ before(async () => {
       };
       function Fixture(){
         const [identity,setIdentity]=useState({app:'sample-app',user:'alice'});
-        const [activeGeneralChatId,setActiveGeneralChatId]=useState('saved');
+        const [activeGeneralChatId,setActiveGeneralChatId]=useState(window.initialGeneralId === undefined ? 'saved' : window.initialGeneralId);
         const [askMessages,setAskMessages]=useState([]);
         const [unreadChatCount,setUnreadChatCount]=useState(0);
         const [mounted,setMounted]=useState(true);
@@ -92,11 +92,12 @@ const transcript = (gid = 'saved', messages = [
   { event_id: 'answer-1', sequence: 2, role: 'assistant', content: 'A saved answer' },
 ], changes = {}) => ({ app_id: 'sample-app', user_id: 'alice', chat_id: gid, found: true, messages, ...changes });
 
-async function fixture(t, width = 1280) {
+async function fixture(t, width = 1280, initialGeneralId = 'saved') {
   const page = await browser.newPage({ viewport: { width, height: 900 } });
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   t.after(async () => { await page.close(); assert.deepEqual(errors, []); });
+  await page.addInitScript(id => { window.initialGeneralId = id; }, initialGeneralId);
   await page.goto(origin);
   await page.getByRole('button', { name: 'Open assistant', exact: true }).click();
   await expect.poll(() => page.evaluate(() => window.connections.length)).toBe(1);
@@ -370,3 +371,65 @@ test('selection before initial or replacement acknowledgement rejects both super
   await expect(page.getByRole('log')).toHaveText('Third history');
   assert.deepEqual(await page.evaluate(() => window.connections.map(record => record.closed)), [true, true, false]);
 });
+
+for (const initialGeneralId of ['saved', null]) {
+  test(`draft before initial acknowledgement cannot migrate on selection (${initialGeneralId})`, async t => {
+    const page = await fixture(t, 1280, initialGeneralId);
+    await send(page, 'draft for original conversation');
+    await page.evaluate(() => window.selectConversation('other'));
+    await expect.poll(() => page.evaluate(() => window.connections.length)).toBe(2);
+    await page.evaluate(() => window.connections[1].callbacks.onOpen());
+    await ack(page, 'other', 1);
+    await resolve(page, transcript('other', []));
+    await expect(page.getByText('Ask anything', { exact: true })).toBeVisible();
+    await expect(page.getByRole('log').locator('p')).toHaveCount(0);
+    assert.deepEqual(await submissions(page), []);
+    if (initialGeneralId) {
+      await page.evaluate(() => window.selectConversation('saved'));
+      await expect.poll(() => page.evaluate(() => window.connections.length)).toBe(3);
+      await page.evaluate(() => window.connections[2].callbacks.onOpen());
+      await ack(page, 'saved', 2);
+      await resolve(page, transcript(), 1);
+      await expect.poll(async () => (await submissions(page)).length).toBe(1);
+      assert.equal((await submissions(page))[0].context.general_chat_id, 'saved');
+    }
+  });
+}
+
+test('draft for an unacknowledged new conversation cannot migrate to an external selection', async t => {
+  const page = await fixture(t);
+  await ack(page); await resolve(page);
+  await page.getByRole('button', { name: /New conversation/ }).click();
+  await send(page, 'draft for pending new conversation');
+  await page.evaluate(() => window.selectConversation('other'));
+  await expect.poll(() => page.evaluate(() => window.connections.length)).toBe(2);
+  await page.evaluate(() => window.connections[1].callbacks.onOpen());
+  await ack(page, 'ignored-new', 0, 'chat.general_session_created');
+  await ack(page, 'other', 1);
+  await resolve(page, transcript('other', []), 1);
+  await expect(page.getByText('Ask anything', { exact: true })).toBeVisible();
+  await expect(page.getByRole('log').locator('p')).toHaveCount(0);
+  assert.deepEqual(await submissions(page), []);
+});
+
+for (const fresh of [false, true]) {
+  test(`connection retry preserves only its own pending ${fresh ? 'new' : 'initial'} conversation draft`, async t => {
+    const page = await fixture(t, 1280, fresh ? 'saved' : null);
+    if (fresh) {
+      await ack(page); await resolve(page);
+      await page.getByRole('button', { name: /New conversation/ }).click();
+    }
+    await send(page, 'draft survives retry');
+    await page.evaluate(() => window.connections[0].callbacks.onClose());
+    await page.getByRole('button', { name: 'Retry connection' }).click();
+    await expect.poll(() => page.evaluate(() => window.connections.length)).toBe(2);
+    await page.evaluate(() => window.connections[1].callbacks.onOpen());
+    const expectedCommand = fresh ? 'chat.start_general_chat' : 'chat.enter_general_mode';
+    assert.equal(await page.evaluate(() => window.sent.at(-1).type), expectedCommand);
+    await ack(page, 'server-selected', 1, fresh ? 'chat.general_session_created' : 'chat.mode_changed');
+    await resolve(page, transcript('server-selected', []), fresh ? 1 : 0);
+    await expect.poll(async () => (await submissions(page)).length).toBe(1);
+    assert.equal((await submissions(page))[0].context.general_chat_id, 'server-selected');
+    await expect(page.getByRole('log')).toHaveText('draft survives retry');
+  });
+}

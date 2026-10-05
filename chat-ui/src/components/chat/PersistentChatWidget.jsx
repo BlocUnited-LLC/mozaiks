@@ -137,7 +137,7 @@ const PersistentChatWidget = ({
   // Widget's own WS connection in ask/general mode.
   const {
     send: wsSend, status: wsStatus, isAgentTyping, generalModeReady,
-    historyStatus, retryHistory, retryConnection, startNewConversation, selectingNew, getConversationId,
+    historyStatus, retryHistory, retryConnection, startNewConversation, selectingNew, getQueueScope,
   } = useWidgetAskWS({
     api,
     appId: effectiveAppId,
@@ -147,12 +147,12 @@ const PersistentChatWidget = ({
     setActiveGeneralChatId,
     messages: askMessages,
     setMessages: setAskMessages,
-    getPendingMessageIds: gid => pendingWidgetSendsRef.current
-      .filter(message => !message.generalChatId || message.generalChatId === gid)
+    getPendingMessageIds: (gid, pendingScope) => pendingWidgetSendsRef.current
+      .filter(message => message.generalChatId === pendingScope || message.generalChatId === gid)
       .map(message => message.id),
-    onConversationAcknowledged: gid => {
+    onConversationAcknowledged: (gid, pendingScope) => {
       pendingWidgetSendsRef.current = pendingWidgetSendsRef.current.map(message =>
-        message.generalChatId ? message : { ...message, generalChatId: gid });
+        message.generalChatId === pendingScope ? { ...message, generalChatId: gid } : message);
       setAskMessages(previous => {
         const ids = new Set(previous.map(message => message.id));
         return [...previous, ...pendingWidgetSendsRef.current
@@ -165,7 +165,7 @@ const PersistentChatWidget = ({
     pagePath,
   });
   const hasPendingCurrentSends = pendingSendCount > 0 && pendingWidgetSendsRef.current.some(message =>
-    !message.generalChatId || message.generalChatId === getConversationId());
+    message.generalChatId === getQueueScope());
 
   // Server-known workflow session (survives cleared localStorage) so the
   // "Back to workspace" logo button stays reliable across pages and reloads.
@@ -197,7 +197,7 @@ const PersistentChatWidget = ({
     if (wsStatus !== 'connected' || !generalModeReady || pendingWidgetSendsRef.current.length === 0) {
       return;
     }
-    const gid = getConversationId();
+    const gid = getQueueScope();
     const pending = pendingWidgetSendsRef.current.filter(message => message.generalChatId === gid);
     pendingWidgetSendsRef.current = pendingWidgetSendsRef.current.filter(message => message.generalChatId !== gid);
     pending.forEach((message) => {
@@ -207,7 +207,7 @@ const PersistentChatWidget = ({
       }
     });
     setPendingSendCount(pendingWidgetSendsRef.current.length);
-  }, [generalModeReady, getConversationId, wsSend, wsStatus]);
+  }, [generalModeReady, getQueueScope, wsSend, wsStatus]);
 
   // Every in-progress workflow session this user owns. The widget is ask-only,
   // so this list is the user's route back into any build they have running —
@@ -340,12 +340,12 @@ const PersistentChatWidget = ({
     if (wsStatus === 'connected' && generalModeReady) {
       const sent = wsSend(text);
       if (!sent) {
-        pendingWidgetSendsRef.current.push({ id, text, optimistic, generalChatId: getConversationId() });
+        pendingWidgetSendsRef.current.push({ id, text, optimistic, generalChatId: getQueueScope() });
         setPendingSendCount(pendingWidgetSendsRef.current.length);
         setWsEnabled(true);
       }
     } else {
-      pendingWidgetSendsRef.current.push({ id, text, optimistic, generalChatId: getConversationId() });
+      pendingWidgetSendsRef.current.push({ id, text, optimistic, generalChatId: getQueueScope() });
       setPendingSendCount(pendingWidgetSendsRef.current.length);
       setWsEnabled(true);
     }

@@ -79,6 +79,8 @@ export function useWidgetAskWS({
   const wsRef = useRef(null);
   const acknowledgedIdRef = useRef(null);
   const requestedIdRef = useRef(null);
+  // Provisional scope is local to one pending request; never a wire/session ID.
+  const pendingScopeRef = useRef(Symbol('pending Ask conversation'));
   const readyRef = useRef(false);
   const outstandingSendsRef = useRef(0);
   const newConversationRef = useRef(false);
@@ -99,6 +101,8 @@ export function useWidgetAskWS({
   useEffect(() => {
     if (!wsRef.current || activeGeneralChatId === (acknowledgedIdRef.current || requestedIdRef.current)) return;
     acknowledgedIdRef.current = null;
+    newConversationRef.current = false;
+    pendingScopeRef.current = activeGeneralChatId || Symbol('pending Ask conversation');
     readyRef.current = false;
     requestRef.current += 1;
     setGeneralModeReady(false);
@@ -111,6 +115,8 @@ export function useWidgetAskWS({
     if (identityRef.current !== identity) {
       identityRef.current = identity;
       acknowledgedIdRef.current = null;
+      newConversationRef.current = false;
+      pendingScopeRef.current = latestRef.current.activeGeneralChatId || Symbol('pending Ask conversation');
       latestRef.current.setMessages([]);
     }
     readyRef.current = false;
@@ -127,8 +133,7 @@ export function useWidgetAskWS({
     const streams = {};
     const completedIds = new Set();
     const carrierId = chatIdProp || getOrCreateFallbackChatId(appId, userId);
-    newConversationRef.current = false;
-    setSelectingNew(false);
+    setSelectingNew(newConversationRef.current);
     setStatus('connecting');
     outstandingSendsRef.current = 0;
     setIsAgentTyping(false);
@@ -142,7 +147,7 @@ export function useWidgetAskWS({
       readyRef.current = false;
       setGeneralModeReady(false);
     };
-    const pendingIds = gid => new Set(latestRef.current.getPendingMessageIds?.(gid) || []);
+    const pendingIds = gid => new Set(latestRef.current.getPendingMessageIds?.(gid, pendingScopeRef.current) || []);
 
     const restore = async (gid) => {
       const request = ++requestRef.current;
@@ -188,6 +193,10 @@ export function useWidgetAskWS({
         setStatus('connected');
         if (entered) return;
         entered = true;
+        if (newConversationRef.current) {
+          conn.send({ type: 'chat.start_general_chat', chat_id: carrierId });
+          return;
+        }
         awaitingEntry = true;
         const gid = acknowledgedIdRef.current || latestRef.current.activeGeneralChatId || getStoredActiveGeneralChatId();
         conn.send({ type: 'chat.enter_general_mode', chat_id: carrierId, ...(gid ? { general_chat_id: gid } : {}) });
@@ -212,7 +221,8 @@ export function useWidgetAskWS({
           if (isNew) completedIds.clear();
           setSelectingNew(false);
           acknowledgedIdRef.current = gid;
-          latestRef.current.onConversationAcknowledged?.(gid);
+          latestRef.current.onConversationAcknowledged?.(gid, pendingScopeRef.current);
+          pendingScopeRef.current = gid;
           latestRef.current.setActiveGeneralChatId?.(gid);
           setStoredActiveGeneralChatId(gid);
           void restore(gid);
@@ -276,6 +286,8 @@ export function useWidgetAskWS({
   const startNewConversation = useCallback(() => {
     if (!wsRef.current || status !== 'connected' || newConversationRef.current) return false;
     newConversationRef.current = true;
+    const previousScope = pendingScopeRef.current;
+    pendingScopeRef.current = Symbol('pending new Ask conversation');
     readyRef.current = false;
     requestRef.current += 1;
     setGeneralModeReady(false);
@@ -285,6 +297,7 @@ export function useWidgetAskWS({
     const sent = wsRef.current.conn.send({ type: 'chat.start_general_chat', chat_id: wsRef.current.carrierId });
     if (!sent) {
       newConversationRef.current = false;
+      pendingScopeRef.current = previousScope;
       setSelectingNew(false);
       setHistoryStatus('error');
     }
@@ -311,6 +324,7 @@ export function useWidgetAskWS({
     return sent;
   }, [appId, pageContext, pagePath, userId]);
 
-  const getConversationId = useCallback(() => newConversationRef.current ? null : acknowledgedIdRef.current, []);
-  return { send, status, isAgentTyping, generalModeReady, historyStatus, retryHistory, retryConnection, startNewConversation, selectingNew, getConversationId };
+  const getQueueScope = useCallback(() => newConversationRef.current
+    ? pendingScopeRef.current : acknowledgedIdRef.current || pendingScopeRef.current, []);
+  return { send, status, isAgentTyping, generalModeReady, historyStatus, retryHistory, retryConnection, startNewConversation, selectingNew, getQueueScope };
 }
