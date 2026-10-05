@@ -28,6 +28,7 @@ from .module_dispatch import (
 )
 from .module_event_provenance import (
     ModuleEventProvenance,
+    ModuleEventRejection,
     ModuleReactionAudit,
     ModuleReactionProvenance,
     build_module_reaction_audit,
@@ -56,6 +57,7 @@ __all__ = [
     "ExecutorType",
     "ModuleContext",
     "ModuleEventProvenance",
+    "ModuleEventRejection",
     "ModuleReactionAudit",
     "ModuleReactionProvenance",
     "build_module_reaction_audit",

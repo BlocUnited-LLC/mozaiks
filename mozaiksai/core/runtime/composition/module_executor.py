@@ -30,6 +30,7 @@ import inspect
 import json
 import os
 import re
+from collections import Counter
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -54,12 +55,12 @@ from mozaiksai.core.runtime.composition.module_authority import (
     ModulePermissionCheck,
 )
 from mozaiksai.core.runtime.composition.module_context import ModuleContext
+from mozaiksai.core.runtime.composition.module_event_provenance import ModuleEventRejection
 from mozaiksai.core.runtime.composition.platform_hooks import (
     PlatformHookRegistry,
     get_platform_hooks,
 )
 from mozaiksai.core.runtime.composition.schema_validation import (
-    SchemaValidationDiagnostic,
     normalize_nullable_schema,
     validate_json_schema,
 )
@@ -163,11 +164,17 @@ class ModuleRequest:
 
 @dataclass
 class ModuleResult:
-    """Result of a module action execution."""
+    """Result of a module action execution.
+
+    ``rejected_events`` names the events the action emitted that were not
+    dispatched because they failed their declared contract. They never change
+    ``success``: an action whose handler completed has committed its writes.
+    """
     success: bool
     data: Any = None
     error: str | None = None
     error_code: str | None = None
+    rejected_events: tuple[ModuleEventRejection, ...] = ()
 
 
 # ---------------------------------------------------------------------------
@@ -175,20 +182,22 @@ class ModuleResult:
 # ---------------------------------------------------------------------------
 
 _AUDIT_ACTION_MAX_LENGTH = 64
+_AUDIT_EVENT_TYPE_MAX_LENGTH = 128
 _AUDIT_ACTION_SAFE_RE = re.compile(r"[^A-Za-z0-9_.\-]")
 
 
-def _bounded_action_for_audit(action: Any) -> str:
-    """Bound and sanitize a caller-supplied action id for logs and audit.
+def _bounded_for_audit(value: Any, *, max_length: int = _AUDIT_ACTION_MAX_LENGTH) -> str:
+    """Bound and sanitize an undeclared identifier for logs and audit.
 
-    Undeclared action ids are attacker-influenced strings; they are reduced to
-    a bounded, safe character set before entering log lines, audit records, or
-    error messages.
+    Undeclared action ids are attacker-influenced strings, and undeclared
+    event types are whatever handler code passed; they are reduced to a
+    bounded, safe character set before entering log lines, audit records,
+    results, or error messages.
     """
-    text = str(action or "")
+    text = str(value or "")
     sanitized = _AUDIT_ACTION_SAFE_RE.sub("?", text)
-    if len(sanitized) > _AUDIT_ACTION_MAX_LENGTH:
-        return sanitized[:_AUDIT_ACTION_MAX_LENGTH] + "..."
+    if len(sanitized) > max_length:
+        return sanitized[:max_length] + "..."
     return sanitized
 
 
@@ -216,37 +225,6 @@ class ModuleInputValidationError(ValueError):
 
 class ModuleRecordNotFoundError(LookupError):
     """A requested record is absent from the caller's authorized scope."""
-
-
-class ModuleEventPayloadValidationError(ValueError):
-    """Raised when a module emits an event payload that violates its contract."""
-
-    def __init__(
-        self,
-        *,
-        event_type: str,
-        source_module: str | None,
-        source_action: str | None,
-        diagnostic: SchemaValidationDiagnostic,
-    ) -> None:
-        self.event_type = event_type
-        self.source_module = source_module
-        self.source_action = source_action
-        self.diagnostic = diagnostic
-        super().__init__(
-            "MODULE_EVENT_PAYLOAD_INVALID: "
-            f"event={event_type} module={source_module or ''} action={source_action or ''} "
-            f"path={diagnostic.path} error={diagnostic.message}"
-        )
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "code": "MODULE_EVENT_PAYLOAD_INVALID",
-            "event_type": self.event_type,
-            "source_module": self.source_module,
-            "source_action": self.source_action,
-            "schema_error": self.diagnostic.to_dict(),
-        }
 
 
 # ---------------------------------------------------------------------------
@@ -311,6 +289,8 @@ class ModuleExecutor:
         self._audit_logger = audit_logger
         self._persistence_database = persistence_database
         self._persistence_client = persistence_client
+        # Rejected emitted events per "module.action", reported by health().
+        self._rejected_event_counts: Counter[str] = Counter()
 
     def _hooks(self) -> PlatformHookRegistry:
         return self._platform_hooks if self._platform_hooks is not None else get_platform_hooks()
@@ -376,10 +356,12 @@ class ModuleExecutor:
                                  EntitlementPort.check() before dispatch and returns
                                  ENTITLEMENT_REQUIRED on denial.
             action_emits:        Maps action id -> event types declared in module.yaml.
+                                 Any other emitted event is rejected, not dispatched.
             action_timeouts:     Maps action id -> async timeout seconds (integer 1..3600).
                                  None/omitted inherits MODULE_ACTION_TIMEOUT_SECONDS.
                                  This is server registration metadata, never request input.
             event_payload_schemas: Maps event type -> payload_schema from contracts/events.yaml.
+                                 A payload that fails it is rejected, not dispatched.
         """
         timeouts = {action: validate_action_timeout(value) for action, value in (action_timeouts or {}).items()}
         if timeouts.keys() - (action_method_map or {}).keys():
@@ -422,8 +404,24 @@ class ModuleExecutor:
     async def execute(self, request: ModuleRequest, context: ModuleContext | None = None) -> ModuleResult:
         """Dispatch a ModuleRequest to the appropriate handler action.
 
-        Builds a ModuleContext from the request if one is not supplied.
+        Builds a ModuleContext from the request if one is not supplied. An
+        event the handler emits that fails its declared contract is not
+        dispatched and does not fail the action: the handler's writes are
+        already committed, so its outcome stands and the result names the
+        rejected event.
         """
+        rejected_events: list[ModuleEventRejection] = []
+        result = await self._dispatch(request, context, rejected_events)
+        if rejected_events:
+            result = replace(result, rejected_events=tuple(rejected_events))
+        return result
+
+    async def _dispatch(
+        self,
+        request: ModuleRequest,
+        context: ModuleContext | None,
+        rejected_events: list[ModuleEventRejection],
+    ) -> ModuleResult:
         dispatch_authority = request.authority
         dispatch_provenance = request.provenance or ModuleDispatchProvenance(
             correlation_id=request.correlation_id,
@@ -460,7 +458,7 @@ class ModuleExecutor:
         # the denied audit is built only from safe, already-known facts.
         handler_method = self._action_methods.get(request.module, {}).get(request.action)
         if handler_method is None:
-            safe_action = _bounded_action_for_audit(request.action)
+            safe_action = _bounded_for_audit(request.action)
             logger.warning(
                 "MODULE_ACTION_UNDECLARED: module=%s action=%s is not declared in "
                 "the module's action contract; refusing dispatch (user=%s)",
@@ -663,7 +661,7 @@ class ModuleExecutor:
                 correlation_id=request.correlation_id,
                 settings=self.resolve_settings(request.module) or None,
                 persistence=self._build_persistence_context(request),
-                _emit=self._build_context_emitter(request),  # type: ignore[arg-type]
+                _emit=self._build_context_emitter(request, rejected_events),  # type: ignore[arg-type]
                 dispatch_authority=dispatch_authority,
                 dispatch_provenance=dispatch_provenance,
                 dispatch_audit=dispatch_audit,
@@ -682,16 +680,21 @@ class ModuleExecutor:
         declared_timeout = self._action_timeouts.get(request.module, {}).get(request.action)
         timeout = declared_timeout if declared_timeout is not None else _action_timeout()
         try:
-            with bind_persistence_principal(str(request.app_id or "").strip(), request.persistence_principal):
-                if inspect.iscoroutinefunction(action_fn):
-                    coro = action_fn(context, **request.params)
-                    result = (
-                        await asyncio.wait_for(coro, timeout=timeout)
-                        if timeout is not None
-                        else await coro
-                    )
-                else:
-                    result = action_fn(context, **request.params)
+            try:
+                with bind_persistence_principal(str(request.app_id or "").strip(), request.persistence_principal):
+                    if inspect.iscoroutinefunction(action_fn):
+                        coro = action_fn(context, **request.params)
+                        result = (
+                            await asyncio.wait_for(coro, timeout=timeout)
+                            if timeout is not None
+                            else await coro
+                        )
+                    else:
+                        result = action_fn(context, **request.params)
+            finally:
+                # Every terminal audit of this dispatch names the events the
+                # handler emitted that were rejected, whatever its outcome.
+                dispatch_audit = replace(dispatch_audit, rejected_events=tuple(rejected_events))
         except TimeoutError:
             logger.error(
                 "MODULE_ACTION_TIMEOUT: module=%s action=%s timeout=%.1fs user=%s",
@@ -751,25 +754,6 @@ class ModuleExecutor:
                 success=False,
                 error="Permission denied.",
                 error_code="PERMISSION_DENIED",
-            )
-        except ModuleEventPayloadValidationError as exc:
-            logger.warning(
-                "MODULE_EVENT_PAYLOAD_INVALID: module=%s action=%s event=%s path=%s error=%s",
-                request.module,
-                request.action,
-                exc.event_type,
-                exc.diagnostic.path,
-                exc.diagnostic.message,
-                extra={"module_event_payload_validation": exc.to_dict()},
-            )
-            await self._finalize_dispatch_audit(
-                replace(dispatch_audit, outcome="failed", reason="MODULE_EVENT_PAYLOAD_INVALID"),
-                error="MODULE_EVENT_PAYLOAD_INVALID",
-            )
-            return ModuleResult(
-                success=False,
-                error=str(exc),
-                error_code="INVALID_EVENT_PAYLOAD",
             )
         except Exception as exc:
             logger.error(
@@ -887,6 +871,10 @@ class ModuleExecutor:
             "executor": "module",
             "modules": self.registered_modules(),
             "count": len(self._modules),
+            "rejected_events": {
+                "total": sum(self._rejected_event_counts.values()),
+                "by_action": dict(sorted(self._rejected_event_counts.items())),
+            },
         }
 
     def can_handle(self, target: str) -> bool:
@@ -989,39 +977,73 @@ class ModuleExecutor:
         )
         await self._hooks().call_module_dispatch_audit(audit)
 
+    def _event_rejection(
+        self,
+        request: ModuleRequest,
+        event_id: str,
+        event_type: str,
+        payload: Any,
+    ) -> ModuleEventRejection | None:
+        """Why an emitted event breaks the action's declared event contract, if it does."""
+        declared_emits = self._action_emits.get(request.module, {}).get(request.action)
+        if declared_emits is not None and event_type not in declared_emits:
+            return ModuleEventRejection(
+                event_id=event_id,
+                event_type=_bounded_for_audit(event_type, max_length=_AUDIT_EVENT_TYPE_MAX_LENGTH),
+                category="undeclared",
+                reason=f"Action {request.module}.{request.action} does not declare this event in module.yaml emits.",
+                validator="emits",
+            )
+        payload_schema = self._event_payload_schemas.get(request.module, {}).get(event_type)
+        if payload_schema is None:
+            return None
+        diagnostic = validate_json_schema(payload, payload_schema)
+        if diagnostic is None:
+            return None
+        return ModuleEventRejection(
+            event_id=event_id,
+            event_type=event_type,
+            category=diagnostic.category,
+            reason=diagnostic.message,
+            validator=diagnostic.validator,
+            schema_path=diagnostic.schema_path,
+        )
+
+    def _record_event_rejection(self, request: ModuleRequest, rejection: ModuleEventRejection) -> None:
+        self._rejected_event_counts[f"{request.module}.{request.action}"] += 1
+        logger.error(
+            "MODULE_EVENT_REJECTED: module=%s action=%s event=%s event_id=%s category=%s validator=%s "
+            "schema_path=%s reason=%s (not dispatched; the action's outcome is unchanged)",
+            request.module,
+            request.action,
+            rejection.event_type,
+            rejection.event_id,
+            rejection.category,
+            rejection.validator,
+            rejection.schema_path,
+            rejection.reason,
+            extra={"module_event_rejection": rejection.to_dict()},
+        )
+
     def _build_context_emitter(
         self,
         request: ModuleRequest,
+        rejected_events: list[ModuleEventRejection],
     ) -> Callable[[str, dict[str, Any]], Awaitable[Any]] | None:
         if self._event_emitter is None:
             return None
 
         async def emit_module_event(event_type: str, payload: dict[str, Any]) -> None:
             event_type_text = str(event_type or "").strip()
-            declared_emits = self._action_emits.get(request.module, {}).get(request.action)
-            if declared_emits is not None and event_type_text not in declared_emits:
-                diagnostic = SchemaValidationDiagnostic(
-                    message=f"action {request.module}.{request.action} did not declare emitted event",
-                    path="$",
-                    schema_path="$",
-                    validator="emits",
-                )
-                raise ModuleEventPayloadValidationError(
-                    event_type=event_type_text,
-                    source_module=request.module,
-                    source_action=request.action,
-                    diagnostic=diagnostic,
-                )
-            payload_schema = self._event_payload_schemas.get(request.module, {}).get(event_type_text)
-            if payload_schema is not None:
-                validation_diagnostic = validate_json_schema(payload, payload_schema)
-                if validation_diagnostic is not None:
-                    raise ModuleEventPayloadValidationError(
-                        event_type=event_type_text,
-                        source_module=request.module,
-                        source_action=request.action,
-                        diagnostic=validation_diagnostic,
-                    )
+            event_id = f"evt_{uuid4().hex}"
+            rejection = self._event_rejection(request, event_id, event_type_text, payload)
+            if rejection is not None:
+                # An event that breaks its contract is dropped and named, never
+                # raised into the handler: its writes may already be committed,
+                # and raising would report them as failed.
+                self._record_event_rejection(request, rejection)
+                rejected_events.append(rejection)
+                return
 
             tenant_scope = {
                 "app_id": request.app_id,
@@ -1031,7 +1053,7 @@ class ModuleExecutor:
                 tenant_scope["workspace_id"] = request.workspace_id
 
             envelope: dict[str, Any] = {
-                "id": f"evt_{uuid4().hex}",
+                "id": event_id,
                 "type": event_type_text,
                 "version": 1,
                 "occurred_at": datetime.now(UTC).isoformat(),

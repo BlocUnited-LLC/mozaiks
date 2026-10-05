@@ -376,6 +376,16 @@ events:
         owner_id: { type: string }
 ```
 
+The runtime checks every `ctx.emit` against the action's `emits` list and the
+event's `payload_schema`. An event that fails is not dispatched, so no reaction
+or notification runs for it. It does not fail the action: the action's writes
+may already be committed, so the action keeps its handler's outcome and
+`ctx.emit` returns normally. The rejected event is named on the dispatch result
+(`ModuleResult.rejected_events`) and the dispatch audit with its event id, type
+and the schema rule it failed, never payload contents. It is logged at ERROR as
+`MODULE_EVENT_REJECTED` and counted in `ModuleExecutor.health()`. The
+AppGenerator runtime smoke fails a generated bundle on any rejected event.
+
 ### `contracts/reactions.yaml`
 
 Declare reactions to events published by other modules. Each reaction routes an

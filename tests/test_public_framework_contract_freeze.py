@@ -72,6 +72,7 @@ def test_app_zero_public_framework_entrypoints_remain_importable() -> None:
         ModuleDispatchProvenance,
         ModuleDispatchScope,
         ModuleEventProvenance,
+        ModuleEventRejection,
         ModuleExecutionPolicyDecision,
         ModuleExecutionPolicyInput,
         ModulePermissionCheck,
@@ -101,6 +102,7 @@ def test_app_zero_public_framework_entrypoints_remain_importable() -> None:
     assert ModuleExecutionPolicyDecision.__name__ == "ModuleExecutionPolicyDecision"
     assert ModuleDispatchAudit.__name__ == "ModuleDispatchAudit"
     assert ModuleEventProvenance.__name__ == "ModuleEventProvenance"
+    assert ModuleEventRejection.__name__ == "ModuleEventRejection"
     assert ModuleReactionProvenance.__name__ == "ModuleReactionProvenance"
     assert ModuleReactionAudit.__name__ == "ModuleReactionAudit"
     assert callable(dispatch_module_action)
@@ -114,6 +116,7 @@ def test_framework_authority_and_provenance_do_not_claim_production_authority() 
     from mozaiksai.core.runtime.composition import (
         ModuleDispatchAuthority,
         ModuleEventProvenance,
+        ModuleEventRejection,
     )
 
     authority = ModuleDispatchAuthority(
@@ -134,6 +137,11 @@ def test_framework_authority_and_provenance_do_not_claim_production_authority() 
     # The permission-list translation shim and its compatibility kinds are gone.
     assert not hasattr(ModuleDispatchAuthority, "from_" + "granted_permissions")
     assert "payload" not in event.to_dict()
+    rejection = ModuleEventRejection(
+        event_id="evt-1", event_type="domain.orders.created", category="value_invalid",
+        reason="Missing required properties: 'order_id'.",
+    )
+    assert "payload" not in rejection.to_dict()
     authority_fields = {field.name for field in fields(authority)}
     assert "production_authority" not in authority_fields
     assert "approval" not in authority_fields

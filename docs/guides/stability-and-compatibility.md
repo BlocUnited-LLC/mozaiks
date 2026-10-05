@@ -15,7 +15,7 @@ and the self-host acceptance suite. Stable within a pre-1.0 minor version.
 Breaking changes require a CHANGELOG entry and a version bump.
 
 **What is in Tier 1:**
-- Module dispatch public API: `dispatch_module_action`, `ModuleActionDispatchRequest`, `ModuleDispatchScope`, `ModuleDispatchMetadata`, `ModuleDispatchAuthority`, `ModuleDispatchProvenance`, `ModuleExecutionPolicyInput`, `ModuleExecutionPolicyDecision`, `ModuleDispatchAudit`, `ModuleEventProvenance`, `ModuleReactionProvenance`, `ModuleReactionAudit`
+- Module dispatch public API: `dispatch_module_action`, `ModuleActionDispatchRequest`, `ModuleDispatchScope`, `ModuleDispatchMetadata`, `ModuleDispatchAuthority`, `ModuleDispatchProvenance`, `ModuleExecutionPolicyInput`, `ModuleExecutionPolicyDecision`, `ModuleDispatchAudit`, `ModuleEventProvenance`, `ModuleEventRejection`, `ModuleReactionProvenance`, `ModuleReactionAudit`
 - Platform extension contract: `PlatformExtensionBundle`, `PLATFORM_EXTENSION_SCHEMA_VERSION`
 - Validation facade: `validate_generated_app_bundle`, `GeneratedAppValidationRequest`, `GeneratedAppValidationResult`, `GeneratedAppValidationDiagnostic`
 - Studio scope: `StudioScope`, `resolve_studio_scope`

@@ -17,6 +17,7 @@ EventEnvelopeShape = Literal["structured", "legacy_flat", "unknown"]
 EventTrustShape = Literal["module_envelope", "platform_envelope", "legacy_flat", "unknown"]
 ReactionTargetKind = Literal["handler", "capability", "notification", "service_adapter", "unknown"]
 ReactionAuditOutcome = Literal["ok", "skipped", "failed"]
+EventRejectionCategory = Literal["undeclared", "value_invalid", "schema_invalid"]
 
 
 @dataclass(frozen=True)
@@ -126,6 +127,35 @@ class ModuleReactionAudit:
             "outcome": self.outcome,
             "reason": self.reason,
             "audit_tags": dict(self.audit_tags),
+        }
+
+
+@dataclass(frozen=True)
+class ModuleEventRejection:
+    """An event a module action emitted that was not dispatched.
+
+    The event is not declared for the action (``undeclared``), its payload
+    fails the declared ``payload_schema`` (``value_invalid``), or the declared
+    schema cannot be evaluated (``schema_invalid``). ``reason``, ``validator``
+    and ``schema_path`` come from the declared contract, never from payload
+    contents.
+    """
+
+    event_id: str
+    event_type: str
+    category: EventRejectionCategory
+    reason: str
+    validator: str | None = None
+    schema_path: str = "$"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "event_id": self.event_id,
+            "event_type": self.event_type,
+            "category": self.category,
+            "reason": self.reason,
+            "validator": self.validator,
+            "schema_path": self.schema_path,
         }
 
 

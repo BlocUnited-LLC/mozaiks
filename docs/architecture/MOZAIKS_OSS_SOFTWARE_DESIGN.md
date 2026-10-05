@@ -366,6 +366,7 @@ Current enforcement:
 
 * event namespace prefixes are validated;
 * `module.yaml.actions[].emits` must reference declared events;
+* `ctx.emit` checks each event against the action's `emits` and the event's `payload_schema` before dispatch. An event that fails is never dispatched, and it never fails the action that emitted it: the action's writes may already be committed. It is named on the dispatch result and audit (event id, type, the schema rule it failed; never payload contents), logged at ERROR and counted;
 * reaction targets must use canonical target kinds and required fields;
 * notification reactions must reference declared notification IDs;
 * generated-app validation checks event, reaction, workflow, capability, and handler wiring;
@@ -375,7 +376,7 @@ Known pre-1.0 hardening gaps:
 
 | Gap | Current status |
 | --- | --- |
-| Runtime event payload-schema enforcement | Event `payload_schema` is declared and validated as metadata, but runtime emit-time JSON Schema enforcement is not yet a hard guarantee. |
+| Event payload-schema enforcement outside module actions | `ctx.emit` enforces it for module actions. Events emitted from reaction handlers bypass the executor: the `ModuleEventRouter` checks them before running reactions, and an invalid one is dropped there without being named on any dispatch result. An executor composed without an event emitter performs no check. |
 | Reaction idempotency | `idempotency_key` is part of the reaction contract, but the router does not yet enforce idempotency. |
 | Reaction permissions | Reaction `permissions` are declared/provenanced, but reaction dispatch does not re-enter public module permission checks. |
 | Cycle detection | No hard deterministic reaction-cycle detector is currently part of runtime validation. |

@@ -344,6 +344,45 @@ async def test_an_entitlement_gate_without_subscriptions_yaml_is_allowed_like_pr
     assert not [check for check in checks if check.startswith(("entitlement.", "subscriptions.")) or check.endswith(".plan")]
 
 
+def _created_event_without_owner(files: dict[str, str]) -> dict[str, str]:
+    """The good bundle, emitting its created event without the user_id its events.yaml schema requires."""
+    emit = "await ctx.emit('domain.task.created', item)"
+    assert files[SERVICE].count(emit) == 1
+    files[SERVICE] = files[SERVICE].replace(
+        emit, "await ctx.emit('domain.task.created', {k: v for k, v in item.items() if k != 'user_id'})",
+    )
+    return files
+
+
+async def test_a_rejected_event_fails_its_own_check_while_the_write_behind_it_passes(mongo):
+    result = await _smoke(_created_event_without_owner(_good()), mongo.uri)
+
+    assert result["status"] == "failed"
+    checks = _by_check(result)
+    event_check = "event.task_management.create_task.domain.task.created"
+    assert {check for check, row in checks.items() if row["status"] == "failed"} == {event_check}
+    message = checks[event_check]["message"]
+    assert message.startswith("task_management.create_task as user A emitted domain.task.created (event evt_")
+    assert "(at $.required: Missing required properties: 'user_id'.)" in message
+    assert checks[event_check]["path"] == SERVICE
+    # The runtime reports the create as succeeded; only the event is refused.
+    assert checks["crud.task_management.tasks.a_create"]["status"] == "passed"
+    assert result["events_emitted"] == ["domain.task.deleted", "domain.task.updated"]
+    assert [item["check"] for item in result["failed_tests"]] == [event_check]
+
+
+async def test_acceptance_fails_a_bundle_whose_event_breaks_its_schema(mongo, monkeypatch):
+    monkeypatch.setattr(app_runtime_smoke, "resolve_smoke_mongo_uri", lambda: mongo.uri)
+
+    result = await run_app_bundle_acceptance_gate(files=_created_event_without_owner(_good()))
+
+    assert result["app_runtime_smoke"]["status"] == "failed"
+    assert "app_runtime_smoke" in result["validation_evidence"]["failed"]
+    smoke_errors = [error for error in result["bundle_repair"]["errors"] if error.startswith("app_runtime_smoke: ")]
+    assert len(smoke_errors) == 1
+    assert "emitted domain.task.created" in smoke_errors[0]
+
+
 async def test_recorded_dead_bundle_fails_for_its_known_runtime_reasons(mongo):
     result = await _smoke(_dead(), mongo.uri)
 

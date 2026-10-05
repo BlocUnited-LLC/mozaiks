@@ -1228,6 +1228,20 @@ This project follows a practical pre-1.0 changelog format:
   Historical worker responses cannot restore rejected changes/deletions or
   overwrite a newer authorized repair, and migration registration preserves
   the accepted file bytes used by download and export.
+- A module action whose handler completed is no longer reported as failed
+  when an event it emits breaks its declared contract (an event the action
+  does not list in `emits`, or a payload that fails its `payload_schema`).
+  The write or delete was already committed, yet the caller got HTTP 500
+  `INVALID_EVENT_PAYLOAD`, so a retry duplicated or misreported it. Such an
+  event is still never dispatched, and no reaction or notification runs for
+  it. `ctx.emit` no longer raises for it, so the rest of the handler runs.
+  The rejected event is named on the dispatch result
+  (`ModuleResult.rejected_events`) and the dispatch audit with its event id,
+  type and the schema rule it failed, never payload contents. It is logged at
+  ERROR as `MODULE_EVENT_REJECTED` and counted in `ModuleExecutor.health()`. A
+  handler that raises still fails the action. The AppGenerator runtime smoke
+  reports every rejected event as a failed check, so generation still catches
+  a wrong event payload.
 - Factory generation now preserves task failures and successful outputs, supplies
   synthesized workers their actual prerequisites, and recovers eligible rejected
   tasks through the existing AG2 batch within finite budgets. Repairs respect
