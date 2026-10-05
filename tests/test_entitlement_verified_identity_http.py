@@ -135,6 +135,7 @@ def runtime(monkeypatch):
 
     return SimpleNamespace(
         client=client, executor=executor, token=token, assignments=assignments, handler=handler,
+        hooks=hooks,
     )
 
 
@@ -176,6 +177,20 @@ def test_token_bound_to_the_paying_tenant_holds_its_plan(runtime):
     assert plain.status_code == 200, plain.text
     assert named.status_code == 200, named.text
     assert runtime.handler.calls == 2
+
+
+def test_host_verified_workspace_does_not_verify_a_requested_tenant(runtime):
+    runtime.hooks.register_bundle(
+        {"module_scope_resolver": lambda **_scope: {"verified_workspace_id": "ws-own"}}, source="test",
+    )
+    client = runtime.client()
+    runtime.assignments.add(tenant_id="t-paid")
+    unbound = runtime.token("nora")
+
+    assert _refused(_export(client, unbound, context={"tenant_id": "t-paid"}))
+    assert _refused(_export(client, unbound, query={"tenant_id": "t-paid"}))
+    assert runtime.handler.calls == 0
+    assert _export(client, runtime.token("mia", tenant="t-paid")).status_code == 200
 
 
 def test_token_bound_to_another_tenant_is_refused(runtime):
@@ -296,3 +311,6 @@ def test_principal_captures_the_tenant_its_credential_is_bound_to(monkeypatch):
     assert http_principal.with_host_scope({"_verified_workspace_id": "ws-host"}) == PersistencePrincipal(
         user_id="mia", workspace_id="ws-host", tenant_id="t-paid",
     )
+    assert PersistencePrincipal(user_id="dave").with_host_scope(
+        {"_verified_workspace_id": "ws-1", "tenant_id": "t-paid"},
+    ) == PersistencePrincipal(user_id="dave", workspace_id="ws-1")

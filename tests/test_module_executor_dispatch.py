@@ -303,6 +303,7 @@ class TestEntitlementGate:
         result = await ex.execute(
             _request(
                 module="wallet",
+                user_id="user-requested",
                 tenant_id="tenant-requested",
                 workspace_id="workspace-requested",
                 authority=enforce_authority("wallet.manage"),
@@ -318,6 +319,36 @@ class TestEntitlementGate:
             user_id="user-1",
             tenant_id="tenant-1",
             workspace_id="workspace-1",
+        )
+
+    @pytest.mark.asyncio
+    async def test_development_identity_keys_the_entitlement_check(self):
+        granted_checker = MagicMock()
+        granted_checker.check = AsyncMock(return_value=EntitlementResult(granted=True))
+        ex = ModuleExecutor(entitlement_checker=granted_checker)
+        ex.register(
+            "wallet",
+            _EchoHandler(),
+            action_method_map={"echo": "echo"},
+            action_entitlements={"echo": "wallet.payout"},
+        )
+        result = await ex.execute(
+            _request(
+                module="wallet",
+                user_id="dev-user",
+                authority=enforce_authority("wallet.manage"),
+                persistence_principal=PersistencePrincipal(
+                    user_id="dev-user", workspace_id="development", source="development",
+                ),
+            )
+        )
+        assert result.success is True
+        granted_checker.check.assert_awaited_once_with(
+            "wallet.payout",
+            app_id="app-1",
+            user_id="dev-user",
+            tenant_id=None,
+            workspace_id="development",
         )
 
     @pytest.mark.asyncio
