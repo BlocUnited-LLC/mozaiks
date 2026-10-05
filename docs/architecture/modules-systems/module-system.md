@@ -243,8 +243,9 @@ data-contract alias. The platform wires the OSS `ConfiguredEntitlementAdapter`
 at startup and the adapter checks active assignment records before dispatch.
 When `assignment_store.workspace_id_field` is declared, assignment lookup is
 workspace-aware: exact app/tenant/workspace/user records are checked before
-broader tenant, workspace, user, or app-level fallback records. For non-SaaS
-apps, no subscription config is needed.
+broader tenant, workspace, user, or app-level fallback records. The user,
+tenant, and workspace come from the dispatch's verified identity, never from
+requested scope. For non-SaaS apps, no subscription config is needed.
 
 This OSS primitive is not hosted-product licensing. Hosted products such as
 Mozaiks App may decide whether an app/workspace can use a proprietary hosted

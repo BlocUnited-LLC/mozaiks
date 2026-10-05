@@ -150,6 +150,15 @@ This project follows a practical pre-1.0 changelog format:
   required array/object fields an empty default; the generated record id is
   `<entity>_id`, never a natural `search_by` key.
 
+- Module entitlement gates are keyed only by the caller's verified identity:
+  the token's user, the tenant the token is bound to, and the workspace the
+  token or a host-verified membership assertion binds. A tenant or workspace
+  selected by the request no longer chooses which plan applies, so a signed-in
+  caller cannot use a plan held by a tenant or workspace their token is not
+  bound to. Dispatch without a verified identity holds only app-wide grants.
+  Apps that sell tenant- or workspace-scoped plans need tokens that carry the
+  tenant (`AUTH_TENANT_ID_CLAIM`) or workspace (`AUTH_WORKSPACE_ID_CLAIM`) claim.
+
 ### Changed
 
 - Workflow context declarations reject keys that start with `ag:` or `a2a:`:

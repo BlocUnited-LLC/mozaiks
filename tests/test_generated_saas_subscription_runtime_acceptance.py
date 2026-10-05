@@ -21,6 +21,7 @@ from mozaiksai.core.capabilities.simple_llm import SimpleLLMCapabilityService
 from mozaiksai.core.runtime.app.entitlements import ConfiguredEntitlementAdapter
 from mozaiksai.core.runtime.app.loader import AppLoader
 from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, ModuleRequest
+from mozaiksai.core.runtime.persistence.adapter import PersistencePrincipal
 from mozaiksai.core.tokens.guard import TokenUsageDenied, TokenUsageGuard
 from mozaiksai.core.tokens.wallet import TokenWalletLedger
 from mozaiksai.hosts.platform import _current_user_token_wallet_summary
@@ -403,6 +404,7 @@ async def test_factory_shaped_saas_app_fulfills_runs_debits_and_blocks_depleted_
             app_id="generated-saas",
             user_id="user_1",
             authority=enforce_authority(),
+            persistence_principal=PersistencePrincipal(user_id="user_1"),
         )
     )
     assert denied.success is False
@@ -453,6 +455,7 @@ async def test_factory_shaped_saas_app_fulfills_runs_debits_and_blocks_depleted_
             app_id="generated-saas",
             user_id="user_1",
             authority=enforce_authority(),
+            persistence_principal=PersistencePrincipal(user_id="user_1"),
         )
     )
     assert granted.success is True
@@ -535,6 +538,7 @@ async def test_factory_shaped_saas_app_fulfills_runs_debits_and_blocks_depleted_
             app_id="generated-saas",
             user_id="user_1",
             authority=enforce_authority(),
+            persistence_principal=PersistencePrincipal(user_id="user_1"),
         )
     )
     assert cancelled.success is False
@@ -608,6 +612,7 @@ async def test_generated_saas_app_http_fulfillment_closes_entitlement_and_token_
             app_id="generated-saas",
             user_id="user_1",
             authority=enforce_authority(),
+            persistence_principal=PersistencePrincipal(user_id="user_1"),
         )
     )
     assert denied_before_fulfillment.success is False
@@ -654,6 +659,7 @@ async def test_generated_saas_app_http_fulfillment_closes_entitlement_and_token_
             app_id="generated-saas",
             user_id="user_1",
             authority=enforce_authority(),
+            persistence_principal=PersistencePrincipal(user_id="user_1"),
         )
     )
     assert granted_after_fulfillment.success is True

@@ -81,11 +81,16 @@ The OSS runtime now provides the foundational tenant/auth scope contract:
   workspace_id, permissions}` for module dispatch.
 - Module persistence context and emitted module event tenant metadata include
   `workspace_id` when present.
-- Entitlement checks receive `workspace_id` and the OSS
-  `ConfiguredEntitlementAdapter` honors `workspace_id_field` when an app's
-  `config/subscriptions.yaml` declares workspace-scoped assignment records.
-  The adapter checks the most specific app/tenant/workspace/user assignment
-  before falling back to broader tenant, workspace, user, or app-level records.
+- Module entitlement checks are keyed only by the dispatch's verified
+  identity: the token's user, the tenant the token is bound to, and the
+  workspace the token or a host-verified membership assertion binds. Requested
+  tenant or workspace scope, including scope a resolver hook returns, never
+  selects a plan. A dispatch with no verified identity holds only app-wide
+  grants. The OSS `ConfiguredEntitlementAdapter` honors `workspace_id_field`
+  when an app's `config/subscriptions.yaml` declares workspace-scoped
+  assignment records, and checks the most specific app/tenant/workspace/user
+  assignment before falling back to broader tenant, workspace, user, or
+  app-level records.
 - Runtime usage events carry `workspace_id` when the workflow context provides
   it. `TokenUsageGuard` uses the same app/user/tenant/workspace scope to
   resolve the active plan before an LLM call. Token wallet balances remain
