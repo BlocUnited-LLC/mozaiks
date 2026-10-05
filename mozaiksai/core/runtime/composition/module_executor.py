@@ -406,8 +406,8 @@ class ModuleExecutor:
 
         Builds a ModuleContext from the request if one is not supplied. An
         event the handler emits that fails its declared contract is not
-        dispatched and does not fail the action: the handler's writes are
-        already committed, so its outcome stands and the result names the
+        dispatched and does not fail the action: the handler's writes may
+        already be committed, so its outcome stands and the result names the
         rejected event.
         """
         rejected_events: list[ModuleEventRejection] = []
