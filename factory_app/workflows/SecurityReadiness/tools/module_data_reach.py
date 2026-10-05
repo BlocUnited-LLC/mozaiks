@@ -362,7 +362,7 @@ class _ReachResolver(PersistenceResolver):
             return frozenset(first + second for first in left for second in right)
         return None
 
-    def global_name(self, node: ast.AST) -> str | None:
+    def global_name(self, node: ast.AST | None) -> str | None:
         """The constant name that ``globals().get(name)`` or ``globals()[name]`` reads."""
         if isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Load) and self._globals(node.value):
             return self.text(node.slice)[0]
@@ -601,8 +601,8 @@ def _read(tree: ast.Module) -> _SourceReach:
             if functions & _WRITERS and not own:
                 if target is None or imported(resolver.resolve(target)):
                     reflective()
-                for name in attribute if attribute is not None else [None]:
-                    rebinds(name)
+                for written in attribute if attribute is not None else [None]:
+                    rebinds(written)
         handle = values & _HANDLES or (
             isinstance(node, (ast.Name, ast.Attribute)) and returns_handle(values) and not called
         )
@@ -614,9 +614,9 @@ def _read(tree: ast.Module) -> _SourceReach:
     )
 
 
-def _reads_global(call: ast.AST, resolver: _ReachResolver, parents: Mapping[ast.AST, ast.AST]) -> bool:
+def _reads_global(call: ast.AST | None, resolver: _ReachResolver, parents: Mapping[ast.AST, ast.AST]) -> bool:
     """Whether ``globals()`` is read only by a constant name, as ``globals().get(name)`` or ``globals()[name]``."""
-    parent = parents.get(call)
+    parent = parents.get(call) if call is not None else None
     if isinstance(parent, ast.Subscript):
         return resolver.global_name(parent) is not None
     if isinstance(parent, ast.Attribute):
@@ -677,14 +677,9 @@ class BundleDataReach:
         rebind a constant another module reads.
         """
         if self._rebound is None:
-            names: set[str] | None = set()
-            for path in sorted(self._files):
-                writes = self._reading(path).writes
-                if writes is None:
-                    names = None
-                    break
-                names |= writes
-            self._rebound = (frozenset(names) if names is not None else None,)
+            readings = [self._reading(path).writes for path in sorted(self._files)]
+            names = None if any(writes is None for writes in readings) else frozenset().union(*filter(None, readings))
+            self._rebound = (names,)
         return self._rebound[0]
 
     def _imports(self, path: str) -> set[str]:
@@ -697,9 +692,9 @@ class BundleDataReach:
             candidates = [parts] + [
                 ["modules", directory, *parts[1:]] for directory in sorted(self._packages.get(parts[0] if parts else "", ()))
             ]
-            for candidate in candidates:
-                for end in range(1, len(candidate) + 1):
-                    found |= self._by_name.get(".".join(candidate[:end]), set())
+            for dotted in candidates:
+                for end in range(1, len(dotted) + 1):
+                    found |= self._by_name.get(".".join(dotted[:end]), set())
         for level, module, names in source.relative_imports:
             base = posixpath.dirname(path)
             for _ in range(level - 1):
