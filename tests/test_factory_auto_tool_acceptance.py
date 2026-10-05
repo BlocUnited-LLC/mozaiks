@@ -292,6 +292,67 @@ async def test_typed_interview_readiness_reaches_chat_and_routes_through_auto_to
     ) == (next_agent or ready_agent)
 
 
+@pytest.mark.parametrize(("outcome", "message", "expected_next"), [
+    ("needs_input", "Should the assistant summarize uploaded documents?", "user"),
+    ("ready", "Your app does not need AI workflows.", "PatternAgent"),
+])
+async def test_agentgenerator_interview_message_reaches_chat_through_auto_tool_binding(
+    factory_manager, side_effect_probes, monkeypatch, outcome, message, expected_next,
+):
+    events = []
+
+    class Transport:
+        async def send_event_to_ui(self, event, chat_id):
+            events.append(event)
+
+    async def get_transport():
+        return Transport()
+
+    monkeypatch.setattr(_auto_tool_mod, "_get_simple_transport", get_transport)
+    workflow, agent = "AgentGenerator", "InterviewAgent"
+    info = factory_manager.reload_workflow(workflow)
+    assert not info.get("error"), info
+    _, registry = _so.load_workflow_structured_outputs(workflow)
+    pattern = _PatternContext()
+    pattern.data.update(interview_outcome="blocked", interview_attempts=0)
+    payload = {"agent_message": message, "outcome": outcome}
+    await emit_validated_agent_output(
+        current_agent_name=agent, last_reply=payload,
+        workflow_name=workflow, chat_id=f"{workflow}-{outcome}-interview", app_id="app-theme-1",
+        user_id="user-1", turn_sequence=1, context_vars_dict={"app_id": "app-theme-1"},
+        context_bridge=pattern, structured_registry=registry,
+        auto_tool_agents={agent}, wf_logger=_Logger(),
+    )
+    calls = [event for event in events if event["kind"] == "tool_call"]
+    assert len(calls) == 1
+    assert calls[0]["payload"]["agent_message"] == message
+    assert calls[0]["awaiting_response"] is False
+    assert pattern.data["interview_outcome"] == outcome
+    results = [event for event in events if event["kind"] == "tool_response"]
+    assert len(results) == 1
+    assert results[0]["success"] is True
+    assert STRUCTURED_OUTPUT_KEY not in pattern.data
+    assert side_effect_probes["context_persists"]
+    for snapshot in side_effect_probes["context_persists"]:
+        assert STRUCTURED_OUTPUT_KEY not in snapshot
+
+    from mozaiksai.core.workflow.execution.network_graph import (
+        compile_transition_rules_to_graph,
+        resolve_next_agent,
+    )
+
+    config = workflow_manager.get_config(workflow)
+    rules = config["transition_graph"]["transition_rules"]
+    names = list(config["agents"]["agents"])
+    graph = compile_transition_rules_to_graph(
+        rules, initial_agent_name=agent, agent_id_by_name={name: name for name in names},
+    )
+    assert resolve_next_agent(
+        graph, current_agent_name=agent, context_variables=pattern.data,
+        agent_name_by_id={name: name for name in names}, participant_order=[*names, "user"],
+    ) == expected_next
+
+
 @pytest.mark.parametrize(("workflow", "agent"), [
     ("ValueEngine", "ValueInterviewAgent"),
     ("ThemeCapture", "ThemeInterviewAgent"),
