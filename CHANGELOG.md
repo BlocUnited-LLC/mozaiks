@@ -168,11 +168,14 @@ This project follows a practical pre-1.0 changelog format:
   anonymous user's roles, dev personas, trusted module dispatch, acting for
   other users) only to requests from its own machine by default. A request
   counts as local only when it comes straight from a loopback address with no
-  forwarding header, and its `Host`, `Origin` and fetch metadata name this
-  machine, so pages on other websites cannot use a local browser to reach the
-  host. Other requests are refused with a message that names the fix. The web
-  shell's dev proxy marks requests from other machines, so the backend refuses
-  them too. Open local apps at `http://localhost:<port>` or
+  forwarding header, its `Host` and `Origin` (when present) name this machine,
+  and, without an `Origin`, fetch metadata does not mark it as cross-site, so
+  pages on other websites cannot use a local browser that sends fetch metadata
+  to get development access (see the authentication setup guide). Other
+  requests get no development access: routes that need an identity refuse
+  them, and routes that need none serve them as requests without credentials.
+  The web shell's dev proxy marks requests from other machines, so the backend
+  treats them the same way. Open local apps at `http://localhost:<port>` or
   `http://127.0.0.1:<port>`. A container reached through a published port needs
   `AUTH_ANON_ACCESS=open`, with the port published on `127.0.0.1` only (see the
   self-hosting guide). Rebuild `mozaiks-sandbox:local` and any E2B preview
@@ -186,9 +189,11 @@ This project follows a practical pre-1.0 changelog format:
 - Anonymous visitors of a public app (`AUTH_ANON_ACCESS=public`) and app
   previews run without development access: no roles, only `AUTH_ANON_SCOPES`
   (or `access_as_user`), their own user id only, and module permissions and
-  entitlement gates enforced. They get no admin, Studio management or billing
-  fulfillment access, and the programmatic workflow trigger needs an internal
-  API key for them.
+  entitlement gates enforced. Visitors share one identity: they see and
+  change each other's chats and per-user records, and their entitlement gates
+  are checked against it. They get no admin, Studio
+  management or billing fulfillment access, and the programmatic workflow
+  trigger needs an internal API key for them.
 - With authentication on, a validated token whose subject is literally
   `anonymous` acts only as itself. It no longer names the user a request acts
   for or sees other owners' chats and sessions; only the development identity

@@ -531,7 +531,7 @@ def test_grants_per_posture() -> None:
     assert _grant(local, LOCAL_MAPPED, ("Host", "127.0.0.1:8000")).development_access
     refused = _grant(local, BRIDGE)
     assert refused.refused and refused.status_code == 403
-    assert refused.detail == local_only_message(LocalityRefusal("peer", "172.20.0.1"))
+    assert refused.detail == local_only_message(LocalityRefusal("peer", "'172.20.0.1'"))
     proxied = _grant(local, LOCAL, ("X-Forwarded-For", "127.0.0.1"))
     assert proxied.detail == local_only_message(LocalityRefusal("forwarded", "x-forwarded-for"))
     assert _grant({"AUTH_ANON_ACCESS": "local"}, LOCAL).development_access
@@ -550,7 +550,7 @@ def test_grants_per_posture() -> None:
 @pytest.mark.parametrize(
     ("headers", "rule", "says"),
     [
-        ((), "peer", "This request came from 172.20.0.1, another machine."),
+        ((), "peer", "This request came from '172.20.0.1', another machine."),
         ((("X-Real-IP", "10.0.0.7"),), "forwarded", "came through a proxy (it carries a x-real-ip header)"),
         ((("Host", "rebind.example"),), "host", "addressed to 'rebind.example', which does not name this machine"),
         ((("Origin", "null"),), "origin", "sent by a page from 'null', which this machine does not serve"),
@@ -600,7 +600,7 @@ def test_local_posture_refuses_every_other_client(monkeypatch, peer, path) -> No
 
     assert response.status_code == 403
     assert response.json()["detail"].startswith("Authentication is off and AUTH_ANON_ACCESS is local")
-    assert f"This request came from {peer[0] if peer else 'testclient'}, another machine." in response.json()["detail"]
+    assert f"This request came from {peer[0] if peer else 'testclient'!r}, another machine." in response.json()["detail"]
 
 
 @pytest.mark.parametrize(
@@ -780,14 +780,24 @@ def test_websocket_local_posture_refuses_a_foreign_page_or_proxy(monkeypatch, ba
         assert closed.code == 1008 and closed.reason.endswith(reason)
 
 
-def test_websocket_visitor_is_bound_to_the_visitor_identity(monkeypatch) -> None:
+def test_websocket_visitor_is_bound_to_the_visitor_identity(monkeypatch, caplog) -> None:
+    from mozaiksai.core.auth import websocket_auth
+
     _off(monkeypatch, "public")
 
     body = _ws(_client(LAN), "/ws/anonymous")
     assert (body["user_id"], body["scopes"], body["provenance"]) == ("anonymous", ["access_as_user"], "anonymous")
 
-    closed = _ws_refusal(_client(LAN), "/ws/victim")
+    long_id = "v" * 120
+    with caplog.at_level(logging.WARNING, logger=websocket_auth.logger.name):
+        closed = _ws_refusal(_client(LAN), "/ws/victim")
+        _ws_refusal(_client(LAN), f"/ws/{long_id}")
     assert (closed.code, closed.reason) == (1008, "user_id mismatch")
+    # The path user id is client-supplied: logged quoted and shortened.
+    assert [record.getMessage() for record in caplog.records if "visitor tried" in record.getMessage()] == [
+        "WebSocket visitor tried to connect as path user 'victim'",
+        f"WebSocket visitor tried to connect as path user {long_id[:77] + '...'!r}",
+    ]
 
     plain = _ws(_client(LAN), "/ws")
     assert (plain["roles"], plain["scopes"]) == ([], ["access_as_user"])
@@ -926,6 +936,109 @@ def test_chat_listing_scopes_every_principal_but_the_shared_development_identity
         assert queries[0]["user_id"] == principal.user_id
 
 
+# A chat record owned by "victim": served to its owner and to the shared
+# development identity, refused to every other principal, a visitor included.
+_VICTIMS_RECORD = pytest.mark.parametrize(
+    ("principal", "served"),
+    [
+        (_principal("victim", provenance="token_validated"), True),
+        (_principal(provenance="local_development"), True),
+        (_principal(provenance="anonymous"), False),
+        (_principal("mallory", provenance="dev_override"), False),
+        (_principal(provenance="token_validated"), False),
+    ],
+    ids=["owner", "shared_development_identity", "visitor", "persona", "token_subject_anonymous"],
+)
+
+
+@_VICTIMS_RECORD
+def test_general_chat_transcript_scopes_every_principal_but_the_shared_development_identity(
+    monkeypatch, principal, served
+) -> None:
+    from mozaiksai.hosts.routers import sessions as sessions_router
+
+    class _Persistence:
+        async def fetch_general_chat_transcript(self, **query):
+            return {"chat_id": query["general_chat_id"], "user_id": "victim", "messages": [{"content": "private"}]}
+
+    monkeypatch.setattr(sessions_router, "persistence_manager", _Persistence())
+    app = FastAPI()
+    app.include_router(sessions_router.router)
+    app.dependency_overrides[sessions_router.require_user_scope] = lambda: principal
+
+    response = TestClient(app).get("/api/general_chats/transcript/app-1/chat-1")
+
+    if served:
+        assert response.status_code == 200
+        assert response.json()["messages"] == [{"content": "private", "timestamp": None}]
+    else:
+        assert (response.status_code, response.json()) == (403, {"detail": "Forbidden"})
+
+
+_ACTION_SERVED = (200, {"status": "success", "result": {"applied": True}})
+_CHAT_NOT_FOUND = (404, {"detail": "Chat not found"})
+
+
+def _component_actions(monkeypatch, principal: UserPrincipal) -> tuple[Any, list[str]]:
+    """Post component actions as ``principal``: victim owns chat-1 and mallory chat-2, both in app-1."""
+    from mozaiksai.hosts import runtime as runtime_app
+
+    chats = (
+        {"_id": "chat-1", "user_id": "victim", "app_id": "app-1"},
+        {"_id": "chat-2", "user_id": "mallory", "app_id": "app-1"},
+    )
+    applied: list[str] = []
+
+    class _Chats:
+        async def find_one(self, query, projection=None):
+            # A record matches only when it equals every field the query names.
+            return next((dict(chat) for chat in chats if all(chat.get(k) == v for k, v in query.items())), None)
+
+    async def chat_coll():
+        return _Chats()
+
+    class _Transport:
+        async def process_component_action(self, **action):
+            applied.append(f"{action['app_id']}/{action['chat_id']}")
+            return {"applied": True}
+
+    monkeypatch.setattr(runtime_app, "_chat_coll", chat_coll)
+    monkeypatch.setattr(runtime_app, "simple_transport", _Transport())
+    monkeypatch.setitem(runtime_app.app.dependency_overrides, runtime_app.require_user_scope, lambda: principal)
+    client = TestClient(runtime_app.app, raise_server_exceptions=False, base_url=HERE)
+
+    def act(app_id: str, chat_id: str) -> tuple[int, Any]:
+        response = client.post(
+            f"/chat/{app_id}/{chat_id}/component_action", json={"component_id": "approval", "action_type": "approve"}
+        )
+        return response.status_code, response.json()
+
+    return act, applied
+
+
+@_VICTIMS_RECORD
+def test_component_action_scopes_every_principal_but_the_shared_development_identity(
+    monkeypatch, principal, served
+) -> None:
+    act, applied = _component_actions(monkeypatch, principal)
+
+    if served:
+        assert act("app-1", "chat-1") == _ACTION_SERVED
+        assert applied == ["app-1/chat-1"]
+    else:
+        assert act("app-1", "chat-1") == _CHAT_NOT_FOUND
+        assert applied == []
+
+
+def test_component_action_ownership_names_the_chat_and_its_app(monkeypatch) -> None:
+    act, applied = _component_actions(monkeypatch, _principal("victim", provenance="token_validated"))
+
+    assert act("app-1", "chat-1") == _ACTION_SERVED
+    assert act("app-2", "chat-1") == _CHAT_NOT_FOUND  # the owner's chat, under another app
+    assert act("app-1", "chat-2") == _CHAT_NOT_FOUND  # another owner's chat in the same app
+    assert applied == ["app-1/chat-1"]
+
+
 def _mint_local_development_authority():
     from mozaiksai.core.runtime.composition.module_authority import ModuleDispatchAuthority
 
@@ -1003,12 +1116,18 @@ class _NoPlanEntitlements:
         return EntitlementResult(granted=False, reason="no_grant")
 
 
-def _module_client(peer: tuple[str, int] | None, *, base_url: str = HERE) -> TestClient:
+def _module_client(
+    peer: tuple[str, int] | None,
+    *,
+    base_url: str = HERE,
+    entitlements: Any = None,
+    persistence_principal: Any = None,
+) -> TestClient:
     from mozaiksai.core.runtime.composition.executor_registry import ExecutorRegistry
     from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor
     from mozaiksai.hosts.routers import modules as module_router
 
-    executor = ModuleExecutor(entitlement_checker=_NoPlanEntitlements())
+    executor = ModuleExecutor(entitlement_checker=entitlements or _NoPlanEntitlements())
     executor.register(
         "orders",
         _Orders(),
@@ -1031,7 +1150,7 @@ def _module_client(peer: tuple[str, int] | None, *, base_url: str = HERE) -> Tes
         authentication_enabled=auth_registry.is_auth_enabled(),
         platform_hooks=module_router.get_platform_hooks(),
         record_invocation=lambda **_: None,
-        persistence_principal=lambda principal: None,
+        persistence_principal=persistence_principal or (lambda principal: None),
     )
     if peer is None:
         return TestClient(app, raise_server_exceptions=False, base_url=base_url)
@@ -1115,6 +1234,35 @@ def test_module_dispatch_checks_entitlement_gates_for_everyone_but_development_a
     assert _module_client(LOCAL).post("/api/modules/orders/premium", json={}).json()["mode"] == "trusted_bypass"
 
 
+class _RecordingEntitlements(_NoPlanEntitlements):
+    def __init__(self) -> None:
+        self.checked: list[dict[str, Any]] = []
+
+    async def check(self, capability_id, *, app_id, user_id=None, tenant_id=None, workspace_id=None):
+        self.checked.append({"user_id": user_id, "tenant_id": tenant_id, "workspace_id": workspace_id})
+        return await super().check(capability_id, app_id=app_id)
+
+
+def test_a_visitor_entitlement_gate_is_checked_against_the_shared_visitor_identity(monkeypatch) -> None:
+    """Visitors share one identity, and their gates are checked against it: a
+    tenant or workspace named in the request never selects the plan."""
+    from mozaiksai.core.runtime.persistence.adapter import PersistencePrincipal
+
+    _off(monkeypatch, "public")
+    entitlements = _RecordingEntitlements()
+    visitor = _module_client(
+        LAN, entitlements=entitlements, persistence_principal=PersistencePrincipal.from_authenticated_user
+    )
+
+    gated = visitor.post(
+        "/api/modules/orders/premium?tenant_id=paying-tenant&workspace_id=paying-workspace",
+        json={"context": {"tenant_id": "paying-tenant", "workspace_id": "paying-workspace"}},
+    )
+
+    assert gated.status_code == 402
+    assert entitlements.checked == [{"user_id": "anonymous", "tenant_id": None, "workspace_id": "development"}]
+
+
 def test_module_dispatch_trusts_only_a_minted_principal(monkeypatch) -> None:
     """Trusted dispatch needs a UserPrincipal minted with development access. An
     object that merely claims the provenance (a duck-typed principal from a host
@@ -1138,7 +1286,7 @@ def test_module_dispatch_trusts_only_a_minted_principal(monkeypatch) -> None:
 
 
 def test_privilege_is_bound_when_the_principal_is_minted(monkeypatch) -> None:
-    """R13: changing the environment later never upgrades an existing principal."""
+    """Changing the environment later never upgrades an existing principal."""
     from mozaiksai.hosts.routers.billing import _authorize_fulfillment
 
     minted: dict[str, UserPrincipal] = {}
@@ -1442,7 +1590,7 @@ async def test_studio_refuses_before_any_other_startup_work(monkeypatch, environ
 
 #: Studio routes that serve a caller before sign-in and depend on no principal.
 #: The shell configuration tells the browser how to sign in, and projects a
-#: development identity only to a client with development access (R20).
+#: development identity only to a client with development access.
 _STUDIO_ROUTES_WITHOUT_A_PRINCIPAL = {(("GET",), "/api/shell-config")}
 
 
@@ -1613,7 +1761,7 @@ def test_websocket_local_posture_refuses_a_cross_site_handshake_without_an_origi
     assert _ws(_client(LOCAL), "/ws", headers=with_origin)["provenance"] == "local_development"
 
 
-# --- Authentication on: every AUTH_ANON_* setting is ignored (R5) --------------------
+# --- Authentication on: every AUTH_ANON_* setting is ignored -------------------------
 
 
 def _auth_on_observations(monkeypatch, **anonymous_settings: str) -> list[tuple[Any, ...]]:
@@ -1671,7 +1819,7 @@ def test_anonymous_settings_change_nothing_while_authentication_is_on(monkeypatc
 
 def test_implicit_demo_resolution_logs_at_debug_only(caplog) -> None:
     """The CLI prints its refusal box right after resolution; a WARNING saying
-    "defaulting to demo mode" just above it read as a contradiction (R6)."""
+    "defaulting to demo mode" just above it read as a contradiction."""
     with caplog.at_level(logging.DEBUG, logger=auth_registry.logger.name):
         config = auth_registry.resolve_auth_config(environ={})
 
@@ -1698,13 +1846,41 @@ def test_each_refusal_is_logged_once_with_its_rule(caplog) -> None:
     refusals = [record for record in caplog.records if "ANONYMOUS_ACCESS_REFUSED" in record.getMessage()]
     assert all(record.levelno == logging.WARNING for record in refusals)
     assert [record.getMessage() for record in refusals] == [
-        "ANONYMOUS_ACCESS_REFUSED reason=not_configured client=127.0.0.1",
-        "ANONYMOUS_ACCESS_REFUSED reason=not_local rule=peer client=172.20.0.1 observed=172.20.0.1",
-        "ANONYMOUS_ACCESS_REFUSED reason=not_local rule=forwarded client=127.0.0.1 observed=x-forwarded-for",
-        "ANONYMOUS_ACCESS_REFUSED reason=not_local rule=host client=127.0.0.1 observed='rebind.example'",
-        "ANONYMOUS_ACCESS_REFUSED reason=not_local rule=origin client=127.0.0.1 observed='http://evil.example'",
-        "ANONYMOUS_ACCESS_REFUSED reason=not_local rule=fetch-site client=127.0.0.1 observed='cross-site'",
+        "ANONYMOUS_ACCESS_REFUSED reason=not_configured client='127.0.0.1'",
+        "ANONYMOUS_ACCESS_REFUSED reason=not_local rule=peer client='172.20.0.1' observed='172.20.0.1'",
+        "ANONYMOUS_ACCESS_REFUSED reason=not_local rule=forwarded client='127.0.0.1' observed=x-forwarded-for",
+        "ANONYMOUS_ACCESS_REFUSED reason=not_local rule=host client='127.0.0.1' observed='rebind.example'",
+        "ANONYMOUS_ACCESS_REFUSED reason=not_local rule=origin client='127.0.0.1' observed='http://evil.example'",
+        "ANONYMOUS_ACCESS_REFUSED reason=not_local rule=fetch-site client='127.0.0.1' observed='cross-site'",
     ]
+
+
+def test_a_refusal_quotes_and_shortens_the_client_address(caplog) -> None:
+    """Behind a proxy the server trusts, the server records the peer from the
+    request's own forwarding header, so the peer is client-supplied text: the
+    log line and the refusal show it cut to 80 characters and quoted, like
+    every other client-supplied value."""
+    from mozaiksai.core.auth import anonymous_access
+
+    spaced = "10.9.8.7 rule=host client=127.0.0.1"
+    long_peer = "10.9.8.7-" + "x" * 111  # 120 characters
+    shortened = repr(long_peer[:77] + "...")
+
+    with caplog.at_level(logging.WARNING, logger=anonymous_access.logger.name):
+        _grant({}, (spaced, 0))
+        refused = _grant({"AUTH_ENABLED": "false"}, (spaced, 0))
+        refused_long = _grant({"AUTH_ENABLED": "false"}, (long_peer, 0))
+
+    refusals = [record.getMessage() for record in caplog.records if "ANONYMOUS_ACCESS_REFUSED" in record.getMessage()]
+    assert refusals == [
+        f"ANONYMOUS_ACCESS_REFUSED reason=not_configured client={spaced!r}",
+        f"ANONYMOUS_ACCESS_REFUSED reason=not_local rule=peer client={spaced!r} observed={spaced!r}",
+        f"ANONYMOUS_ACCESS_REFUSED reason=not_local rule=peer client={shortened} observed={shortened}",
+    ]
+    assert len(shortened) == 82  # 80 characters and the quotes
+    assert f"This request came from {spaced!r}, another machine." in refused.detail
+    assert f"This request came from {shortened}, another machine." in refused_long.detail
+    assert long_peer not in refused_long.detail
 
 
 @pytest.mark.parametrize(
@@ -1713,7 +1889,7 @@ def test_each_refusal_is_logged_once_with_its_rule(caplog) -> None:
     ids=["local_posture_lan", "demo"],
 )
 def test_the_shell_projection_logs_no_refusal(monkeypatch, caplog, environ, peer) -> None:
-    """The browser fetches /api/shell-config before anything else (R20, log_refusal=False)."""
+    """The browser fetches /api/shell-config before anything else (log_refusal=False)."""
     from mozaiksai.core.auth import anonymous_access
 
     _auth(monkeypatch, **environ)
@@ -1725,7 +1901,7 @@ def test_the_shell_projection_logs_no_refusal(monkeypatch, caplog, environ, peer
     assert not [record for record in caplog.records if "ANONYMOUS_ACCESS_REFUSED" in record.getMessage()]
 
 
-# --- Module dispatch: a named user is bound to the caller (R15) -----------------------
+# --- Module dispatch: a named user is bound to the caller ----------------------------
 
 
 def test_module_dispatch_binds_a_named_user_to_the_caller(monkeypatch) -> None:
@@ -1746,7 +1922,7 @@ def test_module_dispatch_binds_a_named_user_to_the_caller(monkeypatch) -> None:
     _off(monkeypatch)
     for response in calls(_module_client(BRIDGE)):  # refused: optional_user gave None
         assert response.status_code == 403
-        assert response.json()["detail"] == local_only_message(LocalityRefusal("peer", "172.20.0.1"))
+        assert response.json()["detail"] == local_only_message(LocalityRefusal("peer", "'172.20.0.1'"))
 
     _auth(monkeypatch, ENV="development")
     for response in calls(_module_client(LOCAL)):  # demo: refused, optional_user gave None

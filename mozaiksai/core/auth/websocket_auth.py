@@ -48,6 +48,7 @@ from mozaiksai.core.auth.anonymous_access import (
     AnonymousGrant,
     anonymous_claims,
     resolve_anonymous_grant,
+    shown_client_value,
 )
 
 logger = get_core_logger("auth.websocket")
@@ -531,7 +532,8 @@ async def authenticate_websocket_with_path_user(
             )
             if not verify_user_owns_resource(user.user_id, path_user_id):
                 logger.warning(
-                    "WebSocket visitor tried to connect as path user %s", path_user_id
+                    "WebSocket visitor tried to connect as path user %s",
+                    shown_client_value(str(path_user_id)),
                 )
                 await websocket.close(code=WS_CLOSE_POLICY_VIOLATION, reason="user_id mismatch")
                 return None

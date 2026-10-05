@@ -236,16 +236,24 @@ def _headers(scope: Mapping[str, Any], names: Iterable[bytes]) -> list[tuple[str
     return found
 
 
-def _shown(value: str) -> str:
-    """A client-supplied value, quoted and shortened, for messages and logs."""
+def shown_client_value(value: str) -> str:
+    """A client-supplied value for messages and logs.
+
+    The value is cut to 80 characters, then repr-quoted, so control characters
+    are escaped and a log record stays on one line.
+    """
     return repr(value if len(value) <= 80 else value[:77] + "...")
 
 
 def client_host(scope: Mapping[str, Any]) -> str:
-    """The peer as the server recorded it, for messages and logs."""
+    """The peer as the server recorded it, quoted and shortened, for messages and logs.
+
+    Behind a proxy the server trusts, the server records the peer from the
+    request's own forwarding header, so the peer is client-supplied text.
+    """
     client = scope.get("client") if isinstance(scope, Mapping) else None
     if isinstance(client, (tuple, list)) and client:
-        return str(client[0])
+        return shown_client_value(str(client[0]))
     return "an unknown address"
 
 
@@ -289,11 +297,11 @@ def local_client_refusal(scope: Mapping[str, Any]) -> LocalityRefusal | None:
         return LocalityRefusal("forwarded", forwarded[0][0])
     for _, host in _headers(scope, (b"host",)):
         if not _is_loopback_authority(host):
-            return LocalityRefusal("host", _shown(host))
+            return LocalityRefusal("host", shown_client_value(host))
     origins = _headers(scope, (b"origin",))
     for _, origin in origins:
         if not _is_loopback_origin(origin):
-            return LocalityRefusal("origin", _shown(origin))
+            return LocalityRefusal("origin", shown_client_value(origin))
     if not origins:
         # Browsers send no Origin on no-cors cross-site GETs (image and script
         # loads, navigations), so rule 4 never sees them, and GET module
@@ -301,7 +309,7 @@ def local_client_refusal(scope: Mapping[str, Any]) -> LocalityRefusal | None:
         # where such a request came from.
         for _, site in _headers(scope, (b"sec-fetch-site",)):
             if site.strip().lower() == "cross-site":
-                return LocalityRefusal("fetch-site", _shown(site))
+                return LocalityRefusal("fetch-site", shown_client_value(site))
     return None
 
 
@@ -415,5 +423,6 @@ __all__ = [
     "local_client_refusal",
     "local_only_message",
     "resolve_anonymous_grant",
+    "shown_client_value",
     "visitor_claims",
 ]

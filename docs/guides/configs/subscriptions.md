@@ -21,13 +21,14 @@ module-owned commercial/service boundary.
    module actions. A call whose capability no active plan grants returns
    HTTP 402 with `detail.error_code: ENTITLEMENT_REQUIRED`.
 
-Gates are skipped only for requests with development access. With
+Among HTTP calls, gates are skipped only for requests with development access. With
 `AUTH_ENABLED=false`, the value `.env.example` and `mozaiks init` ship, HTTP
 calls to `/api/modules/...` from this machine run as trusted local development
 and skip permission and entitlement checks, so a gated action succeeds for
 you. Callers without development access, such as anonymous visitors of a
-public app (`AUTH_ANON_ACCESS=public`), are checked. Turn authentication on to
-test gating per user.
+public app (`AUTH_ANON_ACCESS=public`), are checked. Visitors share one
+identity, so a plan assigned to it applies to every visitor. Turn
+authentication on to test gating per user.
 
 Payment providers, invoices, taxes, payouts, and settlement stay behind app or
 managed-capability integrations. The subscriptions file defines the app's

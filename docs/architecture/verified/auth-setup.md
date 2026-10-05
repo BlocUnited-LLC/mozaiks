@@ -23,8 +23,8 @@ No tokens are required, and `AUTH_ANON_ACCESS` decides whom the host serves:
 
 | `AUTH_ANON_ACCESS` | Who is served | What they get |
 |---|---|---|
-| `local` (default) | requests from this machine only; every other request is refused (HTTP 403, WebSocket closed with 1008) | development access: the anonymous user with `AUTH_ANON_ROLES` and the development scopes, dev personas (below), trusted module dispatch |
-| `public` | every client | an anonymous visitor: no roles, `AUTH_ANON_SCOPES` or `access_as_user` only, its own user id only, module permissions and entitlements enforced. For public apps and their previews; Studio refuses it, and it cannot be combined with `AUTH_ANON_ROLES` |
+| `local` (default) | requests from this machine only. Every other request gets no development access: routes that need an identity refuse it (HTTP 403, WebSocket closed with 1008), and routes that need none serve it like a request without credentials | development access: the anonymous user with `AUTH_ANON_ROLES` and the development scopes, dev personas (below), trusted module dispatch |
+| `public` | every client | an anonymous visitor: no roles, `AUTH_ANON_SCOPES` or `access_as_user` only, its own user id only, module permissions and entitlements enforced. Visitors share one identity: they see and change each other's chats and per-user records, and entitlements are checked against it. For public apps and their previews; Studio refuses it, and it cannot be combined with `AUTH_ANON_ROLES` |
 | `open` | every client that can reach the host | development access, as for `local`. Use it only where the network itself limits who can connect, for example a container whose port is published only on `127.0.0.1` (the host browser reaches a container through Docker's gateway, not as this machine) |
 
 A request is from this machine only when all of these hold, and the refusal
