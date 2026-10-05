@@ -195,8 +195,10 @@ try {
   assert.equal(deleted.body.post, null);
   proof.checks.authenticated_delete = true;
 
+  stage('open-profile-menu');
+  // The reference realm maps the full name, without a separate given_name claim.
+  await page.getByTitle('Alice Gardener', { exact: true }).click();
   stage('external-browser-logout');
-  await page.getByTitle('Alice', { exact: true }).click();
   await page.getByRole('button', { name: 'Sign Out', exact: true }).click();
   await expect.poll(() => page.evaluate(async () => !(await window.mozaiksAuth?.getAccessToken())), { timeout: 45_000 }).toBe(true);
   await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
