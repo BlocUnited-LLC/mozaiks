@@ -36,9 +36,11 @@ const filesMap = mode === 'missing_theme' ? {} : {
 const validationStrategy = historical_strategy;
 const build = eval('(' + callback + ')');
 if (mode === 'invalid_theme') {
-  assert.throws(() => build(null, 'theme_config'), SyntaxError);
+  assert.throws(() => build(true), SyntaxError);
 } else {
-  const result = build(null, mode.includes('theme') ? 'theme_config' : null);
+  const result = build(mode.includes('theme'));
+  assert.equal(result.refinement_request.artifact_kind, artifactKind);
+  assert.equal(result.refinement_request.artifact_key, artifactKey);
   assert.equal(result.refinement_request.artifact_version_id, artifactVersionId);
   assert.equal(result.refinement_request.raw_user_request, refinementRequest.trim());
   assert.equal(Object.hasOwn(result.coding_request || {}, 'validation_strategy'), false);
