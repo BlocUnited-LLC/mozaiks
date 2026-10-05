@@ -2,6 +2,12 @@
 
 This document defines the runtime contract a mobile client (iOS/Android) must follow to work with Mozaiks OSS core.
 
+Status: this is a client integration reference, not an implemented mobile delivery
+target. The repository has responsive web UI and shared `chat-ui` exports, but no
+maintained native client, generated iOS/Android project, signing pipeline, or
+device acceptance evidence. The shared exports have not been qualified as a
+complete React Native application.
+
 Scope:
 - Runtime transport and auth contract.
 - Workflow/chat lifecycle contract.
@@ -238,9 +244,12 @@ Recommended reliability policy:
 - Local pending action queue for transient network failures.
 - Strict tenant-safe keying (`app_id + user_id + chat_id`).
 
-## Shared Chat Core For React Native
+## Shared Chat Exports For A Future Native Client
 
-The `chat-ui` package now exposes a portable shared-core surface for non-browser hosts.
+The `chat-ui` package exports a shared-core entrypoint and a configurable
+platform bridge. The web app uses the bridge for storage and connection URLs.
+These exports are integration points for a future native client; their presence
+does not establish native renderer compatibility or mobile release support.
 
 Use:
 
@@ -257,7 +266,8 @@ Required host responsibilities:
 Important constraint:
 
 - Do not import browser-only adapters such as Keycloak or mock browser auth into a React Native host.
-- The shared core is portable; the default web renderer is not.
+- A native host must qualify the imported hooks/providers and implement its own
+  renderer. The default web renderer uses browser components.
 
 Minimal startup shape:
 
@@ -281,11 +291,14 @@ configurePlatform({
 });
 ```
 
-The React Native host then mounts its own native UI around the shared provider/hook layer.
+This is an integration sketch, not a tested native application. A native host
+would also need to validate authentication, transport, lifecycle, and UI tool
+rendering on its supported devices.
 
 ## 8) Important Caveat: UI Tool Renderers
 
-Workflows and runtime orchestration do not need to change for mobile.
+The runtime transport and workflow contracts are intended to be shared with a
+mobile client.
 
 However, when runtime emits `chat.tool_call` events for UI tools, mobile clients must provide renderer mappings for the emitted component identifiers (for example `ActionPlan`, `AgentAPIKeyInput`, etc.).
 
@@ -294,18 +307,8 @@ Implications:
 - Mobile UI must implement equivalent renderers for any workflow-specific UI tool components used by the app.
 - If a component is unknown on mobile, client should degrade safely (fallback card, prompt-only flow, or explicit "unsupported component" UI).
 
-## 9) Repo Strategy (Recommended)
+## 9) Delivery Scope
 
-Mobile code does not need a separate backend repo. You have two common options:
-
-1. Monorepo (recommended initially)
-- Keep mobile client under this repo (for example `clients/mobile`).
-- Pros: shared contracts/docs, easier synchronized changes, simpler OSS onboarding.
-
-2. Separate mobile repo
-- Use when mobile team/release cadence is fully independent.
-- Requires stronger versioning and CI checks against runtime contract changes.
-
-Recommended default for Mozaiks right now:
-- Keep runtime + web + mobile in one repo first.
-- Split only when release or ownership boundaries force it.
+This contract does not select a mobile renderer, define a generated mobile
+output path, or provide a build and distribution workflow. Those decisions
+require a separate delivery contract and validation against a reference app.
