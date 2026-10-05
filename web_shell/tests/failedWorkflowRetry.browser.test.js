@@ -145,13 +145,15 @@ test('ChatPage observes persisted status on reopen and refreshes it after termin
 
 test('failed workflow retry uses the existing authenticated launch path', async (t) => {
   const api = await fs.readFile(path.join(ui, 'adapters/api.js'), 'utf8');
-  const authHelpers = api.slice(api.indexOf('function getAccessToken('), api.indexOf('export class ApiAdapter'));
+  const authHelpers = api.slice(api.indexOf('function _firstString('), api.indexOf('export class ApiAdapter'));
   const stubs = {
     '../context/ChatUIContext': `export const useChatUI = () => ({
       user: { id: 'operator', app_id: 'wrong-token-default' }, config: { appId: 'wrong-config-default' },
       auth: { getAccessToken: () => window.fixture.token },
     });`,
-    '../adapters/api': `const platform = { getAccessToken: () => { throw Error('unexpected token fallback'); } }; ${authHelpers}`,
+    '../adapters/api': `const platform = {
+      getAccessToken: () => { throw Error('unexpected token fallback'); }, resolveHttpUrl: () => '',
+    }; const config = { get: () => '' }; ${authHelpers}`,
     'react-router-dom': `export const useNavigate = () => window.fixture.navigate;
       export const useParams = () => ({});`,
     '../../core/ui/UIToolRenderer': 'export default function UIToolRenderer() { return null; }',
@@ -170,7 +172,7 @@ test('failed workflow retry uses the existing authenticated launch path', async 
     };
     window.fetch = async (url, options) => {
       const fixture = window.fixture;
-      fixture.requests.push({ url, method: options.method, headers: options.headers, body: JSON.parse(options.body) });
+      fixture.requests.push({ url, method: options.method, headers: Object.fromEntries(new Headers(options.headers)), body: JSON.parse(options.body) });
       await new Promise(resolve => { fixture.release = resolve; });
       if (fixture.next.network) throw Error('Network unavailable');
       return new Response(JSON.stringify(fixture.next.body), { status: fixture.next.status });
@@ -391,7 +393,7 @@ test('failed workflow retry uses the existing authenticated launch path', async 
       await page.waitForFunction(() => document.querySelector('[aria-label="Retry failed workflow"]').disabled);
       assert.deepEqual(await page.evaluate(() => window.fixture.requests), [{
         url: '/api/workflows/trigger', method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer current-token' },
+        headers: { 'content-type': 'application/json', authorization: 'Bearer current-token' },
         body: { trigger_source: 'manual', context_variables: {}, app_id: 'execution-host', user_id: 'operator',
           source_chat_id: 'failed-chat', retry_failed: true, workflow_id: 'ExampleWorkflow' },
       }]);
@@ -459,7 +461,7 @@ test('failed workflow retry uses the existing authenticated launch path', async 
       assert.equal(await page.getByRole('alert').count(), 0);
       await page.evaluate(() => window.fixture.release());
       await page.waitForFunction(() => window.fixture.navigations.length === 1);
-      assert.equal(await page.evaluate(() => window.fixture.requests[1].headers.Authorization), 'Bearer refreshed-token');
+      assert.equal(await page.evaluate(() => window.fixture.requests[1].headers.authorization), 'Bearer refreshed-token');
       await page.close();
     });
   }
@@ -469,7 +471,7 @@ test('failed workflow retry uses the existing authenticated launch path', async 
     await retryButton(page).click();
     await page.evaluate(() => { window.fixture.token = 'refreshed-token'; window.fixture.retry(); });
     assert.equal(await page.evaluate(() => window.fixture.requests.length), 1);
-    assert.equal(await page.evaluate(() => window.fixture.requests[0].headers.Authorization), 'Bearer current-token');
+    assert.equal(await page.evaluate(() => window.fixture.requests[0].headers.authorization), 'Bearer current-token');
     await page.evaluate(() => window.fixture.release());
     await page.waitForFunction(() => window.fixture.navigations.length === 1);
     await page.close();

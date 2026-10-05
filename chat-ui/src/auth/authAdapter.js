@@ -1,4 +1,4 @@
-/** Browser OIDC code flow. The host's validated auth contract owns configuration. */
+/** Shared OIDC code flow. The host's validated auth contract owns configuration. */
 const TRANSACTION_TTL_MS = 15 * 60 * 1000;
 
 export function safeReturnPath(value, fallback = '/') {
@@ -18,6 +18,17 @@ function publicUrl(value, label) {
   if ((url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback))
       || url.username || url.password || url.hash) throw new Error(`${label} must use HTTPS`);
   return url;
+}
+
+function nativeRedirectUri(value, callbackRoute) {
+  let url;
+  try { url = new URL(value); } catch { throw new Error('Native OIDC redirect URI must be an absolute URL'); }
+  if (!/^[a-z](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+:$/.test(url.protocol)
+      || url.host || url.username || url.password || url.search || url.hash
+      || url.pathname !== callbackRoute || value !== `${url.protocol}${callbackRoute}`) {
+    throw new Error('Native OIDC redirect URI must use a reverse-domain scheme and the exact application callback path');
+  }
+  return value;
 }
 
 function randomValue() {
@@ -72,7 +83,7 @@ export function validateAuthBootstrap(authConfig) {
   return runtime;
 }
 
-export function createAuthAdapter({ authConfig, appId = 'mozaiks', env = {} } = {}) {
+export function createAuthAdapter({ authConfig, appId = 'mozaiks', env = {}, authorizationTransport } = {}) {
   const runtime = validateAuthBootstrap(authConfig);
   const contract = authConfig.contract;
   const routes = contract?.routes || { login: '/login', callback: '/auth/callback', logout: '/login', post_login_default: '/' };
@@ -92,7 +103,10 @@ export function createAuthAdapter({ authConfig, appId = 'mozaiks', env = {} } = 
     throw new Error('Authentication is required but unavailable');
   }
   if (contract?.schema_version !== 'mozaiks.auth.v1' || contract.strategy !== 'oidc'
-      || contract.frontend?.adapter !== 'oidc_pkce') throw new Error('A canonical OIDC browser contract is required');
+      || contract.frontend?.adapter !== 'oidc_pkce') throw new Error('A canonical OIDC contract is required');
+  if (authorizationTransport !== undefined && typeof authorizationTransport?.open !== 'function') {
+    throw new Error('Authorization transport must provide open');
+  }
 
   // Build-time Vite values remain valid browser inputs. They never decide the
   // runtime's enabled/local mode; only the verified backend projection does.
@@ -107,8 +121,10 @@ export function createAuthAdapter({ authConfig, appId = 'mozaiks', env = {} } = 
   if (typeof clientId !== 'string' || !clientId.trim()) throw new Error('OIDC client ID is missing');
   const authority = frontend.authority ? publicUrl(frontend.authority, 'OIDC authority').href.replace(/\/$/, '') : '';
   const discoveryUrl = publicUrl(frontend.discovery_url || (authority && `${authority}/.well-known/openid-configuration`), 'OIDC discovery URL').href;
-  const redirectUri = publicUrl(frontend.redirect_uri || new URL(routes.callback, window.location.origin).href, 'OIDC redirect URI').href;
-  if (redirectUri !== new URL(routes.callback, window.location.origin).href) {
+  const redirectUri = authorizationTransport
+    ? nativeRedirectUri(frontend.redirect_uri, routes.callback)
+    : publicUrl(frontend.redirect_uri || new URL(routes.callback, window.location.origin).href, 'OIDC redirect URI').href;
+  if (!authorizationTransport && redirectUri !== new URL(routes.callback, window.location.origin).href) {
     throw new Error('OIDC redirect URI must match this application callback route');
   }
   const scope = frontend.scope;
@@ -120,6 +136,9 @@ export function createAuthAdapter({ authConfig, appId = 'mozaiks', env = {} } = 
   const listeners = new Set();
   let metadataPromise;
   let callbackPromise;
+  let callbackInProgress;
+  let authorizationPending = false;
+  let sessionRevision = 0;
   let expirationTimer;
 
   function readSession() {
@@ -168,17 +187,30 @@ export function createAuthAdapter({ authConfig, appId = 'mozaiks', env = {} } = 
     return metadataPromise;
   }
 
-  async function exchangeCallback() {
-    const params = new URLSearchParams(window.location.search);
+  function callbackParameters(value) {
+    let url;
+    try { url = new URL(value); } catch { throw new Error('Invalid authorization callback URL'); }
+    if (typeof value !== 'string' || /[\u0000-\u0020\u007f]/.test(value)
+        || value.includes('#') || value.split('?')[0] !== redirectUri) {
+      throw new Error('Authorization callback URI does not match the configured redirect URI');
+    }
+    return url.searchParams;
+  }
+
+  async function exchangeCallback(callbackUrl) {
+    const revision = sessionRevision;
+    const params = callbackParameters(callbackUrl);
     const state = params.get('state');
     const pending = transactions();
     const transaction = state && Object.hasOwn(pending, state) ? pending[state] : null;
     if (!transaction) throw new Error('Login state is missing or expired. Restart sign-in.');
     delete pending[state];
     sessionStorage.setItem(transactionKey, JSON.stringify(pending));
-    const cleanUrl = new URL(window.location.href);
-    for (const key of ['code', 'state', 'error', 'error_description', 'session_state', 'iss']) cleanUrl.searchParams.delete(key);
-    window.history.replaceState(window.history.state, '', cleanUrl.pathname + cleanUrl.search + cleanUrl.hash);
+    if (!authorizationTransport) {
+      const cleanUrl = new URL(window.location.href);
+      for (const key of ['code', 'state', 'error', 'error_description', 'session_state', 'iss']) cleanUrl.searchParams.delete(key);
+      window.history.replaceState(window.history.state, '', cleanUrl.pathname + cleanUrl.search + cleanUrl.hash);
+    }
     if (params.has('error')) throw new Error('Sign-in was not completed. Please try again.');
     const code = params.get('code');
     if (!code || params.getAll('code').length !== 1 || params.getAll('state').length !== 1) throw new Error('Invalid sign-in callback');
@@ -218,9 +250,27 @@ export function createAuthAdapter({ authConfig, appId = 'mozaiks', env = {} } = 
       firstName: claims.given_name || null, lastName: claims.family_name || null,
       roles: Array.isArray(roles) ? roles.filter(role => typeof role === 'string') : [],
     };
+    if (sessionRevision !== revision) throw new Error('Sign-in was cancelled. Restart sign-in.');
     sessionStorage.setItem(sessionKey, JSON.stringify({ accessToken: data.access_token, idToken: data.id_token, expiresAt, user }));
     notify();
     return { returnPath: safeReturnPath(transaction.returnPath, routes.post_login_default) };
+  }
+
+  function handleCallback(callbackUrl) {
+    const value = callbackUrl === undefined ? window.location.href : callbackUrl;
+    if (callbackPromise) {
+      if (callbackUrl === undefined || value === callbackInProgress) return callbackPromise;
+      return Promise.reject(new Error('A different sign-in callback is already in progress'));
+    }
+    // Reject unrelated native links before consuming state or changing identity.
+    try { callbackParameters(value); } catch (error) { return Promise.reject(error); }
+    callbackInProgress = value;
+    callbackPromise = exchangeCallback(value).catch(error => {
+      sessionStorage.removeItem(sessionKey);
+      notify();
+      throw error;
+    }).finally(() => { callbackPromise = undefined; callbackInProgress = undefined; });
+    return callbackPromise;
   }
 
   return {
@@ -233,20 +283,39 @@ export function createAuthAdapter({ authConfig, appId = 'mozaiks', env = {} } = 
       return () => { listeners.delete(callback); if (!listeners.size) clearTimeout(expirationTimer); };
     },
     login: async ({ returnPath } = {}) => {
-      const document = await metadata();
-      const verifier = randomValue();
-      const challenge = base64Url(new Uint8Array(await window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))));
-      const state = randomValue();
-      const nonce = randomValue();
-      const pending = transactions();
-      pending[state] = { verifier, nonce, createdAt: Date.now(), redirectUri, returnPath: safeReturnPath(returnPath, routes.post_login_default) };
-      sessionStorage.setItem(transactionKey, JSON.stringify(pending));
-      const url = new URL(document.authorization_endpoint);
-      for (const [key, value] of Object.entries({ client_id: clientId, redirect_uri: redirectUri, response_type: 'code', scope, code_challenge: challenge, code_challenge_method: 'S256', state, nonce })) url.searchParams.set(key, value);
-      window.location.assign(url.href);
+      if (authorizationTransport && authorizationPending) throw new Error('Authorization is already in progress');
+      if (authorizationTransport) authorizationPending = true;
+      const revision = sessionRevision;
+      let state;
+      try {
+        const document = await metadata();
+        const verifier = randomValue();
+        const challenge = base64Url(new Uint8Array(await window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))));
+        if (sessionRevision !== revision) throw new Error('Sign-in was cancelled. Restart sign-in.');
+        state = randomValue();
+        const nonce = randomValue();
+        const pending = transactions();
+        pending[state] = { verifier, nonce, createdAt: Date.now(), redirectUri, returnPath: safeReturnPath(returnPath, routes.post_login_default) };
+        sessionStorage.setItem(transactionKey, JSON.stringify(pending));
+        const url = new URL(document.authorization_endpoint);
+        for (const [key, value] of Object.entries({ client_id: clientId, redirect_uri: redirectUri, response_type: 'code', scope, code_challenge: challenge, code_challenge_method: 'S256', state, nonce })) url.searchParams.set(key, value);
+        if (!authorizationTransport) { window.location.assign(url.href); return; }
+        const callbackUrl = await authorizationTransport.open({ url: url.href, callbackUri: redirectUri });
+        if (sessionRevision !== revision) throw new Error('Sign-in was cancelled. Restart sign-in.');
+        if (callbackParameters(callbackUrl).get('state') !== state) throw new Error('Invalid sign-in callback state');
+        return await handleCallback(callbackUrl);
+      } finally {
+        if (authorizationTransport) {
+          const pending = transactions();
+          if (state) delete pending[state];
+          sessionStorage.setItem(transactionKey, JSON.stringify(pending));
+          authorizationPending = false;
+        }
+      }
     },
     logout: async () => {
       const session = readSession();
+      sessionRevision += 1;
       sessionStorage.removeItem(sessionKey);
       sessionStorage.removeItem(transactionKey);
       notify();
@@ -255,20 +324,28 @@ export function createAuthAdapter({ authConfig, appId = 'mozaiks', env = {} } = 
       if (!document?.end_session_endpoint) { window.location.assign(routes.logout); return; }
       const url = new URL(document.end_session_endpoint);
       url.searchParams.set('client_id', clientId);
-      url.searchParams.set('post_logout_redirect_uri', new URL(routes.logout, window.location.origin).href);
+      url.searchParams.set('post_logout_redirect_uri', authorizationTransport ? redirectUri : new URL(routes.logout, window.location.origin).href);
       if (session?.idToken) url.searchParams.set('id_token_hint', session.idToken);
-      window.location.assign(url.href);
-    },
-    handleCallback: () => {
-      if (!callbackPromise) {
-        callbackPromise = exchangeCallback().catch(error => {
-          sessionStorage.removeItem(sessionKey);
-          notify();
-          throw error;
-        }).finally(() => { callbackPromise = undefined; });
+      if (!authorizationTransport) { window.location.assign(url.href); return; }
+      if (authorizationPending) throw new Error('Authorization is already in progress');
+      authorizationPending = true;
+      try {
+        const state = randomValue();
+        const startedAt = Date.now();
+        url.searchParams.set('state', state);
+        const callbackUrl = await authorizationTransport.open({ url: url.href, callbackUri: redirectUri });
+        const params = callbackParameters(callbackUrl);
+        if (params.getAll('state').length !== 1 || params.get('state') !== state
+            || params.has('code') || params.has('error') || Date.now() < startedAt
+            || Date.now() - startedAt > TRANSACTION_TTL_MS) {
+          throw new Error('Invalid sign-out callback');
+        }
+        window.location.assign(routes.logout);
+      } finally {
+        authorizationPending = false;
       }
-      return callbackPromise;
     },
+    handleCallback,
   };
 }
 

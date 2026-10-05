@@ -1,37 +1,30 @@
 import platform from "../../platform/index.js";
+import { authFetch } from "../../adapters/api.js";
 
-const jsonHeaders = () => {
-  const headers = { Accept: "application/json" };
-  let token = null;
+const hasAccessToken = () => {
   try {
-    token = platform.getAccessToken();
+    return Boolean(platform.getAccessToken());
   } catch {
-    token = null;
+    return false;
   }
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
-  return headers;
 };
 
 export const fetchNotificationCount = async ({ signal } = {}) => {
-  const headers = jsonHeaders();
-  if (!headers.Authorization) return null;
+  if (!hasAccessToken()) return null;
 
-  const response = await fetch("/api/notifications/count", {
+  const response = await authFetch("/api/notifications/count", {
     signal,
-    headers,
+    headers: { Accept: "application/json" },
   });
   if (!response.ok) return null;
   return response.json();
 };
 
 export const clearNotifications = async () => {
-  const headers = jsonHeaders();
-  if (!headers.Authorization) return null;
+  if (!hasAccessToken()) return null;
 
-  return fetch("/api/notifications", {
+  return authFetch("/api/notifications", {
     method: "DELETE",
-    headers,
+    headers: { Accept: "application/json" },
   });
 };

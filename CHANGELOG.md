@@ -14,6 +14,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- Optional native browser navigation for the shared OIDC adapter, with an
+  Android Common Ground reference and authenticated emulator acceptance workflow.
+
 - An experimental Capacitor Android packaging reference for Common Ground,
   with web-asset verification, a diagnostic debug APK build in CI, and explicit
   native integration prerequisites.
@@ -34,6 +37,9 @@ This project follows a practical pre-1.0 changelog format:
   honor it.
 
 ### Security
+
+- Shared authenticated fetches now resolve relative backend URLs consistently
+  and restrict automatic bearer-token injection to the configured backend origin.
 
 - Social `user_posts` listings and per-post reads, comments, and reactions now
   enforce published-public-or-author visibility. Caller filters cannot expose

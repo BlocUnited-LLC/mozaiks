@@ -27,6 +27,8 @@ REPO = WORKSPACE.parents[2]
 EVIDENCE_ROOT = REPO / ".local/evidence/community-env"
 LABEL = "io.mozaiks.community-acceptance"
 IMAGES = {"mongo": "mongo:7", "identity": "quay.io/keycloak/keycloak:26.0"}
+NATIVE_CALLBACK = "org.mozaiks.examples.commonground:/auth/callback"
+NATIVE_ORIGIN = "https://localhost"
 
 
 def write_json(path: Path, value: object) -> None:
@@ -75,7 +77,7 @@ def environment(args: argparse.Namespace, evidence: Path) -> tuple[dict, dict]:
         "VITE_OIDC_AUTHORITY": issuer,
         "VITE_OIDC_DISCOVERY_URL": f"{issuer}/.well-known/openid-configuration",
         "VITE_OIDC_CLIENT_ID": "common-ground",
-        "VITE_OIDC_REDIRECT_URI": f"{web}/auth/callback",
+        "VITE_OIDC_REDIRECT_URI": args.native_callback or f"{web}/auth/callback",
         "VITE_OIDC_SCOPE": "openid profile email user_posts.read user_posts.create user_posts.react",
     }
     runtime = {
@@ -100,6 +102,7 @@ def environment(args: argparse.Namespace, evidence: Path) -> tuple[dict, dict]:
         "AUTH_ACCESS_TOKEN_TYPE_VALUE": "Bearer",
         "FRONTEND_URL": web,
         "REACT_DEV_ORIGIN": web,
+        "ADDITIONAL_CORS_ORIGINS": args.client_origin or "",
         # Both browser members share one loopback IP; this is not a load test.
         "RATE_LIMIT_ENABLED": "true",
         "RATE_LIMIT_REQUESTS_PER_MINUTE": "600",
@@ -147,9 +150,9 @@ def run(args: argparse.Namespace, evidence: Path) -> None:
     frontend, runtime = environment(args, evidence)
     realm = json.loads((WORKSPACE / "tests/identity-realm.json").read_text(encoding="utf-8"))
     web = f"http://127.0.0.1:{args.web_port}"
-    realm["clients"][0]["redirectUris"] = [f"{web}/auth/callback"]
-    realm["clients"][0]["webOrigins"] = [web]
-    realm["clients"][0]["attributes"]["post.logout.redirect.uris"] = f"{web}/*"
+    realm["clients"][0]["redirectUris"] = [frontend["VITE_OIDC_REDIRECT_URI"]]
+    realm["clients"][0]["webOrigins"] = [args.client_origin or web]
+    realm["clients"][0]["attributes"]["post.logout.redirect.uris"] = args.native_callback or f"{web}/*"
     write_json(evidence / "identity-realm.json", realm)
     write_json(evidence / "frontend-env.json", frontend)
     write_json(evidence / "runtime-env.json", runtime)
@@ -160,6 +163,7 @@ def run(args: argparse.Namespace, evidence: Path) -> None:
         "base_url": web, "api_url": frontend["VITE_API_URL"],
         "auth_issuer": frontend["VITE_OIDC_AUTHORITY"],
         "client_id": "common-ground", "audience": "common-ground-api",
+        "native_callback": args.native_callback, "client_origin": args.client_origin or web,
         "users": [{"username": user["username"], "password": user["credentials"][0]["value"]} for user in realm["users"]],
         "frontend_env": frontend, "images": images, "containers": {}, "api_generation": 0,
         "python": sys.executable, "ag2_version": version("ag2"), "owner_pid": os.getpid(),
@@ -312,6 +316,8 @@ def main() -> int:
     parser.add_argument("--oidc-port", type=int, default=28443)
     parser.add_argument("--api-port", type=int, default=18443)
     parser.add_argument("--web-port", type=int, default=14443)
+    parser.add_argument("--native-callback", choices=(NATIVE_CALLBACK,))
+    parser.add_argument("--client-origin", choices=(NATIVE_ORIGIN,))
     args = parser.parse_args()
     evidence = args.evidence_dir.resolve()
     if not evidence.is_relative_to(EVIDENCE_ROOT.resolve()) or evidence == EVIDENCE_ROOT.resolve():
@@ -321,6 +327,8 @@ def main() -> int:
         parser.error("Service ports must be between 1 and 65535.")
     if len({args.mongo_port, args.oidc_port, args.api_port, args.web_port}) != 4:
         parser.error("Each service needs a distinct loopback port.")
+    if bool(args.native_callback) != bool(args.client_origin):
+        parser.error("Native acceptance requires both --native-callback and --client-origin.")
     try:
         if args.action == "_host":
             asyncio.run(host(args))

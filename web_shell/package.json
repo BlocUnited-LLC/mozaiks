@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "test:auth": "node --test tests/authAdapter.test.js",
+    "test:auth": "node --test tests/authAdapter.test.js tests/apiAdapter.test.js",
     "test:auth-browser": "playwright test -c playwright.auth.config.js",
     "test:workflow-ui": "node --test tests/workflowUi.test.js",
     "test:support-panel": "node --test tests/userSupportPanel.test.js tests/appSupportPage.test.js",

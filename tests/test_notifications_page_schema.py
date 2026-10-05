@@ -51,9 +51,10 @@ def test_shell_notification_fetches_use_authenticated_helper() -> None:
     mobile = (layout_dir / "MobileBottomBar.jsx").read_text(encoding="utf-8")
 
     assert "platform.getAccessToken()" in helper
-    assert "headers.Authorization = `Bearer ${token}`;" in helper
-    assert 'fetch("/api/notifications/count"' in helper
-    assert 'fetch("/api/notifications"' in helper
+    assert 'import { authFetch } from "../../adapters/api.js";' in helper
+    assert 'authFetch("/api/notifications/count"' in helper
+    assert 'authFetch("/api/notifications"' in helper
+    assert "headers.Authorization" not in helper
     assert "fetchNotificationCount" in header
     assert "clearNotifications" in header
     assert "fetchNotificationCount" in mobile

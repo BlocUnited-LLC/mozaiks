@@ -27,10 +27,14 @@ def test_launch_auth_helper_forwards_current_adapter_token_and_preserves_respons
     source = (ROOT / "chat-ui/src/adapters/api.js").read_text(encoding="utf-8")
     # Exercise the actual fetch/token helper definitions without loading browser
     # configuration modules, which require Vite's build-time environment.
-    helpers = source[source.index("function getAccessToken("):source.index("export class ApiAdapter")]
+    helpers = source[source.index("function _firstString("):source.index("export class ApiAdapter")]
     script = """
 import assert from 'node:assert/strict';
-const platform = { getAccessToken: () => { throw new Error('unexpected storage fallback'); } };
+const platform = {
+  getAccessToken: () => { throw new Error('unexpected storage fallback'); },
+  resolveHttpUrl: () => 'https://backend.example',
+};
+const config = { get: () => 'https://backend.example' };
 const requests = [];
 const response = { ok: true, status: 200 };
 globalThis.fetch = async (url, options) => { requests.push({ url, ...options }); return response; };
@@ -39,13 +43,14 @@ let token = 'first-token';
 const auth = { getAccessToken: () => token };
 const options = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' };
 assert.equal(await authFetch('/api/transitions/resolve', options, { auth }), response);
-assert.equal(requests[0].headers.Authorization, 'Bearer first-token');
+assert.equal(requests[0].url, 'https://backend.example/api/transitions/resolve');
+assert.equal(requests[0].headers.get('Authorization'), 'Bearer first-token');
 token = 'refreshed-token';
 await authFetch('/api/workflows/trigger', options, { auth });
-assert.equal(requests[1].headers.Authorization, 'Bearer refreshed-token');
+assert.equal(requests[1].headers.get('Authorization'), 'Bearer refreshed-token');
 token = null;
 await authFetch('/api/transitions/resolve', options, { auth });
-assert.equal(requests[2].headers.Authorization, undefined);
+assert.equal(requests[2].headers.get('Authorization'), null);
 assert.equal(options.headers.Authorization, undefined);
 assert.ok(requests.every((r) => r.body === '{}' && r.method === 'POST'));
 """
