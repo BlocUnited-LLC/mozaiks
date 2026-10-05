@@ -478,6 +478,38 @@ This project follows a practical pre-1.0 changelog format:
   field no longer fail with Mongo error 54. Session feedback, which those
   workspaces dropped silently while reporting success, is now stored.
 
+- SecurityReadiness reports a signed-in module action without permissions by
+  the records it can reach, not only by its module's own collections (#817).
+  Runtime persistence does not bind a module to its own collections, so the
+  rule reads sign-in (`app.json` `authRequired` with a valid
+  `config/auth.yaml`), collection ownership in `data/contract.json`,
+  entitlement gates in `config/subscriptions.yaml`, and every collection the
+  module's code addresses through `ctx.persistence` and
+  `app_data_from_context`, including code it imports from other modules or
+  elsewhere in the app. Module code the scanner cannot read as addressing
+  declared collections, such as reflection, run-time module changes, code
+  loaded another way, or a database driver in any file the module's code
+  follows, counts as reach it cannot resolve. An action without permissions
+  is no longer reported when everything its module reaches is owned per user
+  or per workspace. It is reported as high when the app declares no sign-in, when it
+  reaches `app_wide` records without a gate the default plan withholds, or when
+  it reaches records that no declared ownership scopes or uses persistence the
+  scanner cannot resolve. It is reported as medium when an entitlement gate
+  restricts shared records by plan only, or when its module reaches no
+  collection and no gate the default plan withholds restricts it. The scanner
+  reads only the app root the runtime binds, reports surface values the loader
+  rejects, and returns findings instead of raising on a malformed data or
+  module contract. Its reading of module code is bounded, so a loop that
+  reassigns one name no longer makes a scan take minutes. A single function
+  holding thousands of chained assignments still scans slowly, with a correct
+  result. On a recorded generated app, six
+  high findings for owner-scoped create, read, update, delete and a paid
+  summary no longer appear. Dispatch tests on a real database check the
+  verdicts for owner-scoped, per-workspace, shared, cross-module and no-sign-in
+  variants.
+  [Generated Action Protection](docs/architecture/app/generated-action-protection.md)
+  holds the decision table.
+
 - AppGenerator no longer rejects a module contract task because its output
   repeats a companion contract as a raw file. A live run's `task_management`
   contract set `module_contract.reactions_yaml` to null, as its module declares

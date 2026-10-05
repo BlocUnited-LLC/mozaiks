@@ -181,6 +181,7 @@ secret policy, tests, and rollout docs.
 ## Related Docs
 
 - [Authentication Setup](../verified/auth-setup.md)
+- [Generated Action Protection](generated-action-protection.md)
 - [Module System](../modules-systems/module-system.md)
 - [App Bundle Declaratives](app-bundle-declaratives.md)
 - [Core, Product, and App Bundle Boundary](../foundations/core-product-app-bundle-boundary.md)
