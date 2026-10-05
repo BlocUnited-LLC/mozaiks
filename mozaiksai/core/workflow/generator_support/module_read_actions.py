@@ -18,6 +18,8 @@ from mozaiksai.core.workflow.generator_support.code_files import (
 from mozaiksai.core.workflow.generator_support.data_contract_fields import (
     CANONICAL_FIELD_TYPES,
     DATE_FIELD_TYPES,
+    read_lookup_field,
+    record_id_field,
 )
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     canonical_read_action_id,
@@ -62,6 +64,10 @@ def _record_response_schema(collection: dict[str, Any]) -> dict[str, Any]:
         properties[name] = declaration
         if field.get("required"):
             required.append(name)
+    if "_id" in {record_id_field(collection, list(properties)), read_lookup_field(collection)}:
+        properties["_id"] = {"type": "string"}
+        if "_id" not in required:
+            required.append("_id")
     result: dict[str, Any] = {"type": "object", "properties": properties}
     if required:
         result["required"] = required
@@ -287,7 +293,13 @@ def _replace_functions(
         class_node = _class_named(tree, class_name)
         if class_node is None:
             if source.strip():
-                raise ValueError(f"Canonical reads require the declared handler class {class_name!r}")
+                raise ValueError(
+                    f"{path}: define class {class_name} in this file; an import or re-export "
+                    "does not define the required workspace handler. If base_handler.py is owned, "
+                    "import its distinct base class and declare the workspace subclass here, "
+                    "preserving custom action dispatch in the base. Code adds canonical methods "
+                    "to the declared workspace class."
+                )
             constructed = f"class {class_name}:\n" + "\n".join(
                 "\n".join("    " + line if line else "" for line in function.splitlines()) + "\n"
                 for function in functions.values()
@@ -370,6 +382,8 @@ def _read_functions(module_id: str, collection: dict[str, Any], operation: str) 
         f"    return await service.{method}(ctx, {arguments})\n"
     )
     response_fields = [field["name"] for field in collection.get("fields") or []]
+    if "_id" in {record_id_field(collection, response_fields), read_lookup_field(collection)} and "_id" not in response_fields:
+        response_fields.append("_id")
     service = (
         f"async def {method}(ctx, *, {params}):\n"
         "    from . import repo\n"
@@ -408,10 +422,7 @@ def _read_functions(module_id: str, collection: dict[str, Any], operation: str) 
             "    return {'items': records, 'total': total}\n"
         )
     else:
-        declared_fields = {field["name"] for field in collection.get("fields") or []}
-        lookup = collection.get("search_by") or ("id" if "id" in declared_fields else "_id")
-        if lookup != "_id" and lookup not in declared_fields:
-            raise ValueError(f"{module_id}: collection {name!r} search_by {lookup!r} must name a declared field")
+        lookup = read_lookup_field(collection)
         repo += f"    filters = {{{lookup!r}: id}}\n"
         if lookup == "_id":
             repo += (

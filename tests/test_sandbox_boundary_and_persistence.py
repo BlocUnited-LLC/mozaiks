@@ -16,10 +16,13 @@ from factory_app.workflows.AppGenerator.tools.app_validation import (
     _run_sandbox_validation,
 )
 from mozaiksai.control_plane.contracts import CodingWorkerPlan
-from mozaiksai.control_plane.implementations.coding_worker import _VALIDATION_STRATEGIES
+from mozaiksai.control_plane.implementations.coding_worker import resolve_coding_validation_strategy
 from mozaiksai.core.adapters.docker_sandbox import DockerSandboxAdapter, _preview_ports
 from mozaiksai.core.artifacts.models import BuildRecord
 from mozaiksai.core.ports.sandbox import SandboxRunResult, SandboxSessionInfo
+from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
+    APP_VALIDATION_STRATEGIES,
+)
 
 # ---------------------------------------------------------------------------
 # Docker adapter publishes preview ports
@@ -200,11 +203,22 @@ def test_build_record_validation_fields_default_none():
 # Coding worker vocabulary is honest
 # ---------------------------------------------------------------------------
 
-def test_coding_worker_strategies_exclude_unimplemented_e2b():
-    assert _VALIDATION_STRATEGIES == {"skip", "local"}
+@pytest.mark.parametrize("strategy", APP_VALIDATION_STRATEGIES)
+def test_coding_worker_resolves_canonical_validation_strategies(monkeypatch, strategy):
+    monkeypatch.delenv("MOZAIKS_APP_VALIDATION_STRATEGY", raising=False)
+    assert resolve_coding_validation_strategy(strategy) == strategy
 
 
-def test_coding_worker_plan_rejects_e2b():
+@pytest.mark.parametrize("strategy", APP_VALIDATION_STRATEGIES)
+def test_coding_worker_plan_accepts_canonical_validation_strategies(strategy):
+    plan = CodingWorkerPlan(
+        summary="s", owned_paths=[], updated_files=[], validation_strategy=strategy,
+        validation_commands=[], start_preview=False, needs_human_review=False, rationale="r",
+    )
+    assert plan.validation_strategy == strategy
+
+
+def test_coding_worker_plan_rejects_unknown_strategy():
     from pydantic import ValidationError
 
     with pytest.raises(ValidationError):
@@ -212,7 +226,7 @@ def test_coding_worker_plan_rejects_e2b():
             summary="s",
             owned_paths=[],
             updated_files=[],
-            validation_strategy="e2b",
+            validation_strategy="unsupported",
             validation_commands=[],
             start_preview=False,
             needs_human_review=False,

@@ -1140,7 +1140,9 @@ async def websocket_endpoint(
             and resolved_doc.get("status") == int(WorkflowStatus.IN_PROGRESS)
         ):
             existing_task = simple_transport._background_tasks.get(resolved_chat_id)
-            if not (existing_task and not existing_task.done()):
+            if not (existing_task and not existing_task.done()) and await simple_transport._passive_start_rejection(
+                chat_id=resolved_chat_id, app_id=app_id, user_id=user_id, workflow_name=resolved_workflow_name,
+            ) is None:
                 conn = simple_transport.connections.setdefault(resolved_chat_id, {})
                 conn["autostarted"] = True
                 _agent_start_task = asyncio.create_task(

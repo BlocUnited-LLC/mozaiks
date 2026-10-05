@@ -19,6 +19,14 @@ transition_rules:
   transition_type: condition
   condition_type: context_equals
   condition_key: subscription_contract_review_status
+  condition_value: not_required
+  transition_target: TerminateTarget
+  termination_reason: workflow_complete
+- source_agent: ContractDesignerAgent
+  target_agent: terminate
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: subscription_contract_review_status
   condition_value: not_requested_headless
   transition_target: TerminateTarget
   termination_reason: workflow_complete

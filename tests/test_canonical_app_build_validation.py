@@ -78,8 +78,27 @@ def test_validation_models_match_runtime_provider_taxonomy():
     root = resolve_factory_app_root()
     schema = yaml.safe_load((root / "workflows/AppGenerator/structured_outputs.yaml").read_text(encoding="utf-8"))
     models = schema["models"]
-    for name in ("AppValidation", "AppValidationRequest"):
-        assert set(models[name]["fields"]["validation_strategy"]["values"]) == set(APP_VALIDATION_STRATEGIES)
+    assert set(models["AppValidationStrategy"]["values"]) == set(APP_VALIDATION_STRATEGIES)
+    assert models["AppValidation"]["fields"]["validation_strategy"]["type"] == "AppValidationStrategy"
+    assert models["AppValidationRequest"]["fields"]["validation_strategy"]["variants"] == [
+        "AppValidationStrategy", "null",
+    ]
+
+
+def test_compiled_validation_request_allows_runtime_default_and_only_known_strategies():
+    from pydantic import ValidationError
+
+    from mozaiksai.core.workflow.outputs.structured import load_workflow_structured_outputs
+
+    models, _ = load_workflow_structured_outputs("AppGenerator")
+    request_model = models["AppValidationRequest"]
+    base = {"start_dev_server": False, "timeout_seconds": 120, "commands": None}
+    assert request_model.model_validate(base).validation_strategy is None
+    for strategy in (None, "e2b", "docker", "local", "skip"):
+        request = request_model.model_validate({**base, "validation_strategy": strategy})
+        assert request.model_dump(mode="json")["validation_strategy"] == strategy
+    with pytest.raises(ValidationError):
+        request_model.model_validate({**base, "validation_strategy": "auto"})
 
 
 @pytest.mark.asyncio

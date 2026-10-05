@@ -21,7 +21,7 @@ const BuildStatusPane = ({
     statusCfg.showLogs === true ||
     (statusCfg.showLogs !== false && validationStatus === 'failed')
   );
-  const [showWarnings, setShowWarnings] = useState(statusCfg.collapseWarnings !== true);
+  const [showWarnings, setShowWarnings] = useState(statusCfg.collapseWarnings === false);
   const logRef = useRef(null);
 
   const parsedErrors = useMemo(() => {
@@ -84,15 +84,15 @@ const BuildStatusPane = ({
 
   const exportGateNote = useMemo(() => {
     if (validationStatus === 'failed') {
-      return 'Export is blocked server-side until validation is rerun successfully or explicitly skipped, and integration checks pass.';
+      return 'Fix the reported issue and run validation again before exporting.';
     }
-    if (!['passed', 'skipped'].includes(validationStatus)) {
-      return 'Export is blocked server-side until validation completes with a pass or explicit skip.';
+    if (validationStatus !== 'passed') {
+      return 'Required validation must pass before you can export or activate this draft.';
     }
     if (integrationPassed !== true) {
       return integrationPassed == null
-        ? 'Export is blocked server-side until integration checks run and pass.'
-        : 'Export is blocked server-side until integration checks pass.';
+        ? 'Integration checks still need to run before export.'
+        : 'Integration checks must pass before export.';
     }
     return null;
   }, [integrationPassed, validationStatus]);
@@ -151,7 +151,7 @@ const BuildStatusPane = ({
               {validationStatus === 'passed'
                 ? 'Build/test completed successfully.'
                 : validationStatus === 'skipped'
-                  ? 'Runtime validation was explicitly skipped for this run.'
+                  ? 'Build validation did not run. This draft remains unverified.'
                   : validationStatus === 'failed'
                     ? 'Review errors and retry generation/validation.'
                     : 'Validation has not completed yet.'}
@@ -230,12 +230,14 @@ const BuildStatusPane = ({
             )}
 
             {integrationWarnings.length > 0 && (
-              <div className="mt-2 text-[10px] text-[var(--color-text-muted)] whitespace-pre-wrap">
-                {integrationWarnings.slice(0, 3).map((w, idx) => (
-                  <div key={idx}>- {String(w)}</div>
-                ))}
-                {integrationWarnings.length > 3 && <div>… {integrationWarnings.length - 3} more</div>}
-              </div>
+              <details className="mt-2 text-xs text-[var(--color-text-muted)]">
+                <summary className="cursor-pointer text-[var(--color-accent)]">
+                  {integrationWarnings.length} integration warning(s) to review
+                </summary>
+                <div className="mt-2 max-h-40 overflow-auto space-y-2 whitespace-pre-wrap [overflow-wrap:anywhere]">
+                  {integrationWarnings.map((w, idx) => <div key={idx}>{String(w)}</div>)}
+                </div>
+              </details>
             )}
           </div>
         </div>
@@ -273,6 +275,7 @@ const BuildStatusPane = ({
         <div className="px-4 pb-3">
           <button
             type="button"
+            aria-expanded={showWarnings}
             onClick={() => setShowWarnings((v) => !v)}
             className="text-xs text-[var(--color-accent)] hover:text-[var(--color-accent-light)] flex items-center gap-1"
           >
@@ -282,7 +285,7 @@ const BuildStatusPane = ({
           </button>
           {showWarnings && (
             <div className="mt-2 rounded-lg bg-black/30 border border-white/10 p-2 max-h-40 overflow-auto my-scroll1">
-              {warnings.slice(0, 50).map((w, idx) => (
+              {warnings.map((w, idx) => (
                 <div key={idx} className="text-[10px] font-mono text-[var(--color-text-secondary)] whitespace-pre-wrap">
                   {String(w)}
                 </div>

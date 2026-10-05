@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -86,6 +87,13 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _is_link_or_reparse_point(path: Path) -> bool:
+    metadata = path.lstat()
+    return stat.S_ISLNK(metadata.st_mode) or bool(
+        getattr(metadata, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+    )
+
+
 def materialize_coding_workspace(
     files: dict[str, str],
     *,
@@ -133,12 +141,16 @@ def harvest_coding_workspace(
 ) -> WorkspaceHarvest:
     """Deterministically diff the workspace against its pre-run manifest.
 
-    Walks the real tree without following symlinks. Any symlink is a violation
+    Walks the real tree without following links or Windows reparse points. Any link is a violation
     regardless of target. Files outside the editable manifest are violations
     unless ``allow_new_files``; manifest files missing from disk are violations
     unless ``allow_deletes``. Nothing here consults the provider's own claims —
     the walk is the only source of truth.
     """
+    if _is_link_or_reparse_point(workspace.workspace_root):
+        return WorkspaceHarvest(violations=[WorkspaceScopeViolation(
+            path=".", kind="symlink", detail="Workspace root is a link or reparse point; not traversed.",
+        )])
     root = workspace.workspace_root.resolve()
     files: list[HarvestedFile] = []
     violations: list[WorkspaceScopeViolation] = []
@@ -148,25 +160,25 @@ def harvest_coding_workspace(
     for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
         current = Path(dirpath)
         for name in list(dirnames):
-            if (current / name).is_symlink():
+            if _is_link_or_reparse_point(current / name):
                 rel = (current / name).relative_to(root).as_posix()
                 violations.append(
                     WorkspaceScopeViolation(
                         path=rel,
                         kind="symlink",
-                        detail="Symlinked directory found in workspace; not traversed.",
+                        detail="Linked or reparse-point directory found in workspace; not traversed.",
                     )
                 )
                 dirnames.remove(name)
         for name in filenames:
             full = current / name
             rel = full.relative_to(root).as_posix()
-            if full.is_symlink():
+            if _is_link_or_reparse_point(full):
                 violations.append(
                     WorkspaceScopeViolation(
                         path=rel,
                         kind="symlink",
-                        detail="Symlinked file found in workspace; not read.",
+                        detail="Linked or reparse-point file found in workspace; not read.",
                     )
                 )
                 continue

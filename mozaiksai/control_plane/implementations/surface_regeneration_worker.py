@@ -11,7 +11,7 @@ surfaces (e.g. module_action).
 
 Each surface call:
 1. Loads current file content for the surface's affected_paths from the
-   provided staged artifact workspace (empty string for new files).
+   admitted saved artifact workspace.
 2. Calls the LLM with the coding_refinement_system prompt and a
    surface-specific task context (generation_hint, rationale, kind).
 3. Validates that the LLM only writes to declared affected_paths.
@@ -42,6 +42,7 @@ from mozaiksai.control_plane.schema import LoadedControlPlanePack
 from mozaiksai.core.adapters.ag2_agent_runner import AG2StructuredAgentRunner
 from mozaiksai.core.usage.context import resolve_auxiliary_usage_context
 
+from .contract_surface_planner import validate_contract_surface_plan
 from .refinement_router import RefinementRequest, RefinementRoutingDecision
 
 _logger = logging.getLogger("mozaiksai.control_plane.implementations.surface_regeneration_worker")
@@ -89,16 +90,47 @@ class SurfaceRegenerationWorker:
         plan: ContractSurfacePlan,
         refinement_request: RefinementRequest,
         routing_decision: RefinementRoutingDecision,
-        workspace_files: dict[str, str] | None = None,
+        workspace_files: dict[str, str],
+        allowed_paths: list[str] | None = None,
     ) -> SurfacePlanExecutionResult:
         """Execute every surface in plan order and return merged file changes.
 
-        workspace_files supplies the current content of workspace files by
-        relative path. Files absent from workspace_files default to empty
-        string (new file). Accumulated outputs from earlier surfaces override
-        workspace_files for later surfaces so dependent surfaces see the
-        latest generated content.
+        workspace_files is the complete saved artifact. The whole plan must
+        resolve to existing source within the optional explicit write scope
+        before any generation starts. Accumulated outputs from earlier surfaces
+        override workspace_files so dependent surfaces see the latest content.
         """
+        try:
+            validate_contract_surface_plan(
+                plan=plan,
+                refinement_request=refinement_request,
+                routing_decision=routing_decision,
+                workspace_files=workspace_files,
+                allowed_paths=allowed_paths,
+            )
+        except ValueError as exc:
+            return SurfacePlanExecutionResult(
+                status="failed",
+                surfaces_executed=[
+                    SurfaceExecutionRecord(
+                        kind=surface.kind,
+                        target_id=surface.target_id,
+                        status="failed",
+                        error=str(exc),
+                    )
+                    for surface in plan.surfaces
+                ],
+                requires_schema_migration=plan.requires_schema_migration,
+                metadata={
+                    "surfaces_total": len(plan.surfaces),
+                    "surfaces_succeeded": 0,
+                    "surfaces_failed": len(plan.surfaces),
+                    "change_class": plan.change_class,
+                    "artifact_kind": plan.build_family,
+                    "admission_error": str(exc),
+                },
+            )
+
         system_prompt = self._load_system_prompt()
         llm_config = self._load_config().resolve_capability_llm_config("contract_surface")
 
@@ -118,6 +150,11 @@ class SurfaceRegenerationWorker:
                 refinement_request=refinement_request,
                 routing_decision=routing_decision,
                 current_files=current_files,
+                read_only_files={
+                    path: workspace_files[path]
+                    for path in ("ui/route_manifest.json", "ui/index.js")
+                    if surface.kind == "page_binding" and path in workspace_files
+                },
                 system_prompt=system_prompt,
                 llm_config=llm_config,
             )
@@ -180,20 +217,18 @@ class SurfaceRegenerationWorker:
         *,
         surface: ContractSurfaceUpdate,
         accumulated: dict[str, str],
-        workspace_files: dict[str, str] | None,
+        workspace_files: dict[str, str],
     ) -> dict[str, str]:
         """Resolve current file content for this surface's affected_paths.
 
-        Priority: accumulated (from earlier surfaces) > workspace_files > "" (new file).
+        Priority: accumulated (from earlier surfaces) > admitted saved source.
         """
         result: dict[str, str] = {}
         for path in surface.affected_paths:
             if path in accumulated:
                 result[path] = accumulated[path]
-            elif workspace_files and path in workspace_files:
-                result[path] = workspace_files[path]
             else:
-                result[path] = ""
+                result[path] = workspace_files[path]
         return result
 
     async def _execute_surface(
@@ -203,6 +238,7 @@ class SurfaceRegenerationWorker:
         refinement_request: RefinementRequest,
         routing_decision: RefinementRoutingDecision,
         current_files: dict[str, str],
+        read_only_files: dict[str, str],
         system_prompt: str,
         llm_config: dict[str, Any] | None,
     ) -> tuple[dict[str, str], str | None]:
@@ -211,6 +247,7 @@ class SurfaceRegenerationWorker:
             refinement_request=refinement_request,
             routing_decision=routing_decision,
             current_files=current_files,
+            read_only_files=read_only_files,
         )
         try:
             response = await self._agent_runner.run(
@@ -280,10 +317,8 @@ class SurfaceRegenerationWorker:
         refinement_request: RefinementRequest,
         routing_decision: RefinementRoutingDecision,
         current_files: dict[str, str],
+        read_only_files: dict[str, str],
     ) -> str:
-        new_paths = [p for p, c in current_files.items() if not c.strip()]
-        existing_paths = [p for p, c in current_files.items() if c.strip()]
-
         payload: dict[str, Any] = {
             "task": "targeted_surface_regeneration",
             "surface_kind": surface.kind,
@@ -294,9 +329,8 @@ class SurfaceRegenerationWorker:
             "change_class": routing_decision.change_intent.change_class.value,
             "user_request": refinement_request.raw_user_request,
             "affected_paths": surface.affected_paths,
-            "new_paths": new_paths,
-            "existing_paths": existing_paths,
             "current_files": current_files,
+            "read_only_files": read_only_files,
         }
 
         lines = [
@@ -319,8 +353,9 @@ class SurfaceRegenerationWorker:
             "",
             "Rules:",
             "- Include ALL affected_paths in updated_files, not only the ones you changed.",
-            "- For new_paths (empty current content), write the complete file.",
+            "- Write the complete updated content for each affected path.",
             "- Do not write paths outside affected_paths.",
+            "- read_only_files contains saved route and component registration context; never rewrite it.",
         ]
         return "\n".join(lines)
 

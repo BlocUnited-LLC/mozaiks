@@ -10,7 +10,6 @@ logger = logging.getLogger(__name__)
 from pathlib import Path
 from typing import Any, cast
 
-from mozaiksai.control_plane.app_validation import run_current_app_source_validation
 from mozaiksai.control_plane.config import ControlPlaneConfig, load_control_plane_config
 from mozaiksai.control_plane.contracts import (
     CodingWorkerPlan,
@@ -43,15 +42,26 @@ from mozaiksai.core.artifacts import (
     get_artifact_store,
 )
 from mozaiksai.core.artifacts.content_store import get_artifact_content_store
+from mozaiksai.core.artifacts.models import (
+    canonical_bundle_archive_path,
+    resolve_canonical_bundle_entry,
+)
+from mozaiksai.core.validation.generated_app import validate_generated_app_candidate
+from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
+    APP_VALIDATION_STRATEGIES,
+    resolve_app_validation_strategy,
+)
 
 _ELIGIBLE_CHANGE_CLASSES = {"patch"}
 _ELIGIBLE_ARTIFACT_KINDS = {"app_bundle", "workflow_bundle", "theme_capture"}
-# Deliberately excludes "e2b": this worker validates via local subprocesses
-# (run_current_app_source_validation) and has no sandbox execution path, so a
-# plan claiming e2b would stamp a strategy onto build records that never ran.
-# Sandbox-backed worker validation is an AG2 SandboxCodeTool/SandboxPort
-# integration tracked in docs/architecture/workflows/ag2-update-watchpoints.md.
-_VALIDATION_STRATEGIES = {"skip", "local"}
+
+
+def resolve_coding_validation_strategy(raw: str | None) -> str:
+    """Resolve operator/request policy before any coding provider executes."""
+    normalized = str(raw or "").strip().lower() or None
+    if normalized is not None and normalized not in APP_VALIDATION_STRATEGIES:
+        raise ValueError(f"Unsupported coding validation strategy: {normalized}")
+    return resolve_app_validation_strategy(requested=normalized)[0]
 
 # Theme files live inside the app_bundle workspace. We alias the theme_capture artifact
 # kind so the coding worker can locate and patch these files without requiring a
@@ -82,7 +92,7 @@ class ScopedRefinementCodingWorker:
         config_loader: Any = load_control_plane_config,
         pack_loader: Any = load_selected_refinement_harness,
         tool_executor: Any = None,
-        source_validation_runner: Any = run_current_app_source_validation,
+        candidate_validation_runner: Any = validate_generated_app_candidate,
         artifact_store: Any = None,
         output_root: Any = None,
         provider: CodingExecutionProvider | None = None,
@@ -99,7 +109,7 @@ class ScopedRefinementCodingWorker:
             config_loader=config_loader,
         )
         self._config_loader = config_loader
-        self._source_validation_runner = source_validation_runner
+        self._candidate_validation_runner = candidate_validation_runner
         self._artifact_store = artifact_store
         self._output_root = Path(output_root) if output_root is not None else Path("generated_refinements")
 
@@ -166,16 +176,16 @@ class ScopedRefinementCodingWorker:
                 },
             )
 
-        resolved_strategy = self._resolve_validation_strategy(
-            request.validation_strategy or proposal.validation_strategy_hint or "skip"
-        )
         try:
+            resolved_strategy = resolve_coding_validation_strategy(
+                request.validation_strategy
+            )
             resolved_plan = self._plan_from_proposal(
                 request=request,
                 proposal=proposal,
                 resolved_strategy=resolved_strategy,
             )
-            applied_files = {change.path: change.content for change in proposal.changed_files}
+            applied_files = {change.path: change.content for change in resolved_plan.updated_files}
         except Exception as exc:
             return CodingWorkerResult(
                 eligible=True,
@@ -199,16 +209,15 @@ class ScopedRefinementCodingWorker:
         status = "planned"
         if resolved_artifact_kind == "app_bundle" and merged_files:
             try:
-                validation_result = await self._run_source_validation(
+                validation_result = await self._run_candidate_validation(
                     request=request,
-                    plan=resolved_plan,
                     merged_files=merged_files,
                     validation_strategy=resolved_strategy,
                 )
             except Exception as exc:
                 return CodingWorkerResult(
                     eligible=True, status="failed", provider=proposal.provider_id,
-                    error=f"SOURCE_VALIDATION_FAILED: {exc}",
+                    error=f"CANDIDATE_VALIDATION_FAILED: {exc}",
                     metadata={"coding_provider_attempts": provider_attempts},
                 )
             validation_status = str((validation_result or {}).get("validation_status") or "").strip().lower()
@@ -239,8 +248,7 @@ class ScopedRefinementCodingWorker:
         if validation_result is not None:
             validation_status = str((validation_result or {}).get("validation_status") or "").strip().lower()
             metadata["validation_status"] = validation_status
-            metadata["source_validation_status"] = validation_status
-            metadata["source_validation_execution_mode"] = validation_result.get("execution_mode")
+            metadata["app_validation_status"] = validation_result.get("app_validation_result", {}).get("validation_status")
         if isinstance((request.metadata or {}).get("scope_proposal"), dict):
             metadata["scope_proposal"] = dict(request.metadata["scope_proposal"])
         persistence_error: str | None = None
@@ -292,11 +300,30 @@ class ScopedRefinementCodingWorker:
         resolved_strategy: str,
     ) -> CodingWorkerPlan:
         """Reconstruct the checkpoint-facing plan from a provider proposal."""
+        changed_paths = [change.path for change in proposal.changed_files]
+        if not changed_paths:
+            raise ValueError("Coding provider returned no file changes")
+        if len(set(changed_paths)) != len(changed_paths):
+            raise ValueError("Coding provider returned duplicate file changes")
+        allowed_paths = set(request.files)
+        outside_scope = sorted(set(changed_paths) - allowed_paths)
+        if outside_scope:
+            raise ValueError("Coding provider returned changes outside the approved file scope: " + ", ".join(outside_scope))
+        unowned = sorted(set(changed_paths) - set(proposal.owned_paths))
+        if unowned:
+            raise ValueError("Coding provider returned changes outside its declared owned_paths: " + ", ".join(unowned))
+        baseline = request.baseline_files if request.baseline_files is not None else request.files
+        changes = [
+            change for change in proposal.changed_files
+            if change.path not in baseline or change.content != baseline[change.path]
+        ]
+        if not changes:
+            raise ValueError("Coding provider returned no effective file changes")
         return CodingWorkerPlan(
             summary=proposal.summary,
-            owned_paths=list(proposal.owned_paths),
+            owned_paths=[path for path in proposal.owned_paths if path in allowed_paths],
             updated_files=[
-                FileUpdate(path=change.path, content=change.content) for change in proposal.changed_files
+                FileUpdate(path=change.path, content=change.content) for change in changes
             ],
             validation_strategy=cast(Any, resolved_strategy),
             validation_commands=list(proposal.validation_commands),
@@ -306,12 +333,11 @@ class ScopedRefinementCodingWorker:
         )
 
     @staticmethod
-    def _resolve_validation_strategy(raw: str) -> str:
-        normalized = str(raw or "").strip().lower() or "skip"
-        return normalized if normalized in _VALIDATION_STRATEGIES else "skip"
-
-    @staticmethod
     def _check_eligibility(request: CodingWorkerRequest) -> tuple[bool, str | None]:
+        try:
+            resolve_coding_validation_strategy(request.validation_strategy)
+        except ValueError as exc:
+            return False, str(exc)
         if not str(request.app_id or "").strip():
             return False, "app_id is required"
         if str(request.change_class or "").strip().lower() not in _ELIGIBLE_CHANGE_CLASSES:
@@ -324,83 +350,38 @@ class ScopedRefinementCodingWorker:
             return False, "coding worker requires explicit scoped files in v1"
         return True, None
 
-    async def _run_source_validation(
+    async def _run_candidate_validation(
         self,
         *,
         request: CodingWorkerRequest,
-        plan: CodingWorkerPlan,
         merged_files: dict[str, str],
         validation_strategy: str,
     ) -> dict[str, Any]:
-        options = self._source_validation_options(
-            request=request,
-            plan=plan,
-            validation_strategy=validation_strategy,
-        )
-        # Validate the selected artifact plus patch, not an unrelated or absent
-        # brownfield indexing workspace.
+        # Reject unsafe/secret-sensitive files before the validator can execute
+        # the complete candidate. Provider context and commands are not policy.
         self._output_root.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="validation-", dir=self._output_root.resolve()) as root:
-            staged = materialize_coding_workspace(merged_files, workspace_root=Path(root))
-            result = await self._source_validation_runner(
+            materialize_coding_workspace(merged_files, workspace_root=Path(root))
+            result = await self._candidate_validation_runner(
+                files=dict(merged_files),
                 app_id=request.artifact_app_id,
-                artifact_store=self._artifact_store,
-                workspace_root=staged.workspace_root,
-                overlay_files=merged_files,
-                allowed_kinds=options["allowed_kinds"],
-                include_install=options["include_install"],
-                max_commands=options["max_commands"],
-                timeout_seconds=options["timeout_seconds"],
-                confirm_execution=options["confirm_execution"],
-                copy_workspace=True,
+                validation_strategy=validation_strategy,
+                timeout_seconds=self._bounded_int(
+                    request.metadata.get("validation_timeout_seconds"), default=120, minimum=5, maximum=900,
+                ),
             )
-        if hasattr(result, "model_dump"):
-            payload = cast(dict[str, Any], result.model_dump(mode="json"))
-        elif isinstance(result, dict):
-            payload = dict(result)
-        else:
-            payload = {"validation_status": "failed", "error": str(result)}
-        payload["validation_strategy"] = validation_strategy
-        payload["requested_validation_commands"] = list(plan.validation_commands or [])
-        payload["confirm_execution"] = options["confirm_execution"]
+        if not isinstance(result, dict):
+            raise ValueError("Candidate validator returned no acceptance/build evidence")
+        payload = dict(result)
+        acceptance = payload.get("app_bundle_acceptance_result")
+        build = payload.get("app_validation_result")
+        if not isinstance(acceptance, dict) or not isinstance(build, dict):
+            raise ValueError("Candidate validator returned incomplete acceptance/build evidence")
+        if payload.get("validation_status") == "passed" and not (
+            acceptance.get("passed") is True and build.get("validation_status") == "passed"
+        ):
+            raise ValueError("Candidate validator passed without completed acceptance and build checks")
         return payload
-
-    @staticmethod
-    def _source_validation_options(
-        *,
-        request: CodingWorkerRequest,
-        plan: CodingWorkerPlan,
-        validation_strategy: str,
-    ) -> dict[str, Any]:
-        metadata = dict(request.metadata or {})
-        context_seed = dict(request.context_seed or {})
-        raw_kinds = metadata.get("validation_allowed_kinds") or metadata.get("allowed_validation_kinds")
-        if raw_kinds is None:
-            raw_kinds = context_seed.get("validation_allowed_kinds") or context_seed.get("allowed_validation_kinds")
-        allowed_kinds = ScopedRefinementCodingWorker._string_list(raw_kinds)
-        include_install = bool(metadata.get("validation_include_install") or context_seed.get("validation_include_install"))
-        max_commands = ScopedRefinementCodingWorker._bounded_int(
-            metadata.get("validation_max_commands") or context_seed.get("validation_max_commands"),
-            default=4,
-            minimum=1,
-            maximum=12,
-        )
-        timeout_seconds = ScopedRefinementCodingWorker._bounded_int(
-            metadata.get("validation_timeout_seconds") or context_seed.get("validation_timeout_seconds"),
-            default=120,
-            minimum=5,
-            maximum=900,
-        )
-        confirm_execution = validation_strategy != "skip"
-        if plan.start_preview:
-            confirm_execution = True
-        return {
-            "allowed_kinds": allowed_kinds or None,
-            "include_install": include_install,
-            "max_commands": max_commands,
-            "timeout_seconds": timeout_seconds,
-            "confirm_execution": confirm_execution,
-        }
 
     async def _persist_refinement_artifact(
         self,
@@ -434,7 +415,8 @@ class ScopedRefinementCodingWorker:
             )
         written_paths = sorted(staged_workspace.editable_manifest)
 
-        zip_path = bundle_root / "artifact.zip"
+        bundle_name = f"refinement_{bundle_token}"
+        zip_path = bundle_root / f"{bundle_name}.zip"
         try:
             with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
                 for rel_path in sorted(written_paths):
@@ -451,14 +433,16 @@ class ScopedRefinementCodingWorker:
         commit_content_metadata: dict[str, Any] = {
             **(request.run_build_binding.model_dump() if request.run_build_binding else {}),
             "artifact_path": str(zip_path.resolve()),
+            "bundle_name": bundle_name,
             "workspace_dir": str(workspace_dir.resolve()),
             "bundle_mode": "staged_refinement_bundle",
             "applied_paths": sorted(applied_files.keys()),
             "validation_strategy": plan.validation_strategy,
             "validation_status": "",  # filled after status is resolved below
-            "source_validation_status": str((validation_result or {}).get("validation_status") or "").strip().lower(),
-            "source_validation_result": validation_result,
             "validation_result": validation_result,
+            "app_bundle_acceptance": validation_result["app_bundle_acceptance_result"],
+            "validation_evidence": validation_result["app_bundle_acceptance_result"].get("validation_evidence"),
+            "app_validation_result": validation_result["app_validation_result"],
             "source_surface": request.source_surface,
             "staged_file_sha256": dict(staged_workspace.editable_manifest),
             "coding_provider": provider_execution,
@@ -471,30 +455,35 @@ class ScopedRefinementCodingWorker:
                     app_id=request.artifact_app_id,
                     artifact_version_id=f"pending_{zip_sha[:16]}",
                 )
+                if not content_ref:
+                    raise ValueError("Configured content store returned no bundle reference")
                 commit_content_metadata["content_ref"] = content_ref
                 commit_content_metadata["content_backend"] = content_store.backend_name
             except Exception as cs_exc:
-                logger.warning(
-                    "CONTENT_STORE_PUT_BUNDLE_FAILED app=%s: %s — using local path only",
-                    request.app_id,
-                    cs_exc,
-                )
+                raise RuntimeError(
+                    f"CONTENT_STORE_PUT_BUNDLE_FAILED: {cs_exc}"
+                ) from cs_exc
 
         artifact_store = self._artifact_store or get_artifact_store()
         validation_status = self._artifact_validation_status(validation_result)
+        build_result = validation_result["app_validation_result"]
         commit_content_metadata["validation_status"] = validation_status.value
         artifact_version = await artifact_store.create_build_record(
             app_id=request.artifact_app_id,
             build_family=resolved_artifact_kind,
-            build_key=build_key,
+            build_key="app_bundle",
             parent_build_record_id=request.build_record_id,
             source_workflow=request.requested_workflow_id or "control_plane_coding",
             source_chat_id=None,
             lifecycle_status=ArtifactLifecycleStatus.DRAFT,
             validation_status=validation_status,
+            app_validation_status=build_result.get("validation_status"),
+            app_validation_strategy=build_result.get("validation_strategy"),
+            sandbox_session_id=build_result.get("sandbox_session_id"),
+            sandbox_provider=build_result.get("sandbox_provider"),
             files_manifest=[
                 {
-                    "path": f"{build_key}/{zip_path.name}",
+                    "path": canonical_bundle_archive_path(bundle_name),
                     "sha256": zip_sha,
                     "size_bytes": zip_path.stat().st_size,
                     "content_type": "application/zip",
@@ -502,17 +491,20 @@ class ScopedRefinementCodingWorker:
             ],
             commit_metadata={
                 "message": plan.summary,
+                "author_user_id": request.user_id,
                 "source_workflow": request.requested_workflow_id or "control_plane_coding",
                 "metadata": commit_content_metadata,
             },
         )
+        if resolve_canonical_bundle_entry(artifact_version).sha256 != zip_sha:
+            raise RuntimeError("Saved candidate archive identity differs from the validated bundle")
         return {
             "build_record_id": artifact_version.id,
             "artifact_path": str(zip_path.resolve()),
             "workspace_dir": str(workspace_dir.resolve()),
             "bundle_mode": "staged_refinement_bundle",
             "validation_status": validation_status.value,
-            "source_validation_status": commit_content_metadata["source_validation_status"],
+            "app_validation_status": build_result.get("validation_status"),
         }
 
     @staticmethod
@@ -532,30 +524,10 @@ class ScopedRefinementCodingWorker:
             return None
         if validation_result.get("error"):
             return str(validation_result["error"])
-        for key in ("command_results", "fallback_checks"):
-            values = validation_result.get(key)
-            if not isinstance(values, list):
-                continue
-            for item in values:
-                if isinstance(item, dict) and str(item.get("status") or "").strip().lower() == "failed":
-                    return str(item.get("reason") or f"{key} failed")
         errors = validation_result.get("errors")
         if isinstance(errors, list) and errors:
             return str(errors[0])
         return None
-
-    @staticmethod
-    def _string_list(value: Any) -> list[str]:
-        if isinstance(value, str):
-            value = [value]
-        if not isinstance(value, list):
-            return []
-        result: list[str] = []
-        for item in value:
-            text = str(item or "").strip().lower()
-            if text and text not in result:
-                result.append(text)
-        return result
 
     @staticmethod
     def _bounded_int(value: Any, *, default: int, minimum: int, maximum: int) -> int:

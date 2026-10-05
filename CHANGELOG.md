@@ -215,6 +215,20 @@ This project follows a practical pre-1.0 changelog format:
   outcome keys. AG2 reserves those prefixes and drops such keys from A2A,
   AG-UI, A2UI, and NLIP transports, so a declared key passed validation and
   then never reached a remote agent. No shipped workflow uses either prefix.
+- Studio concept and app review screens put the decision before supporting details.
+  The default workspace uses readable body text and quieter panels while retaining
+  the Mozaiks wordmark; generated previews keep their own app branding.
+- Submitting concept feedback immediately generates a new reviewable draft;
+  the revised concept still requires explicit approval. Design failures retain
+  their concrete rejection details when bounded retries end.
+- Domain data assigned a reserved platform-authentication surface identifier
+  receives explicit rename guidance before any ownership reassignment.
+  Chat working indicators now include visible, accessible status text.
+- New-app entry creates an owned Studio draft before launching the build journey.
+  Transition preflight resolves that target without creating or resuming a run.
+- Export and activation require completed acceptance and app-build validation.
+  Restore and activation verify the owned archive's identity and digest before
+  using it. Skipped checks and records without completed validation cannot certify a release.
 - Artifact preview ownership and capacity now persist in MongoDB across Studio
   workers and restarts. Preview allocation uses a bounded queue and positive
   shared limits; interrupted updates require cleanup before reuse. Operators
@@ -300,7 +314,131 @@ This project follows a practical pre-1.0 changelog format:
 - Studio's integrations summary reports the authentication mode from the
   runtime's own auth resolution.
 
+### Removed
+
+- Unused refinement `coding.providers.acp.budget.max_retries` and LLM profile
+  `default_temperature` settings. Configure provider retries and temperature in
+  `llm_config`; obsolete fields now fail configuration validation. Removed the
+  premature build-success metric emitted after classification and its orphaned
+  logger, plus an unreachable duplicate artifact lookup branch.
+
 ### Fixed
+
+- Refinement confirmations ignore unbound nested actions and retain the original
+  request, build and revision through ChatPage. Pending decisions normalize their
+  stored representation before conditional consumption. Accept and reject verify
+  app archives before mutating draft/session state, then reuse the verified bytes.
+  Schema-page edits use the file identity independently of the display name;
+  Workbench theme edits target the saved app bundle. Journeys without an explicit
+  participation choice retain guided reviews.
+- App-owned home pages now render at `/` through the existing authentication
+  guard; apps without a declared home page retain the chat fallback.
+- Saved app builds open the shared preview, refinement and review workbench
+  directly from Studio. Version switches preserve preview cleanup and reject
+  late results from a previously opened version. Parent refreshes preserve a
+  newer draft's files and review evidence.
+  Review-ready apps link directly to their saved builds without restarting a
+  previous build conversation.
+- Passive chat navigation starts only verified empty sessions. Saved execution,
+  pending input, unreadable state or native AG2 state never triggers an automatic
+  restart or synthetic reply; explicit user input keeps its existing route.
+- Entire-app refinement asks the existing harness to propose file scope. Scope
+  and workflow approvals are bound to the saved request, artifact and revision,
+  then consumed once through the session store before continuing. Selected-file
+  requests stop when the saved contracts cannot prove the requested write scope.
+  Pending decisions preserve the current candidate's review evidence, and review
+  actions wait until the submitted refinement finishes.
+- Visual page refinement resolves the saved route and component registration to
+  the existing page source. Its planner and worker validate finite surface/target
+  pairs and the complete write scope before generation, retaining the route and
+  registry as read-only context. Unknown, ambiguous and unsafe mappings fail
+  before generating files; new surfaces require the broader workflow path.
+- Refinements use the configured validation policy and automatic provider
+  selection instead of forcing local builds or inheriting a previous build's
+  local strategy. Saved review labels the starting version and keeps detailed
+  change summaries expandable while showing failures and review actions.
+- Studio drafts show the registered app's current build and approved description.
+  The workbench opens on preview, keeps required continuation and review actions
+  visible, and offers code, downloads, and diagnostics on demand. Historical chat
+  messages no longer keep the typing indicator active after the run pauses.
+  Warning details and review notes are expandable; failed and skipped checks
+  remain visible, and complete warning lists stay accessible.
+- Draft preview dependency installation works with the disposable image's Debian
+  Python, retaining the sandbox user and pinned runtime dependency constraints.
+  Failed previews preserve their original error until retry or dismissal.
+- Scoped refinement preserves the three canonical exported environment templates;
+  real credential files remain blocked and template values still pass deployment
+  validation before acceptance.
+- Generated apps receive their shared API helper before build validation. Preview
+  requests default to the app's own origin, and frontend build errors enter the
+  existing bounded repair path or finish with a failure explanation.
+- Approved concept names now reach the existing Studio app registry through an
+  owner- and build-scoped update, preserving manually assigned names, app identity,
+  lifecycle and history. Unnamed builds retain readable draft labels in the app
+  directory until approval; existing saved records are not renamed retroactively.
+- Generated read actions retain Mongo `_id` when needed for record identity or
+  lookup. Runtime smoke uses the approved get lookup key independently of the
+  generated update/delete identity, preventing false rejection of valid natural
+  keys while retaining record-identity and two-user isolation checks.
+- Reopened failed workflows retain their declared failure explanation in a
+  collapsed details panel beside the existing retry action. The metadata read
+  keeps the session's user and app scope and exposes no other workflow context.
+- App planning preserves the approved data-contract serializer when its task
+  carries an unbound capability label. Planner, schema, and file guidance now
+  agree on its existing structural identity; actual capability associations and
+  extra file ownership remain subject to the normal approval checks.
+- Failed initial-build retries retain the saved guided/autonomous choice while
+  starting with fresh execution state. Invalid saved choices fail before launch.
+- Bundle scanning resolves custom pages through their registered imports instead
+  of guessing a filename from the component name. Missing bindings still fail.
+- ServiceAgent guidance distinguishes the final backend file inventory from
+  model-authored files, keeping generated policy code with its existing owner.
+- Custom page task builds and standalone saves now share page-file validation
+  and registry materialization. Model-authored registry files fail with guidance
+  to preserve the approved page and let code generate its registration.
+- Exhausted build repair reports the limit of automatic recovery without
+  claiming the validation errors are impossible to fix.
+- Studio shows working activity when an actual AG2 model call begins, including
+  repeated calls by the same agent, without exposing hidden agent identities.
+- Authenticated custom-page builds now recognize the exact sign-in and callback
+  routes produced by the canonical auth scaffold. Unapproved custom routes still
+  fail with repair guidance. Exhausted task recovery reports the assembly cause
+  through the existing validation and failure path.
+- Autonomous builds continue through validated no-subscription and no-workflow
+  decisions without redundant approval cards, recording that review was not
+  required. Nonempty decisions and final app activation retain their review gates.
+- Generated handler repair feedback identifies the required workspace subclass.
+  Design and UI guidance preserves mandatory persistence behavior, uses shipped
+  table action APIs, and keeps side effects out of React state updaters.
+
+- Studio clears working and typing indicators when a workflow asks for input
+  or displays an interactive approval, keeping the user's next action clear.
+- The activation response uses the same verified app archive as the activation
+  itself, avoiding a second fetch or an error after a successful activation if
+  the original archive changes.
+
+- Scoped refinements now validate the complete edited app through the existing
+  acceptance and build checks, save a canonical verified archive, and carry that
+  candidate's evidence into Studio review. Operator execution policy wins over
+  model hints; skipped checks cannot activate a draft. Cancelled validation
+  finishes sandbox and disposable runtime-smoke cleanup.
+
+- DesignDocs now declares each page's existing canonical rendering surface.
+  App planning preserves it and uses the shared materializer for prompt paths,
+  preventing an approved interactive custom page from becoming static YAML.
+  Existing pre-production designs without the field must revisit DesignDocs.
+
+- ValueEngine intake now records strict, bounded readiness through its auto tool
+  instead of parsing a completion word from chat. Complete briefs proceed to
+  research without another confirmation; concise product language replaces
+  implementation jargon, while explicit concept approval remains required.
+
+- Factory interviews use typed readiness and retain explicit brand preferences
+  across workflow transitions. Custom interactive page plans now own their React
+  files and shared route registry together, using the same deterministic registry
+  renderer as standalone app saves.
+- AG2 knowledge-store writes are serialized per session so a delayed earlier
+  snapshot cannot overwrite the active channel state needed after restart.
 
 - A copied `.env.example` now imports the hosts and points the local shell's
   API proxy at the backend; `mozaiks context index` passes its workspace key.
@@ -339,6 +477,27 @@ This project follows a practical pre-1.0 changelog format:
   the host does not also auto-start the session and the prompt and initial
   agent always arrive. With `AUTH_ENABLED=true` it needs a token for its user
   in `MOZAIKS_SMOKE_ACCESS_TOKEN` and stops with a clear error without one.
+
+- Refinement completion now reflects validation and persistence outcomes.
+  Failed or unverified drafts stay reviewable without replacing the active
+  editor/preview; Review patch opens the saved candidate instead of running
+  another coding request. Cancellation clears the matching in-progress session,
+  and every coding provider passes the finalizer's approved-file scope check.
+  A configured remote content-store failure now blocks saving the draft instead
+  of silently claiming success with files available on only one worker.
+- Required runtime checks that are skipped or unavailable leave generated-app
+  acceptance pending. Partial source validation cannot pass, and exports require
+  a passed build status plus acceptance for the exported snapshot. Acceptance smoke scripts run the
+  canonical validator instead of injecting skipped build results.
+- Existing-app discovery resumes the correct interview after human replies and
+  completes only after its deterministic artifact save succeeds. Persistence
+  failures terminate as failures instead of reporting successful discovery.
+  Typed plan-recording tools now write the selected adoption path and reject
+  artifact assembly that omits confirmed capability IDs.
+- Workflow provider input retains the agent's prior replies after human
+  confirmation and saved-channel reopen. A thin AG2 view adapter corrects the
+  event shape consumed by provider mappers, preserving AG2 visibility and
+  history limits; an upstream watchpoint defines when this adapter is removed.
 
 - **`mozaiks add --preset <tier>` works** (#304). The command `mozaiks info`
   recommends always failed with "the following arguments are required:

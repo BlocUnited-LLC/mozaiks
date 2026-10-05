@@ -1,7 +1,7 @@
 /* ============================================================================
    ChatMessage — Futuristic Chat Bubble Styles
    Declarative: all colors derive from CSS vars set by themeProvider.js
-   from brand.json at runtime. Change brand.json → bubbles update automatically.
+   from app/brand/theme_config.json at runtime.
 
    Theme vars consumed (set by themeProvider from brand.json):
      --color-primary-rgb       e.g. "6, 182, 212"
@@ -125,7 +125,7 @@
 
 .user-message .message-header { justify-content: flex-end; }
 .agent-message .message-header { justify-content: flex-start; }
-.user-message .message-body { text-align: right; }
+.user-message .message-body { text-align: left; }
 .agent-message .message-body { text-align: left; }
 
 .name-pill {
@@ -163,7 +163,8 @@
 }
 
 .message-body {
-  color: #e6f6ff;
+  color: var(--color-text-primary);
+  font-weight: 400;
   line-height: var(--chat-bubble-line-height);
   font-size: 1rem;
   font-family: var(--font-body, 'Rajdhani', ui-sans-serif, system-ui, sans-serif);
@@ -181,9 +182,9 @@
 .message-body li > p { margin: 0; }
 .message-body li > p + p { margin-top: 0.25rem; }
 .message-body strong {
-  color: var(--color-primary-light);
-  font-family: var(--font-heading, 'Orbitron', 'Rajdhani', ui-sans-serif, system-ui, sans-serif);
-  font-weight: 700;
+  color: inherit;
+  font-family: inherit;
+  font-weight: 600;
 }
 .message-body h1,
 .message-body h2,
@@ -213,6 +214,40 @@
 }
 .message-body pre code { background: none; border: none; padding: 0; }
 
+.workflow-failure-message {
+  box-sizing: border-box;
+  width: min(820px, 100%);
+  padding: 1rem 1.15rem;
+  border: 1px solid var(--color-border, rgba(var(--color-text-primary-rgb, 148, 163, 184), 0.25));
+  border-radius: var(--chat-bubble-radius);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  font-family: var(--font-body, system-ui, sans-serif);
+  font-size: 1rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.workflow-failure-message h3 {
+  margin: 0;
+  font: inherit;
+  font-weight: 600;
+}
+
+.workflow-failure-message > p {
+  margin: 0.35rem 0 0;
+  color: var(--color-text-secondary);
+}
+
+.workflow-failure-message details { margin-top: 0.75rem; }
+.workflow-failure-message summary { cursor: pointer; }
+.workflow-failure-message summary:focus-visible {
+  outline: 2px solid var(--color-primary-light);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+.workflow-failure-message details[open] .message-body { margin-top: 0.75rem; }
+
 /* Subtle entry animation for latest message */
 .message.latest { animation: rise-in 260ms ease-out; }
 @keyframes rise-in {
@@ -231,12 +266,11 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  font-family: var(--font-heading, 'Orbitron', 'Rajdhani', ui-sans-serif, system-ui, sans-serif);
-  line-height: 1;
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: normal;
+  font-family: var(--font-body, system-ui, sans-serif);
+  line-height: 1.4;
   user-select: none;
 }
 
@@ -330,11 +364,11 @@
 @media (min-width: 1024px) {
   .agent-message {
     width: auto !important;
-    max-width: min(820px, 76%) !important;
+    max-width: min(820px, 92%) !important;
   }
   .user-message {
     width: auto !important;
-    max-width: min(500px, 52%) !important;
+    max-width: min(640px, 82%) !important;
   }
 }
 

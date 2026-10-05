@@ -34,6 +34,8 @@ agents:
       - concept_overview, concept_blueprint, captured_theme_config, monetization_enabled, coding_participation, design_docs_hitl, database_provider, database_setup_mode, and any refinement refinement-engine fields are provided via context variables; do not call tools to load them.
       - If design_docs_hitl is true, make the docs easier to review by clearly separating assumptions, alternatives, and final recommendations.
       - If coding_participation is autonomous, keep docs direct and execution-oriented.
+      - Preserve approved behavioral requirements as mandatory across the frontend, backend, and data design. Do not turn "exactly once", "never", ownership, or reload-persistence requirements into optional recommendations.
+      - For a persisted result that must happen exactly once, specify the stable operation identity, owning action, durable deduplication fields/indexes, and repeated-request behavior. A browser-only flag or disabled button is not durable idempotency. Keep client-local interaction state separate from the module-owned persisted result.
       - If database_setup_mode is atlas or existing_uri, treat database connectivity as secret-managed configuration and do not hardcode connection strings.
       - If database_setup_mode is skip, still design a MongoDB-ready schema and note that connection setup is intentionally deferred.
       - Do not call save tools manually. The runtime auto-invokes the save tool after your structured output validates.
@@ -332,10 +334,10 @@ agents:
       - Keep workflow execution lanes as `workflow` surfaces even when a separate refinement harness may route into them.
       - Use `external_integration` when the main boundary is payment provider onboarding, ads APIs, hosting providers, CRM APIs, etc.
       - If a surface depends on third-party credentials, describe that dependency in `integrations`, but keep the credential lifecycle in the platform connector/admin surface rather than in module-owned persistence.
-      - Use `ui_only` only for purely presentational/reporting surfaces that own no durable business state.
+      - Use `ui_only` for presentation and client-local interaction that owns no durable business state. Local countdown state, pause/resume controls, or a canvas do not require an AI workflow or backend module; saved task changes and completed-session records still belong to their declared app modules.
       - Every persistent page should map to one primary owning surface.
       - Every durable mutation should map to one primary owning surface.
-      - Every visible feature must have an action in the approved surface inventory. Declare custom reads for summaries, aggregates, searches, and reports that canonical list/get output cannot supply. Describe each custom read's input, output fields, and access policy in the backend design for downstream implementation. A list response with `items` and `total` does not supply arbitrary KPI value keys.
+      - Every persisted operation and backend read must have an action in the approved surface inventory. Preserve every requested mutation, including status toggles or completion actions; do not reduce these to create/delete only. Client-local controls need no invented backend action. Declare custom reads for summaries, aggregates, searches, and reports that canonical list/get output cannot supply. Describe each custom read's input, output fields, and access policy in the backend design for downstream implementation. A list response with `items` and `total` does not supply arbitrary KPI value keys.
       - If a workflow changes app data, the owning module surface must still own the mutation and resulting domain event.
   - id: contract_discipline
     heading: '[CONTRACT DISCIPLINE]'
@@ -357,8 +359,8 @@ agents:
       - Determined platform identity normalization runs before ownership validation. Any remaining missing tenancy, owner field, or entity is a design decision: use the valid choices in save feedback and revise the typed fields.
       - Do not place API-key metadata, vault state, or workspace integration records into `data_contract`; those are platform-managed connector contracts, not app-owned schema.
       - If a surface truly needs file-backed customization, describe the need in a bounded way; do not invent ad hoc YAML keys or raw implementation blobs.
-      - Persistent app UI remains declarative. Do not embed raw JSX, Tailwind, or untyped callback logic in the ui_schema.
-      - Treat custom full-page React as a rare bounded escape hatch, not a normal generation target. If a page truly cannot be expressed with shipped primitives, describe that as a bounded need for the downstream `custom_route_bundle` contract (`ui/route_manifest.json` + `ui/pages/custom/*.jsx`) rather than inventing a second page contract.
+      - Choose every page's required `ui_surface` explicitly using the existing declarative_page/custom_react_page vocabulary. Prefer declarative_page when shipped primitives express the behavior. Do not embed raw JSX, Tailwind, or untyped callback logic in the ui_schema.
+      - For a required countdown with start/pause/resume/reset, canvas, or other local state and event handlers that shipped primitives cannot express, set `ui_surface: custom_react_page`. Preserve its behavior and state transitions in page intent; sections may be empty or valid primitive composition hints. A Metric displays a value; it does not run a timer. Never invent primitive config fields to imitate behavior. Downstream generation uses the existing `custom_route_bundle` contract (`ui/route_manifest.json` + `ui/pages/custom/*.jsx` + `ui/index.js`), with persisted actions still owned by declared modules.
       - When a route will include a resource id in the path or query string and access depends on ownership, membership, tenant/workspace scope, or invitation/access state, call out the need for a scoped route authorization check in the owning app module. Downstream AppGenerator should express that as `AppPageSchema.meta.routeAuth` for declarative pages or `custom_route_bundle.route_manifest[*].meta.routeAuth` for bounded custom routes, pointing to an app-owned `authorize_*_route` module action; do not describe shell-owned policy or frontend-only authorization.
       - Keep "settings" precise: personal preferences belong to `/api/me/preferences`; module configuration belongs to `contracts/settings.yaml` and app-owned module actions; resource settings belong to scoped resource routes such as `/projects/:projectId/settings`.
   - id: ui_schema_doc_format
@@ -382,6 +384,7 @@ agents:
           {
             "name": "Dashboard",
             "route": "/dashboard",
+            "ui_surface": "declarative_page",
             "layout": "grid",
             "intent": "Landing page showing the most useful app summary and recent activity",
             "sections": [
@@ -402,6 +405,7 @@ agents:
           {
             "name": "Projects",
             "route": "/projects",
+            "ui_surface": "declarative_page",
             "layout": "full-width",
             "intent": "Project management: list, create, edit, archive",
             "sections": [
@@ -427,14 +431,14 @@ agents:
       - Every page in concept_overview must appear in experience_spec.pages[].
       - `navigation_model` describes how primary destinations are navigated (global, local, profile, footer).
       - `brand_direction` is a compact brand and experience posture summary.
-      - Every page must have `name`, `route`, `layout`, `intent`, and `sections[]`.
+      - Every page must have `name`, `route`, `ui_surface`, `layout`, `intent`, and `sections[]`.
       - Every section must declare `id`, `primitive`, `intent`, and `config_hint`.
       - `config_hint` is a JSON-encoded string or null. When non-null, JSON-encode the partial primitive presentation and response-binding scaffold using the supplied primitive contract. Use null when the contract is unavailable rather than inventing fields. Example: `"{\"columns\": [\"id\", \"name\"]}"`.
       - Do not emit `api_endpoint` or mutation endpoint URLs in config_hint. Describe the section's data needs in `intent`; downstream planning selects typed module/action references and code renders their URLs.
       - Prefer `Modal` sections for secondary create/edit/drill-in interactions.
       - Do not describe the same editor twice as both inline form and modal unless the page truly needs side-by-side editing.
       - Do NOT invent capabilities not described in concept_overview.
-      - Do NOT describe custom full-page React in experience_spec — mark those as explicit escape-hatch needs in prose.
+      - Record required custom page behavior in `experience_spec` with `ui_surface: custom_react_page` and precise `intent`; never embed raw JSX or fabricated primitive config. Custom pages may have empty `sections[]`.
       - Do NOT include header/profile/notification/footer content — those belong in `config/shell.json`.
       - Do NOT encode raw visual token values — those belong in `brand/theme_config.json`.
   - id: app_intelligence_context
@@ -515,6 +519,7 @@ agents:
             {
               "name": "Dashboard",
               "route": "/dashboard",
+              "ui_surface": "declarative_page",
               "layout": "grid",
               "intent": "Landing page showing the most useful app summary and recent activity",
               "sections": [
@@ -535,6 +540,7 @@ agents:
             {
               "name": "Projects",
               "route": "/projects",
+              "ui_surface": "declarative_page",
               "layout": "full-width",
               "intent": "Project management: list, create, edit, archive",
               "sections": [

@@ -4,7 +4,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import os
 import re
 import sys
 import tempfile
@@ -19,7 +18,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from factory_app.workflows.AppGenerator.tools.app_validation import run_app_bundle_acceptance_gate
+from factory_app.workflows.AppGenerator.tools.app_validation import (
+    run_app_bundle_acceptance_gate,
+    validate_app_bundle_from_request,
+)
 from factory_app.workflows.AppGenerator.tools.code_file_utils import save_generated_code
 from factory_app.workflows.AppGenerator.tools.export_app_code import resolve_export_gate
 from mozaiksai.core.runtime.app.loader import AppLoader
@@ -55,14 +57,6 @@ class SmokeContext:
 
     def to_dict(self) -> dict[str, Any]:
         return dict(self.data)
-
-
-def _configure_event_loop_policy() -> None:
-    if os.name != "nt":
-        return
-    selector_policy = getattr(asyncio, "WindowsSelectorEventLoopPolicy", None)
-    if selector_policy is not None:
-        asyncio.set_event_loop_policy(selector_policy())
 
 
 def _json_safe(value: Any) -> Any:
@@ -449,7 +443,7 @@ async def create_ticket(ctx, **params):
     )
     created = await repo.insert_ticket(ctx, record)
     await _emit(ctx, "domain.support_ticket.created", created)
-    return {{"ticket": created}}
+    return {{"item": created}}
 
 
 async def request_batch_triage(ctx, **params):
@@ -475,8 +469,8 @@ async def insert_ticket(ctx, record):
     collection = _collection(ctx)
     if collection is None:
         return record
-    result = await collection.insert_one(record)
-    return {**record, "ticket_id": str(result.inserted_id)}
+    await collection.insert_one(dict(record))
+    return record
 """,
     }
     # backend/schemas.py is code-rendered from the data contract below.
@@ -585,8 +579,6 @@ async def validate_appgenerator_acceptance_handoff(
             "app_id": DEFAULT_APP_ID,
             "chat_id": "live-agentgenerator-appgenerator-handoff",
             "generated_files": files,
-            "app_validation_status": "skipped",
-            "app_validation_strategy_used": "skip",
             "generated_workflow_name": integration.get("workflow_name"),
             "generated_workflow_capability_id": integration.get("capability_id"),
             "generated_workflow_startup_mode": integration.get("startup_mode"),
@@ -595,10 +587,13 @@ async def validate_appgenerator_acceptance_handoff(
         }
     )
 
-    acceptance = await run_app_bundle_acceptance_gate(files=files, context_variables=context)
+    validation = await validate_app_bundle_from_request(
+        {"validation_strategy": "local", "start_dev_server": False}, context_variables=context,
+    )
+    acceptance = validation["app_bundle_acceptance_result"]
     export_gate = resolve_export_gate(context)
     loader_result = await _load_runtime_app(
-        files,
+        dict(context.get("generated_files") or {}),
         temp_prefix="mozaiks-appgenerator-acceptance-",
     )
 
@@ -620,6 +615,7 @@ async def validate_appgenerator_acceptance_handoff(
             "workflow_integration": integration,
             "app_bundle_acceptance_status": acceptance.get("status"),
             "app_bundle_validation_evidence": acceptance.get("validation_evidence"),
+            "app_validation_result": validation["app_validation_result"],
             "acceptance": acceptance,
             "export_gate": export_gate,
             "runtime_loader": loader_result,
@@ -644,8 +640,6 @@ async def run_deterministic_appgenerator_repair_loop_smoke() -> dict[str, Any]:
             "app_id": DEFAULT_APP_ID,
             "chat_id": "appgenerator-repair-loop-smoke",
             "generated_files": files,
-            "app_validation_status": "skipped",
-            "app_validation_strategy_used": "skip",
             "generated_workflow_name": integration["workflow_name"],
             "generated_workflow_capability_id": integration["capability_id"],
             "generated_workflow_startup_mode": integration["startup_mode"],
@@ -661,7 +655,10 @@ async def run_deterministic_appgenerator_repair_loop_smoke() -> dict[str, Any]:
     saved = save_generated_code(StructuredOutputOverlay(context, {
         "code_files": [{"filename": SUPPORT_HANDLER_PATH, "content": accepted_handler}],
     }))
-    repaired_acceptance = await run_app_bundle_acceptance_gate(context_variables=context)
+    repaired_validation = await validate_app_bundle_from_request(
+        {"validation_strategy": "local", "start_dev_server": False}, context_variables=context,
+    )
+    repaired_acceptance = repaired_validation["app_bundle_acceptance_result"]
     export_gate = resolve_export_gate(context)
 
     from factory_app.workflows.AppGenerator.tools.code_file_utils import (
@@ -705,6 +702,7 @@ async def run_deterministic_appgenerator_repair_loop_smoke() -> dict[str, Any]:
             "initial_acceptance_status": initial_acceptance.get("status"),
             "initial_bundle_repair": initial_repair,
             "repaired_acceptance_status": repaired_acceptance.get("status"),
+            "app_validation_result": repaired_validation["app_validation_result"],
             "repaired_bundle_repair": repaired_acceptance.get("bundle_repair"),
             "export_gate": export_gate,
             "packaging": {
@@ -791,7 +789,6 @@ async def run_deterministic_appgenerator_acceptance_smoke() -> dict[str, Any]:
 
 
 def main() -> int:
-    _configure_event_loop_policy()
     parser = argparse.ArgumentParser(
         description=(
             "Run the live AgentGenerator to deterministic AppGenerator acceptance smoke. "

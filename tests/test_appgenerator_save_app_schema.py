@@ -621,6 +621,28 @@ def test_save_app_schema_writes_custom_route_bundle(monkeypatch, tmp_path: Path)
     assert context.data["app_schema_ready"] is True
 
 
+def test_save_custom_canonical_page_passes_the_real_ui_quality_gate(monkeypatch, tmp_path: Path) -> None:
+    from factory_app.workflows.AppGenerator.tools.ui_quality import review_ui_quality
+
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
+    context = _Context()
+    bundle = _custom_route_bundle()
+    bundle["page_files"][0]["path"] = "ui/pages/custom/deal_room.jsx"
+    save_app_schema_module.save_app_schema(
+        manifest={"app_name": "Deal Room", "version": "1.0.0", "default_route": "/deal-room",
+                  "pages": [], "custom_routes": ["deal-room"]},
+        pages=[], custom_route_bundle=bundle, context_variables=context,
+    )
+    registry = (tmp_path / "ui/index.js").read_text(encoding="utf-8")
+    assert "import InvestorDealRoom from './pages/custom/deal_room'" in registry
+    assert "registerComponent('InvestorDealRoomPage', InvestorDealRoom" in registry
+    assert context.get("app_ui_quality_warnings") == []
+    result = review_ui_quality(context_variables=context)
+    assert result["status"] == "passed"
+    assert context.get("app_ui_quality_status") == "passed"
+    assert context.get("app_ui_quality_revision_count") == 0
+
+
 def test_save_app_schema_preserves_custom_route_requiresrole_metadata(
     monkeypatch, tmp_path: Path
 ) -> None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from importlib import import_module
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -16,8 +17,6 @@ from motor.motor_asyncio import AsyncIOMotorClient
 
 from factory_app.app.modules.app_registry.backend.repo import AppRegistryRepo
 from factory_app.app.modules.app_registry.backend.service import AppRegistryService
-from factory_app.workflows._shared.platform import build_lifecycle
-from factory_app.workflows.AppGenerator.tools.platform import build_events_outbox
 from mozaiksai.core.data.models import WorkflowStatus
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 from mozaiksai.core.ports.orchestration import RunStatus
@@ -53,6 +52,9 @@ async def failure_database(monkeypatch):
     async def outbox_collection():
         return database["BuildEventsOutbox"]
 
+    # Tool loading refreshes these workflow namespaces; patch the current modules.
+    build_lifecycle = import_module("factory_app.workflows._shared.platform.build_lifecycle")
+    build_events_outbox = import_module("factory_app.workflows.AppGenerator.tools.platform.build_events_outbox")
     monkeypatch.setattr(AG2PersistenceManager, "_coll", chat_collection)
     monkeypatch.setattr(AppRegistryRepo, "_collection", registry_collection)
     monkeypatch.setattr(build_events_outbox, "_coll", outbox_collection)

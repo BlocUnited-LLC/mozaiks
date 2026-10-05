@@ -49,7 +49,7 @@ def _add_surface(
     owner: str = "app",
 ) -> None:
     bundle["experience_spec"]["pages"].append({
-        "name": name, "route": route, "layout": "full-width",
+        "name": name, "ui_surface": "declarative_page", "route": route, "layout": "full-width",
         "intent": f"Use {surface_id} for {', '.join(actions)}.",
         "sections": [{
             "id": surface_id.replace("_", "-"), "primitive": "SurfaceCard",

@@ -3,6 +3,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+import yaml
 from fastapi.testclient import TestClient
 
 from mozaiksai.control_plane import dry_run
@@ -179,6 +180,7 @@ class _E2EArtifactStore:
                 "canonical_inputs_version": dict(kwargs.get("canonical_inputs_version") or {}),
                 "lifecycle_status": kwargs["lifecycle_status"].value,
                 "validation_status": kwargs["validation_status"].value,
+                "app_validation_status": kwargs.get("app_validation_status"),
                 "files_manifest": list(kwargs.get("files_manifest") or []),
                 "commit_metadata": kwargs["commit_metadata"],
             }
@@ -289,7 +291,7 @@ def _bundle_entries(zip_path: Path) -> set[str]:
 
 
 @pytest.mark.asyncio
-async def test_deterministic_staged_patch_smoke_restores_dashboard_title(monkeypatch, tmp_path: Path) -> None:
+async def test_accepted_scoped_patch_requires_whole_app_validation_before_activation(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(dry_run, "LLMChangeClassifier", lambda *args, **kwargs: pytest.fail("LLM should not be used"))
 
     source_bundle = tmp_path / "source_app"
@@ -469,9 +471,10 @@ async def test_deterministic_staged_patch_smoke_restores_dashboard_title(monkeyp
     draft_review_response = TestClient(studio_app.app).get(
         f"/api/studio/build/artifacts/{draft_result.artifact_version_id}/review?build_registry_id=appreg_1"
     )
-    assert draft_review_response.status_code == 200
-    assert draft_review_response.json()["review"]["write_back_mode"] == "generated_artifact"
-    assert draft_review_response.json()["review"]["write_back_target"] is None
+    # The separate staged-patch helper does not create canonical app archives.
+    # Studio cannot display unverified bytes as the candidate under review.
+    assert draft_review_response.status_code == 409
+    assert "could not be verified" in draft_review_response.json()["detail"]
 
     draft_promote_response = TestClient(studio_app.app).post(
         f"/api/studio/build/artifacts/{draft_result.artifact_version_id}/promote?build_registry_id=appreg_1"
@@ -491,42 +494,39 @@ async def test_deterministic_staged_patch_smoke_restores_dashboard_title(monkeyp
     assert accepted_result.refinement_review_status == "promotion_ready"
     assert accepted_result.metadata["refinement"]["review"]["status"] == "promotion_ready"
     assert accepted_result.metadata["acceptance"]["accepted_by"] == "reviewer_1"
+    accepted_version = artifact_store.versions[accepted_result.artifact_version_id]
+    assert accepted_version.validation_status == ArtifactValidationStatus.PASSED
+    assert accepted_version.app_validation_status is None
 
     client = TestClient(studio_app.app)
     promote_response = client.post(
         f"/api/studio/build/artifacts/{accepted_result.artifact_version_id}/promote?build_registry_id=appreg_1",
     )
-    assert promote_response.status_code == 200
-    payload = promote_response.json()
-    assert payload["promoted"] is True
-    assert payload["build_family"] == "app_bundle"
-    assert payload["restored_files"] == sorted(f"app/{path}" for path in bundle_entries)
+    assert promote_response.status_code == 409
+    assert promote_response.json() == {
+        "detail": "This candidate needs passed whole-app build validation before export or activation.",
+    }
     assert not list(runtime_root.iterdir())
-    runtime_root = tmp_path / "workspaces" / app_id / accepted_result.artifact_version_id / "app"
-    assert (runtime_root / "app.json").read_text(encoding="utf-8") == (source_bundle / "app.json").read_text(encoding="utf-8")
-    assert (runtime_root / "modules/projects/backend/service.py").read_text(encoding="utf-8") == source_service_before
-    assert "refinement_plan.json" not in payload["restored_files"]
-    assert "affected_paths.json" not in payload["restored_files"]
-    assert "refinement_review.json" not in payload["restored_files"]
-    assert "execution_result.json" not in payload["restored_files"]
-    assert not (runtime_root / "refinement_plan.json").exists()
-    assert not (runtime_root / "affected_paths.json").exists()
-    assert not (runtime_root / "refinement_review.json").exists()
-    assert not (runtime_root / "execution_result.json").exists()
-    assert not (runtime_root / "backups").exists()
-    assert "title: Reports Overview\n" in (
-        runtime_root / "ui" / "pages" / "dashboard.yaml"
-    ).read_text(encoding="utf-8")
-    assert (runtime_root / "ui" / "index.js").read_text(encoding="utf-8") == (source_bundle / "ui" / "index.js").read_text(encoding="utf-8")
-    assert (runtime_root / "ui" / "route_manifest.json").read_text(encoding="utf-8") == (
-        source_bundle / "ui" / "route_manifest.json"
-    ).read_text(encoding="utf-8")
-    assert (runtime_root / "ui" / "pages" / "custom" / "ReportsOverviewPage.jsx").read_text(encoding="utf-8") == (
-        source_bundle / "ui" / "pages" / "custom" / "ReportsOverviewPage.jsx"
-    ).read_text(encoding="utf-8")
+    assert not (tmp_path / "workspaces").exists()
+    assert registry.promote_calls == []
+    assert registry.app["lifecycle_state"] == "review"
+    assert artifact_store.updated_sessions == []
+    assert artifact_store.sessions[0].status == RefinementSessionStatus.VALIDATED
+
+    # Scoped checks can produce an accepted archive, but cannot authorize activation.
+    with zipfile.ZipFile(draft_result.artifact_path) as archive:
+        saved_files = {name: archive.read(name) for name in archive.namelist()}
+    assert set(saved_files) == bundle_entries
+    saved_page = yaml.safe_load(saved_files["ui/pages/dashboard.yaml"])
+    assert saved_page["title"] == "Reports Overview"
+    assert saved_page["sections"][0]["config"]["title"] == "Reports Overview"
+    for relative_path in (
+        "app.json", "modules/projects/backend/service.py", "ui/index.js", "ui/route_manifest.json",
+        "ui/pages/custom/ReportsOverviewPage.jsx",
+    ):
+        assert saved_files[relative_path] == (source_bundle / relative_path).read_bytes()
     assert (source_bundle / "ui" / "pages" / "dashboard.yaml").read_text(encoding="utf-8") == source_before
     assert (source_bundle / "modules" / "projects" / "backend" / "service.py").read_text(encoding="utf-8") == source_service_before
-    assert artifact_store.updated_sessions[-1]["status"] == RefinementSessionStatus.PROMOTED
     assert artifact_store.versions[accepted_result.artifact_version_id].lifecycle_status == ArtifactLifecycleStatus.CURRENT
     assert artifact_store.versions[source_version.id].lifecycle_status == ArtifactLifecycleStatus.SUPERSEDED
     assert content_store.put_calls

@@ -22,9 +22,10 @@ from mozaiksai.control_plane import (
     StagedPatchProposal,
     select_coding_provider,
 )
+from mozaiksai.core.artifacts.models import BuildRecord
 
-_FILE_A = "app/ui/pages/Dashboard.jsx"
-_FILE_B = "app/ui/pages/Sidebar.jsx"
+_FILE_A = "ui/pages/custom/Dashboard.jsx"
+_FILE_B = "ui/pages/custom/Sidebar.jsx"
 
 
 def _config(acp_enabled: bool = True, max_files: int = 3) -> ControlPlaneConfig:
@@ -134,11 +135,15 @@ def _proposal(provider_id: str, status: str = "completed", **fields: Any) -> Sta
 
 class _FakeArtifactStore:
     async def create_build_record(self, **kwargs):  # noqa: ANN003
-        return type("ArtifactVersion", (), {"id": "av_child_1"})()
+        return BuildRecord(id="av_child_1", version_number=1, lineage_root_id="parent", **kwargs)
 
 
 async def _passing_validation(**kwargs):  # noqa: ANN003
-    return {"success": True, "validation_status": "passed", "execution_mode": "isolated_workspace_copy"}
+    return {
+        "validation_status": "passed",
+        "app_bundle_acceptance_result": {"status": "passed", "passed": True},
+        "app_validation_result": {"validation_status": "passed", "validation_strategy": "local"},
+    }
 
 
 def _worker(
@@ -150,7 +155,7 @@ def _worker(
 ) -> ScopedRefinementCodingWorker:
     return ScopedRefinementCodingWorker(
         config_loader=lambda: _config(acp_enabled=acp_enabled),
-        source_validation_runner=_passing_validation,
+        candidate_validation_runner=_passing_validation,
         artifact_store=_FakeArtifactStore(),
         output_root=tmp_path,
         provider=structured,

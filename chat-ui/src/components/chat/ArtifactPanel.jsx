@@ -52,10 +52,12 @@ const ArtifactPanel = ({
     return typeof type === 'string' && type.startsWith('core.');
   };
 
-  const emptyStateTitle = workflowName ? `${workflowName} artifacts` : 'Artifact canvas';
+  const emptyStateTitle = workflowName
+    ? workflowName.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ')
+    : 'Results';
   const emptyStateMessage = isViewSurface
-    ? 'This surface is ready for generated artifacts, but nothing has been published into it yet.'
-    : 'Artifacts from workflow tools will appear here once the session publishes a UI payload.';
+    ? 'There are no saved results to display.'
+    : 'Follow progress in the chat. Your results will appear here when they’re ready.';
 
   const loadingSurface = (
     <ArtifactLoadingState
@@ -98,7 +100,7 @@ const ArtifactPanel = ({
                     {emptyStateTitle}
                   </div>
                   <div className="text-lg sm:text-xl font-semibold text-white mb-2 heading-font">
-                    No artifacts yet
+                    No results to show yet
                   </div>
                   <div className="text-sm sm:text-base text-[rgba(226,232,240,0.78)] leading-6">
                     {emptyStateMessage}

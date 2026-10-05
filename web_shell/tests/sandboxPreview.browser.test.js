@@ -20,6 +20,9 @@ test('draft preview preserves workspace branding, opens separately, and follows 
   let delayedStop = null;
   let delayNextStop = false;
   let previousExpired = false;
+  let failedSessionRemoved = false;
+  let delayedStatus = null;
+  let delayNextStatus = false;
   let previewUrl;
   const bundle = await build({
     stdin: { resolveDir: shell, loader: 'jsx', contents: `
@@ -84,7 +87,13 @@ test('draft preview preserves workspace branding, opens separately, and follows 
     } else if (req.url.endsWith('/stop') && previousExpired) {
       res.statusCode = 404;
       res.end('{"detail":"Sandbox not found"}');
-    } else if (req.url.endsWith('/status')) res.end(JSON.stringify({status:'running',previewUrl}));
+    } else if (req.url.endsWith('/status')) {
+      const finish = () => {
+        if (failedSessionRemoved) { res.statusCode = 404; res.end('{"detail":"Sandbox not found"}'); }
+        else res.end(JSON.stringify({status:'running',previewUrl}));
+      };
+      if (delayNextStatus) { delayNextStatus = false; delayedStatus = finish; } else finish();
+    }
     else res.end('{"ok":true}');
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -93,6 +102,7 @@ test('draft preview preserves workspace branding, opens separately, and follows 
   const browser = await chromium.launch({headless:true});
   t.after(() => browser.close());
   const page = await browser.newPage();
+  await page.clock.install();
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   const state = async () => JSON.parse(await page.getByLabel('State').textContent());
   await expect(page.getByText('Draft app preview', {exact:true})).toBeVisible();
@@ -117,6 +127,9 @@ test('draft preview preserves workspace branding, opens separately, and follows 
   assert.equal(await popup.evaluate(() => window.opener), null);
   await expect(page.getByRole('heading', {name:'Mozaiks builder'})).toBeVisible();
   await popup.close();
+  delayNextStatus = true;
+  await page.clock.runFor(10001);
+  await expect.poll(() => Boolean(delayedStatus)).toBe(true);
   await page.getByRole('button', {name:'Expire',exact:true}).click();
   await expect.poll(async () => (await state()).error).toBe('Container expired');
   assert.equal((await state()).url, null);
@@ -126,6 +139,18 @@ test('draft preview preserves workspace branding, opens separately, and follows 
   await page.getByRole('button', {name:'Start draft preview',exact:true}).click();
   await expect.poll(async () => (await state()).error).toBe('Backend startup failed');
   assert.equal((await state()).url, null);
+  failedSessionRemoved = true;
+  delayedStatus();
+  const failedPolls = requests.filter(url => url.endsWith('/status')).length;
+  await page.clock.runFor(20001);
+  await expect.poll(async () => (await state()).error).toBe('Backend startup failed');
+  assert.equal(requests.filter(url => url.endsWith('/status')).length, failedPolls,
+    'A failed preview stops polling; sandbox cleanup must not replace the startup cause');
+  await expect(page.getByText('Preview could not start', {exact:true})).toBeVisible();
+  await expect(page.getByText('Backend startup failed', {exact:true})).toBeHidden();
+  await page.getByText('Preview details', {exact:true}).click();
+  await expect(page.getByText('Backend startup failed', {exact:true})).toBeVisible();
+  failedSessionRemoved = false;
   failStart = false;
   delayNextStart = true;
   await page.getByRole('button', {name:'Start draft preview',exact:true}).click();

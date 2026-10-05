@@ -148,6 +148,24 @@ draft | active | deployed | needs_revision
 - `Deploy` and `Integrations` become primary during `configuring`
 - `Usage`, `Operations`, and `Admin` become primary during `deployed` and `active`
 
+Overview reads the owned AppRegistry record and its `current_build_run` for
+build status and the saved chat destination. The separately saved Build request
+and plan form does not indicate whether a Factory run has started. A resumable
+link requires both the saved chat and workflow identities; otherwise the action
+opens the existing `/apps/{app_id}/building` surface without claiming to resume.
+
+For a registered target different from the loaded Studio workspace, its identity
+must not inherit the host app's name, description, or tagline. An approved concept
+may name a provisional target and fill its empty description through the existing
+owner/build-bound registry update. Explicit manual/imported names and all nonempty
+descriptions are preserved. Concept revisions remain available in their approved
+artifacts; this projection does not overwrite an existing registry description.
+
+Before an app is live, Overview leads with build context and the next available
+action. Runtime metrics and source/graph diagnostics remain available through
+expandable details. Missing financial values remain unavailable; a margin is
+shown only when both revenue and cost are known.
+
 ### Empty And Partial States
 
 Do not hide sections just because the app is incomplete.

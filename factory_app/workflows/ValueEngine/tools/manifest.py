@@ -6,11 +6,12 @@ from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, StrictBool, StrictStr, ValidationError
+from pydantic import BaseModel, Field, StrictBool, StrictStr, ValidationError, model_validator
 
 logger = logging.getLogger(__name__)
 
 from factory_app.app.modules.app_registry.backend.policy import is_generic_app_name
+from factory_app.app.modules.app_registry.backend.service import AppRegistryService
 from factory_app.workflows._shared.platform.build_target import require_build_binding
 from mozaiksai.core.artifacts import persist_summary_artifact
 from mozaiksai.core.data.persistence.artifact_store import BuilderArtifactStore
@@ -23,6 +24,13 @@ class ConceptReviewResponse(BaseModel):
     approved: StrictBool
     review_id: StrictStr
     rationale: StrictStr = Field(default="", max_length=4000)
+
+    @model_validator(mode="after")
+    def validate_feedback(self) -> "ConceptReviewResponse":
+        self.rationale = self.rationale.strip()
+        if self.action == "request_changes" and not self.rationale:
+            raise ValueError("Requested changes require feedback")
+        return self
 
 
 def _set_context_value(context_variables: Any | None, key: str, value: Any) -> None:
@@ -106,12 +114,14 @@ async def save_value_manifest(
     chat_id = None
     binding = require_build_binding(context_variables)
     app_id = binding.target_app_id
+    execution_app_id = None
     user_id = None
     workflow_name = "ValueEngine"
     build_mode = None
     structured_output = None
 
     if context_variables is not None and hasattr(context_variables, "get"):
+        execution_app_id = context_variables.get("app_id")
         chat_id = context_variables.get("chat_id")
         user_id = context_variables.get("user_id")
         workflow_name = context_variables.get("workflow_name", "ValueEngine")
@@ -120,7 +130,7 @@ async def save_value_manifest(
         structured_output = detach(context_variables.get("structured_output"))
     if not isinstance(structured_output, dict) or not structured_output:
         return {"success": False, "outcome": "blocked", "error": "ConceptBlueprint structured output is required"}
-    if not all(isinstance(value, str) and value.strip() for value in (app_id, chat_id, user_id)):
+    if not all(isinstance(value, str) and value.strip() for value in (app_id, execution_app_id, chat_id, user_id)):
         return {"success": False, "outcome": "blocked", "error": "App, chat, and user identities are required for review"}
 
     # Extract fields from structured output
@@ -261,6 +271,13 @@ async def save_value_manifest(
             source_workflow=str(workflow_name or "ValueEngine"), source_chat_id=str(chat_id),
             author_user_id=str(user_id), revision_mode=str(build_mode or "").strip().lower() == "revision",
         )
+        if outcome == "approved":
+            named = await AppRegistryService().apply_approved_concept_identity(
+                owner_user_id=str(user_id), execution_app_id=str(execution_app_id),
+                binding=binding, name=app_name, description=concept_overview,
+            )
+            if not named["success"]:
+                return {"success": False, "outcome": "blocked", "error": "The registered build changed before its identity could be saved"}
     except ValidationError:
         return {"success": False, "outcome": "blocked", "error": "Invalid structured concept review"}
     except Exception as exc:

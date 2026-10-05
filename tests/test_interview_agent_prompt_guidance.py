@@ -20,9 +20,9 @@ def test_value_engine_prompt_stays_route_bounded_and_non_exhaustive() -> None:
 def test_appgenerator_prompt_prefers_context_and_assumption_forward_guidance() -> None:
     source = _read("factory_app/workflows/AppGenerator/agents.yaml")
 
-    assert 'Treat `concept_overview`, `value_manifest`, and any design docs as provisional truth.' in source
-    assert '`greenfield_app`: do NOT ask whether the user already has an existing app' in source
-    assert 'Prefer assumption-forward guidance over open-ended interviewing.' in source
+    assert 'Treat upstream briefs and design docs as provisional truth.' in source
+    assert '`greenfield_app`, do NOT ask whether the user already has an existing app' in source
+    assert 'Choose small implementation defaults when the approved requirements permit them.' in source
 
 
 def test_agentgenerator_prompt_avoids_checklist_interrogation() -> None:

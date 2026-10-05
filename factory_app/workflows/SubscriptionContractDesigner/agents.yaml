@@ -49,7 +49,9 @@ agents:
             runtime primitives to use
 
           The save tool presents the normalized contract in a review UI when a
-          chat surface is available. If the user requests changes, revise the
+          chat surface is available, except for a validated explicit no-contract
+          decision in autonomous mode, which it records as not required without
+          claiming user confirmation. If the user requests changes, revise the
           structured output before downstream AppGenerator or AgentGenerator
           context is allowed to consume it.
       - id: context

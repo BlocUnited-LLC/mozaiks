@@ -20,6 +20,7 @@ import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 import yaml
@@ -43,8 +44,12 @@ from mozaiksai.core.ports.orchestration import RunStatus
 from mozaiksai.core.transport import workflow_bridge as _bridge_mod
 from mozaiksai.core.transport.simple_transport import SimpleTransport
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge, _workflow_tool_invocation
-from mozaiksai.core.workflow.context.authority import build_context_authority_policy
+from mozaiksai.core.workflow.context.authority import (
+    ContextAuthorityError,
+    build_context_authority_policy,
+)
 from mozaiksai.core.workflow.orchestration_patterns import _run_complete_event
+from mozaiksai.core.workflow.outputs.structured import load_workflow_structured_outputs
 from tests.test_ag2_network_execution_alignment import _DeterministicAgent
 from tests.test_ag2_network_idle_deadline import _run_on_virtual_clock
 from tests.test_generated_app_functional_acceptance import _basic_crud_files
@@ -391,6 +396,7 @@ async def _run_appgenerator_validation(
     *,
     chat_id: str,
     on_validation: Any = None,
+    on_repair: Any = None,
     validation_request: dict[str, Any] | None = None,
 ) -> SimpleNamespace:
     """Run AppGenerator from AppValidationAgent with the real graph and gate.
@@ -403,21 +409,34 @@ async def _run_appgenerator_validation(
     speakers: list[str] = []
     validations: list[dict[str, Any]] = []
     pauses: list[dict[str, Any]] = []
+    models, _ = load_workflow_structured_outputs("AppGenerator")
+    request_body = {
+        "start_dev_server": False, "timeout_seconds": 120, "commands": None,
+        **({"validation_strategy": "skip"} if validation_request is None else validation_request),
+    }
+    output = {"AppValidationRequest": request_body, "agent_message": "Running validation checks."}
 
     class _Agent(Agent):
         async def ask(self, *msg: Any, **kwargs: Any) -> SimpleNamespace:
             speakers.append(self.name)
-            return SimpleNamespace(body="Running validation checks.")
+            return SimpleNamespace(body=json.dumps(output))
 
     async def output_hook(agent_name: str, envelope: Any) -> None:
         if agent_name != "AppValidationAgent":
-            raise AssertionError(f"unexpected turn: {agent_name}")
+            if on_repair is None:
+                raise AssertionError(f"unexpected turn: {agent_name}")
+            with _workflow_tool_invocation(bridge):
+                on_repair(agent_name, bridge)
+            return
         with _workflow_tool_invocation(bridge):
             if on_validation is not None:
                 validations.append(on_validation(bridge))
             else:
+                parsed = models["AppValidationRequestCall"].model_validate_json(
+                    envelope.event_data["body"],
+                ).model_dump(mode="json")
                 validations.append(await validate_app_bundle_from_request(
-                    validation_request or {"validation_strategy": "skip", "start_dev_server": False},
+                    parsed["AppValidationRequest"],
                     context_variables=bridge,
                 ))
 
@@ -453,6 +472,18 @@ def _assert_readable(message: str) -> None:
         assert line.startswith("- ") and len(line) <= 2 + 300, line
 
 
+@pytest.fixture
+def runtime_smoke_passed(monkeypatch):
+    """Isolate build-failure termination from the separate runtime smoke gate."""
+    smoke = AsyncMock(return_value={
+        "status": "passed", "passed": True, "failed_tests": [], "checks": [],
+    })
+    monkeypatch.setattr(
+        validate_app_bundle_from_request.__globals__["app_runtime_smoke"], "run_app_runtime_smoke", smoke,
+    )
+    return smoke
+
+
 @pytest.mark.asyncio
 async def test_blocked_repair_ends_the_run_after_one_validation_with_its_blocking_errors() -> None:
     """(b) Blocked repair is the end of the run, reported with its blocking errors."""
@@ -470,7 +501,7 @@ async def test_blocked_repair_ends_the_run_after_one_validation_with_its_blockin
     message = result.failure_message
     assert message is not None
     assert message.startswith(
-        "The app build cannot continue: validation found errors that no repair step can fix.\nBlocking errors:\n- "
+        "The app build cannot continue: the available automatic repair steps could not resolve the validation errors.\nBlocking errors:\n- "
     )
     assert repair["errors"], repair
     for error in repair["errors"][:10]:
@@ -486,49 +517,47 @@ async def test_blocked_repair_ends_the_run_after_one_validation_with_its_blockin
 
 
 @pytest.mark.asyncio
-async def test_validating_an_unchanged_bundle_again_with_the_same_result_ends_the_run(monkeypatch) -> None:
-    """(b) A failed build, a user reply, the same failed build: the run ends.
-
-    The bundle passes acceptance and its build fails, so validation hands the
-    turn to the user. Nothing in a reply changes the bundle. The second build
-    names a different temp workspace, which is per-run noise, not a new result.
-    """
+async def test_failed_build_with_no_approved_owner_ends_once_without_user_pause(
+    monkeypatch, runtime_smoke_passed,
+) -> None:
+    """Passed acceptance cannot turn an unowned build failure into a user pause."""
     from mozaiksai.core import adapters
 
     sandbox = _FailingBuildSandbox()
     monkeypatch.setattr(adapters, "get_sandbox_adapter", lambda strategy: sandbox)
-
     run = await _run_appgenerator_validation(
-        _appgen_bundle(_basic_crud_files()), chat_id="appgen-no-progress",
+        _appgen_bundle(_basic_crud_files()), chat_id="appgen-unowned-build",
         validation_request={"validation_strategy": "docker", "start_dev_server": False},
     )
-    result = run.result
-
-    assert run.speakers == ["AppValidationAgent", "AppValidationAgent"]
-    assert [item["app_bundle_acceptance_result"]["passed"] for item in run.validations] == [True, True]
-    first, second = (item["app_validation_result"]["errors"] for item in run.validations)
-    assert first != second  # the raw stderr names a different temp workspace each time
-    [pause] = run.pauses
-    assert pause["app_validation_no_progress"] is False
-    assert pause["app_build_failure_message"] is None
-    assert result.status is RunStatus.FAILED
-    assert result.close_reason == "workflow_failed"
-    assert result.context_variables["app_validation_no_progress"] is True
-    message = result.failure_message
-    assert message.startswith(
-        "The app build cannot continue: validation ran again on an unchanged bundle and failed the same way.\n"
-        "Blocking errors:\n- "
-    )
-    assert "<temp>" in message
-    _assert_readable(message)
+    assert run.speakers == ["AppValidationAgent"]
+    assert runtime_smoke_passed.await_count == 1
+    assert run.pauses == []
+    [validation] = run.validations
+    assert validation["app_bundle_acceptance_result"]["passed"] is True
+    assert validation["app_validation_result"]["validation_status"] == "failed"
+    assert validation["bundle_repair"]["status"] == "blocked"
+    assert run.result.status is RunStatus.FAILED
+    assert run.result.close_reason == "workflow_failed"
+    assert run.result.context_variables["app_validation_ends_run"] is True
+    assert run.result.context_variables["integration_tests_passed"] is False
+    assert run.result.failure_message.startswith("The app build cannot continue:")
+    assert "Rollup failed to resolve import" in run.result.failure_message
+    _assert_readable(run.result.failure_message)
+    event = _run_complete_event(workflow_name="AppGenerator", chat_id="appgen-unowned-build",
+                                runner_result=run.result, pause_agent=None)
+    assert event["status"] == "failed"
+    assert event["awaiting_user_input"] is False
+    assert event["error"] == run.result.failure_message
 
 
 @pytest.mark.asyncio
-async def test_unavailable_validation_infrastructure_ends_the_run_as_an_environment_problem(monkeypatch) -> None:
+async def test_unavailable_validation_infrastructure_ends_the_run_as_an_environment_problem(
+    monkeypatch, runtime_smoke_passed,
+) -> None:
     """(b) An environment outage ends the run without blaming the app.
 
     The bundle passes acceptance; E2B is requested with no key configured, so
-    the gate reports the validation infrastructure unavailable both times.
+    the gate reports the validation infrastructure unavailable and ends once.
     """
     monkeypatch.delenv("E2B_API_KEY", raising=False)
     monkeypatch.delenv("MOZAIKS_APP_VALIDATION_STRATEGY", raising=False)
@@ -539,22 +568,63 @@ async def test_unavailable_validation_infrastructure_ends_the_run_as_an_environm
     )
     result = run.result
 
-    assert run.speakers == ["AppValidationAgent", "AppValidationAgent"]
-    assert [item["app_bundle_acceptance_result"]["passed"] for item in run.validations] == [True, True]
+    assert run.speakers == ["AppValidationAgent"]
+    assert runtime_smoke_passed.await_count == 1
+    assert [item["app_bundle_acceptance_result"]["passed"] for item in run.validations] == [True]
     assert [item["app_validation_result"]["errors"] for item in run.validations] == (
-        [["Validation infrastructure unavailable."]] * 2
+        [["Validation infrastructure unavailable."]]
     )
-    [pause] = run.pauses
-    assert pause["app_build_failure_message"] is None
+    assert run.pauses == []
     assert result.status is RunStatus.FAILED
     assert result.close_reason == "workflow_failed"
     assert result.failure_message == (
-        "The app build cannot continue: the validation environment was unavailable. "
-        "This is an environment problem, not a defect in the app; retry the build "
-        "once validation infrastructure is available.\n"
+        "The app build is unverified: the validation environment was unavailable. "
+        "Restore the validation environment and run validation again before "
+        "exporting or promoting this app.\n"
         "Validation environment errors:\n"
         "- Validation infrastructure unavailable."
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", ["explicit_skip", "automatic_skip", "required_check_pending"])
+async def test_unverified_validation_ends_once_without_user_pause_or_export(
+    monkeypatch, runtime_smoke_passed, case,
+) -> None:
+    from mozaiksai.core.workflow.generator_support import app_validation_strategy
+
+    monkeypatch.delenv("MOZAIKS_APP_VALIDATION_STRATEGY", raising=False)
+    monkeypatch.setattr(app_validation_strategy, "docker_app_validation_available", lambda: False)
+    monkeypatch.setattr(app_validation_strategy, "local_app_validation_available", lambda: False)
+    if case == "required_check_pending":
+        runtime_smoke_passed.return_value = {
+            "status": "skipped", "passed": None, "failed_tests": [], "checks": [],
+            "reason": "Synthetic runtime prerequisite unavailable",
+        }
+    run = await _run_appgenerator_validation(
+        _appgen_bundle(_basic_crud_files()), chat_id=f"appgen-unverified-{case}",
+        validation_request={"validation_strategy": "skip"} if case == "explicit_skip" else {},
+    )
+    assert run.speakers == ["AppValidationAgent"]
+    assert run.pauses == []
+    assert len(run.validations) == 1
+    assert runtime_smoke_passed.await_count == 1
+    assert run.result.status is RunStatus.FAILED
+    assert run.result.close_reason == "workflow_failed"
+    assert run.result.context_variables["app_validation_ends_run"] is True
+    assert run.result.context_variables["app_validation_no_progress"] is False
+    assert run.result.context_variables["integration_tests_passed"] is False
+    assert run.result.failure_message.startswith(
+        "The app build is unverified: required validation did not complete.",
+    )
+    assert "environment was unavailable" not in run.result.failure_message
+    assert "not a defect" not in run.result.failure_message
+    event = _run_complete_event(
+        workflow_name="AppGenerator", chat_id=f"appgen-unverified-{case}",
+        runner_result=run.result, pause_agent=None,
+    )
+    assert event["error"] == run.result.failure_message
+    assert event["awaiting_user_input"] is False
 
 
 def test_failure_message_errors_are_one_bounded_line_without_host_temp_paths() -> None:
@@ -591,16 +661,35 @@ def test_failure_message_is_written_only_when_the_outcome_ends_the_run(
     acceptance["bundle_repair"] = {**acceptance["bundle_repair"], "diagnostics": [{"error": "handler missing"}]}
     with _workflow_tool_invocation(bridge):
         bridge.set("app_build_failure_message", "a previous run's message")
+        bridge.set("app_validation_ends_run", True)
         _record_validation_outcome(bridge, files={"app.json": "{}"}, acceptance=acceptance,
                                    validation=None, passed=False)
     message = bridge.get("app_build_failure_message")
+    assert bridge.get("app_validation_ends_run") is ends_run
     if ends_run:
         assert message == (
-            "The app build cannot continue: validation found errors that no repair step can fix.\n"
+            "The app build cannot continue: the available automatic repair steps could not resolve the validation errors.\n"
             "Blocking errors:\n- handler missing"
         )
     else:
         assert message is None
+
+
+def test_validation_terminal_decision_rejects_model_writes_and_clears_on_success():
+    _, policy, _ = _appgenerator_contract()
+    bridge = ContextVariablesBridge({}, authority_policy=policy)
+    bridge._bind_run(("AppGenerator", "appgen-run-end", "protected-end"), policy)
+    with pytest.raises(ContextAuthorityError), _workflow_tool_invocation(bridge, writer_id="structured_output"):
+        bridge.set("app_validation_ends_run", False)
+    with _workflow_tool_invocation(bridge):
+        bridge.set("app_validation_ends_run", True)
+        bridge.set("app_build_failure_message", "Previous failure")
+        _record_validation_outcome(
+            bridge, files={"app.json": "{}"}, acceptance={"status": "passed", "passed": True},
+            validation={"validation_status": "passed"}, passed=True,
+        )
+    assert bridge.get("app_validation_ends_run") is False
+    assert bridge.get("app_build_failure_message") is None
 
 
 # The validation the live run repeated, as recorded in its AG2 WAL (channel
@@ -692,7 +781,7 @@ async def test_replaying_the_live_blocked_validation_ends_the_run_with_its_four_
     assert result.status is RunStatus.FAILED
     assert result.close_reason == "workflow_failed"
     expected = "\n".join([
-        "The app build cannot continue: validation found errors that no repair step can fix.",
+        "The app build cannot continue: the available automatic repair steps could not resolve the validation errors.",
         "Blocking errors:",
         *(f"- {item['error']}" for item in _LIVE_DIAGNOSTICS),
     ])
@@ -727,3 +816,123 @@ def test_run_complete_reports_a_closed_channel_by_its_close_reason() -> None:
         "error": "max_turns", "close_reason": "max_turns",
     }
     assert json.loads(json.dumps(event)) == event
+
+
+@pytest.mark.asyncio
+async def test_design_docs_exhausted_save_reports_its_last_rejection() -> None:
+    """A real rejected save must survive the retry budget and reach the browser event."""
+    from factory_app.workflows.DesignDocs.tools.save_design_doc import save_design_docs_bundle
+    from mozaiksai.core.workflow.agents.factory import _wrap_tool_with_context
+    from mozaiksai.core.workflow.declarative.contracts import ToolOutcomeSpec
+    from mozaiksai.core.workflow.validation.tool_outcomes import wrap_tool_outcome
+    from tests.factory_context import factory_context
+
+    root = APPGEN.parent / "DesignDocs"
+    config = {
+        name: yaml.safe_load((root / f"{name}.yaml").read_text(encoding="utf-8"))
+        for name in ("orchestrator", "context_variables", "transition_graph", "tools")
+    }
+    rules = config["transition_graph"]["transition_rules"]
+    policy = build_context_authority_policy(
+        workflow_name="DesignDocs", definitions=config["context_variables"]["definitions"],
+        transition_rules=rules,
+    )
+    tool = next(t for t in config["tools"]["tools"] if t["function"] == "save_design_docs_bundle")
+    contract = ToolOutcomeSpec.model_validate(tool["outcome"])
+    bridge = ContextVariablesBridge(factory_context({
+        "design_docs_save_outcome": "blocked", "design_docs_save_attempts": 0,
+        "design_docs_save_feedback": "",
+    }), authority_policy=policy)
+    agent = _DeterministicAgent("DesignDocsAgent", body="A malformed design proposal.")
+    agent._mozaiks_context_bridge = bridge
+    agent._mozaiks_tool_outcome = contract
+    invoke = _wrap_tool_with_context(wrap_tool_outcome(save_design_docs_bundle, contract), bridge)
+    rejections = []
+
+    async def output_hook(agent_name: str, envelope: Any) -> None:
+        assert agent_name == "DesignDocsAgent"
+        rejections.append(await invoke())
+
+    result = await AG2NetworkRunner().run(AG2NetworkRunnerRequest(
+        workflow_name="DesignDocs", app_id="design-failure", chat_id="design-failure",
+        agents={agent.name: agent}, initial_agent_name=agent.name,
+        initial_message="Generate the design.", transition_rules=rules,
+        context_variables=bridge.snapshot(), context_authority_policy=policy,
+        max_turns=config["orchestrator"]["max_turns"], agent_output_handler=output_hook,
+        failure_message_key=config["orchestrator"].get("failure_message_key"),
+        knowledge_store=MemoryKnowledgeStore(), idle_timeout_seconds=60.0,
+    ))
+    try:
+        assert result.status is RunStatus.FAILED
+        assert result.close_reason == "workflow_failed"
+        assert len(rejections) == contract.max_attempts + 1
+        assert rejections[-1]["outcome_error"] == "attempts_exhausted"
+        assert result.failure_message == rejections[-2]["error"]
+        event = _run_complete_event(
+            workflow_name="DesignDocs", chat_id="design-failure", runner_result=result, pause_agent=None,
+        )
+        assert event["error"] == rejections[-2]["error"]
+        assert event["run_completed"] is False
+    finally:
+        if result.live_run is not None:
+            await result.live_run.close()
+
+
+@pytest.mark.asyncio
+async def test_owned_build_failure_routes_to_approved_agent_then_stops_identical_failed_repair(monkeypatch):
+    from factory_app.workflows.AppGenerator.tools import app_validation
+    from mozaiksai.core import adapters
+    from mozaiksai.core.workflow.context.frozen import detach
+
+    page = "ui/pages/custom/focus.jsx"
+    files = {"app.json": "{}", page: "export default function Focus() { return null; }"}
+    initial = _appgen_bundle(files)
+    initial["app_build_plan"]["build_tasks"][0]["owned_paths"] = ["app.json", page]
+    acceptance = {key: {"passed": True} for key in (
+        "bundle_scan", "agent_backend", "module_wiring", "module_implementation",
+        "module_runtime_quality", "functional_completeness", "workflow_integration",
+        "app_runtime_load", "app_runtime_smoke",
+    )}
+    acceptance.update(status="passed", passed=True, skipped_checks=[],
+                      bundle_repair={"status": "passed", "target_agent": None})
+    monkeypatch.setattr(app_validation, "save_auth_scaffold", AsyncMock())
+    monkeypatch.setattr(app_validation, "run_app_bundle_acceptance_gate", AsyncMock(return_value=acceptance))
+
+    class Sandbox(_FailingBuildSandbox):
+        async def run_command(self, **kwargs):
+            return SimpleNamespace(success=False, stdout="", stderr=(
+                "\x1b[31m[UNRESOLVED_IMPORT] \x1b[0mCould not resolve '../../lib/moduleApi.js' "
+                "in ../../../workspace/app/ui/pages/custom/focus.jsx\n"
+            ))
+
+    monkeypatch.setattr(adapters, "get_sandbox_adapter", lambda strategy: Sandbox())
+    repaired = []
+
+    def record_unchanged_repair(agent_name, bridge):
+        if agent_name == "AppUIQualityAgent":
+            assert bridge.get("bundle_repair_target") == "AppSchemaAgent"
+            return
+        assert agent_name == "AppSchemaAgent"
+        repair = detach(bridge.get("bundle_repair_result"))
+        assert repair["active"]["allowed_paths"] == ["app.json", page]
+        assert repair["attempt"] == 1
+        repaired.append(repair)
+        # A synthetic settled response deliberately leaves the same defect.
+        # The native graph must revalidate and block identical further repairs.
+        repair["active"]["status"] = "responded"
+        bridge.set("bundle_repair_result", repair)
+
+    run = await _run_appgenerator_validation(
+        initial, chat_id="appgen-owned-build", on_repair=record_unchanged_repair,
+        validation_request={"validation_strategy": "docker", "start_dev_server": False},
+    )
+    assert run.speakers == ["AppValidationAgent", "AppSchemaAgent", "AppUIQualityAgent", "AppValidationAgent"]
+    assert len(repaired) == 1
+    assert run.pauses == []
+    assert [item["app_bundle_acceptance_result"]["passed"] for item in run.validations] == [True, True]
+    assert run.validations[0]["bundle_repair"]["target_agent"] == "AppSchemaAgent"
+    assert run.validations[1]["bundle_repair"]["status"] == "blocked"
+    assert run.validations[1]["bundle_repair"]["no_progress"] is True
+    assert run.result.status is RunStatus.FAILED
+    assert run.result.close_reason == "workflow_failed"
+    assert "ui/pages/custom/focus.jsx" in run.result.failure_message

@@ -236,6 +236,11 @@ class AG2OrchestrationAdapter:
     # OrchestrationPort.capabilities
     # ------------------------------------------------------------------
 
+    async def has_persisted_execution(self, *, app_id: str, chat_id: str) -> bool:
+        """Query AG2's chat namespace without hydrating a Hub or loading agents."""
+        store = self._with_network_store(app_id, chat_id, {})["knowledge_store"]
+        return bool(await store.exists("/"))
+
     def capabilities(self) -> dict[str, Any]:
         return {
             "engine": "ag2",

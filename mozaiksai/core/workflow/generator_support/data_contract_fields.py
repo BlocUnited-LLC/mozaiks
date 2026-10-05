@@ -113,6 +113,17 @@ def record_id_field(collection: Mapping[str, Any], names: list[str]) -> str:
     return "_id"
 
 
+def read_lookup_field(collection: Mapping[str, Any]) -> str:
+    """The canonical get input addresses search_by, then declared id, then Mongo _id."""
+    names = {field["name"] for field in collection.get("fields") or []}
+    lookup = collection.get("search_by") or ("id" if "id" in names else "_id")
+    if lookup != "_id" and lookup not in names:
+        raise DataContractFieldError(
+            f"collection {collection.get('name')!r} search_by {lookup!r} must name a declared field"
+        )
+    return str(lookup)
+
+
 def _determined_encoding(kind: Any, raw: Any) -> str | None:
     """The JSON a default that fails to decode unambiguously means, if it means exactly one value.
 
@@ -260,6 +271,7 @@ __all__ = [
     "is_managed_timestamp",
     "normalize_structured_defaults",
     "parse_default",
+    "read_lookup_field",
     "record_id_field",
     "validate_collection_fields",
 ]

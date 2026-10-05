@@ -10,7 +10,7 @@
  */
 
 import { useState, useCallback } from 'react';
-import { Panel, StatusPill, Button, Metric } from '@mozaiks/chat-ui/ui';
+import { Panel, StatusPill, Button } from '@mozaiks/chat-ui/ui';
 import { studioFetch } from '../../../../app/admin/pages/studioApi.js';
 
 const STATUS_TONE = {
@@ -80,32 +80,42 @@ export default function AppReviewSummary({ payload = {} }) {
       ? 'failed'
       : null;
   const canPromote = (
-    payload.can_promote !== false
+    payload.can_promote === true
+    && validationStatus === 'passed'
+    && acceptanceStatus === 'passed'
+    && integrationStatus === 'passed'
     && Boolean(payload?.artifact_version_id)
     && Boolean(payload?.build_registry_id)
   );
 
   return (
     <Panel>
-      <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-        Build Summary
+      <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+        Review your app
+      </p>
+      <h3 className="text-xl font-semibold tracking-tight text-foreground">
+        {promoted ? 'Your version is active' : canPromote ? 'Ready for your decision' : 'This draft needs attention'}
+      </h3>
+      <p className="mt-2 mb-5 text-sm leading-relaxed text-muted-foreground">
+        {promoted
+          ? 'The reviewed version is now active in this workspace. Hosting and public access are managed separately.'
+          : canPromote
+            ? 'Required checks passed. Activate this version when you are happy with it, or describe a change in chat.'
+            : 'Required checks are incomplete or failed. Review the check results before activating this version.'}
       </p>
 
-      {payload.app_validation_strategy_used && (
-        <div className="mb-3">
-          <Metric
-            label="Validation strategy"
-            value={payload.app_validation_strategy_used}
-          />
-        </div>
-      )}
-
-      <div className="mb-4 rounded-lg border border-border/40 bg-muted/30 px-4 py-1">
+      <details className="mb-4 rounded-lg border border-border/40 bg-muted/30 px-4 py-3">
+        <summary className="cursor-pointer text-sm font-medium text-foreground">Check results</summary>
+        <div className="mt-2">
         <ValidationRow label="Bundle acceptance" status={acceptanceStatus} />
         <ValidationRow label="Build validation" status={validationStatus} />
         <ValidationRow label="Integration checks" status={integrationStatus} />
         <ValidationRow label="Security readiness" status={securityStatus} />
-      </div>
+        </div>
+        {payload.app_validation_strategy_used && (
+          <p className="mt-2 text-xs text-muted-foreground">Validation environment: {payload.app_validation_strategy_used}</p>
+        )}
+      </details>
 
       {securityFindings.length > 0 && (
         <div className="mb-4 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3">
@@ -116,33 +126,13 @@ export default function AppReviewSummary({ payload = {} }) {
         </div>
       )}
 
-      {payload.app_validation_preview_url && (
-        <div className="mb-4">
-          <a
-            href={payload.app_validation_preview_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-sm font-medium text-primary hover:underline"
-          >
-            Open Preview ↗
-          </a>
-        </div>
-      )}
-
       {error && (
-        <p className="mb-3 text-sm text-destructive">{error}</p>
-      )}
-
-      {!canPromote && !promoted && (
-        <p className="mb-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          Build review context is incomplete. Promotion is unavailable until the
-          AppGenerator handoff provides a review-ready bundle.
-        </p>
+        <p role="alert" className="mb-3 text-sm text-destructive">{error}</p>
       )}
 
       {promoted ? (
-        <div className="rounded-lg border border-success/40 bg-success/10 px-4 py-3 text-sm text-success">
-          App promoted to active — your build is live.
+        <div role="status" className="rounded-lg border border-success/40 bg-success/10 px-4 py-3 text-sm text-success">
+          Version activated successfully.
         </div>
       ) : (
         <>
@@ -152,7 +142,7 @@ export default function AppReviewSummary({ payload = {} }) {
             onClick={handlePromote}
             className="w-full"
           >
-            {promoting ? 'Promoting…' : 'Promote to Active'}
+            {promoting ? 'Activating…' : 'Activate this version'}
           </Button>
           <p className="mt-2 text-center text-xs text-muted-foreground">
             Want changes? Describe them in the chat below.

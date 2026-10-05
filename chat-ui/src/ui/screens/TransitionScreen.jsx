@@ -113,9 +113,9 @@ export function TransitionScreen({ transitionId, onNavigate, context }) {
   // failure. Resolution is fire-and-forget at the click sites, so without this
   // the only other outcome is an unhandled rejection and a dead-looking button.
   const resolve = useCallback(
-    (option_id = null, contextVariables = {}) =>
+    (option_id = null, contextVariables = {}, launchOptions = {}) =>
       Promise.resolve()
-        .then(() => onNavigate?.(option_id, contextVariables))
+        .then(() => onNavigate?.(option_id, contextVariables, launchOptions))
         .catch((err) => setError(err?.message || 'Failed to resolve transition')),
     [onNavigate]
   );

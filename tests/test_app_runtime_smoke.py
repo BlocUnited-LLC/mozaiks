@@ -127,6 +127,11 @@ async def test_acceptance_reports_a_skipped_smoke_explicitly_and_consistently():
     context: dict = {}
     result = await run_app_bundle_acceptance_gate(files=_good(), context_variables=context)
 
+    assert result["status"] != "passed"
+    assert result["passed"] is False
+    assert "snapshot_digest" not in result
+    assert result["bundle_repair"]["target_agent"] is None
+    assert context["integration_tests_passed"] is False
     smoke_check = next(check for check in result["checks"] if check["id"] == "app_runtime_smoke")
     assert (smoke_check["passed"], smoke_check["status"]) == (None, "skipped")
     assert result["app_runtime_smoke"]["passed"] is None
@@ -269,6 +274,62 @@ async def test_recorded_good_bundle_boots_and_passes_every_runtime_check(mongo):
     assert checks["entitlement.task_management.update_task.default_plan_denied"]["message"].endswith("denied with 402.")
     assert checks["entitlement.task_management.update_task.entitled_allowed"]["message"].endswith("allowed (200).")
     assert result["events_emitted"] == ["domain.task.created", "domain.task.deleted", "domain.task.updated"]
+
+
+@pytest.mark.parametrize("id_field", ["_id", "task_id", "id"])
+@pytest.mark.parametrize("search_by", ["title", None])
+async def test_canonical_reads_and_writes_use_their_own_declared_keys(mongo, id_field, search_by):
+    from mozaiksai.core.workflow.generator_support.code_files import (
+        extract_code_file_map_from_payload,
+    )
+    from mozaiksai.core.workflow.generator_support.module_account_data import (
+        materialize_module_account_handlers,
+    )
+    from mozaiksai.core.workflow.generator_support.module_policy import materialize_module_policies
+    from mozaiksai.core.workflow.generator_support.module_read_actions import (
+        materialize_module_read_implementations,
+    )
+    from mozaiksai.core.workflow.generator_support.module_write_actions import (
+        close_module_actions,
+        materialize_module_schemas,
+        materialize_module_write_implementations,
+    )
+
+    names = ["title", "user_id", *([id_field] if id_field != "_id" else [])]
+    contract = {"version": "1", "surfaces": [{
+        "surface_id": "task_management", "surface_kind": "module", "collections": [{
+            "name": "tasks", "entity": "Task", "scope": "app", "tenancy": "per_user", "owner_field": "user_id",
+            "ownership": {"surface_id": "task_management", "surface_kind": "module"},
+            "fields": [{"name": name, "type": "string", "required": True} for name in names],
+            "search_by": search_by,
+            "lifecycle": {"write_mode": "module_action", "migration_policy": "additive_only"},
+        }],
+    }]}
+    plan = {"capability_packs": [{"capability_pack_id": "task_management", "capability_source": "generated_module",
+                                   "primary_entities": ["Task"]}], "pages": []}
+    closed = close_module_actions({"module_contract": {
+        "module_id": "task_management", "module_yaml": {
+            "schema_version": "mozaiks.module.v1",
+            "module": {"id": "task_management", "handler": "backend.handler:TaskManagementHandler"}, "actions": [],
+        },
+    }}, app_build_plan=plan, data_contract=contract)
+    files = extract_code_file_map_from_payload(closed)
+    for materialize in (materialize_module_schemas, materialize_module_read_implementations,
+                        materialize_module_write_implementations, materialize_module_account_handlers):
+        files.update(materialize(files, app_build_plan=plan, data_contract=contract))
+    files.update(materialize_module_policies(files, contract))
+    files["app.json"] = json.dumps({"appName": "Lookup Probe", "authRequired": True})
+    files["config/auth.yaml"] = _good()["config/auth.yaml"]
+    files["data/contract.json"] = json.dumps(contract)
+
+    result = await _smoke(files, mongo.uri)
+
+    assert result["status"] == "passed", json.dumps(result["failed_tests"], indent=1)
+    checks = _by_check(result)
+    assert {row["status"] for row in checks.values()} == {"passed"}
+    for check in ("a_create", "a_list", "get_missing", "a_get", "b_list_isolated", "b_get_isolated",
+                  "b_update_denied", "b_delete_denied", "a_update", "a_delete"):
+        assert checks[f"crud.task_management.tasks.{check}"]["status"] == "passed"
 
 
 async def test_an_entitlement_gate_without_subscriptions_yaml_is_allowed_like_production(mongo):

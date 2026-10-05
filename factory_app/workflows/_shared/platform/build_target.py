@@ -28,6 +28,16 @@ async def bind_factory_session(
 ) -> dict[str, Any]:
     from mozaiksai.core.workflow.workflow_manager import workflow_manager
 
+    if phase == "route":
+        if not build_registry_id:
+            raise ValueError("A registered build target is required for routing")
+        record = (await AppRegistryService().get_app_record(
+            owner_user_id=user_id, build_registry_id=build_registry_id,
+        )).get("app")
+        if not record or record.get("chat_app_id") != app_id:
+            raise ValueError("Registered build target is not available in this host")
+        return {"target_app_id": record["app_id"]}
+
     config = workflow_manager.get_config(workflow_name) or {}
     definitions = (config.get("context_variables") or {}).get("definitions") or {}
     source = (definitions.get("run_build_binding") or {}).get("source") or {}

@@ -22,7 +22,7 @@ AgentGenerator first validates and reviews the workflow partition:
 
 1. `PatternAgent` emits `PatternSelection`. Its tool validates the typed selection against the canonical DesignDocs workflow surface map before writing `workflows_spec`. Module pricing selections are validated by the subscription designer and AppGenerator with their data contract; AgentGenerator does not revalidate them.
 2. Invalid selections return validation feedback to `PatternAgent`. Three total selection attempts are permitted per run; exhausted attempts fail rather than dispatching an invalid plan.
-3. `ProjectOverviewAgent` presents `WorkflowPlanReview`. Approval, request-changes, and cancellation are structured UI responses correlated by `review_id` and the exact selection hash. Chat keywords cannot approve a plan.
+3. `ProjectOverviewAgent` presents `WorkflowPlanReview`, except for a validated empty partition in explicit autonomous mode. Approval, request-changes, and cancellation are structured UI responses correlated by `review_id` and the exact selection hash. Chat keywords cannot approve a plan.
 4. For an approved non-empty partition, `PackBuildCoordinator` starts `workflow_generation_tasks`: one `WorkflowBundleBuilderAgent` per workflow.
 5. Each worker emits `WorkflowBundleBuilderOutput` containing `CodeFile` entries. The runtime collects results in `workflow_bundle_results`, keyed by task ID.
 6. `generate_and_download` validates the resulting workflow contracts before writing accepted bundles, creating the ZIP, or presenting the download UI.
@@ -40,8 +40,11 @@ An explicit `workflows: []`, `is_multi_workflow: false`, and non-empty
 and pages. A missing or malformed selection is not equivalent to this decision.
 Unknown surface kinds and contradictions with DesignDocs fail validation.
 
-After the user approves an empty partition, the existing artifact recorder saves
-a `workflow_bundle` build record with `workflows: []`, the correlated review,
+When `coding_participation` is exactly `autonomous`, the validated empty partition
+records `workflow_plan_review.status: not_required` with its selection hash and
+rationale, without requesting or claiming human approval. Other modes retain
+the review. After that decision or human approval, the existing artifact recorder saves
+a `workflow_bundle` build record with `workflows: []`, the review disposition,
 and no workflow ZIP, primary workflow, API endpoint, or websocket endpoint.
 The stage completes only after this required save succeeds. It does not run the
 task batch or fabricate a workflow. Downstream AppGenerator consumes the same

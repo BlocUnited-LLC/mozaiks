@@ -369,18 +369,20 @@ definitions:
     source:
       type: state
       default: null
-  interview_complete:
-    type: boolean
-    description: True when ValueInterviewAgent signals completion (NEXT).
-    source:
-      type: state
-      default: false
-      triggers:
-      - type: agent_text
-        agent: ValueInterviewAgent
-        ui_hidden: true
-        match:
-          equals: NEXT
+  interview_outcome:
+    type: string
+    authority_class: closed_writer_routing_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    description: Validated concept intake readiness; conversational text is never routing authority.
+    source: {type: state, default: blocked}
+  interview_attempts:
+    type: integer
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    description: Runtime-owned bounded count of concept intake attempts.
+    source: {type: state, default: 0}
   concept_presented:
     type: boolean
     description: True once GapAnalysisAgent has persisted and surfaced the ConceptBlueprint artifact.
@@ -495,7 +497,7 @@ agents:
     - preserve_families
     - previous_brand_ref
     - llm_profile
-    - interview_complete
+    - interview_outcome
   ResearchAgent:
     variables:
     - app_type
@@ -535,7 +537,7 @@ agents:
     - preserve_families
     - previous_brand_ref
     - llm_profile
-    - interview_complete
+    - interview_outcome
     - concept_presented
   GapAnalysisAgent:
     variables:

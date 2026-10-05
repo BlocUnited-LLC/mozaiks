@@ -166,7 +166,8 @@ def test_record_context_and_artifacts_propagates_artifact_registration_failure(
     artifact_projection.assert_not_awaited()
 
 
-def test_empty_workflow_partition_is_recorded_without_fake_endpoints(monkeypatch):
+@pytest.mark.parametrize("review_status", ["approved", "not_required"])
+def test_empty_workflow_partition_is_recorded_without_fake_endpoints(monkeypatch, review_status):
     import yaml
 
     from mozaiksai.core.workflow.agents.factory import (
@@ -185,7 +186,7 @@ def test_empty_workflow_partition_is_recorded_without_fake_endpoints(monkeypatch
     data = {
         "run_build_binding": {"build_registry_id": "reg-1", "target_app_id": "app_123",
                               "build_id": "build-1", "phase": "genesis"},
-        "workflow_plan_review": {"review_id": "review-1", "selection_hash": "hash", "status": "approved"},
+        "workflow_plan_review": {"review_id": "review-1", "selection_hash": "hash", "status": review_status},
         "generated_workflow_name": "StaleWorkflow",
     }
     config_path = Path(__file__).resolve().parents[1] / "factory_app/workflows/AgentGenerator/context_variables.yaml"
@@ -202,7 +203,7 @@ def test_empty_workflow_partition_is_recorded_without_fake_endpoints(monkeypatch
     assert saved["files_manifest"] == []
     assert saved["app_id"] == "app_123"
     metadata = saved["commit_metadata"]["metadata"]
-    assert metadata["workflow_plan_review"]["status"] == "approved"
+    assert metadata["workflow_plan_review"]["status"] == review_status
     assert metadata["workflow_integration_metadata"]["workflows"] == []
     assert metadata["workflow_integration_metadata"]["primary_workflow"] is None
     assert metadata["artifact_path"] is None

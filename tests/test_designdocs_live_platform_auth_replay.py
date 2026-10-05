@@ -5,6 +5,9 @@ f2504efe (OSS f922404a), read from the local AG2 network WAL, with that chat's
 context variables. Live, both attempts were rejected with the message recorded
 in the fixture (`behavior=['events_emitted']` on `user_authentication`), the
 model resubmitted, and the run never left DesignDocs.
+
+The fixture explicitly labels its later ui_surface schema migration; the
+capture identity is retained, without claiming the model emitted that field.
 """
 
 from __future__ import annotations
@@ -133,13 +136,12 @@ def _plan_from_saved_design(context: ContextVariablesBridge) -> dict:
     )
     plan["pages"] = [
         {
-            "name": page["name"], "route": page["route"], "purpose": page["intent"],
+            "name": page["name"], "ui_surface": "declarative_page", "route": page["route"], "purpose": page["intent"],
             "primary_entities": list(facade_pages.get(page["route"], {}).get("primary_entities") or (
                 ["Task"] if page["route"] == "/tasks" else []
             )),
             "primary_actions": list(facade_pages.get(page["route"], {}).get("primary_actions") or []),
-            "ui_layout": "full-width", "ui_surface": "declarative_page",
-            "page_type_hint": facade_pages.get(page["route"], {}).get("page_type_hint") or (
+            "ui_layout": "full-width", "page_type_hint": facade_pages.get(page["route"], {}).get("page_type_hint") or (
                 "analytics_dashboard" if page["route"] == "/dashboard" else "record_list"
             ),
             "sections_hint": [],

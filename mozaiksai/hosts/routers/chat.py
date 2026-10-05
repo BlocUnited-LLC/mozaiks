@@ -220,17 +220,25 @@ async def chat_meta(
     validate_path_id(chat_id, "chat_id")
     try:
         from mozaiksai.core.data.persistence.persistence_manager import extract_last_artifact
+        from mozaiksai.core.workflow.workflow_manager import get_workflow_manager
 
         has_children = False
 
         coll = await runtime_app._chat_coll()
         projection = {"cache_seed": 1, "workflow_ui_state.last_artifact": 1, "status": 1, "_id": 1, "workflow_name": 1}
+        failure_key = get_workflow_manager().get_config(workflow_name).get("failure_message_key")
+        if isinstance(failure_key, str) and failure_key:
+            projection[failure_key] = 1
         query: dict[str, Any] = {"_id": chat_id, "workflow_name": workflow_name, **build_app_scope_filter(app_id)}
         if not is_shared_development_identity(principal):
             query["user_id"] = principal.user_id
         doc = await coll.find_one(query, projection)
         if not doc:
             return {"exists": False}
+
+        failure_message = doc.get(failure_key) if isinstance(failure_key, str) and doc.get("status") == 2 else None
+        if not isinstance(failure_message, str) or not failure_message.strip():
+            failure_message = None
 
         run_history = await runtime_app.persistence_manager.load_run_history(
             chat_id=chat_id,
@@ -259,6 +267,7 @@ async def chat_meta(
             "has_children": has_children,
             "cache_seed": doc.get("cache_seed"),
             "status": doc.get("status"),
+            "failure_message": failure_message,
             "run_history_count": run_history_count,
             "last_artifact": extract_last_artifact(doc),
             "artifact_instance_id": artifact_instance_id,

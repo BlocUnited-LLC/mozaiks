@@ -40,6 +40,19 @@ class _FakePersistence:
         self.completed: list[str] = []
         self.failed: list[str] = []
 
+    async def _coll(self):
+        return self
+
+    async def find_one(self, query, projection):  # noqa: ANN001
+        assert query["_id"] == CHAT_ID
+        assert query["user_id"] == USER_ID
+        assert query["workflow_name"] == WORKFLOW
+        return {"status": self.status, "workflow_ui_state": {"schema_version": 1}}
+
+    async def load_run_events(self, *, chat_id, app_id):  # noqa: ANN001
+        assert (chat_id, app_id) == (CHAT_ID, APP_ID)
+        return []
+
     async def chat_has_resumable_run(self, chat_id, app_id, workflow_name=None):  # noqa: ANN001
         return False
 
@@ -89,6 +102,10 @@ class _FakeAdapter:
         self.transport = None
         self.announce = False
 
+    async def has_persisted_execution(self, *, app_id, chat_id):  # noqa: ANN001
+        assert (chat_id, app_id) == (CHAT_ID, APP_ID)
+        return False
+
     async def _announce(self) -> None:
         run_completed = self.status is RunStatus.COMPLETED
         awaiting = self.status is RunStatus.PAUSED
@@ -120,7 +137,9 @@ class _FakeAdapter:
 
 @pytest.fixture
 def live_send_path(monkeypatch):
-    """A real transport whose only stub is the websocket boundary."""
+    """Real transport with explicit storage, adapter and websocket fixtures."""
+    from mozaiksai.core import session
+
     transport = SimpleTransport()
     persistence = _FakePersistence()
     adapter = _FakeAdapter()
@@ -156,19 +175,25 @@ def live_send_path(monkeypatch):
     monkeypatch.setattr(_bridge_mod, "get_workflow_lifecycle_hooks", lambda _name: {})
     monkeypatch.setattr(_bridge_mod.session_registry, "complete_workflow", lambda *a, **k: None)
 
+    async def _owned_session_router(*, app_id, user_id, chat_id):  # noqa: ANN001
+        assert (app_id, user_id, chat_id) == (APP_ID, USER_ID, CHAT_ID)
+        return None
+
+    monkeypatch.setattr(session, "get_session_router_for_chat", _owned_session_router)
+
     ag2_mod = __import__(
         "mozaiksai.core.adapters.ag2_orchestration", fromlist=["get_ag2_adapter"]
     )
     monkeypatch.setattr(ag2_mod, "get_ag2_adapter", lambda: adapter)
 
-    async def run() -> None:
+    async def run(initial_message=None) -> None:  # noqa: ANN001
         await transport._run_workflow_background(
             chat_id=CHAT_ID,
             workflow_name=WORKFLOW,
             app_id=APP_ID,
             user_id=USER_ID,
             ws_id=7,
-            initial_message=None,
+            initial_message=initial_message,
         )
         await asyncio.sleep(0)
 
@@ -240,15 +265,27 @@ async def test_accepted_run_dispatches_process_completed_exactly_once(live_send_
 
 @pytest.mark.asyncio
 async def test_rejected_start_still_dispatches_its_outcome(live_send_path):
-    """A terminal chat sends no run_complete envelope, so the wrapper is its only signal."""
+    """An explicit start rejected as terminal still announces that rejection once."""
     live_send_path.persistence.status = 1
 
-    await live_send_path.run()
+    await live_send_path.run(initial_message="Continue this workflow")
 
     completions = _completions(live_send_path.emitted)
     assert len(completions) == 1
     assert completions[0]["status"] == "failed"
     assert completions[0]["error_code"] == "WORKFLOW_SESSION_TERMINAL"
     assert completions[0]["route"] == "terminal_session"
+    assert live_send_path.adapter.runs == 0
+    assert not _run_complete_envelopes(live_send_path.broadcast)
+
+
+@pytest.mark.asyncio
+async def test_passive_terminal_reopen_does_not_dispatch_a_new_outcome(live_send_path):
+    """Observing a saved completed chat does not advance its journey a second time."""
+    live_send_path.persistence.status = 1
+
+    await live_send_path.run()
+
+    assert _completions(live_send_path.emitted) == []
     assert live_send_path.adapter.runs == 0
     assert not _run_complete_envelopes(live_send_path.broadcast)

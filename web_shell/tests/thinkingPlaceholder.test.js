@@ -1,28 +1,31 @@
 /**
- * A finished run has nobody thinking.
+ * Finished runs and runs waiting for the user have nobody thinking.
  *
  * The "..." placeholder is appended when an agent hands off, and was only ever
  * removed when a NEXT agent spoke. A run that ends before that — the common
  * case on workflow_failed — left the bubble on screen permanently, which is
  * what a live ThemeCapture run showed above its final message.
  *
- * These tests pull the two terminal reducers out of ChatPage.js and run them,
- * so they assert behaviour rather than the presence of a string.
+ * These tests execute the production pause, interactive UI, and terminal
+ * activity handling, then render their messages through the production component.
  */
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import http from 'node:http';
 import path from 'node:path';
 import test from 'node:test';
 import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
+import { build } from 'esbuild';
+import { chromium, expect } from '@playwright/test';
 
 const shell = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const chatPage = path.join(path.dirname(shell), 'chat-ui/src/pages/ChatPage.js');
 
 // Anchor on a single-line fragment (the checkout is CRLF, so multi-line
 // literals will not match), then walk back to the start of the call.
-const reducerAt = (source, anchor, endMarker) => {
-  const hit = source.indexOf(anchor);
+const reducerAt = (source, anchor, endMarker, last = false) => {
+  const hit = last ? source.lastIndexOf(anchor) : source.indexOf(anchor);
   assert.notEqual(hit, -1, `could not locate anchor: ${anchor}`);
   const start = source.lastIndexOf('setMessagesWithLogging(', hit);
   assert.notEqual(start, -1, 'could not find the enclosing setMessagesWithLogging call');
@@ -47,6 +50,105 @@ const run = (snippet, messages) => {
   return captured;
 };
 
+const eventSource = (source, event) => {
+  const start = source.indexOf(`      case '${event}': {`);
+  assert.notEqual(start, -1, `could not locate event: ${event}`);
+  const end = source.indexOf("      case '", start + 12);
+  assert.notEqual(end, -1, `could not locate end of event: ${event}`);
+  return source.slice(start, end);
+};
+
+const successReducer = source => reducerAt(
+  eventSource(source, 'run_complete'), 'prev.some(m => m?.isThinking)', '));', true,
+);
+
+const pauseEvent = (source, event, state) => {
+  const data = event === 'awaiting_reply'
+    ? {data:{source_agent:'ExampleAgent', prompt:'What do you want to build?', reason:'awaiting_user_reply'}}
+    : {status:'paused', agent:'ExampleAgent', prompt:'What do you want to build?', reason:'awaiting_user_reply'};
+  vm.runInNewContext(`(() => { switch (event) { ${eventSource(source, event)} } })()`, {
+    event, data, Date, isFailedWorkflowSession: () => false,
+    setLoading: value => { state.loading = value; },
+    setPendingWorkflowReply: value => { state.pending = typeof value === 'function' ? value(state.pending) : value; },
+    setMessagesWithLogging: reducer => { state.messages = reducer(state.messages); },
+  });
+  return state;
+};
+
+// Execute the shared activity-handling prefix before component rendering.
+// Both transport event kinds must reach this same subscriber.
+const uiEvent = (source, update, state) => {
+  const start = source.indexOf("        if (update.type === 'tool_call' || update.type === 'ui.render') {");
+  const end = source.indexOf('          const toolName =', start);
+  assert.ok(start !== -1 && end > start, 'shared UI subscriber was not found');
+  vm.runInNewContext(`${source.slice(start, end)} }`, {
+    update, dispatchSurfaceEvent: null,
+    setPendingWorkflowReply: () => {},
+    setLoading: value => { state.loading = value; },
+    setMessagesWithLogging: reducer => { state.messages = reducer(state.messages); },
+  });
+  return state;
+};
+
+const interactiveEvents = ['tool_call', 'ui.render'].flatMap(type => [
+  {type, awaiting_response:true, payload:{review_id:'current-review'}},
+  {type, payload:{awaiting_response:true, review_id:'current-review'}},
+]);
+for (const [index, update] of interactiveEvents.entries()) {
+  test(`interactive UI event ${index + 1} stops activity without agent text and remains repeatable`, async () => {
+    const source = await fs.readFile(chatPage, 'utf8');
+    const state = {messages:withThinking(), loading:true};
+    const realMessage = state.messages[0];
+    uiEvent(source, update, state);
+    assert.equal(state.loading, false);
+    assert.deepEqual(state.messages, [realMessage]);
+    const messages = state.messages;
+    uiEvent(source, update, state);
+    assert.equal(state.messages, messages, 'repeated waiting event must preserve real messages');
+    assert.equal(state.loading, false);
+  });
+}
+
+for (const type of ['tool_call', 'ui.render']) {
+  test(`noninteractive ${type} UI events leave ongoing activity intact`, async () => {
+    const source = await fs.readFile(chatPage, 'utf8');
+    for (const update of [
+      {type, awaiting_response:false, payload:{awaiting_response:true}},
+      {type, payload:{awaiting_response:false}},
+      {type, payload:{}},
+      {type, awaiting_response:'true', payload:{}},
+    ]) {
+      const messages = withThinking();
+      const state = {messages, loading:true};
+      uiEvent(source, update, state);
+      assert.equal(state.loading, true);
+      assert.equal(state.messages, messages);
+    }
+  });
+}
+
+const pauseSequences = [['awaiting_reply'], ['run_complete'], ['awaiting_reply', 'run_complete']];
+for (const sequence of pauseSequences) {
+  test(`${sequence.join(' then ')} removes thinking while preserving the question and reply state`, async () => {
+    const source = await fs.readFile(chatPage, 'utf8');
+    const state = {messages:withThinking(), loading:true, pending:null};
+    const question = {id:'question', sender:'agent', content:'What do you want to build?'};
+    state.messages.push(question);
+    for (const event of sequence) pauseEvent(source, event, state);
+    assert.equal(state.messages.filter(message => message.isThinking).length, 0);
+    assert.equal(state.messages.at(-1), question);
+    assert.equal(state.loading, false);
+    assert.equal(state.pending.agent, 'ExampleAgent');
+    assert.equal(state.pending.prompt, question.content);
+
+    const cleanMessages = state.messages;
+    const pending = state.pending;
+    pauseEvent(source, 'run_complete', state);
+    assert.equal(state.messages, cleanMessages, 'a repeated pause must leave real messages identity-stable');
+    assert.equal(state.pending, pending, 'paused run completion must preserve the existing reply request');
+  });
+}
+
 test('the failure reducer drops the thinking placeholder and reports the error', async () => {
   const source = await fs.readFile(chatPage, 'utf8');
   const snippet = reducerAt(source, '[...prev.filter(m => !m?.isThinking), {', '}]);');
@@ -61,7 +163,7 @@ test('the failure reducer drops the thinking placeholder and reports the error',
 
 test('the success reducer drops the thinking placeholder', async () => {
   const source = await fs.readFile(chatPage, 'utf8');
-  const snippet = reducerAt(source, 'prev.some(m => m?.isThinking)', '));');
+  const snippet = successReducer(source);
 
   const result = run(snippet, withThinking());
 
@@ -74,9 +176,78 @@ test('the success reducer leaves an untouched list identity-stable', async () =>
   // Returning a fresh array on every run_complete would re-render the whole
   // transcript for nothing.
   const source = await fs.readFile(chatPage, 'utf8');
-  const snippet = reducerAt(source, 'prev.some(m => m?.isThinking)', '));');
+  const snippet = successReducer(source);
 
   const clean = [{ id: 'a1', sender: 'agent', content: 'done' }];
 
   assert.equal(run(snippet, clean), clean, 'must return the same array when nothing changed');
+});
+
+test('the active thinking bubble disappears on completion and while waiting for a reply or review', async (t) => {
+  const component = path.resolve(shell, '../chat-ui/src/components/chat/ChatMessage.jsx');
+  const bundle = await build({
+    stdin: {resolveDir: shell, loader: 'jsx', contents: `
+      import React, {useState} from 'react';
+      import {createRoot} from 'react-dom/client';
+      import ChatMessage from ${JSON.stringify(component)};
+      function Fixture() {
+        const [messages, setMessages] = useState([]);
+        window.setMessages = setMessages;
+        return <main>{messages.map(message => <ChatMessage key={message.id}
+          message={message.content} message_from={message.sender} agentName={message.agentName}
+          isThinking={message.isThinking} metadata={message.metadata} />)}</main>;
+      }
+      createRoot(document.getElementById('root')).render(<Fixture />);
+    `},
+    bundle: true, write: false, jsx: 'automatic', loader: {'.css': 'empty'},
+    alias: {
+      react: path.join(shell, 'node_modules/react'),
+      'react-dom': path.join(shell, 'node_modules/react-dom'),
+    },
+    nodePaths: [path.join(shell, 'node_modules')],
+  });
+  const styles = await fs.readFile(path.resolve(shell, '../chat-ui/src/components/chat/ChatMessage.css'), 'utf8');
+  const server = http.createServer((req, res) => {
+    const script = req.url === '/fixture.js';
+    res.setHeader('Content-Type', script ? 'text/javascript' : 'text/html');
+    res.end(script ? bundle.outputFiles[0].text : `<!doctype html><html><head>
+      <meta name="viewport" content="width=device-width, initial-scale=1"><style>${styles}</style>
+      </head><body><div id="root"></div><script src="/fixture.js"></script></body></html>`);
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const browser = await chromium.launch({headless: true});
+  t.after(() => browser.close());
+  const source = await fs.readFile(chatPage, 'utf8');
+  const reducers = [
+    messages => run(successReducer(source), messages),
+    messages => run(reducerAt(source, '[...prev.filter(m => !m?.isThinking), {', '}]);'), messages),
+    ...pauseSequences.map(sequence => messages => {
+      const state = {messages, loading:true, pending:null};
+      for (const event of sequence) pauseEvent(source, event, state);
+      return state.messages;
+    }),
+    ...interactiveEvents.map(update => messages => uiEvent(source, update, {messages, loading:true}).messages),
+  ];
+  for (const width of [1440, 390]) {
+    const page = await browser.newPage({viewport: {width, height: 844}});
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.goto(`http://127.0.0.1:${server.address().port}`);
+    await page.waitForFunction(() => typeof window.setMessages === 'function');
+    for (const reducer of reducers) {
+      const messages = withThinking();
+      messages[1].agentName = 'ExampleAgent';
+      await page.evaluate(messages => window.setMessages(messages), messages);
+      const status = page.getByRole('status', {name: 'Assistant activity'});
+      await expect(status).toHaveText('Working on this step…', {timeout: 1000});
+      await expect(status).toBeVisible();
+      await expect(status.locator('[aria-hidden="true"]')).toHaveCount(1);
+      await page.evaluate(messages => window.setMessages(messages), reducer(messages));
+      await expect(status).toHaveCount(0);
+      await expect(page.getByText('Here is the summary.', {exact: true})).toBeVisible();
+    }
+    assert.deepEqual(errors, []);
+    await page.close();
+  }
 });

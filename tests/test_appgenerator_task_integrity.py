@@ -145,6 +145,66 @@ def test_explicit_empty_revision_inventory_does_not_invent_new_task_requirements
     assert planned_artifact_diagnostics(context, {"app.json": "{}", "ui/pages/records.yaml": "name: records"}) == []
 
 
+def _materialized_custom_page_context():
+    from mozaiksai.core.workflow.generator_support.code_files import (
+        extract_code_file_map_from_payload,
+    )
+
+    page = {"name": "Focus Timer", "route": "/focus", "ui_surface": "custom_react_page"}
+    output = {"manifest": None, "pages": [], "custom_route_bundle": {
+        "route_manifest": [{"id": "focus", "path": "/focus", "component": "FocusTimer"}],
+        "page_files": [{
+            "route_id": "focus", "path": "ui/pages/custom/focus.jsx", "component_name": "FocusTimerPage",
+            "registry_key": "FocusTimer", "purpose": "Interactive focus timer",
+            "content": "export default function FocusTimerPage() { return <main>Focus timer</main>; }",
+        }],
+    }}
+    files = {"app.json": '{"appName":"Focus"}', **extract_code_file_map_from_payload(output)}
+    tasks = [_task("pages", "AppSchemaAgent", list(files), task_type="page_bundle")]
+    return {
+        "app_build_plan": {"pages": [page], "build_tasks": tasks},
+        "app_task_batch_items": deepcopy(tasks), "app_task_batch_results": {"pages": output},
+        "generated_files": files,
+    }
+
+
+def test_materialized_custom_page_passes_assembly_and_final_completeness_without_phantom_yaml():
+    from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import (
+        _apply_planned_page_contracts,
+    )
+
+    context = _materialized_custom_page_context()
+    files = context["generated_files"]
+    assembled = _apply_planned_page_contracts(
+        [{"filename": path, "content": content} for path, content in files.items()],
+        context["app_build_plan"], context_variables=context,
+    )
+    assert {entry["filename"]: entry["content"] for entry in assembled} == files
+    assert planned_artifact_diagnostics(context, files) == []
+
+
+def test_missing_custom_page_reports_its_canonical_jsx_path_once():
+    context = _materialized_custom_page_context()
+    del context["generated_files"]["ui/pages/custom/focus.jsx"]
+    context["generated_files"]["ui/pages/focus.yaml"] = "name: focus\nroute: /focus\n"
+    diagnostics = planned_artifact_diagnostics(context, context["generated_files"])
+    assert [(item["code"], item["path"], item["task_id"]) for item in diagnostics] == [
+        ("PLANNED_ARTIFACT_MISSING", "ui/pages/custom/focus.jsx", "pages"),
+    ]
+
+
+def test_declarative_plan_completeness_requires_its_route_derived_yaml_path():
+    context = _context()
+    context["app_build_plan"]["pages"] = [{
+        "name": "My Records", "route": "/records", "ui_surface": "declarative_page",
+    }]
+    assert planned_artifact_diagnostics(context, context["generated_files"]) == []
+    del context["generated_files"]["ui/pages/records.yaml"]
+    assert [(item["code"], item["path"]) for item in planned_artifact_diagnostics(context, context["generated_files"])] == [
+        ("PLANNED_ARTIFACT_MISSING", "ui/pages/records.yaml"),
+    ]
+
+
 def test_revision_baseline_cannot_substitute_for_failed_new_task():
     context = _context()
     context.update(build_mode="revision", artifact_version_id="verified-baseline")
@@ -340,7 +400,9 @@ async def test_acceptance_repair_policy_and_code_save_use_frozen_context_and_dec
         assert saved["saved_files"] == [path]
         assert bridge.get("bundle_repair_result")["active"]["status"] == "responded"
         accepted = await run_app_bundle_acceptance_gate(context_variables=bridge)
-        assert accepted["passed"] is True, accepted
+        assert accepted["status"] == "pending", accepted
+        assert accepted["validation_evidence"]["failed"] == []
+        assert accepted["validation_evidence"]["skipped"] == ["app_runtime_smoke"]
 
     assert bridge.snapshot()["app_task_batch_results"] == original_results
     updates = bridge.consume_authorized_context_updates(policy=policy, run_identity=run)

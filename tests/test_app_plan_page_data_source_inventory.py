@@ -171,3 +171,54 @@ def test_without_an_approved_design_the_inventory_is_open():
 
     assert drop_unapproved_page_data_sources(plan, _context(variables)) == []
     assert plan == fixture["AppBuildPlan"]
+
+
+@pytest.mark.parametrize("surface,path", [
+    ("custom_react_page", "ui/pages/custom/dashboard.jsx"),
+    ("declarative_page", "ui/pages/dashboard.yaml"),
+])
+def test_removed_hint_notifies_only_the_task_owning_the_canonical_page(surface, path):
+    fixture = _fixture()
+    page = deepcopy(fixture["AppBuildPlan"]["pages"][0])
+    page["ui_surface"] = surface
+    plan = {"pages": [page], "capability_packs": [], "build_tasks": [
+        {"task_id": "dashboard", "task_type": "page_bundle", "owned_paths": [path], "initial_message": "Build the dashboard."},
+        {"task_id": "other", "task_type": "page_bundle", "owned_paths": ["ui/pages/other.yaml"], "initial_message": "Build the other page."},
+    ]}
+
+    repairs = drop_unapproved_page_data_sources(plan, _context(fixture["context_variables"]))
+
+    assert page["sections_hint"][0]["data_source"] is None
+    assert "tasks/get_kpi_stats" in plan["build_tasks"][0]["initial_message"]
+    assert NOTE in plan["build_tasks"][0]["initial_message"]
+    assert "tasks declares" in plan["build_tasks"][0]["initial_message"]
+    assert plan["build_tasks"][1]["initial_message"] == "Build the other page."
+    assert any("dashboard: noted" in repair for repair in repairs)
+
+
+@pytest.mark.parametrize("surface,path", [
+    ("custom_react_page", "ui/pages/custom/focus.jsx"),
+    ("declarative_page", "ui/pages/focus.yaml"),
+])
+def test_page_dependencies_follow_the_canonical_owned_page_and_declared_source(surface, path):
+    from factory_app.workflows.AppGenerator.tools.app_build_plan import (
+        _normalize_page_task_dependencies,
+    )
+
+    tasks = [
+        {"task_id": "records_contract", "task_type": "module_contract", "capability_pack_id": "records"},
+        {"task_id": "notes_contract", "task_type": "module_contract", "capability_pack_id": "notes"},
+        {"task_id": "focus_page", "task_type": "page_bundle", "capability_pack_id": None,
+         "owned_paths": [path], "depends_on": []},
+    ]
+    pages = [
+        {"name": "Focus Timer", "route": "/focus", "ui_surface": surface,
+         "sections_hint": [{"data_source": {"module_id": "records", "action_id": "list_records"}}]},
+        {"name": "Other Page", "route": "/other", "ui_surface": "declarative_page",
+         "sections_hint": [{"data_source": {"module_id": "notes", "action_id": "list_notes"}}]},
+    ]
+
+    normalized = _normalize_page_task_dependencies(tasks, pages=pages)
+
+    assert normalized[-1]["depends_on"] == ["records_contract"]
+    assert tasks[-1]["depends_on"] == []

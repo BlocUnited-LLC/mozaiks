@@ -1,5 +1,17 @@
 schema_version: mozaiks.structured_outputs.v1
 models:
+  AppInterviewResult:
+    type: model
+    description: A concise clarification of a missing implementation blocker or confirmation that the approved app scope is ready.
+    fields:
+      agent_message:
+        type: str
+        description: One short product question or readiness confirmation. Do not repeat known scope or expose pack IDs or routing markers.
+      outcome:
+        type: literal
+        values: [needs_input, ready]
+        description: Use needs_input only for a missing blocker; ready when the approved brief and existing context are sufficient to implement.
+
   AppPageDataSource:
     type: model
     fields:
@@ -139,9 +151,10 @@ models:
         - declarative_page
         - custom_react_page
         description: >
-          Persistent app UI surface type. Use declarative_page by default; use
-          custom_react_page only when shipped page primitives cannot express the
-          route.
+          Persistent app UI surface type, copied exactly from the approved
+          ExperienceSpec page. Declarative pages use shipped primitives; custom
+          React pages implement declared behavior beyond those primitives. Changing
+          this decision requires an updated approved ExperienceSpec.
       page_type_hint:
         type: literal
         values:
@@ -920,6 +933,10 @@ models:
           runtime_extensions.yaml; it must not own backend/*.py.
           `data_models` emits modules/{module_id}/backend/schemas.py and must start
           at ModelAgent.
+          `persistence_contract` serializes the approved data/contract.json only,
+          with initial_agent=DatabaseAgent, surface_id=data_contract,
+          surface_kind=module, and capability_pack_id=null. It is app-level
+          structural work, not an additional module or capability.
           `business_services` emits module backend implementation files such as
           handler.py, service.py, repo.py, policy.py, and declared hooks; it must
           start at ServiceAgent and must not own schemas.py in task-batch execution.
@@ -954,7 +971,10 @@ models:
         variants:
         - str
         - 'null'
-        description: Capability pack this task belongs to. Null only for truly cross-cutting setup work.
+        description: >
+          Capability pack this task belongs to. Null for app-level structural
+          work, including the approved data/contract.json serializer and page
+          bundle. Module-local tasks use their approved module capability ID.
       surface_id:
         type: str
         description: >
@@ -962,6 +982,10 @@ models:
           may use page_bundle only with task_type=page_bundle, surface_kind=ui_only,
           and capability_pack_id=null, scoped to approved experience_spec pages.
           This structural scope cannot identify a capability or module task.
+          The approved data/contract.json serializer uses surface_id=data_contract only
+          with task_type=persistence_contract, initial_agent=DatabaseAgent,
+          surface_kind=module, and capability_pack_id=null. This structural
+          identity grants no new module or capability authority.
       surface_kind:
         type: literal
         values:
@@ -1954,16 +1978,18 @@ models:
       message:
         type: str
         description: Error message.
+  AppValidationStrategy:
+    type: literal
+    values:
+    - e2b
+    - docker
+    - local
+    - skip
   AppValidation:
     type: model
     fields:
       validation_strategy:
-        type: literal
-        values:
-        - e2b
-        - docker
-        - local
-        - skip
+        type: AppValidationStrategy
         description: Validation strategy requested or resolved for this run.
       validation_status:
         type: literal
@@ -1971,7 +1997,7 @@ models:
         - passed
         - failed
         - skipped
-        description: Outcome of the validation strategy. `skipped` is explicit and not a failure.
+        description: Outcome of the validation strategy. `skipped` leaves build execution unverified and blocks export.
       preview_url:
         type: union
         variants:
@@ -2003,13 +2029,12 @@ models:
     type: model
     fields:
       validation_strategy:
-        type: literal
-        values:
-        - e2b
-        - docker
-        - local
-        - skip
-        description: Requested validation strategy. Copy context app_validation_strategy when provided. Operator environment policy takes precedence over this request.
+        type: union
+        variants:
+        - AppValidationStrategy
+        - 'null'
+        default: null
+        description: Copy a non-null context app_validation_strategy when supplied; otherwise null lets the runtime choose its available default. Do not invent a strategy. Operator environment policy takes precedence over this request.
       start_dev_server:
         type: bool
         description: Set false for canonical apps; interactive preview sessions are managed separately.
@@ -6560,7 +6585,7 @@ models:
         description: AppGenerator integration readiness checkpoint result.
 
 registry:
-  InterviewAgent: null
+  InterviewAgent: AppInterviewResult
   AppPlanAgent: AppBuildPlanOutput
   AppSchemaAgent: AppSchemaOutput
   AppUIQualityAgent: AppUIQualityReviewRequest

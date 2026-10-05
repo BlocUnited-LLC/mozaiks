@@ -37,6 +37,7 @@ from mozaiksai.control_plane import (
     StructuredOutputCodingProvider,
     safe_artifact_relpath,
 )
+from mozaiksai.core.artifacts.models import BuildRecord
 
 _SCOPED_PATH = "app/ui/pages/Dashboard.jsx"
 
@@ -257,17 +258,16 @@ class _FakeArtifactStore:
 
     async def create_build_record(self, **kwargs):  # noqa: ANN003
         self.calls.append(dict(kwargs))
-        return type("ArtifactVersion", (), {"id": "av_child_1"})()
+        return BuildRecord(id="av_child_1", version_number=1, lineage_root_id="av_parent", **kwargs)
 
 
-async def _fake_source_validation_runner(**kwargs):  # noqa: ANN003
+async def _fake_candidate_validation_runner(**kwargs):  # noqa: ANN003
     return {
         "success": True,
         "validation_status": "passed",
-        "execution_mode": "isolated_workspace_copy",
-        "command_results": [],
-        "fallback_checks": [],
-        "warnings": [],
+        "app_bundle_acceptance_result": {"passed": True},
+        "app_validation_result": {"validation_status": "passed", "validation_strategy": kwargs["validation_strategy"]},
+        "validation_strategy": kwargs["validation_strategy"],
     }
 
 
@@ -297,7 +297,7 @@ async def test_worker_runs_injected_provider_through_full_lifecycle(tmp_path: Pa
     worker = ScopedRefinementCodingWorker(
         config_loader=_enabled_control_plane,
         pack_loader=_pack,
-        source_validation_runner=_fake_source_validation_runner,
+        candidate_validation_runner=_fake_candidate_validation_runner,
         artifact_store=artifact_store,
         output_root=tmp_path,
         provider=provider,
@@ -328,7 +328,7 @@ async def test_worker_fails_closed_when_provider_fails(tmp_path: Path) -> None:
     worker = ScopedRefinementCodingWorker(
         config_loader=_enabled_control_plane,
         pack_loader=_pack,
-        source_validation_runner=_fake_source_validation_runner,
+        candidate_validation_runner=_fake_candidate_validation_runner,
         artifact_store=_FakeArtifactStore(),
         output_root=tmp_path,
         provider=_StubProvider(proposal),
@@ -351,7 +351,7 @@ async def test_worker_fails_closed_on_malformed_completed_proposal(tmp_path: Pat
     worker = ScopedRefinementCodingWorker(
         config_loader=_enabled_control_plane,
         pack_loader=_pack,
-        source_validation_runner=_fake_source_validation_runner,
+        candidate_validation_runner=_fake_candidate_validation_runner,
         artifact_store=_FakeArtifactStore(),
         output_root=tmp_path,
         provider=_StubProvider(proposal),
@@ -368,7 +368,7 @@ async def test_worker_checks_eligibility_before_calling_provider(tmp_path: Path)
     worker = ScopedRefinementCodingWorker(
         config_loader=_enabled_control_plane,
         pack_loader=_pack,
-        source_validation_runner=_fake_source_validation_runner,
+        candidate_validation_runner=_fake_candidate_validation_runner,
         artifact_store=_FakeArtifactStore(),
         output_root=tmp_path,
         provider=provider,
@@ -421,7 +421,7 @@ async def test_persistence_records_staged_file_hashes(tmp_path: Path) -> None:
     worker = ScopedRefinementCodingWorker(
         config_loader=_enabled_control_plane,
         pack_loader=_pack,
-        source_validation_runner=_fake_source_validation_runner,
+        candidate_validation_runner=_fake_candidate_validation_runner,
         artifact_store=artifact_store,
         output_root=tmp_path,
         provider=_StubProvider(_completed_proposal()),
@@ -444,7 +444,7 @@ async def test_secret_scoped_file_fails_before_source_validation(tmp_path: Path)
     worker = ScopedRefinementCodingWorker(
         config_loader=_enabled_control_plane,
         pack_loader=_pack,
-        source_validation_runner=_fake_source_validation_runner,
+        candidate_validation_runner=_fake_candidate_validation_runner,
         artifact_store=_FakeArtifactStore(),
         output_root=tmp_path,
         provider=_StubProvider(proposal),
@@ -454,7 +454,7 @@ async def test_secret_scoped_file_fails_before_source_validation(tmp_path: Path)
     )
 
     assert result.status == "failed"
-    assert "SOURCE_VALIDATION_FAILED" in str(result.error)
+    assert "CANDIDATE_VALIDATION_FAILED" in str(result.error)
     assert "WORKSPACE_SECRET_PATH" in str(result.error)
     assert "build_record_id" not in result.metadata
 
@@ -465,7 +465,7 @@ async def test_provider_execution_metadata_is_persisted(tmp_path: Path) -> None:
     worker = ScopedRefinementCodingWorker(
         config_loader=_enabled_control_plane,
         pack_loader=_pack,
-        source_validation_runner=_fake_source_validation_runner,
+        candidate_validation_runner=_fake_candidate_validation_runner,
         artifact_store=artifact_store,
         output_root=tmp_path,
         provider=_StubProvider(_completed_proposal()),

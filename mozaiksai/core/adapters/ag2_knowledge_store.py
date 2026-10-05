@@ -47,6 +47,9 @@ class MongoAG2KnowledgeStore:
         self._collection = collection
         self._client: Any | None = None
         self._lock = asyncio.Lock()
+        # AG2 can persist successive metadata snapshots from concurrent ACKs.
+        # Keep their call order across asynchronous Mongo I/O.
+        self._mutation_lock = asyncio.Lock()
         self._indexes_ready = False
 
     async def read(self, path: str) -> str | None:
@@ -54,26 +57,27 @@ class MongoAG2KnowledgeStore:
         return None if doc is None else str(doc.get("content") or "")
 
     async def write(self, path: str, content: str) -> None:
-        assert_chat_mutable(app_id=self._app_id, chat_id=self._chat_id)
-        normalized = _normalize_path(path)
-        now = datetime.now(UTC)
-        await (await self._coll()).update_one(
-            self._filter(normalized),
-            {
-                "$set": dual_write_app_scope(
-                    {
-                        "app_id": self._app_id,
-                        "chat_id": self._chat_id,
-                        "path": normalized,
-                        "content": str(content),
-                        "updated_at": now,
-                    },
-                    self._app_id,
-                ),
-                "$setOnInsert": {"created_at": now},
-            },
-            upsert=True,
-        )
+        async with self._mutation_lock:
+            assert_chat_mutable(app_id=self._app_id, chat_id=self._chat_id)
+            normalized = _normalize_path(path)
+            now = datetime.now(UTC)
+            await (await self._coll()).update_one(
+                self._filter(normalized),
+                {
+                    "$set": dual_write_app_scope(
+                        {
+                            "app_id": self._app_id,
+                            "chat_id": self._chat_id,
+                            "path": normalized,
+                            "content": str(content),
+                            "updated_at": now,
+                        },
+                        self._app_id,
+                    ),
+                    "$setOnInsert": {"created_at": now},
+                },
+                upsert=True,
+            )
 
     async def list(self, path: str = "/") -> list[str]:
         normalized = _normalize_path(path)
@@ -91,14 +95,15 @@ class MongoAG2KnowledgeStore:
         return sorted(children)
 
     async def delete(self, path: str) -> None:
-        assert_chat_mutable(app_id=self._app_id, chat_id=self._chat_id)
-        normalized = _normalize_path(path)
-        query = self._scope_filter()
-        query["$or"] = [
-            {"path": normalized},
-            {"path": {"$regex": f"^{re.escape(normalized.rstrip('/') + '/')}"}},
-        ]
-        await (await self._coll()).delete_many(query)
+        async with self._mutation_lock:
+            assert_chat_mutable(app_id=self._app_id, chat_id=self._chat_id)
+            normalized = _normalize_path(path)
+            query = self._scope_filter()
+            query["$or"] = [
+                {"path": normalized},
+                {"path": {"$regex": f"^{re.escape(normalized.rstrip('/') + '/')}"}},
+            ]
+            await (await self._coll()).delete_many(query)
 
     async def exists(self, path: str) -> bool:
         normalized = _normalize_path(path)
@@ -111,34 +116,35 @@ class MongoAG2KnowledgeStore:
 
     async def append(self, path: str, content: str) -> int:
         """Atomically append UTF-8 content and return its prior byte offset."""
-        assert_chat_mutable(app_id=self._app_id, chat_id=self._chat_id)
-        normalized = _normalize_path(path)
-        now = datetime.now(UTC)
-        prior = await (await self._coll()).find_one_and_update(
-            self._filter(normalized),
-            [
-                {
-                    "$set": dual_write_app_scope(
-                        {
-                            "app_id": self._app_id,
-                            "chat_id": self._chat_id,
-                            "path": normalized,
-                            "content": {
-                                "$concat": [
-                                    {"$ifNull": ["$content", ""]},
-                                    str(content),
-                                ]
+        async with self._mutation_lock:
+            assert_chat_mutable(app_id=self._app_id, chat_id=self._chat_id)
+            normalized = _normalize_path(path)
+            now = datetime.now(UTC)
+            prior = await (await self._coll()).find_one_and_update(
+                self._filter(normalized),
+                [
+                    {
+                        "$set": dual_write_app_scope(
+                            {
+                                "app_id": self._app_id,
+                                "chat_id": self._chat_id,
+                                "path": normalized,
+                                "content": {
+                                    "$concat": [
+                                        {"$ifNull": ["$content", ""]},
+                                        str(content),
+                                    ]
+                                },
+                                "created_at": {"$ifNull": ["$created_at", now]},
+                                "updated_at": now,
                             },
-                            "created_at": {"$ifNull": ["$created_at", now]},
-                            "updated_at": now,
-                        },
-                        self._app_id,
-                    )
-                }
-            ],
-            upsert=True,
-            return_document=ReturnDocument.BEFORE,
-        )
+                            self._app_id,
+                        )
+                    }
+                ],
+                upsert=True,
+                return_document=ReturnDocument.BEFORE,
+            )
         return len(str((prior or {}).get("content") or "").encode("utf-8"))
 
     async def read_range(self, path: str, start: int, end: int | None = None) -> str:

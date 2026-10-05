@@ -7,9 +7,11 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
+from factory_app.workflows.AppGenerator.tools import app_runtime_smoke, app_validation
 from mozaiksai.core.artifacts import (
     ArtifactLifecycleStatus,
     ArtifactValidationStatus,
@@ -110,6 +112,21 @@ def _factory_workflows_root() -> Path:
     return Path(__file__).resolve().parents[1] / "factory_app" / "workflows"
 
 
+@pytest.fixture
+def completed_validation_boundaries(monkeypatch):
+    """Execution fixtures for lineage unit tests; admission and context writes stay real."""
+    from scripts.smoke_factory_artifact_lineage import validate_app_bundle_from_request
+
+    validator_globals = validate_app_bundle_from_request.__globals__
+    smoke = AsyncMock(return_value={
+        "status": "passed", "passed": True, "failed_tests": [], "checks": [],
+    })
+    build = AsyncMock(return_value=app_validation._base_result(strategy="local", status="passed"))
+    monkeypatch.setattr(validator_globals["app_runtime_smoke"], "run_app_runtime_smoke", smoke)
+    monkeypatch.setitem(validator_globals, "_run_local_validation", build)
+    return smoke, build
+
+
 @pytest.mark.asyncio
 async def test_offline_build_sequence_smoke_persists_agent_and_app_artifact_chain(monkeypatch, tmp_path) -> None:
     """Exercise the real archive writers, not duplicate lifecycle summaries."""
@@ -199,7 +216,7 @@ async def test_offline_build_sequence_smoke_persists_agent_and_app_artifact_chai
 
 
 @pytest.mark.asyncio
-async def test_offline_factory_artifact_lineage_smoke_hydrates_workflow_metadata() -> None:
+async def test_offline_factory_artifact_lineage_smoke_hydrates_workflow_metadata(completed_validation_boundaries) -> None:
     from scripts.smoke_factory_artifact_lineage import (
         run_offline_factory_artifact_lineage_smoke,
     )
@@ -238,10 +255,14 @@ async def test_offline_factory_artifact_lineage_smoke_hydrates_workflow_metadata
     assert result["appgenerator_acceptance"]["failed_tasks"] == {}
     assert result["export_gate"]["allow_export"] is True
     assert result["runtime_loader"]["workflow_reaction_loaded"] is True
+    assert result["app_validation_result"]["validation_status"] == "passed"
+    smoke, build = completed_validation_boundaries
+    smoke.assert_awaited_once()
+    build.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_offline_factory_artifact_lineage_smoke_uses_hydrated_primary_workflow_metadata() -> None:
+async def test_offline_factory_artifact_lineage_smoke_uses_hydrated_primary_workflow_metadata(completed_validation_boundaries) -> None:
     from scripts.smoke_factory_artifact_lineage import (
         run_offline_factory_artifact_lineage_smoke,
     )
@@ -279,6 +300,36 @@ async def test_offline_factory_artifact_lineage_smoke_uses_hydrated_primary_work
         == "support-escalation-workflow"
     )
     assert "support-escalation-workflow" in result["runtime_loader"]["reaction_capability_ids"]
+    assert result["app_validation_result"]["validation_status"] == "passed"
+    smoke, build = completed_validation_boundaries
+    smoke.assert_awaited_once()
+    build.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_offline_lineage_cannot_export_or_register_app_when_runtime_validation_is_unavailable(monkeypatch):
+    from factory_app.workflows.AppGenerator.tools import generate_and_download
+    from scripts.smoke_factory_artifact_lineage import run_offline_factory_artifact_lineage_smoke
+
+    monkeypatch.setattr(app_runtime_smoke, "resolve_smoke_mongo_uri", lambda: None)
+    build = AsyncMock(side_effect=AssertionError("Incomplete acceptance must not reach a build."))
+    register = AsyncMock(side_effect=AssertionError("Incomplete acceptance must not register an app artifact."))
+    monkeypatch.setattr(app_validation, "_run_local_validation", build)
+    monkeypatch.setattr(generate_and_download, "_register_app_bundle_artifact_version", register)
+
+    result = await run_offline_factory_artifact_lineage_smoke()
+
+    assert result["success"] is False
+    assert result["export_gate"]["allow_export"] is False
+    assert result["app_validation_result"]["validation_status"] == "pending"
+    acceptance = result["appgenerator_acceptance"]
+    assert acceptance["status"] == "pending"
+    assert acceptance["validation_evidence"]["failed"] == []
+    assert acceptance["validation_evidence"]["skipped"] == ["app_runtime_smoke"]
+    assert "workflow_integration" in acceptance["validation_evidence"]["completed"]
+    assert "snapshot_digest" not in acceptance
+    build.assert_not_awaited()
+    register.assert_not_awaited()
 
 
 @pytest.mark.skipif(

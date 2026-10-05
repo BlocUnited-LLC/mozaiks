@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Any, Protocol, cast, runtime_checkable
 from uuid import uuid4
 
+from mozaiksai.core.artifacts.models import BuildRecord, resolve_canonical_bundle_entry
+
 logger = logging.getLogger(__name__)
 
 
@@ -382,6 +384,36 @@ def get_bundle_content_store() -> ArtifactContentStore:
     return _bundle_content_store
 
 
+async def read_verified_artifact_bundle(
+    artifact: BuildRecord, *, max_bytes: int = 32_000_000,
+) -> bytes:
+    """Read one canonical archive, returning the exact digest-verified bytes.
+
+    Consumers must use these bytes rather than reopen the mutable content
+    reference after verification. Manifests without a digest cannot establish identity.
+    """
+    entry = resolve_canonical_bundle_entry(artifact)
+    metadata = artifact.commit_metadata.metadata
+    if metadata.get("content_ref"):
+        content_store = get_artifact_content_store()
+        if metadata.get("content_backend") != content_store.backend_name:
+            raise ContentIntegrityError("artifact_bundle_content_backend_mismatch")
+        reference = metadata["content_ref"]
+    else:
+        content_store = LocalArtifactContentStore()
+        reference = metadata.get("artifact_path")
+    if not reference:
+        raise ContentNotFoundError("artifact_bundle_content_missing")
+    raw = await content_store.get_bundle(reference)
+    if len(raw) > max_bytes:
+        raise ContentIntegrityError("artifact_bundle_archive_too_large")
+    try:
+        _verified_blob_digest(raw, cast(str, entry.sha256))
+    except ContentIntegrityError as exc:
+        raise ContentIntegrityError("artifact_bundle_digest_mismatch") from exc
+    return raw
+
+
 # New-API name aliases (bundle naming)
 BundleContentStore = ArtifactContentStore
 LocalBundleContentStore = LocalArtifactContentStore
@@ -399,4 +431,5 @@ __all__ = [
     "LocalBundleContentStore",
     "GridFSBundleContentStore",
     "get_bundle_content_store",
+    "read_verified_artifact_bundle",
 ]

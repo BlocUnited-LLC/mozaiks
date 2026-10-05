@@ -41,3 +41,14 @@ test('integration checks with nothing skipped still render as passed', () => {
   assert.doesNotMatch(block, /skipped/);
   assert.match(block, /lucide-circle-check/);
 });
+
+test('expanded build warnings include the full list shown by the count', () => {
+  const warnings = Array.from({length:51}, (_, index) => `Warning ${index + 1}.`);
+  const html = renderToStaticMarkup(createElement(module.exports.default, {
+    validationStatus:'passed', validationResult:{warnings},
+    config:{artifacts:{'build-status':{collapseWarnings:false}}},
+  }));
+  assert.match(html, /aria-expanded="true"/);
+  assert.match(html, /51 warning\(s\)/);
+  assert.match(html, /Warning 51\./);
+});

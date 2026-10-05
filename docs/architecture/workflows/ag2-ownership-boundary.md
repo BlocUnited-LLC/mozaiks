@@ -267,6 +267,20 @@ run_workflow_orchestration(knowledge_store=...)
 
 ## Reconnect Integration
 
+Opening or switching to a saved chat is observation, not permission to execute
+an interrupted turn. Empty UI history alone does not establish a fresh run.
+Before a no-input start, the transport checks the owned session and build
+binding, validated UI state, history, and the orchestration adapter's read-only
+native persistence query. It repeats admission under the existing chat execution
+lease. Any native data, including a partial namespace, prevents automatic
+startup; unavailable or malformed state fails closed. AG2 retains ownership of
+its state and continuation mechanics. The check does not hydrate a Hub or call
+a model, and a refused open does not emit a workflow outcome or change status.
+Explicit user messages and declared initial-agent continuations keep their
+existing paths. An interrupted UI turn is not recovered by this guard:
+saved results may be inspected independently, but status-0 sessions do not gain
+a failed-workflow Retry action or become failed merely because they were opened.
+
 The network adapter snapshots AG2's pending participants before calling its
 `resume_pending_turns()` API. It must not discover and replay downstream turns
 that are already advancing through live delivery, or send a new user message

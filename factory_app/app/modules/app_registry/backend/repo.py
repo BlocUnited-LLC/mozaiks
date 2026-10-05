@@ -162,6 +162,40 @@ class AppRegistryRepo:
             raise RuntimeError("App record could not be loaded after upsert")
         return normalized
 
+    async def update_concept_identity(
+        self, *, owner_user_id: str, execution_app_id: str, build_registry_id: str,
+        app_id: str, expected_build_id: str, name: str, description: str | None,
+    ) -> dict[str, Any] | None:
+        query = {
+            "_id": build_registry_id, **owner_filter(owner_user_id), "app_id": app_id,
+            "chat_app_id": execution_app_id, "current_build_run.build_id": expected_build_id,
+        }
+        coll = await self._collection()
+        existing = await coll.find_one(query)
+        if not existing:
+            return None
+        now = datetime.now(UTC)
+        updates: dict[str, Any] = {}
+        # Approval may name a generated draft, but cannot rename imported or
+        # manually named apps or replace an existing explicit description.
+        if existing.get("name_source") in {"provisional", "value_engine_concept"}:
+            query["name_source"] = existing["name_source"]
+            updates.update({
+                "name": name, "name_status": "named", "name_source": "value_engine_concept",
+                "named_at": existing.get("named_at") or now,
+            })
+        if description and not str(existing.get("description") or "").strip():
+            query["description"] = existing.get("description")
+            updates["description"] = description
+        if not updates:
+            return self._normalize_doc(existing)
+        query["updated_at"] = existing.get("updated_at")
+        updates["updated_at"] = now
+        doc = await coll.find_one_and_update(
+            query, {"$set": updates}, return_document=ReturnDocument.AFTER,
+        )
+        return self._normalize_doc(doc)
+
     async def update_lifecycle_state(
         self,
         *,

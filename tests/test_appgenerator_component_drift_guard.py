@@ -302,8 +302,39 @@ def test_custom_page_file_exists_but_not_registered_fails() -> None:
     )
 
     assert warnings == [
-        "app UI bundle custom page file 'ui/pages/custom/AuditLogPage.jsx' exports component 'AuditLogPage' but that component is not registered in ui/index.js."
+        "app UI bundle custom page file 'ui/pages/custom/AuditLogPage.jsx' is not imported by a registered component in ui/index.js."
     ]
+
+
+@pytest.mark.parametrize("defect", [None, "missing_binding", "missing_file", "unregistered_file"])
+def test_custom_registry_resolves_key_through_actual_import_binding(defect) -> None:
+    from mozaiksai.core.workflow.generator_support.code_files import _custom_route_bundle_code_files
+    from tests.test_appgenerator_save_app_schema import _custom_route_bundle
+
+    bundle = _custom_route_bundle()
+    bundle["page_files"][0]["path"] = "ui/pages/custom/deal_room.jsx"
+    files = {entry["filename"]: entry["content"] for entry in _custom_route_bundle_code_files(bundle)}
+    if defect == "missing_binding":
+        # An imported variable exists, but the registration uses a different,
+        # undefined one. The registry key cannot stand in for that binding.
+        files["ui/index.js"] = files["ui/index.js"].replace(
+            "'InvestorDealRoomPage', InvestorDealRoom,", "'InvestorDealRoomPage', MissingPage,",
+        )
+    elif defect == "missing_file":
+        files.pop("ui/pages/custom/deal_room.jsx")
+    elif defect == "unregistered_file":
+        files["ui/pages/custom/unused.jsx"] = "export default function Unused() { return null; }"
+    warnings = audit_app_ui_bundle_integrity([
+        {"filename": path, "content": content} for path, content in files.items()
+    ])
+    if defect == "missing_binding":
+        assert any("registered binding 'MissingPage'" in warning for warning in warnings)
+    elif defect == "missing_file":
+        assert any("missing file 'ui/pages/custom/deal_room.jsx'" in warning for warning in warnings)
+    elif defect == "unregistered_file":
+        assert any("custom page file 'ui/pages/custom/unused.jsx' is not imported" in warning for warning in warnings)
+    else:
+        assert warnings == []
 
 
 def test_admin_registry_custom_route_misuse_fails() -> None:

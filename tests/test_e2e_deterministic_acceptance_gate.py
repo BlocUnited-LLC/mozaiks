@@ -669,10 +669,12 @@ class TestPositiveE2EAcceptanceGate:
         assert result.passed is True, [d.message for d in result.diagnostics if d.severity == "error"]
 
     @pytest.mark.asyncio
-    async def test_fixture_passes_acceptance_gate(self) -> None:
-        """Production run_app_bundle_acceptance_gate passes."""
+    async def test_fixture_passes_structural_checks_while_runtime_smoke_is_pending(self) -> None:
+        """Static checks pass without claiming an unexecuted persistence smoke."""
         gate = await run_app_bundle_acceptance_gate(files=_canonical_fixture())
-        assert gate["passed"] is True, gate
+        assert gate["status"] == "pending", gate
+        assert gate["validation_evidence"]["failed"] == []
+        assert gate["validation_evidence"]["skipped"] == ["app_runtime_smoke"]
         assert gate["functional_completeness"]["passed"] is True
 
     @pytest.mark.asyncio

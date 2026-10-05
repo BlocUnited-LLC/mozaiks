@@ -36,7 +36,6 @@ from factory_app.workflows.AppGenerator.tools.export_app_code import (
     export_app_code_to_github,
     resolve_export_gate,
 )
-from factory_app.workflows.AppGenerator.tools.module_api_template import get_module_api_template
 from factory_app.workflows.AppGenerator.tools.requirements_scanner import scan_requirements
 from factory_app.workflows.AppGenerator.tools.schema_migration import inject_migration_into_bundle
 from logs.logging_config import get_workflow_logger
@@ -818,12 +817,6 @@ async def generate_and_download(
     if "requirements.txt" not in files_map:
         files_map["requirements.txt"] = scan_requirements(files_map)
 
-    # Inject the canonical moduleApi.js helper if the agents did not produce one.
-    # Custom-route JSX files import moduleAction from this path. The template
-    # includes structured error body parsing so callers can branch on error_code.
-    if "ui/lib/moduleApi.js" not in files_map:
-        files_map["ui/lib/moduleApi.js"] = get_module_api_template()
-
     # Inject any pending migration file produced by DatabaseAgent during refinement.
     pending_migration: dict[str, Any] | None = None
     if context_variables is not None and hasattr(context_variables, "get"):
@@ -892,12 +885,24 @@ async def generate_and_download(
             "status": "error",
             "outcome": _export_repair_outcome(acceptance_result),
             "message": (
-                "Generated app bundle failed deterministic acceptance. "
+                "Required app validation checks have not completed. "
+                "Resolve the reported validation prerequisites and run validation again."
+                if acceptance_result.get("status") == "pending"
+                else "Generated app bundle failed deterministic acceptance. "
                 "Fix the reported contract errors and regenerate."
             ),
             "app_bundle_acceptance_status": acceptance_result.get("status"),
             "app_bundle_acceptance_result": acceptance_result,
             "bundle_errors": acceptance_result.get("bundle_scan", {}).get("errors") or [],
+        }
+
+    export_gate = resolve_export_gate(context_variables, files=files_map)
+    if not export_gate["allow_export"]:
+        return {
+            "status": "error",
+            "outcome": "blocked",
+            "message": "This draft is not ready for export. " + " ".join(export_gate["reasons"]),
+            "export_gate": export_gate,
         }
 
     bundle_name = str(_context_get(context_variables, "app_name") or "GeneratedApp")

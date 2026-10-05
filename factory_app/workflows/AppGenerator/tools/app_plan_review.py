@@ -41,7 +41,7 @@ from mozaiksai.core.runtime.app.paths import is_safe_app_path, normalize_app_pat
 from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.dependency_graph import deterministic_topological_order
-from mozaiksai.core.workflow.generator_support.code_files import _page_file_stem
+from mozaiksai.core.workflow.generator_support.code_files import planned_page_path
 from mozaiksai.core.workflow.generator_support.module_account_data import owns_per_user_collections
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     PackFacadeDirectory,
@@ -408,14 +408,25 @@ def _repair_plan(plan: dict[str, Any], context: Any) -> list[str]:
 
 def _required_page_paths(plan: dict[str, Any]) -> list[str]:
     """Use the materializer's identity for both construction and coverage."""
-    return ["app.json", *[
-        f"ui/pages/{_page_file_stem(page)}.yaml" for page in plan.get("pages") or []
-    ]]
+    pages = plan.get("pages") or []
+    paths = ["app.json", *[planned_page_path(page) for page in pages]]
+    if any(page.get("ui_surface") == "custom_react_page" for page in pages):
+        paths.extend(["ui/route_manifest.json", "ui/index.js"])
+    return paths
 
 
 def _authored_page_paths(plan: dict[str, Any], pack_paths: frozenset[str]) -> list[str]:
     """The page artifacts page_bundle authors: every required one a selected pack does not ship."""
-    return [path for path in _required_page_paths(plan) if path not in pack_paths]
+    authored = [path for path in _required_page_paths(plan) if path not in pack_paths]
+    if any(path.startswith("ui/pages/custom/") for path in authored):
+        conflicts = {"ui/route_manifest.json", "ui/index.js"} & pack_paths
+        if conflicts:
+            raise ValueError(
+                "Custom page generation conflicts with selected-pack registry ownership: "
+                f"{sorted(conflicts)}. Use the selected pack's declared pages or revise the pack selection; "
+                "a page_bundle cannot overwrite its registry."
+            )
+    return authored
 
 
 def _note_pack_pages(plan: dict[str, Any], context: Any) -> list[str]:
@@ -442,6 +453,26 @@ def _note_pack_pages(plan: dict[str, Any], context: Any) -> list[str]:
 
 def _approved_page_inventory(context: Any) -> list[dict[str, Any]]:
     return list((detach(context.get("experience_spec")) or {}).get("pages") or [])
+
+
+def _validate_page_realizations(plan: dict[str, Any], context: Any) -> None:
+    """A plan implements the approved rendering contract; it cannot re-decide it."""
+    planned = {page.get("route"): page for page in plan.get("pages") or []}
+    for approved in _approved_page_inventory(context):
+        surface = approved.get("ui_surface")
+        if surface not in {"declarative_page", "custom_react_page"}:
+            raise ValueError(
+                f"Approved page {approved.get('route')!r} needs an explicit ui_surface "
+                "in ExperienceSpec; revise DesignDocs before app planning."
+            )
+        candidate = planned.get(approved.get("route"))
+        if candidate is not None and candidate.get("ui_surface") != surface:
+            raise ValueError(
+                f"Page {approved['route']!r} must preserve approved ui_surface {surface!r}; "
+                f"received {candidate.get('ui_surface')!r}. Update the plan and page_bundle "
+                f"ownership to implement {planned_page_path(approved)!r}; changing the "
+                "rendering decision requires revising the approved ExperienceSpec."
+            )
 
 
 def _required_module_paths(pack: dict[str, Any], context: Any) -> dict[str, set[str]]:
@@ -588,6 +619,14 @@ def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
     ]
     if expected:
         planned = plan.get("pages") or []
+        approved_by_route = {page["route"]: page for page in approved_pages}
+        for page in planned:
+            # Selected pack descriptors can add pages after the model's plan is
+            # checked. Their rendering contract comes from the approved design.
+            approved_page = approved_by_route.get(page.get("route"))
+            if approved_page is not None and not page.get("ui_surface"):
+                page["ui_surface"] = approved_page["ui_surface"]
+                repairs.append(f"{page['route']}: copied approved ui_surface for constructed page")
         by_route = {page.get("route"): page for page in planned}
         by_name = {page.get("name"): page for page in planned}
         if {(p.get("name"), p.get("route")) for p in planned} != set(expected):
@@ -597,10 +636,11 @@ def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
                 existing = by_route.get(route) or by_name.get(name) or {}
                 page = {
                     key: value for key, value in approved_page.items()
-                    if key in {"name", "route", "purpose", "design_intent", "primary_entities", "primary_actions"}
+                    if key in {"name", "route", "purpose", "design_intent", "primary_entities", "primary_actions", "ui_surface"}
                 }
                 page.update(existing)
                 page["name"], page["route"] = name, route
+                page["ui_surface"] = approved_page["ui_surface"]
                 rebuilt.append(page)
             plan["pages"] = rebuilt
             repairs.append(f"pages -> approved inventory {sorted(expected)}")
@@ -648,6 +688,14 @@ def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
         for path in required_paths:
             assigned.setdefault(path, bundle_tasks[0])
 
+        # One typed custom bundle owns its route registry and all its components.
+        # Splitting these across workers cannot produce a complete registry.
+        custom_paths = [path for path in required_paths if path.startswith("ui/pages/custom/")]
+        if custom_paths:
+            custom_owner = assigned["ui/route_manifest.json"]
+            for path in [*custom_paths, "ui/route_manifest.json", "ui/index.js"]:
+                assigned[path] = custom_owner
+
         for task in bundle_tasks:
             mine = [path for path in required_paths if assigned.get(path) is task]
             others: list[str] = []
@@ -664,7 +712,7 @@ def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
                 # file the planner invented. Keeping it fails materialization
                 # with "page has no approved plan identity", because no approved
                 # page claims that stem. Non-page assets are untouched.
-                if text.startswith("ui/pages/") and text.endswith((".yaml", ".yml")):
+                if text.startswith("ui/pages/") and text.endswith((".yaml", ".yml", ".jsx")):
                     repairs.append(f"{task.get('task_id')}: dropped {text!r}, not an approved page")
                     continue
                 others.append(text)
@@ -1165,7 +1213,7 @@ def _approved_surface_ids(context: Any) -> set[str]:
 
 
 def _owns_only_approved_pages(task: dict[str, Any], context: Any) -> bool:
-    """A page_bundle task whose every owned path is an approved page artifact."""
+    """Resolve the rendering choice only for an already approved page route."""
     pages = _approved_page_inventory(context)
     return bool(
         task.get("task_type") == "page_bundle"
@@ -1175,6 +1223,45 @@ def _owns_only_approved_pages(task: dict[str, Any], context: Any) -> bool:
         and {path.lower() for path in _normalized_owned_paths(task)}
         <= {path.lower() for path in _required_page_paths({"pages": pages})}
     )
+
+
+def _owns_only_approved_data_contract(task: dict[str, Any], context: Any) -> bool:
+    """A DatabaseAgent serializer owns the approved contract, not a new module."""
+    return bool(
+        context.get("data_contract")
+        and task.get("task_type") == "persistence_contract"
+        and task.get("initial_agent") == _CANONICAL_INITIAL_AGENTS["persistence_contract"]
+        and task.get("capability_pack_id") is None
+        and task.get("owned_paths") == ["data/contract.json"]
+    )
+
+
+def _label_persistence_tasks(plan: dict[str, Any], context: Any) -> list[str]:
+    approved = _approved_surface_ids(context)
+    capability_ids = approved | set(_context_available_pack_map(context)) | {
+        _pack_id_from_descriptor(pack) for pack in plan.get("capability_packs") or []
+    }
+    repairs: list[str] = []
+    for task in plan.get("build_tasks") or []:
+        surface_id = str(task.get("surface_id") or "")
+        capability_id = task.get("capability_pack_id")
+        if (
+            surface_id in approved
+            or capability_id in capability_ids
+            or not _owns_only_approved_data_contract({**task, "capability_pack_id": None}, context)
+            or (surface_id == "data_contract" and task.get("surface_kind") == "module" and capability_id is None)
+        ):
+            continue
+        # Its exact approved artifact determines serializer ownership. An
+        # unbound label cannot create a module, and a real association is never
+        # removed to make a task pass the surface inventory check.
+        task.update(surface_id="data_contract", surface_kind="module", capability_pack_id=None)
+        repairs.append(
+            f"{task.get('task_id')}: surface {surface_id!r} -> 'data_contract', "
+            f"capability_pack_id {capability_id!r} -> None; "
+            "the persistence task serializes only the approved data/contract.json"
+        )
+    return repairs
 
 
 def _label_page_tasks(plan: dict[str, Any], context: Any) -> list[str]:
@@ -1364,6 +1451,7 @@ def _merge_closes_cycle(
 
 def _validate_plan_surface_inventory(plan: dict[str, Any], context: Any) -> None:
     """Reject invented scope before repairs or identity advice can obscure it."""
+    _validate_page_realizations(plan, context)
     validate_surface_ownership(
         detach(context.get("design_surface_map")) or {},
         context_variables=context, data_contract=detach(context.get("data_contract")),
@@ -1386,11 +1474,8 @@ def _validate_plan_surface_inventory(plan: dict[str, Any], context: Any) -> None
                 continue
             if (
                 is_task and surface_id == "data_contract"
-                and entry.get("task_type") == "persistence_contract"
                 and entry.get("surface_kind") == "module"
-                and entry.get("capability_pack_id") is None
-                and context.get("data_contract")
-                and entry.get("owned_paths") == ["data/contract.json"]
+                and _owns_only_approved_data_contract(entry, context)
             ):
                 continue
             unapproved.add(surface_id)
@@ -1513,6 +1598,7 @@ def validate_plan_origins(plan: dict[str, Any], context: Any) -> None:
 
 
 def validate_plan_coverage(plan: dict[str, Any], context: Any) -> None:
+    _validate_page_realizations(plan, context)
     tasks = plan.get("build_tasks") or []
     if not tasks:
         raise ValueError("A build plan must declare materializing build_tasks, not just a page or capability inventory")
@@ -1556,6 +1642,12 @@ def validate_plan_coverage(plan: dict[str, Any], context: Any) -> None:
             f"not the display name. Required page paths: {page_paths}; received page_bundle paths: {sorted(page_owned)}. "
             "Replace differently cased filenames; do not add both spellings."
         )
+    custom_paths = {path for path in required_page_paths if path.startswith("ui/pages/custom/")}
+    if custom_paths:
+        custom_bundle_paths = custom_paths | {"ui/route_manifest.json", "ui/index.js"}
+        if not any(custom_bundle_paths <= set(_normalized_owned_paths(task)) for task in tasks
+                   if task.get("task_type") == "page_bundle"):
+            errors.append("One page_bundle task must own the complete custom route manifest, registry, and page files")
 
     for pack in plan.get("capability_packs") or []:
         if pack.get("surface_kind") != "module" or pack.get("capability_source") != "generated_module":
@@ -1641,10 +1733,16 @@ def review_app_build_plan(
         raise ValueError("Plan review requires runtime context")
     _clear_plan(context_variables)
     context_variables.set("app_plan_outcome", "blocked")
+    context_variables.set("app_build_failure_message", None)
     attempts = context_variables.get("app_plan_attempts") or 0
     if type(attempts) is not int or attempts < 0:
         raise ValueError("Invalid runtime plan attempt counter")
     if attempts >= 3:
+        feedback = context_variables.get("app_plan_feedback") or "Plan review attempt budget exhausted"
+        context_variables.set(
+            "app_build_failure_message",
+            "The app build cannot continue: the implementation plan has unresolved contract errors.\n" + feedback,
+        )
         return {"outcome": "blocked", "error": "Plan review attempt budget exhausted"}
     attempts += 1
     context_variables.set("app_plan_attempts", attempts)
@@ -1653,6 +1751,7 @@ def review_app_build_plan(
         plan = models["AppBuildPlan"].model_validate(detach(AppBuildPlan)).model_dump(mode="json")
         for repair in (
             *_apply_dispatch_path_rules(plan),
+            *_label_persistence_tasks(plan, context_variables),
             *_label_page_tasks(plan, context_variables),
             *_merge_split_tasks(plan, context_variables),
         ):
@@ -1698,6 +1797,11 @@ def review_app_build_plan(
         context_variables.set("app_plan_feedback", feedback)
         outcome = "needs_revision" if attempts < 3 else "blocked"
         context_variables.set("app_plan_outcome", outcome)
+        if outcome == "blocked":
+            context_variables.set(
+                "app_build_failure_message",
+                "The app build cannot continue: the implementation plan has unresolved contract errors.\n" + feedback,
+            )
         # Without ok=False the runtime's failure detector reads a rejection as
         # success, so three rejected plans logged as three clean completions and
         # the real validator errors never reached the log at all.

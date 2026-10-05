@@ -128,3 +128,22 @@ test('AppsDirectory keeps local filtering when a complete portfolio is supplied'
   await page.getByText('First app', { exact: true }).filter({ visible: true }).waitFor();
   assert.equal(await page.getByRole('navigation', { name: 'Apps pagination' }).count(), 0);
 });
+
+test('AppsDirectory shows the approved name without changing draft identity or navigation', async t => {
+  const page = await fixture(t);
+  const record = { build_registry_id: 'same-record', app_id: 'draft-app-58c84bf6',
+    name: null, name_status: 'provisional', name_source: 'provisional', status: 'building' };
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.evaluate(app => window.updateDirectory({ apps: [app] }), record);
+    await page.getByText('Draft 58C84B', { exact: true }).filter({ visible: true }).waitFor();
+    assert.equal(await page.getByText(record.app_id, { exact: true }).filter({ visible: true }).count(), 0);
+    await page.evaluate(app => window.updateDirectory({ apps: [{ ...app, name: 'FocusSprint',
+      name_status: 'named', name_source: 'value_engine_concept' }] }), record);
+    await page.getByText('FocusSprint', { exact: true }).filter({ visible: true }).waitFor();
+    assert.equal(await page.getByText('Draft 58C84B', { exact: true }).filter({ visible: true }).count(), 0);
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  }
+  await page.getByRole('button', { name: 'Dashboard', exact: true }).filter({ visible: true }).click();
+  assert.ok(page.url().endsWith('/apps/same-record/overview'));
+});

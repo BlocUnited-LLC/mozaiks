@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from mozaiksai.core.runtime.app.auth_contract import APP_AUTH_COMPONENTS
+from mozaiksai.core.runtime.app.studio_summary import build_app_list_entry
 
 
 def _workspace() -> Path:
@@ -229,13 +230,18 @@ def test_chat_page_defers_new_app_workflow_until_first_user_message() -> None:
     assert "nextParams.delete('defer_start')" in source
 
 
-def test_building_app_list_entry_routes_to_active_chat() -> None:
-    source = _read("mozaiksai/core/runtime/app/studio_summary.py")
-    assert '"chat_app_id": chat_app_id or None' in source
-    assert '"app_id": chat_scope' in source
-    assert 'f"/chat?{urlencode(resume_query)}"' in source
-    assert '"active_chat_id": active_chat_id or None' in source
-    assert '"active_workflow_id": active_workflow_id if active_chat_id else None' in source
+def test_building_app_with_workflow_metadata_requires_chat_before_resuming() -> None:
+    result = build_app_list_entry({
+        "app_id": "draft-app",
+        "chat_app_id": "factory-app",
+        "lifecycle_state": "building",
+        "current_build_run": {"active_workflow_id": "ValueEngine"},
+    })
+
+    assert result["chat_app_id"] == "factory-app"
+    assert result["active_workflow_id"] == "ValueEngine"
+    assert result["active_chat_id"] is None
+    assert result["destination"] == "/apps/draft-app/building"
 
 
 def test_workspace_layout_links_studio_and_hosting_sections() -> None:

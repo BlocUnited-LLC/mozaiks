@@ -828,12 +828,21 @@ async def _materialize_spec(spec: _ArchetypeSpec, tmp_path: Path) -> tuple[dict[
     )
     assert validation.passed is True, f"MATERIALIZATION_GAP {spec.archetype_id}: {validation.diagnostics}"
     assert scan_functional_generated_app(files, capability_packs=spec.plan.get("capability_packs", [])) == []
-    gate = await run_app_bundle_acceptance_gate(
-        files=files,
-        context_variables=ctx,
-        capability_packs=spec.plan.get("capability_packs", []),
-    )
-    assert gate["passed"] is True, f"MATERIALIZATION_GAP {spec.archetype_id}: {gate}"
+    # This deterministic corpus proves static admission; configured CI Mongo must
+    # not silently turn it into a separate runtime-smoke integration suite.
+    with pytest.MonkeyPatch.context() as offline:
+        offline.setattr(
+            run_app_bundle_acceptance_gate.__globals__["app_runtime_smoke"],
+            "resolve_smoke_mongo_uri", lambda: None,
+        )
+        gate = await run_app_bundle_acceptance_gate(
+            files=files,
+            context_variables=ctx,
+            capability_packs=spec.plan.get("capability_packs", []),
+        )
+    assert gate["status"] == "pending", f"MATERIALIZATION_GAP {spec.archetype_id}: {gate}"
+    assert gate["validation_evidence"]["failed"] == []
+    assert gate["validation_evidence"]["skipped"] == ["app_runtime_smoke"]
 
     for page in spec.plan.get("pages", []):
         route = str(page.get("route") or "")

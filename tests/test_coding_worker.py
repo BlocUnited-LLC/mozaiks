@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import hashlib
+import io
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -20,7 +24,15 @@ from mozaiksai.control_plane import (
     ControlPlaneToolsManifest,
     FileUpdate,
     LoadedControlPlanePack,
+    ProposedFileChange,
     ScopedRefinementCodingWorker,
+    StagedPatchProposal,
+)
+from mozaiksai.core.artifacts.content_store import read_verified_artifact_bundle
+from mozaiksai.core.artifacts.models import (
+    BuildRecord,
+    canonical_bundle_archive_path,
+    resolve_canonical_bundle_entry,
 )
 from mozaiksai.core.session.build_binding import RunBuildBinding
 
@@ -34,7 +46,7 @@ async def test_refinement_preserves_unselected_files_and_bound_target(tmp_path):
     worker = ScopedRefinementCodingWorker(
         agent_factory=lambda sp, lc, *, middleware: _FakeAgent(sp, lc), config_loader=_enabled_control_plane,
         pack_loader=_pack, tool_executor=_FakeToolExecutor(),
-        source_validation_runner=_fake_source_validation_runner,
+        candidate_validation_runner=_fake_candidate_validation_runner,
         artifact_store=store, output_root=tmp_path,
     )
     original = "export default function Dashboard() {}"
@@ -63,12 +75,16 @@ async def test_refinement_preserves_unselected_files_and_bound_target(tmp_path):
 @pytest.mark.parametrize("status", ["skipped", "warning", "pending"])
 async def test_unvalidated_output_is_never_reported_validated(tmp_path, status):
     async def validate(**kwargs):
-        return {"validation_status": status}
+        return {
+            "validation_status": status,
+            "app_bundle_acceptance_result": {"passed": True},
+            "app_validation_result": {"validation_status": status, "validation_strategy": kwargs["validation_strategy"]},
+        }
 
     store = _FakeArtifactStore()
     worker = ScopedRefinementCodingWorker(
         agent_factory=lambda sp, lc, *, middleware: _FakeAgent(sp, lc), config_loader=_enabled_control_plane,
-        pack_loader=_pack, tool_executor=_FakeToolExecutor(), source_validation_runner=validate,
+        pack_loader=_pack, tool_executor=_FakeToolExecutor(), candidate_validation_runner=validate,
         artifact_store=store, output_root=tmp_path,
     )
     result = await worker.execute(CodingWorkerRequest(
@@ -139,21 +155,15 @@ class _FakeToolExecutor:
         return ControlPlaneToolResult(success=True, output={"tool_id": call.tool_id, "artifact_version_id": context.artifact_version_id})
 
 
-async def _fake_source_validation_runner(**kwargs):  # noqa: ANN003
+async def _fake_candidate_validation_runner(**kwargs):  # noqa: ANN003
     assert kwargs["app_id"] == "app_1"
-    assert "app/ui/pages/Dashboard.jsx" in kwargs["overlay_files"]
-    root = Path(kwargs["workspace_root"])
-    assert root.is_dir()
-    for name, content in kwargs["overlay_files"].items():
-        assert (root / name).read_text(encoding="utf-8") == content
+    assert "app/ui/pages/Dashboard.jsx" in kwargs["files"]
     return {
         "success": True,
         "validation_status": "passed",
-        "execution_mode": "isolated_workspace_copy",
-        "overlay_file_count": len(kwargs["overlay_files"]),
-        "command_results": [],
-        "fallback_checks": [],
-        "warnings": [],
+        "app_bundle_acceptance_result": {"passed": True},
+        "app_validation_result": {"validation_status": "passed", "validation_strategy": kwargs["validation_strategy"]},
+        "validation_strategy": kwargs["validation_strategy"],
     }
 
 
@@ -163,7 +173,7 @@ class _FakeArtifactStore:
 
     async def create_build_record(self, **kwargs):  # noqa: ANN003
         self.calls.append(dict(kwargs))
-        return type("ArtifactVersion", (), {"id": "av_child_1"})()
+        return BuildRecord(id="av_child_1", version_number=1, lineage_root_id="av_parent", **kwargs)
 
 
 def _enabled_control_plane() -> ControlPlaneConfig:
@@ -236,7 +246,7 @@ async def test_coding_worker_executes_for_scoped_patch_request(tmp_path: Path) -
         config_loader=_enabled_control_plane,
         pack_loader=_pack,
         tool_executor=tool_executor,
-        source_validation_runner=_fake_source_validation_runner,
+        candidate_validation_runner=_fake_candidate_validation_runner,
         artifact_store=artifact_store,
         output_root=tmp_path,
     )
@@ -266,10 +276,10 @@ async def test_coding_worker_executes_for_scoped_patch_request(tmp_path: Path) -
     assert result.applied_files["app/ui/pages/Dashboard.jsx"].endswith('"patched"; }')
     assert result.validation_result["validation_status"] == "passed"
     assert result.validation_result["validation_strategy"] == "local"
-    assert result.validation_result["overlay_file_count"] == 1
+    assert result.validation_result["app_bundle_acceptance_result"]["passed"] is True
     assert result.metadata["build_record_id"] == "av_child_1"
     assert result.metadata["bundle_mode"] == "staged_refinement_bundle"
-    assert result.metadata["source_validation_status"] == "passed"
+    assert result.metadata["app_validation_status"] == "passed"
 
     assert len(created) == 1
     assert created[0].system_prompt == "coding system prompt from pack"
@@ -285,7 +295,7 @@ async def test_coding_worker_executes_for_scoped_patch_request(tmp_path: Path) -
     assert artifact_store.calls[0]["commit_metadata"]["metadata"]["applied_paths"] == [
         "app/ui/pages/Dashboard.jsx"
     ]
-    assert artifact_store.calls[0]["commit_metadata"]["metadata"]["source_validation_result"]["validation_status"] == "passed"
+    assert artifact_store.calls[0]["commit_metadata"]["metadata"]["app_validation_result"]["validation_status"] == "passed"
 
 
 @pytest.mark.asyncio
@@ -295,7 +305,7 @@ async def test_coding_worker_rejects_non_patch_requests() -> None:
         config_loader=_enabled_control_plane,
         pack_loader=_pack,
         tool_executor=_FakeToolExecutor(),
-        source_validation_runner=_fake_source_validation_runner,
+        candidate_validation_runner=_fake_candidate_validation_runner,
     )
 
     result = await worker.execute(
@@ -324,7 +334,7 @@ async def test_coding_worker_fails_when_model_edits_outside_scoped_files(tmp_pat
         config_loader=_enabled_control_plane,
         pack_loader=_pack,
         tool_executor=_FakeToolExecutor(),
-        source_validation_runner=_fake_source_validation_runner,
+        candidate_validation_runner=_fake_candidate_validation_runner,
         artifact_store=_FakeArtifactStore(),
         output_root=tmp_path,
     )
@@ -360,7 +370,7 @@ async def test_coding_worker_surfaces_artifact_persistence_errors(tmp_path: Path
         config_loader=_enabled_control_plane,
         pack_loader=_pack,
         tool_executor=_FakeToolExecutor(),
-        source_validation_runner=_fake_source_validation_runner,
+        candidate_validation_runner=_fake_candidate_validation_runner,
         artifact_store=_BrokenArtifactStore(),
         output_root=tmp_path,
     )
@@ -384,3 +394,146 @@ async def test_coding_worker_surfaces_artifact_persistence_errors(tmp_path: Path
     assert result.status == "failed"
     assert result.error is not None and "ARTIFACT_PERSISTENCE_FAILED" in result.error
     assert "ARTIFACT_PERSISTENCE_FAILED" in result.metadata["artifact_persistence_error"]
+
+
+def _candidate_request(**updates):
+    return CodingWorkerRequest(
+        app_id="studio", target_app_id="app_1", user_id="alice",
+        build_family="app_bundle", build_record_id="parent", change_class="patch",
+        files={"brand/theme_config.json": '{"accent":"blue"}'},
+        baseline_files={"app.json": '{"appId":"app_1"}', "brand/theme_config.json": '{"accent":"blue"}'},
+        run_build_binding=RunBuildBinding(
+            target_app_id="app_1", build_registry_id="registry", build_id="revision", phase="refinement",
+        ),
+        **updates,
+    )
+
+
+def _candidate_proposal(**updates):
+    return StagedPatchProposal(
+        proposal_id="proposal", provider_id="offline", status="completed",
+        summary="Change accent", rationale="Requested accent", owned_paths=["brand/theme_config.json"],
+        changed_files=[ProposedFileChange(path="brand/theme_config.json", content='{"accent":"coral"}')],
+        **updates,
+    )
+
+
+def _candidate_evidence(strategy="docker"):
+    return {
+        "validation_status": "passed", "validation_strategy": strategy,
+        "app_bundle_acceptance_result": {
+            "passed": True, "status": "passed",
+            "validation_evidence": {"completed": ["app_runtime_smoke"], "failed": [], "skipped": []},
+        },
+        "app_validation_result": {
+            "validation_status": "passed", "validation_strategy": strategy,
+            "sandbox_session_id": "owned-validation", "sandbox_provider": strategy,
+            "sandbox_terminated": True,
+        },
+        "errors": [],
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("requested,operator,hint,expected", [
+    ("docker", None, "skip", "docker"),
+    ("e2b", None, "local", "e2b"),
+    ("skip", None, "local", "skip"),
+    ("local", "docker", "skip", "docker"),
+    (None, "e2b", "skip", "e2b"),
+])
+async def test_candidate_execution_uses_operator_policy_not_provider_hint(
+    monkeypatch, tmp_path, requested, operator, hint, expected,
+):
+    if operator is None:
+        monkeypatch.delenv("MOZAIKS_APP_VALIDATION_STRATEGY", raising=False)
+    else:
+        monkeypatch.setenv("MOZAIKS_APP_VALIDATION_STRATEGY", operator)
+    evidence = _candidate_evidence(expected)
+    if expected == "skip":
+        evidence["validation_status"] = "skipped"
+        evidence["app_validation_result"]["validation_status"] = "skipped"
+    validate = AsyncMock(return_value=evidence)
+    provider = SimpleNamespace(execute=AsyncMock(return_value=_candidate_proposal(
+        validation_strategy_hint=hint, validation_commands=["echo must-not-execute"], start_preview=True,
+    )))
+    store = _FakeArtifactStore()
+    worker = ScopedRefinementCodingWorker(
+        provider=provider, candidate_validation_runner=validate, config_loader=_enabled_control_plane,
+        artifact_store=store, output_root=tmp_path,
+    )
+    result = await worker.execute(_candidate_request(validation_strategy=requested))
+
+    assert result.status == ("planned" if expected == "skip" else "validated"), result.error
+    assert result.plan.validation_strategy == expected
+    validate.assert_awaited_once_with(
+        files={"app.json": '{"appId":"app_1"}', "brand/theme_config.json": '{"accent":"coral"}'},
+        app_id="app_1", validation_strategy=expected, timeout_seconds=120,
+    )
+    assert store.calls[0]["app_validation_strategy"] == expected
+    assert store.calls[0]["app_validation_status"] == ("skipped" if expected == "skip" else "passed")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("defect", ["source_only", "acceptance_failed", "build_skipped"])
+async def test_candidate_cannot_be_saved_as_validated_without_both_required_results(tmp_path, defect):
+    evidence = _candidate_evidence()
+    if defect == "source_only":
+        evidence = {"validation_status": "passed"}
+    elif defect == "acceptance_failed":
+        evidence["app_bundle_acceptance_result"]["passed"] = False
+    else:
+        evidence["app_validation_result"]["validation_status"] = "skipped"
+    store = _FakeArtifactStore()
+    worker = ScopedRefinementCodingWorker(
+        candidate_validation_runner=AsyncMock(return_value=evidence), artifact_store=store, output_root=tmp_path,
+    )
+    result = await worker.finalize_proposal(_candidate_request(validation_strategy="docker"), _candidate_proposal())
+
+    assert result.status == "failed"
+    assert "CANDIDATE_VALIDATION_FAILED" in result.error
+    assert store.calls == []
+
+
+@pytest.mark.asyncio
+async def test_candidate_archive_binds_validated_contents_lineage_and_both_gate_results(monkeypatch, tmp_path):
+    monkeypatch.delenv("MOZAIKS_APP_VALIDATION_STRATEGY", raising=False)
+    observed = {}
+
+    async def validate(**kwargs):
+        observed.update(kwargs["files"])
+        # A validator's local context write-back cannot alter the saved candidate.
+        kwargs["files"]["brand/theme_config.json"] = "unvalidated mutation"
+        return _candidate_evidence()
+
+    store = _FakeArtifactStore()
+    worker = ScopedRefinementCodingWorker(candidate_validation_runner=validate, artifact_store=store, output_root=tmp_path)
+    result = await worker.finalize_proposal(_candidate_request(validation_strategy="docker"), _candidate_proposal())
+    assert result.status == "validated", result.error
+    saved = store.calls[0]
+    record = BuildRecord(id="av_child_1", version_number=1, lineage_root_id="av_parent", **saved)
+    entry = resolve_canonical_bundle_entry(record)
+    metadata = record.commit_metadata.metadata
+    archive_path = Path(metadata["artifact_path"])
+    assert entry.path == canonical_bundle_archive_path(metadata["bundle_name"])
+    assert archive_path.name == f'{metadata["bundle_name"]}.zip'
+    assert record.parent_build_record_id == "parent"
+    assert record.app_id == "app_1"
+    assert record.commit_metadata.author_user_id == "alice"
+    assert metadata["build_registry_id"] == "registry"
+    assert metadata["build_id"] == "revision"
+    assert record.validation_status.value == record.app_validation_status == "passed"
+    assert record.app_validation_strategy == record.sandbox_provider == "docker"
+    assert record.sandbox_session_id == "owned-validation"
+    assert metadata["app_bundle_acceptance"] == _candidate_evidence()["app_bundle_acceptance_result"]
+    assert metadata["app_validation_result"] == _candidate_evidence()["app_validation_result"]
+    raw = await read_verified_artifact_bundle(record)
+    assert hashlib.sha256(raw).hexdigest() == entry.sha256
+    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        assert {name: archive.read(name).decode() for name in archive.namelist()} == observed
+    assert metadata["staged_file_sha256"] == {
+        name: hashlib.sha256(content.encode()).hexdigest() for name, content in observed.items()
+    }
+    archive_path.write_bytes(b"changed after validation")
+    with pytest.raises(ValueError):
+        await read_verified_artifact_bundle(record)

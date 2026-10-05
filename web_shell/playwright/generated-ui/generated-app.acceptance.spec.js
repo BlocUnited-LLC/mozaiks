@@ -112,6 +112,9 @@ async function expectSomeVisibleText(container, text) {
 }
 
 async function mockGeneratedAppApis(page) {
+  await page.route('**/api/me', async (route) => {
+    await route.fulfill({ json: localDevelopmentAuth.runtime.user });
+  });
   await page.route('**/api/shell-config', async (route) => {
     await route.fulfill({
       status: 200,
@@ -203,12 +206,12 @@ test('generated tickets page renders clean primitive UI across viewports', async
   await expect(main.getByRole('heading', { name: 'Support Tickets' })).toBeVisible();
   await expect(main.getByText('Review active support work and route customer issues.')).toBeVisible();
   await expect(main.getByRole('button', { name: 'New Ticket' })).toBeVisible();
-  await expect(main.getByPlaceholder('Search…')).toBeVisible();
+  await expect(main.getByRole('searchbox', { name: 'Search tickets...' })).toBeVisible();
   await expectSomeVisibleText(main, 'Acme renewal question');
   await expectSomeVisibleText(main, 'Billing escalation');
   await expectNoHorizontalOverflow(page);
 
-  await main.getByPlaceholder('Search…').fill('billing');
+  await main.getByRole('searchbox', { name: 'Search tickets...' }).fill('billing');
   await expectSomeVisibleText(main, 'Billing escalation');
   await expect(main.getByText('Acme renewal question')).toHaveCount(0);
   await expectNoHorizontalOverflow(page);

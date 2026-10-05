@@ -83,7 +83,7 @@ def _records_of(surface_id: str, name: str, entity: str, fields, *, unique=(), t
 
 def _page(name: str, route: str, *sections: tuple[str, str, dict | None]) -> dict:
     return {
-        "name": name, "route": route, "layout": "full-width", "intent": f"{name} page",
+        "name": name, "ui_surface": "declarative_page", "route": route, "layout": "full-width", "intent": f"{name} page",
         "sections": [
             {"id": sid, "primitive": primitive, "intent": sid, "config_hint": json.dumps(config) if config else None}
             for sid, primitive, config in sections

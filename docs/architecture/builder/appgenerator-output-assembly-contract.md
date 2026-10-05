@@ -1,5 +1,23 @@
 # AppGenerator Output Assembly Contract
 
+## Typed Intake Readiness
+
+Guided intake returns `AppInterviewResult`: a short `agent_message` and an
+`outcome` of `needs_input` or `ready`. `record_app_interview` validates that
+declared output and the matching user-facing message. The runtime auto-tool
+outcome contract writes the closed `interview_outcome` and
+`interview_attempts` state, with at most ten attempts. Invalid tool results,
+tool errors, and exhausted clarification attempts resolve to `blocked`.
+
+The workflow graph sends `ready` to AppPlanAgent, `needs_input` to the user,
+and `blocked` or an unmatched outcome to `workflow_failed`. A reply to a
+clarification returns to InterviewAgent. Existing validation recovery retains
+priority, and an explicit autonomous choice still routes directly to planning.
+Readiness does not depend on an exact text marker or another approval after
+the scope is already known. AppGenerator no longer declares `interview_complete`.
+The interviewer preserves approved scope and asks only for missing blockers;
+pack IDs and routing mechanics remain outside the user-facing message.
+
 ## Typed Page Data Sources
 
 AppGenerator sections select `config.data_source: {module_id, action_id}` from
@@ -31,6 +49,15 @@ Repositories use the deterministically rendered collection policy described in
 Wiring and runtime-quality validators remain the acceptance backstop.
 
 ## Page Output and Action Binding Acceptance
+
+Assembly supplies the canonical `ui/lib/moduleApi.js` client before acceptance
+and frontend build validation when the admitted app does not already provide
+it. Export retains that validated client instead of adding it afterward.
+Custom pages import its named `moduleAction` export; there is no default export.
+With no `VITE_API_URL`, or an empty value, requests use the app's own origin and
+the shell API proxy. An explicit absolute or origin-relative base is supported;
+WebSocket URLs resolve against that same base. The template never defaults to
+another local server on port 8000.
 
 AppSchemaAgent receives accepted module actions with their declared input and
 output schemas and entitlement gates. A metric's `value_key` selects a declared
@@ -143,6 +170,13 @@ it keeps the candidate as `rejected_output` when there is one and is logged at
 ERROR with the task, chat and traceback (`TASK_OUTPUT_PROCESSING_FAILED` while
 processing an output, `TASK_EXECUTION_FAILED` otherwise). It is not reclassified
 as a repairable output error.
+
+ServiceAgent's declared `python_stubs` and task `owned_paths` describe the final
+backend inventory, including code-rendered artifacts. Its prompt identifies
+task-owned `policy.py` paths as renderer-owned: omit them from `python_files`
+and `code_files`, including comment-only placeholders, while retaining the
+planned paths. Existing admission still rejects authored policy source; no
+source is silently dropped and persistence remains the enforcement owner.
 
 `config/subscriptions.yaml` is never model work either. Assembly writes it
 from the approved subscription contract (`materialize_app_config_contracts`,
@@ -344,6 +378,15 @@ by existing materializers: the pack ID, its declared `surface_id`, and
 page task may use the structural scope `page_bundle` with type `page_bundle`,
 kind `ui_only`, and a null capability ID when approved ExperienceSpec pages
 exist. This scope never authorizes a capability or module task.
+A `persistence_contract` task that serializes only the approved `data/contract.json`
+uses `DatabaseAgent`, structural surface `data_contract`, kind `module`, and a
+null capability ID. Before surface validation, review assigns that identity from
+the exact artifact ownership when its proposed surface is unapproved and its
+capability label resolves to no declared, selected, or available capability.
+It preserves the task ID, dependency edges, approved data, and all actual
+capabilities. Extra paths, missing approved data, another worker, or a real
+capability association cannot use this correction to gain approval. Additive
+migrations remain separate capability-owned `data_migrations` tasks.
 What a page task owns determines that scope. Before the surface check, a
 `page_bundle` task with a null capability ID that owns at least one path, every
 one an approved page artifact (an approved page file or `app.json`), is labelled
@@ -377,7 +420,7 @@ blank id, or would close a dependency cycle is left to those checks.
 Selected pack inventory is resolved before coverage construction.
 Canonical worker mapping and selected subscription, refinement, and split-admin
 task file requirements are also shared with validation. Explicit approved action
-names reach module workers. Module materialization constructs canonical reads and, for module-written collections, canonical create/update/delete actions with their implementations and schemas from declared collection ownership and typed list/detail intent. The generated record id is the declared `<entity>_id` field (else `id`, else `_id`); `search_by` is only the get lookup and a natural key there is never replaced by a generated id.
+names reach module workers. Module materialization constructs canonical reads and, for module-written collections, canonical create/update/delete actions with their implementations and schemas from declared collection ownership and typed list/detail intent. The generated record id is the declared `<entity>_id` field (else `id`, else `_id`); `search_by` is only the get lookup and a natural key there is never replaced by a generated id. Canonical get falls back to a declared `id`, then Mongo `_id`. Read schemas and responses retain a string `_id` when either generated identity or get lookup needs it. Runtime acceptance checks get using the stored lookup value and mutation using the generated identity; these values may differ.
 Subscription providers must be explicit or already selected, and facade/client
 dependencies follow registered bindings rather than task prose.
 Section hints bind only to actions that exist. A `sections_hint[].data_source`
@@ -607,6 +650,14 @@ AppGenerator should compile these inputs in priority order:
 ### 1. ThemeCapture
 
 `ThemeCapture` produces canonical visual evidence only.
+
+Its launch context retains the approved `value_manifest`. The interview,
+analysis and assembly stages all receive `value_manifest.brand_intent`, which
+preserves explicit palette, appearance, typography and density choices. Defaults
+fill unspecified slots; later explicit user corrections supersede earlier
+preferences. The interview returns `needs_input` whenever it asks for a decision
+or confirmation, and `ready` only when no unanswered question remains. Readiness
+continues through the typed output and deterministic tool, not message parsing.
 
 It emits:
 
@@ -1139,8 +1190,9 @@ CRUD and ownership tests remain necessary for end-to-end acceptance.
 
 ### 7. AppValidation Strategy
 
-`AppValidationAgent` must use an explicit validation strategy contract instead of
-implicit E2B-only behavior.
+`AppValidationAgent` copies a supplied `app_validation_strategy` into its typed
+request, or emits null when none is supplied. The existing runtime resolver owns
+defaults; the agent must not infer a strategy from the conversation.
 
 Canonical strategy values:
 
@@ -1157,16 +1209,19 @@ Canonical status values:
 
 Rules:
 
-- Studio/hosted environments may prefer `e2b` when sandbox credentials are available.
-- Local environments with a running Docker daemon resolve to `docker`, which also
-  exposes a preview URL (see
-  [app-validation-sandboxes.md](app-validation-sandboxes.md)).
-- CLI/local environments may resolve to `local` or explicit `skip`.
-- generation/export must not be blocked solely because E2B is unavailable.
-- `skip` is explicit and deterministic; it is not a hidden fallback and it is not
-  reported as `passed`.
-- export gating must allow only `passed` or explicit `skipped`, and still requires
-  integration readiness and wiring checks to pass.
+- Operator policy takes precedence over tool and context inputs. E2B requires an
+  explicit selection; credentials alone never select paid infrastructure.
+- Without a selected strategy, the runtime chooses a reachable Docker daemon,
+  then local npm, then `skip` if neither is available. Build results record the
+  resolved strategy and its reason.
+- Interactive previews are separate Studio sessions, not build-validation URLs
+  (see [app-validation-sandboxes.md](app-validation-sandboxes.md)).
+- `skip` leaves execution unverified. It blocks export and promotion even when
+  deterministic integration checks pass. Required pending checks also block.
+- The deterministic tool owns `app_validation_ends_run` and the corresponding
+  failure message. When required validation cannot complete and no recovery or
+  repair is selected, the AG2 graph terminates the run as failed once. It does
+  not wait for a human reply or claim the app has no defects.
 
 Materialization rule:
 
@@ -1246,7 +1301,8 @@ planned repair; staging never implies promotion or successful live acceptance.
 
 Do:
 
-- keep persistent pages declarative
+- keep ordinary persistent pages declarative; preserve stateful interaction through
+  the existing `custom_react_page` contract when primitives cannot express it
 - stack primary record tables below page headers with `layout: full-width`;
   `grid` means peer top-level columns, not full-width rows
 - keep shell content separate from shell styling
@@ -1256,7 +1312,7 @@ Do:
 Do not:
 
 - generate raw React files for persistent pages by default
-- generate any AppGenerator-managed raw React page/component files for persistent pages
+- emit custom page React outside `AppSchemaOutput.custom_route_bundle`
 - place header/footer action content in `theme_config.json`
 - place spacing/padding/density tokens in `shell.json`
 - place reusable media inventory in `theme_config.json` or `shell.json`
@@ -1268,6 +1324,63 @@ Do not:
 
 Without this split, AppGenerator either under-specifies visual/media control or mixes styling, shell behavior, and asset inventory.
 The contract above keeps bundle generation deterministic, keeps ThemeCapture reusable, and gives the runtime a stable set of artifacts to consume.
+
+### Interactive page materialization
+
+`AppBuildPage.ui_surface` determines the required page artifact: a declarative
+page uses `ui/pages/<route-derived-stem>.yaml`; a custom page uses
+`ui/pages/custom/<route-derived-stem>.jsx`. New-app plan review keeps all custom
+pages, `ui/route_manifest.json`, and `ui/index.js` under one page-bundle worker so
+the shared registry cannot be split across concurrent writers. This does not
+give that worker ownership of shell components or other frontend source.
+
+Task admission and assembly both bind each owned custom page to its exact
+approved route and canonical page file through the generated registry. New
+custom registries reject additional routes absent from the plan. The shared
+sign-in and callback entries composed from a validated `config/auth.yaml` and
+`app.json.authRequired=true` remain owned by the auth contract: each must match
+that owner's exact route/component/metadata projection and occur once. A matching
+URL or component name alone does not authorize another custom page. Rejection
+feedback names the approved custom routes and the auth owner without removing
+required app behavior. Scoped
+revisions may retain unchanged route entries from the hydrated baseline; pack
+templates outside the task remain under their existing pack ownership. Failed
+tasks still reach the partial-bundle acceptance gate for actionable repair.
+
+When an original task's bounded correction fails during assembly recovery, the
+existing validation policy runs again before the assembly terminal guard. It
+may select a separate accepted task's owned repair; accepted batch outputs are
+retained rather than regenerated. Exhausted or unchanged repairs terminate with
+the original assembly cause and repair diagnostics in `app_build_failure_message`.
+The existing attempt cap and no-progress guard remain authoritative.
+
+Both the standalone save tool and task-batch materializer validate custom page
+file ownership through `generator_support.code_files.validate_custom_page_files`
+and use the same route manifest, component registry, and page file renderer.
+The registry is derived from typed `page_files` and their registration keys;
+agents do not supply an extra `ui_index` field or put `ui/index.js` or
+`ui/route_manifest.json` inside `page_files`. Non-page and traversal paths are
+rejected before rendering, with feedback to omit the invalid entry while
+preserving the approved page source and route. No authored source is silently
+discarded. Bundle scanning and UI auditing resolve each registry key through
+the same registered binding and import resolver. A key such as `Main` may import
+the approved `ui/pages/custom/main.jsx`; it does not imply `Main.jsx`. Missing
+registrations, unresolved bindings, and missing or wrongly cased import paths
+remain validation errors. Timers with start/pause/resume/reset, canvas interactions, and
+playable controls require real React behavior when no shipped primitive provides
+it. A static Metric cannot substitute for that behavior. Contract checks do not
+prove those interactions work: browser acceptance must exercise them.
+
+Custom React guidance uses the shipped component API: DataTable actions dispatch
+through `actions`, selection, and `onAction(actionId, selectedRows)`, not column
+render callbacks. State updaters stay pure; asynchronous mutations and timers
+belong in event handlers or effects with cleanup. An exactly-once persistence
+requirement needs a declared stable operation identity and backend idempotency;
+component state alone cannot establish it across retries or reloads. Missing
+action contracts require repair by their owner, and failed saves remain visible
+with a retry action. These are generation instructions, not proof that emitted
+code complies: browser/runtime acceptance must verify the actual controls,
+failure recovery, and persistence behavior without weakening the approved scope.
 
 
 

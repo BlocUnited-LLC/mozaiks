@@ -5,8 +5,8 @@
     "primary":    "cyan",
     "variant":    "modern",
     "radius":     "medium",
-    "font":       "rajdhani",
-    "font_heading": "orbitron",
+    "font":       "system",
+    "font_heading": "oxanium",
     "appearance": "dark",
     "density":    "comfortable",
     "branding": {
@@ -26,20 +26,20 @@
     "logo":              "mozaik_logo.svg",
     "wordmark":          "mozaik.png",
     "favicon":           "/favicon.ico",
-    "chatbackgroundImage": "chat_bg_template.png"
+    "chatbackgroundImage": null
   },
 
   "fonts": {
     "body": {
-      "family":      "Rajdhani",
+      "family":      "system-ui",
       "fallbacks":   "ui-sans-serif, system-ui, -apple-system, sans-serif",
-      "googleFont":  "https://fonts.googleapis.com/css2?family=Rajdhani:wght@300;400;500;600;700&display=swap",
       "tailwindClass": "font-sans"
     },
     "heading": {
-      "family":      "Orbitron",
+      "family":      "Oxanium",
       "fallbacks":   "Rajdhani, ui-sans-serif, system-ui, sans-serif",
-      "googleFont":  "https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&display=swap",
+      "localFont":   true,
+      "src":         "/fonts/Oxanium-VariableFont_wght.ttf",
       "tailwindClass": "font-heading"
     },
     "logo": {

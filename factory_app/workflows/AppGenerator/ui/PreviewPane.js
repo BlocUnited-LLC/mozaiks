@@ -76,7 +76,9 @@ const PreviewPane = ({
           </div>
         ) : (
           <>
-            <div className="mt-3 text-sm text-[var(--color-text-muted)]">Preview stopped</div>
+            <div className="mt-3 text-sm text-[var(--color-text-muted)]">
+              {sandboxError ? 'Preview could not start' : 'Start the preview to try your app.'}
+            </div>
             {onStartPreview && canStartPreview ? (
               <>
                 <button
@@ -95,7 +97,10 @@ const PreviewPane = ({
           </>
         )}
         {sandboxError && (
-          <div className="mt-2 text-xs text-red-300">{sandboxError}</div>
+          <details className="mt-3 text-xs text-red-300">
+            <summary className="cursor-pointer">Preview details</summary>
+            <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{sandboxError}</pre>
+          </details>
         )}
         {stopControl && <div className="mt-2">{stopControl}</div>}
       </div>
