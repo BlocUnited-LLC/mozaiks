@@ -1,0 +1,22 @@
+{
+  "name": "@mozaiks-examples/community-mobile-reference",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "android:add": "cap add android",
+    "android:sync": "cap sync android",
+    "verify:assets": "node verify-assets.mjs",
+    "test": "node --test verify-assets.test.mjs"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.4.3",
+    "@capacitor/core": "8.4.3"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.4.3"
+  }
+}

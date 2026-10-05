@@ -1,0 +1,92 @@
+name: Mobile packaging reference
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/mobile-reference.yml'
+      - 'examples/mobile-reference/**'
+      - 'examples/canonical-apps/community/app/**'
+      - 'chat-ui/**'
+      - 'web_shell/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/mobile-reference.yml'
+      - 'examples/mobile-reference/**'
+      - 'examples/canonical-apps/community/app/**'
+      - 'chat-ui/**'
+      - 'web_shell/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android-project:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      PLATFORM_PATH: ${{ github.workspace }}/examples/canonical-apps/community/app
+      MOZAIKS_APP_WORKSPACE_PATH: ${{ github.workspace }}/examples/canonical-apps/community
+      MOZAIKS_HOST: platform
+      VITE_MOZAIKS_HOST: platform
+      VITE_API_URL: https://runtime.example.invalid
+      VITE_CORE_URL: https://runtime.example.invalid
+      VITE_WS_URL: wss://runtime.example.invalid
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            chat-ui/package-lock.json
+            web_shell/package-lock.json
+            examples/mobile-reference/package-lock.json
+      - name: Install shared UI dependencies
+        working-directory: chat-ui
+        run: npm ci
+      - name: Install and build the community web app
+        working-directory: web_shell
+        run: |
+          npm ci
+          npm run build
+      - name: Prepare Android sources and verify bundled assets
+        working-directory: examples/mobile-reference
+        run: |
+          npm ci --ignore-scripts
+          npm audit --audit-level=moderate
+          npm test
+          npm run android:add
+          npm run android:sync
+          node verify-assets.mjs > packaging-evidence.json
+      - name: Compile the diagnostic APK with runner-provided tools
+        working-directory: examples/mobile-reference/android
+        run: |
+          export JAVA_HOME="$JAVA_HOME_21_X64"
+          export PATH="$JAVA_HOME/bin:$PATH"
+          test -d "$ANDROID_HOME/platforms/android-36"
+          java -version
+          ./gradlew --no-daemon assembleDebug
+          cd ..
+          sha256sum android/app/build/outputs/apk/debug/app-debug.apk > apk.sha256
+      - name: Retain packaging evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: mobile-packaging-evidence
+          retention-days: 7
+          if-no-files-found: error
+          path: examples/mobile-reference/packaging-evidence.json
+      - name: Retain diagnostic APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: mobile-reference-debug-apk
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            examples/mobile-reference/android/app/build/outputs/apk/debug/app-debug.apk
+            examples/mobile-reference/apk.sha256
