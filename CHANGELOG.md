@@ -708,6 +708,9 @@ This project follows a practical pre-1.0 changelog format:
   renderer as standalone app saves.
 - AG2 knowledge-store writes are serialized per session so a delayed earlier
   snapshot cannot overwrite the active channel state needed after restart.
+- AgentGenerator interview questions and confirmations now appear in chat.
+  Its startup guidance consistently uses typed readiness instead of routing
+  markers or instructions that contradict the required structured output.
 
 - A copied `.env.example` now imports the hosts and points the local shell's
   API proxy at the backend; `mozaiks context index` passes its workspace key.
