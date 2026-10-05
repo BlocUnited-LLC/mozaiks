@@ -2,6 +2,8 @@
 # Tests for OrchestrationPort protocol, AG2 adapter contract, and data types.
 # ==============================================================================
 
+from unittest.mock import AsyncMock, Mock
+
 import pytest
 
 from mozaiksai.core.ports.orchestration import (
@@ -186,4 +188,44 @@ class TestOrchestrationPortProtocol:
         a = get_ag2_adapter()
         b = get_ag2_adapter()
         assert a is b
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path,content", [
+    (None, None),
+    ("/channels/active/metadata.json", '{"status":"active"}'),
+    ("/channels/closed/metadata.json", '{"status":"closed"}'),
+    ("/channels/orphan/wal.jsonl", "partial"),
+    ("/agents/registered/passport.json", "partial"),
+    ("/channels/corrupt/metadata.json", "not json"),
+])
+async def test_adapter_inspects_native_presence_without_hub_or_writes(monkeypatch, path, content):
+    from ag2.knowledge import MemoryKnowledgeStore
+
+    from mozaiksai.core.adapters import ag2_knowledge_store, ag2_network_runner
+    from mozaiksai.core.adapters.ag2_orchestration import AG2OrchestrationAdapter
+
+    store = MemoryKnowledgeStore()
+    if path:
+        await store.write(path, content)
+    store.write = AsyncMock(side_effect=AssertionError("inspection cannot write"))
+    factory = Mock(return_value=store)
+    hub = Mock(side_effect=AssertionError("inspection cannot hydrate a Hub"))
+    monkeypatch.setattr(ag2_knowledge_store, "MongoAG2KnowledgeStore", factory)
+    monkeypatch.setattr(ag2_network_runner, "Hub", hub)
+    assert await AG2OrchestrationAdapter().has_persisted_execution(app_id="app-1", chat_id="chat-1") is bool(path)
+    factory.assert_called_once_with(app_id="app-1", chat_id="chat-1")
+    store.write.assert_not_awaited()
+    hub.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_adapter_persistence_inspection_error_propagates(monkeypatch):
+    from mozaiksai.core.adapters import ag2_knowledge_store
+    from mozaiksai.core.adapters.ag2_orchestration import AG2OrchestrationAdapter
+
+    store = Mock(exists=AsyncMock(side_effect=RuntimeError("unavailable")))
+    monkeypatch.setattr(ag2_knowledge_store, "MongoAG2KnowledgeStore", lambda **kwargs: store)
+    with pytest.raises(RuntimeError, match="unavailable"):
+        await AG2OrchestrationAdapter().has_persisted_execution(app_id="app-1", chat_id="chat-1")
 

@@ -717,6 +717,10 @@ definitions:
       Add AI Workflows path where the existing app remains source of truth.
       Ecosystem/gradual_modernization may map to Build App Features only
       after explicit user approval for Mozaiks-owned expansion scope.
+    authority_class: closed_writer_routing_state
+    writer_ids: [deterministic_tool]
+    model_visible: true
+    persisted: true
     source:
       type: state
       default: null
@@ -798,16 +802,14 @@ definitions:
 
   plan_complete:
     type: boolean
-    description: True once IntegrationPlannerAgent confirms the adoption plan.
+    description: True only after record_adoption_plan validates and records the confirmed plan.
+    authority_class: closed_writer_routing_state
+    writer_ids: [deterministic_tool]
+    model_visible: true
+    persisted: true
     source:
       type: state
       default: false
-      triggers:
-        - type: agent_text
-          agent: IntegrationPlannerAgent
-          ui_hidden: true
-          match:
-            equals: NEXT
 
   # ---------------------------------------------------------------------------
   # Module decomposition stage (ecosystem / gradual_modernization only)
@@ -821,22 +823,24 @@ definitions:
       Workflow-local evidence consumed by app-context mapping to preserve
       candidate module/page/adapter detail. It is not emitted as a top-level
       ExistingAppAugmentationArtifact field and is not written to disk.
+    authority_class: mutable_workflow_state
+    writer_ids: [deterministic_tool]
+    model_visible: true
+    persisted: true
     source:
       type: state
       default: null
 
   decomposition_complete:
     type: boolean
-    description: True once ModuleDecomposerAgent confirms the decomposition plan.
+    description: True only after record_module_decomposition validates and records the confirmed plan.
+    authority_class: closed_writer_routing_state
+    writer_ids: [deterministic_tool]
+    model_visible: true
+    persisted: true
     source:
       type: state
       default: false
-      triggers:
-        - type: agent_text
-          agent: ModuleDecomposerAgent
-          ui_hidden: true
-          match:
-            equals: NEXT
 
   # ---------------------------------------------------------------------------
   # Artifact output
@@ -858,7 +862,11 @@ definitions:
 
   agent_augmentation_plan:
     type: object
-    description: Canonical Mozaiks adoption/augmentation plan persisted after discovery.
+    description: Confirmed typed adoption plan recorded by the planner tool; assembly cannot overwrite it.
+    authority_class: mutable_workflow_state
+    writer_ids: [deterministic_tool]
+    model_visible: true
+    persisted: true
     source:
       type: state
       default: null
@@ -886,6 +894,23 @@ definitions:
     source:
       type: state
       default: null
+
+  discovery_save_outcome:
+    type: string
+    description: Deterministic final artifact save outcome; saved only after AppContext registration.
+    authority_class: closed_writer_routing_state
+    writer_ids: [deterministic_tool]
+    model_visible: false
+    persisted: true
+    source: {type: state, default: failed}
+
+  discovery_save_attempts:
+    type: integer
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    model_visible: false
+    persisted: true
+    source: {type: state, default: 0}
 
   app_context_graph:
     type: object
@@ -955,7 +980,7 @@ definitions:
 
   brownfield_app_context_artifact_persistence_error:
     type: string
-    description: Non-fatal persistence error from saving brownfield AppContext artifacts, if any.
+    description: Final mapping or persistence error that prevents discovery completion, if any.
     source:
       type: state
       default: null
@@ -1148,6 +1173,7 @@ agents:
       - repo_access_status
       - repo_access_recovery
       - adoption_level
+      - agent_augmentation_plan
       - migration_complexity
       - storage_pattern
       - storage_migration_required

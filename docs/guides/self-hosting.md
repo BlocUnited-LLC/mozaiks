@@ -36,6 +36,7 @@ docker build -t mozaiks -f infra/docker/Dockerfile .
 docker run -p 127.0.0.1:8000:8000 \
   -e ENV=development -e ENVIRONMENT=development \
   -e AUTH_ENABLED=false -e AUTH_ANON_ROLES=admin,user \
+  -e AUTH_ANON_ACCESS=open \
   -e MONGO_URI="mongodb://your-mongo-host:27017/mozaiks" \
   -e OPENAI_API_KEY="sk-..." \
   mozaiks
@@ -43,6 +44,14 @@ docker run -p 127.0.0.1:8000:8000 \
 
 The backend listens at **http://localhost:8000**. To use Studio in a browser,
 start the repository's web shell separately as described in Option 2.
+
+`AUTH_ANON_ACCESS=open` gives every client that can connect development
+access. A container needs it because your browser reaches the container
+through Docker's network gateway, not as the container's own machine. Keep the
+port published on `127.0.0.1` only, so that other machines cannot connect;
+every container on the same Docker network still can. On Linux, use Docker
+Engine 28.0 or later: older engines can let a machine on the same network
+reach a container's address directly despite a `127.0.0.1` publish.
 
 !!! note "Using Anthropic instead of OpenAI?"
     Set `LLM_PRIMARY_API_TYPE=anthropic` and replace `OPENAI_API_KEY` with
@@ -90,6 +99,16 @@ cp .env.example .env
 # For browser sign-in, set VITE_OIDC_CLIENT_ID=mozaiks-studio and
 # VITE_OIDC_AUTHORITY=http://localhost:8080/realms/mozaiks.
 ```
+
+To run the stack without authentication instead, set `AUTH_ENABLED=false`,
+`AUTH_ANON_ACCESS=open` and `MOZAIKS_APP_PORTS=127.0.0.1:8000:8000` in `.env`,
+for the same reason as in Option 1. `MOZAIKS_APP_PORTS` is how Compose
+publishes the app port. Unset, it is `8000:8000` (every interface), which suits
+the default authenticated stack; `127.0.0.1:8000:8000` keeps other machines
+out, although every container on the same Docker network can still connect.
+On Linux, use Docker Engine 28.0 or later: older engines can let a machine on
+the same network reach a container's address directly despite a `127.0.0.1`
+publish.
 
 Then start:
 

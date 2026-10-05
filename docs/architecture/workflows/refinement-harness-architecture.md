@@ -76,9 +76,142 @@ User submits a change request on an existing artifact
 
 The Refinement Engine does not replace the factory. It routes to it.
 
+The Workbench's **Entire app** option submits an unscoped coding request to this
+existing harness. A patch may resolve to a safe file scope; a multi-file proposal
+uses the target-scoped `PendingHarnessDecision` for confirmation. Confirmation
+must match the saved change request, revision, source artifact, request text, and
+displayed paths. The server reloads file contents from the verified artifact;
+approval does not rerun scope selection. Every continuation action must belong to
+the saved decision. The existing session router consumes that exact decision with
+a conditional update before classification or execution, so replayed or concurrent
+confirmations cannot start work twice. A workflow continuation explicitly bypasses
+inline coding and contract-surface generation; a changed workflow recommendation
+requires a new decision rather than reusing the previous approval. If execution
+fails after admission, the user submits a new request; the consumed approval is
+not restored.
+
+Only the bound top-level continuation action can confirm a request; a nested
+`refinement_request.extra.harness_action` is discarded. Pending decisions are
+normalized when written so displayed and reloaded values match the conditional
+consumption check. ChatPage retains the original requested workflow (including
+no selection), change request, revision and server-resolved build registry ID
+when submitting a saved decision. Existing malformed pre-production decisions
+must be reissued rather than bypassing confirmation.
+
+**Limit to selected file** is a hard boundary. Patches use the scoped coding
+worker; eligible design or feature requests use the existing surface planner,
+which must resolve every write to saved contracts within that selection. Core
+changes, schema migrations, workflow fallback and unresolved or wider writes
+are rejected before allocating a refinement build or generating files. The user
+can narrow the request or remove the file limit and submit a broader request.
+This does not change classification to accommodate the selected file. While Apply is
+pending, review mutations are disabled; the previous candidate's source and
+validation evidence remain available if the new request fails or asks for scope
+confirmation.
+
+Saved review labels its initial history selection **Starting version**. A new
+candidate remains in the Workbench for preview and review. Detailed model
+summaries and version identifiers are expandable; failures, validation blockers
+and review actions remain visible.
+
+Schema-page refinement uses the page file stem as its identity; the page's
+display name may differ. Workbench theme edits target the saved `app_bundle`
+and explicitly scope the request to `brand/theme_config.json`.
+
+Accept, reject and promote verify the selected app archive and its available
+parent archive before changing lifecycle state. Their review response reuses
+those verified bytes. An unavailable or changed archive therefore leaves the
+draft and refinement session unchanged.
+
 ---
 
 ## Checkpoint Chain
+
+### Completion and saved drafts
+
+AG2 owns agent execution. The harness owns the decision to stage a change and
+the evidence required before a saved draft can advance. Classification finishes
+only the routing stage; it does not emit a successful build outcome.
+
+| Coding result | Audit event | Workbench behavior |
+|---|---|---|
+| `validated` with a saved `build_record_id` | `completed` | Open the validated draft for review; explicit acceptance is still required. |
+| `planned` | `planned` | Show incomplete validation and offer review when a draft was saved. Keep the active editor/preview on its previous version. |
+| `failed` | `failed` | Show failed checks and offer review when a draft was saved. Keep the previous version active. |
+| `ineligible` | `ineligible` | Explain the blocked request without reporting completion. |
+| Cancelled coding task | `cancelled` | Propagate cancellation and mark the matching registered build as needing revision. |
+
+The worker finalizer checks the proposed files against the approved scope before
+validation or persistence, regardless of coding provider. Unknown validation
+strategies fail; static-only checks, skipped commands, and partially executed
+checks cannot produce a validated result. A saved draft identifies reviewable
+work, not a promoted application. Persistence failure cannot emit completion.
+
+Contract-surface regeneration uses that same worker finalizer and audit writer.
+Generation alone does not emit completion: `surface_result.status=success` is
+returned only after the finalizer validates and saves the draft; incomplete
+validation becomes `partial`, and failure becomes `failed`. Exceptions and
+cancellation in either generation or finalization emit the corresponding
+terminal audit event. Tracking remains best-effort; saved records own the facts.
+Cleanup after ordinary request cancellation is shielded. Process termination
+past the server's shutdown grace period can still interrupt cleanup and leave a
+registry entry marked `building`; automatic startup reconciliation is not implemented.
+
+The workbench uses `coding_worker.metadata.build_record_id` or
+`surface_result.metadata.build_record_id` as its review target. Surface success
+also requires a passed validation result before replacing the editor/preview.
+Its **Review patch** action opens that saved candidate; it does not submit another
+coding request. Review, accept, and reject continue through the existing artifact
+lifecycle APIs. A validated coding attempt alone does not certify the entire
+application or replace independent runtime acceptance.
+
+AppReview revision responses open the same workbench with the original bundle
+and the inline result. They do not start another workflow or automatically
+accept the candidate. A failed or partial saved draft remains reviewable while
+the original bundle stays in the editor and preview.
+
+The opt-in ACP workspace harvester rejects symbolic links and Windows reparse
+points, including directory junctions, before traversal or file reads. A linked
+workspace root is rejected too. These are scope violations; linked targets are
+never harvested or deleted by the harvester.
+
+#### Current readiness and promotion boundaries
+
+`control_plane/app_validation.py` remains the source-project command validator.
+Scoped coding uses `core.validation.validate_generated_app_candidate`, which
+connects Factory's existing generated-contract, wiring, runtime-load and
+database-backed smoke checks to its app build validator. It validates the complete
+merged candidate and records both outcomes before Studio review. The default scoped coding provider makes one
+structured-output attempt; a failed check does not start an automatic coding
+repair loop. Audit events and Studio refinement-session writes are best-effort,
+so their absence is not evidence that a candidate was never saved. Saved build
+records and validation results remain the evidence to inspect.
+
+Patch requests, approved execution contexts and surface finalization use the
+same validation strategy resolver. Explicit operator environment configuration
+takes precedence over an explicit request; otherwise automatic selection prefers
+an available Docker daemon, then local npm, then skipped validation. Saved
+validation evidence is historical information and does not select the next
+request's strategy. The strategy controls app build validation; the existing
+contract, runtime-load and database smoke acceptance checks still run in the
+host process. A subsequent interactive preview is a separate sandbox operation.
+
+Promotion currently has several implementation paths. The scoped coding worker
+writes draft BuildRecords directly. Studio acceptance uses
+`accept_staged_refinement_build_record` for staged-review metadata and otherwise
+the BuildRecord store; its promotion endpoint restores an accepted current
+bundle into the selected workspace. `artifact_promotion.py` also retains
+parallel artifact-version and BuildRecord draft/accept helpers, while
+`promotion.py` exposes direct source-workspace promotion. The exported staged
+draft helpers and direct source-workspace promotion have no in-tree production
+caller connecting them to the scoped coding worker. This inventory does not
+establish that those exported APIs can be removed or that every promotion path
+runs Factory acceptance.
+
+Studio verifies the selected app bundle and its available app-bundle parent
+before changing the workspace or registry. The promotion response builds its
+review diff from those same verified bytes, keyed by saved BuildRecord ID;
+an independent review request verifies the archives again.
 
 Checkpoints are triggered by events, not by agent turns. Each checkpoint is a
 discrete unit of work with a declared handler and optional LLM backing.
@@ -589,6 +722,37 @@ Current first-party handler:
 
 - `mozaiksai/control_plane/implementations/contract_surface_planner.py`
 
+The planner requires the complete verified saved bundle and receives explicit
+allowed write paths separately. Context Graph candidates provide retrieval hints;
+they cannot authorize writes. The classifier receives a deterministic inventory
+of saved targets, and the planner resolves the returned identities before a build
+is allocated. The worker repeats whole-plan admission before its first model call.
+
+| Surface kinds | Target kind | Build family |
+| --- | --- | --- |
+| `module_action`, `module_contract`, `data_schema` | `module` | `app_bundle` |
+| `page_binding` | `page` | `app_bundle` |
+| `app_config` | `app` | `app_bundle` |
+| `workflow_tool`, `workflow_agent`, `ui_component` | `workflow` | `workflow_bundle` |
+
+`page_binding` resolves a schema page by its exact saved schema name. A custom
+React page uses its exact declared route ID in `ui/route_manifest.json`, then the
+existing component resolver follows the `ui/index.js` registration to its local
+`ui/pages/custom/*.jsx` source. Component names do not imply filenames, and a
+filename such as `custom/focus` is not a route identity. Route and registry files
+are supplied to generation as read-only context from the same saved snapshot.
+`ui_component` remains a workflow surface and cannot select an app page.
+The `app_config` target uses the request's owner-resolved artifact app identity;
+`app.json` may omit `appId`, but a conflicting declared identity is rejected.
+
+Missing, empty, unsafe, ambiguous, dynamic, unknown or out-of-scope targets fail
+before generation. Admission checks every surface, including manually constructed
+plans; one invalid surface rejects the whole plan. The worker also rejects generated
+writes outside the admitted paths. New files or undeclared surfaces require the
+existing workflow route rather than guessed path creation. These checks establish
+source ownership, not the generated behavior's correctness: normal validation,
+review and browser acceptance remain required.
+
 ### `coding_requested`
 
 Scoped coding-worker execution for eligible patch refinements.
@@ -608,17 +772,14 @@ output and the staging area.
 
 ```
 LLM coding checkpoint
-    → structured output: list[{path, new_content, reason}]
-    → apply_scoped_refinement_changes()   # scoped_execution.py
-        → path safety checks (no traversal, no secrets, no absolute paths)
-        → write files into staging area (never live workspace)
-        → return ScopedRefinementResult
-    → run_app_source_validation()          # app_validation.py (optional)
-        → copy staging area into isolated temp dir
-        → apply staged files as overlay
-        → run framework-detected lint/test commands
-        → return AppSourceValidationResult
-    → persist staged artifact version
+    → provider-neutral StagedPatchProposal
+    → enforce approved file scope and reject ineffective changes
+    → merge changes into the complete saved baseline
+    → validate_generated_app_candidate()  # existing acceptance + build owners
+        → deterministic bundle and runtime acceptance
+        → operator-selected Docker/E2B/local build execution
+        → require both checks to pass
+    → persist canonical archive and draft BuildRecord with candidate evidence
     → emit tool event to Studio panel
 ```
 
@@ -627,15 +788,18 @@ LLM coding checkpoint
 - It does not modify the live workspace. All writes go to a staging area.
 - It does not interpret the LLM's reasoning. It receives already-typed
   structured output and applies it deterministically.
-- It does not run validation unless `confirm_execution=True` is passed. The
-  default is to plan validation commands and return them without running.
+- It does not let the model choose execution policy. The canonical app validation
+  resolver applies operator settings before a request strategy; `skip` leaves
+  the candidate unverified and blocks activation.
 - It does not promote staged changes. Promotion requires a separate
   acceptance step through the Studio promotion flow.
 
 ### Security guarantees from scoped execution
 
-Every path written by the coding worker passes through
-`apply_scoped_refinement_changes()`, which enforces:
+Every candidate staged by the coding worker passes through
+`materialize_coding_workspace()` and its harvest check, enforcing path containment
+and rejecting symlinks or reparse points. Proposal admission additionally enforces
+the exact approved file scope. The separate scoped-execution helper enforces:
 
 - no `..` traversal components
 - no absolute paths (Windows drive qualifiers or POSIX `/` prefixes)

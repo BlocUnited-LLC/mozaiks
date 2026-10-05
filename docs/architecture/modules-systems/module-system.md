@@ -42,6 +42,8 @@ The workflow converts scanner evidence paths and recommendations into the module
 `evidence_ref` and `remediation` fields. Missing persistence stays visible in the
 advisory review, and zero inspected files yields `not_assessed`. An empty findings
 collection does not prove a saved passing assessment; this module stores findings.
+The rule it applies to permissionless actions is the decision table in
+[Generated Action Protection](../app/generated-action-protection.md).
 
 ---
 

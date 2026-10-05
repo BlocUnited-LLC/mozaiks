@@ -3,10 +3,11 @@
 // DESCRIPTION: AppGenerator artifact canvas (files + Monaco + preview + export)
 // ==============================================================================
 
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import { Code, LayoutGrid, Monitor } from 'lucide-react';
 import { useWorkflowStart } from '@mozaiks/chat-ui/hooks/useWorkflowStart.js';
 import { workflowSurfaceStyles, workflowToolbarButtonClass } from '@mozaiks/chat-ui/platform/workflowSurfaceStyles.js';
+import { normalizePrimitiveActions } from '@mozaiks/chat-ui/core/ui/workflowPrimitiveUtils.js';
 import { useAppValidationWorkbench } from './useAppValidationWorkbench';
 import { useSandbox } from './useSandbox';
 import BuildStatusPane from './BuildStatusPane';
@@ -18,6 +19,21 @@ import HarnessDecisionCard from '../../../app/ui/components/HarnessDecisionCard.
 import { studioFetch } from '../../../app/admin/pages/studioApi.js';
 
 const THEME_FILE_PATH = 'brand/theme_config.json';
+
+const refinementOutput = (response) => {
+  if (response?.execution_mode === 'coding_worker') return response.coding_worker || null;
+  if (response?.execution_mode !== 'surface_regeneration' || !response.surface_result) return null;
+  const result = response.surface_result;
+  return {
+    ...result,
+    status: result.status === 'failed' ? 'failed'
+      : result.status === 'success' && result.metadata?.validation_result?.validation_status === 'passed'
+        ? 'validated' : 'planned',
+    applied_files: result.all_files,
+    validation_result: result.metadata?.validation_result,
+    error: result.surfaces_executed?.find((surface) => surface.status === 'failed')?.error,
+  };
+};
 
 const AppWorkbench = ({
   payload = {},
@@ -43,15 +59,17 @@ const AppWorkbench = ({
     return candidates.find((candidate) => candidate && typeof candidate === 'object') || {};
   }, [payload]);
   const layoutCfg = config?.layout || {};
-  const defaultView = layoutCfg.defaultView || 'split';
+  const defaultView = layoutCfg.defaultView || 'preview-only';
   const [view, setView] = useState(defaultView);
   const [refinementRequest, setRefinementRequest] = useState('');
   const [limitToSelectedFile, setLimitToSelectedFile] = useState(false);
   const [refinementResult, setRefinementResult] = useState(null);
+  const [pendingHarness, setPendingHarness] = useState(null);
   const [refinementError, setRefinementError] = useState(null);
   const [artifactReview, setArtifactReview] = useState(payload?.review || null);
   const [artifactReviewBusy, setArtifactReviewBusy] = useState(false);
   const [artifactReviewError, setArtifactReviewError] = useState(null);
+  const [artifactReviewNotice, setArtifactReviewNotice] = useState(null);
   const artifactValidationResult = artifactReview?.validation_result || null;
   const artifactValidationCommands = Array.isArray(artifactValidationResult?.command_results)
     ? artifactValidationResult.command_results
@@ -63,11 +81,50 @@ const AppWorkbench = ({
   const [activeArtifactVersionId, setActiveArtifactVersionId] = useState(
     payload?.artifact_version_id || payload?.artifactVersionId || null
   );
+  const [reviewArtifactVersionId, setReviewArtifactVersionId] = useState(
+    payload?.artifact_version_id || payload?.artifactVersionId || null
+  );
+  const artifactReviewRef = useRef(null);
+  const reviewNotes = Array.isArray(artifactReview?.risk_notes)
+    ? artifactReview.risk_notes.filter(note => note && note !== artifactReview.validation_blocker)
+    : [];
+  const codingResult = refinementOutput(refinementResult);
+  const savedDraftId = codingResult?.metadata?.build_record_id;
+  const confirmationOnly = payload?.stage === 'confirm';
+  const hasDownloadFiles = Array.isArray(payload?.files) && payload.files.some(Boolean);
+  const canShowExportActions = showExportActions && !codingResult && (hasDownloadFiles || confirmationOnly);
+  const exportPayload = confirmationOnly ? {
+    ...payload,
+    actions: normalizePrimitiveActions(payload, [
+      { id: 'download_complete', label: 'Confirm app bundle', variant: 'primary', approved: true },
+      { id: 'close', label: 'Close', variant: 'secondary' },
+    ]).map((action) => action.id === 'download_complete' ? { ...action, label: 'Confirm app bundle' } : action),
+  } : payload;
+  const codingResultTone = codingResult?.status === 'validated' && savedDraftId
+    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100'
+    : codingResult?.status === 'failed'
+      ? 'border-red-500/30 bg-red-500/10 text-red-200'
+      : 'border-amber-400/30 bg-amber-400/10 text-amber-100';
+  const codingResultMessage = {
+    validated: savedDraftId ? 'Draft validated and saved for review.' : 'Validation passed, but no saved draft is available.',
+    planned: savedDraftId ? 'Draft saved; validation is incomplete.' : 'Refinement planned; no draft was saved.',
+    failed: savedDraftId ? 'Draft saved; validation failed.' : 'Refinement failed; no draft was saved.',
+    ineligible: 'This change is not eligible for scoped refinement.',
+  }[codingResult?.status] || 'Refinement has not completed.';
 
   // Preview ownership follows the persisted artifact version and build target.
   const artifactVersionId = activeArtifactVersionId;
   const buildRegistryId = payload?.build_registry_id;
   const artifactQuery = `?build_registry_id=${encodeURIComponent(buildRegistryId || '')}`;
+  const reviewIdentity = `${buildRegistryId || ''}/${reviewArtifactVersionId || ''}`;
+  const reviewIdentityRef = useRef(reviewIdentity);
+  reviewIdentityRef.current = reviewIdentity;
+  const selectionIdentity = JSON.stringify([buildRegistryId, payload?.artifact_version_id || payload?.artifactVersionId]);
+  const selectionRef = useRef({ identity: selectionIdentity });
+  if (selectionRef.current.identity !== selectionIdentity) selectionRef.current = { identity: selectionIdentity };
+  const refinementSelectionRef = useRef(null);
+  const currentWorkflowError = refinementSelectionRef.current === selectionRef.current ? workflowStartError : null;
+  const anotherVersionIsRefining = refinementStarting && refinementSelectionRef.current !== selectionRef.current;
   const artifactKind = payload?.artifact_kind || payload?.artifactKind || 'app_bundle';
   const artifactKey = payload?.artifact_key || payload?.artifactKey || artifactKind;
 
@@ -83,7 +140,7 @@ const AppWorkbench = ({
     validationStrategy,
     integrationTestResult,
     integrationPassed,
-  } = useAppValidationWorkbench(payload, config);
+  } = useAppValidationWorkbench(payload, config, codingResult, activeArtifactVersionId);
 
   const {
     sandboxStatus,
@@ -98,28 +155,35 @@ const AppWorkbench = ({
 
   useEffect(() => {
     setActiveArtifactVersionId(payload?.artifact_version_id || payload?.artifactVersionId || null);
+    setReviewArtifactVersionId(payload?.artifact_version_id || payload?.artifactVersionId || null);
+    setRefinementResult(null);
+    setPendingHarness(null);
+    setRefinementError(null);
   }, [payload?.artifact_version_id, payload?.artifactVersionId]);
 
   useEffect(() => {
-    setArtifactReview(payload?.review || null);
-  }, [payload?.review]);
+    if (reviewArtifactVersionId === (payload?.artifact_version_id || payload?.artifactVersionId || null)) {
+      setArtifactReview(payload?.review || null);
+    }
+  }, [payload?.review, payload?.artifact_version_id, payload?.artifactVersionId, reviewArtifactVersionId]);
 
   const headerText = useMemo(() => payload?.title || 'App Workbench', [payload]);
 
   const subtitle = useMemo(() => {
+    if (codingResult) return 'Review the checks for this refinement before accepting it.';
     const agentMsg = payload?.agent_message || payload?.description || null;
     if (agentMsg && typeof agentMsg === 'string') return agentMsg;
     if (validationStatus === 'passed') {
-      return 'Validation passed. Review code, preview, and export.';
+      return 'Try your app, request changes, then review it for activation.';
     }
     if (validationStatus === 'skipped') {
-      return 'Validation was explicitly skipped. Review the generated bundle before export.';
+      return 'This draft has not been validated. Required checks must pass before export or activation.';
     }
     if (validationStatus === 'failed') {
       return 'Validation failed. Review errors and retry.';
     }
-    return 'Validation is pending. Review the bundle and wait for validation or skip explicitly.';
-  }, [payload, validationStatus]);
+    return 'Checks are incomplete. Review the draft; export and activation require passed checks.';
+  }, [payload, validationStatus, codingResult]);
 
   const panelClass = workflowSurfaceStyles.darkPanel;
 
@@ -139,8 +203,9 @@ const AppWorkbench = ({
 
   useEffect(() => {
     let cancelled = false;
+    setArtifactReviewNotice(null);
     async function loadReview() {
-      if (!artifactVersionId || !buildRegistryId) {
+      if (!reviewArtifactVersionId || !buildRegistryId) {
         if (!cancelled) {
           setArtifactReview(null);
           setArtifactReviewError(null);
@@ -149,8 +214,9 @@ const AppWorkbench = ({
       }
       setArtifactReviewBusy(true);
       setArtifactReviewError(null);
+      setArtifactReview(null);
       try {
-        const response = await studioFetch(`/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/review${artifactQuery}`);
+        const response = await studioFetch(`/api/studio/build/artifacts/${encodeURIComponent(reviewArtifactVersionId)}/review${artifactQuery}`);
         const body = await response.json().catch(() => ({ detail: response.statusText }));
         if (!response.ok) {
           throw new Error(body.detail || 'Artifact review could not be loaded.');
@@ -170,14 +236,12 @@ const AppWorkbench = ({
     }
     loadReview();
     return () => { cancelled = true; };
-  }, [artifactVersionId, artifactQuery, buildRegistryId]);
+  }, [reviewArtifactVersionId, artifactQuery, buildRegistryId]);
 
-  const buildRefinementTriggerPayload = (harnessAction = null, overrideArtifactKind = null) => {
-    const resolvedArtifactKind = overrideArtifactKind || artifactKind;
-    const isThemeRefinement = overrideArtifactKind === 'theme_config';
+  const buildRefinementTriggerPayload = (isThemeRefinement = false) => {
     const triggerPayload = {
       refinement_request: {
-        artifact_kind: resolvedArtifactKind,
+        artifact_kind: artifactKind,
         artifact_key: artifactKey,
         artifact_version_id: artifactVersionId,
         raw_user_request: refinementRequest.trim(),
@@ -198,55 +262,68 @@ const AppWorkbench = ({
           parent_theme_config: parentTheme,
         };
       }
-      // Scope the coding request explicitly to theme files so the scope
-      // proposer is bypassed. Without this it would try to load a
-      // theme_config artifact from the store, which may not exist yet.
+      // The theme is a file in this saved app bundle, not a separate artifact.
       if (themeSource != null) {
         triggerPayload.coding_request = {
           files: { [THEME_FILE_PATH]: themeSource },
-          validation_strategy: validationStrategy || 'skip',
         };
       }
     } else if (limitToSelectedFile && selectedPath && scopeFiles[selectedPath] != null) {
       triggerPayload.coding_request = {
         files: scopeFiles,
-        validation_strategy: validationStrategy || 'skip',
       };
+    } else {
+      // Missing explicit files asks the existing harness to propose a safe scope.
+      triggerPayload.coding_request = {};
     }
 
-    if (harnessAction && typeof harnessAction === 'object') {
-      triggerPayload.harness_action = harnessAction;
-    }
     return triggerPayload;
   };
 
-  // Shared handler for any refinement response. Handles coding_worker patches
-  // (updates filesMap and advances the persisted artifact version) and
-  // harness_decision responses (routes user to a confirmation action).
-  const handleRefinementResponse = (response) => {
+  // Shared handler for any refinement response. Saved candidates remain
+  // inspectable even when validation prevents advancing the preview baseline.
+  const handleRefinementResponse = (response, submission = null) => {
     if (!response) {
-      if (workflowStartError) setRefinementError(workflowStartError);
+      if (currentWorkflowError) setRefinementError(currentWorkflowError);
       return;
     }
-    if (response.execution_mode === 'coding_worker') {
-      const appliedFiles = response?.coding_worker?.applied_files || {};
-      if (typeof appliedFiles === 'object' && Object.keys(appliedFiles).length > 0) {
-        const mergedFilesMap = { ...(filesMap || {}), ...appliedFiles };
-        setFilesMap(mergedFilesMap);
+    const result = refinementOutput(response);
+    if (result) {
+      setPendingHarness(null);
+      const nextVersionId = result?.metadata?.build_record_id;
+      if (nextVersionId) setReviewArtifactVersionId(nextVersionId);
+      if (result?.status === 'validated' && nextVersionId) {
+        const appliedFiles = result.applied_files || {};
+        if (typeof appliedFiles === 'object' && Object.keys(appliedFiles).length > 0) {
+          setFilesMap((current) => ({ ...(current || {}), ...appliedFiles }));
+        }
+        setActiveArtifactVersionId(nextVersionId);
       }
-      const nextVersionId = response?.coding_worker?.metadata?.artifact_version_id || null;
-      if (nextVersionId) setActiveArtifactVersionId(nextVersionId);
       setRefinementResult(response);
       return;
     }
     if (response.execution_mode === 'harness_decision') {
-      setRefinementResult(response);
+      // A routing question does not replace the active candidate's evidence.
+      setPendingHarness({ response, submission });
     }
   };
 
+  const pendingSubmission = pendingHarness?.submission;
+  const pendingRequest = pendingSubmission?.triggerPayload?.refinement_request;
+  const currentHarnessDecision = pendingSubmission?.selection === selectionRef.current
+    && pendingSubmission?.buildRegistryId === buildRegistryId
+    && pendingRequest?.artifact_version_id === artifactVersionId
+    && pendingRequest?.raw_user_request === refinementRequest.trim()
+      ? pendingHarness?.response?.harness_decision : null;
+
+  // AppReview can hand an already finished inline refinement to this surface.
+  // It must use the same saved-draft/validation rules as a request made here.
+  useEffect(() => {
+    if (payload.refinement_result) handleRefinementResponse(payload.refinement_result);
+  }, [payload.refinement_result]);
+
   const handleApplyScopedRefinement = async () => {
     setRefinementError(null);
-    setRefinementResult(null);
     if (!artifactVersionId) {
       setRefinementError('This build has not been saved as a refinable version yet. Wait for generation to finish, then try again.');
       return;
@@ -255,17 +332,20 @@ const AppWorkbench = ({
       setRefinementError('Describe the change you want first.');
       return;
     }
+    const selection = selectionRef.current;
+    refinementSelectionRef.current = selection;
+    setPendingHarness(null);
+    const triggerPayload = buildRefinementTriggerPayload();
     const response = await startWorkflow(
       null,
       {},
-      { trigger_source: 'refinement', build_registry_id: buildRegistryId, trigger_payload: buildRefinementTriggerPayload() }
+      { trigger_source: 'refinement', build_registry_id: buildRegistryId, trigger_payload: triggerPayload }
     );
-    handleRefinementResponse(response);
+    if (selectionRef.current === selection) handleRefinementResponse(response, { triggerPayload, selection, buildRegistryId });
   };
 
   const handleThemeRefinement = async () => {
     setRefinementError(null);
-    setRefinementResult(null);
     if (!artifactVersionId) {
       setRefinementError('This build has not been saved as a refinable version yet. Wait for generation to finish, then try again.');
       return;
@@ -274,54 +354,107 @@ const AppWorkbench = ({
       setRefinementError('Describe the theme change you want first.');
       return;
     }
+    const selection = selectionRef.current;
+    refinementSelectionRef.current = selection;
+    setPendingHarness(null);
+    const triggerPayload = buildRefinementTriggerPayload(true);
     const response = await startWorkflow(
       null,
       {},
-      { trigger_source: 'refinement', build_registry_id: buildRegistryId, trigger_payload: buildRefinementTriggerPayload(null, 'theme_config') }
+      { trigger_source: 'refinement', build_registry_id: buildRegistryId, trigger_payload: triggerPayload }
     );
-    handleRefinementResponse(response);
+    if (selectionRef.current === selection) handleRefinementResponse(response, { triggerPayload, selection, buildRegistryId });
   };
 
   const handleHarnessDecisionAction = async (action) => {
+    if (action?.action_type === 'review_patch') {
+      if (!savedDraftId) {
+        setRefinementError('No saved draft is available to review.');
+        return;
+      }
+      setReviewArtifactVersionId(savedDraftId);
+      artifactReviewRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      artifactReviewRef.current?.focus({ preventScroll: true });
+      return;
+    }
     if (!action || !refinementRequest.trim() || !artifactVersionId) return;
     setRefinementError(null);
+    if (!currentHarnessDecision?.actions?.some(item => item.action_id === action.action_id)) {
+      setRefinementError('This scope decision is no longer current. Submit the change again.');
+      return;
+    }
+    const triggerPayload = {
+      ...pendingSubmission.triggerPayload,
+      harness_action: { action_id: action.action_id },
+      ...(pendingHarness.response.change_request_id ? { change_request_id: pendingHarness.response.change_request_id } : {}),
+      ...(pendingHarness.response.revision_id ? { revision_id: pendingHarness.response.revision_id } : {}),
+    };
+    if (['run_recommended_workflow', 'confirm_recommended_workflow'].includes(action.action_id)) {
+      delete triggerPayload.coding_request;
+    } else if (action.action_id === 'apply_proposed_scope') {
+      const paths = currentHarnessDecision.selected_paths || [];
+      if (!paths.length || paths.some(path => !Object.hasOwn(filesMap, path))) {
+        setRefinementError('The proposed files are unavailable in this version. Submit the change again.');
+        return;
+      }
+      triggerPayload.coding_request = {
+        ...(triggerPayload.coding_request || {}),
+        files: Object.fromEntries(paths.map(path => [path, filesMap[path]])),
+      };
+    }
+    const selection = selectionRef.current;
+    refinementSelectionRef.current = selection;
+    setPendingHarness(null);
     const response = await startWorkflow(
       null,
       {},
-      { trigger_source: 'refinement', build_registry_id: buildRegistryId, trigger_payload: buildRefinementTriggerPayload({ action_id: action.action_id }) }
+      { trigger_source: 'refinement', build_registry_id: buildRegistryId, trigger_payload: triggerPayload }
     );
-    handleRefinementResponse(response);
+    if (selectionRef.current === selection) handleRefinementResponse(response, { triggerPayload, selection, buildRegistryId });
   };
 
   const handleArtifactReviewAction = async (action) => {
-    if (!artifactVersionId || !action) return;
+    if (!reviewArtifactVersionId || !action || refinementStarting) return;
+    const identity = reviewIdentity;
+    const selection = selectionRef.current;
+    const isCurrent = () => selectionRef.current === selection && reviewIdentityRef.current === identity;
     setArtifactReviewBusy(true);
     setArtifactReviewError(null);
+    setArtifactReviewNotice(null);
     try {
-      const response = await studioFetch(`/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/${action}${artifactQuery}`, {
+      const response = await studioFetch(`/api/studio/build/artifacts/${encodeURIComponent(reviewArtifactVersionId)}/${action}${artifactQuery}`, {
         method: 'POST',
       });
       const body = await response.json().catch(() => ({ detail: response.statusText }));
       if (!response.ok) {
         throw new Error(body.detail || `Artifact ${action} failed.`);
       }
-      setArtifactReview(body.review || null);
+      const confirmation = { accept: 'accepted', reject: 'rejected', promote: 'promoted' }[action];
+      if (body[confirmation] !== true) throw new Error(`Artifact ${action} was not confirmed. Refresh the review before retrying.`);
+      if (isCurrent()) {
+        setArtifactReview(body.review || null);
+        setArtifactReviewNotice(action === 'promote'
+          ? body.restart_required
+            ? 'Version activated. Restart the app to load this version.'
+            : 'Version activated.'
+          : action === 'accept' ? 'Draft accepted. Activate it when you are ready.' : 'Draft rejected.');
+      }
     } catch (error) {
-      setArtifactReviewError(error instanceof Error ? error.message : `Artifact ${action} failed.`);
+      if (isCurrent()) setArtifactReviewError(error instanceof Error ? error.message : `Artifact ${action} failed.`);
     } finally {
-      setArtifactReviewBusy(false);
+      if (isCurrent()) setArtifactReviewBusy(false);
     }
   };
 
   return (
     <div className={panelClass}>
       <div className="px-4 py-3 border-b border-white/10 bg-black/40">
-        <div className="flex items-start justify-between gap-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="text-white font-bold font-heading text-sm">{headerText}</div>
             <div className="text-xs text-[var(--color-text-muted)] mt-1">{subtitle}</div>
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex flex-wrap items-center gap-2">
             <button type="button" className={toolbarBtn(showSplit)} onClick={() => setView('split')} title="Split view">
               <LayoutGrid className="w-4 h-4" /> Split
             </button>
@@ -409,7 +542,7 @@ const AppWorkbench = ({
           />
 
           <div className="mt-3 flex flex-wrap items-center gap-3">
-            <label className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
+            {(showCode || showSplit || limitToSelectedFile) && <label className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
               <input
                 type="checkbox"
                 checked={limitToSelectedFile}
@@ -417,21 +550,21 @@ const AppWorkbench = ({
                 disabled={!selectedPath || refinementStarting}
               />
               Limit to selected file
-            </label>
+            </label>}
             <button
               type="button"
               className={toolbarBtn(canApplyScopedRefinement && !refinementStarting)}
               disabled={!canApplyScopedRefinement || refinementStarting}
               onClick={handleApplyScopedRefinement}
             >
-              {refinementStarting ? 'Applying…' : 'Apply change'}
+              {anotherVersionIsRefining ? 'Working on another version…' : refinementStarting ? 'Applying…' : 'Apply change'}
             </button>
             <button
               type="button"
               className={toolbarBtn(canApplyScopedRefinement && !refinementStarting)}
               disabled={!canApplyScopedRefinement || refinementStarting}
               onClick={handleThemeRefinement}
-              title="Routes through ThemeCapture for design-level changes; uses the coding worker for small patches."
+              title="Change your app's colors, fonts, or visual identity."
             >
               {refinementStarting ? 'Applying...' : 'Redesign theme'}
             </button>
@@ -441,32 +574,41 @@ const AppWorkbench = ({
             </div>
           </div>
 
-          {(refinementError || workflowStartError) && (
+          {(refinementError || currentWorkflowError) && (
             <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
-              {refinementError || workflowStartError}
+              {refinementError || currentWorkflowError}
             </div>
           )}
 
-          {refinementResult?.coding_worker && (
-            <div className="mt-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-3 text-xs text-emerald-100">
-              <div className="font-semibold text-emerald-50">
-                {refinementResult.coding_worker.plan?.summary || 'Scoped refinement applied.'}
-              </div>
-              <div className="mt-1">
-                Status: {refinementResult.coding_worker.status}
-                {refinementResult.coding_worker.metadata?.artifact_version_id
-                  ? ` • Artifact ${refinementResult.coding_worker.metadata.artifact_version_id}`
-                  : ''}
-              </div>
+          {codingResult && (
+            <div role="status" aria-label="Refinement result" className={`mt-3 rounded-xl border px-3 py-3 text-xs ${codingResultTone}`}>
+              <div className="font-semibold">{codingResultMessage}</div>
+              <details className="mt-2">
+                <summary className="cursor-pointer">Refinement details</summary>
+                {codingResult.plan?.summary && <div className="mt-1">{codingResult.plan.summary}</div>}
+                <div className="mt-1 break-words [overflow-wrap:anywhere]">
+                  Status: {codingResult.status}
+                  {savedDraftId ? ` • Draft ${savedDraftId}` : ''}
+                </div>
+              </details>
+              {savedDraftId && codingResult.status !== 'validated' && (
+                <div className="mt-1">The editor and preview still show version {artifactVersionId}. Inspect the saved draft below.</div>
+              )}
+              {codingResult.error && <div className="mt-1">{codingResult.error}</div>}
+              {savedDraftId && (
+                <button type="button" className="mt-2 underline" onClick={() => handleHarnessDecisionAction({ action_type: 'review_patch' })}>
+                  Review patch
+                </button>
+              )}
             </div>
           )}
 
-          {refinementResult?.harness_decision && (
+          {currentHarnessDecision && (
             <div className="mt-3">
               <HarnessDecisionCard
-                decision={refinementResult.harness_decision}
+                decision={currentHarnessDecision}
                 busy={refinementStarting}
-                error={refinementError || workflowStartError}
+                error={refinementError || currentWorkflowError}
                 onAction={handleHarnessDecisionAction}
                 className="border-white/10 bg-black/20"
               />
@@ -474,13 +616,25 @@ const AppWorkbench = ({
           )}
         </div>
 
+        <section ref={artifactReviewRef} tabIndex={-1} aria-label="Artifact review">
+        {artifactReviewBusy && <p role="status" className="text-xs text-[var(--color-text-muted)]">Loading artifact review…</p>}
+        {artifactReviewNotice && <p role="status" className="mb-3 text-sm text-emerald-200">{artifactReviewNotice}</p>}
+        {artifactReviewError && (
+          <div role="alert" className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+            {artifactReviewError}
+          </div>
+        )}
         {artifactReview && (
           <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <div className="text-sm font-semibold text-white">Artifact Review</div>
+                <div className="text-sm font-semibold text-white">Review this draft</div>
                 <div className="mt-1 text-xs text-[var(--color-text-muted)]">
-                  Lifecycle: {artifactReview.lifecycle_status} · Validation: {artifactReview.validation_status} · Review: {artifactReview.review_status}
+                  {artifactReview.can_accept
+                    ? 'Accept the draft when you are satisfied. Activation is a separate step.'
+                    : artifactReview.can_promote
+                      ? 'Review this version before making it the active app.'
+                      : 'Review the saved version and its checks.'}
                 </div>
               </div>
               <div className="text-[10px] text-[var(--color-text-muted)]">
@@ -488,13 +642,19 @@ const AppWorkbench = ({
               </div>
             </div>
 
+            <details className="mt-3 text-xs text-[var(--color-text-muted)]">
+              <summary className="cursor-pointer">Version and check details</summary>
+              <div className="mt-2 break-words [overflow-wrap:anywhere]">Version {reviewArtifactVersionId}</div>
+              <div className="mt-1">
+                Lifecycle: {artifactReview.lifecycle_status} · Validation: {artifactReview.validation_status} · Review: {artifactReview.review_status}
+              </div>
             {artifactReview.selected_paths?.length > 0 && (
               <div className="mt-3 flex flex-wrap gap-2">
                 {artifactReview.selected_paths.map((path) => (
                   <button
                     key={path}
                     type="button"
-                    onClick={() => setSelectedPath(path)}
+                    onClick={() => { setSelectedPath(path); setView('code-only'); }}
                     className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 font-mono text-[11px] text-[var(--color-text-muted)] transition hover:bg-white/10"
                   >
                     {path}
@@ -502,11 +662,13 @@ const AppWorkbench = ({
                 ))}
               </div>
             )}
+            </details>
 
             {artifactReview.coding_summary && (
-              <div className="mt-3 rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-[var(--color-text-muted)]">
-                {artifactReview.coding_summary}
-              </div>
+              <details className="mt-3 text-xs text-[var(--color-text-muted)]">
+                <summary className="cursor-pointer">Change summary</summary>
+                <p className="mt-2 break-words [overflow-wrap:anywhere]">{artifactReview.coding_summary}</p>
+              </details>
             )}
 
             {artifactReview.validation_blocker && (
@@ -515,8 +677,19 @@ const AppWorkbench = ({
               </div>
             )}
 
+            {reviewNotes.length > 0 && (
+              <details className="mt-3 text-xs text-[var(--color-text-muted)]">
+                <summary className="cursor-pointer text-amber-200">Review notes ({reviewNotes.length})</summary>
+                <ul className="mt-2 space-y-2 break-words [overflow-wrap:anywhere]">
+                  {reviewNotes.map((note, index) => <li key={index}>{note}</li>)}
+                </ul>
+              </details>
+            )}
+
             {(artifactValidationCommands.length > 0 || artifactValidationFallbacks.length > 0) && (
-              <div className="mt-3 grid gap-2 text-xs text-[var(--color-text-muted)] sm:grid-cols-2">
+              <details className="mt-3 text-xs text-[var(--color-text-muted)]">
+                <summary className="cursor-pointer">Validation commands</summary>
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
                 {artifactValidationCommands.slice(0, 4).map((item) => (
                   <div key={`${item.kind}:${item.command}`} className="rounded-xl border border-white/10 bg-black/30 px-3 py-2">
                     <div className="break-all font-mono text-[11px] text-white">{item.command}</div>
@@ -530,6 +703,7 @@ const AppWorkbench = ({
                   </div>
                 ))}
               </div>
+              </details>
             )}
 
             {(artifactReview.can_accept || artifactReview.can_reject || artifactReview.can_promote) && (
@@ -537,8 +711,8 @@ const AppWorkbench = ({
                 {artifactReview.can_accept && (
                   <button
                     type="button"
-                    className={toolbarBtn(!artifactReviewBusy)}
-                    disabled={artifactReviewBusy}
+                    className={toolbarBtn(!artifactReviewBusy && !refinementStarting)}
+                    disabled={artifactReviewBusy || refinementStarting}
                     onClick={() => handleArtifactReviewAction('accept')}
                   >
                     {artifactReviewBusy ? 'Working...' : 'Accept artifact'}
@@ -547,8 +721,8 @@ const AppWorkbench = ({
                 {artifactReview.can_reject && (
                   <button
                     type="button"
-                    className={toolbarBtn(!artifactReviewBusy)}
-                    disabled={artifactReviewBusy}
+                    className={toolbarBtn(!artifactReviewBusy && !refinementStarting)}
+                    disabled={artifactReviewBusy || refinementStarting}
                     onClick={() => handleArtifactReviewAction('reject')}
                   >
                     {artifactReviewBusy ? 'Working...' : 'Reject artifact'}
@@ -557,25 +731,27 @@ const AppWorkbench = ({
                 {artifactReview.can_promote && (
                   <button
                     type="button"
-                    className={toolbarBtn(!artifactReviewBusy)}
-                    disabled={artifactReviewBusy}
+                    className={toolbarBtn(!artifactReviewBusy && !refinementStarting)}
+                    disabled={artifactReviewBusy || refinementStarting}
                     onClick={() => handleArtifactReviewAction('promote')}
                   >
-                    {artifactReviewBusy ? 'Working...' : 'Promote to app root'}
+                    {artifactReviewBusy ? 'Working...' : 'Activate this draft'}
                   </button>
                 )}
               </div>
             )}
 
             {artifactReview.changed_files?.length > 0 && (
-              <div className="mt-4 space-y-3">
+              <details className="mt-4 text-xs text-[var(--color-text-muted)]">
+                <summary className="cursor-pointer">Code changes ({artifactReview.changed_file_count || artifactReview.changed_files.length})</summary>
+              <div className="mt-3 space-y-3">
                 {artifactReview.changed_files.slice(0, 6).map((file) => (
                   <div key={`${file.change_type}:${file.path}`} className="rounded-xl border border-white/10 bg-black/30 p-3">
                     <div className="flex items-center justify-between gap-3">
                       <button
                         type="button"
-                        onClick={() => setSelectedPath(file.path)}
-                        className="font-mono text-xs text-white transition hover:text-[var(--color-primary)]"
+                        onClick={() => { setSelectedPath(file.path); setView('code-only'); }}
+                        className="min-w-0 break-words [overflow-wrap:anywhere] font-mono text-xs text-white transition hover:text-[var(--color-primary)]"
                       >
                         {file.path}
                       </button>
@@ -591,20 +767,17 @@ const AppWorkbench = ({
                   </div>
                 ))}
               </div>
-            )}
-
-            {artifactReviewError && (
-              <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
-                {artifactReviewError}
-              </div>
+              </details>
             )}
           </div>
         )}
+        </section>
 
-        {showExportActions && (
+        {canShowExportActions && (
           <div className="pt-2">
             <ExportActions
-              payload={payload}
+              payload={{ ...exportPayload, title: 'Finish this step' }}
+              collapseDetails
               onResponse={onResponse}
               toolName={toolName}
               toolCallId={toolCallId}

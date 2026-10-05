@@ -24,7 +24,7 @@ from factory_app.workflows._shared.workflow_integration import (
     normalize_workflow_integration_metadata,
 )
 from factory_app.workflows.AppGenerator.tools.app_build_plan import app_build_plan
-from factory_app.workflows.AppGenerator.tools.app_validation import run_app_bundle_acceptance_gate
+from factory_app.workflows.AppGenerator.tools.app_validation import validate_app_bundle_from_request
 from factory_app.workflows.AppGenerator.tools.export_app_code import resolve_export_gate
 from mozaiksai.core.artifacts import (
     ArtifactLifecycleStatus,
@@ -51,14 +51,6 @@ ALLOWED_REAL_STORE_SMOKE_APP_ID_PREFIXES = (
     REAL_STORE_SMOKE_APP_ID_PREFIX,
     LIVE_REAL_STORE_SMOKE_APP_ID_PREFIX,
 )
-
-
-def _configure_event_loop_policy() -> None:
-    if os.name != "nt":
-        return
-    selector_policy = getattr(asyncio, "WindowsSelectorEventLoopPolicy", None)
-    if selector_policy is not None:
-        asyncio.set_event_loop_policy(selector_policy())
 
 
 class MemoryArtifactStore:
@@ -449,8 +441,6 @@ async def _run_lineage_smoke_with_store(
         integration_errors.append("Hydrated workflow integration metadata did not include a primary workflow.")
     files = build_appgenerator_acceptance_files(fixture_workflow_integration)
     context.set("generated_files", files)
-    context.set("app_validation_status", "skipped")
-    context.set("app_validation_strategy_used", "skip")
     task_state = build_appgenerator_acceptance_task_state(files)
     context.set("data_contract", task_state["data_contract"])
     app_build_plan(AppBuildPlan=task_state["app_build_plan"], context_variables=context)
@@ -480,7 +470,10 @@ async def _run_lineage_smoke_with_store(
         for item in output["code_files"]
     }
     context.set("generated_files", files)
-    acceptance = await run_app_bundle_acceptance_gate(files=files, context_variables=context)
+    validation = await validate_app_bundle_from_request(
+        {"validation_strategy": "local", "start_dev_server": False}, context_variables=context,
+    )
+    acceptance = validation["app_bundle_acceptance_result"]
     export_gate = resolve_export_gate(context)
     if not acceptance.get("passed") or not export_gate.get("allow_export"):
         return _json_safe({
@@ -488,6 +481,7 @@ async def _run_lineage_smoke_with_store(
             "validation_errors": ["The admitted AppGenerator fixture failed acceptance/export.",
                                   *export_gate.get("reasons", [])],
             "appgenerator_acceptance": acceptance,
+            "app_validation_result": validation["app_validation_result"],
             "export_gate": export_gate,
         })
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as output:
@@ -612,6 +606,7 @@ async def _run_lineage_smoke_with_store(
             },
             "export_gate": export_gate,
             "runtime_loader": loader_result,
+            "app_validation_result": validation["app_validation_result"],
         }
     )
 
@@ -778,7 +773,6 @@ async def run_live_real_store_factory_artifact_lineage_smoke(
 
 
 def main() -> int:
-    _configure_event_loop_policy()
     parser = argparse.ArgumentParser(
         description="Run the factory artifact-lineage smoke for AgentGenerator to AppGenerator handoff."
     )

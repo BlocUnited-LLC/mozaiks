@@ -19,8 +19,8 @@ from mozaiksai.core.runtime.app.paths import (
 from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import (
-    _page_file_stem,
     auth_required_from_strategy,
+    planned_page_path,
 )
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     pack_facade_directories,
@@ -31,7 +31,6 @@ from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
 )
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
     _page_stem_from_path,
-    _page_stems,
 )
 
 try:
@@ -383,7 +382,14 @@ def _infer_pack_id_from_integration_path(path: str) -> str | None:
 
 
 def _raw_frontend_source_path(task: dict[str, Any]) -> str | None:
+    owns_custom_bundle = (
+        task.get("task_type") == "page_bundle"
+        and task.get("initial_agent") == "AppSchemaAgent"
+        and {"ui/route_manifest.json", "ui/index.js"} <= set(_normalized_owned_paths(task))
+    )
     for owned_path in _normalize_string_list(task.get("owned_paths")):
+        if owns_custom_bundle and re.fullmatch(r"ui/pages/custom/[a-z0-9_]+\.jsx", normalize_app_path(owned_path)):
+            continue
         normalized = owned_path.replace("\\", "/").strip().lower()
         suffix = PurePosixPath(normalized).suffix
 
@@ -1395,13 +1401,10 @@ def _normalize_page_task_dependencies(
                 if facade_task_id not in deps:
                     deps.insert(0, facade_task_id)  # type: ignore[attr-defined]
                 item["depends_on"] = deps
-            owned_stems = {
-                stem for path in item.get("owned_paths") or []
-                if (stem := _page_stem_from_path(normalize_app_path(str(path))))
-            }
+            owned_paths = {normalize_app_path(str(path)) for path in item.get("owned_paths") or []}
             dependencies = _normalize_string_list(item.get("depends_on"))
             for page in pages or []:
-                if not owned_stems.intersection(_page_stems(page)):
+                if planned_page_path(page) not in owned_paths:
                     continue
                 for source in _iter_page_data_sources(page):
                     contract_task = module_contract_by_pack.get(source["module_id"])
@@ -1625,7 +1628,7 @@ def _validate_user_facing_managed_capability_tasks(
     if not managed_capability_ids or not pages:
         return
     template_facade = any(re.fullmatch(r"modules/[^/]+/module\.yaml", path) for path in pack_paths)
-    authored_pages = [page for page in pages if f"ui/pages/{_page_file_stem(page)}.yaml" not in pack_paths]
+    authored_pages = [page for page in pages if planned_page_path(page) not in pack_paths]
 
     page_bundle_tasks = [
         task
@@ -1766,7 +1769,7 @@ def _validate_build_tasks(build_tasks: list[dict[str, Any]], managed_capability_
                 "Build task "
                 f"'{task_id}' assigns persistent page output to a non-schema owner "
                 f"({initial_agent}). `page_bundle` must start at AppSchemaAgent and emit "
-                "declarative page artifacts only."
+                "declarative pages or the typed custom route bundle."
             )
         if any(_page_stem_from_path(path) for path in owned_paths) and task_type != "page_bundle":
             raise ValueError(
@@ -1886,7 +1889,8 @@ def _validate_build_tasks(build_tasks: list[dict[str, Any]], managed_capability_
                 "Build task "
                 f"'{task_id}' plans raw frontend source output ('{raw_frontend_path}'). "
                 "Persistent app UI must compile through AppSchemaAgent/page_bundle plus "
-                "shell/theme artifacts, not source files."
+                "shell/theme artifacts. A custom JSX page requires the same page_bundle "
+                "to own its ui/route_manifest.json and ui/index.js. Other raw frontend source is not allowed."
             )
 
         if _OBSOLETE_HOST_ADMIN_CONFIG_PATH in owned_paths:

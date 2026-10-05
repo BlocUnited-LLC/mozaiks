@@ -59,7 +59,7 @@ mozaiks serve ./my-app --host studio    # Studio management host
 | studio | `mozaiksai.hosts.studio:app` | The management interface for building and reviewing apps |
 
 Put your existing backend and the host behind the same reverse proxy if the
-browser should see one origin. Keep `AUTH_ENABLED=true` (the default) and
+browser should see one origin. Keep authentication on (`AUTH_ENABLED=true`) and
 configure the issuer as described in [Authentication setup](auth-setup.md):
 the hosts then reject chat starts and WebSocket connections that do not carry
 a valid token for the user named in the path.

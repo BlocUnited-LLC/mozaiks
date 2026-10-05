@@ -102,7 +102,6 @@ def test_coding_providers_default_to_acp_disabled() -> None:
     assert config.coding.providers.acp.enabled is False
     assert config.coding.providers.acp.adapter == "claude_code"
     assert config.coding.providers.acp.budget.max_files == 3
-    assert config.coding.providers.acp.budget.max_retries == 1
 
 
 def test_coding_provider_block_parses_with_budget_overrides() -> None:
@@ -143,7 +142,6 @@ def test_unknown_provider_key_is_rejected() -> None:
         {"max_files": 0},
         {"max_files": 51},
         {"max_wall_seconds": 5},
-        {"max_retries": 10},
         {"max_diff_bytes": 1},
     ],
 )
@@ -152,6 +150,15 @@ def test_budget_bounds_are_enforced(budget: dict) -> None:
         ControlPlaneConfig.model_validate(
             {"enabled": True, "coding": {"providers": {"acp": {"budget": budget}}}}
         )
+
+
+def test_coding_provider_budget_rejects_unused_retry_setting() -> None:
+    with pytest.raises(ValidationError, match="max_retries") as exc_info:
+        ControlPlaneConfig.model_validate(
+            {"coding": {"providers": {"acp": {"budget": {"max_retries": 1}}}}}
+        )
+
+    assert exc_info.value.errors()[0]["type"] == "extra_forbidden"
 
 
 def test_provider_config_rejects_connection_shaped_fields() -> None:

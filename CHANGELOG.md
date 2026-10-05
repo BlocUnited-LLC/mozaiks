@@ -170,6 +170,40 @@ This project follows a practical pre-1.0 changelog format:
   DesignDocs validates canonical field types and defaults at save time and gives
   required array/object fields an empty default; the generated record id is
   `<entity>_id`, never a natural `search_by` key.
+- A host running without authentication gives development access (the
+  anonymous user's roles, dev personas, trusted module dispatch, acting for
+  other users) only to requests from its own machine by default. A request
+  counts as local only when it comes straight from a loopback address with no
+  forwarding header, its `Host` and `Origin` (when present) name this machine,
+  and, without an `Origin`, fetch metadata does not mark it as cross-site, so
+  pages on other websites cannot use a local browser that sends fetch metadata
+  to get development access (see the authentication setup guide). Other
+  requests get no development access: routes that need an identity refuse
+  them, and routes that need none serve them as requests without credentials.
+  The web shell's dev proxy marks requests from other machines, so the backend
+  treats them the same way. Open local apps at `http://localhost:<port>` or
+  `http://127.0.0.1:<port>`. A container reached through a published port needs
+  `AUTH_ANON_ACCESS=open`, with the port published on `127.0.0.1` only (see the
+  self-hosting guide). Rebuild `mozaiks-sandbox:local` and any E2B preview
+  template from this release so previews pick up the change.
+- A host with no authentication configuration at all no longer starts in an
+  implicit demo mode. It refuses to start and names the choices: configure an
+  identity provider, set `AUTH_ENABLED=false` (this machine only), or set
+  `AUTH_ANON_ACCESS=public`. `mozaiks serve` and `mozaiks studio --open` refuse
+  the same configurations before anything starts, and also refuse
+  `AUTH_ANON_ACCESS=local` on a `--listen` address other machines can reach.
+- Anonymous visitors of a public app (`AUTH_ANON_ACCESS=public`) and app
+  previews run without development access: no roles, only `AUTH_ANON_SCOPES`
+  (or `access_as_user`), their own user id only, and module permissions and
+  entitlement gates enforced. Visitors share one identity: they see and
+  change each other's chats and per-user records, and their entitlement gates
+  are checked against it. They get no admin, Studio
+  management or billing fulfillment access, and the programmatic workflow
+  trigger needs an internal API key for them.
+- With authentication on, a validated token whose subject is literally
+  `anonymous` acts only as itself. It no longer names the user a request acts
+  for or sees other owners' chats and sessions; only the development identity
+  of a host without authentication does.
 
 - Module entitlement gates are keyed only by the caller's verified identity:
   the token's user, the tenant the token is bound to, and the workspace the
@@ -187,6 +221,20 @@ This project follows a practical pre-1.0 changelog format:
   outcome keys. AG2 reserves those prefixes and drops such keys from A2A,
   AG-UI, A2UI, and NLIP transports, so a declared key passed validation and
   then never reached a remote agent. No shipped workflow uses either prefix.
+- Studio concept and app review screens put the decision before supporting details.
+  The default workspace uses readable body text and quieter panels while retaining
+  the Mozaiks wordmark; generated previews keep their own app branding.
+- Submitting concept feedback immediately generates a new reviewable draft;
+  the revised concept still requires explicit approval. Design failures retain
+  their concrete rejection details when bounded retries end.
+- Domain data assigned a reserved platform-authentication surface identifier
+  receives explicit rename guidance before any ownership reassignment.
+  Chat working indicators now include visible, accessible status text.
+- New-app entry creates an owned Studio draft before launching the build journey.
+  Transition preflight resolves that target without creating or resuming a run.
+- Export and activation require completed acceptance and app-build validation.
+  Restore and activation verify the owned archive's identity and digest before
+  using it. Skipped checks and records without completed validation cannot certify a release.
 - Artifact preview ownership and capacity now persist in MongoDB across Studio
   workers and restarts. Preview allocation uses a bounded queue and positive
   shared limits; interrupted updates require cleanup before reuse. Operators
@@ -248,8 +296,155 @@ This project follows a practical pre-1.0 changelog format:
   that gates apply only with authentication on, that `assignment_store` needs
   `user_id_field: user_id` for per-user plans and a data alias declared in
   `data/contract.json`, and give a `reactions.yaml` example that loads.
+- New setting `AUTH_ANON_ACCESS` (`local`, `public` or `open`) decides whom a
+  host without authentication serves. `local` is the default once
+  authentication is explicitly off. `public` serves every client as an
+  anonymous visitor without development access; Studio refuses it, and it
+  cannot be combined with `AUTH_ANON_ROLES`. `open` gives every client that can
+  connect development access, and the host logs a warning at startup. Set on
+  its own, `AUTH_ANON_ACCESS` turns authentication off unless a complete
+  identity provider is configured, which turns it on. Unknown values are
+  refused, and a deployed `ENV` (anything but the local names) still refuses
+  every posture.
+- Generated public apps declare `AUTH_ANON_ACCESS=public` in their `Dockerfile`
+  (`ENV`), in every `.env*.example`, and in the deployment manifest
+  (`auth.runtime_env`). Authenticated apps' artifacts are unchanged. Public
+  bundles exported earlier must add `AUTH_ANON_ACCESS=public` to their
+  environment before upgrading, or the host refuses to start.
+- `infra/compose/docker-compose.yml` publishes the app port through
+  `MOZAIKS_APP_PORTS` (unset: `8000:8000`, as before). To run the stack without
+  authentication, set `AUTH_ENABLED=false`, `AUTH_ANON_ACCESS=open` and
+  `MOZAIKS_APP_PORTS=127.0.0.1:8000:8000`. The repository's
+  `scripts/run-backend.ps1` and `scripts/run-frontend.ps1` bind `127.0.0.1` by
+  default; pass `-BindHost` to change it.
+- Studio's integrations summary reports the authentication mode from the
+  runtime's own auth resolution.
+
+### Removed
+
+- Unused refinement `coding.providers.acp.budget.max_retries` and LLM profile
+  `default_temperature` settings. Configure provider retries and temperature in
+  `llm_config`; obsolete fields now fail configuration validation. Removed the
+  premature build-success metric emitted after classification and its orphaned
+  logger, plus an unreachable duplicate artifact lookup branch.
 
 ### Fixed
+
+- Refinement confirmations ignore unbound nested actions and retain the original
+  request, build and revision through ChatPage. Pending decisions normalize their
+  stored representation before conditional consumption. Accept and reject verify
+  app archives before mutating draft/session state, then reuse the verified bytes.
+  Schema-page edits use the file identity independently of the display name;
+  Workbench theme edits target the saved app bundle. Journeys without an explicit
+  participation choice retain guided reviews.
+- App-owned home pages now render at `/` through the existing authentication
+  guard; apps without a declared home page retain the chat fallback.
+- Saved app builds open the shared preview, refinement and review workbench
+  directly from Studio. Version switches preserve preview cleanup and reject
+  late results from a previously opened version. Parent refreshes preserve a
+  newer draft's files and review evidence.
+  Review-ready apps link directly to their saved builds without restarting a
+  previous build conversation.
+- Passive chat navigation starts only verified empty sessions. Saved execution,
+  pending input, unreadable state or native AG2 state never triggers an automatic
+  restart or synthetic reply; explicit user input keeps its existing route.
+- Entire-app refinement asks the existing harness to propose file scope. Scope
+  and workflow approvals are bound to the saved request, artifact and revision,
+  then consumed once through the session store before continuing. Selected-file
+  requests stop when the saved contracts cannot prove the requested write scope.
+  Pending decisions preserve the current candidate's review evidence, and review
+  actions wait until the submitted refinement finishes.
+- Visual page refinement resolves the saved route and component registration to
+  the existing page source. Its planner and worker validate finite surface/target
+  pairs and the complete write scope before generation, retaining the route and
+  registry as read-only context. Unknown, ambiguous and unsafe mappings fail
+  before generating files; new surfaces require the broader workflow path.
+- Refinements use the configured validation policy and automatic provider
+  selection instead of forcing local builds or inheriting a previous build's
+  local strategy. Saved review labels the starting version and keeps detailed
+  change summaries expandable while showing failures and review actions.
+- Studio drafts show the registered app's current build and approved description.
+  The workbench opens on preview, keeps required continuation and review actions
+  visible, and offers code, downloads, and diagnostics on demand. Historical chat
+  messages no longer keep the typing indicator active after the run pauses.
+  Warning details and review notes are expandable; failed and skipped checks
+  remain visible, and complete warning lists stay accessible.
+- Draft preview dependency installation works with the disposable image's Debian
+  Python, retaining the sandbox user and pinned runtime dependency constraints.
+  Failed previews preserve their original error until retry or dismissal.
+- Scoped refinement preserves the three canonical exported environment templates;
+  real credential files remain blocked and template values still pass deployment
+  validation before acceptance.
+- Generated apps receive their shared API helper before build validation. Preview
+  requests default to the app's own origin, and frontend build errors enter the
+  existing bounded repair path or finish with a failure explanation.
+- Approved concept names now reach the existing Studio app registry through an
+  owner- and build-scoped update, preserving manually assigned names, app identity,
+  lifecycle and history. Unnamed builds retain readable draft labels in the app
+  directory until approval; existing saved records are not renamed retroactively.
+- Generated read actions retain Mongo `_id` when needed for record identity or
+  lookup. Runtime smoke uses the approved get lookup key independently of the
+  generated update/delete identity, preventing false rejection of valid natural
+  keys while retaining record-identity and two-user isolation checks.
+- Reopened failed workflows retain their declared failure explanation in a
+  collapsed details panel beside the existing retry action. The metadata read
+  keeps the session's user and app scope and exposes no other workflow context.
+- App planning preserves the approved data-contract serializer when its task
+  carries an unbound capability label. Planner, schema, and file guidance now
+  agree on its existing structural identity; actual capability associations and
+  extra file ownership remain subject to the normal approval checks.
+- Failed initial-build retries retain the saved guided/autonomous choice while
+  starting with fresh execution state. Invalid saved choices fail before launch.
+- Bundle scanning resolves custom pages through their registered imports instead
+  of guessing a filename from the component name. Missing bindings still fail.
+- ServiceAgent guidance distinguishes the final backend file inventory from
+  model-authored files, keeping generated policy code with its existing owner.
+- Custom page task builds and standalone saves now share page-file validation
+  and registry materialization. Model-authored registry files fail with guidance
+  to preserve the approved page and let code generate its registration.
+- Exhausted build repair reports the limit of automatic recovery without
+  claiming the validation errors are impossible to fix.
+- Studio shows working activity when an actual AG2 model call begins, including
+  repeated calls by the same agent, without exposing hidden agent identities.
+- Authenticated custom-page builds now recognize the exact sign-in and callback
+  routes produced by the canonical auth scaffold. Unapproved custom routes still
+  fail with repair guidance. Exhausted task recovery reports the assembly cause
+  through the existing validation and failure path.
+- Autonomous builds continue through validated no-subscription and no-workflow
+  decisions without redundant approval cards, recording that review was not
+  required. Nonempty decisions and final app activation retain their review gates.
+- Generated handler repair feedback identifies the required workspace subclass.
+  Design and UI guidance preserves mandatory persistence behavior, uses shipped
+  table action APIs, and keeps side effects out of React state updaters.
+
+- Studio clears working and typing indicators when a workflow asks for input
+  or displays an interactive approval, keeping the user's next action clear.
+- The activation response uses the same verified app archive as the activation
+  itself, avoiding a second fetch or an error after a successful activation if
+  the original archive changes.
+
+- Scoped refinements now validate the complete edited app through the existing
+  acceptance and build checks, save a canonical verified archive, and carry that
+  candidate's evidence into Studio review. Operator execution policy wins over
+  model hints; skipped checks cannot activate a draft. Cancelled validation
+  finishes sandbox and disposable runtime-smoke cleanup.
+
+- DesignDocs now declares each page's existing canonical rendering surface.
+  App planning preserves it and uses the shared materializer for prompt paths,
+  preventing an approved interactive custom page from becoming static YAML.
+  Existing pre-production designs without the field must revisit DesignDocs.
+
+- ValueEngine intake now records strict, bounded readiness through its auto tool
+  instead of parsing a completion word from chat. Complete briefs proceed to
+  research without another confirmation; concise product language replaces
+  implementation jargon, while explicit concept approval remains required.
+
+- Factory interviews use typed readiness and retain explicit brand preferences
+  across workflow transitions. Custom interactive page plans now own their React
+  files and shared route registry together, using the same deterministic registry
+  renderer as standalone app saves.
+- AG2 knowledge-store writes are serialized per session so a delayed earlier
+  snapshot cannot overwrite the active channel state needed after restart.
 
 - A copied `.env.example` now imports the hosts and points the local shell's
   API proxy at the backend; `mozaiks context index` passes its workspace key.
@@ -288,6 +483,27 @@ This project follows a practical pre-1.0 changelog format:
   the host does not also auto-start the session and the prompt and initial
   agent always arrive. With `AUTH_ENABLED=true` it needs a token for its user
   in `MOZAIKS_SMOKE_ACCESS_TOKEN` and stops with a clear error without one.
+
+- Refinement completion now reflects validation and persistence outcomes.
+  Failed or unverified drafts stay reviewable without replacing the active
+  editor/preview; Review patch opens the saved candidate instead of running
+  another coding request. Cancellation clears the matching in-progress session,
+  and every coding provider passes the finalizer's approved-file scope check.
+  A configured remote content-store failure now blocks saving the draft instead
+  of silently claiming success with files available on only one worker.
+- Required runtime checks that are skipped or unavailable leave generated-app
+  acceptance pending. Partial source validation cannot pass, and exports require
+  a passed build status plus acceptance for the exported snapshot. Acceptance smoke scripts run the
+  canonical validator instead of injecting skipped build results.
+- Existing-app discovery resumes the correct interview after human replies and
+  completes only after its deterministic artifact save succeeds. Persistence
+  failures terminate as failures instead of reporting successful discovery.
+  Typed plan-recording tools now write the selected adoption path and reject
+  artifact assembly that omits confirmed capability IDs.
+- Workflow provider input retains the agent's prior replies after human
+  confirmation and saved-channel reopen. A thin AG2 view adapter corrects the
+  event shape consumed by provider mappers, preserving AG2 visibility and
+  history limits; an upstream watchpoint defines when this adapter is removed.
 
 - **`mozaiks add --preset <tier>` works** (#304). The command `mozaiks info`
   recommends always failed with "the following arguments are required:
@@ -426,6 +642,38 @@ This project follows a practical pre-1.0 changelog format:
   fails to load. Owned upserts whose filter repeats the principal's owner
   field no longer fail with Mongo error 54. Session feedback, which those
   workspaces dropped silently while reporting success, is now stored.
+
+- SecurityReadiness reports a signed-in module action without permissions by
+  the records it can reach, not only by its module's own collections (#817).
+  Runtime persistence does not bind a module to its own collections, so the
+  rule reads sign-in (`app.json` `authRequired` with a valid
+  `config/auth.yaml`), collection ownership in `data/contract.json`,
+  entitlement gates in `config/subscriptions.yaml`, and every collection the
+  module's code addresses through `ctx.persistence` and
+  `app_data_from_context`, including code it imports from other modules or
+  elsewhere in the app. Module code the scanner cannot read as addressing
+  declared collections, such as reflection, run-time module changes, code
+  loaded another way, or a database driver in any file the module's code
+  follows, counts as reach it cannot resolve. An action without permissions
+  is no longer reported when everything its module reaches is owned per user
+  or per workspace. It is reported as high when the app declares no sign-in, when it
+  reaches `app_wide` records without a gate the default plan withholds, or when
+  it reaches records that no declared ownership scopes or uses persistence the
+  scanner cannot resolve. It is reported as medium when an entitlement gate
+  restricts shared records by plan only, or when its module reaches no
+  collection and no gate the default plan withholds restricts it. The scanner
+  reads only the app root the runtime binds, reports surface values the loader
+  rejects, and returns findings instead of raising on a malformed data or
+  module contract. Its reading of module code is bounded, so a loop that
+  reassigns one name no longer makes a scan take minutes. A single function
+  holding thousands of chained assignments still scans slowly, with a correct
+  result. On a recorded generated app, six
+  high findings for owner-scoped create, read, update, delete and a paid
+  summary no longer appear. Dispatch tests on a real database check the
+  verdicts for owner-scoped, per-workspace, shared, cross-module and no-sign-in
+  variants.
+  [Generated Action Protection](docs/architecture/app/generated-action-protection.md)
+  holds the decision table.
 
 - AppGenerator no longer rejects a module contract task because its output
   repeats a companion contract as a raw file. A live run's `task_management`
@@ -955,6 +1203,14 @@ This project follows a practical pre-1.0 changelog format:
   detached process on 127.0.0.1; `stop` ends it by PID. The host gets an
   explicit environment (operating-system variables, one named env file, and
   path variables pointing into the venv) and reads no `.env` file.
+
+### Removed
+
+- With authentication off, an anonymous user without roles no longer passes
+  the admin check. Admin requires the `admin` role or the email allowlist.
+  Workspaces scaffolded without `AUTH_ANON_ROLES` add
+  `AUTH_ANON_ROLES=admin,user` to `.env` to keep the admin pages on their own
+  machine; the refusal says so.
 
 ## 0.2.0 - 2026-09-18
 

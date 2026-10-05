@@ -35,6 +35,36 @@ export default function SystemStatusCard({ payload = {} }) {
     || `${agent} is working.`
   ).trim();
 
+  if (typeof payload.batch_id === 'string' && payload.batch_id.trim()) {
+    const phase = String(payload.phase || status).trim().toLowerCase();
+    const taskCount = Number.isInteger(payload.task_count) && payload.task_count >= 0 ? payload.task_count : null;
+    const failureCount = Number.isInteger(payload.failure_count) && payload.failure_count >= 0 ? payload.failure_count : null;
+    const needsAttention = failureCount > 0 || FAILED_STATUSES.has(phase)
+      || ['partial', 'completed_with_errors', 'blocked'].includes(phase);
+    let summary = 'Task update.';
+    if (needsAttention) {
+      summary = phase === 'failed' ? 'This step stopped.' : 'Some tasks need attention.';
+    } else if (COMPLETE_STATUSES.has(phase)) {
+      summary = taskCount === null ? 'Tasks completed.' : `${taskCount} ${taskCount === 1 ? 'task' : 'tasks'} completed.`;
+    } else if (['started', 'working', 'running'].includes(phase)) {
+      summary = taskCount === null ? 'Working on this step.' : `Working on ${taskCount} ${taskCount === 1 ? 'task' : 'tasks'}.`;
+    }
+    const countDetail = failureCount > 0
+      ? `${failureCount}${taskCount !== null ? ` of ${taskCount}` : ''} ${(taskCount ?? failureCount) === 1 ? 'task' : 'tasks'} did not complete.`
+      : needsAttention && taskCount !== null ? `${taskCount} ${taskCount === 1 ? 'task' : 'tasks'} in this step.` : null;
+    return (
+      <div className="w-full max-w-[34rem] rounded-lg border border-border bg-card/85 px-4 py-3 text-card-foreground shadow-sm" role="status" aria-live="polite">
+        <p className={`text-sm font-semibold ${needsAttention ? 'text-destructive' : 'text-foreground'}`}>{summary}</p>
+        {countDetail && <p className="mt-1 text-xs text-muted-foreground">{countDetail}</p>}
+        <details className="mt-2 text-xs text-muted-foreground">
+          <summary className="cursor-pointer">Technical details</summary>
+          <p className="mt-2 break-words">{message}</p>
+          <p className="mt-1 break-words font-mono">{payload.batch_id}</p>
+        </details>
+      </div>
+    );
+  }
+
   const tone = COMPLETE_STATUSES.has(status)
     ? 'success'
     : FAILED_STATUSES.has(status)

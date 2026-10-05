@@ -321,6 +321,11 @@ design work implemented by ServiceAgent. Canonical create assigns the generated
 record id, which is the declared `<entity>_id` field, else `id`, else Mongo
 `_id`; clients never supply it. `search_by` is the canonical get lookup and may
 be a user-entered natural key, which is never overwritten with a generated id.
+Canonical get resolves `search_by`, then a declared `id`, then Mongo `_id`.
+List/get responses retain Mongo `_id` as a string when it supplies either the
+generated record identity or the get lookup, alongside the declared fields.
+Runtime smoke uses the stored lookup value for both the owner's successful get
+and another user's denied get, while updates/deletes use the generated record id.
 Create stamps declared `created_at`/`updated_at` fields; update and delete
 address records by the generated id and answer 404 outside the caller's scope. The
 closed create/update request schemas carry only writable scalar fields: ids,

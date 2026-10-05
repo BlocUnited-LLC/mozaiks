@@ -204,7 +204,9 @@ const ModernChatInterface = ({
   const [buttonText, setButtonText] = useState('SEND');
   const [isScrolledUp, setIsScrolledUp] = useState(false);
   const navigate = useNavigate();
-  const formattedWorkflowName = workflowName ? workflowName.charAt(0).toUpperCase() + workflowName.slice(1) : null;
+  const formattedWorkflowName = workflowName
+    ? workflowName.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ')
+    : null;
   const conversationSubtitle = conversationMode === 'ask'
     ? (generalChatSummary?.label || 'Ask Session')
     : `${formattedWorkflowName || 'AI-Powered Workflow'}${workflowHasChildren ? ' · Pack' : ''}`;
@@ -486,38 +488,9 @@ const ModernChatInterface = ({
     return !isEmptyContent || chat.isThinking || hasStructured || hasToolCall || hasAttachment || hasTrace || isSystem;
   });
 
-  // Show a typing indicator when workflow has produced any inline tool call or
-  // tool progress but no agent text has arrived yet.
-  // This covers the before-chat → first-agent gap where before_chat hooks emit
-  // UI surfaces, run_complete clears loading=false, and then DiscoveryHostAgent
-  // (or any first agent) starts its run with no stream chunks yet.
-  const showTypingIndicator = !failedWorkflowRetry && (loading || (() => {
-    if (!Array.isArray(messages) || connectionStatus === 'error') return false;
-    let hasWorkflowOutput = false;
-    let hasAgentText = false;
-    for (const msg of messages) {
-      if (!msg || msg.metadata?.hideInTranscript) continue;
-      // Tool progress or inline tool calls count as visible workflow output.
-      if (
-        msg.toolCall
-        || msg.metadata?.event_type === 'tool_progress'
-      ) {
-        hasWorkflowOutput = true;
-      }
-      if (
-        msg.sender === 'agent'
-        && !msg.isThinking
-        // tool_call_agent_message = planning text before a tool call — not the final response
-        && msg.metadata?.type !== 'tool_call_agent_message'
-        && msg.content
-        && String(msg.content).trim().length > 0
-      ) {
-        hasAgentText = true;
-      }
-    }
-    // Only fire in workflow mode — ask mode doesn't have this gap
-    return conversationMode === 'workflow' && hasWorkflowOutput && !hasAgentText;
-  })());
+  // Historical tool output does not imply current activity. Interactive UI
+  // requests and terminal events clear loading through the shared subscriber.
+  const showTypingIndicator = !failedWorkflowRetry && loading;
   const renderedMessages = (() => {
     // Determine the last chat index with a primary content message
     let lastContentIndex = -1;
@@ -593,6 +566,11 @@ const ModernChatInterface = ({
     });
   })();
 
+  const reopenedFailureMessage = failedWorkflowRetry?.failureMessage;
+  const showReopenedFailure = typeof reopenedFailureMessage === 'string' && reopenedFailureMessage.trim()
+    && !messages?.some(chat => chat?.sender === 'system' && !chat.metadata?.hideInTranscript
+      && chat.metadata?.event_type === 'workflow_failure' && chat.content && String(chat.content).trim());
+
   const messageStackClass = isOnChatPage
     ? 'chat-feed-stream flex flex-col'
     : 'relative';
@@ -603,7 +581,19 @@ const ModernChatInterface = ({
     <div className={messageStackClass} style={{ rowGap: 'var(--chat-bubble-stack-gap, 1rem)' }}>
       {/* Messages render below */}
       {renderedMessages}
-      {/* Typing indicator slot: shown while loading, or when a UI surface arrived before any agent text */}
+      {showReopenedFailure && (
+        <div className="message-container">
+          <section className="workflow-failure-message" aria-label="Workflow failure">
+            <h3>This step couldn’t finish</h3>
+            <p>Review the details below for what needs attention.</p>
+            <details>
+              <summary>View failure details</summary>
+              <div className="message-body" style={{ whiteSpace: 'pre-wrap' }}>{reopenedFailureMessage}</div>
+            </details>
+          </section>
+        </div>
+      )}
+      {/* Current run activity; historical messages never restart this indicator. */}
       {showTypingIndicator && (
         <div className="flex justify-start px-0 message-container">
           <div className="mt-1 px-2 py-1 rounded-md bg-transparent text-[rgba(var(--color-primary-light-rgb),0.7)] flex items-center gap-1 text-xs font-mono tracking-wide typing-indicator" aria-label="Assistant is typing" role="status">
@@ -705,15 +695,20 @@ const ModernChatInterface = ({
                   }
                 }}
                 disabled={modeTogglePending}
+                aria-label={conversationMode === 'ask' ? 'Switch to Workflow' : 'View workflow output'}
                 className={`hidden md:block group relative p-2 md:p-3 rounded-lg bg-gradient-to-r from-[rgba(var(--color-primary-rgb),0.1)] to-[rgba(var(--color-secondary-rgb),0.1)] border border-[rgba(var(--color-primary-light-rgb),0.3)] hover:border-[rgba(var(--color-primary-light-rgb),0.6)] transition-all duration-300 backdrop-blur-sm artifact-hover-glow flex-shrink-0 ${modeTogglePending ? 'opacity-60 cursor-not-allowed pointer-events-none' : ''}`}
                 title={modeTogglePending ? 'Switching modes…' : (conversationMode === 'ask' ? 'Switch to Workflow Mode' : (artifactToggleLabel || 'Toggle Artifact Canvas'))}
               >
                 <img
                   src={brandLogoSrc}
-                  className="w-8 h-8 md:w-10 md:h-10 opacity-70 group-hover:opacity-100 transition-all duration-300 group-hover:scale-105"
-                  alt={conversationMode === 'ask' ? 'Switch to Workflow' : 'Artifact Canvas'}
+                  className="mx-auto w-8 h-8 md:w-10 md:h-10 opacity-70 group-hover:opacity-100 transition-all duration-300 group-hover:scale-105"
+                  alt=""
+                  aria-hidden="true"
                   onError={applyBrandImageFallback}
                 />
+                {conversationMode === 'workflow' && (
+                  <span aria-hidden="true" className="block mt-1 text-[10px] font-medium text-[var(--color-text-primary)]">Results</span>
+                )}
                 <div className="absolute inset-0 bg-[rgba(var(--color-primary-light-rgb),0.1)] rounded-lg blur opacity-0 group-hover:opacity-100 transition-opacity duration-300 -z-10"></div>
               </button>
               <button
@@ -730,15 +725,20 @@ const ModernChatInterface = ({
                   }
                 }}
                 disabled={modeTogglePending}
+                aria-label={conversationMode === 'ask' ? 'Switch to Workflow' : 'View workflow output'}
                 className={`md:hidden group relative p-2 rounded-lg bg-gradient-to-r from-[rgba(var(--color-primary-rgb),0.15)] to-[rgba(var(--color-secondary-rgb),0.15)] border transition-all duration-300 backdrop-blur-sm flex-shrink-0 ${modeTogglePending ? 'opacity-60 cursor-not-allowed pointer-events-none' : ''} ${hasUnseenArtifact && conversationMode === 'workflow' ? 'border-[rgba(var(--color-secondary-rgb),0.8)] shadow-[0_0_12px_rgba(var(--color-secondary-rgb),0.6)] animate-pulse' : 'border-[rgba(var(--color-primary-light-rgb),0.35)] hover:border-[rgba(var(--color-primary-light-rgb),0.7)]'}`}
                 title={modeTogglePending ? 'Switching modes…' : (conversationMode === 'ask' ? 'Switch to Workflow Mode' : (artifactToggleLabel || 'Toggle Artifact Canvas'))}
               >
                 <img
                   src={brandLogoSrc}
-                  className={`w-7 h-7 transition-all duration-300 group-hover:scale-105 ${hasUnseenArtifact && conversationMode === 'workflow' ? 'opacity-100' : 'opacity-80 group-hover:opacity-100'}`}
-                  alt={conversationMode === 'ask' ? 'Switch to Workflow' : 'Artifact Canvas'}
+                  className={`mx-auto w-7 h-7 transition-all duration-300 group-hover:scale-105 ${hasUnseenArtifact && conversationMode === 'workflow' ? 'opacity-100' : 'opacity-80 group-hover:opacity-100'}`}
+                  alt=""
+                  aria-hidden="true"
                   onError={applyBrandImageFallback}
                 />
+                {conversationMode === 'workflow' && (
+                  <span aria-hidden="true" className="block mt-1 text-[10px] font-medium text-[var(--color-text-primary)]">Results</span>
+                )}
               </button>
             </>
           )}

@@ -607,8 +607,8 @@ async def health_check(request: Request):
 
 
 @app.get("/api/shell-config")
-async def get_shell_config(surface: str | None = None):
-    return await build_shell_config(surface=surface or "platform")
+async def get_shell_config(request: Request, surface: str | None = None):
+    return await build_shell_config(surface=surface or "platform", client_scope=request.scope)
 
 
 @app.get("/api/me")
@@ -2721,6 +2721,10 @@ async def websocket_endpoint(
 
             local_transport = runtime_app.simple_transport
             if not local_transport:
+                return
+            if await local_transport._passive_start_rejection(
+                chat_id=active_chat_id, app_id=app_id, user_id=user_id, workflow_name=workflow_name,
+            ) is not None:
                 return
 
             for _ in range(20):

@@ -16,6 +16,7 @@ import hashlib
 import json
 import logging
 import os
+import posixpath
 import re
 import shlex
 import subprocess
@@ -28,6 +29,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
+from anyio import CancelScope
 
 from factory_app.workflows._shared.workflow_integration import (
     workflow_integration_metadata_from_context,
@@ -78,7 +80,7 @@ def _local_validation_available() -> bool:
 
 def _base_result(*, strategy: str, status: str) -> dict[str, Any]:
     return {
-        "success": status != "failed",
+        "success": status == "passed",
         "validation_strategy": strategy,
         "validation_status": status,
         "strategy_reason": "",
@@ -191,10 +193,17 @@ async def _run_local_command(
     return int(process.returncode or 0), stdout, stderr
 
 
-def parse_build_errors(build_output: str) -> list[dict[str, Any]]:
+def _strip_ansi(value: str) -> str:
+    return re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", value)
+
+
+def parse_build_errors(
+    build_output: str, *, app_root: str | None = None, cwd: str | None = None,
+) -> list[dict[str, Any]]:
     if not isinstance(build_output, str) or not build_output:
         return []
 
+    build_output = _strip_ansi(build_output)
     errors: list[dict[str, Any]] = []
 
     ts_pattern = r"([^\s]+):(\d+):(\d+)\s*[-–]\s*error\s+\w+:\s*(.+)"
@@ -219,6 +228,35 @@ def parse_build_errors(build_output: str) -> list[dict[str, Any]]:
             }
         )
 
+    vite_patterns = (
+        r"\[UNRESOLVED_IMPORT\]\s+(Could not resolve .+?) in ([^\r\n]+)",
+        r'(?:\[vite\]: )?(Rollup failed to resolve import .+?) from "([^"\r\n]+)"',
+        r'((?:Could not resolve|Could not load) .+?) from "([^"\r\n]+)"',
+    )
+    for pattern in vite_patterns:
+        for match in re.finditer(pattern, build_output):
+            item = {"file": match.group(2).strip(), "message": match.group(1).strip()}
+            if item not in errors:
+                errors.append(item)
+
+    # Vite/Rolldown names the exporting file in the headline, but the source
+    # location identifies the importer that must correct its binding.
+    missing_export = r"\[MISSING_EXPORT\]\s+([^\r\n]+)\r?\n[^\r\n]*\[\s*(.+):(\d+):(\d+)\s*\]"
+    for match in re.finditer(missing_export, build_output):
+        errors.append({
+            "file": match.group(2).strip(), "line": int(match.group(3)),
+            "column": int(match.group(4)), "message": match.group(1).strip(),
+        })
+
+    if app_root is not None and cwd is not None:
+        root = posixpath.normpath(app_root.replace("\\", "/")).rstrip("/") + "/"
+        for error in errors:
+            filename = str(error["file"]).replace("\\", "/")
+            absolute = filename.startswith("/") or re.match(r"^[A-Za-z]:/", filename)
+            resolved = posixpath.normpath(filename if absolute else posixpath.join(cwd.replace("\\", "/"), filename))
+            # Only the actual staged app root can produce a canonical repair path.
+            # Similar suffixes outside that root remain unowned diagnostics.
+            error["file"] = resolved[len(root):] if resolved.startswith(root) else resolved
     return errors
 
 
@@ -229,7 +267,11 @@ async def _resolve_files(
     wf_logger,
 ) -> tuple[dict[str, str], str | None, str | None]:
     if files is not None:
-        return _safe_files_map(files), None, None
+        return (
+            _safe_files_map(files),
+            _context_get(context_variables, "chat_id"),
+            _context_get(context_variables, "app_id"),
+        )
     return (
         admitted_app_file_map(context_variables),
         _context_get(context_variables, "chat_id"),
@@ -970,7 +1012,11 @@ async def _run_sandbox_validation(
             if run_result.stderr and "warning" in run_result.stderr.lower():
                 result["warnings"].append(run_result.stderr)
 
-        result["parsed_errors"] = parse_build_errors(result.get("build_output", ""))
+        result["parsed_errors"] = parse_build_errors(
+            result.get("build_output", ""),
+            app_root=f"{root}/app" if canonical and root is not None else None,
+            cwd=cwd if canonical else None,
+        )
 
         if not canonical and result["validation_status"] == "passed":
             try:
@@ -1030,11 +1076,13 @@ async def _run_sandbox_validation(
         return result
     finally:
         if session_id is not None:
-            try:
-                result["sandbox_terminated"] = bool(await adapter.terminate_session(session_id=session_id))
-            except Exception as exc:
-                logger.error("sandbox_cleanup_failed session=%s exception=%s", session_id, type(exc).__name__)
-                result["sandbox_terminated"] = False
+            # Request cancellation must not interrupt provider teardown.
+            with CancelScope(shield=True):
+                try:
+                    result["sandbox_terminated"] = bool(await adapter.terminate_session(session_id=session_id))
+                except Exception as exc:
+                    logger.error("sandbox_cleanup_failed session=%s exception=%s", session_id, type(exc).__name__)
+                    result["sandbox_terminated"] = False
             result["preview_url"] = None
             if not result["sandbox_terminated"]:
                 result.update(success=False, validation_status="failed", **{INFRASTRUCTURE_FAILURE: True})
@@ -1098,7 +1146,11 @@ async def _run_local_validation(
                 if stderr and "warning" in stderr.lower():
                     result["warnings"].append(stderr)
 
-            result["parsed_errors"] = parse_build_errors(result.get("build_output", ""))
+            result["parsed_errors"] = parse_build_errors(
+                result.get("build_output", ""),
+                app_root=(root / "app").as_posix() if canonical else None,
+                cwd=cwd if canonical else None,
+            )
 
             if not canonical and result["validation_status"] == "passed":
                 scripts = _read_package_scripts_from_dir(root)
@@ -1263,12 +1315,31 @@ def _check_result(
 def _result_check(result: dict[str, Any], *, default_id: str, default_message: str) -> dict[str, Any]:
     checks = result.get("checks")
     if isinstance(checks, list) and checks and isinstance(checks[0], dict):
-        return dict(checks[0])
+        check = dict(checks[0])
+        if result.get("status") in {"skipped", "pending"}:
+            check["details"] = {**check.get("details", {}), "blocking": True}
+        return check
     return _check_result(
         check_id=default_id,
         passed=bool(result.get("passed")),
         message=default_message,
     )
+
+
+def _acceptance_readiness(subresults: dict[str, dict[str, Any]]) -> tuple[str, dict[str, list[str]]]:
+    """Aggregate required gates, preserving checks that have not run.
+
+    Each gate determines applicability from the app contracts before execution;
+    a successful not-applicable check can pass. A skipped applicable gate cannot.
+    """
+    skipped = sorted(name for name, result in subresults.items() if result.get("status") in {"skipped", "pending"})
+    completed = sorted(
+        name for name, result in subresults.items()
+        if result.get("status") in {None, "passed", "success"} and result.get("passed") is True
+    )
+    failed = sorted(name for name in subresults if name not in skipped and name not in completed)
+    status = "failed" if failed else "pending" if skipped or not completed else "passed"
+    return status, {"completed": completed, "failed": failed, "skipped": skipped}
 
 
 def _runtime_quality_result(generated_files: dict[str, str]) -> dict[str, Any]:
@@ -2148,19 +2219,12 @@ async def run_app_bundle_acceptance_gate(
         "app_runtime_load": app_runtime_load_result,
         "app_runtime_smoke": runtime_smoke_result,
     }
-    # A skipped check is reported as skipped: never a pass, and not a failure to
-    # repair. Acceptance can still pass; skipped_checks says what did not run.
-    skipped = sorted(name for name, result in subresults.items() if result.get("status") == "skipped")
+    acceptance_status, validation_evidence = _acceptance_readiness(subresults)
+    skipped = validation_evidence["skipped"]
     skipped_checks = [
         {"id": name, "reason": subresults[name].get("skipped_reason") or "skipped"} for name in skipped
     ]
-    passed_by_check = {
-        name: bool(result.get("passed"))
-        for name, result in subresults.items() if name not in skipped
-    }
-    failed = sorted(name for name, passed in passed_by_check.items() if not passed)
-    completed = sorted(name for name, passed in passed_by_check.items() if passed)
-    acceptance_passed = not failed
+    acceptance_passed = acceptance_status == "passed"
 
     failed_tests: list[dict[str, Any]] = []
     warnings: list[str] = []
@@ -2186,7 +2250,7 @@ async def run_app_bundle_acceptance_gate(
 
     result = {
         "contract_version": "1.0",
-        "status": "passed" if acceptance_passed else "failed",
+        "status": acceptance_status,
         "passed": acceptance_passed,
         "checks": [
             _result_check(completeness_result, default_id="planned_completeness", default_message="Approved plan completeness checked."),
@@ -2201,11 +2265,7 @@ async def run_app_bundle_acceptance_gate(
             _result_check(app_runtime_load_result, default_id="app_runtime_load", default_message="App runtime load check completed."),
             _result_check(runtime_smoke_result, default_id="app_runtime_smoke", default_message="App runtime smoke completed."),
         ],
-        "validation_evidence": {
-            "completed": completed,
-            "failed": failed,
-            "skipped": skipped,
-        },
+        "validation_evidence": validation_evidence,
         "skipped_checks": skipped_checks,
         "failed_tests": failed_tests,
         "warnings": warnings,
@@ -2330,7 +2390,7 @@ async def validate_app_build(
     if strategy == "skip":
         result = _base_result(strategy="skip", status="skipped")
         result["strategy_reason"] = strategy_reason
-        result["warnings"].append("App validation was explicitly skipped by strategy.")
+        result["warnings"].append(f"App validation did not execute: {strategy_reason}.")
         _persist_validation_context(context_variables=context_variables, result=result)
         return result
 
@@ -2410,7 +2470,7 @@ def _host_temp_paths() -> re.Pattern[str]:
 
 def _scrubbed_error(error: Any) -> str:
     """One line, with this host's temp paths removed: per-run noise, not app content."""
-    return " ".join(_host_temp_paths().sub("<temp>", str(error)).split())
+    return " ".join(_host_temp_paths().sub("<temp>", _strip_ansi(str(error))).split())
 
 
 def _readable_error(error: Any) -> str:
@@ -2421,30 +2481,45 @@ def _readable_error(error: Any) -> str:
 
 
 def _blocking_errors(acceptance: dict[str, Any], validation: dict[str, Any] | None) -> list[str]:
-    """The errors that stop this build, from repair diagnostics, else validation."""
-    diagnostics = (acceptance.get("bundle_repair") or {}).get("diagnostics") or []
-    errors = [item.get("error") for item in diagnostics if isinstance(item, dict)]
+    """Keep the original cause alongside ownership and validation diagnostics."""
+    repair = (validation or {}).get("bundle_repair") or acceptance.get("bundle_repair") or {}
+    diagnostics = repair.get("diagnostics") or []
+    errors = [acceptance["error"]] if acceptance.get("error") else []
+    errors.extend(item.get("error") for item in diagnostics if isinstance(item, dict))
     if not any(errors):
         errors = list((validation or {}).get("errors") or [])
-    if not any(errors) and acceptance.get("error"):
-        errors = [acceptance["error"]]
+    if not any(errors):
+        errors = [
+            f"{item['id']}: {item['reason']}"
+            for item in acceptance.get("skipped_checks", [])
+        ]
+    if not any(errors) and (validation or {}).get("validation_status") in {"pending", "skipped"}:
+        errors = ["Required build validation did not complete."]
     return list(dict.fromkeys(_readable_error(error) for error in errors if error))
 
 
-def _build_failure_message(errors: list[str], *, no_progress: bool, infrastructure: bool) -> str:
+def _build_failure_message(
+    errors: list[str], *, no_progress: bool, infrastructure: bool, unverified: bool,
+) -> str:
     if infrastructure:
         headline = (
-            "The app build cannot continue: the validation environment was unavailable. "
-            "This is an environment problem, not a defect in the app; retry the build "
-            "once validation infrastructure is available."
+            "The app build is unverified: the validation environment was unavailable. "
+            "Restore the validation environment and run validation again before "
+            "exporting or promoting this app."
         )
         label = "Validation environment errors:"
+    elif unverified:
+        headline = (
+            "The app build is unverified: required validation did not complete. "
+            "Run the required validation before exporting or promoting this app."
+        )
+        label = "Incomplete validation:"
     else:
         headline = (
             "The app build cannot continue: validation ran again on an unchanged bundle "
             "and failed the same way."
             if no_progress
-            else "The app build cannot continue: validation found errors that no repair step can fix."
+            else "The app build cannot continue: the available automatic repair steps could not resolve the validation errors."
         )
         label = "Blocking errors:"
     if not errors:
@@ -2471,7 +2546,7 @@ def _record_validation_outcome(
     to act. When this outcome ends the run, the gate also writes the message
     that names the blocking errors; otherwise it clears it.
     """
-    repair = acceptance.get("bundle_repair") or {}
+    repair = (validation or {}).get("bundle_repair") or acceptance.get("bundle_repair") or {}
     recovery_request = acceptance.get("task_recovery_request")
     fingerprint = {
         "bundle": _digest(files),
@@ -2492,18 +2567,21 @@ def _record_validation_outcome(
     _context_set(context_variables, "app_validation_no_progress", no_progress)
     # Recovery and a selected repair change the bundle before the next check,
     # so only an outcome with neither ends the run (transition_graph.yaml).
-    ends_run = (
-        repair.get("target_agent") is None
-        and recovery_request is None
-        and (no_progress or repair.get("status") == "blocked")
+    unverified = not passed and (
+        acceptance.get("status") == "pending"
+        or (acceptance.get("passed") is True and (validation or {}).get("validation_status") in {"pending", "skipped"})
     )
+    infrastructure = not passed and bool((validation or {}).get(INFRASTRUCTURE_FAILURE))
+    ends_run = not passed and repair.get("target_agent") is None and recovery_request is None
+    _context_set(context_variables, "app_validation_ends_run", ends_run)
     _context_set(
         context_variables,
         "app_build_failure_message",
         _build_failure_message(
             _blocking_errors(acceptance, validation),
             no_progress=no_progress,
-            infrastructure=bool((validation or {}).get(INFRASTRUCTURE_FAILURE)),
+            infrastructure=infrastructure,
+            unverified=unverified,
         )
         if ends_run
         else None,
@@ -2584,7 +2662,21 @@ async def validate_app_bundle_from_request(
     app_runtime_load_result = acceptance_result["app_runtime_load"]
     runtime_smoke_result = acceptance_result["app_runtime_smoke"]
     bundle_repair = acceptance_result.get("bundle_repair")
-    validation_passed = str(validation.get("validation_status") or "").strip().lower() in {"passed", "skipped"}
+    if acceptance_result.get("passed") and validation.get("validation_status") == "failed":
+        diagnostics = [
+            {"path": item["file"], "error": f"{item['file']}: {item['message']}"}
+            for item in validation.get("parsed_errors") or []
+            if not validation.get(INFRASTRUCTURE_FAILURE) and isinstance(item, dict) and item.get("file") and item.get("message")
+        ]
+        if not diagnostics:
+            diagnostics = [{"error": _scrubbed_error(error)} for error in validation.get("errors") or []]
+        bundle_repair = _prepare_bundle_repair(
+            {"passed": False, "diagnostics": diagnostics}, context_variables,
+            select_repairs=not validation.get(INFRASTRUCTURE_FAILURE),
+        )
+        validation["bundle_repair"] = bundle_repair
+        _persist_validation_context(context_variables=context_variables, result=validation)
+    validation_passed = str(validation.get("validation_status") or "").strip().lower() == "passed"
     combined_passed = bool(validation_passed and acceptance_result.get("passed"))
     _context_set(context_variables, "integration_tests_passed", combined_passed)
     integration_test_result = {

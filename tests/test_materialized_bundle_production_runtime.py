@@ -167,6 +167,9 @@ async def test_exact_materialized_file_map_validates_boots_and_executes_http(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(
+        run_app_bundle_acceptance_gate.__globals__["app_runtime_smoke"], "resolve_smoke_mongo_uri", lambda: None,
+    )
     files_one, context = await _assemble_from_payload(build_timestamp=BUILD_TIMESTAMP)
     files_two, _ = await _assemble_from_payload(build_timestamp=BUILD_TIMESTAMP)
     files_later, _ = await _assemble_from_payload(build_timestamp=LATER_BUILD_TIMESTAMP)
@@ -194,7 +197,9 @@ async def test_exact_materialized_file_map_validates_boots_and_executes_http(
         context_variables=context,
         capability_packs=_selected_packs(),
     )
-    assert acceptance["passed"] is True, acceptance
+    assert acceptance["status"] == "pending", acceptance
+    assert acceptance["validation_evidence"]["failed"] == []
+    assert acceptance["validation_evidence"]["skipped"] == ["app_runtime_smoke"]
     assert acceptance["functional_completeness"]["passed"] is True
     assert acceptance["app_runtime_load"]["passed"] is True
 

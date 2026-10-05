@@ -17,7 +17,7 @@ _STRATEGY_DESCRIPTIONS = {
     "e2b": "Run disposable pre-deploy build validation in E2B. Interactive previews use separate Studio sessions. Not a production hosting runtime.",
     "docker": "Run disposable build validation in Docker. Interactive previews use separate Studio sessions. Requires a running Docker daemon.",
     "local": "Run build validation on the current machine without requiring sandbox credentials.",
-    "skip": "Do not execute build validation for this run. Integration checks still gate export.",
+    "skip": "Do not execute build validation for this run. The app remains unverified; export and promotion are blocked.",
 }
 
 

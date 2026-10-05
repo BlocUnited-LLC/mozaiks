@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from functools import lru_cache
 from pathlib import PurePosixPath
-from typing import Any
+from typing import Any, cast
 
 import yaml
 
+from mozaiksai.core.runtime.app.auth_contract import (
+    app_auth_route_entries,
+    validate_app_auth_contract,
+)
 from mozaiksai.core.runtime.app.page_schema import PageSchemaValidationError, validate_page_schema
 from mozaiksai.core.workflow.context.frozen import detach
 
@@ -17,6 +22,7 @@ from .code_files import (
     _unwrap_output_envelope,
     extract_code_file_map_from_payload,
     extract_deleted_file_paths_from_payload,
+    planned_page_path,
     safe_relpath,
 )
 from .module_action_inventory import all_module_actions, pack_template_module_contracts
@@ -25,6 +31,165 @@ from .page_binding_construction import construct_page_bindings
 from .page_data_bindings import page_data_binding_errors, schema_at_path, schema_field_paths
 
 logger = logging.getLogger(__name__)
+
+
+def _to_plain(value: Any) -> Any:
+    """Detach structured output and immutable runtime views for serialization."""
+    return detach(value)
+
+
+def _strip_none(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _strip_none(item)
+            for key, item in value.items()
+            if item is not None
+        }
+    if isinstance(value, list):
+        return [_strip_none(item) for item in value if item is not None]
+    return value
+
+
+def _key_value_entries_to_dict(value: Any) -> Any:
+    """Normalize strict key/value lists into runtime object payloads."""
+    value = _to_plain(value)
+    if value is None or isinstance(value, dict):
+        return _strip_none(value)
+    if isinstance(value, list):
+        normalized: dict[str, Any] = {}
+        for entry in value:
+            if not isinstance(entry, dict):
+                continue
+            key = entry.get("key")
+            if not isinstance(key, str) or not key.strip():
+                continue
+            normalized[str(key)] = _strip_none(entry.get("value"))
+        return normalized
+    return value
+
+
+def _normalize_action_data(action: Any) -> Any:
+    action = _strip_none(_to_plain(action))
+    if not isinstance(action, dict):
+        return action
+    for field in ("context_variables", "payload"):
+        if field in action:
+            action[field] = _key_value_entries_to_dict(action.get(field))
+    return _strip_none(action)
+
+
+def _normalize_config_actions(config: dict[str, Any]) -> dict[str, Any]:
+    for field in ("action", "submit_action", "cancel_action"):
+        if field in config:
+            config[field] = _normalize_action_data(config.get(field))
+    if isinstance(config.get("actions"), list):
+        config["actions"] = [_normalize_action_data(action) for action in config["actions"]]
+    empty = config.get("empty")
+    if isinstance(empty, dict) and "action" in empty:
+        empty["action"] = _normalize_action_data(empty.get("action"))
+    return config
+
+
+_OPTIONAL_STRING_KEYS = {
+    "api_endpoint",
+    "cancel_label",
+    "color",
+    "description",
+    "event_type",
+    "height",
+    "href",
+    "icon",
+    "id",
+    "message",
+    "placeholder",
+    "size",
+    "subtitle",
+    "submit_label",
+    "title",
+    "url",
+    "variant",
+    "width",
+    "workflow_id",
+}
+
+
+def _normalize_blank_optional_strings(value: Any) -> Any:
+    if isinstance(value, dict):
+        normalized: dict[str, Any] = {}
+        for key, item in value.items():
+            if key in _OPTIONAL_STRING_KEYS and isinstance(item, str) and not item.strip():
+                normalized[key] = None
+            else:
+                normalized[key] = _normalize_blank_optional_strings(item)
+        return _strip_none(normalized)
+    if isinstance(value, list):
+        return [_normalize_blank_optional_strings(item) for item in value]
+    return value
+
+
+def _normalize_page_section(section: Any) -> Any:
+    section = _strip_none(_to_plain(section))
+    if not isinstance(section, dict):
+        return section
+    config = section.get("config")
+    if isinstance(config, dict):
+        config = _normalize_blank_optional_strings(config)
+        config = _normalize_config_actions(config)
+        children = config.get("children")
+        if isinstance(children, list):
+            config["children"] = [_normalize_page_section(child) for child in children]
+        section["config"] = _strip_none(config)
+    if promote_table_primitive(section):
+        logger.info(
+            "[pages] page section %r promoted DataTable -> ResourceTable for %s",
+            section.get("id"),
+            sorted(resource_table_only_fields() & set(section.get("config") or {})),
+        )
+    return _strip_none(section)
+
+
+def normalize_page_schema(page: Any) -> Any:
+    """Normalize typed page serialization before canonical runtime validation."""
+    page = _strip_none(_to_plain(page))
+    if not isinstance(page, dict):
+        return page
+    meta = page.get("meta")
+    if isinstance(meta, dict) and "routeAuth" in meta:
+        meta["routeAuth"] = _normalize_route_auth(meta.get("routeAuth"))
+    sections = page.get("sections")
+    if isinstance(sections, list):
+        page["sections"] = [_normalize_page_section(section) for section in sections]
+    return _strip_none(page)
+
+
+def _normalize_route_auth(route_auth: Any) -> Any:
+    route_auth = _strip_none(_to_plain(route_auth))
+    if not isinstance(route_auth, dict):
+        return route_auth
+    if "params" in route_auth:
+        route_auth["params"] = _key_value_entries_to_dict(route_auth.get("params"))
+    return _strip_none(route_auth)
+
+
+def _normalize_custom_route_bundle(bundle: Any) -> Any:
+    bundle = _strip_none(_to_plain(bundle))
+    if not isinstance(bundle, dict):
+        return bundle
+    route_manifest = bundle.get("route_manifest")
+    if isinstance(route_manifest, list):
+        normalized_routes: list[Any] = []
+        for entry in route_manifest:
+            entry = _strip_none(_to_plain(entry))
+            if isinstance(entry, dict):
+                meta = entry.get("meta")
+                if isinstance(meta, dict) and "routeAuth" in meta:
+                    meta["routeAuth"] = _normalize_route_auth(meta.get("routeAuth"))
+            normalized_routes.append(entry)
+        bundle["route_manifest"] = normalized_routes
+    page_files = bundle.get("page_files")
+    if isinstance(page_files, list):
+        bundle["page_files"] = [_strip_none(_to_plain(entry)) for entry in page_files]
+    return _strip_none(bundle)
 
 
 def _slug(value: str) -> str:
@@ -719,6 +884,94 @@ def validate_planned_page(content: str, planned: dict[str, Any], path: str) -> N
         raise ValueError(f"{path}: {page_schema_error_details(error, expected_name=expected_name)}") from error
     except (ValueError, yaml.YAMLError) as error:
         raise ValueError(f"{path}: {error}") from error
+
+
+def validate_planned_custom_routes(
+    files: dict[str, str],
+    *,
+    pages: list[dict[str, Any]],
+    owned_paths: set[str],
+    baseline_files: dict[str, str] | None = None,
+) -> None:
+    """Bind this task's materialized custom routes to its approved page identities.
+
+    The typed bundle materializer owns the registry syntax. This checks its
+    route-to-import binding, without interpreting or rewriting authored React.
+    A scoped revision may retain other routes only as unchanged baseline entries.
+    """
+    custom_paths = {path for path in owned_paths if path.startswith("ui/pages/custom/")}
+    if not custom_paths:
+        return
+    planned = {
+        planned_page_path(page): page
+        for page in pages if page.get("ui_surface") == "custom_react_page"
+    }
+    unknown = custom_paths - planned.keys()
+    if unknown:
+        raise ValueError(f"Custom pages have no approved plan identity: {sorted(unknown)}")
+    baseline = baseline_files or {}
+    combined = {**baseline, **files}
+    manifest_path = "ui/route_manifest.json"
+
+    def routes_from(source: dict[str, str]) -> list[dict[str, Any]]:
+        try:
+            document = json.loads(source.get(manifest_path, "{}"))
+            routes = document.get("pages") if isinstance(document, dict) else None
+            if not isinstance(routes, list) or any(not isinstance(route, dict) for route in routes):
+                raise ValueError("pages must be a list of route objects")
+            # Compare preserved entries in the same canonical runtime shape;
+            # older archives can still contain typed nulls or key/value lists.
+            return cast(list[dict[str, Any]], _normalize_custom_route_bundle({"route_manifest": routes})["route_manifest"])
+        except (ValueError, TypeError) as exc:
+            raise ValueError(f"{manifest_path}: {exc}") from exc
+
+    routes = routes_from(combined)
+    preserved = routes_from(baseline) if manifest_path in baseline else []
+    approved_routes = {planned[path]["route"] for path in custom_paths}
+    # Assembly adds shared sign-in/callback routes from the app auth contract.
+    # Only that exact projection belongs to auth; matching a URL or a component
+    # name alone must not authorize an undeclared custom page.
+    auth_routes: list[dict[str, Any]] = []
+    if "config/auth.yaml" in combined:
+        app_manifest = json.loads(combined.get("app.json", "{}"))
+        if isinstance(app_manifest, dict) and app_manifest.get("authRequired") is True:
+            contract = validate_app_auth_contract(yaml.safe_load(combined["config/auth.yaml"]))
+            auth_routes = app_auth_route_entries(contract)
+    if manifest_path in owned_paths:
+        for route in routes:
+            canonical_auth = route in auth_routes and sum(
+                entry.get("path") == route.get("path") for entry in routes
+            ) == 1
+            if route.get("path") not in approved_routes and route not in preserved and not canonical_auth:
+                raise ValueError(
+                    f"{manifest_path}: unapproved custom route {route.get('path')!r}. "
+                    f"Preserve the approved custom routes {sorted(approved_routes)} and their registered page files. "
+                    "Sign-in and callback routes must match the canonical auth projection from config/auth.yaml; "
+                    "other custom routes require an approved page identity. Do not remove required app behavior."
+                )
+    registry = combined.get("ui/index.js", "")
+    for path in sorted(custom_paths):
+        approved = planned[path]["route"]
+        matches = [route for route in routes if route.get("path") == approved]
+        if len(matches) != 1:
+            raise ValueError(f"{path}: custom route must preserve approved {approved!r} exactly once")
+        if path not in files:
+            raise ValueError(f"{path}: page worker did not materialize its owned custom page")
+        component = matches[0].get("component")
+        if not isinstance(component, str) or not component:
+            raise ValueError(f"{path}: approved route {approved!r} must declare its registry component")
+        # These two statements are generated by _build_custom_ui_index, not by
+        # the model. Require the actual registered binding to import this file.
+        bindings = re.findall(
+            rf"\bregisterComponent\s*\(\s*['\"]{re.escape(component)}['\"]\s*,\s*([A-Za-z_$][\w$]*)\s*,",
+            registry,
+        )
+        module_path = "./" + path.removeprefix("ui/").removesuffix(".jsx")
+        if len(bindings) != 1 or not re.search(
+            rf"(?m)^import\s+{re.escape(bindings[0])}\s+from\s+['\"]{re.escape(module_path)}(?:\.jsx)?['\"]\s*;",
+            registry,
+        ):
+            raise ValueError(f"{path}: approved route {approved!r} must register its canonical page file")
 
 
 def pack_template_page_errors(

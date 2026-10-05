@@ -103,6 +103,8 @@ async def handle_switch_workflow(
 
     if not active_context:
         raise ValueError(f"Workflow {target_chat_id} not found or already completed")
+    if active_context.app_id != app_id or active_context.user_id != user_id:
+        raise ValueError("Workflow connection identity does not match")
 
     logger.debug("WORKFLOW_CONTEXT_SWITCHED from=%s to=%s ws_id=%s", chat_id, target_chat_id, ws_id)
 
@@ -144,19 +146,10 @@ async def handle_switch_workflow(
         existing_task = transport._background_tasks.get(target_chat_id_str)
         if workflow_startup_mode == "userdriven":
             if not (existing_task and not existing_task.done()):
-                pm = transport._get_or_create_persistence_manager()
-                coll = await pm._coll()
-                doc = await coll.find_one(
-                    {"_id": target_chat_id_str},
-                    {"status": 1},
-                )
-                status = int(doc.get("status", -1)) if doc else -1
-                run_history = await pm.load_run_history(
-                    chat_id=target_chat_id_str,
-                    app_id=str(active_context.app_id),
-                )
-
-                if status == 0 and not run_history:
+                if await transport._passive_start_rejection(
+                    chat_id=target_chat_id_str, app_id=str(app_id), user_id=str(user_id),
+                    workflow_name=str(active_context.workflow_name),
+                ) is None:
                     _t = asyncio.create_task(
                         transport._run_workflow_background(
                             chat_id=target_chat_id_str,

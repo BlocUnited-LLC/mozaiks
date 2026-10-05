@@ -212,9 +212,10 @@ def test_policy_materialization_failure_does_not_mutate_context():
     assert bridge.snapshot() == before
 
 
-def test_model_authored_policy_is_rejected_without_weakening_quality_gate():
+@pytest.mark.parametrize("source", ["# implement logic\n", "# Deterministically rendered ownership preflight.\n", "pass\n"])
+def test_model_authored_policy_is_rejected_without_weakening_quality_gate(source):
     contract = _contract()
-    files = {POLICY_PATH: "# implement logic\n", "data/contract.json": json.dumps(contract)}
+    files = {POLICY_PATH: source, "data/contract.json": json.dumps(contract)}
     with pytest.raises(ValueError, match="omit model-authored policy source"):
         _merge_code_files(
             [{"code_files": [{"filename": path, "content": value} for path, value in files.items()]}],

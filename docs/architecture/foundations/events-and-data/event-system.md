@@ -51,6 +51,14 @@ Native AG2 user handoffs can also pause without emitting a dedicated
 to mark that the next composer message should resume the workflow. This is a
 composer-turn pause signal, not a second workflow UI renderer lane.
 
+Workflow agents project the start of each actual AG2 model call through
+`chat.select_speaker`, using the generic label `Assistant`. The workflow activity
+middleware runs after token preflight and prompt projection; it emits no prompt,
+private agent identity, estimated percentage, or lifecycle transition. Existing
+reply, interactive UI, pause, and terminal events clear the transient indicator.
+Reading persisted history does not emit model activity, and unavailable UI
+delivery does not prevent execution or suppress cancellation.
+
 ## Layer Responsibilities
 
 ### Runtime App

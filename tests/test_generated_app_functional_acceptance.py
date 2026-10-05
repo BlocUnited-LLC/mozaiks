@@ -844,10 +844,15 @@ class BillingPortalHandler(BillingPortalBaseHandler):
 
 
 @pytest.mark.asyncio
-async def test_app_generator_acceptance_gate_includes_functional_completeness() -> None:
+async def test_app_generator_acceptance_gate_includes_functional_completeness(monkeypatch) -> None:
+    monkeypatch.setattr(
+        run_app_bundle_acceptance_gate.__globals__["app_runtime_smoke"], "resolve_smoke_mongo_uri", lambda: None,
+    )
     result = await run_app_bundle_acceptance_gate(files=_basic_crud_files())
 
-    assert result["passed"] is True
+    assert result["status"] == "pending"
+    assert result["validation_evidence"]["failed"] == []
+    assert result["validation_evidence"]["skipped"] == ["app_runtime_smoke"]
     assert result["functional_completeness"]["passed"] is True
     assert "functional_completeness" in result["validation_evidence"]["completed"]
 

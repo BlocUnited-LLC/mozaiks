@@ -1,7 +1,7 @@
 /**
  * Route Renderer
  *
- * ChatPage is the only hardcoded core route — it is the agentic shell.
+ * ChatPage owns the core chat routes and the undeclared-root fallback.
  * Platform extensions are registered explicitly at shell bootstrap and routed
  * through backend navigation entries composed from page/UI/workflow owner manifests.
  * app.json controls `landing_spot`; shell.json controls header chrome.
@@ -26,7 +26,7 @@ import { getUserRoles, roleMatches } from '../navigation/shellActions';
 import { safeReturnPath } from '../auth/authAdapter.js';
 
 /**
- * Core routes that are ALWAYS mounted — not driven by owner manifests.
+ * Core chat routes; the root fallback yields to an owner-declared root page.
  * Only ChatPage is a true core route. All platform modules/adapters
  * (including AdminPortal) are registered through explicit extension barrels and routed
  * through navigation entries.
@@ -211,6 +211,7 @@ function TransitionRoute({ route }) {
   const [currentTransitionId, setCurrentTransitionId] = useState(null);
   const [currentJourneyId, setCurrentJourneyId] = useState(route.sequence || null);
   const [accumulatedContext, setAccumulatedContext] = useState({});
+  const [buildRegistryId, setBuildRegistryId] = useState(null);
   const entryTransitionId = route.transition || null;
   const resolvedAppId = resolveRouteAppId(config, user);
   const resolvedUserId = resolveRouteUserId(user);
@@ -222,8 +223,11 @@ function TransitionRoute({ route }) {
   }, [entryTransitionId]);
 
   const handleNavigate = useCallback(
-    async (option_id = null, contextVariables = {}) => {
+    async (option_id = null, contextVariables = {}, launchOptions = {}) => {
       const mergedContext = { ...accumulatedContext, ...contextVariables };
+      if (option_id != null) setAccumulatedContext(mergedContext);
+      const selectedRegistryId = launchOptions.build_registry_id || buildRegistryId;
+      if (selectedRegistryId) setBuildRegistryId(selectedRegistryId);
 
       try {
         const res = await authFetch('/api/transitions/resolve', {
@@ -236,6 +240,7 @@ function TransitionRoute({ route }) {
             context_variables: mergedContext,
             app_id: resolvedAppId,
             user_id: resolvedUserId,
+            ...(selectedRegistryId ? { build_registry_id: selectedRegistryId } : {}),
           }),
         }, { auth });
 
@@ -254,8 +259,7 @@ function TransitionRoute({ route }) {
           return true;
         }
 
-        if (data.resolution_type === 'workflow' && data.chat_id && data.workflow_id) {
-          setAccumulatedContext({});
+        if (['workflow', 'chat_session'].includes(data.resolution_type) && data.chat_id && data.workflow_id) {
           navigate(buildWorkflowChatPath(data.workflow_id, data.chat_id));
           return true;
         }
@@ -269,12 +273,13 @@ function TransitionRoute({ route }) {
         throw err;
       }
     },
-    [accumulatedContext, auth, currentJourneyId, currentTransitionId, navigate, resolvedAppId, resolvedUserId]
+    [accumulatedContext, auth, buildRegistryId, currentJourneyId, currentTransitionId, navigate, resolvedAppId, resolvedUserId]
   );
 
   if (!currentTransitionId) return null;
 
-  return <TransitionScreen transitionId={currentTransitionId} onNavigate={handleNavigate} />;
+  return <TransitionScreen transitionId={currentTransitionId} onNavigate={handleNavigate}
+    context={{ ...accumulatedContext, ...(buildRegistryId ? { build_registry_id: buildRegistryId } : {}) }} />;
 }
 
 function WorkflowEntryRoute({ route }) {
@@ -513,7 +518,7 @@ const RouteWrapper = ({
 /**
  * RouteRenderer Component
  *
- * Always mounts core shell routes (ChatPage).
+ * Mounts core chat routes and uses ChatPage when no root page is declared.
  * Module/adapter routes (AdminPortal etc.) come from backend navigation.
  * Extra routes from backend-composed navigation are appended after.
  * All routes require auth by default; opt out with meta.requiresAuth: false.
@@ -533,10 +538,15 @@ const RouteRenderer = ({
 }) => {
   const { pages, loading, landing_spot } = useNavigation();
   const landingSpot = landing_spot || '/';
+  // Transition/workflow routes can own a path without a registered component.
+  const routablePages = useMemo(() => (
+    (pages || []).filter(page => page.path && (page.component || page.transition || page.workflow))
+  ), [pages]);
+  const hasDeclaredRootPage = routablePages.some(page => page.path === '/');
 
-  // Build core route elements (always present)
+  // Preserve the explicit chat paths; a declared root uses the normal route wrapper.
   const coreRouteElements = useMemo(() => {
-    return CORE_ROUTES.map((route, index) => {
+    return CORE_ROUTES.filter(route => route.path !== '/' || !hasDeclaredRootPage).map((route, index) => {
       const { path, component: componentName } = route;
       if (!hasComponent(componentName)) {
         console.warn(`⚠️ [RouteRenderer] Core component "${componentName}" not found in registry for route "${path}"`);
@@ -560,17 +570,15 @@ const RouteRenderer = ({
         />
       );
     }).filter(Boolean);
-  }, [isAuthenticated, onAuthRequired, LoadingFallback]);
+  }, [hasDeclaredRootPage, isAuthenticated, onAuthRequired, LoadingFallback]);
 
   // Build extra route elements from backend-composed navigation (beyond core shell)
   const extraRouteElements = useMemo(() => {
-    // Pages need at least a path; transition/workflow routes don't require a component.
-    const routablePages = (pages || []).filter(p => p.path && (p.component || p.transition || p.workflow));
     if (routablePages.length === 0) return [];
 
-    // Filter out any pages that overlap with core paths (safety net)
+    // Root pages are app-owned; explicit core chat paths remain reserved.
     const corePaths = new Set(CORE_ROUTES.map(r => r.path));
-    const extraRoutes = routablePages.filter(r => !corePaths.has(r.path));
+    const extraRoutes = routablePages.filter(r => r.path === '/' || !corePaths.has(r.path));
 
     return extraRoutes.map((route, index) => {
       const { path, component: componentName, transition, workflow } = route;
@@ -670,7 +678,7 @@ const RouteRenderer = ({
           />
       );
     });
-  }, [pages, isAuthenticated, onAuthRequired, LoadingFallback]);
+  }, [routablePages, isAuthenticated, onAuthRequired, LoadingFallback]);
 
   // Show loading state while navigation config is loading
   if (loading) {

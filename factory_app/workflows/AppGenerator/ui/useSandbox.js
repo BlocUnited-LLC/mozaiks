@@ -12,11 +12,13 @@ export function useSandbox(artifactId, buildRegistryId) {
   const generation = useRef(0);
   const inFlight = useRef(false);
   const lastSession = useRef(null);
+  const currentStatus = useRef(null);
 
   useEffect(() => {
     generation.current += 1;
     setSandboxId(null);
     setSandboxStatus(null);
+    currentStatus.current = null;
     setLivePreviewUrl(null);
     setSandboxError(null);
     // A new version waits for the previous request before adopting a session.
@@ -26,17 +28,21 @@ export function useSandbox(artifactId, buildRegistryId) {
   }, [artifactId, buildRegistryId]);
 
   const applyStatus = useCallback((message) => {
+    currentStatus.current = message.status || null;
     setSandboxStatus(message.status || null);
     setLivePreviewUrl(message.status === 'running' ? message.previewUrl || null : null);
     setSandboxError(message.error || message.lastError || message.message || null);
   }, []);
 
   useEffect(() => {
-    if (!sandboxId) return undefined;
+    if (!sandboxId || !['starting', 'running'].includes(sandboxStatus)) return undefined;
     const currentGeneration = generation.current;
     let closed = false;
     let timer;
-    const isCurrent = () => !closed && currentGeneration === generation.current;
+    // Preserve the terminal cause even if an older poll arrives after failure.
+    // A new explicit start resets status before observing the new attempt.
+    const isCurrent = () => !closed && currentGeneration === generation.current
+      && ['starting', 'running'].includes(currentStatus.current);
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const url = `${protocol}//${window.location.host}/ws/sandbox/${encodeURIComponent(sandboxId)}`;
     const socket = openAuthenticatedWebSocket(url, getStudioAccessToken());
@@ -70,7 +76,7 @@ export function useSandbox(artifactId, buildRegistryId) {
       window.clearTimeout(timer);
       socket.close();
     };
-  }, [sandboxId, applyStatus]);
+  }, [sandboxId, sandboxStatus, applyStatus]);
 
   const syncAndRestart = useCallback(async (filesMap) => {
     if (!artifactId || !buildRegistryId || inFlight.current) return;

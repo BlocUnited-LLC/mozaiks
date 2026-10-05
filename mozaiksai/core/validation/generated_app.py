@@ -159,3 +159,83 @@ def validate_generated_app_bundle(
         passed=not any(item.severity == "error" for item in diagnostics),
         diagnostics=diagnostics,
     )
+
+
+async def validate_generated_app_candidate(
+    *,
+    files: dict[str, str],
+    app_id: str,
+    validation_strategy: str | None = None,
+    timeout_seconds: int = 120,
+) -> dict[str, Any]:
+    """Check one complete candidate with the existing acceptance and build owners.
+
+    This is explicit-file validation, not a replay of Genesis task execution.
+    No prior validation result, model context, or generated repair is admitted.
+    The caller retains responsibility for scope, lineage, review and promotion.
+    Acceptance includes the existing local runtime load/smoke; the selected
+    Docker/E2B/local strategy controls the subsequent build execution.
+    """
+    from factory_app.workflows.AppGenerator.tools.app_validation import (
+        _trim_validation_result,
+        run_app_bundle_acceptance_gate,
+        validate_app_build,
+    )
+    from mozaiksai.core.runtime.app.paths import is_safe_app_path
+    from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
+        resolve_app_validation_strategy,
+    )
+
+    strategy, reason = resolve_app_validation_strategy(requested=validation_strategy)
+    snapshot = dict(files)
+    result: dict[str, Any] = {
+        "validation_status": "pending",
+        "validation_strategy": strategy,
+        "strategy_reason": reason,
+        "app_bundle_acceptance_result": {"status": "pending", "passed": False},
+        "app_validation_result": {"validation_status": "pending", "validation_strategy": strategy},
+        "errors": [],
+    }
+    invalid = [
+        str(path) for path, content in snapshot.items()
+        if not is_safe_app_path(path) or str(PurePosixPath(path)) != path
+        or path.strip() != path or path == "." or any(char in path for char in ("\\", ":", "\x00"))
+        or not isinstance(content, str)
+    ]
+    if invalid or "app.json" not in snapshot:
+        result["validation_status"] = "failed"
+        result["errors"] = [
+            "Candidate validation requires a complete canonical app bundle with app.json and safe file paths."
+        ]
+        return result
+    if strategy == "skip":
+        result["validation_status"] = "skipped"
+        result["app_validation_result"]["validation_status"] = "skipped"
+        return result
+
+    # Fresh context deliberately carries no Genesis task evidence or parent
+    # validation. Copies prevent a helper's context write-back changing bytes.
+    acceptance = await run_app_bundle_acceptance_gate(
+        files=dict(snapshot), context_variables={"app_id": app_id},
+    )
+    result["app_bundle_acceptance_result"] = acceptance
+    if acceptance.get("status") != "passed" or acceptance.get("passed") is not True:
+        result["validation_status"] = "failed" if acceptance.get("status") == "failed" else "pending"
+        result["errors"] = [
+            str(item["error"]) for item in acceptance.get("failed_tests", [])
+            if isinstance(item, dict) and item.get("error")
+        ] or ["Required app acceptance checks have not passed."]
+        return result
+
+    build = await validate_app_build(
+        files=dict(snapshot), validation_strategy=strategy,
+        start_dev_server=False, timeout_seconds=timeout_seconds,
+        context_variables={"app_id": app_id},
+    )
+    result["app_validation_result"] = _trim_validation_result(build)
+    build_status = build.get("validation_status")
+    result["validation_status"] = (
+        build_status if build_status in {"passed", "failed", "skipped"} else "pending"
+    )
+    result["errors"] = list(build.get("errors") or [])
+    return result

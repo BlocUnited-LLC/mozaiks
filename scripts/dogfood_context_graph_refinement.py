@@ -99,6 +99,8 @@ class _MemoryArtifactStore:
             source_chat_id=kwargs.get("source_chat_id"),
             lifecycle_status=lifecycle_status,
             validation_status=validation_status,
+            app_validation_status=kwargs.get("app_validation_status"),
+            app_validation_strategy=kwargs.get("app_validation_strategy"),
             files_manifest=list(kwargs.get("files_manifest") or []),
             commit_metadata=commit_metadata,
         )
@@ -297,17 +299,20 @@ class _DeterministicAgentRunner:
         return schema.model_validate(payload)
 
 
-async def _validation_runner(**_kwargs: Any) -> dict[str, Any]:
+async def _candidate_validation_runner(**_kwargs: Any) -> dict[str, Any]:
     return {
-        "success": True,
         "validation_status": "skipped",
+        "validation_strategy": "skip",
         "execution_mode": "not_executed",
-        "overlay_file_count": len(_kwargs.get("overlay_files") or {}),
-        "command_results": [],
-        "fallback_checks": [],
-        "preview_url": None,
+        "app_bundle_acceptance_result": {
+            "status": "skipped", "passed": False,
+            "skipped_reason": "Deterministic scope smoke does not execute app acceptance.",
+        },
+        "app_validation_result": {
+            "validation_status": "skipped", "validation_strategy": "skip",
+        },
         "errors": [],
-        "warnings": ["dogfood smoke skipped runtime validation intentionally"],
+        "warnings": ["Dogfood smoke skipped app acceptance and build validation intentionally."],
     }
 
 
@@ -412,7 +417,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
         config_loader=_enabled_control_plane,
         pack_loader=load_selected_refinement_harness,
         tool_executor=tool_executor,
-        source_validation_runner=_validation_runner,
+        candidate_validation_runner=_candidate_validation_runner,
         artifact_store=store,
         output_root=output_root / "refinements",
     )
@@ -435,9 +440,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
             },
         )
     )
-    if coding_result.status not in {"validated", "planned"}:
-        raise RuntimeError(f"Coding worker did not validate: {coding_result.model_dump(mode='json')}")
-    if coding_result.status == "planned" and (coding_result.validation_result or {}).get("validation_status") != "skipped":
+    if coding_result.status != "planned" or (coding_result.validation_result or {}).get("validation_status") != "skipped":
         raise RuntimeError(f"Coding worker returned an unexpected planned result: {coding_result.model_dump(mode='json')}")
 
     return {
@@ -474,9 +477,11 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
             "status": coding_result.status,
             "eligible": coding_result.eligible,
             "applied_paths": sorted(coding_result.applied_files),
-            "artifact_version_id": coding_result.metadata.get("artifact_version_id"),
+            "build_record_id": coding_result.metadata.get("build_record_id"),
             "artifact_path": coding_result.metadata.get("artifact_path"),
             "validation_status": (coding_result.validation_result or {}).get("validation_status"),
+            "acceptance_status": (coding_result.validation_result or {}).get("app_bundle_acceptance_result", {}).get("status"),
+            "app_validation_status": (coding_result.validation_result or {}).get("app_validation_result", {}).get("validation_status"),
         },
         "source_mutated": False,
     }

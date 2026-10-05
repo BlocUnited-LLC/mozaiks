@@ -419,6 +419,7 @@ async def test_assemble_app_tasks_merges_schema_artifacts_and_task_batch_outputs
         "config/targets.json",
         "ui/pages/Tickets.yaml",
         "modules/tickets/module.yaml",
+        "ui/lib/moduleApi.js",
     }
     assert context.snapshot()["assembled_source"] == "schema_and_task_batch_outputs"
     assert context.snapshot()["generated_files"]["app.json"] == '{"appName":"Support"}\n'

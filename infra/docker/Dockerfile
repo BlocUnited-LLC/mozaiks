@@ -10,7 +10,10 @@
 # docs/architecture/deployment/oss-infra-and-generated-app-deployment.md.
 #
 # Build: docker build -t mozaiks-repo-host:latest -f infra/docker/Dockerfile .
-# Run locally: docker run -p 127.0.0.1:8000:8000 --env-file .env mozaiks-repo-host:latest
+# Run locally: docker run -p 127.0.0.1:8000:8000 --env-file .env -e AUTH_ANON_ACCESS=open mozaiks-repo-host:latest
+# (With AUTH_ENABLED=false the host serves development access only to its own
+# machine; the browser reaches a container through Docker's gateway, so a
+# container needs AUTH_ANON_ACCESS=open, published on 127.0.0.1 only.)
 
 # ------------------------------------------------------------------------------
 # Stage 1: Builder — install the mozaiks package into a venv

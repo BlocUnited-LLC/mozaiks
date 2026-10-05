@@ -44,6 +44,7 @@ short contributor summary, not as a competing source of authority.
 
 ## App Contracts
 
+- [Multisurface Applications and Managed Delivery (ADR 0013)](../adr/0013-multisurface-applications-and-managed-delivery.md)
 - [Generated App Lifecycle Model](app/generated-app-lifecycle-model.md)
 - [Generated App Functional Acceptance](app/generated-app-functional-acceptance.md)
 - [Canonical App Structure](app/canonical-app-structure.md)

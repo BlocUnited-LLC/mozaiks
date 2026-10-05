@@ -2,9 +2,8 @@
 module_api_template — canonical template for ui/lib/moduleApi.js.
 
 Generated apps that use custom_route_bundle need a module action helper.
-This module provides the canonical implementation that is injected into
-the generated bundle by generate_and_download.py when the agent did not
-already produce one.
+Assembly includes this canonical implementation before validation when the
+admitted app files do not already provide it. Export retains the validated file.
 
 Behavioral contract:
   - All module action calls use POST /api/modules/{module}/{action}.
@@ -26,13 +25,8 @@ Behavioral contract:
   - Non-JSON error bodies (HTML gateway errors, etc.) are handled gracefully.
   - No secrets or provider credentials are attached to thrown errors.
 
-Called by generate_and_download.py:
-
-    from factory_app.workflows.AppGenerator.tools.module_api_template import (
-        get_module_api_template,
-    )
-    if "ui/lib/moduleApi.js" not in files_map:
-        files_map["ui/lib/moduleApi.js"] = get_module_api_template()
+HTTP and WebSocket requests use the current app origin unless VITE_API_URL
+explicitly selects another base. An empty value enables the shell's API proxy.
 """
 
 from __future__ import annotations
@@ -70,9 +64,10 @@ _MODULE_API_TEMPLATE = """\
  *     }
  */
 
-export const API_BASE =
+export const API_BASE = (
   (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL) ||
-  'http://localhost:8000'
+  ''
+).replace(/\\/+$/, '')
 
 export function getAccessToken() {
   if (typeof window !== 'undefined' && window.mozaiksAuth?.getAccessToken) {
@@ -231,10 +226,8 @@ export async function startWorkflow(workflowName, contextVariables = {}) {
 }
 
 export function moduleWebSocketUrl(path, params = {}) {
-  const base = API_BASE.startsWith('https')
-    ? API_BASE.replace(/^https/, 'wss')
-    : API_BASE.replace(/^http/, 'ws')
-  const url = new URL(`${base.replace(/\\/+$/, '')}${path}`)
+  const url = new URL(`${API_BASE}${path}`, window.location.origin)
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
   Object.entries(params).forEach(([key, value]) => {
     if (value !== undefined && value !== null && value !== '') {
       url.searchParams.set(key, value)

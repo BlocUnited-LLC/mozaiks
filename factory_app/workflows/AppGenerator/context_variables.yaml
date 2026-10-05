@@ -1060,6 +1060,17 @@ definitions:
     source:
       type: state
       default: false
+  app_validation_ends_run:
+    type: boolean
+    authority_class: closed_writer_routing_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    description: >
+      Deterministic validation outcome cannot advance through recovery or repair.
+      Ends the run as failed, including required checks that remain unverified.
+    source:
+      type: state
+      default: false
   app_build_failure_message:
     type: string
     authority_class: closed_writer_quality_state
@@ -1067,24 +1078,27 @@ definitions:
     persisted: true
     description: >
       User-facing reason the build cannot continue, listing the blocking errors.
-      Written only when the validation outcome ends the run, null otherwise.
+      Written when planning or validation ends the run as blocked, null otherwise.
       orchestrator.yaml names it as the failure message for workflow_failed ends.
     source:
       type: state
       default: null
-  interview_complete:
-    type: boolean
-    description: True once the intake interview has gathered enough non-AI product
-      scope to begin app generation.
+  interview_outcome:
+    type: string
+    authority_class: closed_writer_routing_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    description: Validated app interview readiness, never inferred from conversational text.
     source:
       type: state
-      default: false
-      triggers:
-      - type: agent_text
-        agent: InterviewAgent
-        ui_hidden: true
-        match:
-          equals: NEXT
+      default: blocked
+  interview_attempts:
+    type: integer
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    description: Runtime-owned bounded count of app interview result attempts.
+    source: {type: state, default: 0}
   app_plan_feedback:
     type: string
     description: Exact deterministic errors to repair in the next complete AppBuildPlan.
@@ -1722,7 +1736,7 @@ agents:
     - subscription_contract
     - subscription_contract_artifact
     - revenue_model
-    - interview_complete
+    - interview_outcome
     - brownfield_build_path
     - adoption_plan
     - ownership_boundary

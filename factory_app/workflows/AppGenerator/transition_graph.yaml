@@ -15,16 +15,8 @@ transition_rules:
   condition_type: context_expression
   context_expression: "${app_task_batch_results}"
   transition_target: AgentTarget
-# "Build it for me" has to be enforced by routing, not requested in a prompt.
-# interview_complete only flips when InterviewAgent emits the literal token
-# NEXT, so skipping the interview meant asking the model to volunteer its own
-# removal. Live runs showed it does not: with coding_participation present,
-# readable, and an explicit prompt branch telling it to decide for itself, it
-# still returned a list of scope questions and waited.
-#
-# AppPlanAgent takes concept_overview, design_surface_map and the three design
-# documents from upstream steps and never reads interview_complete, so it has
-# everything it needs without the interview turn.
+# The explicit autonomous choice bypasses intake after recovery priority.
+# AppPlanAgent consumes the approved upstream brief and design documents.
 - source_agent: user
   target_agent: AppPlanAgent
   transition_type: condition
@@ -35,9 +27,8 @@ transition_rules:
 - source_agent: user
   target_agent: InterviewAgent
   transition_type: condition
-  condition_type: context_equals
-  condition_key: interview_complete
-  condition_value: false
+  condition_type: context_expression
+  context_expression: "${interview_outcome} != 'ready'"
   transition_target: AgentTarget
 - source_agent: user
   target_agent: terminate
@@ -48,13 +39,29 @@ transition_rules:
   target_agent: AppPlanAgent
   transition_type: condition
   condition_type: context_equals
-  condition_key: interview_complete
-  condition_value: true
+  condition_key: interview_outcome
+  condition_value: ready
   transition_target: AgentTarget
 - source_agent: InterviewAgent
   target_agent: user
-  transition_type: after_turn
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: interview_outcome
+  condition_value: needs_input
   transition_target: RevertToUserTarget
+- source_agent: InterviewAgent
+  target_agent: terminate
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: interview_outcome
+  condition_value: blocked
+  transition_target: TerminateTarget
+  termination_reason: workflow_failed
+- source_agent: InterviewAgent
+  target_agent: terminate
+  transition_type: after_turn
+  transition_target: TerminateTarget
+  termination_reason: workflow_failed
 - source_agent: AppPlanAgent
   target_agent: AppPlanAgent
   transition_type: condition
@@ -387,22 +394,14 @@ transition_rules:
   condition_key: bundle_repair_target
   condition_value: FrontendStubAgent
   transition_target: AgentTarget
-# Validating an unchanged bundle again and failing the same way is not
-# progress. Ordered after recovery and repair routes, which change the bundle.
+# The deterministic gate ends unverified or blocked runs with a truthful
+# failure message. Recovery and selected repair routes take precedence.
 - source_agent: AppValidationAgent
   target_agent: terminate
   transition_type: condition
   condition_type: context_equals
-  condition_key: app_validation_no_progress
+  condition_key: app_validation_ends_run
   condition_value: true
-  transition_target: TerminateTarget
-  termination_reason: workflow_failed
-- source_agent: AppValidationAgent
-  target_agent: terminate
-  transition_type: condition
-  condition_type: context_equals
-  condition_key: app_assembly_status
-  condition_value: failed
   transition_target: TerminateTarget
   termination_reason: workflow_failed
 - source_agent: AppValidationAgent
@@ -412,15 +411,14 @@ transition_rules:
   condition_key: app_task_recovery_status
   condition_value: blocked
   transition_target: AgentTarget
-# Blocked repair has no owner left to act, and a user reply cannot change the
-# bundle: returning to the user only re-ran the same validation until
-# max_turns. End the run; the gate's failure message names the blocking errors.
+# A rejected task correction can leave an independent accepted output needing
+# repair. Revalidate once through the existing policy before ending assembly.
 - source_agent: AppValidationAgent
   target_agent: terminate
   transition_type: condition
   condition_type: context_equals
-  condition_key: bundle_repair_status
-  condition_value: blocked
+  condition_key: app_assembly_status
+  condition_value: failed
   transition_target: TerminateTarget
   termination_reason: workflow_failed
 - source_agent: AppValidationAgent

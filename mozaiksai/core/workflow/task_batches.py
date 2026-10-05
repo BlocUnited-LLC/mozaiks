@@ -59,6 +59,7 @@ from .generator_support.page_plan_utils import (
     module_action_index_from_context,
     normalize_page_structure,
     normalize_planned_page_content,
+    validate_planned_custom_routes,
     validate_planned_page,
     workflow_names_from_context,
 )
@@ -1451,6 +1452,11 @@ def _normalize_owned_page_files_from_plan(
                 continue
             file_map[safe] = str(content)
 
+    validate_planned_custom_routes(
+        file_map, pages=_planned_pages(base_context),
+        owned_paths=set(_normalize_owned_paths(task.get("owned_paths"))),
+        baseline_files=base_context.get("generated_files") if base_context.get("build_mode") == "revision" else None,
+    )
     owned_page_paths = [
         path
         for path in _normalize_owned_paths(task.get("owned_paths"))

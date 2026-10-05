@@ -170,9 +170,23 @@ def test_explicitly_public_app_does_not_inherit_an_enabled_provider(app_root, mo
     (app_root / "app.json").write_text('{"appId":"preview-app","authRequired":false}', encoding="utf-8")
     (app_root / "config/auth.yaml").unlink()
     monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+    # Forwarded sandbox values (MOZAIKS_PREVIEW_ENV_*) can neither reopen the
+    # preview nor stop it starting: public refuses anonymous roles.
+    monkeypatch.setenv("AUTH_ENABLED", "true")
+    monkeypatch.setenv("AUTH_ANON_ACCESS", "open")
+    monkeypatch.setenv("AUTH_ANON_ROLES", "admin,user")
+    monkeypatch.setenv("AUTH_ANON_SCOPES", "reports.read")
     monkeypatch.setenv("VITE_OIDC_REDIRECT_URI", "http://host.invalid/callback")
     env = runtime.preview_environment(app_root, preview_url="http://localhost:3000")
     assert env["AUTH_PROVIDER"] == "none" and env["AUTH_ENABLED"] == "false"
+    # Previewed as its visitors see it, never with development access.
+    assert env["AUTH_ANON_ACCESS"] == "public"
+    assert "AUTH_ANON_ROLES" not in env
+    assert env["AUTH_ANON_SCOPES"] == "reports.read"
+    from mozaiksai.core.auth.adapters.registry import resolve_auth_config
+
+    resolved = resolve_auth_config(environ=env)
+    assert resolved.anonymous_access == "public" and not resolved.grants_development_access
     assert env["VITE_OIDC_REDIRECT_URI"] == ""
 
 

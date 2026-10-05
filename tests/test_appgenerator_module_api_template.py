@@ -17,8 +17,8 @@ Verifies that the generated ui/lib/moduleApi.js template:
  13.  Does not propagate secret-shaped fields (tokens, api_key) as named attrs.
  14.  getAccessToken reads from window.mozaiksAuth or sessionStorage fallback keys.
  15.  authHeaders returns Authorization: Bearer when token is present.
- 16.  moduleAction is injected into bundles by generate_and_download when absent.
- 17.  generate_and_download does NOT overwrite an agent-provided moduleApi.js.
+ 16.  Assembly includes moduleAction before validation when absent.
+ 17.  Assembly preserves an admitted app-provided moduleApi.js.
  18.  agents.yaml instructs custom routes to import moduleAction from moduleApi.js.
  19.  agents.yaml instructs custom routes to catch err.error_code for branching.
  20.  file_contracts.yaml lists ui/lib/moduleApi.js as optional page_bundle output.
@@ -35,8 +35,13 @@ No payment provider, MozaiksPay, refund-specific, or hosted-product names in thi
 """
 from __future__ import annotations
 
+import json
 import re
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
 
 _WORKSPACE = Path(__file__).resolve().parents[1]
 _AGENTS_YAML_PATH = _WORKSPACE / "factory_app" / "workflows" / "AppGenerator" / "agents.yaml"
@@ -305,27 +310,66 @@ class TestModuleApiAuthHelpers:
 
 class TestModuleApiInjection:
 
-    def test_generate_download_injects_module_api(self):
-        """generate_and_download.py injects ui/lib/moduleApi.js when absent from bundle."""
-        src = _generate_download_text()
-        assert "ui/lib/moduleApi.js" in src, (
-            "generate_and_download must reference the ui/lib/moduleApi.js injection path"
-        )
-        assert "get_module_api_template" in src, (
-            "generate_and_download must call get_module_api_template to inject the file"
-        )
+    @pytest.mark.parametrize("authored_helper", [None, "export function moduleAction() {}\n"])
+    def test_assembly_closes_custom_route_helper_before_validation(self, authored_helper):
+        from factory_app.workflows.AppGenerator.tools.assembly_phase import _merge_code_files
 
-    def test_generate_download_does_not_overwrite_agent_provided(self):
-        """generate_and_download does NOT overwrite a moduleApi.js the agent already produced."""
-        src = _generate_download_text()
-        # The guard pattern must check 'not in files_map' before injecting
-        assert (
-            '"ui/lib/moduleApi.js" not in files_map' in src
-            or "'ui/lib/moduleApi.js' not in files_map" in src
-        ), (
-            "generate_and_download must guard injection with 'not in files_map' "
-            "so agent-provided moduleApi.js is preserved"
-        )
+        files = {
+            "app.json": json.dumps({"appId": "assembly-test", "appName": "Assembly test", "authRequired": False}),
+            "ui/pages/custom/items.jsx": "import { moduleAction } from '../../lib/moduleApi.js';\nexport default () => null;\n",
+        }
+        if authored_helper is not None:
+            files["ui/lib/moduleApi.js"] = authored_helper
+        entries = [{"filename": name, "content": content} for name, content in files.items()]
+        assembled = _merge_code_files([{"code_files": entries}])
+        result = {item["filename"]: item["content"] for item in assembled}
+
+        assert result["ui/lib/moduleApi.js"] == (authored_helper or _template_js())
+        assert result["ui/pages/custom/items.jsx"] == files["ui/pages/custom/items.jsx"]
+        assert _merge_code_files([{"code_files": assembled}]) == assembled
+
+    def test_export_does_not_add_an_unvalidated_client(self):
+        assert "get_module_api_template" not in _generate_download_text()
+
+
+@pytest.mark.parametrize("api_base, expected_http, expected_socket", [
+    (None, "", "wss://preview.example.test/socket"),
+    ("", "", "wss://preview.example.test/socket"),
+    ("/", "", "wss://preview.example.test/socket"),
+    ("/backend/", "/backend", "wss://preview.example.test/backend/socket"),
+    ("https://api.example.test/", "https://api.example.test", "wss://api.example.test/socket"),
+    ("http://api.example.test/", "http://api.example.test", "ws://api.example.test/socket"),
+])
+def test_generated_client_uses_configured_or_same_origin_transport(api_base, expected_http, expected_socket):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required to execute the generated browser helper")
+    environment = {"VITE_APP_ID": "transport-test"}
+    if api_base is not None:
+        environment["VITE_API_URL"] = api_base
+    source = _template_js().replace("import.meta.env", f"({json.dumps(environment)})")
+    script = source + "\n" + """
+globalThis.window = {
+  location: {origin: 'https://preview.example.test'},
+  mozaiksAuth: {getAccessToken: () => 'test-access-token'},
+};
+const requests = [];
+globalThis.fetch = async (url, options) => {
+  requests.push({url, method: options.method, authorization: options.headers.Authorization});
+  return {ok: true, json: async () => ({saved: true})};
+};
+await moduleAction('inventory', 'create_item', {title: 'Example'});
+await startWorkflow('ExampleWorkflow');
+console.log(JSON.stringify({requests, socket: moduleWebSocketUrl('/socket', {room: 'one two'})}));
+"""
+    completed = subprocess.run([node, "--input-type=module"], input=script, capture_output=True, text=True, timeout=15)
+    assert completed.returncode == 0, completed.stderr
+    result = json.loads(completed.stdout)
+    assert result["requests"] == [
+        {"url": expected_http + "/api/modules/inventory/create_item", "method": "POST", "authorization": "Bearer test-access-token"},
+        {"url": expected_http + "/api/chats/transport-test/ExampleWorkflow/start", "method": "POST", "authorization": "Bearer test-access-token"},
+    ]
+    assert result["socket"] == expected_socket + "?room=one+two"
 
 
 # ---------------------------------------------------------------------------

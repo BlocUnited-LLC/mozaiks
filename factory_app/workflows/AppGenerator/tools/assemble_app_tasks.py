@@ -26,6 +26,7 @@ from mozaiksai.core.workflow.generator_support.page_plan_utils import (
     module_action_index,
     normalize_planned_page_content,
     pack_template_page_errors,
+    validate_planned_custom_routes,
     validate_planned_page,
 )
 
@@ -105,6 +106,18 @@ def _apply_planned_page_contracts(
         if str(task.get("task_type") or "").strip() != "page_bundle":
             continue
         task_id = str(task.get("task_id") or "").strip()
+        if task_id not in failed_tasks:
+            validate_planned_custom_routes(
+                file_map, pages=pages,
+                owned_paths={
+                    path for raw_path in task.get("owned_paths") or []
+                    if (path := safe_relpath(str(raw_path or ""))) and path not in pack_outputs
+                },
+                baseline_files=(
+                    detach(context_variables.get("generated_files"))
+                    if context_variables is not None and context_variables.get("build_mode") == "revision" else None
+                ),
+            )
         for raw_path in task.get("owned_paths") or []:
             # file_map keys are safe_relpath-canonical because every producer
             # runs them through it. Canonicalize this side with the same rule so

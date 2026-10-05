@@ -650,6 +650,7 @@ class SessionRouter:
         decision_id: str,
         action_id: str | None = None,
         accepted: bool = True,
+        expected_pending_decision: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         app = str(app_id or "").strip()
         user = str(user_id or "").strip()
@@ -659,21 +660,37 @@ class SessionRouter:
             raise ValueError("app_id, user_id, and decision_id are required")
 
         state = await self._load_or_create_state(app_id=app, user_id=user)
+        if state.app_id != app or state.user_id != user:
+            raise ValueError("Pending harness decision owner does not match")
         pending = state.pending_harness_decision
         if pending is None:
             raise ValueError("No pending harness decision is recorded for this session")
         if str(pending.decision_id or "").strip() != decision:
             raise ValueError(f"decision_id '{decision}' does not match pending harness decision")
 
-        state.pending_harness_decision = None
-        state.lifecycle_state = SessionLifecycle.ACTIVE
-        state.last_route_explanation = (
+        if expected_pending_decision is not None:
+            for key, active in (
+                ("revision_id", state.active_revision_id),
+                ("change_request_id", state.active_change_request_id),
+            ):
+                if expected_pending_decision.get(key) is not None and expected_pending_decision[key] != active:
+                    raise ValueError("Pending harness decision revision or change request is no longer active")
+            # Mongo truncates timestamp precision. Approval binds decision
+            # content, not the display timestamp returned before persistence.
+            expected = {key: value for key, value in expected_pending_decision.items() if key != "created_at"}
+            current = {
+                key: value for key, value in self._serialize_state(state)["pending_harness_decision"].items()
+                if key != "created_at"
+            }
+            if current != expected:
+                raise ValueError("Pending harness decision changed before confirmation")
+        explanation = (
             f"Pending decision '{decision}' resolved with action '{resolved_action_id or 'none'}'."
             if accepted
             else f"Pending decision '{decision}' dismissed."
         )
-        state.updated_at = datetime.now(UTC)
-        await self._store.upsert(state)
+        if not await self._store.consume_pending_harness_decision(state, explanation=explanation):
+            raise ValueError("Pending harness decision was already resolved or changed")
         payload = self._serialize_state(state)
         payload["accepted"] = bool(accepted)
         payload["action_id"] = resolved_action_id

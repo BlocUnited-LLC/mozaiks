@@ -123,8 +123,9 @@ Set the minimum required environment:
 
 Builds call OpenAI only today. The default model is `gpt-5-nano`; set
 `DEFAULT_LLM_MODEL` to use another OpenAI model. The two `AUTH_` settings run
-Studio without sign-in for local development and give the anonymous user the
-admin role. Without them, Studio shows "Unable to open this app".
+Studio without sign-in for requests from this machine and give the anonymous
+user the admin role. With no auth setting at all, the backend refuses to start
+and names the settings to choose from.
 
 If the repo also has a `.env`, the backend script loads it too; values set in
 the shell win. A `.env` copied from `.env.example` sets

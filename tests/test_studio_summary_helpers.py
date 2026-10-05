@@ -82,6 +82,8 @@ Covers:
 """
 from __future__ import annotations
 
+import pytest
+
 from mozaiksai.core.runtime.app.studio_summary import (
     _build_connector_summary,
     _flatten_unique_strings,
@@ -470,6 +472,40 @@ class TestRecommendLifecycleNextStep:
 # ---------------------------------------------------------------------------
 
 class TestBuildAppListEntry:
+    @pytest.mark.parametrize("chat_id", [None, "previous-build-chat"])
+    def test_review_with_saved_artifact_opens_review_without_resuming_chat(self, chat_id):
+        result = build_app_list_entry({
+            "app_id": "build-app", "lifecycle_state": "review",
+            "current_build_run": {
+                "artifact_version_id": "saved-version",
+                "active_chat_id": chat_id, "active_workflow_id": "AppGenerator",
+            },
+        })
+        assert result["destination"] == "/apps/build-app/activity"
+        assert result["current_build_run"]["artifact_version_id"] == "saved-version"
+
+    def test_review_without_saved_artifact_keeps_building_destination(self):
+        result = build_app_list_entry({"app_id": "build-app", "lifecycle_state": "review"})
+        assert result["destination"] == "/apps/build-app/building"
+
+    @pytest.mark.parametrize("binding", [{}, {"active_chat_id": "orphaned-chat"}])
+    def test_missing_run_binding_opens_registered_building_surface(self, binding):
+        result = build_app_list_entry({"app_id": "build-app", "lifecycle_state": "building", **binding})
+        assert result["destination"] == "/apps/build-app/building"
+        assert result["active_workflow_id"] is None
+
+    @pytest.mark.parametrize("name,status,source", [
+        (None, "provisional", "provisional"), ("FocusSprint", "named", "value_engine_concept"),
+    ])
+    def test_preserves_canonical_name_metadata(self, name, status, source):
+        result = build_app_list_entry({
+            "build_registry_id": "appreg_1", "app_id": "draft-app-58c84bf6",
+            "lifecycle_state": "building", "name": name, "name_status": status, "name_source": source,
+        })
+        assert result["name"] == name
+        assert result["name_status"] == status
+        assert result["name_source"] == source
+
     def test_building_entry_routes_to_chat_scope(self):
         result = build_app_list_entry(
             {

@@ -163,9 +163,15 @@ export function isAppDeployReady(status) {
 
 export function getAppStudioDestination(app) {
   const currentBuildRun = app?.current_build_run || {}
+  const appId = encodeURIComponent(app?.app_id || app?.id || '')
+  const lifecycle = normalizeAppStatus(app?.lifecycle_state || app?.status)
+  if (appId && lifecycle === 'review' && currentBuildRun.artifact_version_id) {
+    return `/apps/${appId}/activity`
+  }
   const activeChatId = currentBuildRun.active_chat_id || app?.active_chat_id
-  const activeWorkflowId = currentBuildRun.active_workflow_id || app?.active_workflow_id || 'ValueEngine'
-  if (isAppInBuild(app?.status || app?.lifecycle_state) && activeChatId) {
+  const activeWorkflowId = currentBuildRun.active_workflow_id || app?.active_workflow_id
+  const inBuild = isAppInBuild(app?.lifecycle_state || app?.status)
+  if (inBuild && activeChatId && activeWorkflowId) {
     const workflowId = encodeURIComponent(activeWorkflowId)
     const chatId = encodeURIComponent(activeChatId)
     // chat_app_id is the factory session app_id used when the chat was created.
@@ -173,17 +179,21 @@ export function getAppStudioDestination(app) {
     const sessionAppId = encodeURIComponent(app?.chat_app_id || app?.app_id || app?.id || '')
     return `/chat?workflow=${workflowId}&mode=workflow&chat_id=${chatId}${sessionAppId ? `&app_id=${sessionAppId}` : ''}`
   }
-  const appId = encodeURIComponent(app?.app_id || app?.id || '')
   if (!appId) return '/apps'
-  return `/apps/${appId}/overview`
+  return `/apps/${appId}/${inBuild ? 'building' : 'overview'}`
 }
 
 export function getAppPrimaryAction(app) {
-  const lifecycle = getAppLifecycleMeta(app?.status || app?.lifecycle_state)
+  const lifecycle = getAppLifecycleMeta(app?.lifecycle_state || app?.status)
+  const href = getAppStudioDestination(app)
+  if (lifecycle.status === 'review' && app?.current_build_run?.artifact_version_id && href.endsWith('/activity')) {
+    return { kind: 'review', label: 'Review builds', href }
+  }
+  const canContinueBuild = lifecycle.primaryAction === 'build' && href.startsWith('/chat?')
   return {
-    kind: lifecycle.primaryAction,
-    label: lifecycle.primaryActionLabel,
-    href: getAppStudioDestination(app),
+    kind: canContinueBuild ? 'build' : 'overview',
+    label: canContinueBuild ? lifecycle.primaryActionLabel : lifecycle.primaryAction === 'build' ? 'Open Building' : 'Open App Studio',
+    href,
   }
 }
 

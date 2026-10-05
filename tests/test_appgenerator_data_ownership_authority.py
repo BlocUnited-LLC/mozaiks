@@ -133,6 +133,7 @@ def test_data_contract_projection_cannot_authorize_unapproved_module_files():
     })
     task = {
         "task_id": "persistence", "task_type": "persistence_contract",
+        "initial_agent": "DatabaseAgent",
         "capability_pack_id": None, "surface_id": "data_contract", "surface_kind": "module",
         "owned_paths": ["data/contract.json"],
     }

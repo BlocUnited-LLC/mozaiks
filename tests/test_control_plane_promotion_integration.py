@@ -53,6 +53,7 @@ from mozaiksai.control_plane.staged_coding_worker import (
     run_live_staged_coding_worker,
 )
 from mozaiksai.control_plane.staging import create_refinement_staging_workspace
+from mozaiksai.core.artifacts.models import BuildRecord
 
 # ---------------------------------------------------------------------------
 # Shared constants
@@ -89,13 +90,6 @@ class _FakeAgent:
         return _FakeReply(self.plan)
 
 
-class _ArtifactVersion:
-    def __init__(self, **kwargs: Any) -> None:
-        for k, v in kwargs.items():
-            setattr(self, k, v)
-        self.id = kwargs.get("id", "av_child_001")
-
-
 class _CapturingArtifactStore:
     """Realistic artifact store that records the full create call and returns a typed stub."""
 
@@ -103,9 +97,9 @@ class _CapturingArtifactStore:
         self.calls: list[dict[str, Any]] = []
         self._child_id = child_id
 
-    async def create_build_record(self, **kwargs: Any) -> _ArtifactVersion:
+    async def create_build_record(self, **kwargs: Any) -> BuildRecord:
         self.calls.append(dict(kwargs))
-        return _ArtifactVersion(id=self._child_id, **kwargs)
+        return BuildRecord(id=self._child_id, version_number=1, lineage_root_id="parent", **kwargs)
 
     @property
     def last_call(self) -> dict[str, Any]:
@@ -126,7 +120,9 @@ async def _skip_validation(**kwargs: Any) -> dict[str, Any]:
         "success": True,
         "validation_status": "skipped",
         "execution_mode": "not_executed",
-        "overlay_file_count": len(kwargs.get("overlay_files") or {}),
+        "file_count": len(kwargs.get("files") or {}),
+        "app_bundle_acceptance_result": {"status": "skipped", "passed": False},
+        "app_validation_result": {"validation_status": "skipped", "validation_strategy": "skip"},
         "command_results": [],
         "fallback_checks": [],
         "warnings": ["Validation skipped in integration test."],
@@ -286,7 +282,7 @@ async def test_full_plan_stage_code_persist_chain(tmp_path: Path) -> None:
         config_loader=_config,
         pack_loader=_pack,
         tool_executor=_FakeToolExecutor(),
-        source_validation_runner=_skip_validation,
+        candidate_validation_runner=_skip_validation,
         artifact_store=artifact_store,
         output_root=tmp_path / "output",
     )
@@ -394,7 +390,7 @@ async def test_artifact_store_fields_match_promotion_contract(tmp_path: Path) ->
         config_loader=_config,
         pack_loader=_pack,
         tool_executor=_FakeToolExecutor(),
-        source_validation_runner=_skip_validation,
+        candidate_validation_runner=_skip_validation,
         artifact_store=artifact_store,
         output_root=tmp_path / "output",
     )
@@ -456,7 +452,7 @@ async def test_broken_artifact_store_sets_failed_status_and_surfaces_error(tmp_p
         config_loader=_config,
         pack_loader=_pack,
         tool_executor=_FakeToolExecutor(),
-        source_validation_runner=_skip_validation,
+        candidate_validation_runner=_skip_validation,
         artifact_store=_BrokenStore(),
         output_root=tmp_path / "output",
     )
@@ -678,7 +674,7 @@ async def test_coding_worker_rejects_out_of_scope_edits_in_integration(tmp_path:
         config_loader=_config,
         pack_loader=_pack,
         tool_executor=_FakeToolExecutor(),
-        source_validation_runner=_skip_validation,
+        candidate_validation_runner=_skip_validation,
         artifact_store=_CapturingArtifactStore(),
         output_root=tmp_path / "output",
     )

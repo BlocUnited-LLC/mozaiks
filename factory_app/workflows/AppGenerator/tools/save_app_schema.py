@@ -45,21 +45,42 @@ from mozaiksai.core.runtime.persistence.intent_loader import (
 )
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import (
+    _custom_route_bundle_code_files,
     _page_file_stem,
     auth_required_from_strategy,
     data_contract_requires_auth,
+    validate_custom_page_files,
 )
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     pack_owned_output_paths,
 )
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
+    _key_value_entries_to_dict as _key_value_entries_to_dict,
+)
+from mozaiksai.core.workflow.generator_support.page_plan_utils import (
+    _normalize_action_data as _normalize_action_data,
+)
+from mozaiksai.core.workflow.generator_support.page_plan_utils import (
+    _normalize_blank_optional_strings as _normalize_blank_optional_strings,
+)
+from mozaiksai.core.workflow.generator_support.page_plan_utils import (
+    _normalize_config_actions as _normalize_config_actions,
+)
+from mozaiksai.core.workflow.generator_support.page_plan_utils import (
+    _normalize_custom_route_bundle,
+    _strip_none,
+    _to_plain,
     compile_page_data_sources,
     materialize_modal_targets,
     module_action_index_from_context,
-    promote_table_primitive,
     resolve_modal_action_targets,
-    resource_table_only_fields,
     workflow_names_from_context,
+)
+from mozaiksai.core.workflow.generator_support.page_plan_utils import (
+    _normalize_page_section as _normalize_page_section,
+)
+from mozaiksai.core.workflow.generator_support.page_plan_utils import (
+    normalize_page_schema as _normalize_page_schema,
 )
 from mozaiksai.core.workflow.ui_primitives import (
     validate_page_ui_primitives,
@@ -150,164 +171,6 @@ def _normalize_list(value: Any) -> list[Any]:
     return list(value)
 
 
-def _to_plain(value: Any) -> Any:
-    """Detach structured output and immutable runtime views for serialization."""
-    return detach(value)
-
-
-def _strip_none(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {
-            key: _strip_none(item)
-            for key, item in value.items()
-            if item is not None
-        }
-    if isinstance(value, list):
-        return [_strip_none(item) for item in value if item is not None]
-    return value
-
-
-def _key_value_entries_to_dict(value: Any) -> Any:
-    """Normalize strict key/value lists into runtime object payloads."""
-    value = _to_plain(value)
-    if value is None or isinstance(value, dict):
-        return _strip_none(value)
-    if isinstance(value, list):
-        normalized: dict[str, Any] = {}
-        for entry in value:
-            if not isinstance(entry, dict):
-                continue
-            key = entry.get("key")
-            if not _is_non_empty_string(key):
-                continue
-            normalized[str(key)] = _strip_none(entry.get("value"))
-        return normalized
-    return value
-
-
-def _normalize_action_data(action: Any) -> Any:
-    action = _strip_none(_to_plain(action))
-    if not isinstance(action, dict):
-        return action
-    for field in ("context_variables", "payload"):
-        if field in action:
-            action[field] = _key_value_entries_to_dict(action.get(field))
-    return _strip_none(action)
-
-
-def _normalize_config_actions(config: dict[str, Any]) -> dict[str, Any]:
-    for field in ("action", "submit_action", "cancel_action"):
-        if field in config:
-            config[field] = _normalize_action_data(config.get(field))
-    if isinstance(config.get("actions"), list):
-        config["actions"] = [_normalize_action_data(action) for action in config["actions"]]
-    empty = config.get("empty")
-    if isinstance(empty, dict) and "action" in empty:
-        empty["action"] = _normalize_action_data(empty.get("action"))
-    return config
-
-
-_OPTIONAL_STRING_KEYS = {
-    "api_endpoint",
-    "cancel_label",
-    "color",
-    "description",
-    "event_type",
-    "height",
-    "href",
-    "icon",
-    "id",
-    "message",
-    "placeholder",
-    "size",
-    "subtitle",
-    "submit_label",
-    "title",
-    "url",
-    "variant",
-    "width",
-    "workflow_id",
-}
-
-
-def _normalize_blank_optional_strings(value: Any) -> Any:
-    if isinstance(value, dict):
-        normalized: dict[str, Any] = {}
-        for key, item in value.items():
-            if key in _OPTIONAL_STRING_KEYS and isinstance(item, str) and not item.strip():
-                normalized[key] = None
-            else:
-                normalized[key] = _normalize_blank_optional_strings(item)
-        return _strip_none(normalized)
-    if isinstance(value, list):
-        return [_normalize_blank_optional_strings(item) for item in value]
-    return value
-
-
-def _normalize_page_section(section: Any) -> Any:
-    section = _strip_none(_to_plain(section))
-    if not isinstance(section, dict):
-        return section
-    config = section.get("config")
-    if isinstance(config, dict):
-        config = _normalize_blank_optional_strings(config)
-        config = _normalize_config_actions(config)
-        children = config.get("children")
-        if isinstance(children, list):
-            config["children"] = [_normalize_page_section(child) for child in children]
-        section["config"] = _strip_none(config)
-    if promote_table_primitive(section):
-        _logger.info(
-            "[AppGenerator] page section %r promoted DataTable -> ResourceTable for %s",
-            section.get("id"),
-            sorted(resource_table_only_fields() & set(section.get("config") or {})),
-        )
-    return _strip_none(section)
-
-
-def _normalize_page_schema(page: Any) -> Any:
-    page = _strip_none(_to_plain(page))
-    if not isinstance(page, dict):
-        return page
-    meta = page.get("meta")
-    if isinstance(meta, dict) and "routeAuth" in meta:
-        meta["routeAuth"] = _normalize_route_auth(meta.get("routeAuth"))
-    sections = page.get("sections")
-    if isinstance(sections, list):
-        page["sections"] = [_normalize_page_section(section) for section in sections]
-    return _strip_none(page)
-
-
-def _normalize_route_auth(route_auth: Any) -> Any:
-    route_auth = _strip_none(_to_plain(route_auth))
-    if not isinstance(route_auth, dict):
-        return route_auth
-    if "params" in route_auth:
-        route_auth["params"] = _key_value_entries_to_dict(route_auth.get("params"))
-    return _strip_none(route_auth)
-
-
-def _normalize_custom_route_bundle(bundle: Any) -> Any:
-    bundle = _strip_none(_to_plain(bundle))
-    if not isinstance(bundle, dict):
-        return bundle
-    route_manifest = bundle.get("route_manifest")
-    if isinstance(route_manifest, list):
-        normalized_routes: list[Any] = []
-        for entry in route_manifest:
-            entry = _strip_none(_to_plain(entry))
-            if isinstance(entry, dict):
-                meta = entry.get("meta")
-                if isinstance(meta, dict) and "routeAuth" in meta:
-                    meta["routeAuth"] = _normalize_route_auth(meta.get("routeAuth"))
-            normalized_routes.append(entry)
-        bundle["route_manifest"] = normalized_routes
-    page_files = bundle.get("page_files")
-    if isinstance(page_files, list):
-        bundle["page_files"] = [_strip_none(_to_plain(entry)) for entry in page_files]
-    return _strip_none(bundle)
-
-
 def _normalize_shell_config(shell_config: Any) -> Any:
     return _strip_none(_to_plain(shell_config))
 
@@ -372,7 +235,6 @@ VALID_GRID_GAPS = {"sm", "md", "lg", "1", "2", "3", "4", "6", "8", "10", "12"}
 VALID_MODAL_SIZES = {"small", "medium", "large", "full"}
 VALID_SELECTION_MODES = {"none", "single", "multi"}
 VALID_ASSET_SOURCES = {"local", "remote", "uploaded", "generated", "stock"}
-VALID_CUSTOM_PAGE_EXTENSIONS = {".jsx"}
 VALID_SHELL_MODES = {"standard", "workspace", "conversation", "focused", "immersive", "public"}
 VALID_SHELL_ACTION_SURFACES = {"studio", "app", "user", "workflow_session", "transition", "public", "page"}
 VALID_SHELL_ACTION_WHEN_FIELDS = {
@@ -564,7 +426,6 @@ def _validate_custom_route_bundle(custom_route_bundle: Any) -> None:
     route_ids: set[str] = set()
     route_paths: set[str] = set()
     registry_keys: set[str] = set()
-    route_by_id: dict[str, dict[str, Any]] = {}
     for index, entry in enumerate(route_manifest):
         path = f"custom_route_bundle.route_manifest[{index}]"
         if not isinstance(entry, dict):
@@ -605,122 +466,8 @@ def _validate_custom_route_bundle(custom_route_bundle: Any) -> None:
         route_ids.add(route_id)  # type: ignore[arg-type]
         route_paths.add(route_path)  # type: ignore[arg-type]
         registry_keys.add(component)  # type: ignore[arg-type]
-        route_by_id[route_id] = entry  # type: ignore[index]
 
-    file_paths: set[str] = set()
-    for index, entry in enumerate(page_files):
-        path = f"custom_route_bundle.page_files[{index}]"
-        if not isinstance(entry, dict):
-            raise ValueError(f"{path} must be an object")
-        route_id = entry.get("route_id")
-        if route_id not in route_by_id:
-            raise ValueError(
-                f"{path}.route_id '{route_id}' must reference a declared "
-                "custom_route_bundle.route_manifest[*].id so the route path, component key, "
-                "custom page file, and ui/index.js registration can be generated together"
-            )
-        file_path = entry.get("path")
-        if not _is_non_empty_string(file_path):
-            raise ValueError(f"{path}.path is required")
-        normalized = str(file_path).replace("\\", "/")
-        if not normalized.startswith("ui/pages/custom/"):
-            raise ValueError(f"{path}.path must live under ui/pages/custom/")
-        if Path(normalized).suffix not in VALID_CUSTOM_PAGE_EXTENSIONS:
-            raise ValueError(f"{path}.path must end with one of {sorted(VALID_CUSTOM_PAGE_EXTENSIONS)}")
-        if normalized in file_paths:
-            raise ValueError(f"{path}.path must be unique")
-        if not _is_non_empty_string(entry.get("component_name")):
-            raise ValueError(f"{path}.component_name is required")
-        registry_key = entry.get("registry_key")
-        if not _is_non_empty_string(registry_key):
-            raise ValueError(f"{path}.registry_key is required")
-        owning_route = route_by_id[route_id]
-        owning_component = owning_route.get("component")
-        owning_path = owning_route.get("path")
-        if registry_key != owning_component:
-            raise ValueError(
-                f"{path}.registry_key '{registry_key}' must match route_manifest component "
-                f"'{owning_component}' for route path '{owning_path}'. Expected fix: make "
-                "route_manifest[*].component, page_files[*].registry_key, and the generated "
-                "ui/index.js registerComponent key identical."
-            )
-        if not _is_non_empty_string(entry.get("purpose")):
-            raise ValueError(f"{path}.purpose is required")
-        _validate_string_list(entry.get("contract_refs"), field=f"{path}.contract_refs")
-        if not _is_non_empty_string(entry.get("content")):
-            raise ValueError(f"{path}.content is required")
-        file_paths.add(normalized)
-
-
-def _build_custom_route_manifest_json(custom_route_bundle: dict[str, Any]) -> dict[str, Any]:
-    return {"pages": list(custom_route_bundle.get("route_manifest") or [])}
-
-
-def _build_custom_ui_index(custom_route_bundle: dict[str, Any]) -> str:
-    page_files = list(custom_route_bundle.get("page_files") or [])
-    if not page_files:
-        return "export function register() {}\n"
-
-    imports: list[str] = []
-    registrations: list[str] = []
-    registry_keys: list[str] = []
-    for entry in page_files:
-        file_path = str(entry["path"]).replace("\\", "/")
-        rel_path = file_path[len("ui/") :]
-        module_path = "./" + rel_path[:-4] if rel_path.endswith(".jsx") else "./" + rel_path[:-3]
-        component_name = entry["component_name"]
-        registry_key = entry["registry_key"]
-        registry_keys.append(registry_key)
-        purpose = str(entry.get("purpose") or "").replace("\\", "\\\\").replace("'", "\\'")
-        imports.append(f"import {component_name} from '{module_path}';")
-        registrations.append(
-            "  registerComponent("
-            f"'{registry_key}', {component_name}, "
-            "{\n"
-            f"    description: '{purpose}',\n"
-            "  }\n"
-            "  );"
-        )
-
-    lines = imports + [
-        "",
-        "export function register(registerComponent) {",
-        "  if (typeof registerComponent !== 'function') return;",
-        f"  console.info('[mozaiks/app-ui] Registering custom route components: {', '.join(registry_keys)}');",
-        *registrations,
-        "}",
-        "",
-    ]
-    return "\n".join(lines)
-
-
-def _custom_route_bundle_code_files(custom_route_bundle: Any) -> list[dict[str, str]]:
-    if not isinstance(custom_route_bundle, dict):
-        return []
-    files: list[dict[str, str]] = [
-        {
-            "filename": "ui/route_manifest.json",
-            "content": json.dumps(
-                _build_custom_route_manifest_json(custom_route_bundle),
-                indent=2,
-                ensure_ascii=False,
-            ),
-        },
-        {
-            "filename": "ui/index.js",
-            "content": _build_custom_ui_index(custom_route_bundle),
-        },
-    ]
-    for entry in custom_route_bundle.get("page_files") or []:
-        if not isinstance(entry, dict):
-            continue
-        files.append(
-            {
-                "filename": str(entry.get("path") or "").replace("\\", "/"),
-                "content": str(entry.get("content") or ""),
-            }
-        )
-    return files
+    validate_custom_page_files(custom_route_bundle)
 
 
 def _validate_action(action: Any, *, path: str) -> None:
@@ -1425,24 +1172,11 @@ def _persist_to_filesystem(
         written.append(f"ui/pages/{name}.yaml")
 
     if custom_route_bundle and isinstance(custom_route_bundle, dict):
-        route_manifest_path = output_dir / "ui" / "route_manifest.json"
-        route_manifest_path.parent.mkdir(parents=True, exist_ok=True)
-        route_manifest_path.write_text(
-            json.dumps(_build_custom_route_manifest_json(custom_route_bundle), indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
-        written.append("ui/route_manifest.json")
-
-        for entry in custom_route_bundle.get("page_files") or []:
-            file_path = output_dir / Path(str(entry["path"]).replace("\\", "/"))
+        for entry in _custom_route_bundle_code_files(custom_route_bundle):
+            file_path = output_dir / entry["filename"]
             file_path.parent.mkdir(parents=True, exist_ok=True)
             file_path.write_text(str(entry["content"]), encoding="utf-8")
-            written.append(str(Path(str(entry["path"]).replace("\\", "/"))).replace("\\", "/"))
-
-        ui_index_path = output_dir / "ui" / "index.js"
-        ui_index_path.parent.mkdir(parents=True, exist_ok=True)
-        ui_index_path.write_text(_build_custom_ui_index(custom_route_bundle), encoding="utf-8")
-        written.append("ui/index.js")
+            written.append(entry["filename"])
 
     # brand/theme_config.json — deep-merge theme_config_patch when provided
     if theme_config_patch and isinstance(theme_config_patch, dict):

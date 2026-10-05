@@ -17,7 +17,10 @@ import yaml
 from ag2 import Agent
 from ag2.knowledge import MemoryKnowledgeStore
 
-from factory_app.workflows.AppGenerator.tools.app_validation import validate_app_bundle_from_request
+from factory_app.workflows.AppGenerator.tools.app_validation import (
+    _record_validation_outcome,
+    validate_app_bundle_from_request,
+)
 from factory_app.workflows.AppGenerator.tools.code_file_utils import admitted_app_file_map
 from factory_app.workflows.AppGenerator.tools.repair_policy import (
     prepare_bundle_repair,
@@ -122,11 +125,15 @@ async def test_readiness_user_reply_materializes_auth_before_real_validation(con
             result = await AG2NetworkRunner().run(request("Confirmed", reopen=True))
         else:
             result = await result.live_run.continue_with_user_message("Confirmed")
-        assert result.status is RunStatus.PAUSED, result.error
-        assert validations[0]["integration_tests_passed"] is True, json.dumps(
-            validations[0]["app_bundle_acceptance_result"]["failed_tests"], indent=2,
-        )
-        assert speakers == ["IntegrationReadinessAgent", "AppValidationAgent", "DownloadAgent"]
+        assert result.status is RunStatus.FAILED, result.error
+        assert result.close_reason == "workflow_failed"
+        acceptance = validations[0]["app_bundle_acceptance_result"]
+        assert acceptance["status"] == "pending"
+        assert acceptance["validation_evidence"]["failed"] == []
+        assert acceptance["validation_evidence"]["skipped"] == ["app_runtime_smoke"]
+        assert validations[0]["integration_tests_passed"] is False
+        assert validations[0]["app_validation_result"]["validation_status"] == "pending"
+        assert speakers == ["IntegrationReadinessAgent", "AppValidationAgent"]
         assert validations[0]["app_runtime_load_result"]["passed"] is True
         assert validations[0]["bundle_scan_result"]["passed"] is True
         generated = admitted_app_file_map(result.context_variables)
@@ -167,7 +174,7 @@ async def test_repair_rounds_preserve_execution_and_budgets_across_resume(
          "owned_paths": ["ui/pages/tasks.yaml"], "depends_on": ["services"]},
     ]
     initial_context = {
-        "coding_participation": "autonomous", "interview_complete": False,
+        "coding_participation": "autonomous", "interview_outcome": "blocked",
         "build_task_model": "AppBuildTask", "build_timestamp": "2026-09-26T00:00:00Z",
         "app_build_plan": {"build_tasks": tasks, "pages": [{"name": "tasks", "route": "/tasks"}]},
         "app_task_batch_items": tasks,
@@ -226,13 +233,18 @@ async def test_repair_rounds_preserve_execution_and_budgets_across_resume(
                         # Different diagnostics permit both original artifact proposals.
                         # The third diagnostic is deferred after the two-proposal ceiling.
                         attempts = bridge.get("bundle_repair_attempt_count", 0)
-                        prepare_bundle_repair({
+                        repair = prepare_bundle_repair({
                             "passed": False, "diagnostics": [{
                                 "path": "modules/tasks/backend/service.py",
                                 "error": f"service runtime check {attempts} failed",
                             }],
                         }, bridge)
                         bridge.set("app_validation_status", "failed")
+                        _record_validation_outcome(
+                            bridge, files=admitted_app_file_map(bridge),
+                            acceptance={"status": "failed", "bundle_repair": repair},
+                            validation={"validation_status": "failed"}, passed=False,
+                        )
                 elif self.name == "ServiceAgent":
                     candidate = {"modules/tasks/backend/service.py": f"repair {len(artifact_repairs) + 1}"}
                     artifact_repairs.append(validate_repair_candidate(bridge, candidate))

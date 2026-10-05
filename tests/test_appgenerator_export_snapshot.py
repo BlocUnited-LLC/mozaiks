@@ -6,12 +6,20 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from factory_app.workflows.AppGenerator.tools import export_app_code
+from factory_app.workflows.AppGenerator.tools import app_runtime_smoke, export_app_code
 from factory_app.workflows.AppGenerator.tools.app_validation import run_app_bundle_acceptance_gate
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge, _wrap_tool_with_context
 from tests.test_app_validation_strategy import _accept_support_tasks, _Context
 
 _HANDLER = "modules/support_tickets/backend/handler.py"
+
+
+@pytest.fixture
+def mock_runtime_smoke_for_export_contract(monkeypatch):
+    """Isolate ZIP/identity authorization; this fixture is not runtime evidence."""
+    monkeypatch.setattr(app_runtime_smoke, "run_app_runtime_smoke", AsyncMock(return_value={
+        "status": "passed", "passed": True, "failed_tests": [], "checks": [],
+    }))
 
 
 async def _accepted_context(*, line_ending="\n"):
@@ -29,7 +37,7 @@ async def _accepted_context(*, line_ending="\n"):
         "generated_workflow_capability_id": integration["capability_id"],
         "generated_workflow_startup_mode": integration["startup_mode"],
         "generated_workflow_trigger_events": integration["trigger_events"],
-        "app_validation_status": "skipped", "app_validation_strategy_used": "skip",
+        "app_validation_status": "passed", "app_validation_strategy_used": "local",
     })
     _accept_support_tasks(context, files)
     accepted = await run_app_bundle_acceptance_gate(files=files, context_variables=context)
@@ -51,7 +59,21 @@ def test_status_only_acceptance_cannot_authorize_export():
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_runtime_smoke_for_export_contract")
+async def test_matching_snapshot_does_not_authorize_skipped_build_validation():
+    context = await _accepted_context()
+    context.set("app_validation_status", "skipped")
+    context.set("app_validation_strategy_used", "skip")
+
+    gate = export_app_code.resolve_export_gate(context)
+
+    assert gate["allow_export"] is False
+    assert gate["app_bundle_acceptance_status"] == "passed"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("changed", [False, True])
+@pytest.mark.usefixtures("mock_runtime_smoke_for_export_contract")
 async def test_export_gate_reads_frozen_runtime_context_through_tool_injection(changed):
     context = await _accepted_context()
     if changed:
@@ -72,6 +94,7 @@ async def test_export_gate_reads_frozen_runtime_context_through_tool_injection(c
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mutation", ["content", "plan", "task_evidence"])
+@pytest.mark.usefixtures("mock_runtime_smoke_for_export_contract")
 async def test_changed_context_cannot_reuse_accepted_snapshot(mutation):
     context = await _accepted_context()
     if mutation == "content":
@@ -90,6 +113,7 @@ async def test_changed_context_cannot_reuse_accepted_snapshot(mutation):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("line_ending", ["\n", "\r\n"])
 @pytest.mark.parametrize("tamper", [None, "changed", "missing", "extra", "duplicate", "unsafe", "foreign_prefix"])
+@pytest.mark.usefixtures("mock_runtime_smoke_for_export_contract")
 async def test_github_export_checks_the_zip_before_any_external_call(monkeypatch, tmp_path, line_ending, tamper):
     context = await _accepted_context(line_ending=line_ending)
     files = dict(context.get("generated_files"))

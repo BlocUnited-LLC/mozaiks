@@ -33,10 +33,9 @@ ALLOWED_CONTROL_PLANE_LLM_PROFILE_IDS: tuple[str, ...] = (
 
 
 class ControlPlaneLLMProfileConfig(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     purpose: str = ""
-    default_temperature: float | None = None
     expected_behavior: str = ""
     llm_config: dict[str, Any] | None = None
 
@@ -61,7 +60,6 @@ class ControlPlaneCodingProviderBudget(BaseModel):
     max_files: int = Field(default=3, ge=1, le=50)
     max_diff_bytes: int = Field(default=262_144, ge=1024, le=16_777_216)
     max_wall_seconds: int = Field(default=600, ge=30, le=3600)
-    max_retries: int = Field(default=1, ge=0, le=3)
 
 
 class ControlPlaneACPProviderConfig(BaseModel):

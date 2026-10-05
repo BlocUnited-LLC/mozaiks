@@ -82,7 +82,9 @@ The OSS runtime now provides the foundational tenant/auth scope contract:
 - The same hook may return `verified_tenant_id` and `verified_workspace_id`.
   These are host membership assertions: return one only after checking
   membership from the authenticated principal the hook receives, never from
-  the requested scope or params. They are the only hook values that change
+  the requested scope or params. With `AUTH_ANON_ACCESS=public` the hook also
+  receives anonymous visitors, who all share one user id; never return a
+  verified key for them. They are the only hook values that change
   the verified identity. Plain `tenant_id` and `workspace_id`, from the hook
   or the request, stay dispatch metadata. Omitting a verified key keeps the
   tenant or workspace the token is bound to; an explicit `None` removes it.
@@ -179,6 +181,7 @@ secret policy, tests, and rollout docs.
 ## Related Docs
 
 - [Authentication Setup](../verified/auth-setup.md)
+- [Generated Action Protection](generated-action-protection.md)
 - [Module System](../modules-systems/module-system.md)
 - [App Bundle Declaratives](app-bundle-declaratives.md)
 - [Core, Product, and App Bundle Boundary](../foundations/core-product-app-bundle-boundary.md)

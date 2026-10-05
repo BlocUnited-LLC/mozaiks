@@ -31,6 +31,12 @@ Fail-closed contract:
   environments (see :mod:`mozaiksai.core.environment`). Every other explicit
   environment value — known deployments and unknown/regional/custom names
   alike — rejects it, independent of startup-check mode.
+- No-auth operation never implies development access. An explicit disable
+  (``AUTH_ENABLED=false``, ``AUTH_PROVIDER=none``, or ``AUTH_ANON_ACCESS`` with
+  no provider configured) resolves the anonymous access policy
+  (``AUTH_ANON_ACCESS``) that decides, per request, who is served and with
+  which privileges (:mod:`mozaiksai.core.auth.anonymous_access`); implicit
+  demo mode serves nobody.
 - The cached adapter is keyed by a fingerprint derived from the complete
   configuration snapshot that actually constructs the adapter for the resolved
   provider, plus adapter-registration identity. Changing any meaning-bearing
@@ -75,7 +81,14 @@ _FALSY_VALUES = frozenset({"false", "0", "no", "off"})
 # from exactly these, so any meaning-bearing change rebuilds the adapter.
 # ---------------------------------------------------------------------------
 
-_AUTH_MODE_ENV_VARS: tuple[str, ...] = ("AUTH_ENABLED", "AUTH_PROVIDER", *ENVIRONMENT_ENV_VARS)
+# AUTH_ANON_ACCESS is a mode input: set with no provider configured, it is an
+# explicit disable (step 5 of resolve_auth_config).
+_AUTH_MODE_ENV_VARS: tuple[str, ...] = (
+    "AUTH_ENABLED",
+    "AUTH_PROVIDER",
+    "AUTH_ANON_ACCESS",
+    *ENVIRONMENT_ENV_VARS,
+)
 
 _JWT_CONFIG_ENV_VARS: tuple[str, ...] = (
     "AUTH_JWKS_URL",
@@ -186,6 +199,14 @@ ResolvedAuthSource = Literal[
     "auto_detected",
     "demo_default",
 ]
+
+#: Who an explicitly unauthenticated host serves, from ``AUTH_ANON_ACCESS``.
+#: ``local``: development access, for requests from this machine only.
+#: ``public``: every client, as an anonymous visitor without development access.
+#: ``open``: development access for every client that can reach the host.
+AnonymousAccess = Literal["local", "public", "open"]
+_ANONYMOUS_ACCESS_VALUES: tuple[AnonymousAccess, ...] = ("local", "public", "open")
+_DEVELOPMENT_ACCESS_POSTURES: frozenset[str] = frozenset({"local", "open"})
 
 
 # ---------------------------------------------------------------------------
@@ -415,6 +436,7 @@ class ResolvedAuthConfig:
     Invariants (enforced at construction):
       - ``enabled`` is exactly ``provider != "none"``
       - ``enabled`` and ``explicitly_disabled`` are never both true
+      - ``anonymous_access`` is set exactly when ``explicitly_disabled``
     """
 
     provider: str
@@ -424,6 +446,7 @@ class ResolvedAuthConfig:
     environment: ResolvedEnvironment
     settings: Mapping[str, str]
     fingerprint: tuple[tuple[str, str], ...]
+    anonymous_access: AnonymousAccess | None = None
 
     def __post_init__(self) -> None:
         if self.enabled != (self.provider != "none"):
@@ -440,6 +463,30 @@ class ResolvedAuthConfig:
                 500,
                 "registry",
             )
+        if self.explicitly_disabled != (self.anonymous_access is not None):
+            raise AuthError(
+                "Internal auth resolution invariant violated: anonymous access "
+                "is resolved exactly when authentication is explicitly disabled.",
+                500,
+                "registry",
+            )
+
+    @property
+    def grants_development_access(self) -> bool:
+        """True when anonymous requests may receive development access.
+
+        Development access (anonymous roles, dev personas, trusted module
+        dispatch, caller-named users) requires an explicit disable, an
+        environment that permits unauthenticated operation, and
+        ``AUTH_ANON_ACCESS`` ``local`` or ``open``. Implicit demo mode and
+        ``public`` never grant it. Whether a particular request receives it is
+        decided per request by :mod:`mozaiksai.core.auth.anonymous_access`.
+        """
+        return (
+            self.explicitly_disabled
+            and self.environment.permits_no_auth
+            and self.anonymous_access in _DEVELOPMENT_ACCESS_POSTURES
+        )
 
 
 @dataclass(frozen=True)
@@ -497,6 +544,39 @@ def _auth_enabled_setting(settings: Mapping[str, str]) -> bool | None:
         500,
         "registry",
     )
+
+
+def _anonymous_access_setting(settings: Mapping[str, str]) -> AnonymousAccess:
+    """Return who an explicitly unauthenticated host serves.
+
+    Consulted only when authentication is explicitly disabled; like the other
+    ``AUTH_ANON_*`` settings it is ignored while authentication is on. Unset
+    or empty means ``local``. An unrecognized value fails closed rather than
+    widening access, and ``public`` refuses anonymous roles, which are a
+    development privilege.
+    """
+    raw = settings.get("AUTH_ANON_ACCESS", "")
+    value = raw.strip().lower()
+    if not value:
+        return "local"
+    if value not in _ANONYMOUS_ACCESS_VALUES:
+        raise AuthError(
+            f"Unrecognized AUTH_ANON_ACCESS value: {raw!r}. Use local, public or open.",
+            500,
+            "registry",
+        )
+    if value == "public" and any(
+        role.strip() for role in settings.get("AUTH_ANON_ROLES", "").split(",")
+    ):
+        raise AuthError(
+            "AUTH_ANON_ACCESS=public serves anonymous visitors without development "
+            "access, so it cannot be combined with AUTH_ANON_ROLES. Remove "
+            "AUTH_ANON_ROLES, or use AUTH_ANON_ACCESS=local for development on this "
+            "machine.",
+            500,
+            "registry",
+        )
+    return value  # type: ignore[return-value]
 
 
 def _require_audience_binding(
@@ -580,7 +660,11 @@ def resolve_auth_config(*, environ: Mapping[str, str] | None = None) -> Resolved
        KEYCLOAK_URL + KEYCLOAK_REALM, AUTH_JWKS_URL + AUTH_ISSUER, OIDC
        discovery settings).
     4. ``AUTH_ENABLED`` explicitly true with nothing detectable — fatal.
-    5. Nothing auth-related configured at all — implicit demo mode
+    5. ``AUTH_ANON_ACCESS`` set — explicit disable with that posture. It comes
+       after provider detection, so adding identity-provider settings to an
+       environment (or image) that ships only ``AUTH_ANON_ACCESS`` turns
+       authentication on; ``AUTH_ENABLED=false`` (step 2) stays a hard off.
+    6. Nothing auth-related configured at all — implicit demo mode
        (``none``, not an explicit disable).
 
     Contradictory explicit declarations raise instead of silently resolving:
@@ -597,6 +681,12 @@ def resolve_auth_config(*, environ: Mapping[str, str] | None = None) -> Resolved
     Audience policy (mandatory, mode-independent): the built-in ``jwt``
     provider requires ``AUTH_AUDIENCE`` and the built-in ``keycloak`` provider
     requires ``KEYCLOAK_CLIENT_ID``; an empty value is fatal.
+
+    Anonymous access policy (explicit disable only): ``AUTH_ANON_ACCESS``
+    selects ``local`` (the default), ``public`` or ``open``. An unrecognized
+    value, or ``public`` together with ``AUTH_ANON_ROLES``, is fatal. Implicit
+    demo mode resolves no anonymous access: hosts refuse to start in it, and
+    requests that reach one anyway are refused.
     """
     settings = _environment_snapshot(environ)
 
@@ -666,14 +756,18 @@ def resolve_auth_config(*, environ: Mapping[str, str] | None = None) -> Resolved
             500,
             "registry",
         )
+    elif settings.get("AUTH_ANON_ACCESS", "").strip():
+        # The operator said whom a host without authentication serves, which
+        # is an explicit choice to run without it. A provider configured above
+        # still wins.
+        provider, explicitly_disabled, source = "none", True, "explicit_disable"
     else:
-        # Nothing auth-related configured at all: implicit demo mode for easy
-        # getting started. NOT an explicit disable — security-sensitive
-        # bypasses must not treat demo mode as operator intent.
-        logger.warning(
-            "No auth provider detected. Defaulting to 'none' (demo mode). "
-            "Set AUTH_PROVIDER or configure a specific provider."
-        )
+        # Nothing auth-related configured at all: implicit demo mode. NOT an
+        # explicit disable: it grants no development access, hosts refuse to
+        # start in it, and requests that reach one anyway are refused. It still
+        # resolves (rather than raising) so request-time predicates, which run
+        # in processes that configure no auth at all, keep working.
+        logger.debug("No authentication is configured (implicit demo mode); hosts refuse to start in this mode.")
         provider, explicitly_disabled, source = "none", False, "demo_default"
 
     if provider == "none" and not environment.permits_no_auth:
@@ -690,6 +784,8 @@ def resolve_auth_config(*, environ: Mapping[str, str] | None = None) -> Resolved
             "registry",
         )
 
+    anonymous_access = _anonymous_access_setting(settings) if explicitly_disabled else None
+
     _ensure_builtin_adapters()
     registration = _adapter_registry.get(provider)
     _require_audience_binding(provider, settings, registration, source=source)
@@ -702,6 +798,7 @@ def resolve_auth_config(*, environ: Mapping[str, str] | None = None) -> Resolved
         environment=environment,
         settings=settings,
         fingerprint=_fingerprint(provider=provider, settings=settings, registration=registration),
+        anonymous_access=anonymous_access,
     )
 
 
@@ -732,10 +829,13 @@ def is_auth_enabled() -> bool:
 def is_auth_explicitly_disabled() -> bool:
     """True only when the operator explicitly declared no-auth operation.
 
-    Explicit declaration means ``AUTH_ENABLED=false`` or
-    ``AUTH_PROVIDER=none``. Implicit demo mode (no auth configuration at all)
+    Explicit declaration means ``AUTH_ENABLED=false``,
+    ``AUTH_PROVIDER=none``, or ``AUTH_ANON_ACCESS`` with no provider
+    configured. Implicit demo mode (no auth configuration at all)
     is NOT an explicit declaration — security-sensitive bypasses must key off
-    this helper, never off ``not is_auth_enabled()``. Both predicates read the
+    this helper, never off ``not is_auth_enabled()``, and request-scoped ones
+    off the principal's provenance (``has_local_development_access``), which
+    also accounts for ``AUTH_ANON_ACCESS`` and the request. Both predicates read the
     same :func:`resolve_auth_config` interpretation, so they can never both be
     true, and both reject in environments that forbid no-auth operation.
     """

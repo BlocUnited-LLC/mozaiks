@@ -2,7 +2,7 @@
   "platform_user_email": "builder@example.com",
   "build_mode": "initial",
   "app_type": "greenfield_app",
-  "interview_complete": true,
+  "coding_participation": "autonomous",
   "concept_overview": "Build a clean internal support operations app for a helpdesk lead. The app tracks support tickets, reviews queue health, and lets operators update ticket status without external integrations.",
   "concept_blueprint": {
     "product_name": "Support Operations",

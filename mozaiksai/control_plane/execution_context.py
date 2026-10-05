@@ -116,7 +116,6 @@ def build_coding_request_from_execution_context(
         change_class="patch",
         files=scoped_files,
         baseline_files=dict(baseline_files),
-        validation_strategy="local",
         context_seed={
             "execution_context": approved.model_dump(mode="python"),
         },

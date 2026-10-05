@@ -3,11 +3,13 @@ Static contract tests for web_shell/vite.config.js.
 
 These tests guard against regressions in the Vite resolver configuration.
 They read the source file directly rather than executing Vite so they run
-fast and without Node dependencies.
+fast and without installed Node packages (the dev-proxy hook functions are
+extracted and run with plain node).
 """
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 
@@ -249,6 +251,74 @@ class TestResolveModules:
             "path.resolve(__dirname, 'node_modules') so the resolver has a "
             "fallback for packages not present in chat-ui's tree."
         )
+
+
+# ── Dev proxy: client address for the backend's local-only check ─────────────
+
+class TestDevProxyMarksRemoteClients:
+    """
+    With authentication off the backend gives development access only to
+    requests from this machine and treats any forwarding header as "not this
+    machine". The dev proxy must mark exactly the clients on other machines:
+    xfwd would mark every client, and no marking would let every client of a
+    dev server listening beyond loopback look local.
+    """
+
+    def test_both_proxies_use_the_marking_hook_and_not_xfwd(self) -> None:
+        proxy = _extract_object_region(_vite_config(), "proxy:")
+        assert "xfwd" not in proxy
+        assert re.search(r"'/api'\s*:\s*\{[^}]*configure:\s*markRemoteClients", proxy)
+        assert re.search(r"'/ws'\s*:\s*\{[^}]*configure:\s*markRemoteClients", proxy)
+
+    def test_marking_hook_marks_only_clients_on_other_machines(self) -> None:
+        source = _vite_config()
+        functions = "\n".join(
+            re.search(rf"^function {name}\(.*?^\}}\n", source, re.DOTALL | re.MULTILINE).group(0)
+            for name in ("isLoopbackAddress", "remoteClientAddress", "markRemoteClients")
+        )
+        script = functions + """
+import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
+
+const proxy = new EventEmitter();
+markRemoteClients(proxy);
+// HTTP: the hook rewrites the incoming request's headers on 'start', before
+// http-proxy-3 copies them into the outgoing request.
+const http = (remoteAddress, headers = {}) => {
+  const req = { socket: { remoteAddress }, headers: { ...headers } };
+  proxy.emit('start', req, {}, 'http://127.0.0.1:8000');
+  return req.headers;
+};
+// WebSocket upgrade: the hook sets the header on the outgoing request.
+const ws = (remoteAddress, headersSent = false) => {
+  const headers = {};
+  let destroyed = false;
+  const proxyReq = { headersSent, setHeader: (k, v) => { headers[k] = v; }, destroy: () => { destroyed = true; } };
+  proxy.emit('proxyReqWs', proxyReq, { socket: { remoteAddress } });
+  return { headers, destroyed };
+};
+for (const here of ['127.0.0.1', '127.8.9.1', '::1', '::ffff:127.0.0.1']) {
+  assert.deepEqual(http(here), {});
+  assert.deepEqual(ws(here).headers, {});
+}
+assert.deepEqual(http('192.168.1.20'), { 'x-forwarded-for': '192.168.1.20' });
+// A forged value from another machine is replaced, and an Expect header does not
+// skip the marking (http-proxy-3 suppresses 'proxyReq' when Expect is present).
+assert.deepEqual(
+  http('192.168.1.20', { 'x-forwarded-for': '127.0.0.1', expect: '100-continue' }),
+  { 'x-forwarded-for': '192.168.1.20', expect: '100-continue' },
+);
+assert.deepEqual(http(undefined), { 'x-forwarded-for': 'unknown' });
+assert.deepEqual(ws('::ffff:172.19.0.3').headers, { 'X-Forwarded-For': '::ffff:172.19.0.3' });
+assert.deepEqual(ws(undefined).headers, { 'X-Forwarded-For': 'unknown' });
+assert.equal(ws('10.0.0.5', true).destroyed, true);
+assert.equal(proxy.listenerCount('proxyReq'), 0);
+"""
+        result = subprocess.run(
+            ["node", "--input-type=module", "--eval", script],
+            cwd=_workspace(), text=True, capture_output=True, check=False, timeout=30,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

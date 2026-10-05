@@ -11,9 +11,12 @@ Covers:
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
+import yaml
+from pydantic import ValidationError
 
 from mozaiksai.control_plane.config import ControlPlaneCapabilityConfig, ControlPlaneConfig
 from mozaiksai.control_plane.contracts import (
@@ -26,6 +29,8 @@ from mozaiksai.control_plane.contracts import (
 from mozaiksai.control_plane.implementations.contract_surface_planner import (
     ContractSurfaceClassification,
     ContractSurfacePlanner,
+    resolve_contract_surface_paths,
+    validate_contract_surface_plan,
 )
 from mozaiksai.control_plane.implementations.refinement_router import (
     ArtifactKind,
@@ -287,6 +292,7 @@ async def test_propose_uses_ag2_runner_for_contract_surface_classification():
         refinement_request=_planner_request(),
         routing_decision=_planner_routing_decision(),
         context_graph_catalog=None,
+        workspace_files=_saved_bundle(),
     )
 
     assert plan.fallback_to_workflow is False
@@ -298,154 +304,314 @@ async def test_propose_uses_ag2_runner_for_contract_surface_classification():
     assert agent_runner.calls[0]["llm_config"] == {"model": "gpt-5.2-codex", "temperature": 0.1}
 
 
-def test_resolve_surfaces_module_action_no_catalog():
-    classification = _make_classification(
-        surfaces=[
-            {
-                "kind": "module_action",
-                "target_id": "projects",
-                "target_kind": "module",
-                "rationale": "add export action",
-                "confidence": 0.9,
-                "generation_hint": "add export_projects",
-            }
-        ]
-    )
-    surfaces = ContractSurfacePlanner._resolve_surfaces(
-        classification=classification,
-        context_graph_catalog=None,
-    )
-    assert len(surfaces) == 1
-    s = surfaces[0]
-    assert s.kind == "module_action"
-    assert s.target_id == "projects"
-    assert "modules/projects/module.yaml" in s.affected_paths
-    assert "modules/projects/backend/handler.py" in s.affected_paths
-
-
-def test_resolve_surfaces_filters_to_known_paths_when_catalog_present():
-    classification = _make_classification(
-        surfaces=[
-            {
-                "kind": "module_action",
-                "target_id": "tasks",
-                "target_kind": "module",
-                "rationale": "add complete action",
-                "confidence": 0.85,
-                "generation_hint": "add complete_task action",
-            }
-        ]
-    )
-    catalog = {
-        "file_tree": [
-            "modules/tasks/module.yaml",
-            "modules/tasks/backend/handler.py",
-            "modules/tasks/backend/service.py",
-            # schemas.py and repo.py are absent — not yet generated
-        ],
-        "candidate_files": [],
+def _saved_bundle() -> dict[str, str]:
+    return {
+        "app.json": json.dumps({"appId": "app_1"}),
+        "modules/projects/module.yaml": "module:\n  id: projects\n",
+        "modules/projects/backend/handler.py": "class Projects: pass",
+        "modules/projects/backend/schemas.py": "class ExportRequest: pass",
+        "ui/pages/projects.yaml": yaml.safe_dump({
+            "schema_version": "mozaiks.app_page.v1", "name": "projects", "route": "/projects",
+            "title": "Projects", "page_type": "record_list", "layout": "full-width", "sections": [{"id": "heading", "primitive": "PageHeader", "config": {"title": "Projects"}}],
+        }),
+        "ui/route_manifest.json": json.dumps({"pages": [
+            {"id": "Focus", "path": "/", "component": "Focus"},
+            {"path": "/projects", "component": "SchemaPage", "schema": "projects"},
+        ]}),
+        "ui/index.js": "import { FocusPage as FocusView } from './pages/custom/focus.jsx';\nregisterComponent('Focus', FocusView);",
+        "ui/pages/custom/focus.jsx": "export function FocusPage() { return <main>Focus</main>; }",
     }
-    surfaces = ContractSurfacePlanner._resolve_surfaces(
-        classification=classification,
-        context_graph_catalog=catalog,
+
+
+def _entry(kind="page_binding", target_id="Focus", target_kind="page") -> dict[str, Any]:
+    return dict(kind=kind, target_id=target_id, target_kind=target_kind,
+                rationale="Update saved surface", confidence=0.9, generation_hint="Improve the layout")
+
+
+def _resolve(files=None, *, kind="page_binding", target_id="Focus", target_kind="page", family="app_bundle"):
+    return resolve_contract_surface_paths(
+        kind=kind, target_id=target_id, target_kind=target_kind, build_family=family,
+        workspace_files=_saved_bundle() if files is None else files, artifact_app_id="app_1",
     )
-    assert len(surfaces) == 1
-    s = surfaces[0]
-    # Only paths that exist in the workspace should be in affected_paths
-    for path in s.affected_paths:
-        if path in catalog["file_tree"]:
-            assert True
-        else:
-            # Fallback: top canonical paths are included even if not in catalog
-            assert path in ["modules/tasks/module.yaml", "modules/tasks/backend/handler.py"]
+
+
+def _plan(**changes) -> ContractSurfacePlan:
+    payload = dict(surfaces=[dict(**_entry(), affected_paths=["ui/pages/custom/focus.jsx"])],
+                   summary="Improve focus", change_class="feature", build_family="app_bundle")
+    payload.update(changes)
+    return ContractSurfacePlan.model_validate(payload)
+
+
+def _admit(plan=None, *, files=None, allowed_paths=None):
+    validate_contract_surface_plan(
+        plan=plan or _plan(), refinement_request=_planner_request(), routing_decision=_planner_routing_decision(),
+        workspace_files=_saved_bundle() if files is None else files, allowed_paths=allowed_paths,
+    )
+
+
+def test_custom_page_uses_exact_registered_alias_and_lowercase_filename():
+    assert _resolve() == ["ui/pages/custom/focus.jsx"]
+    _admit(allowed_paths=["ui/pages/custom/focus.jsx"])
+
+
+@pytest.mark.parametrize("target", ["custom/focus", "focus", "../Focus", "Focus/extra", "Missing", " Focus"])
+def test_custom_page_rejects_guessed_or_unsafe_identity(target):
+    with pytest.raises(ValueError):
+        _resolve(target_id=target)
+
+
+def test_schema_page_and_module_paths_resolve_only_saved_contracts():
+    assert _resolve(target_id="projects") == ["ui/pages/projects.yaml"]
+    assert _resolve(kind="module_action", target_kind="module", target_id="projects") == [
+        "modules/projects/module.yaml", "modules/projects/backend/handler.py", "modules/projects/backend/schemas.py",
+    ]
+
+
+@pytest.mark.parametrize("suffix", [".yaml", ".yml", "/page.yaml", "/page.yml"])
+def test_schema_page_uses_runtime_supported_source_layout(suffix):
+    files = _saved_bundle()
+    files["ui/pages/projects" + suffix] = files.pop("ui/pages/projects.yaml")
+    assert _resolve(files, target_id="projects") == ["ui/pages/projects" + suffix]
+
+
+@pytest.mark.parametrize("suffix", [".yaml", ".yml", "/page.yaml", "/page.yml"])
+def test_schema_page_display_name_preserves_runtime_file_identity(tmp_path, suffix):
+    from mozaiksai.core.runtime.app.page_schema import load_app_page_schemas
+
+    path = "ui/pages/support_tickets" + suffix
+    files = {path: yaml.safe_dump({
+        "schema_version": "mozaiks.app_page.v1", "name": "Support Tickets",
+        "route": "/support", "title": "Support", "page_type": "record_list",
+        "layout": "full-width", "sections": [{"id": "heading", "primitive": "PageHeader",
+                                                "config": {"title": "Support"}}],
+    })}
+    saved = tmp_path / path
+    saved.parent.mkdir(parents=True)
+    saved.write_text(files[path], encoding="utf-8")
+    assert list(load_app_page_schemas(tmp_path)) == ["support_tickets"]
+    assert _resolve(files, target_id="support_tickets") == [path]
+    with pytest.raises(ValueError):
+        _resolve(files, target_id="SupportTickets")
+
+
+@pytest.mark.asyncio
+async def test_schema_page_planner_advertises_runtime_identity_not_display_name():
+    files = _saved_bundle()
+    page = yaml.safe_load(files["ui/pages/projects.yaml"])
+    page["name"] = "Projects"
+    files["ui/pages/projects.yaml"] = yaml.safe_dump(page)
+    runner = _FakeAgentRunner(_make_classification(surfaces=[_entry(target_id="projects")]).model_dump())
+    planner = ContractSurfacePlanner(agent_runner=runner, config_loader=_enabled_contract_surface_config,
+                                     pack_loader=_planner_pack)
+    plan = await planner.propose(refinement_request=_planner_request(),
+                                 routing_decision=_planner_routing_decision(), workspace_files=files,
+                                 allowed_paths=["ui/pages/projects.yaml"])
+    assert plan.fallback_to_workflow is False
+    assert plan.surfaces[0].affected_paths == ["ui/pages/projects.yaml"]
+    prompt = runner.calls[0]["user_prompt"]
+    payload = json.loads(prompt.split("payload_json:\n", 1)[1].split("\n\nReturn", 1)[0])
+    assert {"kind": "page_binding", "target_kind": "page", "target_id": "projects",
+            "affected_paths": ["ui/pages/projects.yaml"]} in payload["available_targets"]
+    assert not any(target["target_id"] == "Projects" for target in payload["available_targets"])
+
+
+def test_schema_page_duplicate_realizations_rejected():
+    files = _saved_bundle()
+    files["ui/pages/projects/page.yaml"] = files["ui/pages/projects.yaml"]
+    with pytest.raises(ValueError, match="exactly one"):
+        _resolve(files, target_id="projects")
+
+
+@pytest.mark.parametrize("kind", ["workflow_tool", "workflow_agent", "ui_component"])
+def test_workflow_surfaces_require_saved_workflow_declaration(kind):
+    files = {"workflows/Review/orchestrator.yaml": "workflow_name: Review"}
+    paths = [path.replace("{target_id}", "Review") for path in CONTRACT_SURFACE_CANONICAL_PATHS[kind]]
+    files.update({path: "saved: true" for path in paths})
+    assert _resolve(files, kind=kind, target_kind="workflow", target_id="Review", family="workflow_bundle") == paths
+    with pytest.raises(ValueError, match="requires workflow_bundle"):
+        _resolve(files, kind=kind, target_kind="workflow", target_id="Review")
+
+
+def test_app_config_requires_exact_saved_app_identity():
+    assert _resolve(kind="app_config", target_kind="app", target_id="app_1") == ["app.json"]
+    with pytest.raises(ValueError, match="artifact app identity"):
+        _resolve(kind="app_config", target_kind="app", target_id="other")
+
+
+def test_app_config_uses_bound_artifact_identity_when_manifest_omits_app_id():
+    files = _saved_bundle()
+    files["app.json"] = '{"name": "My app"}'
+    plan = _plan(surfaces=[dict(**_entry("app_config", "app_1", "app"), affected_paths=["app.json"])])
+    _admit(plan, files=files)
+    prompt = ContractSurfacePlanner._build_user_prompt(
+        request=_planner_request(), routing_decision=_planner_routing_decision(),
+        context_graph_catalog=None, workspace_files=files, allowed_paths=None,
+    )
+    assert '"target_id": "app_1"' in prompt
+
+
+def test_app_config_rejects_conflicting_manifest_identity():
+    files = _saved_bundle()
+    files["app.json"] = '{"appId": "different-app"}'
+    plan = _plan(surfaces=[dict(**_entry("app_config", "app_1", "app"), affected_paths=["app.json"])])
+    with pytest.raises(ValueError, match="conflicts"):
+        _admit(plan, files=files)
+
+
+def test_app_config_requires_authoritative_binding_not_manifest_alone():
+    with pytest.raises(ValueError, match="authoritative"):
+        resolve_contract_surface_paths(
+            kind="app_config", target_id="app_1", target_kind="app", build_family="app_bundle",
+            workspace_files=_saved_bundle(),
+        )
+
+
+@pytest.mark.parametrize("kind,target_kind", [
+    ("ui_component", "page"), ("page_binding", "workflow"), ("module_action", "page"),
+    ("app_config", "module"), ("not_a_surface", "module"),
+])
+def test_classifier_and_plan_share_finite_surface_target_pairs(kind, target_kind):
+    entry = _entry(kind=kind, target_kind=target_kind)
+    with pytest.raises(ValidationError):
+        _make_classification(surfaces=[_entry(), entry])
+    with pytest.raises(ValidationError):
+        ContractSurfaceUpdate.model_validate(entry)
+
+
+def test_empty_target_is_rejected_not_silently_skipped():
+    with pytest.raises(ValidationError):
+        _make_classification(surfaces=[_entry(target_id="")])
+
+
+@pytest.mark.parametrize("missing", ["ui/route_manifest.json", "ui/index.js", "ui/pages/custom/focus.jsx"])
+def test_custom_page_requires_all_saved_ownership_sources(missing):
+    files = _saved_bundle()
+    del files[missing]
+    with pytest.raises(ValueError):
+        _resolve(files)
+
+
+@pytest.mark.parametrize("source", [
+    "", "import Focus from './pages/custom/focus.jsx'; registerComponent(name, Focus);",
+    "import Focus from './pages/custom/focus.jsx'; registerComponent('Focus', () => Focus);",
+    "import Focus from './pages/custom/focus.jsx'; registerComponent('Focus', Focus); registerComponent('Focus', Focus);",
+    "import Focus from './pages/custom/focus.jsx'; registerComponent('Focus', Focus); registerComponent(variable, Other);",
+    "function Focus() {} registerComponent('Focus', Focus);",
+    "import Focus from '@mozaiks/chat-ui'; registerComponent('Focus', Focus);",
+    "import Focus from './missing.jsx'; registerComponent('Focus', Focus);",
+    "import Focus from '../../ui/pages/custom/focus.jsx'; registerComponent('Focus', Focus);",
+])
+def test_custom_page_rejects_unresolved_or_ambiguous_registry(source):
+    files = _saved_bundle()
+    files["ui/index.js"] = source
+    with pytest.raises(ValueError):
+        _resolve(files)
+
+
+def test_other_index_cannot_authorize_page_registration():
+    files = _saved_bundle()
+    files["workflows/Other/ui/index.js"] = files.pop("ui/index.js")
+    with pytest.raises(ValueError, match="ui/index.js"):
+        _resolve(files)
+
+
+@pytest.mark.parametrize("component", ["LoginPage", "AuthCallbackPage", "ChatPage", "UnknownPage"])
+def test_platform_components_do_not_become_custom_page_writes(component):
+    files = _saved_bundle()
+    files["ui/route_manifest.json"] = json.dumps({"pages": [{"id": "Focus", "path": "/", "component": component}]})
+    with pytest.raises(ValueError):
+        _resolve(files)
+
+
+@pytest.mark.parametrize("duplicate", [
+    {"id": "Focus", "path": "/other", "component": "Focus"},
+    {"id": "Other", "path": "/", "component": "Focus"},
+])
+def test_duplicate_route_identity_or_path_is_ambiguous(duplicate):
+    files = _saved_bundle()
+    manifest = json.loads(files["ui/route_manifest.json"])
+    manifest["pages"].append(duplicate)
+    files["ui/route_manifest.json"] = json.dumps(manifest)
+    with pytest.raises(ValueError, match="Ambiguous"):
+        _resolve(files)
+
+
+@pytest.mark.parametrize("path", ["../escape.jsx", "/absolute.jsx", "ui/../escape.jsx", "C:/escape.jsx", "ui\\escape.jsx"])
+def test_saved_snapshot_requires_canonical_safe_paths(path):
+    files = _saved_bundle()
+    files[path] = "source"
+    with pytest.raises(ValueError, match="unsafe"):
+        _resolve(files)
+
+
+@pytest.mark.parametrize("path", ["ui/pages/custom/focus.jsx", "ui/index.js"])
+def test_empty_required_source_fails(path):
+    files = _saved_bundle()
+    files[path] = " "
+    with pytest.raises(ValueError):
+        _resolve(files)
+
+
+@pytest.mark.parametrize("changes", [
+    {"build_family": "workflow_bundle"}, {"change_class": "design"},
+    {"fallback_to_workflow": True}, {"surfaces": []},
+    {"surfaces": [dict(**_entry(), affected_paths=["ui/index.js"])]},
+    {"surfaces": [dict(**_entry(), affected_paths=[])]},
+])
+def test_direct_plan_cannot_bypass_request_and_source_admission(changes):
+    with pytest.raises(ValueError):
+        _admit(_plan(**changes))
+
+
+def test_plan_rejects_later_invalid_surface_without_partial_admission():
+    plan = _plan(surfaces=[dict(**_entry(), affected_paths=["ui/pages/custom/focus.jsx"]),
+                          dict(**_entry(target_id="Unknown"), affected_paths=["ui/pages/projects.yaml"])])
+    with pytest.raises(ValueError):
+        _admit(plan)
+
+
+@pytest.mark.parametrize("allowed", [[], ["ui/pages/projects.yaml"], ["ui/pages/custom/focus.jsx", "ui/pages/custom/focus.jsx"], ["missing.jsx"]])
+def test_explicit_allowed_paths_remain_hard_write_boundary(allowed):
+    with pytest.raises(ValueError):
+        _admit(allowed_paths=allowed)
+
+
+def test_missing_snapshot_never_creates_guessed_paths():
+    with pytest.raises(ValueError, match="verified saved bundle"):
+        _resolve({})
 
 
 def test_resolve_surfaces_dependency_ordering():
-    classification = _make_classification(
-        surfaces=[
-            {
-                "kind": "page_binding",
-                "target_id": "projects",
-                "target_kind": "page",
-                "rationale": "add export section to page",
-                "confidence": 0.85,
-                "generation_hint": "add export section",
-            },
-            {
-                "kind": "module_action",
-                "target_id": "projects",
-                "target_kind": "module",
-                "rationale": "add export action to module",
-                "confidence": 0.9,
-                "generation_hint": "add export_projects action",
-            },
-            {
-                "kind": "data_schema",
-                "target_id": "projects",
-                "target_kind": "module",
-                "rationale": "add ExportRequest schema",
-                "confidence": 0.8,
-                "generation_hint": "add ExportRequest, ExportResponse",
-            },
-        ]
-    )
-    surfaces = ContractSurfacePlanner._resolve_surfaces(
-        classification=classification,
-        context_graph_catalog=None,
-    )
-    # data_schema (order 0) → module_action (order 2) → page_binding (order 3)
-    kinds = [s.kind for s in surfaces]
-    assert kinds.index("data_schema") < kinds.index("module_action")
-    assert kinds.index("module_action") < kinds.index("page_binding")
+    classification = _make_classification(surfaces=[
+        _entry(), _entry("module_action", "projects", "module"), _entry("data_schema", "projects", "module"),
+    ])
+    surfaces = ContractSurfacePlanner._resolve_surfaces(classification=classification, build_family="app_bundle", workspace_files=_saved_bundle())
+    assert [surface.kind for surface in surfaces] == ["data_schema", "module_action", "page_binding"]
 
 
-def test_resolve_surfaces_skips_unknown_kind():
-    classification = _make_classification(
-        surfaces=[
-            {
-                "kind": "not_a_real_surface",
-                "target_id": "projects",
-                "target_kind": "module",
-                "rationale": "unknown",
-                "confidence": 0.9,
-                "generation_hint": "",
-            },
-            {
-                "kind": "module_action",
-                "target_id": "projects",
-                "target_kind": "module",
-                "rationale": "add action",
-                "confidence": 0.9,
-                "generation_hint": "add action",
-            },
-        ]
+@pytest.mark.asyncio
+async def test_planner_prompt_uses_verified_inventory_not_graph_write_authority():
+    runner = _FakeAgentRunner(_make_classification(surfaces=[_entry()]).model_dump())
+    planner = ContractSurfacePlanner(agent_runner=runner, config_loader=_enabled_contract_surface_config, pack_loader=_planner_pack)
+    plan = await planner.propose(
+        refinement_request=_planner_request(), routing_decision=_planner_routing_decision(),
+        workspace_files=_saved_bundle(), allowed_paths=["ui/pages/custom/focus.jsx"],
+        context_graph_catalog={"candidate_files": [{"path": "workflows/custom/focus/ui_config.yaml"}]},
     )
-    surfaces = ContractSurfacePlanner._resolve_surfaces(
-        classification=classification,
-        context_graph_catalog=None,
-    )
-    assert len(surfaces) == 1
-    assert surfaces[0].kind == "module_action"
+    assert plan.surfaces[0].affected_paths == ["ui/pages/custom/focus.jsx"]
+    prompt = runner.calls[0]["user_prompt"]
+    payload = json.loads(prompt.split("payload_json:\n", 1)[1].split("\n\nReturn", 1)[0])
+    assert payload["allowed_paths"] == ["ui/pages/custom/focus.jsx"]
+    assert {"kind": "page_binding", "target_kind": "page", "target_id": "Focus", "affected_paths": ["ui/pages/custom/focus.jsx"]} in payload["available_targets"]
 
 
-def test_resolve_surfaces_skips_empty_target_id():
-    classification = _make_classification(
-        surfaces=[
-            {
-                "kind": "module_action",
-                "target_id": "",
-                "target_kind": "module",
-                "rationale": "missing id",
-                "confidence": 0.9,
-                "generation_hint": "",
-            }
-        ]
-    )
-    surfaces = ContractSurfacePlanner._resolve_surfaces(
-        classification=classification,
-        context_graph_catalog=None,
-    )
-    assert surfaces == []
+@pytest.mark.asyncio
+async def test_planner_rejects_missing_snapshot_before_classifier():
+    runner = _FakeAgentRunner({})
+    planner = ContractSurfacePlanner(agent_runner=runner, config_loader=_enabled_contract_surface_config, pack_loader=_planner_pack)
+    with pytest.raises(ValueError):
+        await planner.propose(refinement_request=_planner_request(), routing_decision=_planner_routing_decision(), workspace_files={})
+    assert runner.calls == []
 
 
 # ---------------------------------------------------------------------------

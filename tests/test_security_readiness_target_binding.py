@@ -234,7 +234,7 @@ def test_runtime_binding_and_scan_evidence_are_not_caller_writable():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("fault", ["missing", "unreadable", "invalid_zip"])
 async def test_unavailable_content_keeps_explicit_source_diagnostics(security_build, monkeypatch, fault):
-    from factory_app.workflows._shared.artifact_bundle import LocalArtifactContentStore
+    from mozaiksai.core.artifacts.content_store import LocalArtifactContentStore
     build = security_build.add()
     if fault == "missing":
         build.artifact.commit_metadata.metadata["artifact_path"] = str(build.archive.parent / "missing.zip")

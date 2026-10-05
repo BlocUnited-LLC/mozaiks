@@ -673,13 +673,16 @@ def _clear_auth_env(monkeypatch) -> None:
         # these tests exercise the un-granted anonymous path.
         "AUTH_ANON_ROLES",
         "AUTH_ANON_SCOPES",
+        "AUTH_ANON_ACCESS",
     ):
         monkeypatch.delenv(var, raising=False)
 
 
 def test_fulfillment_ingress_fails_closed_when_auth_merely_unconfigured(monkeypatch) -> None:
     """Implicit demo mode (no auth config at all) + no INTERNAL_API_KEY must NOT
-    make the fulfillment ingress callable without authentication."""
+    make the fulfillment ingress callable without authentication: the request
+    has no principal, exactly like a request without a token on an
+    authenticated host, and the ingress refuses it."""
     from mozaiksai.core.auth.adapters.registry import reset_auth_adapter
 
     _clear_auth_env(monkeypatch)
@@ -688,14 +691,79 @@ def test_fulfillment_ingress_fails_closed_when_auth_merely_unconfigured(monkeypa
         client = _ingress_client(monkeypatch)
         resp = client.post("/api/billing/fulfillment/apply", json=_INGRESS_PAYLOAD)
         assert resp.status_code == 403
+        assert "requires an internal API key" in resp.json()["detail"]
         listing = client.get("/api/admin/billing/fulfillment?app_id=app_1")
         assert listing.status_code == 403
     finally:
         reset_auth_adapter()
 
 
+@pytest.mark.parametrize(
+    ("access", "client_host", "status"),
+    [
+        ("local", "127.0.0.1", 200),
+        ("local", "172.20.0.1", 403),
+        ("public", "127.0.0.1", 403),
+        ("public", "172.20.0.1", 403),
+        ("open", "172.20.0.1", 200),
+    ],
+)
+def test_fulfillment_ingress_local_branch_requires_development_access(
+    monkeypatch, access, client_host, status
+) -> None:
+    """The explicit-disable dev branch serves only requests granted development
+    access: this machine under local, anyone under open, never a public visitor."""
+    from mozaiksai.core.auth.adapters.registry import reset_auth_adapter
+
+    _clear_auth_env(monkeypatch)
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("AUTH_ANON_ACCESS", access)
+    reset_auth_adapter()
+    try:
+        client = _ingress_client(monkeypatch)
+        client = TestClient(
+            client.app,
+            raise_server_exceptions=False,
+            client=(client_host, 50000),
+            base_url="http://localhost:8000",
+        )
+        resp = client.post("/api/billing/fulfillment/apply", json=_INGRESS_PAYLOAD)
+        assert resp.status_code == status
+    finally:
+        reset_auth_adapter()
+
+
+@pytest.mark.parametrize("client_host", [None, "172.20.0.1"], ids=["testclient", "docker_gateway"])
+def test_fulfillment_ingress_internal_key_works_from_a_client_the_local_posture_refuses(
+    monkeypatch, client_host
+) -> None:
+    """A hosted fulfillment sender is not this machine: under AUTH_ANON_ACCESS=local
+    it has no principal (optional_user gives None), and its internal key still
+    authorizes, exactly as on an authenticated host."""
+    from mozaiksai.core.auth.adapters.registry import reset_auth_adapter
+
+    _clear_auth_env(monkeypatch)
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("INTERNAL_API_KEY", "configured-key-0123456789abcdef")
+    reset_auth_adapter()
+    try:
+        client = _ingress_client(monkeypatch)
+        if client_host is not None:
+            client = TestClient(client.app, raise_server_exceptions=False, client=(client_host, 50000))
+        keyed = client.post(
+            "/api/billing/fulfillment/apply",
+            json=_INGRESS_PAYLOAD,
+            headers={"x-internal-api-key": "configured-key-0123456789abcdef"},
+        )
+        assert keyed.status_code == 200
+        assert client.post("/api/billing/fulfillment/apply", json=_INGRESS_PAYLOAD).status_code == 403
+    finally:
+        reset_auth_adapter()
+
+
 def test_fulfillment_ingress_allows_explicitly_disabled_auth_dev_mode(monkeypatch) -> None:
-    """AUTH_ENABLED=false is the explicit development contract — local dev keeps working."""
+    """AUTH_ENABLED=false is the explicit development contract — local dev
+    (a request from this machine) keeps working."""
     from mozaiksai.core.auth.adapters.registry import reset_auth_adapter
 
     _clear_auth_env(monkeypatch)
@@ -703,6 +771,12 @@ def test_fulfillment_ingress_allows_explicitly_disabled_auth_dev_mode(monkeypatc
     reset_auth_adapter()
     try:
         client = _ingress_client(monkeypatch)
+        client = TestClient(
+            client.app,
+            raise_server_exceptions=False,
+            client=("127.0.0.1", 50000),
+            base_url="http://localhost:8000",
+        )
         resp = client.post("/api/billing/fulfillment/apply", json=_INGRESS_PAYLOAD)
         assert resp.status_code == 200
         assert resp.json()["status"] == "applied"
@@ -720,6 +794,13 @@ def test_fulfillment_ingress_requires_key_when_key_configured_even_if_auth_disab
     reset_auth_adapter()
     try:
         client = _ingress_client(monkeypatch)
+        # From this machine, so the request does have development access.
+        client = TestClient(
+            client.app,
+            raise_server_exceptions=False,
+            client=("127.0.0.1", 50000),
+            base_url="http://localhost:8000",
+        )
         no_key = client.post("/api/billing/fulfillment/apply", json=_INGRESS_PAYLOAD)
         assert no_key.status_code == 403
         wrong_key = client.post(

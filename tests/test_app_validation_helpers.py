@@ -69,9 +69,9 @@ class TestBaseResult:
         result = _base_result(strategy="local", status="passed")
         assert result["success"] is True
 
-    def test_skipped_status_success_true(self):
+    def test_skipped_status_is_not_success(self):
         result = _base_result(strategy="skip", status="skipped")
-        assert result["success"] is True
+        assert result["success"] is False
 
     def test_strategy_reflected(self):
         result = _base_result(strategy="docker", status="passed")

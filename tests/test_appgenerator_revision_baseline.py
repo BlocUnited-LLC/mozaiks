@@ -8,9 +8,9 @@ from unittest.mock import AsyncMock
 import pytest
 import yaml
 
-from factory_app.workflows._shared import artifact_bundle
 from factory_app.workflows.AppGenerator.tools import hydrate_app_revision_context as revision
 from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
+from mozaiksai.core.artifacts import content_store
 from mozaiksai.core.artifacts.models import BuildRecord
 from mozaiksai.core.workflow.context.adapter import create_context_container
 
@@ -46,7 +46,7 @@ def baseline(monkeypatch):
     )
     store = SimpleNamespace(get_build_record=AsyncMock(return_value=artifact))
     monkeypatch.setattr(revision, "get_artifact_store", lambda: store)
-    monkeypatch.setattr(artifact_bundle, "get_artifact_content_store", lambda: content)
+    monkeypatch.setattr(content_store, "get_artifact_content_store", lambda: content)
     context = {
         "app_id": "factory-host", "user_id": "owner", "build_mode": "revision",
         "workflow_sequence": "app_revision", "artifact_version_id": "artifact_1",

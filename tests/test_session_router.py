@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from types import SimpleNamespace
 
 import pytest
@@ -67,11 +68,13 @@ class _MemoryCollection:
     async def find_one(self, query, projection=None, sort=None):  # noqa: ANN001
         for doc in self._docs.values():
             if self._matches(doc, query):
-                return dict(doc)
+                return deepcopy(doc)
         return None
 
     async def update_one(self, filter_query, update, upsert=False):  # noqa: ANN001
         doc_id = filter_query.get("_id")
+        if doc_id and not self._matches(self._docs.get(doc_id, {}), filter_query) and not upsert:
+            return SimpleNamespace(matched_count=0, modified_count=0)
         if not doc_id:
             for existing_id, existing_doc in self._docs.items():
                 if self._matches(existing_doc, filter_query):
@@ -79,13 +82,14 @@ class _MemoryCollection:
                     break
         if not doc_id:
             if not upsert:
-                return
+                return SimpleNamespace(matched_count=0, modified_count=0)
             doc_id = f"doc_{len(self._docs) + 1}"
 
         base = dict(self._docs.get(doc_id, {"_id": doc_id}))
         for key, value in (update.get("$set") or {}).items():
-            base[key] = value
+            base[key] = deepcopy(value)
         self._docs[doc_id] = base
+        return SimpleNamespace(matched_count=1, modified_count=1)
 
 
 class _FakePersistence:

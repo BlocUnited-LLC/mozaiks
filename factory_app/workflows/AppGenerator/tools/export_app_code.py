@@ -28,7 +28,7 @@ from mozaiksai.core.workflow.generator_support.workflow_exports import (
     record_workflow_export,
 )
 
-ALLOWED_EXPORT_VALIDATION_STATUSES = {"passed", "skipped"}
+ALLOWED_EXPORT_VALIDATION_STATUSES = {"passed"}
 
 
 def _read_ctx(context_variables: Any | None, key: str) -> Any:
@@ -70,7 +70,7 @@ def resolve_export_gate(context_variables: Any | None, *, files: dict[str, str] 
         elif validation_status == "pending":
             reasons.append("App validation has not completed yet.")
         else:
-            reasons.append("App validation did not complete with a pass or explicit skip.")
+            reasons.append("App validation did not complete with a pass.")
 
     if integration_passed is not True:
         reasons.append("Integration checks have not passed.")

@@ -17,13 +17,34 @@ the workflow or operator explicitly selects it. Build validation uses
 `MOZAIKS_PREVIEW_PROVIDER=e2b`. Both require `E2B_API_KEY`.
 An operator setting is authoritative: generated tool arguments cannot bypass it
 by selecting `skip`, `local`, or another provider. Invalid operator values fail.
+`AppValidationAgent` copies a supplied context strategy; otherwise its nullable
+request defers to this resolver. It does not infer `skip` from a test-like brief.
 
 | Strategy | Runs where | Preview URL | Cost | Intended for |
 |----------|-----------|-------------|------|--------------|
 | `e2b` | Hosted e2b cloud sandbox | separate Studio session | per sandbox-minute (COGS) | Hosted product — browser-only users |
 | `docker` | Local Docker container | separate Studio session | free | OSS self-hosters / local dev |
 | `local` | Current machine (npm) | no | free | Quick local checks without Docker |
-| `skip` | — | no | — | CI/deterministic tests; integration checks still gate export |
+| `skip` | — | no | — | Deterministic tests only; unverified build blocks export and promotion |
+
+Readiness requires both deterministic acceptance and build execution to pass.
+Skipped or pending required checks cannot certify readiness. When no bounded
+recovery or repair can run next, the validation tool writes the protected
+`app_validation_ends_run` flag and a failure message; the existing AG2 graph ends
+the run once rather than asking for a reply that would repeat the same checks.
+Messages distinguish incomplete validation from an unavailable environment and
+do not assert that an unverified app is defect-free.
+
+Build execution failures use that same approved-task repair policy after acceptance
+passes. TypeScript, webpack and supported Vite diagnostics resolve only against the
+actual staged app root and build working directory; ANSI formatting grants no path
+authority. A repair requires one approved owner and accepted task/prerequisite
+evidence, within the existing attempt and no-progress limits. Unknown or unowned
+paths, exhausted repair, and incomplete/unavailable validation end as failed with
+an explanation, without an empty request for user input. Acceptance remains a
+separate passed result when only the later build failed; combined readiness stays
+false until both gates pass. A successful static acceptance does not erase build
+errors or authorize export.
 
 All sandbox strategies route through the `SandboxPort` seam
 (`mozaiksai/core/ports/sandbox.py`, Tier 1 stable) and its adapters.
@@ -38,6 +59,12 @@ explicit local validation; local validation requires installed shared shell depe
 Compilation does not bind or invent app identity before export. Static acceptance
 still checks schemas, references, module implementation, and runtime loading.
 Interactive runtime/browser acceptance is a separate step, not implied by a build.
+Restore and activation read the owned artifact through the canonical content store,
+verify its archive identity and SHA-256, and consume those same verified bytes.
+Records without this identity must be validated and saved as a new canonical
+artifact before activation. There is currently no persisted-draft revalidation
+endpoint; the build workflow must produce that new artifact. Source checks on a
+refinement alone do not certify the whole app build.
 One-shot validation always terminates its sandbox and returns `preview_url: null`.
 The shared shell bundles its fallback logo and does not require undeclared
 app-owned background images. Existing preview templates must be rebuilt to pick
@@ -136,6 +163,23 @@ unchanged. The standard module executor does not supply `app_slug`, so account
 handlers using the same module/entity IDs with `collection_name_for` also use
 its default slug. Custom naming inputs are not inferred from app display names.
 
+### Preview auth posture
+
+A public app (no auth contract) is previewed as its visitors see it. The
+preview environment sets `AUTH_ENABLED=false`, `AUTH_PROVIDER=none` and
+`AUTH_ANON_ACCESS=public` unconditionally and drops `AUTH_ANON_ROLES`, so a
+forwarded `MOZAIKS_PREVIEW_ENV_*` value can neither give the preview
+development access nor stop it starting. `AUTH_ANON_SCOPES` is kept, so a
+preview matches its deployment: pages and module actions run with the
+visitor's scopes and admin pages stay closed. An app with an auth contract
+keeps authentication on in its preview.
+
+This matters most on E2B: the SDK makes a sandbox's ports public by default,
+so anyone who holds a preview URL can reach the preview. The posture is set
+inside the sandbox by the packaged runtime, so it takes effect only in a
+`mozaiks-sandbox:local` image and an E2B template rebuilt from a revision that
+includes it; rebuild both after upgrading.
+
 The preview regression writes through the executor's real scoped persistence
 context, then calls the account routes through a registered canonical handler
 against an in-memory Mongo substitute. It checks export, owned deletion, repeat
@@ -160,6 +204,9 @@ docker build -f infra/docker/Dockerfile.preview -t mozaiks-sandbox:local .
 
 The image includes the installed OSS runtime, frontend dependencies, and Mongo.
 Generated `requirements.txt` installs against the image's dependency constraints.
+The install runs in the sandbox user's site directory with pip's
+`--break-system-packages` option because the disposable image uses Debian's
+externally managed Python. It does not install into the operator's Python.
 Containers use an unprivileged user, dropped capabilities, resource limits, and
 random loopback-only frontend/backend ports. No Docker socket, host workspace,
 or Factory database is mounted into the app.

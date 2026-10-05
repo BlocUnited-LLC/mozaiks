@@ -24,9 +24,25 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from logs.logging_config import get_core_logger
 from mozaiksai.core.auth.adapters import AuthError, UserClaims, get_auth_adapter
-from mozaiksai.core.auth.adapters.registry import is_auth_enabled
+from mozaiksai.core.auth.adapters.registry import (
+    ResolvedAuthConfig,
+    is_auth_enabled,
+    resolve_auth_config,
+)
+from mozaiksai.core.auth.anonymous_access import (
+    ANONYMOUS_PROVENANCE,
+    DEV_OVERRIDE_PROVENANCE,
+    DEVELOPMENT_ACCESS_PROVENANCES,
+    LOCAL_DEVELOPMENT_PROVENANCE,
+    AnonymousGrant,
+    anonymous_claims,
+    resolve_anonymous_grant,
+)
 
 logger = get_core_logger("auth.dependencies")
+
+#: The user id of the shared anonymous principal when AUTH_ANON_USER_ID is unset.
+ANONYMOUS_USER_ID = "anonymous"
 
 # FastAPI security scheme for OpenAPI docs
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -54,18 +70,28 @@ class UserPrincipal:
     workspace_id: str | None = None
     # Server-side provenance fact: how this principal came into existence.
     # "token_validated" is set ONLY where a bearer token was actually
-    # validated by the configured auth adapter. "anonymous" covers the
-    # no-auth/demo principal; "dev_override" covers request-scoped local dev
-    # personas. Privileged surfaces must check is_authenticated rather than
-    # inferring authenticated identity from role/scope strings, which dev
-    # personas can freely carry.
-    auth_provenance: str = "anonymous"
+    # validated by the configured auth adapter. With authentication off,
+    # "local_development" is the anonymous principal granted development
+    # access for this request (see core/auth/anonymous_access.py),
+    # "dev_override" a request-scoped persona (reachable only from
+    # development access), and "anonymous" a visitor without development
+    # access, which is also the default for any principal constructed
+    # elsewhere. Privileged surfaces must check is_authenticated or
+    # has_local_development_access rather than inferring authority from
+    # role/scope strings or from the process-wide auth mode.
+    auth_provenance: str = ANONYMOUS_PROVENANCE
 
     @property
     def is_authenticated(self) -> bool:
         """True only when this principal was produced by validating a real
         bearer token against the configured auth adapter."""
         return self.auth_provenance == "token_validated"
+
+    @property
+    def has_local_development_access(self) -> bool:
+        """True only for an anonymous principal granted development access for
+        this request, or a dev persona derived from one."""
+        return self.auth_provenance in DEVELOPMENT_ACCESS_PROVENANCES
 
     def has_role(self, role: str) -> bool:
         """Check if user has a specific role."""
@@ -112,7 +138,7 @@ class UserPrincipal:
         cls,
         claims: UserClaims,
         *,
-        auth_provenance: str = "anonymous",
+        auth_provenance: str = ANONYMOUS_PROVENANCE,
     ) -> "UserPrincipal":
         """Create UserPrincipal from adapter UserClaims.
 
@@ -145,10 +171,10 @@ def _csv_request_value(request: Request, *, header: str, cookie: str, query: str
 def _no_auth_dev_override_principal(request: Request, principal: UserPrincipal) -> UserPrincipal:
     """Apply request-scoped local-dev persona overrides when auth is disabled.
 
-    This intentionally runs only from the AUTH_ENABLED=false branch in
-    ``require_user``. It lets local browser profiles test user-to-user flows
-    such as DM notifications without reconfiguring the process-wide no-auth
-    adapter.
+    This intentionally runs only for an anonymous principal that was granted
+    development access for this request (see ``_anonymous_principal``). It
+    lets local browser profiles test user-to-user flows such as DM
+    notifications without reconfiguring the process-wide no-auth adapter.
     """
     requested_user_id = (
         request.headers.get("X-Mozaiks-Dev-User-Id")
@@ -189,7 +215,7 @@ def _no_auth_dev_override_principal(request: Request, principal: UserPrincipal) 
         workspace_id=principal.workspace_id,
         # Dev personas are never authenticated provenance, no matter which
         # roles/scopes the request-scoped override assigns them.
-        auth_provenance="dev_override",
+        auth_provenance=DEV_OVERRIDE_PROVENANCE,
     )
 
 
@@ -238,6 +264,38 @@ async def _validate_and_attach(
     return principal
 
 
+#: Set on ``request.state`` when ``optional_user`` returns ``None`` because the
+#: anonymous access policy refused the request, so a route that needs a
+#: principal can say why (see hosts/routers/modules.py).
+ANONYMOUS_ACCESS_REFUSAL_STATE = "anonymous_access_refusal"
+
+
+async def _anonymous_principal(
+    request: Request, config: ResolvedAuthConfig, grant: AnonymousGrant
+) -> UserPrincipal:
+    """Mint the principal of a request the anonymous access policy did not refuse.
+
+    Development access gives the anonymous roles and scopes, then any dev
+    persona the request names; anyone else is an anonymous visitor without
+    development access.
+    """
+    claims = await anonymous_claims(grant, config, get_auth_adapter())
+    if grant.development_access:
+        principal = UserPrincipal.from_claims(claims, auth_provenance=LOCAL_DEVELOPMENT_PROVENANCE)
+        principal = _no_auth_dev_override_principal(request, principal)
+    else:
+        principal = UserPrincipal.from_claims(claims, auth_provenance=ANONYMOUS_PROVENANCE)
+    logger.debug(
+        "Auth disabled - anonymous principal (provenance=%s)", principal.auth_provenance
+    )
+    request.state.user = principal
+    request.state.user_id = principal.user_id
+    request.state.app_id = principal.app_id
+    request.state.tenant_id = principal.tenant_id
+    request.state.workspace_id = principal.workspace_id
+    return principal
+
+
 async def require_user(
     request: Request,
     authorization: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
@@ -246,32 +304,15 @@ async def require_user(
     Dependency that requires a valid user token.
 
     Returns UserPrincipal on success, raises HTTPException on failure.
+    With authentication off, the anonymous access policy mints or refuses the
+    principal (``AUTH_ANON_ACCESS``; see core/auth/anonymous_access.py).
     """
-    # Auth bypass for local development
     if not is_auth_enabled():
-        adapter = get_auth_adapter()
-        logger.debug("Auth disabled - using anonymous principal (%s)", adapter.name)
-        try:
-            claims = await adapter.validate_token("")
-            principal = UserPrincipal.from_claims(claims)
-        except Exception as _anon_exc:
-            logger.debug("AUTH_ADAPTER_EMPTY_TOKEN_FAILED adapter=%s — using anonymous fallback: %s", adapter.name, _anon_exc)
-            principal = UserPrincipal(
-                user_id="anonymous",
-                email=None,
-                name="Anonymous User",
-                roles=[],
-                scopes=["access_as_user"],
-                raw_claims={},
-                provider="none",
-            )
-        principal = _no_auth_dev_override_principal(request, principal)
-        request.state.user = principal
-        request.state.user_id = principal.user_id
-        request.state.app_id = principal.app_id
-        request.state.tenant_id = principal.tenant_id
-        request.state.workspace_id = principal.workspace_id
-        return principal
+        config = resolve_auth_config()
+        grant = resolve_anonymous_grant(request.scope, config)
+        if grant.refused:
+            raise HTTPException(status_code=grant.status_code or 403, detail=grant.detail)
+        return await _anonymous_principal(request, config, grant)
 
     token = _extract_token(authorization)
     if not token:
@@ -353,9 +394,21 @@ async def optional_user(
 
     Returns UserPrincipal if token is valid, None if no token.
     Raises HTTPException if token is present but invalid.
+
+    With authentication off, a request the anonymous access policy refuses
+    (implicit demo mode, or another machine under ``AUTH_ANON_ACCESS=local``)
+    is a request without credentials: ``None``, never more. The route decides
+    what an anonymous caller may do, exactly as for a request without a token
+    on an authenticated host; the refusal is kept on ``request.state`` so the
+    route can say why.
     """
     if not is_auth_enabled():
-        return await require_user(request, authorization)
+        config = resolve_auth_config()
+        grant = resolve_anonymous_grant(request.scope, config)
+        if grant.refused:
+            setattr(request.state, ANONYMOUS_ACCESS_REFUSAL_STATE, grant)
+            return None
+        return await _anonymous_principal(request, config, grant)
 
     token = _extract_token(authorization)
     if not token:
@@ -467,9 +520,11 @@ def resolve_scope_from_principal(
     Validates that any caller-supplied *app_id* or *user_id* match the
     authenticated principal's claims, then returns the canonical resolved pair.
     Raises :class:`fastapi.HTTPException` on a mismatch or missing required value.
+    *default_user_id* is the user the shared development identity acts for
+    when the caller names none; every other principal acts as itself.
     """
     effective_user_id = user_id
-    if principal.user_id == "anonymous" and not effective_user_id:
+    if is_shared_development_identity(principal) and not effective_user_id:
         effective_user_id = str(default_user_id or "").strip() or None
 
     resolved_user_id = validate_user_id_against_principal(principal, body_user_id=effective_user_id)
@@ -485,32 +540,51 @@ def resolve_scope_from_principal(
     return resolved_app_id, resolved_user_id
 
 
+def is_shared_development_identity(principal: object) -> bool:
+    """True for the shared anonymous principal granted development access.
+
+    It stands for nobody in particular: a caller with development access (this
+    machine under ``AUTH_ANON_ACCESS=local``, any client under ``open``) names
+    the user it acts for, and routes that scope records to their owner skip
+    that scope for it. Anonymous visitors and token-validated principals act
+    only as themselves, including a token whose subject is literally
+    "anonymous".
+    """
+    return (
+        isinstance(principal, UserPrincipal)
+        and principal.has_local_development_access
+        and principal.user_id == ANONYMOUS_USER_ID
+    )
+
+
+
 def validate_user_id_against_principal(
     principal: "UserPrincipal",
     path_user_id: str | None = None,
     body_user_id: str | None = None,
 ) -> str:
-    """Validate that path/body user_id matches the authenticated principal.
+    """Validate that path/body user_id matches the principal.
 
-    When auth is enabled:
+    Every principal except the shared development identity (see
+    :func:`is_shared_development_identity`), including an anonymous visitor:
         - If *path_user_id* is provided it MUST match ``principal.user_id``.
         - If *body_user_id* is provided it MUST match ``principal.user_id``.
         - Returns the canonical ``user_id`` from the principal.
 
-    When auth is disabled (anonymous principal):
+    The shared development identity:
         - Falls back to *path_user_id* or *body_user_id*.
         - Raises HTTP 400 if neither is provided.
     """
     jwt_user_id = principal.user_id
 
-    # Auth-disabled path — trust caller-supplied id.
-    if jwt_user_id == "anonymous":
+    # Shared development identity — the caller names the user.
+    if is_shared_development_identity(principal):
         user_id = path_user_id or body_user_id
         if not user_id:
             raise HTTPException(status_code=400, detail="user_id is required")
         return user_id
 
-    # Auth-enabled — enforce match.
+    # Everyone else acts as itself — enforce match.
     if path_user_id and str(path_user_id).strip() != str(jwt_user_id).strip():
         raise HTTPException(
             status_code=403,

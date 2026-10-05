@@ -118,6 +118,8 @@ def build_review_summary_payload(context_variables: Any | None) -> dict[str, Any
         promotion_blockers.append("missing_app_validation_status")
     elif app_validation_status == "failed":
         promotion_blockers.append("app_validation_failed")
+    elif app_validation_status != "passed":
+        promotion_blockers.append("app_validation_not_passed")
     if app_bundle_acceptance_status is None:
         promotion_blockers.append("missing_app_bundle_acceptance_status")
     elif app_bundle_acceptance_status == "failed":

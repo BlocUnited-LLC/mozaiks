@@ -38,8 +38,8 @@ def _review_context(**overrides: Any) -> _Context:
         "artifact_version_id": "av_app_bundle_1",
         "bundle_path": "C:/Repos/BlocUnitedRepo/mozaiks/generated/apps/app_1/build_1/app",
         "lifecycle_state": "review",
-        "app_validation_status": "skipped",
-        "app_validation_strategy_used": "skip",
+        "app_validation_status": "passed",
+        "app_validation_strategy_used": "docker",
         "app_bundle_acceptance_status": "passed",
         "integration_tests_passed": True,
     }
@@ -83,6 +83,15 @@ def test_review_summary_blocks_promotion_when_handoff_is_incomplete() -> None:
     assert payload["revision_blockers"] == ["missing_review_bundle_path"]
 
 
+@pytest.mark.parametrize("status", ["skipped", "pending", "unknown"])
+def test_review_summary_requires_completed_build_validation(status: str) -> None:
+    payload = build_review_summary_payload(_review_context(app_validation_status=status))
+    assert payload["can_promote"] is False
+    assert payload["review_ready"] is False
+    assert payload["can_revise"] is True
+    assert "app_validation_not_passed" in payload["promotion_blockers"]
+
+
 def test_refinement_payload_matches_studio_trigger_contract() -> None:
     payload = build_refinement_request_payload(_review_context(), "Add dark mode.")
 
@@ -97,8 +106,8 @@ def test_refinement_payload_matches_studio_trigger_contract() -> None:
             "bundle_path": "C:/Repos/BlocUnitedRepo/mozaiks/generated/apps/app_1/build_1/app",
             "build_registry_id": "appreg_1",
             "build_id": "build_1",
-            "app_validation_status": "skipped",
-            "app_validation_strategy_used": "skip",
+            "app_validation_status": "passed",
+            "app_validation_strategy_used": "docker",
             "integration_tests_passed": True,
         },
     }
@@ -176,8 +185,8 @@ async def test_submit_revision_request_records_and_emits_refinement_payload(
                     "bundle_path": "C:/Repos/BlocUnitedRepo/mozaiks/generated/apps/app_1/build_1/app",
                     "build_registry_id": "appreg_1",
                     "build_id": "build_1",
-                    "app_validation_status": "skipped",
-                    "app_validation_strategy_used": "skip",
+                    "app_validation_status": "passed",
+                    "app_validation_strategy_used": "docker",
                     "integration_tests_passed": True,
                 },
             },

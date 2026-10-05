@@ -1415,21 +1415,58 @@ def test_scan_route_manifest_component_files_accepts_present_jsx() -> None:
         {
             "ui/route_manifest.json": '{"pages": [{"path": "/custom", "component": "CustomDashboard"}]}',
             "ui/pages/custom/CustomDashboard.jsx": "export default function CustomDashboard() { return null; }\n",
+            "ui/index.js": "import CustomDashboard from './pages/custom/CustomDashboard';\n"
+            "export function register(registerComponent) { registerComponent('CustomDashboard', CustomDashboard); }",
         }
     )
 
-    assert not any("CustomDashboard" in e and "404" in e for e in errors)
+    assert not any("CustomDashboard" in e and "ui/route_manifest.json" in e for e in errors)
+
+
+@pytest.mark.parametrize("binding", ["Main", "TimerPage"])
+def test_scan_custom_route_resolves_registered_import_instead_of_component_filename(binding) -> None:
+    errors = scan_generated_bundle({
+        "ui/route_manifest.json": '{"pages": [{"path": "/main", "component": "Main"}]}',
+        "ui/index.js": f"import {binding} from './pages/custom/main';\n"
+        f"export function register(registerComponent) {{ registerComponent('Main', {binding}, {{}}); }}",
+        "ui/pages/custom/main.jsx": "export default function Main() { return null; }\n",
+    })
+    assert not any("ui/route_manifest.json" in e or "registers component" in e for e in errors)
+
+
+@pytest.mark.parametrize("mutation", ["missing_registry", "wrong_key", "wrong_binding", "wrong_import_case", "missing_file"])
+def test_scan_custom_route_requires_exact_registered_file_binding(mutation) -> None:
+    files = {
+        "ui/route_manifest.json": '{"pages": [{"path": "/main", "component": "Main"}]}',
+        "ui/index.js": "import Main from './pages/custom/Main';\n"
+        "export function register(registerComponent) { registerComponent('Main', Main, {}); }",
+        "ui/pages/custom/Main.jsx": "export default function Main() { return null; }\n",
+    }
+    if mutation == "missing_registry":
+        files.pop("ui/index.js")
+    elif mutation == "wrong_key":
+        files["ui/index.js"] = files["ui/index.js"].replace("registerComponent('Main'", "registerComponent('Other'")
+    elif mutation == "wrong_binding":
+        files["ui/index.js"] = files["ui/index.js"].replace("'Main', Main", "'Main', Other")
+    elif mutation == "wrong_import_case":
+        files["ui/index.js"] = files["ui/index.js"].replace("./pages/custom/Main", "./pages/custom/main")
+    else:
+        files.pop("ui/pages/custom/Main.jsx")
+    errors = scan_generated_bundle(files)
+    assert any("ui/route_manifest.json" in e and "component 'Main'" in e for e in errors)
 
 
 def test_scan_route_manifest_component_files_rejects_missing_jsx() -> None:
     errors = scan_generated_bundle(
         {
             "ui/route_manifest.json": '{"pages": [{"path": "/dashboard", "component": "MissingPage"}]}',
+            "ui/index.js": "import MissingPage from './pages/custom/MissingPage';\n"
+            "export function register(registerComponent) { registerComponent('MissingPage', MissingPage); }",
         }
     )
 
-    assert any("MissingPage" in e and "404 at runtime" in e for e in errors)
-    assert any("ui/pages/custom/MissingPage.jsx is missing" in e for e in errors)
+    assert any("MissingPage" in e and "no registered import" in e for e in errors)
+    assert any("missing file 'ui/pages/custom/MissingPage.jsx'" in e for e in errors)
 
 
 def test_scan_route_manifest_component_files_rejects_multiple_missing_jsx() -> None:
@@ -1444,13 +1481,17 @@ def test_scan_route_manifest_component_files_rejects_multiple_missing_jsx() -> N
 }
 """,
             "ui/pages/custom/AlphaPage.jsx": "export default function AlphaPage() { return null; }\n",
+            "ui/index.js": "import AlphaPage from './pages/custom/AlphaPage';\n"
+            "import BetaPage from './pages/custom/BetaPage';\n"
+            "export function register(registerComponent) { "
+            "registerComponent('AlphaPage', AlphaPage); registerComponent('BetaPage', BetaPage); }",
         }
     )
 
     # AlphaPage present → no error for it.
-    assert not any("AlphaPage" in e and "404" in e for e in errors)
+    assert not any("AlphaPage" in e and "ui/route_manifest.json" in e for e in errors)
     # BetaPage missing → error.
-    assert any("BetaPage" in e and "404 at runtime" in e for e in errors)
+    assert any("BetaPage" in e and "missing file" in e for e in errors)
 
 
 # ---------------------------------------------------------------------------

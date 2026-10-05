@@ -226,6 +226,33 @@ async def test_cannot_switch_targets_using_another_registry_selector():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("host", ["factory", "foreign"])
+async def test_transition_preflight_resolves_owned_draft_without_allocating_run(monkeypatch, host):
+    from factory_app.workflows._shared.platform import build_target
+
+    service, repo = registry()
+    repo.get_by_build_registry_id.return_value = {
+        "app_id": "customer_tracker", "chat_app_id": host, "lifecycle_state": "draft",
+    }
+    monkeypatch.setattr(build_target, "AppRegistryService", lambda: service)
+    kwargs = dict(
+        app_id="factory", user_id="owner", workflow_name="", chat_id="preflight",
+        phase="route", trigger_source="transition", build_registry_id="appreg_tracker",
+        source_chat_id=None, session_fields={},
+    )
+    if host == "foreign":
+        with pytest.raises(ValueError, match="not available in this host"):
+            await build_target.bind_factory_session(**kwargs)
+    else:
+        assert await build_target.bind_factory_session(**kwargs) == {"target_app_id": "customer_tracker"}
+    repo.get_by_build_registry_id.assert_awaited_once_with(
+        owner_user_id="owner", build_registry_id="appreg_tracker",
+    )
+    repo.update_lifecycle_state.assert_not_awaited()
+    repo.upsert_app_record.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_refinement_keeps_target_but_allocates_new_build():
     service, _ = registry()
     result = await service.resolve_build_binding(

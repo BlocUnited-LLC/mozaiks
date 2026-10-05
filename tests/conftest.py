@@ -80,6 +80,24 @@ def app_root() -> Path:
 
 
 @pytest.fixture(autouse=True)
+def _development_access_by_default(monkeypatch):
+    """Serve in-process test clients with development access unless a test says otherwise.
+
+    With authentication off a host grants development access only to requests
+    from this machine (``AUTH_ANON_ACCESS=local``), and Starlette's TestClient
+    is not a network peer at all (its client is ``"testclient"``). Tests that
+    do not configure auth therefore run as CI does (``AUTH_ENABLED=false``)
+    with ``AUTH_ANON_ACCESS=open``. Values already in the environment win, and
+    tests of auth behaviour set or delete these variables themselves.
+    """
+    if "AUTH_ENABLED" not in os.environ and "AUTH_PROVIDER" not in os.environ:
+        monkeypatch.setenv("AUTH_ENABLED", "false")
+    if "AUTH_ANON_ACCESS" not in os.environ:
+        monkeypatch.setenv("AUTH_ANON_ACCESS", "open")
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _isolate_chat_lock_state():
     """Reset the chat execution lock's process-level state before each test.
 

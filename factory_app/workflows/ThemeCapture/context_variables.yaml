@@ -194,6 +194,13 @@ definitions:
       type: state
       default: null
 
+  value_manifest:
+    type: object
+    description: Approved concept blueprint, including explicit visual constraints in brand_intent.
+    source:
+      type: state
+      default: null
+
   value_proposition:
     type: string
     description: Approved concept's value proposition, used to justify a visual direction.
@@ -388,6 +395,7 @@ definitions:
 agents:
   ThemeInterviewAgent:
     variables:
+      - value_manifest
       - concept_overview
       - value_proposition
       - target_user
@@ -437,6 +445,7 @@ agents:
 
   ThemeAnalysisAgent:
     variables:
+      - value_manifest
       - app_name
       - app_description
       - tech_stack
@@ -466,6 +475,7 @@ agents:
 
   ThemeConfigAssemblerAgent:
     variables:
+      - value_manifest
       - app_name
       - parent_theme_config
       - workflow_sequence

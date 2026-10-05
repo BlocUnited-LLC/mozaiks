@@ -224,6 +224,37 @@ middleware is still applied on every turn, correction turns included.
 each provider attempt, so it does not meet the attempt-provenance condition
 above.
 
+## Workflow Provider History
+
+`AG2-WP-015` (`ACTIVE`, reverified October 4, 2026): native workflow views in the
+installed AG2 1.1.2 pin project an agent's own earlier packets as bare `ModelMessage` events.
+The OpenAI Chat, OpenAI Responses, and Anthropic mappers consume assistant
+history through `ModelResponse`; bare messages are omitted. A real discovery
+run consequently repeated its opening after human confirmation. An isolated
+AG2 1.1.1 wheel reproduced the same event-to-provider conversion gap. On 1.1.2,
+real Agent/Hub continuation and disk reopen tests pass with the adapter, while
+the strict provider-neutral native-history retirement gate still fails as
+expected. The dependency upgrade alone does not close this watchpoint.
+
+`ag2_workflow_view.py` subclasses the existing `WorkflowAdapter` and wraps its
+native view through public `Hub.register_adapter`. It converts only projected
+bare `ModelMessage` events to `ModelResponse`, preserving message metadata.
+AG2 continues to own WAL, visibility, peer labels, bounded history, turn
+selection, and channel lifecycle. Existing responses and tool events remain
+unchanged; the wrapper adds no usage or tool-execution events.
+
+`tests/test_ag2_workflow_provider_history.py` captures actual provider mapper
+payloads through real Agent/Hub execution, human continuation, and disk-backed
+reopen without paid model calls. It also covers self-edges and privacy/window
+preservation, including peer messages retaining their user role. The strict
+expected-failure native projection test checks the provider-neutral event shape:
+own assistant messages must be preserved as `ModelResponse`, with no bare
+`ModelMessage` left for any provider mapper to drop. It is the
+retirement signal: when they unexpectedly pass on an AG2 upgrade, remove the
+local adapter and registration, remove those expected-failure markers, and
+keep continuation/reopen tests passing on the native adapter. No dependency
+baseline is changed by this correction.
+
 ## AG2 Ownership Guard
 
 Before adding any Mozaiks abstraction involving agents, `Task`, Network,
@@ -384,9 +415,9 @@ upstream changelog into this document.
   (`SandboxPort` + e2b/docker adapters, preview URLs, app boot) are
   Mozaiks-owned application-runtime behavior outside AG2's snippet-execution
   scope; agent-level execution stays on AG2 `SandboxShellTool` (already used
-  by six AppGenerator agents). The coding worker's unimplemented `e2b`
-  validation label was removed so build records only claim strategies that
-  actually ran. Session identity/metadata now persists (validation results
+  by six AppGenerator agents). Scoped coding now calls the same candidate
+  acceptance/build facade; Docker/E2B build evidence comes from the existing
+  `SandboxPort`, never from a model's strategy label. Session identity/metadata persists (validation results
   carry `sandbox_session_id`/`sandbox_provider`; preview sandboxes are
   created with identity metadata and provider-side kill deadlines), closing
   the orphaned-sandbox billing vector ahead of hosted e2b activation.

@@ -10,6 +10,11 @@ from collections.abc import Mapping
 from mozaiksai.core.auth.adapters.base import BaseAuthAdapter, UserClaims
 
 
+def csv_setting_values(raw: str | None) -> list[str]:
+    """Split a comma-separated setting into its trimmed, non-empty entries."""
+    return [item.strip() for item in (raw or "").split(",") if item.strip()]
+
+
 class NoAuthAdapter(BaseAuthAdapter):
     """
     Auth adapter that bypasses authentication.
@@ -28,6 +33,11 @@ class NoAuthAdapter(BaseAuthAdapter):
     Optional env vars:
         AUTH_ANON_USER_ID: User ID for anonymous user (default: "anonymous")
         AUTH_ANON_EMAIL: Email for anonymous user (default: None)
+
+    These claims describe the anonymous principal *with development access*.
+    Who receives development access, and which requests are served as
+    anonymous visitors instead, is decided per request by
+    :mod:`mozaiksai.core.auth.anonymous_access` (``AUTH_ANON_ACCESS``).
     """
 
     name = "none"
@@ -35,7 +45,8 @@ class NoAuthAdapter(BaseAuthAdapter):
     # Default module permission scopes granted to the anonymous dev user.
     # Covers all first-party factory app module permissions so that
     # profile panels, support requests, and admin actions work without
-    # configuring real auth in local development.
+    # configuring real auth in local development. Anonymous visitors
+    # (AUTH_ANON_ACCESS=public) never receive them.
     _DEV_DEFAULT_SCOPES = [
         "access_as_user",
         "workspace_support.read",
@@ -61,17 +72,14 @@ class NoAuthAdapter(BaseAuthAdapter):
         self._default_email = default_email or self._optional_setting("AUTH_ANON_EMAIL")
         # AUTH_ANON_ROLES: comma-separated list of roles for the anonymous dev user
         # e.g. AUTH_ANON_ROLES=admin,user  — enables admin portal in no-auth dev mode
-        env_roles_raw = self._setting("AUTH_ANON_ROLES")
-        env_roles = (
-            [r.strip() for r in env_roles_raw.split(",") if r.strip()] if env_roles_raw else []
-        )
+        env_roles = csv_setting_values(self._setting("AUTH_ANON_ROLES"))
         self._default_roles = default_roles or env_roles
         # AUTH_ANON_SCOPES: comma-separated override for module permission scopes.
         # Defaults to _DEV_DEFAULT_SCOPES which grants all first-party module
         # permissions so local dev works without auth configuration.
         env_scopes_raw = self._setting("AUTH_ANON_SCOPES")
         if env_scopes_raw:
-            self._default_scopes = [s.strip() for s in env_scopes_raw.split(",") if s.strip()]
+            self._default_scopes = csv_setting_values(env_scopes_raw)
         else:
             self._default_scopes = default_scopes or list(self._DEV_DEFAULT_SCOPES)
 

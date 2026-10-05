@@ -84,7 +84,10 @@ def _links(experience: dict) -> list[str]:
 def test_fixture_records_the_live_evidence():
     entry = _entry()
     assert entry["chat_id"] == "4da11a24-2e1a-43d2-8be0-abc143657d52"
-    assert entry["labelled_defaults"] == [] and entry["occurrences"] == 1
+    assert entry["occurrences"] == 1
+    assert len(entry["labelled_defaults"]) == len(entry["experience_spec"]["pages"])
+    assert all(label["field"] == "ui_surface" and label["value"] == "declarative_page"
+               for label in entry["labelled_defaults"])
     (tasks,) = entry["surface_map"]["surfaces"]
     assert (tasks["surface_id"], tasks["owner"], tasks["surface_kind"]) == ("tasks", "app", "module")
     assert tasks["primary_entities"] == ["Task"]

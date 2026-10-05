@@ -1217,14 +1217,16 @@ const ChatPage = () => {
         || ''
       ).trim() || null,
       revision_id: String(source?.revision_id || base.revision_id || '').trim() || null,
+      build_registry_id: String(
+        source?.build_registry_id || source?.metadata?.build_registry_id || base.build_registry_id || ''
+      ).trim() || null,
       requires_confirmation: Boolean(
         source?.requires_confirmation ?? base.requires_confirmation ?? false
       ),
       trigger_source: String(source?.trigger_source || base.trigger_source || 'refinement').trim() || 'refinement',
       requested_workflow_id: String(
-        source?.requested_workflow_id
-        || base.requested_workflow_id
-        || ''
+        (source && Object.hasOwn(source, 'requested_workflow_id')
+          ? source.requested_workflow_id : base.requested_workflow_id) || ''
       ).trim() || null,
       journey_id: String(source?.journey_id || base.journey_id || '').trim() || null,
       context_variables: source?.context_variables && typeof source.context_variables === 'object'
@@ -1318,11 +1320,8 @@ const ChatPage = () => {
     }
 
     setPendingHarnessDecisionError(null);
-    const workflowId = action.workflow_id
-      || pendingHarnessDecision.recommended_workflow_id
-      || pendingHarnessDecision.requested_workflow_id
-      || currentWorkflowName
-      || null;
+    // Approval repeats the bound request; the server owns the chosen re-entry.
+    const workflowId = pendingHarnessDecision.requested_workflow_id || null;
     const contextVariables = {
       ...(pendingHarnessDecision.context_variables || {}),
     };
@@ -1332,16 +1331,17 @@ const ChatPage = () => {
         action_id: action.action_id,
       },
     };
-    if (pendingHarnessDecision.change_request_id && !triggerPayload.change_request_id) {
+    if (pendingHarnessDecision.change_request_id) {
       triggerPayload.change_request_id = pendingHarnessDecision.change_request_id;
     }
-    if (pendingHarnessDecision.revision_id && !triggerPayload.revision_id) {
+    if (pendingHarnessDecision.revision_id) {
       triggerPayload.revision_id = pendingHarnessDecision.revision_id;
     }
 
     const result = await startPendingHarnessWorkflow(workflowId, contextVariables, {
       trigger_source: pendingHarnessDecision.trigger_source || 'refinement',
       journey_id: pendingHarnessDecision.journey_id || null,
+      build_registry_id: pendingHarnessDecision.build_registry_id || null,
       app_id: currentAppId || null,
       user_id: currentUserId || null,
       trigger_payload: triggerPayload,
@@ -1365,8 +1365,8 @@ const ChatPage = () => {
           journey_id: pendingHarnessDecision.journey_id || null,
           context_variables: contextVariables,
           trigger_payload: triggerPayload,
-          change_request_id: triggerPayload.change_request_id || pendingHarnessDecision.change_request_id,
-          revision_id: triggerPayload.revision_id || pendingHarnessDecision.revision_id,
+          change_request_id: result.change_request_id || pendingHarnessDecision.change_request_id,
+          revision_id: result.revision_id || pendingHarnessDecision.revision_id,
         },
       );
       setPendingHarnessDecision(nextDecision);
@@ -1380,7 +1380,6 @@ const ChatPage = () => {
     buildPendingHarnessDecision,
     currentAppId,
     currentUserId,
-    currentWorkflowName,
     pendingHarnessDecision,
     pendingHarnessWorkflowStartError,
     startPendingHarnessWorkflow,
@@ -3499,6 +3498,9 @@ const ChatPage = () => {
       case 'awaiting_reply': {
         const payload = data.data || {};
         setLoading(false);
+        setMessagesWithLogging(prev => (
+          prev.some(m => m?.isThinking) ? prev.filter(m => !m?.isThinking) : prev
+        ));
         setPendingWorkflowReply({
           agent: payload.source_agent || payload.agent || 'Agent',
           prompt: payload.prompt || '',
@@ -3528,7 +3530,8 @@ const ChatPage = () => {
             sender:'system',
             agentName:'System',
             content:`⚠️ ${errorMessage}`,
-            isStreaming:false
+            isStreaming:false,
+            metadata: { event_type: 'workflow_failure' }
           }]);
           return;
         }
@@ -3539,6 +3542,9 @@ const ChatPage = () => {
         );
         if (!isTerminalCompletion) {
           setLoading(false);
+          setMessagesWithLogging(prev => (
+            prev.some(m => m?.isThinking) ? prev.filter(m => !m?.isThinking) : prev
+          ));
           setPendingWorkflowReply(prev => prev || {
             agent: data.agent || data.data?.agent || 'Agent',
             prompt: data.prompt || data.data?.prompt || '',
@@ -3603,6 +3609,7 @@ const ChatPage = () => {
         const requestExtra = (
           detail.extra && typeof detail.extra === 'object' && !Array.isArray(detail.extra)
         ) ? detail.extra : {};
+        const buildRegistryId = detail.build_registry_id || requestExtra.build_registry_id || null;
         if (!revisionText) return;
         const resolvedAppId = (
           appId ||
@@ -3628,7 +3635,7 @@ const ChatPage = () => {
         const triggerPayload = {
           refinement_request: refinementRequest,
         };
-        authFetch('/api/workflows/trigger', {
+        return authFetch('/api/workflows/trigger', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -3636,15 +3643,50 @@ const ChatPage = () => {
             app_id: resolvedAppId,
             user_id: resolvedUserId,
             source_chat_id: currentChatId,
+            ...(buildRegistryId ? { build_registry_id: buildRegistryId } : {}),
             trigger_payload: triggerPayload,
           }),
         }, { auth })
           .then(async (res) => {
             if (!res.ok) {
-              console.error('❌ [ChatPage] revision trigger failed:', res.status);
-              return;
+              throw new Error('The revision could not be started. Please retry from the app review.');
             }
             const triggerData = await res.json();
+            if (['coding_worker', 'surface_regeneration'].includes(triggerData.execution_mode)) {
+              const result = triggerData.execution_mode === 'coding_worker'
+                ? triggerData.coding_worker : triggerData.surface_result;
+              if (!result || !artifactVersionId || !buildRegistryId) {
+                throw new Error('The revision response was incomplete. Reopen the app review to inspect its current state.');
+              }
+              const bundleResponse = await authFetch(
+                `/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/bundle?build_registry_id=${encodeURIComponent(buildRegistryId)}`,
+                {}, { auth },
+              );
+              if (!bundleResponse.ok) {
+                throw new Error('The revision result could not be opened. Reopen the app review to inspect it.');
+              }
+              const bundle = await bundleResponse.json();
+              const workbenchUI = bundle.workbench_ui;
+              if (typeof workbenchUI?.component !== 'string' || !workbenchUI.component.trim()
+                  || typeof workbenchUI?.workflow_name !== 'string' || !workbenchUI.workflow_name.trim()) {
+                throw new Error('The revision result has no registered review surface. Reopen the app review.');
+              }
+              await dynamicUIHandler.processUIEvent({
+                type: 'ui.render', component: workbenchUI.component, workflow_name: workbenchUI.workflow_name,
+                tool_call_id: `refinement-${triggerData.refinement_session_id || artifactVersionId}`,
+                display: 'artifact', awaiting_response: false, interaction_type: 'ui_surface',
+                payload: {
+                  ...bundle.workbench,
+                  artifact_version_id: artifactVersionId, artifact_kind: artifactKind, artifact_key: artifactKey,
+                  build_registry_id: buildRegistryId, refinement_result: triggerData,
+                },
+              });
+              setPendingHarnessDecision(null);
+              setPendingHarnessDecisionError(null);
+              setLoading(false);
+              setPendingWorkflowReply(null);
+              return;
+            }
             if (triggerData.execution_mode === 'workflow' && triggerData.chat_id && triggerData.workflow_id) {
               setCurrentChatId(triggerData.chat_id);
               setActiveChatId(triggerData.chat_id);
@@ -3662,8 +3704,11 @@ const ChatPage = () => {
                 triggerData.harness_decision,
                 {
                   trigger_source: triggerData.trigger_source || 'refinement',
-                  requested_workflow_id: triggerData.requested_workflow_id || triggerData.workflow_id || null,
+                  requested_workflow_id: null,
                   recommended_workflow_id: triggerData.workflow_id || null,
+                  build_registry_id: buildRegistryId,
+                  change_request_id: triggerData.change_request_id,
+                  revision_id: triggerData.revision_id,
                   journey_id: triggerData.journey_id || null,
                   context_variables: {},
                   trigger_payload: triggerPayload,
@@ -3679,8 +3724,13 @@ const ChatPage = () => {
           })
           .catch((err) => {
             console.error('❌ [ChatPage] revision trigger error:', err);
+            setLoading(false);
+            setPendingWorkflowReply(null);
+            setMessagesWithLogging(prev => [...prev, {
+              id: `revision-error-${Date.now()}`, sender: 'system', agentName: 'System', isStreaming: false,
+              content: err.message || 'The revision could not be started. Please retry from the app review.',
+            }]);
           });
-        return;
       }
       case 'error': {
         setPendingWorkflowReply(null);
@@ -4737,6 +4787,13 @@ const ChatPage = () => {
             dispatchSurfaceEvent(update);
           }
           const { tool_name, payload = {}, tool_call_id, workflow_name, onResponse, display } = update;
+          // Interactive tools wait inside the run, without an awaiting_reply event.
+          if ((update.awaiting_response ?? payload.awaiting_response) === true) {
+            setLoading(false);
+            setMessagesWithLogging(prev => (
+              prev.some(m => m?.isThinking) ? prev.filter(m => !m?.isThinking) : prev
+            ));
+          }
           const toolName = tool_name || payload.tool_name || update.component_type || update.component || null;
           const toolCallId = tool_call_id || payload.tool_call_id || null;
           const componentType =

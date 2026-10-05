@@ -159,6 +159,14 @@ class OrchestrationPort(Protocol):
         """
         ...
 
+    async def has_persisted_execution(self, *, app_id: str, chat_id: str) -> bool:
+        """Inspect durable execution presence without starting or resuming it.
+
+        Partial native state counts as present. Inspection errors propagate;
+        callers must not interpret unavailable persistence as a fresh chat.
+        """
+        ...
+
     def capabilities(self) -> dict[str, Any]:
         """Advertise what this adapter supports.
 

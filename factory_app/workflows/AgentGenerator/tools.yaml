@@ -25,7 +25,7 @@ tools:
 - agent: ProjectOverviewAgent
   file: mermaid_sequence_diagram.py
   function: mermaid_sequence_diagram
-  description: Review the exact workflow partition before dispatch. An approved empty partition records that no AI workflows are required.
+  description: Review the exact workflow partition before dispatch. A validated empty partition records that no AI workflows are required; autonomous mode needs no additional approval for that empty partition.
   tool_type: UI_Tool
   auto_tool_call: true
   bind_to_agent: false

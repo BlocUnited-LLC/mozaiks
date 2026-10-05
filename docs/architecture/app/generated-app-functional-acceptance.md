@@ -111,8 +111,8 @@ generated business operations must bind to actual module actions. Runtime page
 schema parsing still permits safe host-owned/custom API paths; this check does
 not replace the host's routing contract or introduce a second runtime validator.
 
-`validation_strategy: skip` skips optional execution checks, not mandatory
-app-bundle acceptance or its wiring check. A zero-reference result only means
+`validation_strategy: skip` leaves build execution unverified; it does not
+establish acceptance or bypass mandatory wiring checks. A zero-reference result only means
 that inspected input contains no page API references, not that an absent input
 was successfully validated.
 
@@ -241,9 +241,22 @@ the file each one names:
 With no configured database, or an unreachable one, the check reports
 `skipped` with the reason (`passed: null`, `status: "skipped"`). Acceptance
 lists it in `validation_evidence.skipped` and `skipped_checks` with that reason.
-It is neither completed nor failed, so acceptance can still pass. The build
-status pane shows the integration checks as skipped (amber), not as a clean
-pass.
+It is neither completed nor failed. The aggregate acceptance remains `pending`
+with `passed: false` until required checks complete; an actual contract failure
+still makes it `failed`. A skipped smoke contributes no app-code repair
+diagnostic. Missing validation infrastructure must be restored before a build
+can become ready. There is no persisted-draft revalidation endpoint yet: run
+the build workflow to produce a new validated artifact; this may use model calls.
+No accepted snapshot
+digest is issued for an unverified candidate.
+
+Source refinement follows the same distinction. Every selected, applicable
+detected validation command must complete successfully. Unselected commands do
+not block that source-validation result; rejected, unavailable or truncated
+selected commands do. Static fallback checks retain their individual results,
+but syntax-only success is an aggregate `warning`, not readiness. Empty or
+all-skipped validation stays `skipped`. These outcomes preserve a reviewable
+draft without declaring it validated or eligible for promotion.
 
 **Not covered.** Module reactions, workflow triggers, pages and startup services
 are not exercised. Custom actions are called only when they carry an entitlement
@@ -762,6 +775,66 @@ The focused regression suites are `test_factory_auto_tool_acceptance.py`,
 `test_design_docs_bundle_persistence.py`, `test_subscription_contract_designer.py`,
 and `test_structured_output_runtime_contracts.py`. They complement, but do not
 replace, an authenticated live generated-app CRUD/refinement/export proof.
+
+## Scoped refinement candidates
+
+`validate_generated_app_candidate` in `mozaiksai.core.validation` connects the
+existing Factory acceptance and build validators for a complete, explicit file
+snapshot. The coding worker merges only approved changes into the saved baseline,
+validates that candidate, and persists a canonical bundle archive with its own
+acceptance and build results. Both must pass before the candidate is validated.
+Parent validation and source-index checks cannot certify a new candidate.
+
+Execution strategy comes from operator policy and the request, never a model's
+suggestion. `skip` runs neither acceptance nor build execution and cannot activate
+the candidate. Acceptance uses the existing local runtime load and smoke process;
+Docker/E2B isolates the subsequent compilation stage, not the whole acceptance
+pipeline. This entrypoint proves explicit bundle correctness. It does not replay
+Genesis task execution or manufacture task evidence from a refinement request.
+
+Saved archives use the same canonical identity and digest checks as normal builds.
+The existing Studio lifecycle registers the exact candidate for review; explicit
+acceptance and promotion remain separate from generating or validating edits.
+
+## App root route acceptance
+
+When `app.json` declares `startup.landing_spot: "/"`, a page declared at `/`
+renders through the shared component registry and route authentication wrapper.
+Authentication is required by default; only `meta.requiresAuth: false` makes a
+page public. A missing registered component reports the binding error instead of
+silently opening Chat.
+
+Chat remains the root fallback when the app declares no root page. The explicit
+`/chat/*` and `/app/*` routes retain their core chat owner. An explicit non-root
+landing spot retains its redirect from `/`.
+
+The browser regressions in `appJourneyStart.browser.test.js` exercise the actual
+renderer with declared routes, authentication states, and landing redirects.
+These isolated component tests do not qualify a generated app's preview,
+interactions, or persistence; those still require the generated bundle's live
+acceptance journey.
+
+## Saved build review
+
+Studio's app Build Review page loads the selected saved app bundle through the
+authenticated artifact bundle endpoint. It verifies the returned app, registry,
+and version binding before rendering the endpoint's registered Workbench through
+the shared UI-tool renderer. Opening or changing a selection does not resume a
+workflow or start a preview. Preview remains an explicit Workbench action.
+
+The existing Workbench owns scoped refinement and server-gated acceptance and
+activation. Saved review has no workflow export-confirmation response. Build
+history and preservation reports remain available in a disclosure; failed bundle
+loads offer a retry, and cancelled or stale selections cannot display another
+version's payload. Responsive browser fixtures exercise this composition with
+mocked HTTP boundaries; live preview and generated app behavior require their
+own acceptance evidence.
+
+Within the Workbench, a completed refinement retains its own files, validation
+and review identity when the original saved-version payload refreshes or a later
+request fails. Responses from a previously opened version cannot replace the
+current selection. Server-confirmed acceptance and activation show separate
+receipts; activation reports when an app restart is required.
 
 ## Remaining Gaps
 
