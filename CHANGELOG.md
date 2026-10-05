@@ -630,6 +630,10 @@ This project follows a practical pre-1.0 changelog format:
   renderer as standalone app saves.
 - AG2 knowledge-store writes are serialized per session so a delayed earlier
   snapshot cannot overwrite the active channel state needed after restart.
+- App planning rejects backend module work attached to an approved UI-only
+  surface before scheduling it. Planning guidance allows browser-only apps
+  without capability packs and distinguishes category hints from registered
+  providers while preserving the requested page behavior.
 
 - A copied `.env.example` now imports the hosts and points the local shell's
   API proxy at the backend; `mozaiks context index` passes its workspace key.
