@@ -122,11 +122,9 @@ def _page_paths(target_id: str, files: dict[str, str]) -> list[str]:
     for path in schema_paths:
         if path in files:
             try:
-                page = validate_page_schema(_mapping(files, path), expected_name=target_id)
+                validate_page_schema(_mapping(files, path), expected_name=target_id)
             except PageSchemaValidationError as exc:
                 raise ValueError(f"Invalid saved page schema: {path}") from exc
-            if page.name != target_id:
-                raise ValueError("Schema page identity must match exactly")
             candidates.append(path)
 
     if "ui/route_manifest.json" in files:
@@ -258,10 +256,11 @@ def _available_targets(files: dict[str, str], build_family: str, artifact_app_id
             identities.add(("module", parts[1]))
         if len(parts) == 3 and parts[0] == "workflows" and parts[2] == "orchestrator.yaml":
             identities.add(("workflow", parts[1]))
-        if path.startswith("ui/pages/") and path.endswith((".yaml", ".yml")):
-            name = _mapping(files, path).get("name")
-            if isinstance(name, str):
-                identities.add(("page", name))
+        if parts[:2] == ["ui", "pages"]:
+            if len(parts) == 3 and path.endswith((".yaml", ".yml")):
+                identities.add(("page", PurePosixPath(path).stem))
+            elif len(parts) == 4 and parts[3] in {"page.yaml", "page.yml"}:
+                identities.add(("page", parts[2]))
     if "app.json" in files and artifact_app_id:
         identities.add(("app", artifact_app_id))
     if "ui/route_manifest.json" in files:

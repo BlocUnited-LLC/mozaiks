@@ -1212,7 +1212,8 @@ def test_scope_confirmation_requires_pending_decision(monkeypatch, _owned_build_
     _owned_build_target.begin_refinement_run.assert_not_awaited()
 
 
-def test_studio_trigger_endpoint_returns_core_harness_decision_before_launch(monkeypatch):
+@pytest.mark.parametrize("extra_action", [None, "confirm_recommended_workflow", "run_recommended_workflow", "apply_proposed_scope"])
+def test_studio_trigger_endpoint_returns_core_harness_decision_before_launch(monkeypatch, extra_action):
     from mozaiksai.core.auth import reset_auth_adapter
 
     monkeypatch.setenv("AUTH_ENABLED", "false")
@@ -1262,6 +1263,7 @@ def test_studio_trigger_endpoint_returns_core_harness_decision_before_launch(mon
                     "artifact_version_id": "av_core_1",
                     "raw_user_request": "Add blockchain support to the product.",
                     "source_surface": "app_build",
+                    "extra": {"harness_action": {"action_id": extra_action}} if extra_action else {},
                 },
             },
         },
@@ -1270,11 +1272,12 @@ def test_studio_trigger_endpoint_returns_core_harness_decision_before_launch(mon
     assert response.status_code == 200
     assert response.json() == {
         "execution_mode": "harness_decision",
+        "build_registry_id": "appreg_1",
         "change_request_id": "cr_core_1",
         "revision_id": response.json()["revision_id"],
         "chat_id": None,
         "workflow_id": "ValueEngine",
-        "requested_workflow_id": "ValueEngine",
+        "requested_workflow_id": None,
         "websocket_url": None,
         "trigger_source": "refinement",
         "routing_explanation": "Core concept change detected for app bundle; restarting from ValueEngine.",
@@ -1304,6 +1307,13 @@ def test_studio_trigger_endpoint_returns_core_harness_decision_before_launch(mon
             },
         },
     }
+    snapshot = asyncio.run(studio_app.get_session_router().for_target("app_1").get_session_snapshot(
+        app_id="factory", user_id="demo-user",
+    ))
+    pending = snapshot["pending_harness_decision"]
+    assert pending["metadata"]["build_registry_id"] == "appreg_1"
+    assert pending["requested_workflow_id"] is None
+    assert "harness_action" not in pending["trigger_payload"]["refinement_request"]["extra"]
 
 
 @pytest.mark.parametrize("continuation", ["run_recommended_workflow", "confirm_recommended_workflow"])
@@ -1817,6 +1827,59 @@ def test_studio_artifact_review_marks_skipped_validation_as_override_required(mo
     assert body["review"]["actions"][0]["id"] == "accept"
     assert body["review"]["actions"][0]["enabled"] is False
     assert "Required checks have not passed" in body["review"]["actions"][0]["reason"]
+
+
+@pytest.mark.parametrize("endpoint", ["accept", "reject"])
+@pytest.mark.parametrize("archive_owner", ["parent", "child"])
+@pytest.mark.parametrize("damage", ["missing", "changed"])
+def test_review_mutations_verify_archives_before_changing_state(monkeypatch, tmp_path, endpoint, archive_owner, damage):
+    from mozaiksai.core.auth import reset_auth_adapter
+    from mozaiksai.hosts import studio
+
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+    reset_auth_adapter()
+    store = _build_review_store(tmp_path, lifecycle_status=ArtifactLifecycleStatus.DRAFT)
+    monkeypatch.setattr(studio, "get_artifact_store", lambda: store)
+    version = getattr(store, f"{archive_owner}_version")
+    archive = Path(version.commit_metadata.metadata["artifact_path"])
+    if damage == "missing":
+        archive.unlink()
+    else:
+        archive.write_bytes(archive.read_bytes() + b"unverified change")
+    before = store.child_version.model_dump(), store.session.model_dump()
+
+    response = TestClient(studio.app).post(f"/api/studio/build/artifacts/av_child_1/{endpoint}?build_registry_id=appreg_1")
+
+    assert response.status_code == 409, response.text
+    assert (store.child_version.model_dump(), store.session.model_dump()) == before
+    assert store.update_calls == []
+
+
+@pytest.mark.parametrize("endpoint", ["accept", "reject"])
+def test_review_mutations_reuse_verified_snapshot_for_response(monkeypatch, tmp_path, endpoint):
+    from mozaiksai.core.auth import reset_auth_adapter
+    from mozaiksai.hosts import studio
+
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+    reset_auth_adapter()
+    store = _build_review_store(tmp_path, lifecycle_status=ArtifactLifecycleStatus.DRAFT)
+    monkeypatch.setattr(studio, "get_artifact_store", lambda: store)
+    method_name = "accept_build_record" if endpoint == "accept" else "reject_artifact_version"
+    mutate = getattr(store, method_name)
+
+    async def mutate_then_change_archive(**kwargs):
+        result = await mutate(**kwargs)
+        for version in (store.parent_version, store.child_version):
+            Path(version.commit_metadata.metadata["artifact_path"]).write_bytes(b"changed after mutation")
+        return result
+
+    monkeypatch.setattr(store, method_name, mutate_then_change_archive)
+    response = TestClient(studio.app).post(f"/api/studio/build/artifacts/av_child_1/{endpoint}?build_registry_id=appreg_1")
+    assert response.status_code == 200, response.text
+    assert response.json()["review"]["changed_file_count"] == 1
+    assert "Builder Workspace" in response.json()["review"]["changed_files"][0]["diff_preview"]
 
 
 def test_studio_artifact_accept_endpoint_marks_current_and_updates_session(monkeypatch, tmp_path: Path):

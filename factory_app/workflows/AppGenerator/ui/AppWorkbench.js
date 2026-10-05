@@ -238,12 +238,10 @@ const AppWorkbench = ({
     return () => { cancelled = true; };
   }, [reviewArtifactVersionId, artifactQuery, buildRegistryId]);
 
-  const buildRefinementTriggerPayload = (harnessAction = null, overrideArtifactKind = null) => {
-    const resolvedArtifactKind = overrideArtifactKind || artifactKind;
-    const isThemeRefinement = overrideArtifactKind === 'theme_config';
+  const buildRefinementTriggerPayload = (isThemeRefinement = false) => {
     const triggerPayload = {
       refinement_request: {
-        artifact_kind: resolvedArtifactKind,
+        artifact_kind: artifactKind,
         artifact_key: artifactKey,
         artifact_version_id: artifactVersionId,
         raw_user_request: refinementRequest.trim(),
@@ -264,9 +262,7 @@ const AppWorkbench = ({
           parent_theme_config: parentTheme,
         };
       }
-      // Scope the coding request explicitly to theme files so the scope
-      // proposer is bypassed. Without this it would try to load a
-      // theme_config artifact from the store, which may not exist yet.
+      // The theme is a file in this saved app bundle, not a separate artifact.
       if (themeSource != null) {
         triggerPayload.coding_request = {
           files: { [THEME_FILE_PATH]: themeSource },
@@ -281,9 +277,6 @@ const AppWorkbench = ({
       triggerPayload.coding_request = {};
     }
 
-    if (harnessAction && typeof harnessAction === 'object') {
-      triggerPayload.harness_action = harnessAction;
-    }
     return triggerPayload;
   };
 
@@ -364,7 +357,7 @@ const AppWorkbench = ({
     const selection = selectionRef.current;
     refinementSelectionRef.current = selection;
     setPendingHarness(null);
-    const triggerPayload = buildRefinementTriggerPayload(null, 'theme_config');
+    const triggerPayload = buildRefinementTriggerPayload(true);
     const response = await startWorkflow(
       null,
       {},

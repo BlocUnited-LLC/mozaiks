@@ -563,6 +563,20 @@ def _build_bundle_diff_summary(
     return changed
 
 
+async def _verified_review_snapshots(*, app_id: str, version, artifact_store) -> dict[str, bytes]:  # noqa: ANN001
+    """Verify app archives before changing review state; reuse these bytes in the response."""
+    snapshots = {}
+    if version.build_family == "app_bundle":
+        snapshots[version.id] = await _verified_app_bundle(version)
+    if version.parent_build_record_id:
+        parent = await artifact_store.get_build_record(
+            app_id=app_id, build_record_id=version.parent_build_record_id,
+        )
+        if parent is not None and parent.build_family == "app_bundle":
+            snapshots[parent.id] = await _verified_app_bundle(parent)
+    return snapshots
+
+
 async def _build_artifact_review_payload(
     *,
     app_id: str,
@@ -570,7 +584,7 @@ async def _build_artifact_review_payload(
     artifact_store,
     verified_bundle_snapshots: dict[str, bytes] | None = None,
 ) -> dict[str, Any]:  # noqa: ANN001
-    # Promotion reuses the selected and parent records' verified snapshots.
+    # Review mutations reuse the selected and parent records' verified snapshots.
     snapshots = verified_bundle_snapshots or {}
     current_zip: bytes | Path | None = snapshots.get(version.id)
     if current_zip is None:
@@ -2056,6 +2070,9 @@ async def accept_build_artifact_version(
         version,
         action="accepted",
     )
+    verified_bundle_snapshots = await _verified_review_snapshots(
+        app_id=app_id, version=version, artifact_store=artifact_store,
+    )
 
     refinement_metadata = _refinement_metadata_from_version(version)
     refinement_review_record = _load_refinement_review_record_for_version(version)
@@ -2100,6 +2117,7 @@ async def accept_build_artifact_version(
         app_id=app_id,
         version=accepted,
         artifact_store=artifact_store,
+        verified_bundle_snapshots=verified_bundle_snapshots,
     )
     return {"accepted": True, "app_id": app_id, **payload}
 
@@ -2119,6 +2137,9 @@ async def reject_build_artifact_version(
         raise HTTPException(status_code=404, detail=f"Artifact version not found: {artifact_version_id}")
     if version.lifecycle_status != ArtifactLifecycleStatus.DRAFT:
         raise HTTPException(status_code=409, detail="Only draft artifact versions can be rejected.")
+    verified_bundle_snapshots = await _verified_review_snapshots(
+        app_id=app_id, version=version, artifact_store=artifact_store,
+    )
 
     rejected = await artifact_store.reject_artifact_version(
         app_id=app_id,
@@ -2145,6 +2166,7 @@ async def reject_build_artifact_version(
         app_id=app_id,
         version=refreshed,
         artifact_store=artifact_store,
+        verified_bundle_snapshots=verified_bundle_snapshots,
     )
     return {"rejected": True, "app_id": app_id, **payload}
 
@@ -2211,14 +2233,10 @@ async def promote_build_artifact_version(
             raise HTTPException(status_code=409, detail="Selected artifact is not the current build under review")
     refinement_metadata = _refinement_metadata_from_version(version)
 
-    bundle_bytes = await _verified_app_bundle(version)
-    verified_bundle_snapshots = {version.id: bundle_bytes}
-    if version.parent_build_record_id:
-        parent_version = await artifact_store.get_build_record(
-            app_id=app_id, build_record_id=version.parent_build_record_id,
-        )
-        if parent_version is not None and parent_version.build_family == "app_bundle":
-            verified_bundle_snapshots[parent_version.id] = await _verified_app_bundle(parent_version)
+    verified_bundle_snapshots = await _verified_review_snapshots(
+        app_id=app_id, version=version, artifact_store=artifact_store,
+    )
+    bundle_bytes = verified_bundle_snapshots[version.id]
     target_dir = _resolve_bundle_restore_target(version)
     try:
         restore_summary = _restore_bundle_to_target(bundle_bytes=bundle_bytes, target_dir=target_dir, workspace_layout=True)
@@ -2779,7 +2797,7 @@ async def trigger_workflow(
         # not from caller context or copied workbench metadata.
         safe_extra = {
             key: value for key, value in refinement_request.extra.items()
-            if key in {"harness_action", "change_request_id", "revision_id"}
+            if key in {"change_request_id", "revision_id"}
         }
         safe_extra["files_manifest"] = [entry.model_dump(mode="python") for entry in source_version.files_manifest]
         if metadata.get("workspace_dir"):
@@ -2858,6 +2876,9 @@ async def trigger_workflow(
                 )
             except ValueError as exc:
                 raise HTTPException(status_code=409, detail="This decision has already been handled or replaced. Submit the change again.") from exc
+            refinement_request = refinement_request.model_copy(update={"extra": {
+                **refinement_request.extra, "harness_action": {"action_id": action_id},
+            }})
         try:
             refinement_decision = await orchestration_control.route_refinement_request(refinement_request)
         except Exception as exc:
@@ -3064,11 +3085,7 @@ async def trigger_workflow(
     if persisted_change_request_id is not None:
         trigger_payload["change_request_id"] = persisted_change_request_id
 
-    confirmed_action = None
-    if refinement_request is not None:
-        maybe_action = refinement_request.extra.get("harness_action")
-        if isinstance(maybe_action, dict):
-            confirmed_action = str(maybe_action.get("action_id") or "").strip() or None
+    confirmed_action = action_id if refinement_request is not None else None
 
     should_return_harness_decision = (
         harness_decision is not None
@@ -3149,7 +3166,7 @@ async def trigger_workflow(
                     )
                     for action in harness_decision.actions
                 ],
-                metadata=dict(harness_decision.metadata or {}),
+                metadata={**(harness_decision.metadata or {}), "build_registry_id": build_registry_id},
             )
             pending_snapshot = await session_router.persist_revision_intent(
                 trigger=TriggerInput(
@@ -3172,11 +3189,12 @@ async def trigger_workflow(
             logger.warning("Failed to persist prelaunch revision intent: %s", session_err)
         return {
             "execution_mode": "harness_decision",
+            "build_registry_id": build_registry_id,
             "change_request_id": persisted_change_request_id,
             "revision_id": persisted_revision_id,
             "chat_id": None,
             "workflow_id": harness_decision.recommended_workflow_id or refinement_decision.workflow_id,
-            "requested_workflow_id": body.workflow_id or (harness_decision.recommended_workflow_id if harness_decision else None),
+            "requested_workflow_id": body.workflow_id,
             "websocket_url": None,
             "trigger_source": body.trigger_source,
             "routing_explanation": refinement_decision.explanation if refinement_decision is not None else "",

@@ -329,10 +329,10 @@ definitions:
       default: null
   coding_participation:
     type: string
-    description: Build participation mode selected at the transition checkpoint after theme capture.
+    description: Build participation mode selected at the transition checkpoint after theme capture; without an explicit choice, retain guided review.
     source:
       type: state
-      default: autonomous
+      default: guided
   design_docs_hitl:
     type: boolean
     description: True when the user selected a guided design-doc checkpoint before generation continues.

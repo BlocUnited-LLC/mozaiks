@@ -324,6 +324,13 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Refinement confirmations ignore unbound nested actions and retain the original
+  request, build and revision through ChatPage. Pending decisions normalize their
+  stored representation before conditional consumption. Accept and reject verify
+  app archives before mutating draft/session state, then reuse the verified bytes.
+  Schema-page edits use the file identity independently of the display name;
+  Workbench theme edits target the saved app bundle. Journeys without an explicit
+  participation choice retain guided reviews.
 - App-owned home pages now render at `/` through the existing authentication
   guard; apps without a declared home page retain the chat fallback.
 - Saved app builds open the shared preview, refinement and review workbench
@@ -366,7 +373,7 @@ This project follows a practical pre-1.0 changelog format:
   requests default to the app's own origin, and frontend build errors enter the
   existing bounded repair path or finish with a failure explanation.
 - Approved concept names now reach the existing Studio app registry through an
-  owner- and build-scoped update, preserving manual/imported names, app identity,
+  owner- and build-scoped update, preserving manually assigned names, app identity,
   lifecycle and history. Unnamed builds retain readable draft labels in the app
   directory until approval; existing saved records are not renamed retroactively.
 - Generated read actions retain Mongo `_id` when needed for record identity or
@@ -480,13 +487,13 @@ This project follows a practical pre-1.0 changelog format:
   of silently claiming success with files available on only one worker.
 - Required runtime checks that are skipped or unavailable leave generated-app
   acceptance pending. Partial source validation cannot pass, and exports require
-  a passed build for the accepted snapshot. Acceptance smoke scripts run the
+  a passed build status plus acceptance for the exported snapshot. Acceptance smoke scripts run the
   canonical validator instead of injecting skipped build results.
 - Existing-app discovery resumes the correct interview after human replies and
   completes only after its deterministic artifact save succeeds. Persistence
   failures terminate as failures instead of reporting successful discovery.
-  Typed plan-recording tools now write the selected adoption path and protect
-  the confirmed scope from replacement during artifact assembly.
+  Typed plan-recording tools now write the selected adoption path and reject
+  artifact assembly that omits confirmed capability IDs.
 - Workflow provider input retains the agent's prior replies after human
   confirmation and saved-channel reopen. A thin AG2 view adapter corrects the
   event shape consumed by provider mappers, preserving AG2 visibility and

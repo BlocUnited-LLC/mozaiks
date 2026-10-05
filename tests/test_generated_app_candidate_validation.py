@@ -1,15 +1,16 @@
 from __future__ import annotations
 
+from importlib import import_module
 from unittest.mock import AsyncMock
 
 import pytest
 
-from factory_app.workflows.AppGenerator.tools import app_validation
 from mozaiksai.core.validation import validate_generated_app_candidate
 
 
 @pytest.fixture
 def gates(monkeypatch):
+    app_validation = import_module("factory_app.workflows.AppGenerator.tools.app_validation")
     monkeypatch.setenv("MOZAIKS_APP_VALIDATION_STRATEGY", "docker")
     acceptance = AsyncMock(return_value={"status": "passed", "passed": True})
     build = AsyncMock(return_value={"validation_status": "passed", "validation_strategy": "docker"})
@@ -86,6 +87,7 @@ async def test_invalid_candidate_cannot_reach_execution(gates, files):
 
 @pytest.mark.asyncio
 async def test_explicit_build_files_keep_session_owner_metadata(monkeypatch):
+    app_validation = import_module("factory_app.workflows.AppGenerator.tools.app_validation")
     monkeypatch.setenv("MOZAIKS_APP_VALIDATION_STRATEGY", "docker")
     sandbox = AsyncMock(return_value={"validation_status": "passed"})
     monkeypatch.setattr(app_validation, "_run_sandbox_validation", sandbox)

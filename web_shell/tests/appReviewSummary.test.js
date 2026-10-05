@@ -120,7 +120,9 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
           {id:'download_complete', label:'Download Bundle', approved:true},
           {id:'close', label:'Return to editor'},
         ]} : {}),
-        generated_files:{'README.md':'Original contents', 'notes.md':'Original notes'}, app_validation_status:'passed',
+        generated_files:{'README.md':'Original contents', 'notes.md':'Original notes',
+          ...(new URLSearchParams(location.search).has('theme')
+            ? {'brand/theme_config.json':JSON.stringify({theme:{primary:'teal'}})} : {})}, app_validation_status:'passed',
         app_validation_strategy_used:'parent-only-strategy',
         app_validation_result:{warnings:['Parent evidence only']}, integration_tests_passed:true,
         integration_test_result:{passed:true, warnings:['Custom page bindings need review.']}};
@@ -211,6 +213,28 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
   t.after(() => new Promise(resolve => {server.closeAllConnections(); server.close(resolve);}));
   const browser = await chromium.launch({headless:true});
   t.after(() => browser.close());
+  await t.test('Redesign theme keeps saved bundle identity and exact theme file scope', async () => {
+    scenario = {decision:'apply_proposed_scope'};
+    requests.length = 0;
+    const page = await browser.newPage();
+    try {
+      await page.goto(`http://127.0.0.1:${server.address().port}/?theme=1`);
+      await page.getByRole('textbox', {name:'App change request'}).fill('Use a purple accent.');
+      await page.getByRole('button', {name:'Redesign theme', exact:true}).click();
+      await expect.poll(() => requests.filter(r => r.url==='/fixture-trigger').length).toBe(1);
+      const [workflow, context, options] = JSON.parse(requests.find(r => r.url==='/fixture-trigger').body);
+      assert.equal(workflow, null);
+      assert.deepEqual(context, {});
+      assert.equal(options.build_registry_id, 'owned-build');
+      const request = options.trigger_payload.refinement_request;
+      assert.equal(request.artifact_kind, 'app_bundle');
+      assert.equal(request.artifact_key, 'app_bundle');
+      assert.equal(request.artifact_version_id, 'baseline');
+      assert.deepEqual(request.extra.parent_theme_config, {theme:{primary:'teal'}});
+      assert.deepEqual(options.trigger_payload.coding_request.files,
+        {'brand/theme_config.json':JSON.stringify({theme:{primary:'teal'}})});
+    } finally { await page.close(); }
+  });
   await t.test('Entire app proposes scope; confirmation sends only displayed paths and binds the pending request', async () => {
     scenario = {decision:'apply_proposed_scope'};
     requests.length = 0;

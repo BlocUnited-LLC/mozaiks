@@ -3,39 +3,45 @@ from __future__ import annotations
 import asyncio
 import os
 from copy import deepcopy
+from dataclasses import asdict
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 
-from mozaiksai.core.session.model import PendingHarnessDecision
+from mozaiksai.core.session.model import PendingDecisionAction, PendingHarnessDecision, SessionState
 from mozaiksai.core.session.persistence import SessionStateStore
 from mozaiksai.core.session.router import SessionRouter
 from tests.test_session_router import _FakePersistence
 
 
-async def _pending_router(target="target-a", persistence=None):
+async def _pending_router(target="target-a", persistence=None, decision_overrides=None):
     persistence = persistence or _FakePersistence()
     store = SessionStateStore(persistence)
     router = SessionRouter(persistence=persistence, store=store, target_app_id=target)
+    await store.upsert(SessionState(
+        session_id=store.session_id_for_scope("host", "alice", target),
+        app_id="host", user_id="alice", target_app_id=target,
+        active_revision_id="rev-1", active_change_request_id="change-1",
+    ))
+    decision = PendingHarnessDecision(
+        decision_id="decision", decision_type="scope_selection", message="Apply these files",
+        rationale="Bounded patch", revision_id="rev-1", change_request_id="change-1",
+        selected_paths=["ui/main.jsx"], trigger_payload={"artifact_version_id": "artifact-1"},
+    )
+    for key, value in (decision_overrides or {}).items():
+        setattr(decision, key, deepcopy(value))
     snapshot = await router.mark_pending_harness_decision(
         app_id="host", user_id="alice",
-        pending_decision=PendingHarnessDecision(
-            decision_id="decision", decision_type="scope_selection", message="Apply these files",
-            rationale="Bounded patch", revision_id="rev-1", change_request_id="change-1",
-            selected_paths=["ui/main.jsx"], trigger_payload={"artifact_version_id": "artifact-1"},
-        ),
+        pending_decision=decision,
     )
-    state = await store.load(app_id="host", user_id="alice", target_app_id=target)
-    state.active_revision_id = "rev-1"
-    state.active_change_request_id = "change-1"
-    await store.upsert(state)
     return router, store, persistence, snapshot["pending_harness_decision"]
 
 
 @pytest.mark.asyncio
-async def test_two_confirmations_reading_same_decision_have_one_winner(monkeypatch):
-    router, store, _, _ = await _pending_router()
+@pytest.mark.parametrize("decision_overrides", [{}, {"rationale": "  Bounded patch\n", "journey_id": ""}])
+async def test_two_confirmations_reading_same_decision_have_one_winner(monkeypatch, decision_overrides):
+    router, store, _, pending = await _pending_router(decision_overrides=decision_overrides)
     barrier = asyncio.Barrier(2)
     original_load = store.load
 
@@ -48,6 +54,7 @@ async def test_two_confirmations_reading_same_decision_have_one_winner(monkeypat
     results = await asyncio.gather(*(
         router.resolve_pending_harness_decision(
             app_id="host", user_id="alice", decision_id="decision", action_id="apply_proposed_scope",
+            expected_pending_decision=pending,
         ) for _ in range(2)
     ), return_exceptions=True)
     assert sum(isinstance(result, dict) for result in results) == 1
@@ -55,6 +62,87 @@ async def test_two_confirmations_reading_same_decision_have_one_winner(monkeypat
     state = await original_load(app_id="host", user_id="alice", target_app_id="target-a")
     assert state.pending_harness_decision is None
     assert state.lifecycle_state.value == "active"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field,raw,normalized", [
+    ("message", "  Apply these files\n", "Apply these files"),
+    ("rationale", "\n Bounded patch \n", "Bounded patch"),
+    ("journey_id", "", None),
+    ("clarification_question", "  ", None),
+    ("requested_workflow_id", "", None),
+    ("recommended_workflow_id", " AppWorkbench ", "AppWorkbench"),
+    ("selected_paths", [" ui/main.jsx ", ""], ["ui/main.jsx"]),
+    ("actions", [PendingDecisionAction(
+        action_id=" apply_proposed_scope ", label=" Apply scope ",
+        action_type=" confirm_workflow ", workflow_id=" AppWorkbench ",
+        metadata={"original_request": "  keep user text\n"},
+    )], [{
+        "action_id": "apply_proposed_scope", "label": "Apply scope",
+        "action_type": "confirm_workflow", "workflow_id": "AppWorkbench",
+        "metadata": {"original_request": "  keep user text\n"},
+    }]),
+])
+async def test_pending_decision_write_reload_and_expected_snapshot_share_normalization(field, raw, normalized):
+    router, store, persistence, pending = await _pending_router(decision_overrides={field: raw})
+    coll = await persistence._coll("SessionRouterState")
+    saved = deepcopy(coll._docs[store.session_id_for_scope("host", "alice", "target-a")])
+    loaded = await store.load(app_id="host", user_id="alice", target_app_id="target-a")
+
+    result = await router.resolve_pending_harness_decision(
+        app_id="host", user_id="alice", decision_id="decision", action_id="apply_proposed_scope",
+        expected_pending_decision=pending,
+    )
+
+    assert result["pending_harness_decision"] is None
+    assert pending[field] == normalized
+    assert saved["pending_harness_decision"] == asdict(loaded.pending_harness_decision)
+    assert saved["pending_harness_decision"][field] == normalized
+    with pytest.raises(ValueError, match="No pending"):
+        await router.resolve_pending_harness_decision(app_id="host", user_id="alice", decision_id="decision")
+
+
+@pytest.mark.asyncio
+async def test_normalized_decision_is_consumable_without_client_snapshot():
+    router, _, _, _ = await _pending_router(decision_overrides={"rationale": " Bounded patch\n", "journey_id": ""})
+    result = await router.resolve_pending_harness_decision(
+        app_id="host", user_id="alice", decision_id="decision", accepted=False,
+    )
+    assert result["accepted"] is False
+    assert result["pending_harness_decision"] is None
+
+
+@pytest.mark.asyncio
+async def test_decision_normalization_preserves_opaque_payloads_and_build_binding():
+    original = {"request": "  keep user whitespace\n", "optional": "", "nested": {"value": " "}}
+    metadata = {**original, "build_registry_id": "build-123"}
+    router, store, _, pending = await _pending_router(decision_overrides={
+        "rationale": " Bounded patch\n", "metadata": metadata,
+        "context_variables": original, "trigger_payload": original,
+    })
+    loaded = await store.load(app_id="host", user_id="alice", target_app_id="target-a")
+    assert loaded.pending_harness_decision.metadata == pending["metadata"] == metadata
+    for field in ("context_variables", "trigger_payload"):
+        assert getattr(loaded.pending_harness_decision, field) == pending[field] == original
+    result = await router.resolve_pending_harness_decision(
+        app_id="host", user_id="alice", decision_id="decision", expected_pending_decision=pending,
+    )
+    assert result["pending_harness_decision"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["decision_id", "decision_type", "message", "rationale"])
+async def test_invalid_pending_decision_cannot_overwrite_existing_session(field):
+    router, store, persistence, _ = await _pending_router()
+    coll = await persistence._coll("SessionRouterState")
+    before = deepcopy(coll._docs)
+    state = await store.load(app_id="host", user_id="alice", target_app_id="target-a")
+    setattr(state.pending_harness_decision, field, " \n")
+    with pytest.raises(ValueError, match="Pending harness decision"):
+        await store.upsert(state)
+    assert coll._docs == before
+    snapshot = await router.get_session_snapshot(app_id="host", user_id="alice")
+    assert snapshot["pending_harness_decision"][field] == before[state.session_id]["pending_harness_decision"][field]
 
 
 @pytest.mark.asyncio
@@ -174,7 +262,8 @@ async def test_existing_transition_dismissal_consumer_uses_atomic_resolution(mon
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("second_accepted", [True, False])
-async def test_real_mongo_allows_one_confirmation_or_dismissal_winner(monkeypatch, second_accepted):
+@pytest.mark.parametrize("decision_overrides", [{}, {"rationale": "  Bounded patch\n", "journey_id": ""}])
+async def test_real_mongo_allows_one_confirmation_or_dismissal_winner(monkeypatch, second_accepted, decision_overrides):
     from motor.motor_asyncio import AsyncIOMotorClient
 
     uri = os.getenv("MONGO_URI")
@@ -196,7 +285,9 @@ async def test_real_mongo_allows_one_confirmation_or_dismissal_winner(monkeypatc
         async def collection(name=None):
             return database[name or "ChatSessions"]
 
-        router, store, _, pending = await _pending_router(persistence=SimpleNamespace(_coll=collection))
+        router, store, _, pending = await _pending_router(
+            persistence=SimpleNamespace(_coll=collection), decision_overrides=decision_overrides,
+        )
         original_load = store.load
         barrier = asyncio.Barrier(2)
 

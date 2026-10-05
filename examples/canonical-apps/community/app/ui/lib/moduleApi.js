@@ -26,9 +26,10 @@
  *     }
  */
 
-export const API_BASE =
+export const API_BASE = (
   (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL) ||
-  'http://localhost:8000'
+  ''
+).replace(/\/+$/, '')
 
 export function getAccessToken() {
   if (typeof window !== 'undefined' && window.mozaiksAuth?.getAccessToken) {
@@ -187,10 +188,8 @@ export async function startWorkflow(workflowName, contextVariables = {}) {
 }
 
 export function moduleWebSocketUrl(path, params = {}) {
-  const base = API_BASE.startsWith('https')
-    ? API_BASE.replace(/^https/, 'wss')
-    : API_BASE.replace(/^http/, 'ws')
-  const url = new URL(`${base.replace(/\/+$/, '')}${path}`)
+  const url = new URL(`${API_BASE}${path}`, window.location.origin)
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
   Object.entries(params).forEach(([key, value]) => {
     if (value !== undefined && value !== null && value !== '') {
       url.searchParams.set(key, value)

@@ -241,6 +241,15 @@ class SessionStateStore:
         )
 
     async def upsert(self, state: SessionState) -> None:
+        if state.pending_harness_decision is not None:
+            # Approval snapshots and atomic consumption must compare the same
+            # canonical decision that load() reconstructs from the document.
+            pending = _coerce_pending_harness_decision(
+                asdict(state.pending_harness_decision), fallback=state.updated_at,
+            )
+            if pending is None:
+                raise ValueError("Pending harness decision requires a nonempty id, type, message, and rationale")
+            state.pending_harness_decision = pending
         coll = await self._coll()
         payload: dict[str, Any] = asdict(state)
         payload["_id"] = state.session_id

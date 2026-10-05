@@ -374,6 +374,47 @@ def test_schema_page_uses_runtime_supported_source_layout(suffix):
     assert _resolve(files, target_id="projects") == ["ui/pages/projects" + suffix]
 
 
+@pytest.mark.parametrize("suffix", [".yaml", ".yml", "/page.yaml", "/page.yml"])
+def test_schema_page_display_name_preserves_runtime_file_identity(tmp_path, suffix):
+    from mozaiksai.core.runtime.app.page_schema import load_app_page_schemas
+
+    path = "ui/pages/support_tickets" + suffix
+    files = {path: yaml.safe_dump({
+        "schema_version": "mozaiks.app_page.v1", "name": "Support Tickets",
+        "route": "/support", "title": "Support", "page_type": "record_list",
+        "layout": "full-width", "sections": [{"id": "heading", "primitive": "PageHeader",
+                                                "config": {"title": "Support"}}],
+    })}
+    saved = tmp_path / path
+    saved.parent.mkdir(parents=True)
+    saved.write_text(files[path], encoding="utf-8")
+    assert list(load_app_page_schemas(tmp_path)) == ["support_tickets"]
+    assert _resolve(files, target_id="support_tickets") == [path]
+    with pytest.raises(ValueError):
+        _resolve(files, target_id="SupportTickets")
+
+
+@pytest.mark.asyncio
+async def test_schema_page_planner_advertises_runtime_identity_not_display_name():
+    files = _saved_bundle()
+    page = yaml.safe_load(files["ui/pages/projects.yaml"])
+    page["name"] = "Projects"
+    files["ui/pages/projects.yaml"] = yaml.safe_dump(page)
+    runner = _FakeAgentRunner(_make_classification(surfaces=[_entry(target_id="projects")]).model_dump())
+    planner = ContractSurfacePlanner(agent_runner=runner, config_loader=_enabled_contract_surface_config,
+                                     pack_loader=_planner_pack)
+    plan = await planner.propose(refinement_request=_planner_request(),
+                                 routing_decision=_planner_routing_decision(), workspace_files=files,
+                                 allowed_paths=["ui/pages/projects.yaml"])
+    assert plan.fallback_to_workflow is False
+    assert plan.surfaces[0].affected_paths == ["ui/pages/projects.yaml"]
+    prompt = runner.calls[0]["user_prompt"]
+    payload = json.loads(prompt.split("payload_json:\n", 1)[1].split("\n\nReturn", 1)[0])
+    assert {"kind": "page_binding", "target_kind": "page", "target_id": "projects",
+            "affected_paths": ["ui/pages/projects.yaml"]} in payload["available_targets"]
+    assert not any(target["target_id"] == "Projects" for target in payload["available_targets"])
+
+
 def test_schema_page_duplicate_realizations_rejected():
     files = _saved_bundle()
     files["ui/pages/projects/page.yaml"] = files["ui/pages/projects.yaml"]

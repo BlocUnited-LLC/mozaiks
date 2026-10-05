@@ -496,6 +496,10 @@ Both must persist their actual disposition before completing. Nonempty plans,
 collaborative mode, and missing or unknown modes retain their existing reviews.
 App validation, final artifact review, acceptance, and promotion gates still apply.
 
+DesignDocs defaults `coding_participation` to `guided`. Brownfield and refinement
+sequences that do not visit the participation selector therefore keep these
+reviews; an explicit upstream `autonomous` choice is preserved by context relay.
+
 ### Discovery human continuation
 
 `ExistingAppDiscovery/transition_graph.yaml` explicitly routes human replies

@@ -90,6 +90,14 @@ requires a new decision rather than reusing the previous approval. If execution
 fails after admission, the user submits a new request; the consumed approval is
 not restored.
 
+Only the bound top-level continuation action can confirm a request; a nested
+`refinement_request.extra.harness_action` is discarded. Pending decisions are
+normalized when written so displayed and reloaded values match the conditional
+consumption check. ChatPage retains the original requested workflow (including
+no selection), change request, revision and server-resolved build registry ID
+when submitting a saved decision. Existing malformed pre-production decisions
+must be reissued rather than bypassing confirmation.
+
 **Limit to selected file** is a hard boundary. Patches use the scoped coding
 worker; eligible design or feature requests use the existing surface planner,
 which must resolve every write to saved contracts within that selection. Core
@@ -105,6 +113,15 @@ Saved review labels its initial history selection **Starting version**. A new
 candidate remains in the Workbench for preview and review. Detailed model
 summaries and version identifiers are expandable; failures, validation blockers
 and review actions remain visible.
+
+Schema-page refinement uses the page file stem as its identity; the page's
+display name may differ. Workbench theme edits target the saved `app_bundle`
+and explicitly scope the request to `brand/theme_config.json`.
+
+Accept, reject and promote verify the selected app archive and its available
+parent archive before changing lifecycle state. Their review response reuses
+those verified bytes. An unavailable or changed archive therefore leaves the
+draft and refinement session unchanged.
 
 ---
 
@@ -136,6 +153,9 @@ returned only after the finalizer validates and saves the draft; incomplete
 validation becomes `partial`, and failure becomes `failed`. Exceptions and
 cancellation in either generation or finalization emit the corresponding
 terminal audit event. Tracking remains best-effort; saved records own the facts.
+Cleanup after ordinary request cancellation is shielded. Process termination
+past the server's shutdown grace period can still interrupt cleanup and leave a
+registry entry marked `building`; automatic startup reconciliation is not implemented.
 
 The workbench uses `coding_worker.metadata.build_record_id` or
 `surface_result.metadata.build_record_id` as its review target. Surface success

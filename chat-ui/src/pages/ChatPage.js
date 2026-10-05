@@ -1217,14 +1217,16 @@ const ChatPage = () => {
         || ''
       ).trim() || null,
       revision_id: String(source?.revision_id || base.revision_id || '').trim() || null,
+      build_registry_id: String(
+        source?.build_registry_id || source?.metadata?.build_registry_id || base.build_registry_id || ''
+      ).trim() || null,
       requires_confirmation: Boolean(
         source?.requires_confirmation ?? base.requires_confirmation ?? false
       ),
       trigger_source: String(source?.trigger_source || base.trigger_source || 'refinement').trim() || 'refinement',
       requested_workflow_id: String(
-        source?.requested_workflow_id
-        || base.requested_workflow_id
-        || ''
+        (source && Object.hasOwn(source, 'requested_workflow_id')
+          ? source.requested_workflow_id : base.requested_workflow_id) || ''
       ).trim() || null,
       journey_id: String(source?.journey_id || base.journey_id || '').trim() || null,
       context_variables: source?.context_variables && typeof source.context_variables === 'object'
@@ -1318,11 +1320,8 @@ const ChatPage = () => {
     }
 
     setPendingHarnessDecisionError(null);
-    const workflowId = action.workflow_id
-      || pendingHarnessDecision.recommended_workflow_id
-      || pendingHarnessDecision.requested_workflow_id
-      || currentWorkflowName
-      || null;
+    // Approval repeats the bound request; the server owns the chosen re-entry.
+    const workflowId = pendingHarnessDecision.requested_workflow_id || null;
     const contextVariables = {
       ...(pendingHarnessDecision.context_variables || {}),
     };
@@ -1332,16 +1331,17 @@ const ChatPage = () => {
         action_id: action.action_id,
       },
     };
-    if (pendingHarnessDecision.change_request_id && !triggerPayload.change_request_id) {
+    if (pendingHarnessDecision.change_request_id) {
       triggerPayload.change_request_id = pendingHarnessDecision.change_request_id;
     }
-    if (pendingHarnessDecision.revision_id && !triggerPayload.revision_id) {
+    if (pendingHarnessDecision.revision_id) {
       triggerPayload.revision_id = pendingHarnessDecision.revision_id;
     }
 
     const result = await startPendingHarnessWorkflow(workflowId, contextVariables, {
       trigger_source: pendingHarnessDecision.trigger_source || 'refinement',
       journey_id: pendingHarnessDecision.journey_id || null,
+      build_registry_id: pendingHarnessDecision.build_registry_id || null,
       app_id: currentAppId || null,
       user_id: currentUserId || null,
       trigger_payload: triggerPayload,
@@ -1365,8 +1365,8 @@ const ChatPage = () => {
           journey_id: pendingHarnessDecision.journey_id || null,
           context_variables: contextVariables,
           trigger_payload: triggerPayload,
-          change_request_id: triggerPayload.change_request_id || pendingHarnessDecision.change_request_id,
-          revision_id: triggerPayload.revision_id || pendingHarnessDecision.revision_id,
+          change_request_id: result.change_request_id || pendingHarnessDecision.change_request_id,
+          revision_id: result.revision_id || pendingHarnessDecision.revision_id,
         },
       );
       setPendingHarnessDecision(nextDecision);
@@ -1380,7 +1380,6 @@ const ChatPage = () => {
     buildPendingHarnessDecision,
     currentAppId,
     currentUserId,
-    currentWorkflowName,
     pendingHarnessDecision,
     pendingHarnessWorkflowStartError,
     startPendingHarnessWorkflow,
@@ -3705,8 +3704,11 @@ const ChatPage = () => {
                 triggerData.harness_decision,
                 {
                   trigger_source: triggerData.trigger_source || 'refinement',
-                  requested_workflow_id: triggerData.requested_workflow_id || triggerData.workflow_id || null,
+                  requested_workflow_id: null,
                   recommended_workflow_id: triggerData.workflow_id || null,
+                  build_registry_id: buildRegistryId,
+                  change_request_id: triggerData.change_request_id,
+                  revision_id: triggerData.revision_id,
                   journey_id: triggerData.journey_id || null,
                   context_variables: {},
                   trigger_payload: triggerPayload,
