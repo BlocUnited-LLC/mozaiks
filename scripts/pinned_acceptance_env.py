@@ -22,7 +22,10 @@ path. ``MOZAIKS_FACTORY_APP_PATH``, ``MOZAIKS_WORKFLOWS_PATH``,
 ``MOZAIKS_CHAT_UI_PATH`` and ``MOZAIKS_WEB_SHELL_PATH`` always point into the
 venv, and generated artifacts go to the evidence folder. The env file must set
 ``MONGO_URI``: the generated app's runtime check runs against that database,
-and when that check cannot run the export stays blocked.
+and when that check cannot run the export stays blocked. It must also choose
+how the host authenticates (for example ``AUTH_ENABLED=false``, which serves
+requests from this machine only): with no auth setting the host refuses to
+start.
 
 The proof runs in the venv's interpreter with the host's environment, after
 importing the host module. It records the origin of every package the mozaiks

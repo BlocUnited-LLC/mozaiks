@@ -81,6 +81,8 @@ Required shape:
   - `runtime_required_variables`
   - `runtime_optional_variables`
   - `public_variables`
+  - `runtime_env` (public apps only: exactly `{"AUTH_ANON_ACCESS": "public"}`;
+    rejected when `required=true`)
 - `image`
   - `image_name`
   - `tag_strategy`
@@ -234,6 +236,33 @@ is required. Required audience variables cannot be omitted or moved to optional
 metadata, and the generated environment examples must retain their required
 placeholders. These checks run again on the assembled bundle, so an edited
 deployment artifact cannot bypass validation by having been valid when rendered.
+
+### Public App Contract
+
+When `authRequired=false`, the app serves its visitors anonymously, without
+the development access an unauthenticated host otherwise gives requests from
+its own machine. The bundle declares that posture itself, so every deployment
+of it starts with it and none starts in implicit demo mode (which the runtime
+refuses):
+
+- `deployment.manifest.json` carries `auth.runtime_env` set to exactly
+  `{"AUTH_ANON_ACCESS": "public"}`; validation rejects any other value, and
+  rejects the key on an authenticated manifest
+- the root `Dockerfile` sets `ENV AUTH_ANON_ACCESS=public`
+- every `.env*.example` sets `AUTH_ANON_ACCESS=public`
+
+It is the only auth setting a public bundle carries. `AUTH_ENABLED=false` is
+deliberately not emitted: with only `AUTH_ANON_ACCESS`, an operator who adds a
+complete identity provider configuration turns authentication on. Visitors
+have no roles, carry only `AUTH_ANON_SCOPES` (or `access_as_user`), act only
+as themselves, and are subject to module permissions and entitlement gates.
+Admin pages of a public app need real authentication. The no-auth environment
+allowlist is unchanged, so a public app still leaves `ENV` unset rather than
+`production`. Authenticated bundles are unchanged.
+
+Bundles exported before this posture existed carry no `AUTH_ANON_ACCESS`;
+add `AUTH_ANON_ACCESS=public` to their environment before upgrading the
+runtime, or the host refuses to start.
 
 ### CI Workflow Secret Requirements
 

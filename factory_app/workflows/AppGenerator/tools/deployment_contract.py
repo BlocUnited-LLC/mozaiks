@@ -26,6 +26,12 @@ _TAG_STRATEGIES = {"commit_sha", "timestamp", "manual"}
 _BUILD_STATUSES = {"pending", "running", "succeeded", "failed"}
 _AUTH_PROVIDER_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _AUTH_RUNTIME_REQUIRED_ENV = ["AUTH_ENABLED", "AUTH_PROVIDER"]
+# A public app (no auth contract) serves its visitors anonymously, without the
+# development access an unauthenticated host otherwise grants to this machine.
+# The image declares that posture itself, so every deployment of the bundle
+# starts with it. It is the only auth setting the image carries: an operator
+# who adds identity-provider settings turns authentication on.
+_PUBLIC_APP_RUNTIME_ENV: dict[str, str] = {"AUTH_ANON_ACCESS": "public"}
 _AUTH_PROVIDER_AUDIENCE_ENV = {"jwt": "AUTH_AUDIENCE", "keycloak": "KEYCLOAK_CLIENT_ID"}
 _AUTH_RUNTIME_OPTIONAL_ENV = [
     "AUTH_ACCESS_TOKEN_TYPE_CLAIM",
@@ -168,7 +174,7 @@ def _auth_provider_name(value: str | None) -> str:
 def _auth_contract(*, auth_required: bool, auth_provider: str | None) -> dict[str, Any]:
     provider = _auth_provider_name(auth_provider)
     audience_env = _AUTH_PROVIDER_AUDIENCE_ENV.get(provider)
-    return {
+    contract: dict[str, Any] = {
         "required": bool(auth_required),
         "provider": provider,
         "runtime_required_variables": (
@@ -190,6 +196,23 @@ def _auth_contract(*, auth_required: bool, auth_provider: str | None) -> dict[st
             "are public build-time vars."
         ),
     }
+    if not auth_required:
+        contract["runtime_env"] = dict(_PUBLIC_APP_RUNTIME_ENV)
+    return contract
+
+
+def _auth_runtime_env_errors(auth: dict[str, Any]) -> list[str]:
+    """A declared runtime posture belongs to public apps and must be the canonical one."""
+    if "runtime_env" not in auth:
+        return []
+    if auth.get("required"):
+        return ["auth.runtime_env must be absent when auth.required=true"]
+    if auth.get("runtime_env") == _PUBLIC_APP_RUNTIME_ENV:
+        return []
+    return [
+        f"auth.runtime_env must be {json.dumps(_PUBLIC_APP_RUNTIME_ENV, sort_keys=True)} "
+        "when auth.required=false"
+    ]
 
 
 def _looks_like_url(value: Any) -> bool:
@@ -891,6 +914,7 @@ def validate_deploy_target_spec(spec: dict[str, Any]) -> list[str]:
                     errors.append("auth runtime required and optional variables must not overlap")
             elif _list_of_str(auth.get("runtime_required_variables")):
                 errors.append("auth.runtime_required_variables must be empty when auth.required=false")
+            errors.extend(_auth_runtime_env_errors(auth))
 
     image = spec.get("image") if isinstance(spec.get("image"), dict) else {}
     if not str(image.get("image_name") or "").strip():  # type: ignore[union-attr]
@@ -1042,6 +1066,7 @@ def validate_deployment_template_manifest(manifest: dict[str, Any]) -> list[str]
                         "auth.required manifests must include required_env entries: "
                         + ", ".join(missing_auth_required)
                     )
+            errors.extend(_auth_runtime_env_errors(auth))
 
     ci_secret_requirements = manifest.get("ci_secret_requirements")
     errors.extend(
@@ -1119,6 +1144,14 @@ def _render_env_example(spec: dict[str, Any], *, environment: str | None = None)
         else:
             lines.append(f"{key}=<required>")
 
+    runtime_env = _auth_runtime_env(spec)
+    if runtime_env:
+        lines.extend(["", "# Auth posture: public app, anonymous visitors without development access"])
+        if environment:
+            # No-auth postures run only where no deployed ENV is declared.
+            lines.append(f"# Leave ENV unset: AUTH_ANON_ACCESS=public is refused with ENV={environment}.")
+        lines.extend(f"{key}={value}" for key, value in runtime_env.items())
+
     if optional_env:
         lines.extend(["", "# Optional variables"])
         for key in optional_env:
@@ -1143,10 +1176,16 @@ def _render_env_examples(spec: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def _auth_runtime_env(spec: dict[str, Any]) -> dict[str, str]:
+    runtime_env = _dict_or_empty(_dict_or_empty(spec.get("auth")).get("runtime_env"))
+    return {str(key): str(value) for key, value in runtime_env.items()}
+
+
 def _render_dockerfile(spec: dict[str, Any]) -> str:
     runtime = spec.get("runtime") if isinstance(spec.get("runtime"), dict) else {}
     port = int(runtime.get("container_port") or DEFAULT_RUNTIME_PORT)  # type: ignore[union-attr]
     start_command = json.dumps(_platform_start_command(port), separators=(",", ":"))
+    runtime_env = _auth_runtime_env(spec)
     return "\n".join(
         [
             "FROM python:3.13-slim",
@@ -1154,6 +1193,11 @@ def _render_dockerfile(spec: dict[str, Any]) -> str:
             "COPY requirements.txt ./",
             "RUN pip install --no-cache-dir -r requirements.txt",
             "COPY . .",
+            *(
+                [f"ENV {' '.join(f'{key}={value}' for key, value in runtime_env.items())}"]
+                if runtime_env
+                else []
+            ),
             f"EXPOSE {port}",
             f"CMD {start_command}",
             "",

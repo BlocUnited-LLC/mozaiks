@@ -23,7 +23,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from mozaiksai.core.auth import UserPrincipal, WebSocketUser
-from mozaiksai.core.auth.adapters import registry as auth_registry
+from mozaiksai.core.auth.dependencies import is_shared_development_identity
 from mozaiksai.core.auth.websocket_auth import verify_user_owns_resource
 from mozaiksai.core.transport.ui_events import UIDisplayMode, UIUpdateData
 
@@ -411,12 +411,10 @@ class UIToolsMixin:
         if not session or not session.get("user_id") or not session.get("app_id"):
             return False
         if not verify_user_owns_resource(principal.user_id, session["user_id"]):
-            # HTTP permits anonymous local/demo access; WS identities stay path-bound.
-            if (
-                not isinstance(principal, UserPrincipal)
-                or principal.user_id != "anonymous"
-                or auth_registry.is_auth_enabled()
-            ):
+            # Only the shared HTTP development identity (this machine, or
+            # AUTH_ANON_ACCESS=open) may answer for another user; anonymous
+            # visitors and WS identities stay bound to themselves.
+            if not is_shared_development_identity(principal):
                 return False
         if not principal.validate_app_id(session["app_id"]) or not principal.validate_chat_id(event_chat_id):
             return False

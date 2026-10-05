@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from mozaiksai.core.auth import UserPrincipal, optional_user
 from mozaiksai.core.auth.adapters.registry import is_auth_enabled
-from mozaiksai.core.auth.dependencies import validate_path_app_id
+from mozaiksai.core.auth.dependencies import ANONYMOUS_ACCESS_REFUSAL_STATE, validate_path_app_id
 from mozaiksai.core.metrics.usage_instrumentation import record_action_invocation
 from mozaiksai.core.runtime.composition.module_authority import (
     ModuleDispatchAuthority,
@@ -334,8 +334,23 @@ async def _execute_module_action(
 
     environment = environment or module_dispatch_environment()
     auth_enabled = environment.authentication_enabled
-    if auth_enabled and principal is None and not _is_public_module_action(request, module_name, action_name):
+    # No principal is a caller without credentials, whatever the auth mode:
+    # with authentication off, optional_user returns None only when the
+    # anonymous access policy refused the request, and says why.
+    if principal is None and not _is_public_module_action(request, module_name, action_name):
+        refusal = getattr(getattr(request, "state", None), ANONYMOUS_ACCESS_REFUSAL_STATE, None)
+        if refusal is not None:
+            raise HTTPException(status_code=refusal.status_code or 403, detail=refusal.detail)
         raise HTTPException(status_code=401, detail="Missing authorization token")
+    # Development access is a property of the principal minted for this
+    # request (core/auth/anonymous_access.py), never of the process-wide auth
+    # mode: an anonymous visitor of an unauthenticated host is bound to its
+    # own identity and enforced exactly like an authenticated caller.
+    development_access = (
+        not auth_enabled
+        and isinstance(principal, UserPrincipal)
+        and principal.has_local_development_access
+    )
 
     # Snapshot authenticated claims before host scope hooks receive the mutable
     # UserPrincipal. Requested workspace selection remains separate metadata.
@@ -355,15 +370,16 @@ async def _execute_module_action(
         or "default"
     )
 
-    # HTTP query-string user_id is an authenticated override only. In local
-    # no-auth mode, optional_user already resolves the stable anonymous/dev
-    # principal, and trusted callers that need an explicit execution user pass
-    # context_overrides directly instead of relying on external query params.
+    # HTTP query-string user_id is a bound-identity override only. With
+    # development access, optional_user already resolves the stable
+    # anonymous/dev principal, and trusted callers that need an explicit
+    # execution user pass context_overrides directly instead of relying on
+    # external query params.
     requested_user_id = context_overrides.get("user_id")
-    if requested_user_id is None and auth_enabled:
+    if requested_user_id is None and not development_access:
         requested_user_id = request.query_params.get("user_id")
     if (
-        auth_enabled
+        not development_access
         and principal is not None
         and requested_user_id
         and str(requested_user_id).strip() != str(principal.user_id)
@@ -442,13 +458,13 @@ async def _execute_module_action(
             actor_id=str(user_id) if user_id else None,
             permissions=tuple(dispatch_scope.get("permissions") or []),
         )
-    # When auth is disabled (dev/local mode), optional_user still returns an
-    # anonymous principal so downstream code has a stable user shape. Treat all
-    # such module HTTP calls as trusted local dispatch so module permission
-    # declarations don't block the Studio admin UI. In production
-    # (AUTH_ENABLED=true), non-public HTTP callers must carry a token with
-    # explicit scopes that become the enforce-mode authority's permissions.
-    elif not auth_enabled:
+    # A request granted development access (authentication off, and this
+    # machine or AUTH_ANON_ACCESS=open) is trusted local dispatch so module
+    # permission declarations don't block the Studio admin UI. Everyone else is
+    # enforced: authenticated callers with their token's scopes, and anonymous
+    # callers (visitors of an unauthenticated host, or public actions without a
+    # token) as public HTTP with the scopes their principal carries.
+    elif development_access:
         authority = ModuleDispatchAuthority(
             kind="local_development",
             permission_mode="trusted_bypass",
@@ -458,7 +474,7 @@ async def _execute_module_action(
     else:
         authority_kind = cast(
             ModuleDispatchAuthorityKind,
-            "authenticated_user" if principal is not None else "public_http",
+            "authenticated_user" if principal is not None and auth_enabled else "public_http",
         )
         authority = ModuleDispatchAuthority(
             kind=authority_kind,

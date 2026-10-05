@@ -92,10 +92,21 @@ class PersistencePrincipal:
 
     @classmethod
     def _development(cls, user_id: str) -> PersistencePrincipal | None:
-        from mozaiksai.core.auth.adapters.registry import is_auth_enabled
-        from mozaiksai.core.environment import environment_permits_no_auth
+        """Ownership identity of an unauthenticated principal.
 
-        if not environment_permits_no_auth() or is_auth_enabled():
+        Only an explicit disable in an environment that permits it qualifies;
+        implicit demo mode owns nothing. The user id is the principal's: a
+        caller-named user only with development access, otherwise the fixed
+        anonymous visitor id.
+        """
+        from mozaiksai.core.auth.adapters import AuthError
+        from mozaiksai.core.auth.adapters.registry import resolve_auth_config
+
+        try:
+            config = resolve_auth_config()
+        except AuthError:
+            return None
+        if not (config.explicitly_disabled and config.environment.permits_no_auth):
             return None
         logger.warning(
             "PERSISTENCE_DEVELOPMENT_PRINCIPAL user_id=%s workspace_id=development", user_id,

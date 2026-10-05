@@ -39,6 +39,7 @@ from mozaiksai.core.auth import (
     require_user_scope,
 )
 from mozaiksai.core.auth.dependencies import (
+    is_shared_development_identity,
     validate_path_app_id,
     validate_path_id,
 )
@@ -814,6 +815,16 @@ async def trigger_workflow(
     """Create a runtime workflow session for programmatic callers."""
     validate_path_id(workflow_name, "workflow_name")
     _validate_internal_api_key(request)
+    # Without an internal key this programmatic route is open to any principal,
+    # so with authentication off an anonymous visitor (AUTH_ANON_ACCESS=public)
+    # must not start runs: only a validated token or development access may.
+    if not os.getenv("INTERNAL_API_KEY", "").strip() and not (
+        principal.is_authenticated or principal.has_local_development_access
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Workflow trigger requires an internal API key or development access",
+        )
 
     from mozaiksai.core.workflow.workflow_manager import workflow_manager
 
@@ -1247,7 +1258,7 @@ async def handle_component_action(
     if simple_transport is None:
         raise HTTPException(status_code=503, detail="Transport service is not available")
 
-    if principal.user_id != "anonymous":
+    if not is_shared_development_identity(principal):
         coll = await _chat_coll()
         owned = await coll.find_one(
             {"_id": chat_id, "user_id": principal.user_id, **build_app_scope_filter(app_id)},

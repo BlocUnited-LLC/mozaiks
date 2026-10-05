@@ -164,6 +164,40 @@ This project follows a practical pre-1.0 changelog format:
   DesignDocs validates canonical field types and defaults at save time and gives
   required array/object fields an empty default; the generated record id is
   `<entity>_id`, never a natural `search_by` key.
+- A host running without authentication gives development access (the
+  anonymous user's roles, dev personas, trusted module dispatch, acting for
+  other users) only to requests from its own machine by default. A request
+  counts as local only when it comes straight from a loopback address with no
+  forwarding header, its `Host` and `Origin` (when present) name this machine,
+  and, without an `Origin`, fetch metadata does not mark it as cross-site, so
+  pages on other websites cannot use a local browser that sends fetch metadata
+  to get development access (see the authentication setup guide). Other
+  requests get no development access: routes that need an identity refuse
+  them, and routes that need none serve them as requests without credentials.
+  The web shell's dev proxy marks requests from other machines, so the backend
+  treats them the same way. Open local apps at `http://localhost:<port>` or
+  `http://127.0.0.1:<port>`. A container reached through a published port needs
+  `AUTH_ANON_ACCESS=open`, with the port published on `127.0.0.1` only (see the
+  self-hosting guide). Rebuild `mozaiks-sandbox:local` and any E2B preview
+  template from this release so previews pick up the change.
+- A host with no authentication configuration at all no longer starts in an
+  implicit demo mode. It refuses to start and names the choices: configure an
+  identity provider, set `AUTH_ENABLED=false` (this machine only), or set
+  `AUTH_ANON_ACCESS=public`. `mozaiks serve` and `mozaiks studio --open` refuse
+  the same configurations before anything starts, and also refuse
+  `AUTH_ANON_ACCESS=local` on a `--listen` address other machines can reach.
+- Anonymous visitors of a public app (`AUTH_ANON_ACCESS=public`) and app
+  previews run without development access: no roles, only `AUTH_ANON_SCOPES`
+  (or `access_as_user`), their own user id only, and module permissions and
+  entitlement gates enforced. Visitors share one identity: they see and
+  change each other's chats and per-user records, and their entitlement gates
+  are checked against it. They get no admin, Studio
+  management or billing fulfillment access, and the programmatic workflow
+  trigger needs an internal API key for them.
+- With authentication on, a validated token whose subject is literally
+  `anonymous` acts only as itself. It no longer names the user a request acts
+  for or sees other owners' chats and sessions; only the development identity
+  of a host without authentication does.
 
 - Module entitlement gates are keyed only by the caller's verified identity:
   the token's user, the tenant the token is bound to, and the workspace the
@@ -242,6 +276,29 @@ This project follows a practical pre-1.0 changelog format:
   that gates apply only with authentication on, that `assignment_store` needs
   `user_id_field: user_id` for per-user plans and a data alias declared in
   `data/contract.json`, and give a `reactions.yaml` example that loads.
+- New setting `AUTH_ANON_ACCESS` (`local`, `public` or `open`) decides whom a
+  host without authentication serves. `local` is the default once
+  authentication is explicitly off. `public` serves every client as an
+  anonymous visitor without development access; Studio refuses it, and it
+  cannot be combined with `AUTH_ANON_ROLES`. `open` gives every client that can
+  connect development access, and the host logs a warning at startup. Set on
+  its own, `AUTH_ANON_ACCESS` turns authentication off unless a complete
+  identity provider is configured, which turns it on. Unknown values are
+  refused, and a deployed `ENV` (anything but the local names) still refuses
+  every posture.
+- Generated public apps declare `AUTH_ANON_ACCESS=public` in their `Dockerfile`
+  (`ENV`), in every `.env*.example`, and in the deployment manifest
+  (`auth.runtime_env`). Authenticated apps' artifacts are unchanged. Public
+  bundles exported earlier must add `AUTH_ANON_ACCESS=public` to their
+  environment before upgrading, or the host refuses to start.
+- `infra/compose/docker-compose.yml` publishes the app port through
+  `MOZAIKS_APP_PORTS` (unset: `8000:8000`, as before). To run the stack without
+  authentication, set `AUTH_ENABLED=false`, `AUTH_ANON_ACCESS=open` and
+  `MOZAIKS_APP_PORTS=127.0.0.1:8000:8000`. The repository's
+  `scripts/run-backend.ps1` and `scripts/run-frontend.ps1` bind `127.0.0.1` by
+  default; pass `-BindHost` to change it.
+- Studio's integrations summary reports the authentication mode from the
+  runtime's own auth resolution.
 
 ### Fixed
 
@@ -949,6 +1006,14 @@ This project follows a practical pre-1.0 changelog format:
   detached process on 127.0.0.1; `stop` ends it by PID. The host gets an
   explicit environment (operating-system variables, one named env file, and
   path variables pointing into the venv) and reads no `.env` file.
+
+### Removed
+
+- With authentication off, an anonymous user without roles no longer passes
+  the admin check. Admin requires the `admin` role or the email allowlist.
+  Workspaces scaffolded without `AUTH_ANON_ROLES` add
+  `AUTH_ANON_ROLES=admin,user` to `.env` to keep the admin pages on their own
+  machine; the refusal says so.
 
 ## 0.2.0 - 2026-09-18
 

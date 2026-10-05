@@ -68,11 +68,17 @@ async def test_module_context_user_id_override_reaches_executor(monkeypatch):
         lambda: SimpleNamespace(call_module_scope=_scope),
     )
 
+    # The principal optional_user mints, with authentication off, for a
+    # request granted development access (a request it refuses gets None).
+    development = module_router.UserPrincipal(
+        user_id="anonymous", email=None, name=None, roles=[], scopes=["access_as_user"],
+        raw_claims={}, provider="none", auth_provenance="local_development",
+    )
     result = await module_router._execute_module_action(
         module_name="workspace_support",
         action_name="create_support_request",
         request=request,
-        principal=None,
+        principal=development,
         params={"message": "help"},
         context_overrides={"app_id": "mozaiks-factory", "user_id": "demo-user"},
     )
@@ -80,6 +86,19 @@ async def test_module_context_user_id_override_reaches_executor(monkeypatch):
     assert result == {"ok": True, "user_id": "demo-user"}
     assert executor.requests[0].app_id == "mozaiks-factory"
     assert executor.requests[0].user_id == "demo-user"
+
+    # No principal is a caller without credentials, with authentication off too.
+    with pytest.raises(module_router.HTTPException) as refused:
+        await module_router._execute_module_action(
+            module_name="workspace_support",
+            action_name="create_support_request",
+            request=request,
+            principal=None,
+            params={"message": "help"},
+            context_overrides={"app_id": "mozaiks-factory", "user_id": "demo-user"},
+        )
+    assert refused.value.status_code == 401
+    assert len(executor.requests) == 1
 
 
 def test_reconcile_reserved_params_keeps_declared_user_id_and_skips_context_promotion():

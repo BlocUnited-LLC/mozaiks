@@ -11,7 +11,7 @@ from typing import Any
 from urllib.error import URLError
 from urllib.request import urlopen
 
-from mozaiks_cli.unauthenticated_bind import unauthenticated_bind_warning
+from mozaiks_cli.unauthenticated_bind import assess_unauthenticated_start
 from mozaiks_cli.workspace import load_workspace_dotenv, resolve_active_app_root
 from mozaiksai.resources import (
     resolve_chat_ui_root,
@@ -202,24 +202,29 @@ def launch_studio(
     """Start (or reuse) the Studio backend and frontend for ``workspace_root``.
 
     Both servers listen on ``bind_host``: loopback by default, because local
-    development runs with authentication off, where any request can act as any
-    user with any role. On any other address, a warning says so before the
-    first server starts.
+    development runs with authentication off and development access is
+    granted only to requests from this machine (``AUTH_ANON_ACCESS=local``).
+    A configuration the backend would refuse, or ``local`` on any other
+    address, is refused before either server starts; ``open`` on such an
+    address is a warning.
     """
     web_shell_root = resolve_web_shell_root()
     host_name = "studio" if preferred_host == "auto" else preferred_host
     app_module = _resolve_backend_app_module(host_name)
     env = _workspace_env(workspace_root, host=host_name)
     # The backend runs in a child process that receives exactly ``env``.
-    exposure_warning = unauthenticated_bind_warning(
-        bind_host, environ=env, env_file=workspace_root / ".env"
+    start = assess_unauthenticated_start(
+        bind_host, environ=env, env_file=workspace_root / ".env", host=host_name
     )
+    if start.refusal is not None:
+        raise RuntimeError(start.refusal)
+    exposure_notice = start.notice
 
     def warn_about_exposure_once() -> None:
-        nonlocal exposure_warning
-        if exposure_warning is not None:
-            print(exposure_warning, file=sys.stderr, flush=True)
-            exposure_warning = None
+        nonlocal exposure_notice
+        if exposure_notice is not None:
+            print(exposure_notice, file=sys.stderr, flush=True)
+            exposure_notice = None
 
     local_host = _loopback_host(bind_host)
     backend_origin = f"http://{local_host}:{backend_port}"
@@ -289,8 +294,11 @@ def launch_studio(
             str(frontend_port),
             "--strictPort",
         ]
-        # The dev server proxies /api to the backend, so it exposes the same
-        # unauthenticated API even when the backend was already running.
+        # The dev server proxies /api and /ws to the backend, so it exposes the
+        # same API even when the backend was already running. Its proxy marks
+        # clients that are not on this machine (web_shell/vite.config.js
+        # markRemoteClients), so the backend's per-request locality check
+        # still refuses them.
         warn_about_exposure_once()
         frontend_log = _process_log_path(workspace_root, "frontend")
         frontend_process = _spawn_process(

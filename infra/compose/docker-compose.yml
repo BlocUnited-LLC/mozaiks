@@ -97,11 +97,18 @@ services:
     env_file:
       - ../../.env
     ports:
-      - "8000:8000"
+      # Every interface by default (authentication is on by default). Set
+      # MOZAIKS_APP_PORTS=127.0.0.1:8000:8000 to publish on this machine only.
+      - "${MOZAIKS_APP_PORTS:-8000:8000}"
       #433: "443:443"   # Uncomment if using HTTPS
     environment:
       # Keycloak auth — enabled when Keycloak is healthy.
-      # Set AUTH_ENABLED=false in the Compose --env-file for local no-auth mode.
+      # For local no-auth mode set AUTH_ENABLED=false, AUTH_ANON_ACCESS=open and
+      # MOZAIKS_APP_PORTS=127.0.0.1:8000:8000 in the Compose --env-file.
+      # Your browser reaches the container through Docker's gateway, not as the
+      # container's own machine, so local no-auth mode needs AUTH_ANON_ACCESS=open,
+      # and the 127.0.0.1 publish keeps other machines out (every container on
+      # the same Docker network can still connect).
       # The imported browser client adds the distinct mozaiks-api audience to
       # access tokens. See docs/guides/self-hosting.md.
       AUTH_ENABLED: ${AUTH_ENABLED:-true}

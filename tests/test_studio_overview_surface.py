@@ -37,7 +37,7 @@ async def test_platform_app_exposes_console_routes_only_on_studio_surface(monkey
     console_pages = {page.get("path"): page for page in studio_shell.get("pages", [])}
     platform_paths = {page.get("path") for page in platform_shell.get("pages", [])}
 
-    assert 'build_shell_config(surface="studio")' in studio_source
+    assert 'build_shell_config(surface="studio", client_scope=request.scope)' in studio_source
     assert "os.getenv" not in inspect.getsource(studio_app.get_studio_shell_config)
     assert "STUDIO_SHELL_ROUTES" not in platform_source
     assert "/usage" in console_pages

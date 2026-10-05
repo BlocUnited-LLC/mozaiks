@@ -11,13 +11,14 @@ import os
 import stat
 import zipfile
 from asyncio import to_thread
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from difflib import unified_diff
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Literal
 from uuid import uuid4
 
-from fastapi import BackgroundTasks, Depends, HTTPException
+from fastapi import BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, TypeAdapter, ValidationError
 
@@ -81,6 +82,7 @@ from mozaiksai.core.artifacts import (
     get_artifact_store,
 )
 from mozaiksai.core.auth import UserPrincipal, require_user_scope
+from mozaiksai.core.auth.anonymous_access import ANONYMOUS_PROVENANCE, STUDIO_PUBLIC_MESSAGE
 from mozaiksai.core.auth.dependencies import validate_path_id
 from mozaiksai.core.dashboard import load_dashboard_manifest
 from mozaiksai.core.data.persistence import ConnectorStore
@@ -122,6 +124,7 @@ from mozaiksai.core.session.model import (
 )
 from mozaiksai.core.session.router import configure_session_router, get_session_router
 from mozaiksai.core.session.trigger_routing import TriggerRoutingContribution
+from mozaiksai.core.startup.validation import require_management_auth_posture
 from mozaiksai.core.studio.scope import resolve_studio_scope
 from mozaiksai.core.workflow.generator_support.connector_health import run_connector_health_check
 from mozaiksai.core.workflow.generator_support.connector_service import (
@@ -142,6 +145,27 @@ from mozaiksai.hosts.runtime import register_app_lifespan
 
 app = platform_app.app
 register_repo_host_bootstrap(app, "studio")
+
+
+def _register_management_auth_posture_check(target_app) -> None:
+    """Refuse an auth posture Studio cannot serve before any other startup work.
+
+    It wraps the whole composed lifespan, so Studio's own message (no
+    ``AUTH_ANON_ACCESS=public`` among the choices) comes before the runtime's
+    generic startup checks. Request-level refusal: :func:`require_studio_user`.
+    """
+    existing_lifespan = target_app.router.lifespan_context
+
+    @asynccontextmanager
+    async def _management_auth_posture_lifespan(app_instance):
+        require_management_auth_posture()
+        async with existing_lifespan(app_instance):
+            yield
+
+    target_app.router.lifespan_context = _management_auth_posture_lifespan
+
+
+_register_management_auth_posture_check(app)
 register_app_lifespan(app, preview_sessions_lifespan)
 logger = get_workflow_logger("studio_app")
 
@@ -679,6 +703,37 @@ def register_studio_platform_hooks(registry: Any | None = None) -> None:
 
 register_studio_platform_hooks()
 
+
+async def require_studio_user(
+    principal: UserPrincipal = Depends(require_user_scope),
+) -> UserPrincipal:
+    """The caller of a Studio management route, never an anonymous visitor.
+
+    Studio manages workspaces, builds and connectors for whoever calls it. Its
+    startup refuses AUTH_ANON_ACCESS=public; this refuses a visitor
+    principal on every request too, so a Studio composed without its
+    lifespan cannot serve visitors either.
+    """
+    _refuse_anonymous_visitor(principal)
+    return principal
+
+
+def _refuse_anonymous_visitor(principal: UserPrincipal) -> None:
+    if principal.auth_provenance == ANONYMOUS_PROVENANCE:
+        raise HTTPException(status_code=403, detail=STUDIO_PUBLIC_MESSAGE)
+
+
+def _resolve_studio_preview_scope(principal: UserPrincipal) -> tuple[str, str]:
+    """Studio scope for the preview sandbox routes and websocket.
+
+    Studio composes them from the shared router factory, whose routes take
+    their principal from require_user_scope (or the websocket), so the
+    visitor refusal of require_studio_user happens here.
+    """
+    _refuse_anonymous_visitor(principal)
+    return _resolve_studio_scope(principal)
+
+
 def _resolve_studio_scope(
     principal: UserPrincipal,
     *,
@@ -697,15 +752,15 @@ def _resolve_studio_scope(
 
 
 @app.get("/api/shell-config")
-async def get_studio_shell_config():
-    return await build_shell_config(surface="studio")
+async def get_studio_shell_config(request: Request):
+    return await build_shell_config(surface="studio", client_scope=request.scope)
 
 
 @app.get("/api/studio/dashboard")
 async def get_studio_dashboard_config(
     scope: Literal["workspace", "app"] | None = None,
     app_id: str | None = None,
-    principal: UserPrincipal = Depends(require_user_scope),
+    principal: UserPrincipal = Depends(require_studio_user),
 ):
     resolved_app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
     manifest = load_dashboard_manifest(resolve_app_root())
@@ -723,7 +778,7 @@ async def get_studio_dashboard_config(
 async def get_app_overview(
     app_id: str | None = None,
     build_registry_id: str | None = None,
-    principal: UserPrincipal = Depends(require_user_scope),
+    principal: UserPrincipal = Depends(require_studio_user),
 ):
     if build_registry_id is not None:
         resolved_app_id, user_id = await _resolve_studio_artifact_scope(
@@ -757,7 +812,7 @@ async def get_app_overview(
 
 @app.get("/api/studio/apps")
 async def get_workspace_apps(
-    principal: UserPrincipal = Depends(require_user_scope),
+    principal: UserPrincipal = Depends(require_studio_user),
 ):
     _, user_id = _resolve_studio_scope(principal)
     app_root = resolve_app_root()
@@ -792,7 +847,7 @@ class CreateWorkspaceAppRequest(BaseModel):
 @app.post("/api/studio/apps")
 async def create_workspace_app(
     body: CreateWorkspaceAppRequest,
-    principal: UserPrincipal = Depends(require_user_scope),
+    principal: UserPrincipal = Depends(require_studio_user),
 ):
     host_app_id, user_id = _resolve_studio_scope(principal)
     return await _get_app_registry_service().create_app_record(
@@ -804,7 +859,7 @@ async def create_workspace_app(
 @app.delete("/api/studio/apps/{build_registry_id}")
 async def delete_workspace_app(
     build_registry_id: str,
-    principal: UserPrincipal = Depends(require_user_scope),
+    principal: UserPrincipal = Depends(require_studio_user),
 ):
     _, user_id = _resolve_studio_scope(principal)
     try:
@@ -900,7 +955,7 @@ def _analytics_funnel_for_record(record: dict[str, Any]) -> FunnelDef | None:
 @app.get("/api/studio/analytics/portfolio")
 async def get_studio_analytics_portfolio(
     period: str = "30d",
-    principal: UserPrincipal = Depends(require_user_scope),
+    principal: UserPrincipal = Depends(require_studio_user),
 ):
     """World View analytics across every app the caller owns."""
 
@@ -930,7 +985,7 @@ async def get_studio_analytics_portfolio(
 async def get_studio_analytics_app(
     app_id: str,
     period: str = "30d",
-    principal: UserPrincipal = Depends(require_user_scope),
+    principal: UserPrincipal = Depends(require_studio_user),
 ):
     """App View analytics for one owned app, including movement and funnel."""
 
@@ -952,7 +1007,7 @@ async def get_studio_analytics_metric_detail(
     app_id: str,
     metric_id: str,
     period: str = "30d",
-    principal: UserPrincipal = Depends(require_user_scope),
+    principal: UserPrincipal = Depends(require_studio_user),
 ):
     """Drill-down detail for one metric on one owned app."""
 
@@ -987,7 +1042,7 @@ async def get_studio_analytics_metric_detail(
 @app.get("/api/studio/integrations")
 async def get_app_integrations(
     app_id: str | None = None,
-    principal: UserPrincipal = Depends(require_user_scope),
+    principal: UserPrincipal = Depends(require_studio_user),
 ):
     app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
     return await build_integrations_summary(app_id=app_id)
@@ -996,7 +1051,7 @@ async def get_app_integrations(
 @app.get("/api/studio/integrations/connectors")
 async def get_integration_connectors(
     app_id: str | None = None,
-    principal: UserPrincipal = Depends(require_user_scope),
+    principal: UserPrincipal = Depends(require_studio_user),
 ):
     app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
     connectors = await list_connectors(scope=ConnectorStore.SCOPE_APP, scope_id=app_id)
@@ -1154,7 +1209,7 @@ def _plan_from_operator_payload(payload: dict[str, Any]) -> RefinementExecutionP
 @app.get("/api/studio/apps/{app_id}/context")
 async def get_studio_app_context_status(
     app_id: str,
-    principal: UserPrincipal = Depends(require_user_scope),
+    principal: UserPrincipal = Depends(require_studio_user),
 ):
     validate_path_id(app_id, "app_id")
     resolved_app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
@@ -1205,7 +1260,7 @@ async def index_studio_app_intelligence_context(
     app_id: str,
     body: AppIntelligenceIndexRequest,
     background_tasks: BackgroundTasks,
-    principal: UserPrincipal = Depends(require_user_scope),
+    principal: UserPrincipal = Depends(require_studio_user),
 ):
     validate_path_id(app_id, "app_id")
     resolved_app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
@@ -1222,7 +1277,7 @@ async def import_studio_app_source_context(
     app_id: str,
     body: AppIntelligenceIndexRequest,
     background_tasks: BackgroundTasks,
-    principal: UserPrincipal = Depends(require_user_scope),
+    principal: UserPrincipal = Depends(require_studio_user),
 ):
     validate_path_id(app_id, "app_id")
     resolved_app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
@@ -1237,7 +1292,7 @@ async def import_studio_app_source_context(
 @app.get("/api/studio/apps/{app_id}/context/app-intelligence/index/latest")
 async def get_latest_studio_app_intelligence_index_job(
     app_id: str,
-    principal: UserPrincipal = Depends(require_user_scope),
+    principal: UserPrincipal = Depends(require_studio_user),
 ):
     validate_path_id(app_id, "app_id")
     resolved_app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
@@ -1249,7 +1304,7 @@ async def get_latest_studio_app_intelligence_index_job(
 async def get_studio_app_intelligence_index_job(
     app_id: str,
     job_id: str,
-    principal: UserPrincipal = Depends(require_user_scope),
+    principal: UserPrincipal = Depends(require_studio_user),
 ):
     validate_path_id(app_id, "app_id")
     validate_path_id(job_id, "job_id")
@@ -1264,7 +1319,7 @@ async def get_studio_app_intelligence_index_job(
 async def run_studio_app_source_validation(
     app_id: str,
     body: AppSourceValidationRequest,
-    principal: UserPrincipal = Depends(require_user_scope),
+    principal: UserPrincipal = Depends(require_studio_user),
 ):
     validate_path_id(app_id, "app_id")
     if not body.confirm_execution:
@@ -1472,7 +1527,7 @@ def _studio_context_readiness(*, summary: Any, graph_status: dict[str, Any], lat
 async def create_studio_app_context_refresh_plan(
     app_id: str,
     body: AppContextRefreshPlanRequest,
-    principal: UserPrincipal = Depends(require_user_scope),
+    principal: UserPrincipal = Depends(require_studio_user),
 ):
     validate_path_id(app_id, "app_id")
     resolved_app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
@@ -1514,7 +1569,7 @@ async def create_studio_app_context_refresh_plan(
 async def launch_studio_app_context_refresh(
     app_id: str,
     body: AppContextRefreshLaunchRequest,
-    principal: UserPrincipal = Depends(require_user_scope),
+    principal: UserPrincipal = Depends(require_studio_user),
 ):
     validate_path_id(app_id, "app_id")
     if not body.confirm_launch:
@@ -1545,7 +1600,7 @@ async def launch_studio_app_context_refresh(
 async def complete_studio_app_context_refresh(
     app_id: str,
     body: AppContextRefreshCompleteRequest,
-    principal: UserPrincipal = Depends(require_user_scope),
+    principal: UserPrincipal = Depends(require_studio_user),
 ):
     validate_path_id(app_id, "app_id")
     resolved_app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
@@ -1573,7 +1628,7 @@ async def complete_studio_app_context_refresh(
 async def create_studio_app_context_policy_override(
     app_id: str,
     body: AppContextPolicyOverrideRequest,
-    principal: UserPrincipal = Depends(require_user_scope),
+    principal: UserPrincipal = Depends(require_studio_user),
 ):
     validate_path_id(app_id, "app_id")
     resolved_app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
@@ -1620,7 +1675,7 @@ async def create_studio_app_context_policy_override(
 async def create_or_update_integration_connector(
     body: IntegrationConnectorCreateRequest,
     app_id: str | None = None,
-    principal: UserPrincipal = Depends(require_user_scope),
+    principal: UserPrincipal = Depends(require_studio_user),
 ):
     app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
     record = None
@@ -1686,7 +1741,7 @@ async def patch_integration_connector(
     service: str,
     body: IntegrationConnectorPatchRequest,
     app_id: str | None = None,
-    principal: UserPrincipal = Depends(require_user_scope),
+    principal: UserPrincipal = Depends(require_studio_user),
 ):
     validate_path_id(service, "service")
     app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
@@ -1731,7 +1786,7 @@ async def patch_integration_connector(
 async def check_integration_connector_health(
     service: str,
     app_id: str | None = None,
-    principal: UserPrincipal = Depends(require_user_scope),
+    principal: UserPrincipal = Depends(require_studio_user),
 ):
     validate_path_id(service, "service")
     app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
@@ -1759,7 +1814,7 @@ async def check_integration_connector_health(
 async def remove_integration_connector(
     service: str,
     app_id: str | None = None,
-    principal: UserPrincipal = Depends(require_user_scope),
+    principal: UserPrincipal = Depends(require_studio_user),
 ):
     validate_path_id(service, "service")
     app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
@@ -1796,7 +1851,7 @@ async def download_build_artifact(
     artifact_version_id: str,
     build_registry_id: str,
     app_id: str | None = None,
-    principal: UserPrincipal = Depends(require_user_scope),
+    principal: UserPrincipal = Depends(require_studio_user),
 ):
     validate_path_id(artifact_version_id, "artifact_version_id")
     target_app_id, _ = await _resolve_studio_artifact_scope(
@@ -1823,7 +1878,7 @@ async def download_build_artifact(
 
 @app.get("/api/studio/build/history")
 async def get_build_history(
-    principal: UserPrincipal = Depends(require_user_scope),
+    principal: UserPrincipal = Depends(require_studio_user),
     app_id: str | None = None,
     build_registry_id: str | None = None,
     build_family: str | None = None,
@@ -1857,7 +1912,7 @@ async def get_build_artifact_bundle(
     artifact_version_id: str,
     app_id: str | None = None,
     build_registry_id: str | None = None,
-    principal: UserPrincipal = Depends(require_user_scope),
+    principal: UserPrincipal = Depends(require_studio_user),
 ):
     validate_path_id(artifact_version_id, "artifact_version_id")
     host_app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
@@ -1921,7 +1976,7 @@ async def get_build_artifact_review(
     artifact_version_id: str,
     app_id: str | None = None,
     build_registry_id: str | None = None,
-    principal: UserPrincipal = Depends(require_user_scope),
+    principal: UserPrincipal = Depends(require_studio_user),
 ):
     validate_path_id(artifact_version_id, "artifact_version_id")
     app_id, _ = await _resolve_studio_artifact_scope(principal, app_id=app_id, build_registry_id=build_registry_id)
@@ -1954,7 +2009,7 @@ async def accept_build_artifact_version(
     body: BuildArtifactAcceptanceRequest | None = None,
     app_id: str | None = None,
     build_registry_id: str | None = None,
-    principal: UserPrincipal = Depends(require_user_scope),
+    principal: UserPrincipal = Depends(require_studio_user),
 ):
     validate_path_id(artifact_version_id, "artifact_version_id")
     app_id, _ = await _resolve_studio_artifact_scope(principal, app_id=app_id, build_registry_id=build_registry_id)
@@ -2026,7 +2081,7 @@ async def reject_build_artifact_version(
     artifact_version_id: str,
     app_id: str | None = None,
     build_registry_id: str | None = None,
-    principal: UserPrincipal = Depends(require_user_scope),
+    principal: UserPrincipal = Depends(require_studio_user),
 ):
     validate_path_id(artifact_version_id, "artifact_version_id")
     app_id, _ = await _resolve_studio_artifact_scope(principal, app_id=app_id, build_registry_id=build_registry_id)
@@ -2080,7 +2135,7 @@ async def promote_build_artifact_version(
     body: BuildArtifactPromotionRequest | None = None,
     app_id: str | None = None,
     build_registry_id: str | None = None,
-    principal: UserPrincipal = Depends(require_user_scope),
+    principal: UserPrincipal = Depends(require_studio_user),
 ):
     validate_path_id(artifact_version_id, "artifact_version_id")
     app_id, user_id = await _resolve_studio_artifact_scope(principal, app_id=app_id, build_registry_id=build_registry_id)
@@ -2233,7 +2288,7 @@ async def restore_artifact_version(
     body: BuildRestoreRequest,
     app_id: str | None = None,
     build_registry_id: str | None = None,
-    principal: UserPrincipal = Depends(require_user_scope),
+    principal: UserPrincipal = Depends(require_studio_user),
 ):
     """Materialize a selected app version outside the running host workspace."""
     app_id, _ = await _resolve_studio_artifact_scope(principal, app_id=app_id, build_registry_id=build_registry_id)
@@ -2298,7 +2353,7 @@ async def restore_artifact_version(
 async def get_build_surface(
     app_id: str | None = None,
     build_registry_id: str | None = None,
-    principal: UserPrincipal = Depends(require_user_scope),
+    principal: UserPrincipal = Depends(require_studio_user),
 ):
     if build_registry_id is not None:
         app_id, user_id = await _resolve_studio_artifact_scope(
@@ -2352,7 +2407,7 @@ class BuildSaveRequest(BaseModel):
 async def save_build_surface(
     request: BuildSaveRequest,
     app_id: str | None = None,
-    principal: UserPrincipal = Depends(require_user_scope),
+    principal: UserPrincipal = Depends(require_studio_user),
 ):
     app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
     if request.change_class and request.request_kind != "refinement":
@@ -2549,7 +2604,7 @@ async def _fail_inline_refinement(*, binding: RunBuildBinding, user_id: str) -> 
 @app.post("/api/workflows/trigger")
 async def trigger_workflow(
     body: WorkflowTriggerRequest,
-    principal: UserPrincipal = Depends(require_user_scope),
+    principal: UserPrincipal = Depends(require_studio_user),
 ):
     app_id, user_id = _resolve_studio_scope(principal, app_id=body.app_id, user_id=body.user_id)
     retry_contribution = None
@@ -3179,7 +3234,7 @@ async def _resolve_preview_artifact(
     return target_app_id, files
 
 
-app.include_router(create_sandbox_router(resolve_scope=_resolve_studio_scope, resolve_artifact=_resolve_preview_artifact))
+app.include_router(create_sandbox_router(resolve_scope=_resolve_studio_preview_scope, resolve_artifact=_resolve_preview_artifact))
 
 
 app.router.routes[:] = sorted(

@@ -37,7 +37,7 @@ def test_studio_host_exposes_build_endpoint_and_console_routes() -> None:
     assert '@app.put("/api/studio/apps/{build_registry_id}/status")' not in studio_source
     assert '@app.get("/api/studio/build")' in studio_source
     assert '@app.put("/api/studio/build")' in studio_source
-    assert 'build_shell_config(surface="studio")' in studio_source
+    assert 'build_shell_config(surface="studio", client_scope=request.scope)' in studio_source
     assert '"path": "/apps/new"' in manifest_source
     assert '"path": "/usage"' in manifest_source
     assert '"path": "/integrations"' in manifest_source

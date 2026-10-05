@@ -199,22 +199,33 @@ class TestValidateUserIdAgainstPrincipal:
         assert result == "user-123"
 
     def test_anonymous_falls_back_to_path_id(self):
-        p = _principal(user_id="anonymous")
+        p = _principal(user_id="anonymous", auth_provenance="local_development")
         result = validate_user_id_against_principal(p, path_user_id="supplied-id")
         assert result == "supplied-id"
 
     def test_anonymous_falls_back_to_body_id(self):
-        p = _principal(user_id="anonymous")
+        p = _principal(user_id="anonymous", auth_provenance="local_development")
         result = validate_user_id_against_principal(p, body_user_id="body-id")
         assert result == "body-id"
 
     def test_anonymous_no_id_raises_400(self):
         from fastapi import HTTPException
 
-        p = _principal(user_id="anonymous")
+        p = _principal(user_id="anonymous", auth_provenance="local_development")
         with pytest.raises(HTTPException) as exc_info:
             validate_user_id_against_principal(p)
         assert exc_info.value.status_code == 400
+
+    def test_anonymous_visitor_cannot_name_another_user(self):
+        """The id "anonymous" alone is no authority: a visitor acts as itself."""
+        from fastapi import HTTPException
+
+        p = _principal(user_id="anonymous", auth_provenance="anonymous")
+        assert validate_user_id_against_principal(p) == "anonymous"
+        assert validate_user_id_against_principal(p, body_user_id="anonymous") == "anonymous"
+        with pytest.raises(HTTPException) as exc_info:
+            validate_user_id_against_principal(p, path_user_id="victim")
+        assert exc_info.value.status_code == 403
 
 
 # ---------------------------------------------------------------------------

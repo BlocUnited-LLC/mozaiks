@@ -4,19 +4,55 @@ Mozaiks uses a pluggable auth adapter system that works with any auth provider.
 
 ## Quick Start
 
-### Demo Mode (No Auth)
+### Running Without Authentication
 
-For local development or demos, disable auth entirely:
+A host with no authentication configuration at all refuses to start and names
+the choices below. To run without authentication, say so explicitly:
 
 ```bash
 AUTH_ENABLED=false
 ```
 
-All requests become anonymous users. No tokens required.
+Setting `AUTH_ANON_ACCESS` on its own is also an explicit choice, unless
+identity-provider settings are present: those turn authentication on, while
+`AUTH_ENABLED=false` keeps it off whatever else is set (and the host warns
+about the provider settings it ignores). Generated public apps ship
+`AUTH_ANON_ACCESS=public` this way.
+
+No tokens are required, and `AUTH_ANON_ACCESS` decides whom the host serves:
+
+| `AUTH_ANON_ACCESS` | Who is served | What they get |
+|---|---|---|
+| `local` (default) | requests from this machine only. Every other request gets no development access: routes that need an identity refuse it (HTTP 403, WebSocket closed with 1008), and routes that need none serve it like a request without credentials | development access: the anonymous user with `AUTH_ANON_ROLES` and the development scopes, dev personas (below), trusted module dispatch |
+| `public` | every client | an anonymous visitor: no roles, `AUTH_ANON_SCOPES` or `access_as_user` only, its own user id only, module permissions and entitlements enforced. Visitors share one identity: they see and change each other's chats and per-user records, and entitlements are checked against it. For public apps and their previews; Studio refuses it, and it cannot be combined with `AUTH_ANON_ROLES` |
+| `open` | every client that can reach the host | development access, as for `local`. Use it only where the network itself limits who can connect, for example a container whose port is published only on `127.0.0.1` (the host browser reaches a container through Docker's gateway, not as this machine) |
+
+A request is from this machine only when all of these hold, and the refusal
+names the one that failed:
+
+- its peer is a loopback address (IPv4, IPv6, or IPv4-mapped IPv6);
+- it carries no `X-Forwarded-For`, `X-Real-IP` or `Forwarded` header at all.
+  `local` is for a host your browser reaches directly; behind a reverse proxy
+  use authentication, `public` or `open`. The web shell's dev server adds
+  `X-Forwarded-For` only for clients on other machines;
+- its `Host` header, if any, names this machine: `localhost`, a `.localhost`
+  name, or a loopback IP literal. Open the app at `http://localhost:<port>` or
+  `http://127.0.0.1:<port>`, not at a name that merely resolves to 127.0.0.1;
+- its `Origin` header, if any, is an `http`/`https` origin on such a host, so
+  pages from other sites cannot use your browser to reach the host;
+- without an `Origin` header, it does not carry `Sec-Fetch-Site: cross-site`.
+  Browsers send no `Origin` on cross-site image and script loads or
+  navigations, which are GET requests, and some GET routes change state
+  (module dispatch, `/api/me`). Browsers without fetch metadata do not send
+  the header, so this rule cannot stop them.
+
+`mozaiks serve` and `mozaiks studio` refuse `local` on a `--listen` address
+other machines can reach.
 
 For local user-to-user testing, such as DM notifications, keep auth disabled
 but assign each browser profile a different dev persona. The no-auth dependency
-accepts these request-scoped overrides only when `AUTH_ENABLED=false`:
+accepts these request-scoped overrides only for requests with development
+access (`AUTH_ENABLED=false`, and this machine or `AUTH_ANON_ACCESS=open`):
 
 - Header: `X-Mozaiks-Dev-User-Id: dev_alice`
 - Cookie: `mozaiks_dev_user_id=dev_alice`
@@ -153,7 +189,8 @@ If `AUTH_PROVIDER` is not set, the system auto-detects based on environment vari
 | `KEYCLOAK_URL` + `KEYCLOAK_REALM` | `keycloak` |
 | `AUTH_JWKS_URL` + `AUTH_ISSUER` | `jwt` |
 | `MOZAIKS_OIDC_AUTHORITY` or `MOZAIKS_OIDC_DISCOVERY_URL` | `jwt` |
-| Nothing | `none` (demo mode) |
+| `AUTH_ANON_ACCESS` only (no provider above) | `none` (explicit, with that posture) |
+| Nothing | `none` (implicit demo mode: hosts refuse to start) |
 
 Resolution is canonical and fails closed. One parser
 (`mozaiksai.core.auth.adapters.registry.resolve_auth_config`) interprets the
@@ -191,11 +228,22 @@ adapter cache, and startup validation consume that same interpretation:
   `staging-eu`, `production-east`, `preview`, `qa`, or any custom value — an
   unrecognized environment never inherits development privilege. Unknown
   environments may still boot normally with authentication configured.
-- Demo mode (`none` without explicit disablement) applies only when no auth
-  configuration is present at all, in an environment that permits no-auth.
-  Security-sensitive bypasses (such as the billing fulfillment ingress)
-  additionally require *explicit* disablement — `AUTH_ENABLED=false` or
-  `AUTH_PROVIDER=none` — and are not available in implicit demo mode.
+- Implicit demo mode (`none` without explicit disablement) applies only when
+  no auth configuration is present at all. It serves nobody: hosts refuse to
+  start in it, whatever `MOZAIKS_STARTUP_CHECKS` says, and a request that
+  reaches one anyway (a host composed without its lifespan) is refused with
+  HTTP 401. Resolution itself still succeeds, so request-time predicates keep
+  working in processes that configure no auth.
+- Development privileges are bound to the principal when it is created, never
+  read from the process-wide auth switch. Anonymous roles, dev personas,
+  trusted module dispatch, naming other users, and the local branch of the
+  billing fulfillment ingress need a principal with development access
+  (`has_local_development_access`): an explicit disablement, an environment
+  that permits it, `AUTH_ANON_ACCESS` `local` or `open`, and, for `local`, a
+  request from this machine. Admin needs the `admin` role or the email
+  allowlist; authentication being off no longer lets a principal without
+  roles into the admin API. With development access and no `admin` role the
+  refusal says to set `AUTH_ANON_ROLES=admin,user`.
 
 ### ENV / ENVIRONMENT resolution
 
@@ -303,8 +351,10 @@ construction without the snapshot.
 Privileged HTTP surfaces can additionally require authenticated provenance:
 `UserPrincipal.is_authenticated` is true only for principals produced by
 validating a real bearer token against the configured adapter. Anonymous
-demo principals and request-scoped dev personas may carry admin-looking
-roles/scopes, but they are never authenticated provenance.
+principals with development access and request-scoped dev personas may carry
+admin-looking roles/scopes, but they are never authenticated provenance.
+`has_local_development_access` is true only for those two; an anonymous
+visitor (`AUTH_ANON_ACCESS=public`) has neither.
 
 ---
 

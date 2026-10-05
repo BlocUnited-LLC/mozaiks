@@ -239,26 +239,34 @@ class TestExtractToken:
 # ---------------------------------------------------------------------------
 
 class TestValidateUserIdAgainstPrincipal:
+    # The shared development identity: anonymous with development access.
     def test_anonymous_with_path_user_id(self):
-        p = _principal(user_id="anonymous")
+        p = _principal(user_id="anonymous", auth_provenance="local_development")
         result = validate_user_id_against_principal(p, path_user_id="user-abc")
         assert result == "user-abc"
 
     def test_anonymous_with_body_user_id_only(self):
-        p = _principal(user_id="anonymous")
+        p = _principal(user_id="anonymous", auth_provenance="local_development")
         result = validate_user_id_against_principal(p, body_user_id="user-xyz")
         assert result == "user-xyz"
 
     def test_anonymous_path_preferred_over_body(self):
-        p = _principal(user_id="anonymous")
+        p = _principal(user_id="anonymous", auth_provenance="local_development")
         result = validate_user_id_against_principal(p, path_user_id="path-id", body_user_id="body-id")
         assert result == "path-id"
 
     def test_anonymous_with_neither_raises_400(self):
-        p = _principal(user_id="anonymous")
+        p = _principal(user_id="anonymous", auth_provenance="local_development")
         with pytest.raises(HTTPException) as exc_info:
             validate_user_id_against_principal(p)
         assert exc_info.value.status_code == 400
+
+    def test_anonymous_visitor_is_bound_to_itself(self):
+        p = _principal(user_id="anonymous", auth_provenance="anonymous")
+        assert validate_user_id_against_principal(p) == "anonymous"
+        with pytest.raises(HTTPException) as exc_info:
+            validate_user_id_against_principal(p, body_user_id="user-xyz")
+        assert exc_info.value.status_code == 403
 
     def test_authenticated_returns_jwt_user_id(self):
         p = _principal(user_id="jwt-user-1")
