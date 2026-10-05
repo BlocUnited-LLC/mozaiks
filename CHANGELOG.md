@@ -427,8 +427,10 @@ This project follows a practical pre-1.0 changelog format:
   collection and no gate the default plan withholds restricts it. The scanner
   reads only the app root the runtime binds, reports surface values the loader
   rejects, and returns findings instead of raising on a malformed data or
-  module contract. Its reading of module code is bounded, so scan time no
-  longer grows superlinearly on large files. On a recorded generated app, six
+  module contract. Its reading of module code is bounded, so a loop that
+  reassigns one name no longer makes a scan take minutes. A single function
+  holding thousands of chained assignments still scans slowly, with a correct
+  result. On a recorded generated app, six
   high findings for owner-scoped create, read, update, delete and a paid
   summary no longer appear. Dispatch tests on a real database check the
   verdicts for owner-scoped, per-workspace, shared, cross-module and no-sign-in
