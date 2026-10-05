@@ -72,7 +72,8 @@ jobs:
           test -d "$ANDROID_HOME/platforms/android-36"
           java -version
           ./gradlew --no-daemon assembleDebug
-          sha256sum app/build/outputs/apk/debug/app-debug.apk > ../apk.sha256
+          cd ..
+          sha256sum android/app/build/outputs/apk/debug/app-debug.apk > apk.sha256
       - name: Retain packaging evidence
         uses: actions/upload-artifact@v7
         with:
