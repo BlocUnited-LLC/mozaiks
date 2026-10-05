@@ -31,12 +31,13 @@ required_checks:
       Action permissions must be a list of ids that resolve to module.yaml permissions entries. An
       action without permissions needs one unless its api_surface is exactly public or
       public_readonly, exactly internal with an explicit empty permissions list, or absent or null
-      in an app whose app.json authRequired and valid config/auth.yaml declare sign-in, when every
-      collection its module reaches is per_user or per_workspace with an owner_field. A module
-      reaches the data/contract.json collections declared for it or shared with it, and every
-      collection its code, or code it imports, addresses through ctx.persistence or
-      app_data_from_context. Every other surface value, including admin_internal, needs a
-      permission. The finding is high without sign-in, for app_wide reach without a restricting
+      in an app whose app.json authRequired and valid config/auth.yaml declare sign-in, and either
+      every collection its module reaches is per_user or per_workspace with an owner_field, or its
+      module reaches no collection and it has a restricting gate. A module reaches the
+      data/contract.json collections declared for it or shared with it, and every collection its
+      code, or code it imports, addresses through ctx.persistence or app_data_from_context; module
+      code the scanner cannot resolve to declared collections counts as reach that cannot be
+      resolved. Every other surface value, including admin_internal, needs a permission. The finding is high without sign-in, for app_wide reach without a restricting
       gate, and for reach that no declared ownership scopes or that cannot be resolved, including
       an app without a valid data/contract.json. It is medium for app_wide reach behind a
       restricting gate, an entitlement_gate that the default plan of a valid

@@ -20,9 +20,11 @@ agents:
       - app/modules/*/module.yaml owns action permissions and emitted events.
       - app/modules/*/backend/policy.py owns module-local scoping policy.
       - app/data/contract.json owns collection ownership, and app/config/subscriptions.yaml
-        owns which capabilities each plan grants. Permission findings already account for
-        sign-in, collection ownership, the collections each module's code reaches, and
-        entitlement gates; report them as returned.
+        owns which capabilities each plan grants. Permission findings account for sign-in,
+        collection ownership, entitlement gates, and the collections the scanner can read
+        each module's code reaching; report their severities as returned. The code reading
+        is bounded, so a module without findings is not proven safe: never describe the
+        absence of a finding as verified protection.
 
       When the tools complete, summarize the readiness status briefly and stop.
       If no files were inspected, say the bundle was not assessed.

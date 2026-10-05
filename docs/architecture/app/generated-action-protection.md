@@ -19,7 +19,7 @@ Five declared contracts decide who can run a module action:
 | Sign-in | `app.json` `authRequired: true` with a valid `config/auth.yaml` | The app loads as a signed-in app. Whether a module call needs a token is the host's auth mode, not this declaration: a host with authentication enabled rejects an unauthenticated call to a non-public action with 401. |
 | Declared permission | `actions[].permissions`, resolving to `module.yaml` `permissions[]` | The executor rejects a caller whose granted permissions lack one, with 403. |
 | Collection ownership | `tenancy` and `owner_field` per collection in `data/contract.json` | A `per_user` or `per_workspace` collection with an `owner_field` is scoped by persistence to the caller's own user or workspace, whatever the module code queries through `ctx.persistence.collection`. Members of one workspace share its `per_workspace` records. `app_wide` collections are shared by every caller of the app, and a collection that declares no scoped ownership is not scoped at all. |
-| Entitlement gate | `actions[].entitlement_gate`, with plans in `config/subscriptions.yaml` | The executor rejects the call with 402 unless entitlement resolution finds a plan that grants the capability. A caller with no assignment holds the default plan. Without a subscriptions contract no entitlement adapter is wired and every gate passes. A gate restricts callers by plan. It is not an ownership boundary, and the scanner never treats it as one. |
+| Entitlement gate | `actions[].entitlement_gate`, with plans in `config/subscriptions.yaml` | The executor rejects the call with 402 unless entitlement resolution finds a plan that grants the capability to the caller's verified identity: the signed-in user, or the tenant or workspace the caller's credential is bound to. A caller with no assignment of their own holds the default plan. An app-level assignment grants its plan to every caller. Without a subscriptions contract no entitlement adapter is wired and every gate passes. A gate restricts callers by plan. It is not an ownership boundary, and the scanner never treats it as one. |
 
 A host runs without authentication only in local development, test, or an
 unconfigured environment. Without authentication the caller's identity is not
@@ -41,7 +41,8 @@ action's reach is every collection its module can address:
   `app_data_from_context(ctx).collection(alias)` resolved through the
   contract's aliases;
 - the same, for code the module imports from another module or from elsewhere
-  in the app.
+  in the app, including by the package name the runtime gives each module's
+  code.
 
 With a data contract present, `collection()` refuses a module and name pair
 that the contract does not declare, and a literal or alias name cannot address
@@ -51,16 +52,34 @@ without a data contract has no scoped collection, and an app whose contract
 the runtime refuses does not load; the scanner treats both as unscoped reach.
 
 The scanner reads every Python file under the module's directory, and the app
-files that code imports, with AppGenerator's persistence resolver. The reading
-follows import and assignment aliases, string constants, and helper functions
-that return persistence handles. It is bounded, not a sandbox:
+files that code imports, with AppGenerator's persistence resolver. It proves
+reach only from forms it recognises:
 
-- an argument it cannot read as a constant stands for every collection the
-  contract lets that call reach;
-- a persistence handle passed to another function, kept in a container, read
-  through an attribute outside the persistence API, or chosen at run time,
-  and code the AppGenerator persistence guard rejects, make the module's reach
-  unscoped.
+- the persistence calls above, with arguments it reads as string constants.
+  A constant counts only if no app file may set an attribute of that name.
+  Any other argument stands for every collection the contract lets that call
+  reach;
+- persistence handles followed through assignments, helper functions that
+  return them, and attribute names drawn from known strings.
+
+Anything else that could reach records makes the module's reach unscoped
+(row 9):
+
+- a persistence handle passed to another function, kept in a container, or
+  used outside its API;
+- reflection over objects, namespaces or frames, and module state set at run
+  time;
+- code imported by a name chosen at run time, loaded through the import
+  system, compiled, or run in another process;
+- a database driver or the runtime's raw client internals, in any file the
+  module's code follows;
+- code the AppGenerator persistence guard rejects;
+- code too large or too deeply nested to read within the reading's bounds.
+
+The reading is static and bounded, not a sandbox. It follows the code a
+module imports, not objects handed to that code at run time, and it does not
+read dependencies outside the app bundle. A module without findings has no
+unprotected reach the scanner could read. That is not proof that it has none.
 
 ## Decision Table
 
@@ -90,7 +109,9 @@ A restricting gate is an `entitlement_gate` whose capability a valid
 `config/subscriptions.yaml` does not grant through its default plan (the
 `default_plan_id` of a v1 contract, or any product's default plan in v2). A
 gate the default plan grants admits every signed-in user, so it counts as no
-gate.
+gate. The scanner reads the plan catalog, not assignments: an app-level
+assignment grants its plan to every caller, and then a gate that plan covers
+restricts no one.
 
 Severity follows what the caller can do. High means any signed-in user, or any
 caller, can act on records that are not theirs or that nothing declares an
@@ -100,8 +121,9 @@ nothing declares what the action reaches (row 10).
 
 ## The Scanner Rule
 
-The scanner reads only the app root the runtime binds: the bundle root when it
-holds `app.json`, otherwise `app/`. Files outside that root are never loaded.
+The scanner reads only the app root the runtime binds: `app/` when it holds
+`app.json` and the bundle root does not, otherwise the bundle root. Files
+outside that root are never loaded.
 
 `module_permissions:missing:{module_id}:{action_id}` is reported for an action
 with no permissions, unless one of these holds:
@@ -126,8 +148,9 @@ states, and that file's `module_permissions_declared` check carries this rule.
 `tests/test_security_readiness_action_protection.py` builds variants of the
 recorded `fdfa818e` bundle. Most change one declared contract; some change
 several, add a module, or change module code. Scanner tests assert the
-findings and severities of every variant, and tests of the code reading assert
-which persistence uses it resolves.
+findings and severities of every variant, including malformed contracts,
+which return findings rather than fail. Tests of the code reading assert which
+persistence uses it resolves and which forms it reports as unresolved.
 
 Eight tests compose a variant's module router and executor against a real
 MongoDB and dispatch actions as anonymous and signed-in callers. Signed-in
