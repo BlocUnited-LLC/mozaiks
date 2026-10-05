@@ -689,6 +689,10 @@ def with_shared_literal_for_digest(files: dict[str, str]) -> None:
         ),
         pytest.param((_digest(ALIAS.format(alias="billing.unknown")),), {}, id="addresses_an_undeclared_alias"),
         pytest.param((_digest(LITERAL),), HIGH_DIGEST, id="addresses_a_literal_collection"),
+        pytest.param(
+            (with_task_alias, _digest(LITERAL.replace("scratch_notes", "task_records"))), HIGH_DIGEST,
+            id="code_the_persistence_guard_rejects",
+        ),
         pytest.param((_digest(HANDLE_PASSED_ON),), HIGH_DIGEST, id="passes_a_persistence_handle_on"),
         pytest.param((_digest(HANDLE_ATTRIBUTE),), HIGH_DIGEST, id="reads_a_handle_attribute_outside_its_api"),
         pytest.param((_digest(DYNAMIC_IMPORT),), HIGH_DIGEST, id="imports_a_module_chosen_at_run_time"),
@@ -914,6 +918,8 @@ def test_reading_records_the_constants_each_argument_comes_from() -> None:
     reading = read_source("MODULE = 'a'\nNAME = 'b'\n\nasync def action(ctx):\n    ctx.persistence.collection(MODULE, 'x' + NAME)\n")
     assert reading.addresses == (("<persistence_collection>", ("a", "xb")),)
     assert reading.constants == ((frozenset({"MODULE"}), frozenset({"NAME"})),)
+    rebound = read_source("MODULE = 'a'\nMODULE += 'b'\n\nasync def action(ctx):\n    ctx.persistence.collection(MODULE, 'x')\n")
+    assert rebound.addresses == (("<persistence_collection>", (None, "x")),)
 
 
 @pytest.mark.parametrize(
