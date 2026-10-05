@@ -221,9 +221,10 @@ after scope resolution.
 when the action belongs to the generated app's own SaaS feature-gate model and
 requires an active plan grant before executing. The `ModuleExecutor` checks
 `EntitlementPort.check(capability_id, app_id=..., user_id=..., tenant_id=...,
-workspace_id=...)` and returns `ENTITLEMENT_REQUIRED` on denial. Those keys come
-from the verified identity: the token's claims, or a membership the scope hook
-asserted with `verified_tenant_id` or `verified_workspace_id`. Plain resolved
+workspace_id=...)` and returns `ENTITLEMENT_REQUIRED` on denial. `user_id`,
+`tenant_id` and `workspace_id` come from the verified identity: the token's
+claims, or a membership the scope hook asserted with `verified_tenant_id` or
+`verified_workspace_id`. `app_id` is the dispatch app. Plain resolved
 `tenant_id` and `workspace_id` never select a plan. Non-SaaS apps
 use `NoOpEntitlementAdapter` and are entirely unaffected — no configuration
 needed. Never set `entitlement_gate` on `admin_internal` actions.

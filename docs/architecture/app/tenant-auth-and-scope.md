@@ -86,6 +86,10 @@ The OSS runtime now provides the foundational tenant/auth scope contract:
   the verified identity. Plain `tenant_id` and `workspace_id`, from the hook
   or the request, stay dispatch metadata. Omitting a verified key keeps the
   tenant or workspace the token is bound to; an explicit `None` removes it.
+  A hook that raises is skipped on HTTP module dispatch and workflow tool
+  dispatch, which keeps the token binding; the admin lane, Page Ask and
+  profile hydration refuse instead. A hook that relies on removal must catch
+  its own lookup failures and return `None`.
   Request input (context, query, params, body or headers) cannot set either
   key. Every path that applies host scope honors both: HTTP module dispatch
   and its admin lane, workflow tool dispatch, Page Ask context, and profile

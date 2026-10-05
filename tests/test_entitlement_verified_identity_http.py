@@ -572,6 +572,34 @@ async def test_scope_registry_carries_only_a_hook_asserted_tenant():
     assert (await resolve({"verified_tenant_id": "t-host"}, {"verified_tenant_id": ""}))["_verified_tenant_id"] is None
 
 
+@pytest.mark.asyncio
+async def test_scope_registry_keeps_a_verified_tenant_out_of_dispatch_scope_and_past_a_failing_hook():
+    permission_tenants: list[Any] = []
+
+    def failing(**_scope):
+        raise RuntimeError("membership lookup failed")
+
+    def permissions(**scope):
+        permission_tenants.append(scope["tenant_id"])
+
+    registry = PlatformHookRegistry()
+    registry.register_bundle(
+        {"module_scope_resolver": lambda **_scope: {"verified_tenant_id": "t-host"}}, source="test",
+    )
+    registry.register_bundle(
+        {"module_scope_resolver": failing, "module_permission_resolver": permissions}, source="test",
+    )
+
+    resolved = await registry.call_module_scope(
+        principal=None, module_name="reports", action_name="export_report",
+        requested_scope={"tenant_id": "t-requested"}, params={},
+    )
+
+    assert resolved["_verified_tenant_id"] == "t-host"
+    assert resolved["tenant_id"] == "t-requested"
+    assert permission_tenants == ["t-requested"]
+
+
 def test_principal_takes_tenant_and_workspace_only_from_verified_keys():
     bound = PersistencePrincipal(user_id="mia", workspace_id="ws-token", tenant_id="t-token")
     development = PersistencePrincipal(user_id="dev", workspace_id="development", source="development")
@@ -588,4 +616,8 @@ def test_principal_takes_tenant_and_workspace_only_from_verified_keys():
     )
     assert development.with_host_scope({"_verified_tenant_id": "t-host"}) == PersistencePrincipal(
         user_id="dev", workspace_id="development", source="development", tenant_id="t-host",
+    )
+    assert bound.with_host_scope({"verified_tenant_id": "t-x", "verified_workspace_id": "ws-x"}) is bound
+    assert PersistencePrincipal(user_id="mia").with_host_scope({"_verified_tenant_id": "t-host"}) == (
+        PersistencePrincipal(user_id="mia", tenant_id="t-host")
     )

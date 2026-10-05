@@ -63,6 +63,9 @@ Bundle keys (all optional):
         keys module entitlement lookups and nothing else; ordinary tenant_id
         remains dispatch metadata. Explicit None removes the token-bound
         tenant, while omitting it preserves the authenticated token binding.
+        A hook that raises is skipped unless the caller resolves scope
+        fail-closed, so a hook that relies on removal must catch its own
+        lookup failures and return None.
 
     workflow_ordering     (workflow_names: List[str]) -> List[str]
         Reorder the workflow list returned to the frontend (e.g. by journey
