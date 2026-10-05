@@ -10,7 +10,10 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const requireShell = createRequire(path.join(root, 'web_shell/package.json'));
 const { _android } = requireShell('playwright');
-const { expect } = requireShell('@playwright/test');
+const { expect: playwrightExpect } = requireShell('@playwright/test');
+// Device UI assertions have their own timeout; page.setDefaultTimeout covers
+// browser actions only. Wait on rendered state through slow emulator startup.
+const expect = playwrightExpect.configure({ timeout: 45_000 });
 const appId = 'org.mozaiks.examples.commonground';
 const callback = `${appId}:/auth/callback`;
 const origin = 'https://localhost';
