@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable
 from typing import Any
 
 import yaml
@@ -309,6 +310,11 @@ def _scan_secret_contract(files: dict[str, str]) -> list[dict[str, Any]]:
     return findings
 
 
+def _iterable(value: Any) -> Iterable[Any]:
+    """A contract value to iterate; a scalar where a list belongs holds nothing."""
+    return value if isinstance(value, Iterable) else ()
+
+
 def _scan_module_contracts(files: dict[str, str], root: str) -> list[dict[str, Any]]:
     """Module findings for the app root's files; evidence paths keep the bundle's root prefix."""
     findings: list[dict[str, Any]] = []
@@ -336,18 +342,19 @@ def _scan_module_contracts(files: dict[str, str], root: str) -> list[dict[str, A
             continue
         declared_permissions = {
             str(item.get("id") or "").strip()
-            for item in module.get("permissions") or []
+            for item in _iterable(module.get("permissions"))
             if isinstance(item, dict)
         }
-        module_id = str((module.get("module") or {}).get("id") or root + path).strip()
+        header = module.get("module")
+        module_id = str((header.get("id") if isinstance(header, dict) else None) or root + path).strip()
         module_root = path.rsplit("/", 1)[0]
         reach = data_reach.for_module(module_id, module_root)
-        for action in module.get("actions") or []:
+        for action in _iterable(module.get("actions")):
             if not isinstance(action, dict):
                 continue
             action_id = str(action.get("id") or "").strip()
             permissions = [
-                str(item).strip() for item in action.get("permissions") or [] if str(item).strip()
+                str(item).strip() for item in _iterable(action.get("permissions")) if str(item).strip()
             ]
             if action.get("api_surface") in _PUBLIC_SURFACES:
                 continue

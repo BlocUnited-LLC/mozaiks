@@ -37,6 +37,12 @@ _PRIVATE_STORAGE = {
     "_client_handle", "_owner_scope", "_scope_metadata", "_ownership", "_collections", "_restrict_aggregation",
     "_client", "_principal", "_app_id", "_app_slug", "_database_name", "_bindings", "_options", "_collection_resolver",
 }
+# Bounded resolution (SecurityReadiness): an attribute chain that extends a
+# value its name already holds is widened past this depth, a name or helper
+# holds at most this many values, and propagation runs at most this many passes.
+_CHAIN_DEPTH = 24
+_VALUES_PER_NAME = 256
+_BOUNDED_PASSES = 64
 
 
 def constant_text(node: ast.AST) -> str | None:
@@ -56,12 +62,22 @@ class PersistenceResolver:
     markers above. Monotonic propagation catches simple aliases and repo
     helpers regardless of definition order without pretending to execute
     generated Python.
+
+    Unbounded, a name assigned an attribute of itself (``node = node.parent``)
+    grows by one value per pass until the pass limit. Bounded resolution
+    widens such a chain instead: a marker never depends on the depth of the
+    chain it ends, so values deeper than ``_CHAIN_DEPTH`` that extend a value
+    the name already holds are dropped. ``truncated`` records any value it had
+    to drop that a widening cannot account for, and propagation that does not
+    settle.
     """
 
-    def __init__(self, tree: ast.Module) -> None:
+    def __init__(self, tree: ast.Module, *, bounded: bool = False) -> None:
         self.nodes = list(ast.walk(tree))
         self.aliases: dict[str, set[str]] = {}
         self.returns: dict[str, set[str]] = {}
+        self.bounded = bounded
+        self.truncated = False
         self.methods = {node.name for node in self.nodes if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
         for node in self.nodes:
             if isinstance(node, ast.Import):
@@ -119,8 +135,33 @@ class PersistenceResolver:
             return set().union(*(self.returns.get(name.rsplit(".", 1)[-1], set()) for name in functions))
         return set()
 
+    def _extend(self, table: dict[str, set[str]], name: str, values: set[str]) -> bool:
+        """Add values to a name's set; return whether the set grew."""
+        new = values - table.get(name, set())
+        if new and self.bounded:
+            new = self._admit(table.get(name, set()), new)
+        if not new:
+            return False
+        table.setdefault(name, set()).update(new)
+        return True
+
+    def _admit(self, held: set[str], new: set[str]) -> set[str]:
+        kept = set()
+        for value in new:
+            if value.count(".") > _CHAIN_DEPTH and any(value.startswith(f"{item}.") for item in held):
+                # A widened chain is only attribute names; a handle-derived one is not followed.
+                self.truncated = self.truncated or "<" in value
+                continue
+            kept.add(value)
+        room = max(_VALUES_PER_NAME - len(held), 0)
+        if len(kept) > room:
+            self.truncated = True
+            kept = set(sorted(kept)[:room])
+        return kept
+
     def _propagate(self) -> None:
-        for _ in range(len(self.nodes) + 1):
+        passes = min(len(self.nodes) + 1, _BOUNDED_PASSES) if self.bounded else len(self.nodes) + 1
+        for _ in range(passes):
             changed = False
             for node in self.nodes:
                 targets = node.targets if isinstance(node, ast.Assign) else [node.target] if isinstance(node, ast.AnnAssign) else []
@@ -129,16 +170,16 @@ class PersistenceResolver:
                     values = self.resolve(value)
                     for target in targets:
                         label = self.key(target)
-                        if label and values - self.aliases.get(label, set()):
-                            self.aliases.setdefault(label, set()).update(values)
+                        if label and self._extend(self.aliases, label, values):
                             changed = True
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     values = set().union(*(self.resolve(item.value) for item in ast.walk(node) if isinstance(item, ast.Return) and item.value))
-                    if values - self.returns.get(node.name, set()):
-                        self.returns.setdefault(node.name, set()).update(values)
+                    if self._extend(self.returns, node.name, values):
                         changed = True
             if not changed:
                 break
+        else:
+            self.truncated = self.truncated or self.bounded
 
 
 def _startup_files(files: dict[str, str]) -> set[str]:
@@ -159,7 +200,8 @@ def _startup_files(files: dict[str, str]) -> set[str]:
     return allowed
 
 
-def scan_module_persistence(files: dict[str, str]) -> list[str]:
+def scan_module_persistence(files: dict[str, str], *, bounded: bool = False) -> list[str]:
+    """Rejections for generated module code; ``bounded`` resolves with the bounded resolver."""
     errors = []
     startup = _startup_files(files)
     for path, source in files.items():
@@ -170,14 +212,16 @@ def scan_module_persistence(files: dict[str, str]) -> list[str]:
         except SyntaxError as exc:
             errors.append(f"{path}:{exc.lineno}: generated module Python must parse before persistence validation.")
             continue
-        errors.extend(_scan_source(path, tree, startup))
+        errors.extend(_scan_source(path, tree, startup, bounded=bounded))
     return errors
 
 
-def _scan_source(path: str, tree: ast.Module, startup: set[str]) -> list[str]:
-    resolver = PersistenceResolver(tree)
+def _scan_source(path: str, tree: ast.Module, startup: set[str], *, bounded: bool = False) -> list[str]:
+    resolver = PersistenceResolver(tree, bounded=bounded)
     nodes, resolve, methods = resolver.nodes, resolver.resolve, resolver.methods
     errors: set[tuple[int, str]] = set()
+    if resolver.truncated:
+        errors.add((1, "persistence resolution did not settle within its bounds."))
 
     def reject(node: ast.AST, message: str) -> None:
         errors.add((getattr(node, "lineno", 1), message))

@@ -10,6 +10,7 @@ dispatch test uses loads without a failed module.
 """
 from __future__ import annotations
 
+import ast
 import json
 import os
 import uuid
@@ -22,6 +23,7 @@ import pytest
 import yaml
 from fastapi import FastAPI, Request
 
+from factory_app.workflows.AppGenerator.tools.module_persistence_guard import PersistenceResolver
 from factory_app.workflows.SecurityReadiness.tools.inspect_generated_app_security import (
     _PERMISSION_GAPS,
     inspect_generated_app_security,
@@ -324,8 +326,13 @@ READ_OWN_DIGESTS = (
 )
 
 
-def _digest(repo: str, *, gate: str | None = None, own_collection: bool = True) -> Callable[[dict[str, str]], None]:
-    """Add task_digest: one permissionless signed-in action whose repository is ``repo``."""
+def _digest(
+    repo: str, *, gate: str | None = None, own_collection: bool = True, extra: dict[str, str] | None = None,
+) -> Callable[[dict[str, str]], None]:
+    """Add task_digest: one permissionless signed-in action whose repository is ``repo``.
+
+    ``extra`` adds or replaces app files, keyed by path.
+    """
 
     def change(files: dict[str, str]) -> None:
         action = {
@@ -350,6 +357,7 @@ def _digest(repo: str, *, gate: str | None = None, own_collection: bool = True) 
         files["modules/task_digest/backend/__init__.py"] = ""
         files["modules/task_digest/backend/handler.py"] = DIGEST_HANDLER
         files["modules/task_digest/backend/repo.py"] = repo
+        files.update(extra or {})
         if own_collection:
             _json(files, CONTRACT, lambda contract: contract["surfaces"].append({
                 "surface_id": "task_digest", "surface_kind": "module",
@@ -371,6 +379,24 @@ def with_task_alias(files: dict[str, str]) -> None:
 
 def without_contract_version(files: dict[str, str]) -> None:
     _json(files, CONTRACT, lambda contract: contract.pop("version"))
+
+
+def with_aliases_not_a_list(files: dict[str, str]) -> None:
+    _json(files, CONTRACT, lambda contract: contract.update(aliases=7))
+
+
+def with_shares_not_a_list(files: dict[str, str]) -> None:
+    _json(files, CONTRACT, lambda contract: contract.update(shared_collections=True))
+
+
+def with_auth_required_string(files: dict[str, str]) -> None:
+    """Only the boolean true declares sign-in."""
+    _json(files, "app.json", lambda app: app.update(authRequired="true"))
+
+
+def with_long_constant_in_the_repository(files: dict[str, str]) -> None:
+    """A loadable constant too deep for a recursive reading."""
+    files[f"{TASKS}/repo.py"] += "\nLABELS = " + " + ".join(["'a'"] * 1200) + "\n"
 
 
 def with_tasks_shared_with_digest(files: dict[str, str]) -> None:
@@ -476,6 +502,12 @@ async def test_protected_actions_raise_no_permission_finding(security_build, cha
         pytest.param((without_contract_version,), _expect("high", TASK_ACTIONS), id="contract_the_loader_rejects"),
         pytest.param((with_duplicate_collection,), _expect("high", TASK_ACTIONS), id="contract_raising_value_error"),
         pytest.param((with_entities_list_tenancy,), _expect("high", TASK_ACTIONS), id="entities_row_with_list_tenancy"),
+        pytest.param((with_aliases_not_a_list,), _expect("high", TASK_ACTIONS), id="aliases_not_a_list"),
+        pytest.param((with_shares_not_a_list,), _expect("high", TASK_ACTIONS), id="shared_collections_not_a_list"),
+        pytest.param((with_auth_required_string,), _expect("high", TASK_ACTIONS), id="auth_required_not_boolean"),
+        pytest.param(
+            (with_long_constant_in_the_repository,), _expect("high", TASK_ACTIONS), id="code_too_deep_to_read",
+        ),
         pytest.param((without_task_collections,), _expect("medium", UNGATED), id="no_declared_data_scope"),
         pytest.param((with_operator_list,), _expect("high", ("list_tasks",)), id="operator_action_without_permission"),
         pytest.param((with_blank_surface,), _expect("high", ("list_tasks",)), id="blank_surface"),
@@ -553,6 +585,84 @@ NAME_FROM_PARAMETER = (
     "async def list_digest(ctx):\n"
     "    return await _collection(ctx, 'tasks').find_many({}, limit=100)\n"
 )
+MODULE_FROM_PARAMETER = (
+    "def _collection(ctx, module):\n"
+    "    return ctx.persistence.collection(module, 'tasks')\n\n"
+    "async def list_digest(ctx):\n"
+    "    return await _collection(ctx, 'task_management').find_many({}, limit=100)\n"
+)
+# The runtime imports each module's backend as the package mozaiks_runtime_module_<directory>.
+RUNTIME_PACKAGE_IMPORT = (
+    "from mozaiks_runtime_module_task_management.backend import repo as task_repo\n\n"
+    "async def list_digest(ctx):\n"
+    "    return (await task_repo.list_tasks(ctx))['items']\n"
+)
+RUNTIME_PACKAGE_DYNAMIC_IMPORT = (
+    "import importlib\n\n"
+    "async def list_digest(ctx):\n"
+    "    task_repo = importlib.import_module('.backend.repo', 'mozaiks_runtime_module_task_management')\n"
+    "    return (await task_repo.list_tasks(ctx))['items']\n"
+)
+APP_PACKAGE_IMPORT = IMPORTED_SERVICE.replace("from modules.", "from app.modules.")
+CONTEXT_NAMESPACE = (
+    "async def list_digest(ctx):\n"
+    "    return await vars(ctx)['persistence'].collection('task_digest', 'digests').find_many({}, limit=100)\n"
+)
+CONTEXT_DICT = CONTEXT_NAMESPACE.replace("vars(ctx)", "ctx.__dict__")
+LOADED_MODULE_TABLE = (
+    "import sys\n\n"
+    "async def list_digest(ctx):\n"
+    "    task_repo = sys.modules['mozaiks_runtime_module_task_management.backend.repo']\n"
+    "    return (await task_repo.list_tasks(ctx))['items']\n"
+)
+MODULE_CONSTANT = (
+    "MODULE = 'task_digest'\n\n"
+    "async def list_digest(ctx):\n"
+    "    return await ctx.persistence.collection(MODULE, 'tasks').find_many({}, limit=100)\n"
+)
+CONSTANT_REBOUND_BY_GLOBALS = MODULE_CONSTANT + "\nglobals()['MODULE'] = 'task_management'\n"
+REBINDS_REPO_CONSTANT = (
+    "from . import repo\n\n"
+    "setattr(repo, 'MODULE', 'task_management')\n"
+)
+REBINDS_DIGEST_CONSTANT = (
+    "from modules.task_digest.backend import repo as digest_repo\n\n"
+    "digest_repo.MODULE = 'task_management'\n"
+)
+DATABASE_ADAPTER = (
+    '"""Provider database mechanics."""\n'
+    "from pymongo import MongoClient\n\n"
+    "def collection(client: MongoClient, database_name, collection_name):\n"
+    "    return client[database_name][collection_name]\n"
+)
+USES_DATABASE_ADAPTER = (
+    "from services.adapters.database import record_store\n\n"
+    "async def list_digest(ctx):\n"
+    "    return record_store.collection(None, ctx.persistence.database_name, 'digests')\n"
+)
+LITERAL_FROM_PARAMETER = (
+    "def records(ctx, name):\n"
+    "    return ctx.persistence.literal_collection(name)\n"
+)
+USES_LITERAL_HELPER = (
+    "from services import record_names\n\n"
+    "async def list_digest(ctx):\n"
+    "    return await record_names.records(ctx, 'digests').find_many({}, limit=100)\n"
+)
+HANDLER_IMPORTS_STORE = DIGEST_HANDLER.replace("from . import repo", "from . import store as repo")
+
+
+def with_alias_to_a_storage_name(files: dict[str, str]) -> None:
+    """An alias whose collection is a storage name the contract does not declare as a literal."""
+    _json(files, CONTRACT, lambda contract: contract["aliases"].append(
+        {"alias": "tasks.everything", "collection": "app_release__task_management__tasks"},
+    ))
+
+
+def with_shared_literal_for_digest(files: dict[str, str]) -> None:
+    """A share that also names a literal collection the contract does not declare."""
+    with_tasks_shared_with_digest(files)
+    _json(files, CONTRACT, lambda contract: contract["shared_collections"][0].update(mongo_collection="shared_task_records"))
 
 
 @pytest.mark.asyncio
@@ -601,6 +711,59 @@ NAME_FROM_PARAMETER = (
             (with_app_wide_notes, _digest(NAME_FROM_PARAMETER)), HIGH_DIGEST,
             id="name_from_a_parameter_bounded_by_an_app_wide_collection",
         ),
+        pytest.param(
+            (with_app_wide_tasks, _digest(MODULE_FROM_PARAMETER)), HIGH_DIGEST,
+            id="module_from_a_parameter_bounded_by_every_module",
+        ),
+        pytest.param((with_app_wide_tasks, _digest(APP_PACKAGE_IMPORT)), HIGH_DIGEST, id="imports_through_app_package"),
+        pytest.param(
+            (with_app_wide_tasks, _digest(READ_OWN_DIGESTS, extra={
+                "modules/task_digest/backend/handler.py": HANDLER_IMPORTS_STORE,
+                "modules/task_digest/backend/store.py": READ_TASKS,
+            })), HIGH_DIGEST, id="reads_every_file_of_the_module",
+        ),
+        pytest.param(
+            (with_alias_to_a_storage_name, _digest(ALIAS.format(alias="tasks.everything"))), HIGH_DIGEST,
+            id="alias_to_an_undeclared_storage_name",
+        ),
+        pytest.param(
+            (_digest(READ_OWN_DIGESTS), with_shared_literal_for_digest), HIGH_DIGEST,
+            id="shared_an_undeclared_literal",
+        ),
+        pytest.param(
+            (_digest(USES_LITERAL_HELPER, extra={"services/record_names.py": LITERAL_FROM_PARAMETER}),), HIGH_DIGEST,
+            id="literal_name_from_a_parameter_in_imported_code",
+        ),
+        # Each way module code reaches records outside the forms the reading recognises.
+        pytest.param(
+            (with_app_wide_tasks, _digest(RUNTIME_PACKAGE_IMPORT)), HIGH_DIGEST, id="imports_by_runtime_package_name",
+        ),
+        pytest.param((_digest(RUNTIME_PACKAGE_IMPORT),), {}, id="runtime_package_import_bounded_per_user"),
+        pytest.param(
+            (with_app_wide_tasks, _digest(RUNTIME_PACKAGE_DYNAMIC_IMPORT)), HIGH_DIGEST,
+            id="imports_by_runtime_package_name_dynamically",
+        ),
+        pytest.param((_digest(CONTEXT_NAMESPACE),), HIGH_DIGEST, id="reads_the_context_namespace"),
+        pytest.param((_digest(CONTEXT_DICT),), HIGH_DIGEST, id="reads_the_context_dict"),
+        pytest.param((_digest(LOADED_MODULE_TABLE),), HIGH_DIGEST, id="reads_the_loaded_module_table"),
+        pytest.param((with_app_wide_tasks, _digest(MODULE_CONSTANT)), {}, id="constant_names_a_refused_pair"),
+        pytest.param(
+            (with_app_wide_tasks, _digest(CONSTANT_REBOUND_BY_GLOBALS)), HIGH_DIGEST, id="constant_rebound_by_globals",
+        ),
+        pytest.param(
+            (with_app_wide_tasks, _digest(MODULE_CONSTANT, extra={
+                "modules/task_digest/backend/setup.py": REBINDS_REPO_CONSTANT,
+            })), HIGH_DIGEST, id="constant_rebound_by_setattr_on_a_module",
+        ),
+        pytest.param(
+            (with_app_wide_tasks, _digest(MODULE_CONSTANT, extra={
+                "modules/task_management/backend/patch.py": REBINDS_DIGEST_CONSTANT,
+            })), HIGH_DIGEST, id="constant_rebound_from_code_the_module_does_not_import",
+        ),
+        pytest.param(
+            (_digest(USES_DATABASE_ADAPTER, extra={"services/adapters/database/record_store.py": DATABASE_ADAPTER}),),
+            HIGH_DIGEST, id="imports_a_database_adapter",
+        ),
     ],
 )
 async def test_reach_includes_every_collection_module_code_addresses(security_build, changes, expected) -> None:
@@ -631,6 +794,22 @@ async def test_findings_describe_the_caller_without_naming_a_bypass(security_bui
         assert not any(word in text for word in ("tenant", "workspace_id", "dev_user", "header", "query string"))
 
 
+@pytest.mark.asyncio
+async def test_contracts_outside_the_bound_root_and_malformed_modules_are_read_safely(security_build) -> None:
+    """auth.yaml under app/ is not loaded when the bundle root holds app.json; malformed module shapes never raise."""
+    build = security_build.add(_variant(with_decoy_app_auth))
+    result = await invoke(inspect_generated_app_security, build.bridge)
+    assert "auth_contract:missing_auth_yaml" in {item["finding_id"] for item in result["findings"]}
+    for change in ({"module": "task_management"}, {"actions": 7}, {"permissions": True}):
+        files = _variant()
+        _yaml(files, MODULE, lambda module, change=change: module.update(change))
+        result = await invoke(inspect_generated_app_security, security_build.add(files).bridge)
+        assert result["success"] is True
+    files = _variant()
+    _yaml(files, MODULE, lambda module: _action(module, "list_tasks").update(permissions=5))
+    assert await _permission_findings(security_build, files) == _expect("high", ("list_tasks",))
+
+
 # --------------------------------------------------------------------------- code reading
 
 
@@ -655,6 +834,42 @@ async def test_findings_describe_the_caller_without_naming_a_bypass(security_bui
         pytest.param("def _handle():\n    return ctx.persistence\nuse(_handle)", True, id="helper_passed_on"),
         pytest.param("import importlib\nimportlib.import_module('.repo', __name__)", False, id="own_package_import"),
         pytest.param("import importlib\nimportlib.import_module('.repo', name)", True, id="package_chosen_at_run_time"),
+        pytest.param("handles = {}\nhandles['p'] = ctx.persistence", True, id="kept_by_subscript"),
+        pytest.param("hook = globals().get('before_create')\nreturn hook", False, id="global_read_by_constant_name"),
+        pytest.param("hook = globals()['before_create']", False, id="global_subscript_by_constant_name"),
+        pytest.param("hook = globals().get(name)", True, id="global_read_by_run_time_name"),
+        pytest.param("globals().update(MODULE='other')", True, id="globals_written"),
+        pytest.param("names = locals()", True, id="local_namespace"),
+        pytest.param("values = vars(ctx)", True, id="object_namespace"),
+        pytest.param("values = ctx.__dict__", True, id="object_dict"),
+        pytest.param("import sys\nmodule = sys.modules[name]", True, id="loaded_module_table"),
+        pytest.param("import importlib.util\nspec = importlib.util.find_spec(name)", True, id="import_loader"),
+        pytest.param("from . import names\nsetattr(names, 'MODULE', 'other')", True, id="setattr_on_a_module"),
+        pytest.param("from . import names\ndelattr(names, 'MODULE')", True, id="delattr_on_a_module"),
+        pytest.param("from . import names\nnames.MODULE = 'other'", True, id="attribute_set_on_a_module"),
+        pytest.param("setattr(self, 'cache', None)", False, id="setattr_on_self"),
+        pytest.param("for attr in ('auth_token', 'user_id'):\n    value = getattr(ctx, attr, None)", False,
+                     id="getattr_name_from_known_strings"),
+        pytest.param("value = getattr(ctx, name, None)", True, id="getattr_name_at_run_time"),
+        pytest.param("principal = ctx.persistence.principal\nvalue = getattr(principal, name, None)", False,
+                     id="getattr_of_a_principal"),
+        pytest.param("client = store._client", True, id="private_storage_of_another_object"),
+        pytest.param("client = self._client", False, id="own_private_attribute"),
+        pytest.param("from motor.motor_asyncio import AsyncIOMotorClient", True, id="database_driver"),
+        pytest.param("import importlib\nimportlib.import_module('pymongo')", True, id="database_driver_imported_dynamically"),
+        pytest.param("from mozaiksai.core.core_config import get_mongo_client", True, id="runtime_client"),
+        pytest.param("code = compile(text, 'x', 'exec')", True, id="compiled_code"),
+        pytest.param("import importlib\nsetattr(importlib.import_module('modules.m.names'), 'MODULE', 'x')", True,
+                     id="setattr_on_a_dynamically_imported_module"),
+        pytest.param("from . import names\nnames.__setattr__('MODULE', 'x')", True, id="module_setattr_method"),
+        pytest.param("for attr in ('persistence',):\n    handle = getattr(ctx, attr)\n    helper(handle)", True,
+                     id="getattr_known_name_holds_the_handle"),
+        pytest.param("handles = list(map(getattr, [ctx], ['persistence']))", True, id="getattr_passed_as_a_value"),
+        pytest.param("from .code import helpers\nhelpers.run()", False, id="relative_import_named_like_a_library"),
+        pytest.param("import subprocess\nsubprocess.run(['task'])", True, id="other_process"),
+        pytest.param("import importlib\nimportlib.import_module('mozaiksai.core.core_config')", True,
+                     id="runtime_internals_imported_dynamically"),
+        pytest.param("table = __builtins__", True, id="builtins_namespace"),
     ],
 )
 def test_reading_marks_untracked_persistence_use_unresolved(body: str, unresolved: bool) -> None:
@@ -679,6 +894,64 @@ def test_reading_resolves_constant_arguments_and_bounds_the_rest() -> None:
         ("<persistence_collection>", (None, None)),
         ("<app_data_collection>", ("billing.subscriptions",)),
     }
+
+
+@pytest.mark.parametrize(
+    ("call", "arguments"),
+    [
+        pytest.param("collection(module_id='a', collection_name='b')", ("a", "b"), id="keywords"),
+        pytest.param("collection(collection_name='b', module_id='a')", ("a", "b"), id="keywords_reordered"),
+        pytest.param("collection('a', *rest)", (None, None), id="starred_argument"),
+        pytest.param("collection('a', **options)", (None, None), id="keyword_mapping"),
+    ],
+)
+def test_reading_unpacked_arguments_bounds_every_argument(call: str, arguments: tuple[str | None, ...]) -> None:
+    source = f"async def action(ctx, rest, options):\n    return ctx.persistence.{call}\n"
+    assert read_source(source).addresses == (("<persistence_collection>", arguments),)
+
+
+def test_reading_records_the_constants_each_argument_comes_from() -> None:
+    reading = read_source("MODULE = 'a'\nNAME = 'b'\n\nasync def action(ctx):\n    ctx.persistence.collection(MODULE, 'x' + NAME)\n")
+    assert reading.addresses == (("<persistence_collection>", ("a", "xb")),)
+    assert reading.constants == ((frozenset({"MODULE"}), frozenset({"NAME"})),)
+
+
+@pytest.mark.parametrize(
+    ("source", "writes"),
+    [
+        pytest.param("from . import names\nnames.MODULE = 'a'\n", frozenset({"MODULE"}), id="attribute_set"),
+        pytest.param("def f(record):\n    setattr(record, 'title', 'a')\n", frozenset({"title"}), id="setattr_constant"),
+        pytest.param("def f(record, field):\n    setattr(record, field, 'a')\n", None, id="setattr_any_name"),
+        pytest.param("class A:\n    def f(self):\n        self.cache = {}\n", frozenset(), id="own_attribute"),
+        pytest.param("names = vars()\n", None, id="namespace"),
+        pytest.param("def (\n", frozenset(), id="does_not_parse"),
+    ],
+)
+def test_reading_records_what_a_source_may_rebind(source: str, writes: frozenset[str] | None) -> None:
+    assert read_source(source).writes == writes
+
+
+def test_reading_marks_source_it_cannot_parse_or_walk_unresolved() -> None:
+    assert read_source("def (\n").unresolved is True
+    long_constant = "LABELS = " + " + ".join(["'a'"] * 1200) + "\n"
+    assert read_source(long_constant).unresolved is True
+
+
+def test_bounded_resolution_widens_a_self_extending_chain() -> None:
+    filler = "".join(f"def helper_{index}(value):\n    return value.field_{index}\n\n" for index in range(160))
+    loop = filler + "def root(node):\n    while node.parent is not None:\n        node = node.parent\n    return node\n"
+    resolver = PersistenceResolver(ast.parse(loop), bounded=True)
+    assert not resolver.truncated
+    assert len(resolver.aliases["node"]) <= 26
+    assert read_source(loop).unresolved is False
+    # A handle-derived chain, too many values for one name, and propagation that
+    # does not settle are each cut short, and the source is unresolved.
+    handles = "def walk(ctx):\n    node = ctx.persistence\n" + "    node = node.app_id\n" * 30 + "    return node\n"
+    branching = "def walk(node):\n" + "".join(f"    node = node.side{index % 2}\n" for index in range(9))
+    unsettled = "".join(f"value_{index + 1} = value_{index}\n" for index in reversed(range(70))) + "value_0 = ctx\n"
+    for source in (handles, branching, unsettled):
+        assert PersistenceResolver(ast.parse(source), bounded=True).truncated is True
+        assert read_source(source).unresolved is True
 
 
 # --------------------------------------------------------------------------- runtime (real Mongo)
