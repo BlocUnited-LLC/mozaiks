@@ -420,6 +420,53 @@ def test_explicit_host_membership_revocation_denies_token_workspace(http_runtime
     assert response.status_code == 403, response.text
 
 
+@pytest.mark.parametrize("tenancy", ["per_user", "per_workspace", "app_wide"])
+def test_host_verified_tenant_changes_no_stored_document_or_audit(http_runtime, monkeypatch, tenancy):
+    """A verified tenant keys entitlement lookups only; persistence and audit never read it."""
+
+    def run(verified_tenant):
+        hooks = PlatformHookRegistry()
+        hooks.register_bundle({"module_scope_resolver": lambda **kwargs: {
+            "verified_workspace_id": "workspace-" + kwargs["principal"].user_id[-1], **verified_tenant,
+        }}, source="membership-provider")
+        monkeypatch.setattr(module_router, "get_platform_hooks", lambda: hooks)
+        monkeypatch.setattr("mozaiksai.core.runtime.composition.module_executor.get_platform_hooks", lambda: hooks)
+        http_runtime.database.clear()
+        ModuleExecutor._emit_dispatch_audit.reset_mock()
+        client = http_runtime.client(tenancy)
+        a, b = http_runtime.token("user-a"), http_runtime.token("user-b")
+        url = "/api/modules/tasks/"
+        calls = [
+            ("create_task", a, {"task_id": "a", "title": "A", "context": {"tenant_id": "t-requested"}}),
+            ("create_task", a, {"task_id": "a2", "title": "A2"}),
+            ("create_task", b, {"task_id": "b", "title": "B"}),
+            ("update_task", b, {"task_id": "a", "title": "from b"}),
+            ("update_task", a, {"task_id": "a", "title": "from a"}),
+            ("delete_task", a, {"task_id": "a2"}),
+            ("custom_list", a, {}),
+            ("custom_list", b, {}),
+        ]
+        responses = [
+            (response.status_code, response.json())
+            for response in (client.post(url + action, headers=headers, json=body) for action, headers, body in calls)
+        ]
+        stored = {name: deepcopy(collection.rows) for name, collection in http_runtime.database.items()}
+        audits = [
+            {key: value for key, value in call.args[0].to_dict().items() if key not in {"dispatch_id", "correlation_id"}}
+            for call in ModuleExecutor._emit_dispatch_audit.call_args_list
+        ]
+        return responses, stored, audits
+
+    without_tenant = run({})
+    with_tenant = run({"verified_tenant_id": "t-verified"})
+
+    assert with_tenant == without_tenant
+    responses, stored, audits = with_tenant
+    assert all(status == 200 for status, _ in responses), responses
+    assert any(row.get("tenant_id") == "t-requested" for rows in stored.values() for row in rows)
+    assert "t-verified" not in json.dumps([stored, audits, responses], default=str)
+
+
 @pytest.mark.parametrize("tenancy", ["per_user", "per_workspace"])
 @pytest.mark.parametrize("surface", ["panels", "tabs", "pages", "relationships"])
 @pytest.mark.parametrize("host_membership", [False, True])

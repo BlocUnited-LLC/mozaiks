@@ -3,7 +3,9 @@
 Signed tokens through the real JWT adapter, module router, executor and
 ConfiguredEntitlementAdapter. Only the JWKS transport and the assignment store
 are replaced. A tenant or workspace named by the request never selects a plan;
-the tenant or workspace a validated token is bound to does.
+the tenant or workspace a validated token is bound to does, unless a host's
+scope hook replaces it with a membership it verified (``verified_tenant_id`` /
+``verified_workspace_id``).
 """
 from __future__ import annotations
 
@@ -19,6 +21,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from mozaiksai.core.auth.adapters.base import UserClaims
 from mozaiksai.core.auth.adapters.jwt_adapter import GenericJWTAdapter, JWTAdapterConfig
 from mozaiksai.core.auth.dependencies import UserPrincipal
 from mozaiksai.core.auth.websocket_auth import WebSocketUser
@@ -27,6 +30,7 @@ from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
 from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, ModuleRequest
 from mozaiksai.core.runtime.composition.platform_hooks import PlatformHookRegistry
 from mozaiksai.core.runtime.persistence.adapter import PersistencePrincipal
+from mozaiksai.hosts.routers import admin_modules as admin_module_router
 from mozaiksai.hosts.routers import modules as module_router
 from tests.module_authority_test_helpers import enforce_authority, trusted_framework_authority
 
@@ -102,13 +106,15 @@ def runtime(monkeypatch):
     assignments = _Assignments()
     handler = _Reports()
 
-    def token(user, *, tenant=None, workspace=None):
+    def token(user, *, tenant=None, workspace=None, roles=None):
         claims = {"sub": user, "iss": "https://auth.test", "aud": "entitlement-test",
                   "app_id": APP_ID, "exp": int(time.time()) + 300}
         if tenant is not None:
             claims["tid"] = tenant
         if workspace is not None:
             claims["workspace_id"] = workspace
+        if roles is not None:
+            claims["roles"] = roles
         return {"Authorization": "Bearer " + jwt.encode(
             claims, key, algorithm="RS256", headers={"kid": "entitlement-test", "typ": "at+jwt"},
         )}
@@ -126,11 +132,12 @@ def runtime(monkeypatch):
         )
         return module_executor
 
-    def client(*, workspace_store=False):
+    def client(*, workspace_store=False, surface=None):
         app = FastAPI()
-        app.state.module_action_surfaces = {"reports": {"export_report": None}}
+        app.state.module_action_surfaces = {"reports": {"export_report": surface}}
         app.state.executor_registry = SimpleNamespace(module_executor=executor(workspace_store=workspace_store))
         app.include_router(module_router.router)
+        app.include_router(admin_module_router.router)
         return TestClient(app)
 
     return SimpleNamespace(
@@ -314,3 +321,303 @@ def test_principal_captures_the_tenant_its_credential_is_bound_to(monkeypatch):
     assert PersistencePrincipal(user_id="dave").with_host_scope(
         {"_verified_workspace_id": "ws-1", "tenant_id": "t-paid"},
     ) == PersistencePrincipal(user_id="dave", workspace_id="ws-1")
+
+
+# A host-verified tenant: the scope hook returns ``verified_tenant_id``.
+
+# Host-owned memberships. The hooks below look a caller up by the
+# authenticated principal only, never by anything the request names.
+_HOST_TENANTS = {"maya": "t-paid", "olga": "t-paid"}
+
+
+def _membership_hook(**scope):
+    tenant = _HOST_TENANTS.get(scope["principal"].user_id)
+    return {"verified_tenant_id": tenant} if tenant else {}
+
+
+def _plain_tenant_hook(**scope):
+    return {"tenant_id": _HOST_TENANTS.get(scope["principal"].user_id)}
+
+
+def _audits() -> list[Any]:
+    return [call.args[0] for call in ModuleExecutor._emit_dispatch_audit.call_args_list]
+
+
+def _socket_user(user: str) -> WebSocketUser:
+    return WebSocketUser.from_claims(UserClaims(
+        user_id=user, app_id=APP_ID, provider="jwt", raw_claims={"exp": int(time.time()) + 300},
+    ))
+
+
+@pytest.mark.parametrize("token_tenant", [None, "idp-directory"])
+def test_host_verified_tenant_lets_a_member_pass_a_tenant_gate(runtime, token_tenant):
+    runtime.hooks.register_bundle({"module_scope_resolver": _membership_hook}, source="test")
+    client = runtime.client()
+    runtime.assignments.add(tenant_id="t-paid")
+
+    member = _export(client, runtime.token("maya", tenant=token_tenant))
+    outsider = _export(client, runtime.token("nora", tenant=token_tenant))
+
+    assert member.status_code == 200, member.text
+    assert _refused(outsider)
+    assert runtime.handler.calls == 1
+    # The audit records the dispatch tenant, not the verified one.
+    granted = next(audit for audit in _audits() if audit.actor_id == "maya")
+    assert granted.tenant_id == token_tenant
+    assert granted.entitlement_check.status == "granted"
+
+
+def test_plain_tenant_from_a_host_hook_stays_dispatch_metadata(runtime):
+    runtime.hooks.register_bundle({"module_scope_resolver": _plain_tenant_hook}, source="test")
+    client = runtime.client()
+    runtime.assignments.add(tenant_id="t-paid")
+    member = runtime.token("maya")
+
+    assert _refused(_export(client, member))
+    assert _refused(_export(client, member, context={"tenant_id": "t-paid"}))
+    assert runtime.handler.calls == 0
+    assert {audit.tenant_id for audit in _audits()} == {"t-paid"}
+
+
+_FORGED_TENANT = {"tenant_id": "t-paid", "verified_tenant_id": "t-paid", "_verified_tenant_id": "t-paid"}
+
+
+@pytest.mark.parametrize("with_hook", [False, True])
+@pytest.mark.parametrize("form", ["context", "query", "params", "flat", "headers"])
+def test_request_input_cannot_assert_a_verified_tenant(runtime, with_hook, form):
+    if with_hook:
+        runtime.hooks.register_bundle({"module_scope_resolver": _membership_hook}, source="test")
+    client = runtime.client()
+    runtime.assignments.add(tenant_id="t-paid")
+    headers = runtime.token("nora")
+
+    if form == "flat":
+        response = client.post(URL, json=dict(_FORGED_TENANT), headers=headers)
+    elif form == "headers":
+        headers.update({"X-Tenant-Id": "t-paid", "X-Mozaiks-Tenant-Id": "t-paid", "X-Verified-Tenant-Id": "t-paid"})
+        response = _export(client, headers)
+    else:
+        response = _export(client, headers, **{
+            "context": {"context": dict(_FORGED_TENANT)},
+            "query": {"query": dict(_FORGED_TENANT)},
+            "params": dict(_FORGED_TENANT),
+        }[form])
+
+    assert _refused(response), response.text
+    assert runtime.handler.calls == 0
+
+
+@pytest.mark.parametrize(("hook_result", "granted"), [
+    ({}, True),
+    ({"verified_workspace_id": "ws-own"}, True),
+    ({"tenant_id": "t-other"}, True),
+    ({"verified_tenant_id": None}, False),
+    ({"verified_tenant_id": "t-other"}, False),
+])
+def test_token_bound_tenant_is_kept_unless_the_host_asserts_one(runtime, hook_result, granted):
+    runtime.hooks.register_bundle({"module_scope_resolver": lambda **_scope: dict(hook_result)}, source="test")
+    client = runtime.client()
+    runtime.assignments.add(tenant_id="t-paid")
+
+    response = _export(client, runtime.token("mia", tenant="t-paid"))
+
+    if granted:
+        assert response.status_code == 200, response.text
+    else:
+        assert _refused(response), response.text
+    assert runtime.handler.calls == int(granted)
+
+
+@pytest.mark.parametrize(("token_workspace", "hook_result", "granted"), [
+    ("ws-paid", {"verified_tenant_id": "t-own"}, True),
+    (None, {"verified_tenant_id": "t-own", "verified_workspace_id": "ws-paid"}, True),
+    (None, {"verified_tenant_id": "t-own"}, False),
+    ("ws-paid", {"verified_tenant_id": "t-own", "verified_workspace_id": None}, False),
+])
+def test_tenant_assertion_leaves_workspace_behaviour_unchanged(runtime, token_workspace, hook_result, granted):
+    runtime.hooks.register_bundle({"module_scope_resolver": lambda **_scope: dict(hook_result)}, source="test")
+    client = runtime.client(workspace_store=True)
+    runtime.assignments.add(workspace_id="ws-paid")
+
+    response = _export(client, runtime.token("quin", workspace=token_workspace))
+
+    if granted:
+        assert response.status_code == 200, response.text
+    else:
+        assert _refused(response), response.text
+
+
+def test_admin_lane_applies_a_host_verified_tenant(runtime):
+    runtime.hooks.register_bundle({"module_scope_resolver": _membership_hook}, source="test")
+    client = runtime.client(surface="admin_internal")
+    runtime.assignments.add(tenant_id="t-paid")
+    url = "/api/admin/modules/reports/export_report"
+
+    member = client.post(url, json={"params": {}}, headers=runtime.token("olga", roles=["platform_operator"]))
+    outsider = client.post(
+        url, json={"params": {}, "context": {"tenant_id": "t-paid"}},
+        headers=runtime.token("otto", roles=["platform_operator"]),
+    )
+
+    assert member.status_code == 200, member.text
+    assert _refused(outsider)
+    assert runtime.handler.calls == 1
+    assert [(audit.actor_id, audit.tenant_id, audit.entitlement_check.status) for audit in _audits()] == [
+        ("olga", None, "granted"), ("otto", "t-paid", "denied"),
+    ]
+
+
+@pytest.mark.parametrize("surface", ["panels", "tabs", "pages", "relationships"])
+def test_profile_hydration_applies_a_host_verified_tenant(runtime, monkeypatch, surface):
+    from mozaiksai.hosts import platform
+
+    runtime.hooks.register_bundle({"module_scope_resolver": _membership_hook}, source="test")
+    runtime.assignments.add(tenant_id="t-paid")
+    relationship = surface == "relationships"
+    monkeypatch.setattr(platform, "executor_registry", SimpleNamespace(module_executor=runtime.executor()))
+    monkeypatch.setattr(platform, "get_platform_hooks", lambda: runtime.hooks)
+    monkeypatch.setattr(platform.app.state, "subscriptions_config", None)
+    loader = "load_relationship_providers" if relationship else f"load_profile_{surface}"
+    monkeypatch.setattr(platform, loader, lambda *_: [{"id": "gated", "module_id": "reports", "action": "export_report"}])
+    handler = platform.get_current_user_relationships if relationship else getattr(platform, f"get_profile_{surface}")
+    app = FastAPI()
+    app.add_api_route("/profile", handler, methods=["GET"])
+    client = TestClient(app)
+
+    def error_for(user):
+        response = client.get("/profile", headers=runtime.token(user))
+        assert response.status_code == 200, response.text
+        rows = response.json()["providers" if relationship else surface]
+        return next(row for row in rows if row["id"] == "gated")["error"]
+
+    assert error_for("maya") is None
+    assert error_for("nora")
+    assert runtime.handler.calls == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("user", "granted"), [("maya", True), ("nora", False)])
+async def test_workflow_tool_dispatch_applies_a_host_verified_tenant(runtime, monkeypatch, user, granted):
+    from starlette.websockets import WebSocketState
+
+    from mozaiksai.core.transport.simple_transport import SimpleTransport
+    from mozaiksai.core.workflow import module_tools
+
+    runtime.hooks.register_bundle({"module_scope_resolver": _membership_hook}, source="test")
+    runtime.assignments.add(tenant_id="t-paid")
+    app = SimpleNamespace(state=SimpleNamespace(
+        executor_registry=SimpleNamespace(module_executor=runtime.executor()),
+        module_action_surfaces={"reports": {"export_report": None}},
+    ))
+    socket = SimpleNamespace(
+        state=SimpleNamespace(user=_socket_user(user)), app=app,
+        client_state=WebSocketState.CONNECTED, application_state=WebSocketState.CONNECTED,
+    )
+    transport = SimpleNamespace(connections={
+        "chat-1": {"websocket": socket, "active": True, "app_id": APP_ID, "user_id": user},
+    })
+    monkeypatch.setattr(SimpleTransport, "get_instance", AsyncMock(return_value=transport))
+    monkeypatch.setattr(module_tools, "get_platform_hooks", lambda: runtime.hooks)
+    monkeypatch.setattr(module_tools, "active_workflow_tool_run", lambda: ("Reports", APP_ID, "chat-1", user))
+
+    result = await module_tools.dispatch_workflow_module_action("reports", "export_report", {})
+
+    assert result.success is granted
+    assert result.error_code == (None if granted else "ENTITLEMENT_REQUIRED")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("user", "granted"), [("maya", True), ("nora", False)])
+async def test_page_ask_context_applies_a_host_verified_tenant(runtime, monkeypatch, user, granted):
+    from mozaiksai.core.runtime import composition
+    from mozaiksai.core.runtime.app import ask_page_context
+
+    runtime.hooks.register_bundle({"module_scope_resolver": _membership_hook}, source="test")
+    runtime.assignments.add(tenant_id="t-paid")
+    monkeypatch.setattr(composition, "get_platform_hooks", lambda: runtime.hooks)
+    app = SimpleNamespace(state=SimpleNamespace(
+        executor_registry=SimpleNamespace(module_executor=runtime.executor()),
+        module_ask_context_actions={"reports": {"export_report": True}},
+    ))
+    principal = _socket_user(user)
+
+    context = await ask_page_context.resolve_page_ask_context(
+        ask_page_context.normalize_ask_context_declarations([{"module": "reports", "action": "export_report"}]),
+        app=app, app_id=APP_ID, user_id=user,
+        persistence_principal=PersistencePrincipal.from_websocket_user(principal), principal=principal,
+    )
+
+    assert context == ({"reports.export_report": json.dumps({"exported": True})} if granted else {})
+
+
+@pytest.mark.asyncio
+async def test_scope_registry_carries_only_a_hook_asserted_tenant():
+    async def resolve(*hook_results, requested=None, params=None):
+        registry = PlatformHookRegistry()
+        for hook_result in hook_results:
+            registry.register_bundle(
+                {"module_scope_resolver": lambda _result=hook_result, **_scope: dict(_result)}, source="test",
+            )
+        return await registry.call_module_scope(
+            principal=None, module_name="reports", action_name="export_report",
+            requested_scope=requested or {}, params=params or {},
+        )
+
+    requested_only = await resolve(requested=dict(_FORGED_TENANT), params=dict(_FORGED_TENANT))
+    assert requested_only["tenant_id"] == "t-paid"
+    assert "_verified_tenant_id" not in requested_only
+    assert "_verified_tenant_id" not in await resolve({"tenant_id": "t-paid", "_verified_tenant_id": "t-paid"})
+    assert (await resolve({"verified_tenant_id": " t-host "}))["_verified_tenant_id"] == "t-host"
+    assert (await resolve({"verified_tenant_id": None}))["_verified_tenant_id"] is None
+    assert (await resolve({"verified_tenant_id": "t-host"}, {"verified_tenant_id": ""}))["_verified_tenant_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_scope_registry_keeps_a_verified_tenant_out_of_dispatch_scope_and_past_a_failing_hook():
+    permission_tenants: list[Any] = []
+
+    def failing(**_scope):
+        raise RuntimeError("membership lookup failed")
+
+    def permissions(**scope):
+        permission_tenants.append(scope["tenant_id"])
+
+    registry = PlatformHookRegistry()
+    registry.register_bundle(
+        {"module_scope_resolver": lambda **_scope: {"verified_tenant_id": "t-host"}}, source="test",
+    )
+    registry.register_bundle(
+        {"module_scope_resolver": failing, "module_permission_resolver": permissions}, source="test",
+    )
+
+    resolved = await registry.call_module_scope(
+        principal=None, module_name="reports", action_name="export_report",
+        requested_scope={"tenant_id": "t-requested"}, params={},
+    )
+
+    assert resolved["_verified_tenant_id"] == "t-host"
+    assert resolved["tenant_id"] == "t-requested"
+    assert permission_tenants == ["t-requested"]
+
+
+def test_principal_takes_tenant_and_workspace_only_from_verified_keys():
+    bound = PersistencePrincipal(user_id="mia", workspace_id="ws-token", tenant_id="t-token")
+    development = PersistencePrincipal(user_id="dev", workspace_id="development", source="development")
+
+    assert bound.with_host_scope({"tenant_id": "t-x", "workspace_id": "ws-x"}) is bound
+    assert bound.with_host_scope({"_verified_tenant_id": "t-host"}) == PersistencePrincipal(
+        user_id="mia", workspace_id="ws-token", tenant_id="t-host",
+    )
+    assert bound.with_host_scope({"_verified_tenant_id": None}) == PersistencePrincipal(
+        user_id="mia", workspace_id="ws-token",
+    )
+    assert bound.with_host_scope({"_verified_tenant_id": "t-host", "_verified_workspace_id": "ws-host"}) == (
+        PersistencePrincipal(user_id="mia", workspace_id="ws-host", tenant_id="t-host")
+    )
+    assert development.with_host_scope({"_verified_tenant_id": "t-host"}) == PersistencePrincipal(
+        user_id="dev", workspace_id="development", source="development", tenant_id="t-host",
+    )
+    assert bound.with_host_scope({"verified_tenant_id": "t-x", "verified_workspace_id": "ws-x"}) is bound
+    assert PersistencePrincipal(user_id="mia").with_host_scope({"_verified_tenant_id": "t-host"}) == (
+        PersistencePrincipal(user_id="mia", tenant_id="t-host")
+    )

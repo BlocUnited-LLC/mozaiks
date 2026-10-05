@@ -234,6 +234,8 @@ membership for that authenticated actor. Omission preserves the signed token's
 workspace claim; explicit `None` revokes workspace ownership. Plain
 `workspace_id`, action inputs, requested scope, and mutable context fields never
 grant ownership. The assertion is accepted only from the registered host hook.
+The hook's `verified_tenant_id` assertion keys module entitlement lookups only;
+persistence never reads it, and stored rows keep the dispatch tenant.
 
 Auth-disabled local, development, and test hosts use an explicit logged
 development principal with stable workspace `development`. This authority is

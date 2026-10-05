@@ -79,14 +79,33 @@ The OSS runtime now provides the foundational tenant/auth scope contract:
 - `PlatformHookRegistry` exposes `module_scope_resolver`, a provider-neutral
   hook that lets apps return validated `{app_id, user_id, tenant_id,
   workspace_id, permissions}` for module dispatch.
+- The same hook may return `verified_tenant_id` and `verified_workspace_id`.
+  These are host membership assertions: return one only after checking
+  membership from the authenticated principal the hook receives, never from
+  the requested scope or params. They are the only hook values that change
+  the verified identity. Plain `tenant_id` and `workspace_id`, from the hook
+  or the request, stay dispatch metadata. Omitting a verified key keeps the
+  tenant or workspace the token is bound to; an explicit `None` removes it.
+  A hook that raises is skipped on HTTP module dispatch and workflow tool
+  dispatch, which keeps the token binding; the admin lane, Page Ask and
+  profile hydration refuse instead. A hook that relies on removal must catch
+  its own lookup failures and return `None`.
+  Request input (context, query, params, body or headers) cannot set either
+  key. Every path that applies host scope honors both: HTTP module dispatch
+  and its admin lane, workflow tool dispatch, Page Ask context, and profile
+  panel, tab, page and relationship hydration.
 - Module persistence context and emitted module event tenant metadata include
   `workspace_id` when present.
 - Module entitlement checks are keyed only by the dispatch's verified
-  identity: the token's user, the tenant the token is bound to, and the
-  workspace the token or a host-verified membership assertion binds. Requested
-  tenant or workspace scope, including scope a resolver hook returns, never
+  identity: the token's user, plus the tenant and workspace the token is bound
+  to or a host-verified membership assertion replaces. Requested tenant or
+  workspace scope, including plain scope a resolver hook returns, never
   selects a plan. A dispatch with no verified identity holds only app-wide
-  grants. The OSS `ConfiguredEntitlementAdapter` honors `workspace_id_field`
+  grants. A verified tenant changes entitlement lookups only: persistence
+  ownership reads the verified user and workspace, and stored documents and
+  dispatch audit records keep the dispatch tenant. Account export and delete
+  use the token identity and never consult the scope hook. The OSS
+  `ConfiguredEntitlementAdapter` honors `workspace_id_field`
   when an app's `config/subscriptions.yaml` declares workspace-scoped
   assignment records, and checks the most specific app/tenant/workspace/user
   assignment before falling back to broader tenant, workspace, user, or
