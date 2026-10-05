@@ -58,6 +58,11 @@ Bundle keys (all optional):
         authenticated principal. It is persistence ownership authority; ordinary
         workspace_id remains dispatch metadata. Explicit None revokes workspace
         ownership, while omitting it preserves the authenticated token binding.
+        verified_tenant_id follows the same rules for the tenant: return it
+        only after verifying membership from the authenticated principal. It
+        keys module entitlement lookups and nothing else; ordinary tenant_id
+        remains dispatch metadata. Explicit None removes the token-bound
+        tenant, while omitting it preserves the authenticated token binding.
 
     workflow_ordering     (workflow_names: List[str]) -> List[str]
         Reorder the workflow list returned to the frontend (e.g. by journey
@@ -516,7 +521,7 @@ class PlatformHookRegistry:
         tenant_id = _clean_optional(requested_scope.get("tenant_id"))
         workspace_id = _clean_optional(requested_scope.get("workspace_id"))
         permissions: list[str] = list(default_permissions) if default_permissions is not None else []
-        ownership_scope: dict[str, Any] = {}
+        verified_scope: dict[str, Any] = {}
 
         for hook in self._module_scope_resolver_hooks:
             try:
@@ -539,7 +544,9 @@ class PlatformHookRegistry:
                     res = await res
                 if isinstance(res, dict):
                     if "verified_workspace_id" in res:
-                        ownership_scope["_verified_workspace_id"] = _clean_optional(res["verified_workspace_id"])
+                        verified_scope["_verified_workspace_id"] = _clean_optional(res["verified_workspace_id"])
+                    if "verified_tenant_id" in res:
+                        verified_scope["_verified_tenant_id"] = _clean_optional(res["verified_tenant_id"])
                     if "app_id" in res:
                         app_id = str(res.get("app_id") or "")
                     if "user_id" in res:
@@ -577,7 +584,7 @@ class PlatformHookRegistry:
             "tenant_id": tenant_id,
             "workspace_id": workspace_id,
             "permissions": permissions,
-            **ownership_scope,
+            **verified_scope,
         }
 
     async def call_before_module_execution(self, policy_input: Any) -> ModuleExecutionPolicyDecision:

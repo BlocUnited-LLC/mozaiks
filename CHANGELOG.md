@@ -18,6 +18,17 @@ This project follows a practical pre-1.0 changelog format:
   reactions and author-controlled deletion, plus reproducible local acceptance
   against the platform host, MongoDB and OIDC sign-in.
 
+- A host's `module_scope_resolver` hook can return `verified_tenant_id`, beside
+  `verified_workspace_id`, to assert a tenant it verified from the authenticated
+  caller's memberships. Module entitlement checks then use that tenant, so a
+  host that keeps its own tenant ids can make tenant-level plans apply to its
+  members. Omitting it keeps the tenant the token is bound to; an explicit
+  `None` removes it. A plain `tenant_id` from the hook or the request remains
+  dispatch metadata and never selects a plan. Stored documents, ownership,
+  account export and delete, and dispatch audit records are unchanged. HTTP and
+  admin module dispatch, workflow tools, Page Ask and profile hydration all
+  honor it.
+
 ### Security
 
 - Social `user_posts` listings and per-post reads, comments, and reactions now

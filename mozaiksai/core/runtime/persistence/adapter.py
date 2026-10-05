@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 from logs.logging_config import get_core_logger
@@ -26,8 +26,9 @@ class PersistencePrincipal:
     Runtime authentication or an explicit local development identity supplies
     the actor. ``tenant_id`` is the tenant the validated credential is bound
     to; requested dispatch scope never sets it. Only a host's verified
-    membership assertion may select workspace. Persistence ownership and
-    module entitlement lookups read this identity.
+    membership assertion may select tenant or workspace. Persistence
+    ownership reads user and workspace; module entitlement lookups read user,
+    tenant and workspace.
     """
 
     user_id: str
@@ -102,13 +103,18 @@ class PersistencePrincipal:
         return cls(user_id=user_id, workspace_id="development", source="development")
 
     def with_host_scope(self, scope: Mapping[str, Any]) -> PersistencePrincipal:
-        """Apply the hook registry's explicit, host-verified membership assertion."""
-        if "_verified_workspace_id" not in scope:
-            return self
-        return PersistencePrincipal(
-            user_id=self.user_id, workspace_id=scope["_verified_workspace_id"], source=self.source,
-            tenant_id=self.tenant_id,
-        )
+        """Apply the hook registry's explicit, host-verified membership assertions.
+
+        Only the registry's private verified keys are read. A plain requested
+        ``tenant_id`` or ``workspace_id`` in the same scope never changes the
+        principal.
+        """
+        asserted = {
+            field: scope[key]
+            for key, field in (("_verified_tenant_id", "tenant_id"), ("_verified_workspace_id", "workspace_id"))
+            if key in scope
+        }
+        return replace(self, **asserted) if asserted else self
 
 
 class PersistenceScopeError(PermissionError):
