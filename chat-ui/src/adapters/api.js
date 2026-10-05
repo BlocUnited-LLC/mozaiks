@@ -16,6 +16,40 @@ function _trimTrailingSlash(value) {
   return typeof value === 'string' && value.endsWith('/') ? value.slice(0, -1) : value;
 }
 
+function getHttpBaseUrl(adapterConfig = null) {
+  const fallback = typeof config?.get === 'function' ? config.get('api.baseUrl') : undefined;
+  return _trimTrailingSlash(_firstString(
+    adapterConfig?.baseUrl,
+    adapterConfig?.api?.baseUrl,
+    fallback,
+    platform.resolveHttpUrl()
+  ));
+}
+
+function resolveHttpRequest(input, baseUrl) {
+  // Request and URL objects already identify a destination. Fetch owns their semantics.
+  if (typeof input !== 'string' || !baseUrl) return input;
+  const value = input.trim();
+  if (/^[a-z][a-z\d+.-]*:|^[\\/]{2}/i.test(value)) return input;
+  // Adapter methods may already include a relative proxy prefix.
+  if (baseUrl.startsWith('/') && (value === baseUrl || value.startsWith(`${baseUrl}/`))) return input;
+  return `${baseUrl}${value.startsWith('/') ? '' : '/'}${value}`;
+}
+
+function isBackendRequest(input, baseUrl) {
+  try {
+    const origin = typeof window !== 'undefined' ? window.location?.origin : undefined;
+    const backend = new URL(baseUrl || origin, origin);
+    const destination = new URL(typeof Request !== 'undefined' && input instanceof Request ? input.url : input, origin);
+    return /^https?:$/.test(backend.protocol)
+      && /^https?:$/.test(destination.protocol)
+      && destination.origin === backend.origin
+      && !destination.username && !destination.password;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Get the current access token from storage.
  * In production, this should be provided by the auth adapter.
@@ -37,40 +71,21 @@ function getAccessToken(adapterConfig = null) {
 }
 
 /**
- * Build headers with Authorization if token available.
- * Always includes Content-Type for JSON requests.
+ * Resolve backend paths and attach the current token only to that backend's origin.
+ * Caller-supplied authorization and ordinary Request/RequestInit behavior are preserved.
  */
-function buildAuthHeaders(contentType = 'application/json', adapterConfig = null) {
-  const headers = {};
-  
-  if (contentType) {
-    headers['Content-Type'] = contentType;
-  }
-  
-  const token = getAccessToken(adapterConfig);
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-  
-  return headers;
-}
+export async function authFetch(input, options = {}, adapterConfig = null) {
+  const baseUrl = getHttpBaseUrl(adapterConfig);
+  const target = resolveHttpRequest(input, baseUrl);
+  const requestHeaders = typeof Request !== 'undefined' && input instanceof Request ? input.headers : undefined;
+  const headers = new Headers(options?.headers !== undefined ? options.headers : requestHeaders);
 
-/**
- * Wrapper for fetch with automatic auth header injection.
- */
-export async function authFetch(url, options = {}, adapterConfig = null) {
-  const token = getAccessToken(adapterConfig);
-  
-  const headers = {
-    ...options.headers,
-  };
-  
-  // Add Authorization header if token present and not already set
-  if (token && !headers['Authorization']) {
-    headers['Authorization'] = `Bearer ${token}`;
+  if (!headers.has('Authorization') && isBackendRequest(target, baseUrl)) {
+    const token = getAccessToken(adapterConfig);
+    if (token) headers.set('Authorization', `Bearer ${token}`);
   }
-  
-  return fetch(url, {
+
+  return fetch(target, {
     ...options,
     headers,
   });
@@ -107,12 +122,7 @@ export class ApiAdapter {
   }
 
   async get(path, options = {}) {
-    const baseUrl = this.getHttpBaseUrl();
-    const normalizedPath = typeof path === 'string' && path.startsWith('http')
-      ? path
-      : `${baseUrl}${String(path || '').startsWith('/') ? '' : '/'}${path || ''}`;
-
-    const response = await authFetch(normalizedPath, {
+    const response = await authFetch(path, {
       method: 'GET',
       ...(options || {}),
     }, this.config);
@@ -143,14 +153,7 @@ export class ApiAdapter {
   }
 
   getHttpBaseUrl() {
-    const fallback = typeof config?.get === 'function' ? config.get('api.baseUrl') : undefined;
-    const raw = _firstString(
-      this.config?.baseUrl,
-      this.config?.api?.baseUrl,
-      fallback,
-      platform.resolveHttpUrl()
-    );
-    return _trimTrailingSlash(raw);
+    return getHttpBaseUrl(this.config);
   }
 
   getWsBaseUrl() {
@@ -238,12 +241,7 @@ export class ApiAdapter {
   }
 
   async delete(path, options = {}) {
-    const baseUrl = this.getHttpBaseUrl();
-    const normalizedPath = typeof path === 'string' && path.startsWith('http')
-      ? path
-      : `${baseUrl}${String(path || '').startsWith('/') ? '' : '/'}${path || ''}`;
-
-    const response = await authFetch(normalizedPath, {
+    const response = await authFetch(path, {
       method: 'DELETE',
       ...(options || {}),
     }, this.config);
@@ -387,7 +385,7 @@ export class WebSocketApiAdapter extends ApiAdapter {
       const baseUrl = this.getHttpBaseUrl();
       const response = await authFetch(`${baseUrl}/chat/${appId}/${chatId}/${userId}/input`, {
         method: 'POST',
-        headers: buildAuthHeaders(undefined, this.config),
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message,
           workflow_name: actualworkflowname,
@@ -671,7 +669,7 @@ export class WebSocketApiAdapter extends ApiAdapter {
         }
         const response = await authFetch(`${baseUrl}/api/chats/${encodeURIComponent(appId)}/${encodeURIComponent(actualworkflowname)}/start`, {
           method: 'POST',
-          headers: buildAuthHeaders(undefined, this.config),
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
           ...fetchOpts
         }, this.config);
@@ -716,7 +714,7 @@ export class RestApiAdapter extends ApiAdapter {
       const baseUrl = this.getHttpBaseUrl();
       const response = await authFetch(`${baseUrl}/api/chat/send`, {
         method: 'POST',
-        headers: buildAuthHeaders(undefined, this.config),
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message, appId, userId })
       }, this.config);
 
@@ -742,7 +740,7 @@ export class RestApiAdapter extends ApiAdapter {
       const baseUrl = this.getHttpBaseUrl();
       const response = await authFetch(`${baseUrl}/chat/${appId}/${chatId}/${userId}/input`, {
         method: 'POST',
-        headers: buildAuthHeaders(undefined, this.config),
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           message, 
           workflow_name: actualworkflowname,
@@ -855,7 +853,7 @@ export class RestApiAdapter extends ApiAdapter {
         }
         const response = await authFetch(`${baseUrl}/api/chats/${encodeURIComponent(appId)}/${encodeURIComponent(actualworkflowname)}/start`, {
           method: 'POST',
-          headers: buildAuthHeaders(undefined, this.config),
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
           ...fetchOpts
         }, this.config);

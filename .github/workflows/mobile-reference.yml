@@ -7,6 +7,10 @@ on:
       - '.github/workflows/mobile-reference.yml'
       - 'examples/mobile-reference/**'
       - 'examples/canonical-apps/community/app/**'
+      - 'examples/canonical-apps/community/scripts/**'
+      - 'examples/canonical-apps/community/tests/**'
+      - 'mozaiksai/**'
+      - 'pyproject.toml'
       - 'chat-ui/**'
       - 'web_shell/**'
   pull_request:
@@ -15,6 +19,10 @@ on:
       - '.github/workflows/mobile-reference.yml'
       - 'examples/mobile-reference/**'
       - 'examples/canonical-apps/community/app/**'
+      - 'examples/canonical-apps/community/scripts/**'
+      - 'examples/canonical-apps/community/tests/**'
+      - 'mozaiksai/**'
+      - 'pyproject.toml'
       - 'chat-ui/**'
       - 'web_shell/**'
 
@@ -30,13 +38,14 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
-      PLATFORM_PATH: ${{ github.workspace }}/examples/canonical-apps/community/app
-      MOZAIKS_APP_WORKSPACE_PATH: ${{ github.workspace }}/examples/canonical-apps/community
+      PLATFORM_PATH: ${{ github.workspace }}/examples/mobile-reference/.local/workspace/app
+      MOZAIKS_APP_WORKSPACE_PATH: ${{ github.workspace }}/examples/mobile-reference/.local/workspace
       MOZAIKS_HOST: platform
       VITE_MOZAIKS_HOST: platform
       VITE_API_URL: https://runtime.example.invalid
       VITE_CORE_URL: https://runtime.example.invalid
       VITE_WS_URL: wss://runtime.example.invalid
+      VITE_OIDC_REDIRECT_URI: org.mozaiks.examples.commonground:/auth/callback
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -50,6 +59,13 @@ jobs:
       - name: Install shared UI dependencies
         working-directory: chat-ui
         run: npm ci
+      - name: Prepare the native workspace
+        working-directory: examples/mobile-reference
+        run: |
+          npm ci --ignore-scripts
+          npm audit --audit-level=moderate
+          npm test
+          npm run native:prepare
       - name: Install and build the community web app
         working-directory: web_shell
         run: |
@@ -58,11 +74,9 @@ jobs:
       - name: Prepare Android sources and verify bundled assets
         working-directory: examples/mobile-reference
         run: |
-          npm ci --ignore-scripts
-          npm audit --audit-level=moderate
-          npm test
           npm run android:add
           npm run android:sync
+          npm run android:configure
           node verify-assets.mjs > packaging-evidence.json
       - name: Compile the diagnostic APK with runner-provided tools
         working-directory: examples/mobile-reference/android
@@ -90,3 +104,181 @@ jobs:
           path: |
             examples/mobile-reference/android/app/build/outputs/apk/debug/app-debug.apk
             examples/mobile-reference/apk.sha256
+
+  native-acceptance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      PYTHON_DOTENV_DISABLED: '1'
+      COMMUNITY_LIVE_CONFIG: ${{ github.workspace }}/.local/evidence/community-env/native-ci/environment.json
+      MOBILE_ACCEPTANCE_EVIDENCE: ${{ github.workspace }}/.local/evidence/mobile-native
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: pip
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            chat-ui/package-lock.json
+            web_shell/package-lock.json
+            examples/mobile-reference/package-lock.json
+      - name: Install pinned dependencies
+        run: |
+          python -m pip install -e ".[dev]"
+          npm ci --prefix chat-ui
+          npm ci --prefix web_shell
+          npm ci --ignore-scripts --prefix examples/mobile-reference
+      - name: Pull disposable local service images
+        run: |
+          docker pull mongo:7
+          docker pull quay.io/keycloak/keycloak:26.0
+      - name: Enable Android hardware acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Start owned services and compile the native acceptance APK
+        shell: python
+        run: |
+          import json
+          import os
+          import subprocess
+          import sys
+          import time
+          import tomllib
+          from importlib.metadata import version
+          from pathlib import Path
+
+          root = Path.cwd()
+          state_path = Path(os.environ['COMMUNITY_LIVE_CONFIG'])
+          evidence = state_path.parent
+          evidence.parent.mkdir(parents=True, exist_ok=True)
+          launcher = root / 'examples/canonical-apps/community/scripts/live_environment.py'
+          dependencies = tomllib.loads((root / 'pyproject.toml').read_text())['project']['dependencies']
+          required_ag2 = next(item.split('==')[1] for item in dependencies if item.startswith('ag2['))
+          assert version('ag2') == required_ag2
+          with (evidence.parent / 'native-owner.log').open('w') as owner_log:
+              owner = subprocess.Popen([
+                  sys.executable, str(launcher), 'start', '--evidence-dir', str(evidence),
+                  '--native-callback', 'org.mozaiks.examples.commonground:/auth/callback',
+                  '--client-origin', 'https://localhost',
+              ], stdin=subprocess.DEVNULL, stdout=owner_log, stderr=subprocess.STDOUT, start_new_session=True)
+          (evidence.parent / 'native-owner.json').write_text(json.dumps({'pid': owner.pid}))
+          deadline = time.monotonic() + 180
+          while True:
+              if owner.poll() is not None:
+                  raise RuntimeError('Native acceptance owner exited before readiness')
+              state = json.loads(state_path.read_text()) if state_path.exists() else {}
+              if state.get('status') == 'ready':
+                  break
+              if time.monotonic() > deadline:
+                  raise TimeoutError('Native acceptance services did not become ready')
+              time.sleep(0.5)
+          assert state['ag2_version'] == required_ag2
+          reference = root / 'examples/mobile-reference'
+          subprocess.run(['node', 'scripts/prepare.mjs', 'workspace'], cwd=reference, check=True)
+          workspace = reference / '.local/workspace'
+          env = {
+              **os.environ, **state['frontend_env'],
+              'PLATFORM_PATH': str(workspace / 'app'),
+              'MOZAIKS_APP_WORKSPACE_PATH': str(workspace),
+              'VITE_MOZAIKS_HOST': 'platform',
+              'VITE_CORE_URL': state['api_url'],
+              'VITE_WS_URL': state['api_url'].replace('http://', 'ws://', 1),
+              'JAVA_HOME': os.environ['JAVA_HOME_21_X64'],
+          }
+          env['PATH'] = str(Path(env['JAVA_HOME']) / 'bin') + os.pathsep + env['PATH']
+          subprocess.run(['npm', 'run', 'build'], cwd=root / 'web_shell', env=env, check=True)
+          subprocess.run(['npm', 'run', 'android:add'], cwd=reference, env=env, check=True)
+          subprocess.run(['npm', 'run', 'android:sync'], cwd=reference, env=env, check=True)
+          subprocess.run(['node', 'scripts/prepare.mjs', 'android', '--acceptance'], cwd=reference, env=env, check=True)
+          safe_evidence = Path(os.environ['MOBILE_ACCEPTANCE_EVIDENCE'])
+          safe_evidence.mkdir(parents=True, exist_ok=True)
+          with (safe_evidence / 'packaging-evidence.json').open('w') as report:
+              subprocess.run(['node', 'verify-assets.mjs'], cwd=reference, stdout=report, check=True)
+          subprocess.run(['./gradlew', '--no-daemon', 'assembleDebug'], cwd=reference / 'android', env=env, check=True)
+      - name: Exercise real external-browser auth and community actions on Android
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7
+          ram-size: 2048M
+          disable-animations: true
+          emulator-boot-timeout: 300
+          script: |
+            adb reverse tcp:18443 tcp:18443
+            adb reverse tcp:28443 tcp:28443
+            adb shell am set-debug-app --persistent com.android.chrome
+            timeout 8m node examples/mobile-reference/scripts/android-acceptance.mjs
+      - name: Stop owned services and record safe provenance
+        if: always()
+        shell: python
+        run: |
+          import json
+          import os
+          import signal
+          import subprocess
+          import sys
+          import time
+          from pathlib import Path
+
+          root = Path.cwd()
+          state_path = Path(os.environ['COMMUNITY_LIVE_CONFIG'])
+          evidence = state_path.parent
+          state = json.loads(state_path.read_text()) if state_path.exists() else {}
+          launcher = root / 'examples/canonical-apps/community/scripts/live_environment.py'
+          if state.get('status') == 'ready':
+              subprocess.run([sys.executable, str(launcher), 'stop', '--evidence-dir', str(evidence)], check=True, timeout=160)
+          elif not state or state.get('status') in ('starting', 'restarting'):
+              # Signal only the process created above, after verifying its command.
+              owner_file = evidence.parent / 'native-owner.json'
+              owner = json.loads(owner_file.read_text()) if owner_file.exists() else {}
+              pid = state.get('owner_pid') or owner.get('pid')
+              command_path = Path(f'/proc/{pid}/cmdline')
+              if pid and command_path.exists():
+                  command = command_path.read_bytes().split(b'\0')
+                  assert str(launcher).encode() in command and str(evidence).encode() in command
+                  os.kill(pid, signal.SIGINT)
+                  deadline = time.monotonic() + 90
+                  while time.monotonic() < deadline:
+                      state = json.loads(state_path.read_text()) if state_path.exists() else {}
+                      if state.get('cleanup_status') or not command_path.exists():
+                          break
+                      time.sleep(0.5)
+          state = json.loads(state_path.read_text()) if state_path.exists() else {}
+          keys = (
+              'source_sha', 'source_changes', 'ag2_version', 'images', 'api_generation',
+              'status', 'cleanup_status', 'cleanup_errors', 'forced_api_stop',
+              'native_callback', 'client_origin',
+          )
+          safe_evidence = Path(os.environ['MOBILE_ACCEPTANCE_EVIDENCE'])
+          safe_evidence.mkdir(parents=True, exist_ok=True)
+          (safe_evidence / 'service-provenance.json').write_text(json.dumps({key: state.get(key) for key in keys}, indent=2))
+          if state:
+              assert state.get('cleanup_status') == 'complete', state.get('cleanup_errors')
+      - name: Retain sanitized native acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mobile-native-acceptance
+          retention-days: 7
+          if-no-files-found: warn
+          include-hidden-files: true
+          path: |
+            .local/evidence/mobile-native/android-proof.json
+            .local/evidence/mobile-native/packaging-evidence.json
+            .local/evidence/mobile-native/service-provenance.json
+            .local/evidence/mobile-native/*.png
+      - name: Retain the acceptance APK matching the proof checksum
+        uses: actions/upload-artifact@v7
+        with:
+          name: mobile-native-acceptance-apk
+          retention-days: 7
+          if-no-files-found: error
+          path: examples/mobile-reference/android/app/build/outputs/apk/debug/app-debug.apk

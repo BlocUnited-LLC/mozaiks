@@ -136,7 +136,7 @@ const invalidResponses = {
   nonce: ({ claims }) => ({ id_token: jwt({ ...claims, nonce: 'wrong' }) }),
   issuer: ({ claims }) => ({ id_token: jwt({ ...claims, iss: 'https://other.example' }) }),
   audience: ({ claims }) => ({ id_token: jwt({ ...claims, aud: 'other-client' }) }),
-  authorized_party: ({ claims }) => ({ id_token: jwt({ ...claims, aud: ['browser-client', 'other-client'] }) }),
+  authorized_party: ({ claims }) => ({ id_token: jwt({ ...claims, aud: [claims.aud, 'other-client'] }) }),
   expired_identity: ({ claims }) => ({ id_token: jwt({ ...claims, exp: 1 }) }),
   future_identity: ({ claims }) => ({ id_token: jwt({ ...claims, iat: Date.now() / 1000 + 3600 }) }),
   missing_subject: ({ claims }) => ({ id_token: jwt({ ...claims, sub: '' }) }),
@@ -265,4 +265,317 @@ test('missing, nonboolean, or contradictory public intent rejects bootstrap befo
     metadataResponse = { appId: 'malformed-app', auth };
     await assert.rejects(loadShellAuth({ createAppAuthAdapter: () => { throw new Error('custom adapter must not run'); } }), /authentication intent/);
   }
+});
+
+const nativeCallback = 'org.mozaiks.examples.commonground:/auth/callback';
+function nativeConfig() {
+  const value = config();
+  value.frontend.client_id = 'native-client';
+  value.frontend.redirect_uri = nativeCallback;
+  return value;
+}
+
+function nativeResponse({ url, callbackUri }) {
+  const authorization = new URL(url);
+  const now = Math.floor(Date.now() / 1000);
+  const claims = {
+    iss: issuer, aud: authorization.searchParams.get('client_id'), sub: 'native-user',
+    nonce: authorization.searchParams.get('nonce'), exp: now + 3600, iat: now,
+  };
+  tokenResponse = { access_token: 'native-access-token', id_token: jwt(claims), token_type: 'Bearer', expires_in: 1800 };
+  return { claims, callback: `${callbackUri}?code=native-code&state=${authorization.searchParams.get('state')}` };
+}
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+
+test('native transport reuses PKCE and the backend client, returns the trusted path, and avoids browser navigation', async () => {
+  let opened;
+  const adapter = createAuthAdapter({
+    authConfig: nativeConfig(), appId: 'native-app',
+    env: { VITE_OIDC_CLIENT_ID: 'unselected-client', VITE_OIDC_REDIRECT_URI: 'org.other.app:/auth/callback' },
+    authorizationTransport: { async open(options) { opened = options; return nativeResponse(options).callback; } },
+  });
+  const users = [];
+  const unsubscribe = adapter.onAuthStateChange(user => users.push(user));
+  const result = await adapter.login({ returnPath: '/community/post-1?tab=comments' });
+  unsubscribe();
+  assert.equal(result.returnPath, '/community/post-1?tab=comments');
+  assert.equal(users.at(-1).id, 'native-user');
+  assert.equal(adapter.getAccessToken(), 'native-access-token');
+  assert.equal(opened.callbackUri, nativeCallback);
+  const authorization = new URL(opened.url);
+  assert.equal(authorization.searchParams.get('client_id'), 'native-client');
+  assert.equal(authorization.searchParams.get('redirect_uri'), nativeCallback);
+  assert.equal(authorization.searchParams.get('code_challenge_method'), 'S256');
+  const exchange = requests.find(request => request.method === 'POST');
+  const body = new URLSearchParams(exchange.body);
+  assert.equal(body.get('redirect_uri'), nativeCallback);
+  assert.equal(body.get('client_id'), 'native-client');
+  const challenge = Buffer.from(await webcrypto.subtle.digest('SHA-256', new TextEncoder().encode(body.get('code_verifier')))).toString('base64url');
+  assert.equal(challenge, authorization.searchParams.get('code_challenge'));
+  assert.equal(window.location.assigned, undefined);
+  assert.equal(window.location.pathname, '/apps');
+});
+
+test('native redirect configuration is explicit, scheme-bound, and matches the declared callback path', () => {
+  for (const redirectUri of [
+    '', 'myapp:/auth/callback', 'https://app.example/auth/callback',
+    'org.example.app://host/auth/callback', 'org.example.app:///auth/callback',
+    'org.example.app:/another/callback', 'org.example.app:/auth/callback?tenant=one',
+    'org.example.app:/auth/callback#fragment', 'org.example.app:/auth/callback?',
+    'org.example.app:/auth/../auth/callback', 'org.example.app:/auth/%63allback',
+    'org.example.app-:/auth/callback',
+  ]) {
+    const authConfig = nativeConfig();
+    authConfig.frontend.redirect_uri = redirectUri;
+    assert.throws(() => createAuthAdapter({ authConfig, authorizationTransport: { open() {} } }), /Native OIDC redirect URI/);
+  }
+  assert.throws(() => createAuthAdapter({ authConfig: config(), authorizationTransport: {} }), /transport/);
+  assert.throws(() => createAuthAdapter({ authConfig: nativeConfig() }), /HTTPS/);
+  const authConfig = config();
+  authConfig.frontend.redirect_uri = 'https://other.example/auth/callback';
+  assert.throws(() => createAuthAdapter({ authConfig }), /application callback route/);
+});
+
+test('wrong callback URI cannot consume an active native transaction or exchange a token', async () => {
+  const opened = deferred();
+  const delivered = deferred();
+  const adapter = createAuthAdapter({ authConfig: nativeConfig(), authorizationTransport: {
+    open(options) { opened.resolve(options); return delivered.promise; },
+  } });
+  const login = adapter.login();
+  const options = await opened.promise;
+  const callback = nativeResponse(options).callback;
+  const before = [...storage.entries()];
+  for (const wrong of [
+    callback.replace('org.mozaiks', 'org.other'),
+    callback.replace(':/auth/', '://host/auth/'),
+    callback.replace('/auth/callback', '/different'),
+    callback.replace('/auth/callback', '/auth/../auth/callback'),
+    callback.replace('/auth/callback', '/auth/%63allback'),
+    callback + '#fragment', callback + '#', `\n${callback}`,
+  ]) {
+    await assert.rejects(adapter.handleCallback(wrong), /callback URI/);
+    assert.deepEqual([...storage.entries()], before);
+  }
+  assert.equal(requests.filter(request => request.method === 'POST').length, 0);
+  delivered.resolve(callback);
+  await login;
+  assert.equal(adapter.getAccessToken(), 'native-access-token');
+});
+
+test('browser callback also validates its exact URI before consuming state', async () => {
+  const { adapter, state } = await begin();
+  await assert.rejects(adapter.handleCallback(`https://other.example/auth/callback?code=code-one&state=${state}`), /callback URI/);
+  assert.equal(requests.filter(request => request.method === 'POST').length, 0);
+  await adapter.handleCallback();
+  assert.equal(adapter.getAccessToken(), 'opaque-access-token');
+});
+
+test('native cancellation removes the transaction and permits a fresh retry', async () => {
+  let attempt = 0;
+  let cancelledCallback;
+  const adapter = createAuthAdapter({ authConfig: nativeConfig(), authorizationTransport: {
+    async open(options) {
+      const { callback } = nativeResponse(options);
+      if (attempt++ === 0) { cancelledCallback = callback; throw new Error('Authorization cancelled'); }
+      return callback;
+    },
+  } });
+  await assert.rejects(adapter.login(), /cancelled/);
+  const key = [...storage.keys()].find(value => value.endsWith(':transactions'));
+  assert.deepEqual(JSON.parse(storage.get(key)), {});
+  assert.equal(adapter.getAccessToken(), null);
+  await assert.rejects(adapter.handleCallback(cancelledCallback), /state/);
+  assert.equal(requests.filter(request => request.method === 'POST').length, 0);
+  await adapter.login();
+  assert.equal(adapter.getAccessToken(), 'native-access-token');
+});
+
+test('a second native login cannot replace an outstanding browser operation', async () => {
+  const opened = deferred();
+  const delivered = deferred();
+  let opens = 0;
+  const adapter = createAuthAdapter({ authConfig: nativeConfig(), authorizationTransport: {
+    open(options) { opens += 1; opened.resolve(options); return delivered.promise; },
+  } });
+  const first = adapter.login();
+  const options = await opened.promise;
+  await assert.rejects(adapter.login(), /already in progress/);
+  assert.equal(opens, 1);
+  delivered.resolve(nativeResponse(options).callback);
+  await first;
+});
+
+for (const variant of ['wrong_state', 'duplicate_state', 'duplicate_code', 'issuer', 'error']) {
+  test(`native login rejects ${variant} before token exchange`, async () => {
+    const adapter = createAuthAdapter({ authConfig: nativeConfig(), authorizationTransport: {
+      async open(options) {
+        const callback = new URL(nativeResponse(options).callback);
+        if (variant === 'wrong_state') callback.searchParams.set('state', 'unsolicited');
+        if (variant === 'duplicate_state') callback.searchParams.append('state', callback.searchParams.get('state'));
+        if (variant === 'duplicate_code') callback.searchParams.append('code', 'another-code');
+        if (variant === 'issuer') callback.searchParams.set('iss', 'https://other.example');
+        if (variant === 'error') callback.searchParams.set('error', 'access_denied');
+        return callback.href;
+      },
+    } });
+    await assert.rejects(adapter.login());
+    assert.equal(requests.filter(request => request.method === 'POST').length, 0);
+    assert.equal(adapter.getAccessToken(), null);
+    const key = [...storage.keys()].find(value => value.endsWith(':transactions'));
+    assert.deepEqual(JSON.parse(storage.get(key)), {});
+  });
+}
+
+for (const [name, modify] of Object.entries(invalidResponses)) {
+  test(`native code exchange preserves the ${name} identity check`, async () => {
+    const adapter = createAuthAdapter({ authConfig: nativeConfig(), authorizationTransport: {
+      async open(options) {
+        const response = nativeResponse(options);
+        Object.assign(tokenResponse, modify(response));
+        return response.callback;
+      },
+    } });
+    await assert.rejects(adapter.login());
+    assert.equal(await adapter.getCurrentUser(), null);
+    assert.equal(adapter.getAccessToken(), null);
+  });
+}
+
+test('native callback replay and a cold callback without a transaction cannot create identity', async () => {
+  let callback;
+  const options = { authConfig: nativeConfig(), authorizationTransport: {
+    async open(request) { callback = nativeResponse(request).callback; return callback; },
+  } };
+  const adapter = createAuthAdapter(options);
+  await adapter.login();
+  requests.length = 0;
+  await assert.rejects(adapter.handleCallback(callback), /state/);
+  assert.equal(adapter.getAccessToken(), null);
+  storage.clear();
+  await assert.rejects(createAuthAdapter(options).handleCallback(callback), /state/);
+  assert.equal(requests.length, 0);
+});
+
+test('duplicate native callback delivery shares one exchange while an unrelated callback is rejected', async () => {
+  const opened = deferred();
+  const delivered = deferred();
+  const exchangeStarted = deferred();
+  const exchangeDelivered = deferred();
+  const adapter = createAuthAdapter({ authConfig: nativeConfig(), authorizationTransport: {
+    open(options) { opened.resolve(options); return delivered.promise; },
+  } });
+  const fetch = globalThis.fetch;
+  globalThis.fetch = async (url, options) => {
+    if (url === discovery.token_endpoint) {
+      exchangeStarted.resolve();
+      await exchangeDelivered.promise;
+    }
+    return fetch(url, options);
+  };
+  const login = adapter.login();
+  const callback = nativeResponse(await opened.promise).callback;
+  delivered.resolve(callback);
+  await exchangeStarted.promise;
+  const duplicate = adapter.handleCallback(callback);
+  await assert.rejects(adapter.handleCallback(callback.replace('native-code', 'other-code')), /already in progress/);
+  exchangeDelivered.resolve();
+  assert.deepEqual(await duplicate, await login);
+  assert.equal(requests.filter(request => request.method === 'POST').length, 1);
+});
+
+test('native logout clears local state, validates a new return state, and navigates to the local logout route', async () => {
+  let logoutRequest;
+  const adapter = createAuthAdapter({ authConfig: nativeConfig(), authorizationTransport: {
+    async open(options) {
+      const url = new URL(options.url);
+      if (url.pathname === '/authorize') return nativeResponse(options).callback;
+      logoutRequest = { ...options, url };
+      assert.equal(adapter.getAccessToken(), null);
+      return `${options.callbackUri}?state=${url.searchParams.get('state')}`;
+    },
+  } });
+  await adapter.login();
+  const expectedIdToken = tokenResponse.id_token;
+  await adapter.logout();
+  assert.equal(logoutRequest.callbackUri, nativeCallback);
+  assert.equal(logoutRequest.url.searchParams.get('post_logout_redirect_uri'), nativeCallback);
+  assert.equal(logoutRequest.url.searchParams.get('id_token_hint'), expectedIdToken);
+  assert.ok(logoutRequest.url.searchParams.get('state').length >= 43);
+  assert.equal(window.location.assigned, '/login');
+  assert.equal(adapter.getAccessToken(), null);
+});
+
+for (const variant of ['wrong_uri', 'wrong_state', 'duplicate_state', 'code', 'error', 'cancelled']) {
+  test(`native logout rejects ${variant} while keeping local identity cleared`, async () => {
+    const adapter = createAuthAdapter({ authConfig: nativeConfig(), authorizationTransport: {
+      async open(options) {
+        const url = new URL(options.url);
+        if (url.pathname === '/authorize') return nativeResponse(options).callback;
+        if (variant === 'cancelled') throw new Error('Authorization cancelled');
+        const callback = new URL(`${options.callbackUri}?state=${url.searchParams.get('state')}`);
+        if (variant === 'wrong_uri') callback.pathname = '/different';
+        if (variant === 'wrong_state') callback.searchParams.set('state', 'wrong');
+        if (variant === 'duplicate_state') callback.searchParams.append('state', callback.searchParams.get('state'));
+        if (variant === 'code') callback.searchParams.set('code', 'login-code');
+        if (variant === 'error') callback.searchParams.set('error', 'access_denied');
+        return callback.href;
+      },
+    } });
+    await adapter.login();
+    await assert.rejects(adapter.logout());
+    assert.equal(adapter.getAccessToken(), null);
+    assert.equal(window.location.assigned, undefined);
+    await adapter.login();
+    assert.equal(adapter.getAccessToken(), 'native-access-token');
+  });
+}
+
+test('native logout rejects an expired return even with its matching state', async () => {
+  const clock = Date.now;
+  const adapter = createAuthAdapter({ authConfig: nativeConfig(), authorizationTransport: {
+    async open(options) {
+      const url = new URL(options.url);
+      if (url.pathname === '/authorize') return nativeResponse(options).callback;
+      const expiredNow = clock() + 16 * 60 * 1000;
+      Date.now = () => expiredNow;
+      return `${options.callbackUri}?state=${url.searchParams.get('state')}`;
+    },
+  } });
+  try {
+    await adapter.login();
+    await assert.rejects(adapter.logout(), /Invalid sign-out callback/);
+    assert.equal(adapter.getAccessToken(), null);
+    assert.equal(window.location.assigned, undefined);
+  } finally {
+    Date.now = clock;
+  }
+});
+
+test('logout during native token exchange cannot restore a cancelled session', async () => {
+  const exchangeStarted = deferred();
+  const exchangeDelivered = deferred();
+  const adapter = createAuthAdapter({ authConfig: nativeConfig(), authorizationTransport: {
+    async open(options) { return nativeResponse(options).callback; },
+  } });
+  const fetch = globalThis.fetch;
+  globalThis.fetch = async (url, options) => {
+    if (url === discovery.token_endpoint) {
+      exchangeStarted.resolve();
+      await exchangeDelivered.promise;
+    }
+    return fetch(url, options);
+  };
+  const login = adapter.login();
+  await exchangeStarted.promise;
+  await assert.rejects(adapter.logout(), /already in progress/);
+  exchangeDelivered.resolve();
+  await assert.rejects(login, /cancelled/);
+  assert.equal(adapter.getAccessToken(), null);
 });

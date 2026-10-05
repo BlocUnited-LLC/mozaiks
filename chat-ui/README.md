@@ -160,7 +160,60 @@ configurePlatform({
 
 Use a synchronous store for `storage`. `AsyncStorage` is not suitable for the current shared core because some reads happen synchronously during initialization.
 
-Web-only auth code (`createAuthAdapter`, `LoginPage`, and `AuthCallbackPage` from `@mozaiks/chat-ui/auth`) should not be imported from a native host. Auth is host-injected via the `authAdapter` prop.
+React Native hosts inject their own `authAdapter` prop; the shared auth pages and
+adapter require browser APIs and are not React Native components.
+
+### Capacitor authorization transport
+
+Capacitor renders the existing browser shell. Its app-owned `ui/index.js` may
+export `createAuthAdapter(options)` and call the shared adapter with an
+`authorizationTransport`:
+
+```js
+import { createAuthAdapter as createSharedAuthAdapter } from '@mozaiks/chat-ui/auth';
+
+export function createAuthAdapter(options) {
+  return createSharedAuthAdapter({
+    ...options,
+    authorizationTransport: {
+      async open({ url, callbackUri }) {
+        // Open the system browser, await the exact app callback, and return
+        // its complete URL. Reject if the user cancels or the operation expires.
+        return nativeBrowser.authorize({ url, callbackUri });
+      },
+    },
+  });
+}
+```
+
+`nativeBrowser` above represents the app's platform integration, not a package
+export. Register callback listeners before opening the browser, handle warm and
+cold launch delivery, remove owned listeners when finished, and reject duplicate
+opens. Authorization must use the system browser rather than the app WebView.
+
+The validated backend auth projection remains authoritative, including
+`frontend.redirect_uri`. Native transport requires an explicitly configured
+reverse-domain callback such as `org.example.app:/auth/callback`, with no
+authority, query, or fragment and a path exactly matching `routes.callback`.
+Register the exact URI for both sign-in and post-logout return with the issuer.
+The current projection supplies one public client configuration; use an
+appropriate host configuration for this native client, rather than overriding
+the browser client's projected settings inside the transport.
+
+The shared adapter owns PKCE, state, nonce, identity validation, expiry, and
+session storage. Native `login()` awaits the callback and returns the validated
+`returnPath`; the shared login page restores it. `handleCallback(absoluteUrl)`
+also accepts a callback delivered by the host, verifies its complete base URI,
+and consumes an existing transaction once. Without transport, browser navigation
+and the same-origin callback requirement remain in effect. Native logout clears
+the local session immediately and verifies a fresh state before returning to
+the local logout route. Cancellation removes the unfinished login transaction
+and permits retry. A cold callback with no surviving session transaction fails
+closed; this seam does not add durable credentials or refresh-token storage.
+
+See [OAuth for Native Apps](https://www.rfc-editor.org/info/rfc8252/),
+[Capacitor Browser](https://capacitorjs.com/docs/apis/browser), and
+[Capacitor App callbacks](https://capacitorjs.com/docs/apis/app).
 
 ## Dev Demo
 
