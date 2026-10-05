@@ -14,6 +14,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- An experimental Capacitor Android packaging reference for Common Ground,
+  with exact web-asset verification and explicit native integration prerequisites.
+
 - Common Ground, a responsive community reference with posts, comments,
   reactions and author-controlled deletion, plus reproducible local acceptance
   against the platform host, MongoDB and OIDC sign-in.
