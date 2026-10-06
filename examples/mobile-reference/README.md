@@ -85,7 +85,10 @@ credentials, and browser traces are excluded from uploaded evidence.
 Android receives the reverse-domain scheme; the shared adapter checks the exact
 callback URI and transaction. Callback delivery stores only a SHA-256 receipt
 to prevent replay of a retained launch intent after WebView reload. A process
-restart that loses the pending transaction requires fresh sign-in. Session
+restart that loses the pending transaction requires fresh sign-in. Bootstrap
+reads a retained native callback only when the shared adapter has a surviving
+PKCE transaction; a post-logout launch intent cannot delay sign-in readiness.
+Session
 storage follows the existing browser contract. Persistent native refresh-token
 storage needs separate design and qualification.
 

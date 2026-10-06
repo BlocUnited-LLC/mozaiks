@@ -36,6 +36,10 @@ export async function createNativeAppAuthAdapter(options, { App, Browser, create
       },
     },
   });
+  // A retained intent can complete only a surviving PKCE transaction. In
+  // particular, logout clears those transactions before navigating; reading
+  // a native launch intent then cannot add identity and needlessly blocks boot.
+  if (!adapter.hasPendingAuthorization()) return adapter;
   const launch = await App.getLaunchUrl();
   if (launch?.url) {
     const receipt = await digest(launch.url);

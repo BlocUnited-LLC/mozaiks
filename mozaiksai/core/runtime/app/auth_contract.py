@@ -262,7 +262,7 @@ async def build_app_auth_projection(
             "tenant_id": claims.tenant_id,
             "workspace_id": claims.workspace_id,
         }
-    frontend = None
+    frontend: dict[str, Any] | None = None
     if contract is not None:
         handles = contract.frontend
         frontend = {

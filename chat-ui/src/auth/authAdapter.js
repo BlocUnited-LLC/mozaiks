@@ -59,6 +59,7 @@ function fixedAdapter(user, routes) {
     routes,
     getCurrentUser: async () => user,
     getAccessToken: () => null,
+    hasPendingAuthorization: () => false,
     onAuthStateChange: callback => { callback(user); return () => {}; },
     login: async () => {},
     logout: async () => { window.location.assign(routes.logout); },
@@ -313,6 +314,7 @@ export function createAuthAdapter({ authConfig, appId = 'mozaiks', env = {}, aut
         }
       }
     },
+    hasPendingAuthorization: () => Object.keys(transactions()).length > 0,
     logout: async () => {
       const session = readSession();
       sessionRevision += 1;

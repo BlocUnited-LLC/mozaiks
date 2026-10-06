@@ -160,20 +160,35 @@ test('a cold launch with a surviving PKCE transaction completes through the shar
   }
 });
 
-test('a cold callback with missing state returns to login without exchanging tokens or persisting the callback', async () => {
+test('a cold callback without a surviving transaction is ignored without native bridge work', async () => {
   const callback = `${callbackUri}?code=fixture-authorization-code&state=lost-transaction`;
   const host = nativeHost(callback);
+  host.dependencies.App.getLaunchUrl = () => assert.fail('No transaction can consume this launch intent');
   const adapter = await createNativeAppAuthAdapter(options(), host.dependencies);
   assert.equal(adapter.getAccessToken(), null);
   assert.equal(await adapter.getCurrentUser(), null);
-  assert.deepEqual(navigation, ['/login', 'popstate']);
+  assert.deepEqual(navigation, []);
   assert.equal(requests.length, 0);
-  assert.equal(storage.get(receiptKey), digest(callback));
-  assert.deepEqual([...storage.entries()], [[receiptKey, digest(callback)]]);
+  assert.equal(storage.has(receiptKey), false);
+  assert.deepEqual([...storage.entries()], []);
   navigation.length = 0;
   await createNativeAppAuthAdapter(options(), host.dependencies);
-  assert.equal(host.handled.length, 1);
+  assert.equal(host.handled.length, 0);
   assert.deepEqual(navigation, []);
+});
+
+test('a post-logout bootstrap cannot wait on an irrelevant retained native launch intent', async () => {
+  const host = nativeHost();
+  const first = await createNativeAppAuthAdapter(options(), host.dependencies);
+  await first.login();
+  await first.logout(); // The fixture issuer has no external logout endpoint.
+  assert.equal(first.hasPendingAuthorization(), false);
+  host.dependencies.App.getLaunchUrl = () => new Promise(() => {});
+  const reloaded = await Promise.race([
+    createNativeAppAuthAdapter(options(), host.dependencies),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('Bootstrap waited on retained intent')), 100)),
+  ]);
+  assert.equal(reloaded.getAccessToken(), null);
 });
 
 test('cancelled native authorization creates no receipt and a fresh attempt can succeed', async () => {
