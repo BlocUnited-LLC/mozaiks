@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { setImmediate as tick } from 'node:timers/promises';
-import { createNativeAuthorizationTransport } from './authorizationTransport.mjs';
+import { createNativeAuthorizationTransport } from '../../factory_app/build_context/mobile/templates/ui/auth/capacitor/authorizationTransport.mjs';
 
 const callbackUri = 'org.mozaiks.examples.commonground:/auth/callback';
 const request = { url: 'https://identity.example/authorize?state=one', callbackUri };

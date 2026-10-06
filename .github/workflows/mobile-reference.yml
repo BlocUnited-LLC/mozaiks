@@ -9,6 +9,14 @@ on:
       - 'examples/canonical-apps/community/app/**'
       - 'examples/canonical-apps/community/scripts/**'
       - 'examples/canonical-apps/community/tests/**'
+      - 'examples/canonical-apps/project-hub/**'
+      - 'factory_app/build_context/mobile/**'
+      - 'factory_app/workflows/AppGenerator/tools/android_delivery*'
+      - 'factory_app/workflows/AppGenerator/tools/resolve_managed_capability_templates.py'
+      - 'mozaiks_cli/**'
+      - 'tests/mobile/**'
+      - 'tests/test_android_delivery.py'
+      - 'tests/test_cli_android_packaging.py'
       - 'mozaiksai/**'
       - 'pyproject.toml'
       - 'chat-ui/**'
@@ -21,6 +29,14 @@ on:
       - 'examples/canonical-apps/community/app/**'
       - 'examples/canonical-apps/community/scripts/**'
       - 'examples/canonical-apps/community/tests/**'
+      - 'examples/canonical-apps/project-hub/**'
+      - 'factory_app/build_context/mobile/**'
+      - 'factory_app/workflows/AppGenerator/tools/android_delivery*'
+      - 'factory_app/workflows/AppGenerator/tools/resolve_managed_capability_templates.py'
+      - 'mozaiks_cli/**'
+      - 'tests/mobile/**'
+      - 'tests/test_android_delivery.py'
+      - 'tests/test_cli_android_packaging.py'
       - 'mozaiksai/**'
       - 'pyproject.toml'
       - 'chat-ui/**'
@@ -36,18 +52,15 @@ concurrency:
 jobs:
   android-project:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
-      PLATFORM_PATH: ${{ github.workspace }}/examples/mobile-reference/.local/workspace/app
-      MOZAIKS_APP_WORKSPACE_PATH: ${{ github.workspace }}/examples/mobile-reference/.local/workspace
-      MOZAIKS_HOST: platform
-      VITE_MOZAIKS_HOST: platform
-      VITE_API_URL: https://runtime.example.invalid
-      VITE_CORE_URL: https://runtime.example.invalid
-      VITE_WS_URL: wss://runtime.example.invalid
-      VITE_OIDC_REDIRECT_URI: org.mozaiks.examples.commonground:/auth/callback
+      PYTHON_DOTENV_DISABLED: '1'
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: pip
       - uses: actions/setup-node@v7
         with:
           node-version: '22'
@@ -55,55 +68,59 @@ jobs:
           cache-dependency-path: |
             chat-ui/package-lock.json
             web_shell/package-lock.json
-            examples/mobile-reference/package-lock.json
-      - name: Install shared UI dependencies
-        working-directory: chat-ui
-        run: npm ci
-      - name: Prepare the native workspace
-        working-directory: examples/mobile-reference
+            factory_app/build_context/mobile/package-lock.json
+      - name: Check reusable packaging contracts
         run: |
-          npm ci --ignore-scripts
-          npm audit --audit-level=moderate
-          npm test
-          npm run native:prepare
-      - name: Install and build the community web app
-        working-directory: web_shell
+          python -m pip install -e ".[dev]"
+          python -m pytest -q --no-cov tests/test_android_delivery.py tests/test_cli_android_packaging.py
+          node --test tests/mobile/*.test.mjs
+      - name: Compile a separate external Project Hub workspace through the CLI
+        shell: python
         run: |
-          npm ci
-          npm run build
-      - name: Prepare Android sources and verify bundled assets
-        working-directory: examples/mobile-reference
-        run: |
-          npm run android:add
-          npm run android:sync
-          npm run android:configure
-          node verify-assets.mjs > packaging-evidence.json
-      - name: Compile the diagnostic APK with runner-provided tools
-        working-directory: examples/mobile-reference/android
-        run: |
-          export JAVA_HOME="$JAVA_HOME_21_X64"
-          export PATH="$JAVA_HOME/bin:$PATH"
-          test -d "$ANDROID_HOME/platforms/android-36"
-          java -version
-          ./gradlew --no-daemon assembleDebug
-          cd ..
-          sha256sum android/app/build/outputs/apk/debug/app-debug.apk > apk.sha256
+          import json
+          import os
+          import shutil
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          root = Path.cwd()
+          temporary = Path(os.environ['RUNNER_TEMP'])
+          source = temporary / 'mobile-project-hub-source'
+          output = temporary / 'mobile-project-hub-output'
+          shutil.copytree(root / 'examples/canonical-apps/project-hub/app', source / 'app')
+          config = temporary / 'project-hub-android.json'
+          config.write_text(json.dumps({
+              'schema_version': 'mozaiks.android_delivery.v1',
+              'package_id': 'org.mozaiks.examples.projecthub', 'display_name': 'Project Hub',
+              'version_name': '1.2.3', 'version_code': 7,
+              'backend_origin': 'https://runtime.example.invalid', 'build_type': 'debug',
+          }))
+          env = {**os.environ, 'JAVA_HOME': os.environ['JAVA_HOME_21_X64']}
+          assert (Path(env['ANDROID_HOME']) / 'platforms/android-36').is_dir()
+          subprocess.run([sys.executable, '-m', 'mozaiks_cli', 'package', 'android', str(source),
+                          '--config', str(config), '--output', str(output)], env=env, check=True)
+          mobile = output / 'workspace/mobile'
+          receipt = json.loads((mobile / 'build-result.json').read_text())
+          assert receipt['status'] == 'succeeded' and receipt['device_acceptance'] == 'not_run'
+          assert receipt['android']['package_id'] == 'org.mozaiks.examples.projecthub'
+          assert receipt['android']['version_code'] == 7
+          assert not (source / 'app/ui/auth/capacitor').exists()
+          subprocess.run(['npm', 'audit', '--audit-level=moderate'], cwd=mobile, check=True)
       - name: Retain packaging evidence
         uses: actions/upload-artifact@v7
         with:
           name: mobile-packaging-evidence
           retention-days: 7
           if-no-files-found: error
-          path: examples/mobile-reference/packaging-evidence.json
+          path: ${{ runner.temp }}/mobile-project-hub-output/workspace/mobile/build-result.json
       - name: Retain diagnostic APK
         uses: actions/upload-artifact@v7
         with:
-          name: mobile-reference-debug-apk
+          name: mobile-project-hub-debug-apk
           retention-days: 7
           if-no-files-found: error
-          path: |
-            examples/mobile-reference/android/app/build/outputs/apk/debug/app-debug.apk
-            examples/mobile-reference/apk.sha256
+          path: ${{ runner.temp }}/mobile-project-hub-output/workspace/mobile/android/app/build/outputs/apk/debug/app-debug.apk
 
   native-acceptance:
     runs-on: ubuntu-24.04
@@ -125,13 +142,11 @@ jobs:
           cache-dependency-path: |
             chat-ui/package-lock.json
             web_shell/package-lock.json
-            examples/mobile-reference/package-lock.json
+            factory_app/build_context/mobile/package-lock.json
       - name: Install pinned dependencies
         run: |
           python -m pip install -e ".[dev]"
-          npm ci --prefix chat-ui
           npm ci --prefix web_shell
-          npm ci --ignore-scripts --prefix examples/mobile-reference
       - name: Pull disposable local service images
         run: |
           docker pull mongo:7
@@ -179,30 +194,27 @@ jobs:
                   raise TimeoutError('Native acceptance services did not become ready')
               time.sleep(0.5)
           assert state['ag2_version'] == required_ag2
-          reference = root / 'examples/mobile-reference'
-          subprocess.run(['node', 'scripts/prepare.mjs', 'workspace'], cwd=reference, check=True)
-          workspace = reference / '.local/workspace'
+          from factory_app.workflows.AppGenerator.tools.deployment_contract import materialize_android_workspace
+          config = json.loads((root / 'examples/mobile-reference/android.json').read_text())
+          result = materialize_android_workspace(root / 'examples/canonical-apps/community', config,
+                                                Path(os.environ['RUNNER_TEMP']) / 'mobile-common-ground')
+          mobile = Path(result['mobile_dir'])
           env = {
               **os.environ, **state['frontend_env'],
-              'PLATFORM_PATH': str(workspace / 'app'),
-              'MOZAIKS_APP_WORKSPACE_PATH': str(workspace),
-              'VITE_MOZAIKS_HOST': 'platform',
-              'VITE_CORE_URL': state['api_url'],
-              'VITE_WS_URL': state['api_url'].replace('http://', 'ws://', 1),
+              'MOZAIKS_PYTHON': sys.executable,
               'JAVA_HOME': os.environ['JAVA_HOME_21_X64'],
           }
-          env['PATH'] = str(Path(env['JAVA_HOME']) / 'bin') + os.pathsep + env['PATH']
-          subprocess.run(['npm', 'run', 'build'], cwd=root / 'web_shell', env=env, check=True)
-          subprocess.run(['npm', 'run', 'android:add'], cwd=reference, env=env, check=True)
-          subprocess.run(['npm', 'run', 'android:sync'], cwd=reference, env=env, check=True)
-          subprocess.run(['node', 'scripts/prepare.mjs', 'android', '--acceptance'], cwd=reference, env=env, check=True)
+          subprocess.run(['node', str(mobile / 'build.mjs'), '--acceptance'], cwd=mobile, env=env, check=True)
+          from mozaiks_cli.commands.package import _verified_build_result
+          receipt = _verified_build_result(mobile)
+          assert receipt['acceptance_build'] is True
           safe_evidence = Path(os.environ['MOBILE_ACCEPTANCE_EVIDENCE'])
           safe_evidence.mkdir(parents=True, exist_ok=True)
-          with (safe_evidence / 'packaging-evidence.json').open('w') as report:
-              subprocess.run(['node', 'verify-assets.mjs'], cwd=reference, stdout=report, check=True)
-          subprocess.run(['./gradlew', '--no-daemon', 'assembleDebug'], cwd=reference / 'android', env=env, check=True)
+          (safe_evidence / 'packaging-evidence.json').write_text(json.dumps(receipt, indent=2))
       - name: Exercise real external-browser auth and community actions on Android
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+        env:
+          MOBILE_ACCEPTANCE_APK: ${{ runner.temp }}/mobile-common-ground/workspace/mobile/android/app/build/outputs/apk/debug/app-debug.apk
         with:
           api-level: 35
           target: google_apis
@@ -276,9 +288,10 @@ jobs:
             .local/evidence/mobile-native/service-provenance.json
             .local/evidence/mobile-native/*.png
       - name: Retain the acceptance APK matching the proof checksum
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: mobile-native-acceptance-apk
           retention-days: 7
-          if-no-files-found: error
-          path: examples/mobile-reference/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: warn
+          path: ${{ runner.temp }}/mobile-common-ground/workspace/mobile/android/app/build/outputs/apk/debug/app-debug.apk

@@ -14,6 +14,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- Reusable Android delivery of canonical app workspaces through
+  `mozaiks package android`, with a declared mobile build-context pack,
+  deterministic source/tooling archives, and debug APK build receipts.
+
 - Optional native browser navigation for the shared OIDC adapter, with an
   Android Common Ground reference and authenticated emulator acceptance workflow.
 

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { beforeEach, test } from 'node:test';
 import { createHash, webcrypto } from 'node:crypto';
-import { createAuthAdapter } from '../../../chat-ui/src/auth/authAdapter.js';
-import { createNativeAppAuthAdapter } from './authAdapter.mjs';
+import { createAuthAdapter } from '../../chat-ui/src/auth/authAdapter.js';
+import { createNativeAppAuthAdapter } from '../../factory_app/build_context/mobile/templates/ui/auth/capacitor/authAdapter.mjs';
 
 const callbackUri = 'org.mozaiks.examples.commonground:/auth/callback';
 const issuer = 'https://identity.example';

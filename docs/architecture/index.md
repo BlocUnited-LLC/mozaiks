@@ -54,6 +54,7 @@ short contributor summary, not as a competing source of authority.
 - [Platform Navigation Contract](app/platform-navigation-contract.md)
 - [Account, Admin, and Platform Services](app/account-admin-and-platform-services.md)
 - [Generated App Deployment Contract](deployment/generated-app-deployment-contract.md)
+- [Android Workspace Delivery](targets/android-delivery.md)
 
 ## Runtime Authoring Contracts
 

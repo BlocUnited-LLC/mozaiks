@@ -183,6 +183,61 @@ class TestPathTemplateValidation:
 
 
 class TestMatchingSemantics:
+    def test_native_pack_javascript_is_classified_as_executable(self) -> None:
+        path = "ui/auth/capacitor/authAdapter.mjs"
+        registry = build_app_layout_registry((LayoutExtension(
+            slot=ExtensionSlot.CAPABILITY_PACK_OUTPUT, pack_id="mobile", path=path,
+        ),))
+        family = next(family for family in registry.families if family.path_template == path)
+        assert family.path_scope is PathScope.APP_BUNDLE_ROOT
+        assert family.security_class is SecurityClass.EXECUTABLE_STUB
+
+    @pytest.mark.parametrize("name", [
+        "package.json", "package-lock.json", "capacitor.config.json", "build.mjs",
+        "delivery.manifest.json",
+    ])
+    def test_android_tooling_is_exported_at_workspace_scope(self, name: str) -> None:
+        path = f"mobile/{name}"
+        registry = build_app_layout_registry((LayoutExtension(
+            slot=ExtensionSlot.ANDROID_DELIVERY, pack_id="mobile",
+        ),))
+        family = registry.match_path(path, PathScope.WORKSPACE_ROOT).family
+        assert family.kind is ArtifactKind.APP_DEPLOYMENT_ARTIFACT
+        assert family.owner is LayoutOwner.DOWNLOAD_RENDERER
+        assert family.condition is ConditionIdentifier.WHEN_EXTENSION_SELECTED
+        assert family.materializer is MaterializerIdentifier.DOWNLOAD_DEPLOYMENT_RENDERER
+        with pytest.raises(ValueError, match="not registered"):
+            registry.match_path(path, PathScope.APP_BUNDLE_ROOT)
+        with pytest.raises(ValueError, match="not registered"):
+            match_path(path, PathScope.WORKSPACE_ROOT)
+
+    def test_android_selection_only_extends_the_registry_for_its_caller(self) -> None:
+        before = _registry()
+        selected = build_app_layout_registry((LayoutExtension(
+            slot=ExtensionSlot.ANDROID_DELIVERY, pack_id="mobile",
+        ),))
+        assert [row for row in selected.families if not row.path_template.startswith("mobile/")] == list(before.families)
+        assert len(selected.families) == len(before.families) + 5
+        assert _registry() == before
+
+    @pytest.mark.parametrize("pack_id,path", [
+        ("unknown", None), ("mobile", "mobile/arbitrary.js"), ("mobile", "ui/rogue.js"),
+    ])
+    def test_android_selection_cannot_register_arbitrary_delivery_outputs(self, pack_id, path) -> None:
+        with pytest.raises(ValidationError, match="android_delivery"):
+            LayoutExtension(slot=ExtensionSlot.ANDROID_DELIVERY, pack_id=pack_id, path=path)
+
+    @pytest.mark.parametrize("path", [
+        "mobile/build-result.json", "mobile/android/app/build/outputs/apk/debug/app-debug.apk",
+        "mobile/signing.jks", "mobile/arbitrary.js",
+    ])
+    def test_android_build_outputs_are_not_portable_workspace_contracts(self, path: str) -> None:
+        registry = build_app_layout_registry((LayoutExtension(
+            slot=ExtensionSlot.ANDROID_DELIVERY, pack_id="mobile",
+        ),))
+        with pytest.raises(ValueError, match="not registered"):
+            registry.match_path(path, PathScope.WORKSPACE_ROOT)
+
     def test_match_path_returns_exactly_one_result_with_values(self) -> None:
         match = match_path("modules/orders/module.yaml", PathScope.APP_BUNDLE_ROOT)
 

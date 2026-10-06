@@ -20,6 +20,7 @@ Commands:
     mozaiks add <feature>     Add feature to existing project (or --preset <tier>)
     mozaiks gen <mode>        Convenience shortcut: generate from a prompt
     mozaiks migrations status Read-only generated-app migration health
+    mozaiks package android  Package an existing app workspace for Android
     mozaiks context index    Index local workspace App Intelligence
     mozaiks sync-agent-guidance  Sync app-local coding-agent guidance safely
     mozaiks info              Show current config and available presets
@@ -36,6 +37,7 @@ from mozaiks_cli.commands import (
     init_command,
     migrations_command,
     onboard_command,
+    package_command,
     quickstart_command,
     serve_command,
     studio_command,
@@ -516,6 +518,21 @@ def create_parser():
         help="Overwrite guidance files with current templates",
     )
 
+    package_parser = subparsers.add_parser(
+        "package", help="Package an existing app workspace for a delivery target",
+    )
+    package_targets = package_parser.add_subparsers(dest="target", required=True)
+    android_parser = package_targets.add_parser(
+        "android", help="Prepare portable Android sources and compile a debug APK",
+    )
+    android_parser.add_argument("workspace", help="Canonical workspace containing app/app.json")
+    android_parser.add_argument("--config", required=True, help="Android delivery request JSON")
+    android_parser.add_argument("--output", required=True, help="New or empty output directory")
+    android_parser.add_argument(
+        "--prepare-only", action="store_true",
+        help="Export source and tooling without installing dependencies or compiling",
+    )
+
     # mozaiks info
     info_parser = subparsers.add_parser(
         "info",
@@ -573,6 +590,10 @@ def main():
                 sys.exit(result)
         elif args.command == "migrations":
             result = migrations_command.run(args)
+            if result:
+                sys.exit(result)
+        elif args.command == "package":
+            result = package_command.run(args)
             if result:
                 sys.exit(result)
         elif args.command == "context":

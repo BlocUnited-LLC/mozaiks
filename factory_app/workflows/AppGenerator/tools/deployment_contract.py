@@ -1749,6 +1749,24 @@ def generate_deployment_artifacts(
     }
 
 
+def validate_deployment_secrets(artifacts: dict[str, str]) -> list[str]:
+    """Check portable deployment source for credential values and markers."""
+    errors: list[str] = []
+    for env_path in _ENV_EXAMPLE_PATHS:
+        for line in str(artifacts.get(env_path) or "").splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                continue
+            key, value = (part.strip() for part in stripped.split("=", 1))
+            if key.endswith("_KEY") or key.endswith("_SECRET") or key in {"MONGO_URI", "INTERNAL_API_KEY"}:
+                if value and not value.startswith("<"):
+                    errors.append(f"secret variable {key} in {env_path} must not be assigned a real value")
+    for path, content in artifacts.items():
+        if any(pattern.search(str(content or "")) for pattern in _PROHIBITED_CONTENT_PATTERNS):
+            errors.append(f"artifact {path} contains forbidden secret/provider marker")
+    return errors
+
+
 def validate_generated_deployment_bundle(
     artifacts: dict[str, str],
     *,
@@ -1774,25 +1792,7 @@ def validate_generated_deployment_bundle(
     if missing:
         errors.append("missing required artifacts: " + ", ".join(missing))
 
-    for env_path in _ENV_EXAMPLE_PATHS:
-        env_example = str(artifacts.get(env_path) or "")
-        for line in env_example.splitlines():
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#") or "=" not in stripped:
-                continue
-            key, value = stripped.split("=", 1)
-            key = key.strip()
-            value = value.strip()
-            if key.endswith("_KEY") or key.endswith("_SECRET") or key in {"MONGO_URI", "INTERNAL_API_KEY"}:
-                if value and not value.startswith("<"):
-                    errors.append(f"secret variable {key} in {env_path} must not be assigned a real value")
-
-    for path, content in artifacts.items():
-        body = str(content or "")
-        for pattern in _PROHIBITED_CONTENT_PATTERNS:
-            if pattern.search(body):
-                errors.append(f"artifact {path} contains forbidden secret/provider marker")
-                break
+    errors.extend(validate_deployment_secrets(artifacts))
 
     manifest_text = str(artifacts.get("deployment.manifest.json") or "")
     manifest_payload: dict[str, Any] | None = None
@@ -1869,6 +1869,7 @@ def validate_generated_deployment_bundle(
 
 
 __all__ = [
+    "materialize_android_workspace",
     "build_deploy_target_spec",
     "build_deployment_template_manifest",
     "generate_deployment_artifacts",
@@ -1877,6 +1878,14 @@ __all__ = [
     "validate_deploy_target_spec",
     "validate_deployment_template_manifest",
     "validate_generated_deployment_bundle",
+    "validate_deployment_secrets",
     "validate_readiness_requirements",
 ]
+
+
+def materialize_android_workspace(workspace, config, output_dir):
+    """Export reusable Android tooling for an existing canonical workspace."""
+    from .android_delivery import materialize_android_workspace as materialize
+
+    return materialize(workspace, config, output_dir)
 
