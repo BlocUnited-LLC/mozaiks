@@ -325,8 +325,9 @@ def test_factory_app_react_files_are_classified() -> None:
         "factory_app/workflows/ExistingAppDiscovery/ui/AppIntelligenceOverviewCard.jsx",
         "factory_app/workflows/ExistingAppDiscovery/ui/AppIntelligenceProgressCard.jsx",
         "factory_app/workflows/ExistingAppDiscovery/ui/RepoAccessRecoveryCard.jsx",
-        # AppReview workflow agentic UI artifact — emitted by present_review_summary
+        # AppReview workflow-owned browser artifacts — summary and preview workspace
         "factory_app/workflows/AppReview/ui/AppReview/AppReviewSummary.jsx",
+        "factory_app/workflows/AppReview/ui/AppReview/AppReviewWorkspace.jsx",
         # SubscriptionContractDesigner agentic UI artifact — approval card for contract review
         "factory_app/workflows/SubscriptionContractDesigner/ui/SubscriptionContractDesigner/SubscriptionContractReview.jsx",
     }

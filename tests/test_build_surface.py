@@ -197,7 +197,9 @@ def test_apps_page_fetches_workspace_apps_endpoint() -> None:
     assert "manifest-declared default App Dashboard portal" in studio_page_source
     assert "getDefaultPortalRoute(payload, 'app')" in studio_page_source
     assert "location.pathname}/overview" not in studio_page_source
-    assert "AppRegistryService().resolve_build_binding" in binding_source
+    assert "from factory_app.app.modules.app_registry.backend.service import AppRegistryService" in binding_source
+    assert "registry = AppRegistryService()" in binding_source
+    assert "binding = await registry.resolve_build_binding(" in binding_source
     assert "persisted_binding=session_fields.get" in binding_source
     assert not (_workspace() / "factory_app/workflows/ValueEngine/tools/create_app_record.py").exists()
     assert not (_workspace() / "factory_app/workflows/AppGenerator/tools/update_app_record.py").exists()
