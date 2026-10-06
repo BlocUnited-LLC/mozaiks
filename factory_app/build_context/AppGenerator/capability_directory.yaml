@@ -15,6 +15,20 @@ app_agnostic_rules:
   - Generated app pages must call app-owned facade modules; they must not call hosted product internals or payment provider SDKs directly.
   - Any default managed adapter must declare an external_adapter replacement path so user-selected providers can satisfy the same app-facing contract.
 capabilities:
+  - id: outcome_feedback
+    label: Workflow Outcome Feedback
+    capability_kind: operator_pack
+    recommendation_rank: 30
+    domains: [workflow, user experience]
+    intent_signals:
+      - Approved requirements request actual end-user ratings or helpfulness for workflow results.
+    selection_aliases: [outcome_feedback, workflow ratings, user outcome feedback, agent helpfulness]
+    generator_notes:
+      - Select only for explicit feedback requirements; do not add a survey to every workflow.
+      - Reuse OutcomeFeedback and the session-owned receipt; generate the app-owned outcome_feedback module from templates.
+      - Declare outcome_feedback.records with scope=app, tenancy=per_user, owner_field=user_id, and entity=WorkflowFeedback.
+      - AgentGenerator supplies the optional post-result interaction. Do not substitute model-generated ratings or framework telemetry.
+    capability_ids: [outcome_feedback.record]
   - id: mozaikspay
     label: MozaiksPay Managed SaaS Billing
     capability_kind: operator_pack

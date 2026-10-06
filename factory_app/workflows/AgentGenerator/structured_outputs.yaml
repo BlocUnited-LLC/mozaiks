@@ -463,6 +463,7 @@ models:
     - choice_picker
     - confirmation_summary
     - form_card
+    - outcome_feedback
     - progress_stepper
     - record_picker
     - file_upload_prompt
@@ -482,6 +483,7 @@ models:
     - choice_picker
     - confirmation_summary
     - form_card
+    - outcome_feedback
     - progress_stepper
     - record_picker
     - file_upload_prompt

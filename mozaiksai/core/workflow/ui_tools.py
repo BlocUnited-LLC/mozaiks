@@ -367,7 +367,8 @@ async def use_ui_tool(
         duration_ms = (_dt.datetime.now(_dt.UTC) - start).total_seconds() * 1000.0
         # Assemble log message to keep line length under linter limits
         wf_logger.debug("UI_TOOL_ROUNDTRIP tool=%s event=%s duration_ms=%.2f", tool_id, event_id, duration_ms)
-        if isinstance(resp, dict) and 'ui_event_id' not in resp:
+        if isinstance(resp, dict):
+            # Attribution belongs to the emitted event, never a browser field.
             resp['ui_event_id'] = event_id
         try:
             from logs.tools_logs import get_tool_logger as _get_tool_logger  # type: ignore

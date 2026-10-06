@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from mozaiksai.core.auth import UserPrincipal, WebSocketUser
@@ -213,6 +214,10 @@ class UIToolsMixin:
                 "chat_id": chat_id,
                 "tool_name": tool_name,
                 "display": _display_norm,
+                "workflow_primitive": payload.get("workflow_primitive"),
+                "workflow_name": workflow_name,
+                "outcome_id": payload.get("outcome_id"),
+                "feedback_agent_name": payload.get("agent_name"),
             }
 
         # Delegate to core event sender for namespacing and sequence handling
@@ -423,6 +428,34 @@ class UIToolsMixin:
         # The awaited lookup must not authorize an event rebound to another chat.
         if self._tool_call_chat_id(event_id) != event_chat_id:
             return False
+        metadata = self._ui_tool_metadata.get(event_id) or {}
+        if metadata.get("workflow_primitive") == "outcome_feedback":
+            from pydantic import ValidationError
+
+            from mozaiksai.core.workflow.outcome_feedback import (
+                WorkflowFeedbackEvidence,
+                WorkflowFeedbackResponse,
+            )
+
+            try:
+                response = WorkflowFeedbackResponse.model_validate(response_data)
+                receipt = WorkflowFeedbackEvidence(
+                    app_id=session["app_id"], chat_id=event_chat_id, user_id=session["user_id"],
+                    workflow_name=metadata.get("workflow_name"),
+                    agent_name=metadata.get("feedback_agent_name"),
+                    outcome_id=metadata.get("outcome_id"), ui_event_id=event_id,
+                    observed_at=datetime.now(UTC).isoformat(), response=response,
+                )
+                saved = await self._get_or_create_persistence_manager().save_workflow_feedback_receipt(
+                    receipt.model_dump(mode="json"),
+                )
+            except ValidationError:
+                return False
+            except Exception as exc:
+                logger.warning("[UI_TOOL] Feedback receipt not persisted: %s", type(exc).__name__)
+                return False
+            if not saved or self._tool_call_chat_id(event_id) != event_chat_id:
+                return False
         return await self.submit_tool_call_response(event_id, response_data)
 
     async def submit_tool_call_response(self, event_id: str, response_data: dict[str, Any]) -> bool:
@@ -430,6 +463,18 @@ class UIToolsMixin:
         if self._is_tool_call_response_resolved(event_id):
             logger.debug("[UI_TOOL] Ignoring duplicate response for already resolved event %s", event_id)
             return True
+
+        metadata = self._ui_tool_metadata.get(event_id) or {}
+        if metadata.get("workflow_primitive") == "outcome_feedback":
+            from pydantic import ValidationError
+
+            from mozaiksai.core.workflow.outcome_feedback import WorkflowFeedbackResponse
+
+            try:
+                response_data = WorkflowFeedbackResponse.model_validate(response_data).model_dump()
+            except ValidationError:
+                # Leave the interaction pending so a corrected response can retry.
+                return False
 
         future = self._resolve_tool_call_future(event_id)
         if future is not None:

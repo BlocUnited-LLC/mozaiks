@@ -20,6 +20,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from logs.logging_config import get_workflow_logger
+from mozaiksai.core.workflow.outcome_feedback import WorkflowFeedbackEvidence
 
 logger = get_workflow_logger("chat_workflow_models")
 
@@ -105,6 +106,9 @@ class WorkflowUIState(BaseModel):
     last_artifact: WorkflowUIArtifactState | None = None
     pending_input_request: WorkflowUIPendingInputState | None = None
     tool_calls: dict[str, WorkflowUIToolCallState] = Field(default_factory=dict)
+    # Typed evidence is validated at the authenticated UI submission boundary.
+    # Session ownership and lifecycle govern retention of these private receipts.
+    feedback_receipts: dict[str, WorkflowFeedbackEvidence] = Field(default_factory=dict)
 
 
 class ChatSessionDoc(BaseModel):

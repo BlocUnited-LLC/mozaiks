@@ -1,0 +1,24 @@
+{
+  "schema_version": "mozaiks.data_migration.v1",
+  "version": "1",
+  "migration_id": "outcome_feedback_001_collections",
+  "description": "One private response per app, user, run and outcome.",
+  "operations": [
+    {"type": "ensure_collection", "module_id": "outcome_feedback", "entity_name": "records"},
+    {
+      "type": "ensure_index", "module_id": "outcome_feedback", "entity_name": "records",
+      "index": {
+        "name": "feedback_id_unique",
+        "keys": [{"field": "feedback_id", "order": 1}],
+        "unique": true
+      }
+    }, {
+      "type": "ensure_index", "module_id": "outcome_feedback", "entity_name": "records",
+      "index": {
+        "name": "feedback_event_unique",
+        "keys": [{"field": "app_id", "order": 1}, {"field": "ui_event_id", "order": 1}],
+        "unique": true
+      }
+    }
+  ]
+}

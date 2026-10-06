@@ -17,7 +17,7 @@ from mozaiksai.core.workflow.workflow_ui_catalog import (
 logger = logging.getLogger(__name__)
 
 _HEADER = "[SHIPPED UI PRIMITIVES]"
-_TARGET_AGENTS = {"ToolPlanningAgent", "ToolsManagerAgent", "UIFileGenerator"}
+_TARGET_AGENTS = {"ToolPlanningAgent", "ToolsManagerAgent", "UIFileGenerator", "WorkflowBundleBuilderAgent"}
 _SURFACE_HEADER = "[UI SURFACE TAXONOMY]"
 _WORKFLOW_HEADER = "[WORKFLOW UI PRIMITIVE CATALOG]"
 _TRANSITION_HEADER = "[TRANSITION UI PRIMITIVE CATALOG]"

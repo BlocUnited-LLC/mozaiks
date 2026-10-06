@@ -1,0 +1,19 @@
+context_id: outcome_feedback
+applies_to_workflows: [DesignDocs, AgentGenerator, AppGenerator]
+assets:
+  - path: contract.yaml
+    kind: contract
+  - path: templates/
+    kind: templates
+pack:
+  id: outcome_feedback
+  version: "0.1.0"
+  status: active
+  capability_source: generated_module
+capabilities:
+  - capability_id: outcome_feedback.record
+    description: Persist an authenticated workflow feedback receipt in the owning app.
+projections:
+  context_variables:
+    capability_packs:
+      from: capability_packs

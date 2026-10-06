@@ -28,6 +28,7 @@ from mozaiksai.core.workflow.generator_support.code_files import (
 from mozaiksai.core.workflow.generator_support.module_account_data import (
     materialize_module_account_handlers,
 )
+from mozaiksai.core.workflow.generator_support.module_action_inventory import pack_owned_outputs
 from mozaiksai.core.workflow.generator_support.module_policy import materialize_module_policies
 from mozaiksai.core.workflow.generator_support.module_read_actions import (
     materialize_module_read_implementations,
@@ -97,6 +98,14 @@ def _merge_code_files(
         if task.get("task_type") == "business_services"
         for path in task.get("owned_paths") or []
     ]
+    # Models never own template paths. Canonical compilation still owns the
+    # declared CRUD/read methods inside admitted persistent template modules.
+    service_paths.extend(
+        path for path in pack_owned_outputs(context_variables)
+        if path in file_map and len(parts := path.split("/")) == 4
+        and parts[0] == "modules" and parts[2] == "backend"
+        and parts[3] in {"handler.py", "service.py", "repo.py"}
+    )
     file_map.update(materialize_module_read_implementations(
         file_map, app_build_plan=app_build_plan, data_contract=data_contract,
         subscription_contract=subscription_contract, owned_paths=service_paths,

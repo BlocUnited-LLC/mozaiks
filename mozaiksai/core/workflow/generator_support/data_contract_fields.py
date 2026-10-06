@@ -248,7 +248,11 @@ def validate_collection_fields(collection: Mapping[str, Any], location: str) -> 
                 f"set type 'string'{_as_string_default(field.get('default'))}, or set enum null to keep type {kind!r}"
             )
         has_default, _value = parse_default(field, location)
-        if kind in STRUCTURED_FIELD_TYPES and field.get("required") and not has_default:
+        # Workflow/platform writers can supply required structured evidence.
+        # Only canonical create inputs have the closed scalar request limit.
+        lifecycle = collection.get("lifecycle")
+        writer = lifecycle.get("write_mode") if isinstance(lifecycle, Mapping) else None
+        if kind in STRUCTURED_FIELD_TYPES and field.get("required") and not has_default and writer not in {"workflow_write", "platform_sync"}:
             raise DataContractFieldError(
                 f"{location}: required field {field.get('name')!r} has structured type {kind!r}, which "
                 "canonical create input cannot carry; declare a JSON default "
