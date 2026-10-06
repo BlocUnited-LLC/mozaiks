@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Any, Literal
@@ -167,11 +168,13 @@ async def validate_generated_app_candidate(
     app_id: str,
     validation_strategy: str | None = None,
     timeout_seconds: int = 120,
+    capability_packs: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Check one complete candidate with the existing acceptance and build owners.
 
     This is explicit-file validation, not a replay of Genesis task execution.
     No prior validation result, model context, or generated repair is admitted.
+    Selected pack contracts must come from the caller's trusted build record.
     The caller retains responsibility for scope, lineage, review and promotion.
     Acceptance includes the existing local runtime load/smoke; the selected
     Docker/E2B/local strategy controls the subsequent build execution.
@@ -217,6 +220,7 @@ async def validate_generated_app_candidate(
     # validation. Copies prevent a helper's context write-back changing bytes.
     acceptance = await run_app_bundle_acceptance_gate(
         files=dict(snapshot), context_variables={"app_id": app_id},
+        capability_packs=deepcopy(capability_packs or []),
     )
     result["app_bundle_acceptance_result"] = acceptance
     if acceptance.get("status") != "passed" or acceptance.get("passed") is not True:

@@ -145,6 +145,7 @@ const AppWorkbench = ({
   const {
     sandboxStatus,
     livePreviewUrl,
+    previewArtifactId,
     sandboxError: sandboxSyncError,
     syncing: sandboxSyncing,
     sandboxId,
@@ -512,6 +513,8 @@ const AppWorkbench = ({
                 sandboxSyncing={sandboxSyncing}
                 sandboxError={sandboxSyncError}
                 artifactVersionId={artifactVersionId}
+                previewArtifactId={previewArtifactId}
+                refinementPending={refinementStarting && !anotherVersionIsRefining}
                 config={config}
                 onStartPreview={() => syncAndRestart(filesMap)}
                 onStopPreview={sandboxId ? stopPreview : null}

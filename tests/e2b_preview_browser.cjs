@@ -18,12 +18,17 @@ const assert = require('node:assert/strict');
       page.on('response', response => {
         if (response.request().resourceType() === 'font' && response.ok()) loadedFonts.push(response.url());
       });
-      await page.goto(`${process.argv[3]}/reports`, { waitUntil: 'domcontentloaded' });
+      await page.goto(process.argv[3], { waitUntil: 'domcontentloaded' });
       console.log(`${name} initial UI:`, await page.locator('body').innerText());
       try {
         await page.getByRole('heading', { name: 'Reports', exact: true }).waitFor({ timeout: 30000 });
         const reports = name === 'desktop' ? page.getByRole('table') : page.locator('article');
         await reports.getByText('Readiness', { exact: true }).waitFor({ timeout: 30000 });
+        assert.equal(new URL(page.url()).pathname, '/reports', 'The app entry must open its public landing page');
+        await page.getByRole('searchbox', {name: 'Search...', exact: true}).fill('no matching report');
+        await reports.getByText('Readiness', {exact: true}).waitFor({state: 'hidden'});
+        await page.getByRole('searchbox', {name: 'Search...', exact: true}).fill('');
+        await reports.getByText('Readiness', {exact: true}).waitFor();
         await page.getByText('Deterministic Reports', { exact: true }).first().waitFor({ timeout: 30000 });
         await page.getByRole('note', { name: 'Draft app preview' }).waitFor();
         await page.waitForFunction(() => getComputedStyle(document.body).fontFamily.includes('Oxanium'));
@@ -69,7 +74,7 @@ const assert = require('node:assert/strict');
       }));
       assert.equal(theme.primary.toLowerCase(), '#0f766e', 'Preview must retain its own teal brand');
       assert.equal(theme.background, 'rgb(244, 248, 252)', 'The app light appearance must not inherit a dark shell');
-      const result = { name, renderedReport: true, draftPreview: true, localFontLoaded: true, ...theme, overflow, errors };
+      const result = { name, renderedReport: true, publicLanding: true, searchWorks: true, draftPreview: true, localFontLoaded: true, ...theme, overflow, errors };
       evidence.push(result);
       console.log(JSON.stringify(result));
       await page.close();

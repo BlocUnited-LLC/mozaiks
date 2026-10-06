@@ -5,6 +5,7 @@ import logging
 import tempfile
 import uuid
 import zipfile
+from copy import deepcopy
 
 logger = logging.getLogger(__name__)
 from pathlib import Path
@@ -206,13 +207,16 @@ class ScopedRefinementCodingWorker:
         resolved_artifact_kind = _ARTIFACT_KIND_ALIASES.get(request.build_family, request.build_family)
 
         validation_result = None
+        capability_packs: list[dict[str, Any]] = []
         status = "planned"
         if resolved_artifact_kind == "app_bundle" and merged_files:
             try:
+                capability_packs = await self._parent_capability_packs(request)
                 validation_result = await self._run_candidate_validation(
                     request=request,
                     merged_files=merged_files,
                     validation_strategy=resolved_strategy,
+                    capability_packs=capability_packs,
                 )
             except Exception as exc:
                 return CodingWorkerResult(
@@ -263,6 +267,7 @@ class ScopedRefinementCodingWorker:
                         plan=resolved_plan,
                         validation_result=validation_result or {},
                         provider_execution=provider_execution,
+                        capability_packs=capability_packs,
                     )
                 )
             except Exception as exc:
@@ -354,12 +359,29 @@ class ScopedRefinementCodingWorker:
             return False, "coding worker requires explicit scoped files in v1"
         return True, None
 
+    async def _parent_capability_packs(self, request: CodingWorkerRequest) -> list[dict[str, Any]]:
+        """Only the saved parent may authorize pack-owned candidate outputs."""
+        parent_id = request.build_record_id
+        if parent_id is None or not parent_id.strip():
+            raise ValueError("Refinement parent build record ID is required")
+        artifact_store = self._artifact_store or get_artifact_store()
+        parent = await artifact_store.get_build_record(
+            app_id=request.artifact_app_id, build_record_id=parent_id,
+        )
+        if parent is None:
+            raise ValueError("Refinement parent build record was not found for the target app")
+        packs = parent.commit_metadata.metadata.get("capability_packs", [])
+        if not isinstance(packs, list) or any(not isinstance(pack, dict) for pack in packs):
+            raise ValueError("Refinement parent capability_packs must be a list of selected pack descriptors")
+        return deepcopy(packs)
+
     async def _run_candidate_validation(
         self,
         *,
         request: CodingWorkerRequest,
         merged_files: dict[str, str],
         validation_strategy: str,
+        capability_packs: list[dict[str, Any]],
     ) -> dict[str, Any]:
         # Reject unsafe/secret-sensitive files before the validator can execute
         # the complete candidate. Provider context and commands are not policy.
@@ -370,6 +392,7 @@ class ScopedRefinementCodingWorker:
                 files=dict(merged_files),
                 app_id=request.artifact_app_id,
                 validation_strategy=validation_strategy,
+                capability_packs=deepcopy(capability_packs),
                 timeout_seconds=self._bounded_int(
                     request.metadata.get("validation_timeout_seconds"), default=120, minimum=5, maximum=900,
                 ),
@@ -396,6 +419,7 @@ class ScopedRefinementCodingWorker:
         merged_files: dict[str, str],
         plan: CodingWorkerPlan,
         validation_result: dict[str, Any],
+        capability_packs: list[dict[str, Any]],
         provider_execution: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         build_key = str(request.build_key or resolved_artifact_kind or "artifact").strip() or "artifact"
@@ -450,6 +474,7 @@ class ScopedRefinementCodingWorker:
             "source_surface": request.source_surface,
             "staged_file_sha256": dict(staged_workspace.editable_manifest),
             "coding_provider": provider_execution,
+            "capability_packs": deepcopy(capability_packs),
         }
         content_store = get_artifact_content_store()
         if content_store.backend_name != "local":

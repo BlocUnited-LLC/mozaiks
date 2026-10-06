@@ -98,4 +98,44 @@ mutation boundary.
 - promotion and restore are out of scope
 - no `mozaiks-app` files are touched
 
+## Studio and E2B acceptance
+
+The diagnostic above does not prove the Studio chat, artifact UI, or running
+preview. Verify those separately against a recorded OSS commit:
+
+1. Start an isolated Studio with its normal auth posture and an owned database.
+   Record the exact source commit, model configuration, and E2B template build.
+   Rebuild the template when the preview runtime changes; updating Studio alone
+   does not update code installed inside an existing template.
+2. Use an owned saved app bundle with passed checks. Open **Review builds** from
+   its app overview. The registered AppWorkbench loads the saved version; it
+   does not need a fabricated workflow completion. If the baseline comes from
+   deterministic fixture materialization, state that explicitly: it proves
+   refinement of that fixture, not a completed live generation journey.
+3. Start its draft preview and exercise a real app action in the iframe. For
+   public apps, each public page explicitly declares `meta.requiresAuth: false`.
+   App-level public identity alone does not make every page public. Check the
+   landing route as a visitor, not just `/api/health` or `/api/pages/...`.
+4. Type a bounded change into **App change request** and apply it with real
+   provider calls. Verify the saved revision, file diff, and fresh validation
+   evidence. Repeat for a second revision. Include an app using a capability
+   pack with generated support files, so refinement cannot silently lose the
+   original pack declaration.
+5. While a change runs, try the existing preview. Once a newer draft is ready,
+   its label must still identify the version actually displayed. **Update
+   preview** explicitly replaces that sandbox. With one allowed preview, the
+   previous session must stop before another starts; a short restart interval
+   is expected. A failed change must not advance the selected preview version.
+6. Inspect desktop and narrow-screen screenshots. Status and the next action
+   stay visible; technical failure details and logs can be expanded when needed.
+   Verify no horizontal overflow, working controls, expiry, and reload behavior.
+7. Stop the preview and verify the provider session is absent. Stop owned local
+   services and retain private evidence without publishing credentials.
+
+The **AppReview conversation** is a separate entry into the same refinement
+boundary. Test it through a real journey with its prerequisite artifacts;
+materializing only an app bundle does not satisfy those prerequisites. Do not
+report Workbench text input as proof that chat messages, pause/resume, or the
+full journey worked.
+
 

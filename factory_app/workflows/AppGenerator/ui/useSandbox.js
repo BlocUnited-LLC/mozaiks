@@ -3,27 +3,37 @@ import { openAuthenticatedWebSocket } from '@mozaiks/chat-ui/adapters/websocketA
 import { getStudioAccessToken, studioFetch } from '../../../app/admin/pages/studioApi.js';
 
 export function useSandbox(artifactId, buildRegistryId) {
-  const [sandboxId, setSandboxId] = useState(null);
+  const [session, setSession] = useState(null);
   const [sandboxStatus, setSandboxStatus] = useState(null);
   const [livePreviewUrl, setLivePreviewUrl] = useState(null);
   const [sandboxError, setSandboxError] = useState(null);
   const [syncing, setSyncing] = useState(false);
   const [stopping, setStopping] = useState(false);
   const generation = useRef(0);
+  const observation = useRef(0);
+  const selectedRegistry = useRef(buildRegistryId);
   const inFlight = useRef(false);
   const lastSession = useRef(null);
   const currentStatus = useRef(null);
+  // Hide a different app synchronously, before the selection effect runs.
+  const visibleSession = session?.buildRegistryId === buildRegistryId ? session : null;
+  const sandboxId = visibleSession?.sandboxId || null;
 
   useEffect(() => {
     generation.current += 1;
-    setSandboxId(null);
-    setSandboxStatus(null);
-    currentStatus.current = null;
-    setLivePreviewUrl(null);
-    setSandboxError(null);
+    const retainPreview = selectedRegistry.current === buildRegistryId
+      && currentStatus.current === 'running' && !inFlight.current;
+    selectedRegistry.current = buildRegistryId;
+    if (!retainPreview) {
+      observation.current += 1;
+      setSession(null);
+      setSandboxStatus(null);
+      currentStatus.current = null;
+      setLivePreviewUrl(null);
+      setSandboxError(null);
+    }
     // A new version waits for the previous request before adopting a session.
     setSyncing(inFlight.current);
-    setStopping(false);
     return () => { generation.current += 1; };
   }, [artifactId, buildRegistryId]);
 
@@ -35,13 +45,14 @@ export function useSandbox(artifactId, buildRegistryId) {
   }, []);
 
   useEffect(() => {
-    if (!sandboxId || !['starting', 'running'].includes(sandboxStatus)) return undefined;
-    const currentGeneration = generation.current;
+    if (!sandboxId || syncing || stopping || !['starting', 'running'].includes(sandboxStatus)) return undefined;
+    const currentObservation = observation.current;
     let closed = false;
     let timer;
     // Preserve the terminal cause even if an older poll arrives after failure.
     // A new explicit start resets status before observing the new attempt.
-    const isCurrent = () => !closed && currentGeneration === generation.current
+    const isCurrent = () => !closed && !inFlight.current && currentObservation === observation.current
+      && lastSession.current?.sandboxId === sandboxId
       && ['starting', 'running'].includes(currentStatus.current);
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const url = `${protocol}//${window.location.host}/ws/sandbox/${encodeURIComponent(sandboxId)}`;
@@ -76,7 +87,7 @@ export function useSandbox(artifactId, buildRegistryId) {
       window.clearTimeout(timer);
       socket.close();
     };
-  }, [sandboxId, sandboxStatus, applyStatus]);
+  }, [sandboxId, sandboxStatus, syncing, stopping, applyStatus]);
 
   const syncAndRestart = useCallback(async (filesMap) => {
     if (!artifactId || !buildRegistryId || inFlight.current) return;
@@ -85,7 +96,9 @@ export function useSandbox(artifactId, buildRegistryId) {
     const currentGeneration = generation.current;
     const isCurrent = () => generation.current === currentGeneration;
     inFlight.current = true;
+    observation.current += 1;
     setSyncing(true);
+    setSession(null);
     applyStatus({ status: 'starting' });
 
     async function post(url, body, allowMissing = false) {
@@ -100,7 +113,8 @@ export function useSandbox(artifactId, buildRegistryId) {
 
     try {
       const previous = lastSession.current;
-      if (previous && (previous.artifactId !== artifactId || previous.buildRegistryId !== buildRegistryId)) {
+      if (previous && (previous.artifactId !== artifactId || previous.buildRegistryId !== buildRegistryId || previous.requiresStop)) {
+        previous.requiresStop = true;
         await post(`/api/sandbox/${encodeURIComponent(previous.sandboxId)}/stop`, null, true);
         if (lastSession.current === previous) lastSession.current = null;
         if (!isCurrent()) return;
@@ -109,7 +123,7 @@ export function useSandbox(artifactId, buildRegistryId) {
       const { sandboxId: sid } = await post(`/api/artifacts/${encodeURIComponent(artifactId)}/sandbox${query}`);
       lastSession.current = { sandboxId: sid, artifactId, buildRegistryId };
       if (!isCurrent()) return;
-      setSandboxId(sid);
+      setSession(lastSession.current);
       await post(`/api/sandbox/${encodeURIComponent(sid)}/sync`, {
         files: entries.map(([path, content]) => ({ path, content: String(content) })), deleted: [],
       });
@@ -130,7 +144,10 @@ export function useSandbox(artifactId, buildRegistryId) {
     const currentGeneration = generation.current;
     const isCurrent = () => generation.current === currentGeneration;
     inFlight.current = true;
+    observation.current += 1;
     setStopping(true);
+    if (lastSession.current?.sandboxId === sandboxId) lastSession.current.requiresStop = true;
+    applyStatus({ status: 'stopping' });
     try {
       const response = await studioFetch(`/api/sandbox/${encodeURIComponent(sandboxId)}/stop`, { method: 'POST' });
       const result = await response.json();
@@ -138,11 +155,11 @@ export function useSandbox(artifactId, buildRegistryId) {
       if (lastSession.current?.sandboxId === sandboxId) lastSession.current = null;
       if (isCurrent()) {
         generation.current += 1;
-        setSandboxId(null);
+        setSession(null);
         applyStatus({ status: null });
       }
     } catch (error) {
-      if (isCurrent()) setSandboxError(error.message || 'Preview could not be stopped');
+      if (isCurrent()) applyStatus({ status: 'error', message: error.message || 'Preview could not be stopped' });
     } finally {
       inFlight.current = false;
       setSyncing(false);
@@ -150,5 +167,9 @@ export function useSandbox(artifactId, buildRegistryId) {
     }
   }, [sandboxId, applyStatus]);
 
-  return { sandboxId, sandboxStatus, livePreviewUrl, sandboxError, syncing, stopping, syncAndRestart, stopPreview };
+  return {
+    sandboxId, sandboxStatus, livePreviewUrl: visibleSession ? livePreviewUrl : null,
+    previewArtifactId: visibleSession && livePreviewUrl ? visibleSession.artifactId : null,
+    sandboxError, syncing, stopping, syncAndRestart, stopPreview,
+  };
 }

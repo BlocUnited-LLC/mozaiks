@@ -431,6 +431,13 @@ This project follows a practical pre-1.0 changelog format:
   same backend as the browser app. Native sign-in requires the configured
   Android profile and a callback matching the packaged application.
 
+- Refinement retains the saved app's selected capability packs during validation
+  and later revisions, so declared pack support files remain recognized.
+- Studio keeps an existing preview visible while a newer version is ready,
+  labels the version actually displayed, and offers an explicit **Update preview**.
+  Detailed validation errors and logs start collapsed while failed checks remain
+  visible.
+
 - Refinement confirmations ignore unbound nested actions and retain the original
   request, build and revision through ChatPage. Pending decisions normalize their
   stored representation before conditional consumption. Accept and reject verify

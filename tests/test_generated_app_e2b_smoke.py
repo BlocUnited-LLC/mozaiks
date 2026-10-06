@@ -53,6 +53,9 @@ async def test_factory_materialized_app_builds_runs_and_is_terminated(monkeypatc
     monkeypatch.setenv("SANDBOX_MAX_SESSIONS", "1")
     monkeypatch.delenv("SANDBOX_TEMPLATE", raising=False)
     outputs = _typed_task_outputs(_load_models())
+    # Public app identity does not opt individual routes out of sign-in.
+    # Preview visitors must exercise the page's explicit public contract.
+    outputs["reports.page"]["pages"][0]["meta"] = {"requiresAuth": False}
     outputs["reports.page"]["pages"][0]["sections"][0]["config"]["data_key"] = "reports"
     outputs["reports.page"]["theme_config_patch"]["theme"].update(
         primary="teal", font="oxanium", font_heading="oxanium",

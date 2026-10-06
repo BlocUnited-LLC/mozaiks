@@ -52,3 +52,21 @@ test('expanded build warnings include the full list shown by the count', () => {
   assert.match(html, /51 warning\(s\)/);
   assert.match(html, /Warning 51\./);
 });
+
+test('failed checks keep a visible summary and all diagnostic details without opening logs', () => {
+  const errors = Array.from({length: 21}, (_, index) => `Failure ${index + 1}.`);
+  const html = renderToStaticMarkup(createElement(module.exports.default, {
+    validationStatus: 'failed',
+    validationResult: {errors, build_output: 'Long compiler log'},
+    integrationPassed: false,
+    integrationTestResult: {passed: false, checks: [{id: 'bundle_scan', passed: false, message: 'Undeclared file'}]},
+  }));
+  assert.match(html, /Validation failed/);
+  assert.match(html, /1 failed check\(s\) to review/);
+  assert.match(html, /21 error\(s\) to review/);
+  assert.match(html, /Failure 21\./);
+  assert.match(html, /Undeclared file/);
+  assert.doesNotMatch(html, /<details[^>]*\sopen(?:[=>\s])/);
+  assert.doesNotMatch(html, /Long compiler log/);
+  assert.match(html, /aria-expanded="false"/);
+});

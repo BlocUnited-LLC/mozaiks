@@ -12,6 +12,8 @@ const PreviewPane = ({
   sandboxSyncing,
   sandboxError,
   artifactVersionId,
+  previewArtifactId,
+  refinementPending = false,
   config = {},
   onStartPreview = null,
   canStartPreview = false,
@@ -40,7 +42,9 @@ const PreviewPane = ({
     setIframeKey((k) => k + 1);
   }, []);
 
-  const isRestarting = sandboxSyncing || sandboxStatus === 'starting';
+  const isRestarting = sandboxSyncing || sandboxStopping || sandboxStatus === 'starting';
+  const differentDraftSelected = Boolean(url && previewArtifactId && artifactVersionId && previewArtifactId !== artifactVersionId);
+  const displayedVersion = url ? previewArtifactId : artifactVersionId;
   const stopControl = onStopPreview && (
     <button
       type="button"
@@ -55,13 +59,18 @@ const PreviewPane = ({
     <div className="min-w-0">
       <div className="flex flex-wrap items-center gap-2">
         <div className="text-sm font-semibold text-white">Draft app preview</div>
-        {artifactVersionId && (
-          <span className="text-[10px] text-[var(--color-text-muted)] font-mono" title={artifactVersionId}>
-            Version {artifactVersionId.slice(0, 12)}
+        {displayedVersion && (
+          <span className="text-[10px] text-[var(--color-text-muted)] font-mono" title={displayedVersion}>
+            {url ? 'Preview based on version' : 'Version'} {displayedVersion.slice(0, 12)}
           </span>
         )}
       </div>
       <div className="mt-1 text-xs text-[var(--color-text-muted)]">Temporary preview · Changes here do not publish your app.</div>
+      {url && (differentDraftSelected || refinementPending) && (
+        <p role="status" className="mt-2 text-sm text-[var(--color-text-secondary)]">
+          {differentDraftSelected ? 'A different draft is selected.' : 'Making your changes. You can keep trying this preview.'}
+        </p>
+      )}
     </div>
   );
 
@@ -72,7 +81,7 @@ const PreviewPane = ({
         {isRestarting ? (
           <div className="mt-3 flex items-center gap-2 text-sm text-[var(--color-text-muted)]">
             <div className="h-4 w-4 border-2 border-[var(--color-primary-light)] border-t-transparent rounded-full animate-spin flex-shrink-0" />
-            Starting draft preview...
+            {sandboxStopping ? 'Stopping preview…' : 'Starting draft preview...'}
           </div>
         ) : (
           <>
@@ -118,11 +127,12 @@ const PreviewPane = ({
               type="button"
               onClick={onStartPreview}
               disabled={isRestarting}
-              className="p-2 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-50 text-[var(--color-text-secondary)] hover:text-white"
-              title="Restart draft preview"
-              aria-label="Restart draft preview"
+              className="inline-flex items-center gap-2 p-2 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-50 text-xs font-semibold text-[var(--color-text-secondary)] hover:text-white"
+              title={differentDraftSelected ? 'Update preview' : 'Restart draft preview'}
+              aria-label={differentDraftSelected ? 'Update preview' : 'Restart draft preview'}
             >
               <Play className="w-4 h-4" />
+              {differentDraftSelected && 'Update preview'}
             </button>
           )}
           <button

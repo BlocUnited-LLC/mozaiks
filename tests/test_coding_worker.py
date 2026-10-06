@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import zipfile
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -170,6 +171,12 @@ async def _fake_candidate_validation_runner(**kwargs):  # noqa: ANN003
 class _FakeArtifactStore:
     def __init__(self) -> None:
         self.calls: list[dict] = []
+
+    async def get_build_record(self, *, app_id, build_record_id):
+        return BuildRecord(
+            id=build_record_id, app_id=app_id, build_family="app_bundle", build_key="app_bundle",
+            version_number=1, lineage_root_id=build_record_id,
+        )
 
     async def create_build_record(self, **kwargs):  # noqa: ANN003
         self.calls.append(dict(kwargs))
@@ -361,7 +368,7 @@ async def test_coding_worker_fails_when_model_edits_outside_scoped_files(tmp_pat
 
 @pytest.mark.asyncio
 async def test_coding_worker_surfaces_artifact_persistence_errors(tmp_path: Path) -> None:
-    class _BrokenArtifactStore:
+    class _BrokenArtifactStore(_FakeArtifactStore):
         async def create_build_record(self, **kwargs):  # noqa: ANN003
             raise RuntimeError('artifact store unavailable')
 
@@ -447,6 +454,179 @@ def _candidate_evidence(strategy="docker"):
     }
 
 
+def _selected_pack_contracts():
+    return [{
+        "id": "operator_readiness", "capability_source": "config_file",
+        "pack_source_path": str(Path(__file__).resolve().parents[1] / "factory_app/build_context/operator_readiness"),
+    }]
+
+
+class _LineageArtifactStore(_FakeArtifactStore):
+    def __init__(self, metadata):
+        super().__init__()
+        self.reads = []
+        self.records = {"parent": BuildRecord(
+            id="parent", app_id="app_1", build_family="app_bundle", build_key="app_bundle",
+            version_number=1, lineage_root_id="parent", commit_metadata={"metadata": deepcopy(metadata)},
+        )}
+
+    async def get_build_record(self, *, app_id, build_record_id):
+        self.reads.append((app_id, build_record_id))
+        record = self.records.get(build_record_id)
+        return record if record and record.app_id == app_id else None
+
+    async def create_build_record(self, **kwargs):
+        self.calls.append(kwargs)
+        record = BuildRecord(
+            id=f"child_{len(self.calls)}", version_number=len(self.calls) + 1, lineage_root_id="parent", **kwargs,
+        )
+        self.records[record.id] = record
+        return record
+
+
+async def _validate_pack_support_outputs(**kwargs):
+    # Exercise the existing declaration gate; no build, provider or Mongo access.
+    from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import (
+        _scan_declared_pack_repo_support_outputs,
+    )
+
+    errors = _scan_declared_pack_repo_support_outputs(
+        kwargs["files"], capability_packs=kwargs.get("capability_packs"),
+    )
+    result = _candidate_evidence()
+    if errors:
+        result.update(validation_status="failed", errors=errors)
+        result["app_bundle_acceptance_result"] = {"passed": False, "status": "failed"}
+        result["app_validation_result"]["validation_status"] = "pending"
+    return result
+
+
+def _pack_candidate_request():
+    request = _candidate_request()
+    request.baseline_files["docs/operations/operator-readiness.md"] = "Original declared pack output"
+    return request
+
+
+@pytest.mark.asyncio
+async def test_selected_pack_contracts_survive_two_refinements_without_request_authority(tmp_path):
+    selected = _selected_pack_contracts()
+    store = _LineageArtifactStore({"capability_packs": selected})
+    seen = []
+
+    async def validate(**kwargs):
+        seen.append(deepcopy(kwargs.get("capability_packs")))
+        result = await _validate_pack_support_outputs(**kwargs)
+        # Validation helper writes cannot become authority on the persisted child.
+        if kwargs.get("capability_packs"):
+            kwargs["capability_packs"][0]["id"] = "untrusted_helper_write"
+        return result
+
+    worker = ScopedRefinementCodingWorker(
+        candidate_validation_runner=validate, artifact_store=store, output_root=tmp_path,
+    )
+    request = _pack_candidate_request()
+    first = await worker.finalize_proposal(request, _candidate_proposal())
+    assert first.status == "validated", first.error
+    first_id = first.metadata["build_record_id"]
+    assert store.records[first_id].commit_metadata.metadata["capability_packs"] == selected
+    request = request.model_copy(update={
+        "build_record_id": first_id,
+        "files": dict(first.applied_files),
+        "baseline_files": {**request.baseline_files, **first.applied_files},
+    })
+    second = await worker.finalize_proposal(request, _candidate_proposal().model_copy(update={
+        "changed_files": [ProposedFileChange(path="brand/theme_config.json", content='{"accent":"teal"}')],
+    }))
+    assert second.status == "validated", second.error
+    assert store.records[second.metadata["build_record_id"]].commit_metadata.metadata["capability_packs"] == selected
+    assert store.records["parent"].commit_metadata.metadata["capability_packs"] == selected
+    assert seen == [selected, selected]
+    assert store.reads == [("app_1", "parent"), ("app_1", first_id)]
+    assert store.calls[1]["parent_build_record_id"] == first_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("parent_metadata", [{}, {"capability_packs": []}])
+async def test_request_and_generated_provenance_cannot_grant_missing_pack_contracts(tmp_path, parent_metadata):
+    store = _LineageArtifactStore(parent_metadata)
+    request = _pack_candidate_request()
+    request.metadata["capability_packs"] = _selected_pack_contracts()
+    request.context_seed["app_build_plan"] = {"capability_packs": _selected_pack_contracts()}
+    request.baseline_files[".mozaiks/pack_provenance.json"] = '{"packs":[{"id":"operator_readiness"}]}'
+    worker = ScopedRefinementCodingWorker(
+        candidate_validation_runner=_validate_pack_support_outputs, artifact_store=store, output_root=tmp_path,
+    )
+    result = await worker.finalize_proposal(request, _candidate_proposal())
+    assert result.status == "failed"
+    assert "undeclared repository-support pack outputs" in result.error
+    assert store.calls[0]["validation_status"].value == "failed"
+    assert store.calls[0]["commit_metadata"]["metadata"]["capability_packs"] == []
+
+
+@pytest.mark.asyncio
+async def test_saved_pack_still_requires_its_resolvable_output_contract(tmp_path):
+    selected = _selected_pack_contracts()
+    selected[0]["pack_source_path"] = str(tmp_path / "missing_installed_pack")
+    store = _LineageArtifactStore({"capability_packs": selected})
+    worker = ScopedRefinementCodingWorker(
+        candidate_validation_runner=_validate_pack_support_outputs, artifact_store=store, output_root=tmp_path,
+    )
+    result = await worker.finalize_proposal(_pack_candidate_request(), _candidate_proposal())
+    assert result.status == "failed"
+    assert "Selected CapabilityPack output contract is invalid" in result.error
+    assert store.calls[0]["validation_status"].value == "failed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("packs", [{"id": "operator_readiness"}, ["operator_readiness"], None])
+async def test_malformed_saved_pack_contracts_fail_before_validation_or_persistence(tmp_path, packs):
+    store = _LineageArtifactStore({"capability_packs": packs})
+    validate = AsyncMock(return_value=_candidate_evidence())
+    worker = ScopedRefinementCodingWorker(
+        candidate_validation_runner=validate, artifact_store=store, output_root=tmp_path,
+    )
+    result = await worker.finalize_proposal(_candidate_request(), _candidate_proposal())
+    assert result.status == "failed"
+    assert "capability_packs" in result.error
+    validate.assert_not_awaited()
+    assert store.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("parent_id", [None, "", "   "])
+async def test_finalization_requires_parent_id_before_store_read(tmp_path, parent_id):
+    store = _LineageArtifactStore({"capability_packs": _selected_pack_contracts()})
+    validate = AsyncMock(return_value=_candidate_evidence())
+    worker = ScopedRefinementCodingWorker(
+        candidate_validation_runner=validate, artifact_store=store, output_root=tmp_path,
+    )
+    request = _candidate_request().model_copy(update={"build_record_id": parent_id})
+    result = await worker.finalize_proposal(request, _candidate_proposal())
+    assert result.status == "failed"
+    assert "parent build record ID is required" in result.error
+    assert store.reads == store.calls == []
+    validate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("parent_app", [None, "foreign_app"])
+async def test_refinement_cannot_resolve_parent_outside_target_app(tmp_path, parent_app):
+    store = _LineageArtifactStore({"capability_packs": _selected_pack_contracts()})
+    if parent_app is None:
+        store.records.clear()
+    else:
+        store.records["parent"].app_id = parent_app
+    validate = AsyncMock(return_value=_candidate_evidence())
+    worker = ScopedRefinementCodingWorker(
+        candidate_validation_runner=validate, artifact_store=store, output_root=tmp_path,
+    )
+    result = await worker.finalize_proposal(_candidate_request(), _candidate_proposal())
+    assert result.status == "failed"
+    assert "parent build record" in result.error
+    validate.assert_not_awaited()
+    assert store.calls == []
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("requested,operator,hint,expected", [
     ("docker", None, "skip", "docker"),
@@ -482,6 +662,7 @@ async def test_candidate_execution_uses_operator_policy_not_provider_hint(
     validate.assert_awaited_once_with(
         files={"app.json": '{"appId":"app_1"}', "brand/theme_config.json": '{"accent":"coral"}'},
         app_id="app_1", validation_strategy=expected, timeout_seconds=120,
+        capability_packs=[],
     )
     assert store.calls[0]["app_validation_strategy"] == expected
     assert store.calls[0]["app_validation_status"] == ("skipped" if expected == "skip" else "passed")
