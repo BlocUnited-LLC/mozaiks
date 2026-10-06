@@ -1,16 +1,23 @@
 """New review sessions hydrate saved build facts before the first model turn."""
 
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+import yaml
+from ag2 import Agent
 
 from factory_app.workflows._shared.platform import build_target
 from factory_app.workflows.AppReview.tools import review_context
+from mozaiksai.core.adapters.ag2_network_runner import AG2NetworkRunner, AG2NetworkRunnerRequest
 from mozaiksai.core.artifacts import ArtifactLifecycleStatus
+from mozaiksai.core.ports.orchestration import RunStatus
 from mozaiksai.core.runtime.composition.platform_hooks import PlatformHookRegistry
 from mozaiksai.core.session import launcher
 from mozaiksai.core.session.build_binding import RunBuildBinding
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+from mozaiksai.core.workflow.context.authority import build_context_authority_policy
 
 
 @pytest.fixture
@@ -114,3 +121,50 @@ async def test_resume_and_other_workflows_keep_the_existing_binding_contract(rev
     assert result == fields
     review_launch.registry.get_app_record.assert_not_awaited()
     review_launch.store.get_build_record.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_hydrated_review_user_reply_keeps_saved_artifact_in_revision_event(review_launch):
+    persistence = SimpleNamespace(create_chat_session=AsyncMock(), persist_server_owned_session_fields=AsyncMock())
+    await launcher.create_routed_chat_session(
+        workflow_id="AppReview", app_id="factory", user_id="owner", chat_id="new-review",
+        context_variables={}, trigger_meta={"trigger_source": "manual"},
+        build_registry_id="registry", persistence_manager=persistence,
+    )
+    persisted = {
+        **persistence.create_chat_session.await_args.kwargs["extra_fields"],
+        **persistence.persist_server_owned_session_fields.await_args.kwargs["fields"],
+        "chat_id": "new-review", "app_id": "factory", "user_id": "owner", "review_complete": False,
+    }
+    root = Path(__file__).resolve().parents[1] / "factory_app/workflows/AppReview"
+    rules = yaml.safe_load((root / "transition_graph.yaml").read_text(encoding="utf-8"))["transition_rules"]
+    definitions = yaml.safe_load((root / "context_variables.yaml").read_text(encoding="utf-8"))["definitions"]
+    policy = build_context_authority_policy(workflow_name="AppReview", definitions=definitions, transition_rules=rules)
+    bridge = ContextVariablesBridge(persisted, authority_policy=policy)
+    events = []
+
+    class ReviewAgent(Agent):
+        def __init__(self):
+            super().__init__("ReviewAgent", prompt="Deterministic saved-review routing test")
+            self._mozaiks_context_bridge = bridge
+
+        async def ask(self, *messages, **kwargs):
+            events.append(review_context.build_revision_event_payload(bridge, "Make the timer teal."))
+            return SimpleNamespace(body="Your saved draft is ready for review.")
+
+    result = await AG2NetworkRunner().run(AG2NetworkRunnerRequest(
+        workflow_name="AppReview", app_id="factory", chat_id="new-review",
+        agents={"ReviewAgent": ReviewAgent()}, transition_rules=rules, context_authority_policy=policy,
+        context_variables=bridge.snapshot(), initial_agent_name="ReviewAgent", initial_message="Review the draft.",
+        idle_timeout_seconds=3.0,
+    ))
+    assert result.status is RunStatus.PAUSED, result.error
+    try:
+        continued = await result.live_run.continue_with_user_message("Make the timer teal.")
+        assert continued.status is RunStatus.PAUSED, continued.error
+        assert len(events) == 2
+        assert events[-1]["artifact_version_id"] == "saved"
+        assert events[-1]["extra"]["build_registry_id"] == "registry"
+        assert events[-1]["extra"]["build_id"] == "build"
+    finally:
+        await result.live_run.close()

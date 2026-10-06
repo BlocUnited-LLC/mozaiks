@@ -3787,6 +3787,7 @@ const ChatPage = () => {
         }
         const triggerPayload = {
           refinement_request: refinementRequest,
+          coding_request: {},
         };
         const sourceChatId = currentChatId;
         const sourceArtifact = findRevisionArtifact(buildRegistryId, artifactKind, artifactVersionId);

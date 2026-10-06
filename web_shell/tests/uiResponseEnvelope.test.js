@@ -143,7 +143,8 @@ test('ChatPage approvals preserve original request identity through real browser
     }
     res.end(JSON.stringify({execution_mode:'harness_decision', build_registry_id:'owned-build',
       requested_workflow_id:null, workflow_id:'ThemeCapture', change_request_id:`change-${round}`,
-      revision_id:`revision-${round}`, harness_decision:decision(round)}));
+      revision_id:`revision-${round}`, harness_decision:{...decision(round),
+        trigger_payload:{refinement_request:requests.at(-1).body.trigger_payload.refinement_request}}}));
   });
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   t.after(()=>new Promise(resolve=>{server.closeAllConnections();server.close(resolve);}));
@@ -167,6 +168,7 @@ test('ChatPage approvals preserve original request identity through real browser
         assert.equal(body.trigger_payload.change_request_id,'change-1');
         assert.equal(body.trigger_payload.revision_id,'revision-1');
         assert.deepEqual(body.trigger_payload.refinement_request,refinement);
+        assert.equal(Object.hasOwn(body.trigger_payload,'coding_request'),false);
       }finally{await page.close();}
     });
   }
@@ -179,6 +181,8 @@ test('ChatPage approvals preserve original request identity through real browser
       await page.getByRole('button',{name:'Approve design 2',exact:true}).click();
       await expect.poll(()=>requests.length).toBe(2);
       const first=requests[0].body, approved=requests[1].body;
+      assert.deepEqual(first.trigger_payload.coding_request,{});
+      assert.equal(Object.hasOwn(approved.trigger_payload,'coding_request'),false,'Canonical decision payload replaces the initial opt-in');
       assert.equal(approved.build_registry_id,first.build_registry_id);
       assert.equal(approved.source_chat_id,first.source_chat_id);
       assert.equal(approved.workflow_id??null,first.workflow_id??null);
@@ -190,6 +194,7 @@ test('ChatPage approvals preserve original request identity through real browser
       assert.equal(requests[2].body.workflow_id??null,null);
       assert.equal(requests[2].body.trigger_payload.change_request_id,'change-3');
       assert.equal(requests[2].body.trigger_payload.revision_id,'revision-3');
+      assert.equal(Object.hasOwn(requests[2].body.trigger_payload,'coding_request'),false);
     }finally{await page.close();}
   });
   for (const mode of ['coding_worker','surface_regeneration']) {
@@ -287,6 +292,13 @@ const reviewArtifact = {
     payload: { build_registry_id: 'owned-build', artifact_kind: 'app_bundle',
       artifact_version_id: 'baseline', target_app_id: 'target-app' } },
 };
+
+test('wire revision asks the canonical harness to propose scope without supplying paths', async () => {
+  const {requests}=await routeRevisionResult({execution_mode:'harness_decision'});
+  const payload=JSON.parse(requests[0].options.body).trigger_payload;
+  assert.deepEqual(payload.coding_request,{});
+  assert.equal(payload.refinement_request.artifact_version_id,'baseline');
+});
 
 test('wire revision suppresses only its source completion during the handoff', async () => {
   const { requests, revisionHandoffRef } = await routeRevisionResult({execution_mode:'harness_decision'}, {
