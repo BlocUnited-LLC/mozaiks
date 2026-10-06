@@ -1,0 +1,21 @@
+context_id: mobile
+description: Bundled Android delivery for an existing canonical app workspace.
+applies_to_workflows:
+  - AppGenerator
+assets:
+  - path: contract.yaml
+    kind: contract
+  - path: templates/
+    kind: templates
+  - path: package.json
+    kind: catalog
+  - path: package-lock.json
+    kind: catalog
+pack:
+  id: mobile
+  version: "0.1.0"
+  status: active
+  capability_source: framework_pack
+capabilities:
+  - capability_id: mobile.android.package
+    description: Package an existing app as an Android debug APK using the explicit delivery command.

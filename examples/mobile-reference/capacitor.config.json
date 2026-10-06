@@ -1,6 +1,0 @@
-{
-  "appId": "org.mozaiks.examples.commonground",
-  "appName": "Common Ground",
-  "webDir": "../../web_shell/dist",
-  "includePlugins": ["@capacitor/app", "@capacitor/browser"]
-}

@@ -18,7 +18,7 @@ const appId = 'org.mozaiks.examples.commonground';
 const callback = `${appId}:/auth/callback`;
 const origin = 'https://localhost';
 const evidence = path.resolve(process.env.MOBILE_ACCEPTANCE_EVIDENCE || path.join(root, '.local/evidence/mobile-native'));
-const apk = path.resolve(process.env.MOBILE_ACCEPTANCE_APK || path.join(root, 'examples/mobile-reference/android/app/build/outputs/apk/debug/app-debug.apk'));
+const apk = path.resolve(process.env.MOBILE_ACCEPTANCE_APK || path.join(root, '.local/mobile-reference/workspace/mobile/android/app/build/outputs/apk/debug/app-debug.apk'));
 mkdirSync(evidence, { recursive: true });
 
 const proof = { status: 'running', stage: 'configuration', app_id: appId, callback, webview_origin: origin, checks: {} };

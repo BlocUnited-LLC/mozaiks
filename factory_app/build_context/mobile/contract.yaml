@@ -1,0 +1,30 @@
+contract_id: mobile
+contract_type: build_pack_instructions
+selection_rules:
+  - id: explicit_android_delivery
+    when:
+      intent_any: [android packaging]
+    action: require_explicit_user_confirmation
+required_outputs:
+  - path: ui/auth/capacitor/index.js
+    owner: templates
+  - path: ui/auth/capacitor/authAdapter.mjs
+    owner: templates
+  - path: ui/auth/capacitor/authorizationTransport.mjs
+    owner: templates
+runtime_boundaries:
+  - id: explicit_delivery
+    rule: Invoke through the Android delivery materializer and CLI for an existing validated workspace; ordinary app generation does not select this pack.
+  - id: shared_auth
+    rule: Delegate PKCE, token exchange, callback validation and sessions to the shared auth adapter; Capacitor App and Browser own only external-browser navigation.
+  - id: provider_configuration
+    rule: Backend-projected auth stays authoritative; configure the backend for the separately registered native public client and exact callback.
+  - id: source_isolation
+    rule: Native preparation changes only a disposable app view; original browser registration remains intact.
+  - id: build_evidence
+    rule: Build success proves compilation and artifact identity; device acceptance and release readiness need separate evidence.
+forbidden_outputs:
+  - path_prefix: services/adapters/auth/
+    reason: Do not introduce a second OAuth implementation or provider secrets.
+  - path_prefix: security/
+    reason: Packaging does not own backend credentials, signing keys or store credentials.

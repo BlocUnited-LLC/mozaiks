@@ -1,1 +1,3 @@
 tests/fixtures/subscription_contract_designer_4582201a_outputs.json -text whitespace=cr-at-eol
+factory_app/build_context/mobile/** text eol=lf
+factory_app/workflows/AppGenerator/tools/android_delivery_build.mjs text eol=lf

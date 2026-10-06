@@ -719,6 +719,26 @@ def _core_families() -> tuple[ArtifactFamily, ...]:
         _family(ArtifactKind.APP_DEPLOYMENT_ARTIFACT, LayoutOwner.DOWNLOAD_RENDERER, Requirement.GENERATED, deployment, "deployment.manifest.json", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.DOWNLOAD_EXPORT, condition=ConditionIdentifier.WHEN_DEPLOYMENT_EXPORT_REQUESTED, security=SecurityClass.DEPLOYMENT_METADATA),
         _family(ArtifactKind.APP_DEPLOYMENT_ARTIFACT, LayoutOwner.DOWNLOAD_RENDERER, Requirement.GENERATED, deployment, ".github/workflows/deploy.yml", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.DOWNLOAD_EXPORT, condition=ConditionIdentifier.WHEN_DEPLOYMENT_EXPORT_REQUESTED, security=SecurityClass.DEPLOYMENT_METADATA),
         _family(ArtifactKind.APP_DEPLOYMENT_ARTIFACT, LayoutOwner.DOWNLOAD_RENDERER, Requirement.GENERATED, deployment, ".github/workflows/readiness.yml", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.DOWNLOAD_EXPORT, condition=ConditionIdentifier.WHEN_DEPLOYMENT_EXPORT_REQUESTED, security=SecurityClass.DEPLOYMENT_METADATA),
+        *(
+            _family(
+                ArtifactKind.APP_DEPLOYMENT_ARTIFACT,
+                LayoutOwner.DOWNLOAD_RENDERER,
+                Requirement.GENERATED,
+                workspace,
+                path,
+                ValidatorIdentifier.GENERATED_APP_VALIDATOR,
+                RuntimeConsumerIdentifier.DOWNLOAD_EXPORT,
+                condition=ConditionIdentifier.WHEN_DEPLOYMENT_EXPORT_REQUESTED,
+                security=(SecurityClass.EXECUTABLE_STUB if path.endswith(".mjs") else SecurityClass.DEPLOYMENT_METADATA),
+            )
+            for path in (
+                "mobile/package.json",
+                "mobile/package-lock.json",
+                "mobile/capacitor.config.json",
+                "mobile/build.mjs",
+                "mobile/delivery.manifest.json",
+            )
+        ),
         _family(ArtifactKind.APP_MANIFEST, LayoutOwner.PLATFORM, Requirement.REQUIRED, workspace, "app/app.json", ValidatorIdentifier.APP_LOADER, RuntimeConsumerIdentifier.APP_LOADER, inputs=application_inputs),
         _family(ArtifactKind.WORKFLOW_MANIFEST, LayoutOwner.WORKFLOW, Requirement.CONDITIONAL, workspace, "workflows/{workflow_id}/orchestrator.yaml", ValidatorIdentifier.WORKFLOW_MANAGER, RuntimeConsumerIdentifier.WORKFLOW_MANAGER, condition=ConditionIdentifier.WHEN_WORKFLOW_DECLARED, multiplicity=Multiplicity.MANY, inputs=workflow_inputs),
         _family(ArtifactKind.WORKFLOW_MANIFEST, LayoutOwner.WORKFLOW, Requirement.CONDITIONAL, workflow, "orchestrator.yaml", ValidatorIdentifier.WORKFLOW_MANAGER, RuntimeConsumerIdentifier.WORKFLOW_MANAGER, condition=ConditionIdentifier.WHEN_WORKFLOW_DECLARED, inputs=workflow_inputs),
@@ -988,7 +1008,7 @@ def _capability_pack_output_consumer(path: str) -> RuntimeConsumerIdentifier:
 
 
 def _capability_pack_output_security(path: str) -> SecurityClass:
-    if path.lower().endswith((".py", ".js", ".jsx", ".ts", ".tsx", ".ps1", ".sh")):
+    if path.lower().endswith((".py", ".js", ".mjs", ".jsx", ".ts", ".tsx", ".ps1", ".sh")):
         return SecurityClass.EXECUTABLE_STUB
     return SecurityClass.INTERNAL_CONTRACT
 
