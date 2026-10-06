@@ -26,6 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, TypeAdapter, Vali
 
 from factory_app.app.modules.app_registry.backend.service import AppRegistryService
 from factory_app.workflows._shared.artifact_bundle import read_artifact_bundle
+from factory_app.workflows._shared.platform.review_continuation import continue_inline_app_review
 from logs.logging_config import get_workflow_logger
 from mozaiksai.control_plane import (
     AcceptedStagedAppBundleBuildRecordError,
@@ -2669,9 +2670,13 @@ def _confirmed_refinement_decision(
     action_id: str,
     change_request_id: str | None,
     revision_id: str | None,
+    source_chat_id: str | None,
 ) -> dict[str, Any]:
     """Bind an approval to the existing target-scoped pending decision."""
     pending = (snapshot or {}).get("pending_harness_decision") or {}
+    metadata = pending.get("metadata") or {}
+    if "source_chat_id" in metadata and metadata["source_chat_id"] != source_chat_id:
+        raise HTTPException(status_code=409, detail="The decision belongs to a different review conversation. Reopen its original review.")
     stored_request = (pending.get("trigger_payload") or {}).get("refinement_request")
     actions = pending.get("actions") or []
     if (
@@ -2727,6 +2732,7 @@ async def trigger_workflow(
     coding_session = None
     contract_surface_plan = None
     surface_result = None
+    inline_binding = None
     baseline_files = None
     persisted_change_request_id = str(trigger_payload.get("change_request_id") or "").strip() or None
     persisted_revision_id = str(trigger_payload.get("revision_id") or "").strip() or None
@@ -2851,6 +2857,7 @@ async def trigger_workflow(
             pending_decision = _confirmed_refinement_decision(
                 session_snapshot, refinement_request, action_id=action_id,
                 change_request_id=persisted_change_request_id, revision_id=persisted_revision_id,
+                source_chat_id=body.source_chat_id,
             )
             if body.context_variables != (pending_decision.get("context_variables") or {}):
                 raise HTTPException(status_code=409, detail="The decision belongs to a different request context. Submit the change again.")
@@ -3132,6 +3139,10 @@ async def trigger_workflow(
     )
 
     if should_return_harness_decision:
+        decision_metadata = {
+            **(harness_decision.metadata or {}), "build_registry_id": build_registry_id,
+            "source_chat_id": body.source_chat_id,
+        }
         try:
             pending_workflow_id = harness_decision.recommended_workflow_id or refinement_decision.workflow_id
             pending_journey_id = (
@@ -3191,7 +3202,7 @@ async def trigger_workflow(
                     )
                     for action in harness_decision.actions
                 ],
-                metadata={**(harness_decision.metadata or {}), "build_registry_id": build_registry_id},
+                metadata=decision_metadata,
             )
             pending_snapshot = await session_router.persist_revision_intent(
                 trigger=TriggerInput(
@@ -3224,8 +3235,26 @@ async def trigger_workflow(
             "trigger_source": body.trigger_source,
             "routing_explanation": refinement_decision.explanation if refinement_decision is not None else "",
             "rerouted_by_dependency": False,
-            "harness_decision": harness_decision.model_dump(mode="python"),
+            "harness_decision": {**harness_decision.model_dump(mode="python"), "metadata": decision_metadata},
         }
+
+    review_continuation = None
+    review_continuation_error = None
+    if inline_binding is not None and (coding_result is not None or surface_result is not None):
+        try:
+            review_continuation = await continue_inline_app_review(
+                app_id=app_id, user_id=user_id, source_chat_id=body.source_chat_id,
+                binding=inline_binding, baseline_id=refinement_request.build_record_id,
+                result=coding_result if coding_result is not None else surface_result,
+                registry=_get_app_registry_service(), artifact_store=artifact_store,
+                persistence=_PERSISTENCE_MANAGER, session_router=session_router,
+            )
+        except Exception:
+            logger.exception("inline_review_continuation_failed build=%s", inline_binding.build_id)
+            review_continuation_error = (
+                "The edit finished, but its review chat could not be reopened. "
+                "Open the app's saved builds to review the result."
+            )
 
     if coding_result is not None and coding_result.eligible:
         if artifact_store is not None and persisted_change_request_id is not None and refinement_request.build_record_id:
@@ -3262,6 +3291,8 @@ async def trigger_workflow(
             "refinement_session_id": coding_session.id if coding_session is not None else None,
             "harness_decision": harness_decision.model_dump(mode="python") if harness_decision is not None else None,
             "coding_worker": coding_result.model_dump(mode="python"),
+            "review_continuation": review_continuation,
+            "review_continuation_error": review_continuation_error,
         }
 
     if surface_result is not None:
@@ -3303,6 +3334,8 @@ async def trigger_workflow(
             "refinement_session_id": surface_session.id if surface_session is not None else None,
             "harness_decision": harness_decision.model_dump(mode="python") if harness_decision is not None else None,
             "surface_result": surface_result.model_dump(mode="python"),
+            "review_continuation": review_continuation,
+            "review_continuation_error": review_continuation_error,
         }
 
     try:

@@ -143,4 +143,31 @@ materializing only an app bundle does not satisfy those prerequisites. Do not
 report Workbench text input as proof that chat messages, pause/resume, or the
 full journey worked.
 
+### Chat artifact preview
+
+AppReview presents `AppReviewWorkspace` in the existing artifact panel. It uses
+the shared preview lifecycle and loads saved bundles through the authenticated
+Studio bundle endpoint. The preview appears first; acceptance and activation
+remain gated by that saved version's checks and lifecycle.
+
+For acceptance, continue a real AppReview conversation and verify:
+
+1. Open the artifact panel and start the preview. Exercise an app control, then
+   hide and reopen the panel. Its iframe and app state must remain mounted.
+   On mobile, switch between chat and artifact without creating another sandbox.
+2. Request a change in the chat composer. Keep using the original preview while
+   the agents work. A checked successor enables **Update preview**; an unsuccessful
+   attempt keeps the previous working preview and identifies the failed change.
+3. After an inline refinement, Studio creates a new AppReview session bound to
+   the settled build. The client adopts only its matching server descriptor;
+   connecting its websocket starts the review through the existing launch owner.
+   The previous run's immutable build binding is never rewritten. Verify a
+   second chat edit addresses the new saved version.
+4. Reject cross-app/version bundle responses and late responses from an abandoned
+   chat. A failed review handoff must show an error rather than implying that
+   another chat is ready. Acceptance must refetch the canonical saved review
+   before activation becomes available.
+5. Repeat the explicit update and provider-confirmed Stop checks above. Record
+   real model/provider receipts separately from browser tests with HTTP fixtures.
+
 

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 
 const MobileArtifactDrawer = ({
   state = 'hidden',
@@ -13,6 +13,11 @@ const MobileArtifactDrawer = ({
 }) => {
   const isExpanded = viewMode || state === 'expanded';
   const isHidden = state === 'hidden';
+  const isVisible = !isHidden && isExpanded;
+  const [artifactVisited, setArtifactVisited] = useState(false);
+  useEffect(() => {
+    if (isVisible) setArtifactVisited(true);
+  }, [isVisible]);
 
   const handleCollapse = () => {
     if (viewMode) {
@@ -29,13 +34,16 @@ const MobileArtifactDrawer = ({
     ? { height: 'calc(100dvh - env(safe-area-inset-top, 0px) - var(--shell-header-height, 4rem))' }
     : undefined;
 
-  // Peek state: nothing rendered — toggle button in the header handles open
-  if (isHidden || !isExpanded) return null;
+  // Mount on first open, then retain the live artifact while it is collapsed.
+  if (!isVisible && !artifactVisited) return null;
 
   return (
     <div
       className="absolute inset-x-0 bottom-0 z-40 pointer-events-none"
-      style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+      hidden={!isVisible}
+      inert={!isVisible}
+      aria-hidden={!isVisible}
+      style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)', display: isVisible ? undefined : 'none' }}
     >
       <div
         className="w-full rounded-t-3xl bg-[rgba(3,6,15,0.96)] backdrop-blur-2xl border border-[rgba(var(--color-primary-light-rgb),0.35)] border-b-0 shadow-[0_-12px_40px_rgba(2,6,23,0.65)] flex flex-col pointer-events-auto overflow-hidden"

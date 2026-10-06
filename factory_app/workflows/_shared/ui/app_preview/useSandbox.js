@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { openAuthenticatedWebSocket } from '@mozaiks/chat-ui/adapters/websocketAuth.js';
-import { getStudioAccessToken, studioFetch } from '../../../app/admin/pages/studioApi.js';
+import { getStudioAccessToken, studioFetch } from '../../../../app/admin/pages/studioApi.js';
 
 async function stopSandbox(sandboxId, isCurrent) {
   for (let attempt = 0; attempt < 3; attempt += 1) {

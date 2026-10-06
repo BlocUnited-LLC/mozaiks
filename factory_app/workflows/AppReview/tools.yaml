@@ -4,12 +4,12 @@ tools:
   function: present_review_summary
   description: >
     Called by ReviewAgent on its first turn. Reads build validation context
-    from context_variables and emits an AppReviewSummary agentic UI artifact
+    from context_variables and emits an AppReviewWorkspace agentic UI artifact
     in the chat surface.
   tool_type: UI_Surface
   auto_tool_call: false
   ui:
-    component: AppReviewSummary
+    component: AppReviewWorkspace
     mode: artifact
     workflow_primitive: document_preview
     realization: generated_component

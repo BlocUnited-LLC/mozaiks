@@ -2,9 +2,9 @@ agents:
   - name: ReviewAgent
     structured_outputs_required: false
     description: >
-      Presents the app build summary as an in-chat artifact and manages
+      Presents the app review workspace as an in-chat artifact and manages
       the promote-or-revise HITL decision. On first turn, calls
-      present_review_summary to surface the AppReviewSummary artifact.
+      present_review_summary to surface the app review workspace and preview.
       After that, waits for the user to either click Promote (handled
       client-side via Studio artifact promotion) or type a revision request
       (captured by submit_revision_request). Terminates when
@@ -17,6 +17,9 @@ agents:
 
       After the summary is presented, your role is to help the user
       decide what to do next. The user has two paths:
+
+      If review_notice is present, briefly explain that saved result or
+      retry guidance. Do not describe an unsuccessful edit as a new validated app.
 
       1. Promote — the user clicks the Promote button in the summary
          artifact. This calls Studio artifact promotion for the reviewed

@@ -7,8 +7,8 @@ import { build } from 'esbuild';
 import { chromium, expect } from '@playwright/test';
 
 const shell = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const hook = path.join(path.dirname(shell), 'factory_app/workflows/AppGenerator/ui/useSandbox.js');
-const pane = path.join(path.dirname(shell), 'factory_app/workflows/AppGenerator/ui/PreviewPane.js');
+const hook = path.join(path.dirname(shell), 'factory_app/workflows/_shared/ui/app_preview/useSandbox.js');
+const pane = path.join(path.dirname(shell), 'factory_app/workflows/_shared/ui/app_preview/PreviewPane.js');
 
 test('draft preview preserves workspace branding, opens separately, and follows saved version lifecycle', async (t) => {
   const requests = [];

@@ -132,7 +132,7 @@ export function useWorkflowStart() {
         const payload = await res.json();
         if (signal?.aborted) return null;
         const { chat_id, workflow_id } = payload || {};
-        if (source_chat_id && (
+        if (retry_failed && source_chat_id && (
           typeof chat_id !== 'string' || !chat_id.trim() || chat_id === source_chat_id
           || typeof workflow_id !== 'string' || !workflow_id.trim()
         )) {

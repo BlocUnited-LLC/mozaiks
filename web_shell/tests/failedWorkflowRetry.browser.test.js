@@ -79,6 +79,7 @@ async function metadataHarness() {
   const state = {
     useCallback: fn => fn, currentAppId: 'execution-host', currentUserId: 'operator',
     currentChatId: 'failed-chat', currentWorkflowName: 'ExampleWorkflow',
+    currentChatIdRef: { current: 'failed-chat' },
     token: 'initial-token', resolveKnownWorkflowName: value => value,
     chatMetaHydratedRef: { current: new Set() },
     chatMetaHydrationInFlightRef: { current: new Map() },
@@ -94,6 +95,22 @@ async function metadataHarness() {
     workflow_name: 'ExampleWorkflow', last_artifact: { tool_name: 'ExistingReview' } });
   return { state, requests, observed, hydrate, meta };
 }
+
+test('late source-chat metadata cannot hydrate state after review succession', async () => {
+  const { state, requests, observed, hydrate, meta } = await metadataHarness();
+  const mutations = [];
+  for (const name of ['cacheServerLastArtifact', 'setLoading', 'setCacheSeed', 'setStoredChatCacheSeed', 'setChatExists']) {
+    state[name] = () => mutations.push(name);
+  }
+  const pending = hydrate();
+  state.currentChatIdRef.current = 'next-review';
+  requests[0].resolve({ ...meta(0), cache_seed: 'previous-seed' });
+  assert.equal(await pending, false);
+  assert.deepEqual(observed, []);
+  assert.deepEqual(mutations, []);
+  assert.equal(state.chatMetaHydrationInFlightRef.current.size, 0);
+  assert.equal(state.chatMetaHydratedRef.current.size, 0);
+});
 
 test('forced failure metadata bypasses an already hydrated artifact cache', async () => {
   const { requests, observed, hydrate, meta } = await metadataHarness();

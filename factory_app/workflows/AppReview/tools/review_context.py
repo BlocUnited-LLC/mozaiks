@@ -158,6 +158,7 @@ def build_review_summary_payload(context_variables: Any | None) -> dict[str, Any
         "integration_tests_passed": integration_tests_passed,
         "security_readiness_summary": _context_get(context_variables, "security_readiness_summary")
         or {},
+        "review_notice": _text(_context_get(context_variables, "review_notice")),
         "promotion_blockers": promotion_blockers,
         "revision_blockers": revision_blockers,
         "review_ready": can_promote and can_revise,

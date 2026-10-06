@@ -1,5 +1,6 @@
 import React from 'react';
 import UIToolRenderer from '../../core/ui/UIToolRenderer';
+import { artifactRenderKey } from '../../core/ui/artifactRenderKey';
 import ArtifactActionsBar from '../actions/ArtifactActionsBar';
 import ArtifactLoadingState from '../../ui/primitives/ArtifactLoadingState';
 import {
@@ -135,7 +136,7 @@ const ArtifactPanel = ({
                       ? 'app-ui-component flex-1 min-h-0'
                       : 'app-ui-component';
                     return (
-                      <div key={m.id || idx} className={wrapperClass}>
+                      <div key={artifactRenderKey(m.toolCall, m.id || idx)} className={wrapperClass}>
                         <UIToolRenderer
                           event={m.toolCall}
                           onResponse={m.toolCall.onResponse}

@@ -1,5 +1,5 @@
 // ==============================================================================
-// FILE: factory_app/workflows/AppGenerator/ui/PreviewPane.js
+// FILE: factory_app/workflows/_shared/ui/app_preview/PreviewPane.js
 // DESCRIPTION: Preview iframe with basic controls
 // ==============================================================================
 
@@ -19,6 +19,7 @@ const PreviewPane = ({
   canStartPreview = false,
   onStopPreview = null,
   sandboxStopping = false,
+  unavailableMessage = 'Your preview will be available once this build is saved.',
 }) => {
   const previewCfg = config?.artifacts?.['e2b-preview'] || {};
   const [iframeKey, setIframeKey] = useState(0);
@@ -100,7 +101,7 @@ const PreviewPane = ({
               </>
             ) : (
               <div className="text-xs text-[var(--color-text-muted)] mt-1">
-                Your preview will be available once this build is saved.
+                {unavailableMessage}
               </div>
             )}
           </>

@@ -461,7 +461,7 @@ def full_journey(*, final_state: dict[str, Any] | None = None, promote: tuple[in
             ],
             "c-review": [
                 Send(chat_meta("c-review", "AppReview")),
-                Send(tool_call("summary-1", "AppReviewSummary", awaiting=False, payload=summary, agent="ReviewAgent")),
+                Send(tool_call("summary-1", "AppReviewWorkspace", awaiting=False, payload=summary, agent="ReviewAgent")),
                 Send(says("c-review", "ReviewAgent", "Promote this build or describe changes.")),
                 *map(Send, pause("c-review", "AppReview", "ReviewAgent")),
                 Expect("the promotion signal", submits(signal)),
@@ -741,7 +741,7 @@ async def test_the_driver_promotes_only_its_own_build_target(tmp_path: Path) -> 
     summary = {"artifact_version_id": ARTIFACT, "build_registry_id": "someone-elses-build", "can_promote": True}
     host = single_step(
         "c-review", "AppReview",
-        Send(tool_call("summary-1", "AppReviewSummary", awaiting=False, payload=summary)),
+        Send(tool_call("summary-1", "AppReviewWorkspace", awaiting=False, payload=summary)),
         *map(Send, pause("c-review", "AppReview", "ReviewAgent")),
     )
     run = await drive(host, tmp_path)
@@ -755,7 +755,7 @@ async def test_review_asking_again_after_the_signal_needs_a_human(tmp_path: Path
     signal = driver.PROMOTION_SIGNAL.format(artifact_version_id=ARTIFACT, build_registry_id=BUILD)
     host = single_step(
         "c-review", "AppReview",
-        Send(tool_call("summary-1", "AppReviewSummary", awaiting=False, payload=summary)),
+        Send(tool_call("summary-1", "AppReviewWorkspace", awaiting=False, payload=summary)),
         *map(Send, pause("c-review", "AppReview", "ReviewAgent")),
         Expect("the promotion signal", submits(signal)),
         *map(Send, pause("c-review", "AppReview", "ReviewAgent")),

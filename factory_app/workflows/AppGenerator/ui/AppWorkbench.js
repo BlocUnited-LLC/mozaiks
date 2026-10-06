@@ -9,31 +9,17 @@ import { useWorkflowStart } from '@mozaiks/chat-ui/hooks/useWorkflowStart.js';
 import { workflowSurfaceStyles, workflowToolbarButtonClass } from '@mozaiks/chat-ui/platform/workflowSurfaceStyles.js';
 import { normalizePrimitiveActions } from '@mozaiks/chat-ui/core/ui/workflowPrimitiveUtils.js';
 import { useAppValidationWorkbench } from './useAppValidationWorkbench';
-import { useSandbox } from './useSandbox';
+import { useSandbox } from '../../_shared/ui/app_preview/useSandbox';
+import { refinementOutput } from '../../_shared/ui/app_preview/refinementOutput';
 import BuildStatusPane from './BuildStatusPane';
 import CodeEditorPane from './CodeEditorPane';
-import PreviewPane from './PreviewPane';
+import PreviewPane from '../../_shared/ui/app_preview/PreviewPane';
 import ExportActions from './ExportActions';
 import FileTreePane from './FileTreePane';
 import HarnessDecisionCard from '../../../app/ui/components/HarnessDecisionCard.jsx';
 import { studioFetch } from '../../../app/admin/pages/studioApi.js';
 
 const THEME_FILE_PATH = 'brand/theme_config.json';
-
-const refinementOutput = (response) => {
-  if (response?.execution_mode === 'coding_worker') return response.coding_worker || null;
-  if (response?.execution_mode !== 'surface_regeneration' || !response.surface_result) return null;
-  const result = response.surface_result;
-  return {
-    ...result,
-    status: result.status === 'failed' ? 'failed'
-      : result.status === 'success' && result.metadata?.validation_result?.validation_status === 'passed'
-        ? 'validated' : 'planned',
-    applied_files: result.all_files,
-    validation_result: result.metadata?.validation_result,
-    error: result.surfaces_executed?.find((surface) => surface.status === 'failed')?.error,
-  };
-};
 
 const AppWorkbench = ({
   payload = {},

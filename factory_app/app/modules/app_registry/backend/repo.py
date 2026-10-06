@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime
+from types import EllipsisType
 from typing import Any, cast
 from uuid import uuid4
 
@@ -258,14 +259,18 @@ class AppRegistryRepo:
         expected_build_id: str | None = None,
         expected_artifact_version_id: str | None = None,
         expected_lifecycle_state: str | None = None,
+        expected_active_chat_id: str | None | EllipsisType = ...,
     ) -> dict[str, Any] | None:
-        query = {"_id": build_registry_id, **owner_filter(owner_user_id)}
+        query: dict[str, Any] = {"_id": build_registry_id, **owner_filter(owner_user_id)}
         if expected_build_id is not None:
             query["current_build_run.build_id"] = expected_build_id
         if expected_artifact_version_id is not None:
             query["current_build_run.artifact_version_id"] = expected_artifact_version_id
         if expected_lifecycle_state is not None:
             query["lifecycle_state"] = expected_lifecycle_state
+        # Explicit None matches a missing/null chat; omission leaves it unconstrained.
+        if expected_active_chat_id is not ...:
+            query["active_chat_id"] = expected_active_chat_id
         await self.ensure_indexes()
         coll = await self._collection()
         existing = await coll.find_one(query)

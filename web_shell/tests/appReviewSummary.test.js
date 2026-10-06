@@ -31,6 +31,196 @@ const module = { exports: {} };
 new Function('module', 'exports', 'require', compiled.outputFiles[0].text)(module, module.exports, createRequire(import.meta.url));
 const render = payload => renderToStaticMarkup(createElement(module.exports.default, { payload }));
 
+test('review workspace previews owned snapshots and keeps revision evidence separate', async (t) => {
+  const root = path.dirname(shell);
+  const bundle = await build({
+    stdin: {resolveDir:shell, loader:'jsx', contents:`
+      import React, { useState } from 'react';
+      import { createRoot } from 'react-dom/client';
+      import AppReviewWorkspace from ${JSON.stringify(path.join(root, 'factory_app/workflows/AppReview/ui/AppReview/AppReviewWorkspace.jsx'))};
+      function Fixture() {
+        const [payload, setPayload] = useState({target_app_id:'app-a', build_registry_id:'registry-a', artifact_version_id:'parent',
+          lifecycle_state:'review', app_validation_status:'passed', app_bundle_acceptance_status:'passed', integration_tests_passed:true, can_promote:true});
+        window.patchReview = patch => setPayload(previous => ({...previous, ...patch}));
+        return <main><h1>Mozaiks builder</h1><AppReviewWorkspace payload={payload} /></main>;
+      }
+      createRoot(document.getElementById('root')).render(<Fixture />);
+    `},
+    bundle:true, write:false, jsx:'automatic', loader:{'.js':'jsx'}, nodePaths:[path.join(shell,'node_modules')],
+    plugins:[{name:'review-transport', setup(builder) {
+      builder.onResolve({filter:/@mozaiks\/chat-ui\/ui|studioApi\.js$|websocketAuth\.js$/}, args => ({path:args.path,namespace:'fixture'}));
+      builder.onLoad({filter:/.*/,namespace:'fixture'}, ({path: name}) => ({loader:'jsx',resolveDir:shell,contents:
+        name.endsWith('studioApi.js') ? 'export const getStudioAccessToken = () => null; export const studioFetch = (...args) => fetch(...args);'
+          : name.endsWith('websocketAuth.js') ? 'export const openAuthenticatedWebSocket = () => ({close(){}});'
+            : 'export const Panel=({children})=><section>{children}</section>; export const StatusPill=({children})=><span>{children}</span>; export const Button=({children,...props})=><button {...props}>{children}</button>;',
+      }));
+    }}],
+  });
+  const requests = [];
+  const bodies = new Map();
+  const delayed = new Map();
+  const active = new Set();
+  let maxActive = 0;
+  let origin;
+  const saved = (id, status='passed') => ({
+    app_id:'app-a', artifact_version_id:id, build_family:'app_bundle', generated_files:{'app.json':JSON.stringify({name:id})},
+    workbench:{target_app_id:'app-a', build_registry_id:'registry-a', artifact_version_id:id, build_family:'app_bundle',
+      generated_files:{'app.json':JSON.stringify({name:id})}, app_validation_status:status, app_validation_strategy_used:'e2b',
+      integration_test_result:{passed:status==='passed'}},
+    review:{app_id:'app-a', artifact_version_id:id, artifact_kind:'app_bundle', validation_status:status,
+      parent_version_id:id==='parent' ? null : 'parent',
+      validation_result:{validation_status:status, app_validation_result:{validation_status:status}, app_bundle_acceptance_result:{passed:status==='passed'}},
+      can_accept:id!=='parent' && status==='passed', can_promote:id==='parent' && status==='passed'},
+  });
+  for (const id of ['parent','child','later','slow']) bodies.set(id,saved(id));
+  bodies.set('failed',saved('failed','failed'));
+  const server = http.createServer((req,res) => {
+    if (req.url==='/fixture.js') {res.setHeader('Content-Type','text/javascript');res.end(bundle.outputFiles[0].text);return;}
+    if (req.url.startsWith('/preview/')) {res.setHeader('Content-Type','text/html');res.end('<h1>Customer app</h1><button onclick="this.textContent=\'Added\'">Add item</button>');return;}
+    if (!req.url.startsWith('/api/')) {res.setHeader('Content-Type','text/html');res.end('<div id="root"></div><script src="/fixture.js"></script>');return;}
+    requests.push({url:req.url,method:req.method});
+    res.setHeader('Content-Type','application/json');
+    const url = new URL(req.url,'http://fixture');
+    const id = url.pathname.split('/')[5];
+    if (url.pathname.endsWith('/bundle')) {
+      const finish = () => res.end(JSON.stringify(bodies.get(id)));
+      if (delayed.has(id)) delayed.set(id,finish); else finish();
+    } else if (url.pathname.endsWith('/accept')) {
+      const next = bodies.get(id);
+      next.review = {...next.review,can_accept:false,can_promote:true};
+      res.end(JSON.stringify({review:next.review}));
+    } else if (url.pathname.endsWith('/promote')) {res.end('{"promoted":true}');}
+    else if (url.pathname.startsWith('/api/artifacts/')) {
+      const sid='session-'+url.pathname.split('/')[3];
+      if (active.size) {res.statusCode=409;res.end('{"detail":"quota"}');return;}
+      active.add(sid);maxActive=Math.max(maxActive,active.size);res.end(JSON.stringify({sandboxId:sid}));
+    } else if (url.pathname.endsWith('/stop')) {active.delete(url.pathname.split('/')[3]);res.end('{"ok":true}');}
+    else if (url.pathname.endsWith('/start') || url.pathname.endsWith('/status')) {
+      res.end(JSON.stringify({status:'running',previewUrl:origin+'/preview/'+url.pathname.split('/')[3]}));
+    } else res.end('{"ok":true}');
+  });
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  origin=`http://127.0.0.1:${server.address().port}`;
+  t.after(()=>new Promise(resolve=>{server.closeAllConnections();server.close(resolve);}));
+  const browser=await chromium.launch({headless:true});
+  t.after(()=>browser.close());
+  const page=await browser.newPage();
+  const errors=[];page.on('pageerror',error=>errors.push(error.message));
+  await page.goto(origin);
+  const patch=async value=>page.evaluate(next=>window.patchReview(next),value);
+  const result=(id,status='validated')=>({execution_mode:'coding_worker',coding_worker:{status,metadata:id?{build_record_id:id}:{},
+    validation_result:{validation_status:status==='validated'?'passed':'failed'},applied_files:{'app.json':'untrusted inline files'}}});
+  await expect(page.getByRole('button',{name:'Start draft preview',exact:true})).toBeVisible();
+  assert.equal(requests[0].url,'/api/studio/build/artifacts/parent/bundle?build_registry_id=registry-a');
+  await page.getByRole('button',{name:'Start draft preview',exact:true}).click();
+  const iframe=page.frameLocator('iframe[title="Draft app preview"]');
+  await iframe.getByRole('button',{name:'Add item',exact:true}).click();
+  const frameNode=await page.locator('iframe').elementHandle();
+  await patch({refinement_pending:true});
+  await expect(page.getByText('Making your changes. You can keep trying this preview.')).toBeVisible();
+  await expect(page.getByRole('button',{name:'Activate this version',exact:true})).toBeDisabled();
+  await patch({refinement_pending:false,refinement_result:result('child')});
+  await expect(page.getByRole('button',{name:'Update preview',exact:true})).toBeVisible();
+  await expect(iframe.getByRole('button',{name:'Added',exact:true})).toBeVisible();
+  assert.equal(await frameNode.evaluate(node=>node===document.querySelector('iframe')),true,'Payload update must preserve the running iframe');
+  assert.equal(requests.filter(r=>r.url.startsWith('/api/artifacts/')).length,1,'A child result must not allocate automatically');
+  await expect(page.getByRole('button',{name:'Activate this version',exact:true})).toBeDisabled();
+  await page.getByRole('button',{name:'Accept this draft',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Activate this version',exact:true})).toBeEnabled();
+  assert.ok(requests.some(r=>r.method==='POST' && r.url==='/api/studio/build/artifacts/child/accept?build_registry_id=registry-a'));
+  await page.getByRole('button',{name:'Update preview',exact:true}).click();
+  await expect(page.getByText('Preview based on version child')).toBeVisible();
+  assert.equal(maxActive,1);
+  await page.getByRole('button',{name:'Activate this version',exact:true}).click();
+  await expect(page.getByText('Version activated successfully.')).toBeVisible();
+  assert.ok(requests.some(r=>r.url==='/api/studio/build/artifacts/child/promote?build_registry_id=registry-a'));
+  await patch({refinement_result:result('failed','validated')});
+  await expect(page.getByText('This change needs attention. The preview still shows the previous draft.')).toBeVisible();
+  await expect(page.getByText('Preview based on version child')).toBeVisible();
+  await expect(page.getByRole('button',{name:'Accept this draft',exact:true})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Activate this version',exact:true})).toBeDisabled();
+  await expect(page.getByText('Version activated successfully.')).toHaveCount(0);
+  await page.getByText('Check results',{exact:true}).click();
+  await expect(page.getByText('Failed',{exact:true})).toHaveCount(3);
+  // A fresh AppReview continuation can replace the source ID without the
+  // transient refinement result. Its persisted checks still govern adoption.
+  await patch({artifact_version_id:'failed',refinement_result:null});
+  await expect.poll(()=>requests.filter(r=>r.url.includes('/failed/bundle')).length).toBeGreaterThan(0);
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await expect(page.getByRole('button',{name:'Update preview',exact:true})).toHaveCount(0);
+  await expect(page.getByText('Preview based on version child')).toBeVisible();
+  await patch({artifact_version_id:'later'});
+  await expect(page.getByRole('button',{name:'Update preview',exact:true})).toBeVisible();
+  await patch({artifact_version_id:'child'});
+  await expect(page.getByRole('button',{name:'Update preview',exact:true})).toHaveCount(0);
+  await patch({refinement_error:'This change could not be saved.'});
+  await expect(page.getByRole('alert')).toHaveText('This change could not be saved.');
+  await expect(page.getByRole('button',{name:'Activate this version',exact:true})).toBeDisabled();
+  await expect(page.getByText('Preview based on version child')).toBeVisible();
+  await patch({refinement_error:null});
+  // A fresh continuation after a failed edit can select the previous passed
+  // artifact without carrying either transient result or error fields.
+  await patch({lifecycle_state:'needs_revision',can_promote:false,refinement_result:null,
+    review_notice:'The last edit did not produce a saved draft. Your previous draft is still selected.'});
+  await expect(page.getByRole('button',{name:'Activate this version',exact:true})).toBeDisabled();
+  await expect(page.getByText('Preview based on version child')).toBeVisible();
+  await expect(page.getByText('This change needs attention. The preview still shows the previous draft.')).toBeVisible();
+  await Promise.all([
+    page.waitForResponse(response=>response.url().includes('/later/bundle')),
+    patch({artifact_version_id:'later'}),
+  ]);
+  await expect(page.getByText('Loading saved draft…')).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Accept this draft',exact:true})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Activate this version',exact:true})).toBeDisabled();
+  await patch({artifact_version_id:'child',lifecycle_state:'review',can_promote:true,review_notice:null});
+  await expect(page.getByRole('button',{name:'Activate this version',exact:true})).toBeEnabled();
+  // No saved result must never restore the parent's passed evidence.
+  await patch({refinement_result:result(null,'failed')});
+  await expect(page.getByRole('button',{name:'Activate this version',exact:true})).toBeDisabled();
+  await expect(page.getByText('Preview based on version child')).toBeVisible();
+  // A successful-looking surface response cannot supply missing saved checks.
+  const unproven=saved('unproven');
+  unproven.review.validation_result={validation_status:'passed'};
+  delete unproven.workbench.integration_test_result;
+  bodies.set('unproven',unproven);
+  await patch({refinement_result:{execution_mode:'surface_regeneration',surface_result:{status:'success',
+    metadata:{build_record_id:'unproven',validation_result:{validation_status:'passed'}}}}});
+  await expect(page.getByRole('button',{name:'Accept this draft',exact:true})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Activate this version',exact:true})).toBeDisabled();
+  await expect(page.getByText('Preview based on version child')).toBeVisible();
+  // Every binding dimension is checked, not just the returned version.
+  for (const [name,change] of [
+    ['registry',body=>{body.workbench.build_registry_id='other';}],
+    ['target',body=>{body.workbench.target_app_id='other';}],
+    ['app',body=>{body.app_id='other';}],
+    ['version',body=>{body.artifact_version_id='other';}],
+    ['family',body=>{body.build_family='workflow_bundle';}],
+    ['review-version',body=>{body.review.artifact_version_id='other';}],
+    ['review-app',body=>{body.review.app_id='other';}],
+  ]) {
+    const id='bad-'+name;const body=saved(id);change(body);bodies.set(id,body);
+    await patch({refinement_result:result(id)});
+    await expect(page.getByRole('alert')).toContainText('does not match');
+    await expect(page.getByRole('button',{name:'Activate this version',exact:true})).toBeDisabled();
+    await expect(page.getByText('Preview based on version child')).toBeVisible();
+  }
+  // A late GET for the old candidate cannot replace the selected snapshot.
+  delayed.set('slow',null);
+  await patch({refinement_result:result('slow')});
+  await expect.poll(()=>typeof delayed.get('slow')).toBe('function');
+  await patch({refinement_result:result('later')});
+  await expect(page.getByRole('button',{name:'Accept this draft',exact:true})).toBeVisible();
+  delayed.get('slow')();
+  await page.getByRole('button',{name:'Accept this draft',exact:true}).click();
+  assert.ok(requests.some(r=>r.url==='/api/studio/build/artifacts/later/accept?build_registry_id=registry-a'));
+  await page.setViewportSize({width:390,height:844});
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  await expect(page.getByRole('button',{name:'Update preview',exact:true})).toBeVisible();
+  await patch({target_app_id:'app-b',build_registry_id:'registry-b',artifact_version_id:'other',refinement_result:null});
+  await expect(page.locator('iframe')).toHaveCount(0);
+  assert.deepEqual(errors,[]);
+});
+
 test('missing review evidence is visible as Missing, never Skipped', () => {
   const html = render({ can_promote: false });
   for (const label of ['Bundle acceptance', 'Build validation', 'Integration checks', 'Security readiness']) {
@@ -95,9 +285,9 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
           finally { setStarting(false); }
         } };
       }`,
-    './useSandbox': `export const useSandbox = () => ({syncAndRestart(){}, stopPreview(){}});`,
+    '../../_shared/ui/app_preview/useSandbox': `export const useSandbox = () => ({syncAndRestart(){}, stopPreview(){}});`,
     './CodeEditorPane': `export default function Editor({content}) { return <output aria-label="Editor contents">{content}</output>; }`,
-    './PreviewPane': `export default function Preview({artifactVersionId}) { return <output aria-label="Preview version">{artifactVersionId}</output>; }`,
+    '../../_shared/ui/app_preview/PreviewPane': `export default function Preview({artifactVersionId}) { return <output aria-label="Preview version">{artifactVersionId}</output>; }`,
     '../../adapters/api.js': `export const authFetch = (...args) => fetch(...args);`,
     '../../../app/admin/pages/studioApi.js': 'export const studioFetch = (...args) => fetch(...args);',
   };
