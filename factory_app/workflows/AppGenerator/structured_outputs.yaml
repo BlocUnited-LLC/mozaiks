@@ -2298,6 +2298,18 @@ models:
           authenticated UI/API actions. Internal/admin_internal disable HTTP dispatch
           even with authentication and are only for trusted runtime/event calls.
           Does not bypass permissions or entitlement_gate checks.
+      timeout_seconds:
+        type: union
+        default: null
+        variants:
+        - int
+        - 'null'
+        description: >
+          Optional server-declared async execution budget, integer 1 through 3600
+          seconds. Leave null for ordinary actions to inherit the process default
+          (30 seconds unless configured). Declare a longer budget only for an
+          explicitly bounded background operation. Never derive it from request
+          params. Cancellation cleanup and durable recovery remain service-owned.
       input_schema:
         type: JsonSchemaContract
         description: Typed JSON-schema-like input contract.

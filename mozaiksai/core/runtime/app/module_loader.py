@@ -28,10 +28,10 @@ import inspect
 import sys
 from pathlib import Path, PurePosixPath
 from types import ModuleType
-from typing import Any, Literal, cast
+from typing import Annotated, Any, Literal, cast
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.taxonomy import SemanticCategory, validate_registered_identifier
@@ -40,6 +40,14 @@ logger = get_workflow_logger("module_loader")
 
 CANONICAL_EVENT_PREFIXES = ("domain.", "platform.", "hosted.", "mozaikspay.")
 CANONICAL_EVENT_PREFIX_LABEL = "domain.*, platform.*, hosted.*, or mozaikspay.*"
+
+ActionTimeoutSeconds = Annotated[int, Field(strict=True, ge=1, le=3600)]
+_ACTION_TIMEOUT_ADAPTER = TypeAdapter(ActionTimeoutSeconds | None)
+
+
+def validate_action_timeout(value: Any) -> int | None:
+    """Validate a server-declared async action budget at contract boundaries."""
+    return _ACTION_TIMEOUT_ADAPTER.validate_python(value)
 
 
 def _default_notification_channels() -> list[Literal["in_app", "email", "push", "sms"]]:
@@ -190,6 +198,7 @@ class ActionDef(ModuleContractModel):
     description: str
     handler_method: str
     api_surface: Literal["public", "public_readonly", "internal", "admin_internal"] | None = None
+    timeout_seconds: ActionTimeoutSeconds | None = None
     input_schema: dict[str, Any] = Field(default_factory=dict)
     output_schema: dict[str, Any] = Field(default_factory=dict)
     permissions: list[str] = Field(default_factory=list)
@@ -282,6 +291,11 @@ class ModuleDefinition(ModuleContractModel):
     def action_entitlement_map(self) -> dict[str, str | None]:
         """Maps each action id to its entitlement_gate capability_id (or None)."""
         return {action.id: action.entitlement_gate for action in self.actions}
+
+    @property
+    def action_timeout_map(self) -> dict[str, int | None]:
+        """Maps action ids to async budgets; None inherits the process default."""
+        return {action.id: action.timeout_seconds for action in self.actions}
 
     @property
     def action_emits_map(self) -> dict[str, list[str]]:
@@ -1113,6 +1127,10 @@ class LoadedModule:
     @property
     def action_entitlement_map(self) -> dict[str, str | None]:
         return self.definition.action_entitlement_map
+
+    @property
+    def action_timeout_map(self) -> dict[str, int | None]:
+        return self.definition.action_timeout_map
 
     @property
     def action_emits_map(self) -> dict[str, list[str]]:

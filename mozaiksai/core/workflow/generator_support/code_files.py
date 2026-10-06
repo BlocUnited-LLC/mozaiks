@@ -11,6 +11,7 @@ import yaml
 from jsonschema import Draft7Validator
 from jsonschema.exceptions import SchemaError
 
+from mozaiksai.core.runtime.app.module_loader import validate_action_timeout
 from mozaiksai.core.runtime.app.provenance import (
     build_default_app_provenance,
     dump_app_provenance_yaml,
@@ -467,6 +468,8 @@ def _materialize_module_contract_file_map(payload: dict[str, Any]) -> dict[str, 
             value = deepcopy(value)
             if key == "module_yaml" and isinstance(value, dict):
                 for action in value.get("actions") or []:
+                    if "timeout_seconds" in action:
+                        validate_action_timeout(action["timeout_seconds"])
                     for schema_key in ("input_schema", "output_schema"):
                         if isinstance(action.get(schema_key), dict):
                             action[schema_key] = _materialize_schema_contract(
