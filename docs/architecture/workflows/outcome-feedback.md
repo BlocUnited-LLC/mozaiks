@@ -90,6 +90,10 @@ records use `ctx.persistence`; app/user isolation and unique indexes preserve
 one response per app/user/chat/outcome and per event. A later invitation for the
 same outcome cannot change that counted response. Session receipt retention
 follows session lifecycle; copied app records follow the app's account policy.
+The persistence API's `is_unique_constraint_violation(error)` identifies typed
+storage conflicts without generated repositories importing a database driver.
+The pack recovers only after finding its expected scoped row; other failures
+propagate. Existing persistence adapter exception behavior is unchanged.
 
 An app can use another explicitly declared module sink satisfying this contract.
 Generated apps do not inherit a host operator's private analytics receiver.

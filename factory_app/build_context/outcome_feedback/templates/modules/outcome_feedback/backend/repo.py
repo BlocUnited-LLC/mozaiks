@@ -1,4 +1,4 @@
-from pymongo.errors import DuplicateKeyError
+from mozaiksai.core.runtime.persistence import is_unique_constraint_violation
 
 
 def _records(ctx):
@@ -11,12 +11,15 @@ async def insert_once(ctx, *, record):
             {"feedback_id": record["feedback_id"], "user_id": ctx.user_id},
             {"$setOnInsert": record}, upsert=True,
         )
-    except DuplicateKeyError:
+    except Exception as error:
+        if not is_unique_constraint_violation(error):
+            raise
         # A concurrent delivery of the same immutable receipt already won.
         existing = await _records(ctx).find_one(
             {"feedback_id": record["feedback_id"], "user_id": ctx.user_id},
         )
-        if existing is None:
+        identity_fields = ("app_id", "chat_id", "user_id", "outcome_id")
+        if existing is None or any(existing.get(field) != record.get(field) for field in identity_fields):
             raise
         return False
     return bool(getattr(result, "upserted_id", None))

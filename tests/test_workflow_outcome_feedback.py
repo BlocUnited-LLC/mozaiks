@@ -216,6 +216,37 @@ async def test_receipt_storage_is_immutable_and_scoped(monkeypatch):
     assert not await pm.save_workflow_feedback_receipt({**receipt, "response": {"status": "submitted", "rating": 5}})
 
 
+@pytest.mark.parametrize("failure,existing_kind,duplicate", [
+    ("duplicate", "matching", True),
+    ("duplicate", "missing", False),
+    ("duplicate", "conflicting", False),
+    ("connection", "matching", False),
+])
+async def test_generated_repository_recovers_only_typed_scoped_uniqueness_conflicts(failure, existing_kind, duplicate):
+    from pymongo.errors import AutoReconnect, DuplicateKeyError
+
+    from mozaiksai.core.runtime.persistence import is_unique_constraint_violation
+
+    error = DuplicateKeyError("conflict") if failure == "duplicate" else AutoReconnect("unavailable")
+    assert is_unique_constraint_violation(error) is (failure == "duplicate")
+    assert not is_unique_constraint_violation(RuntimeError("duplicate key"))
+    source = Path(__file__).parents[1] / "factory_app/build_context/outcome_feedback/templates/modules/outcome_feedback/backend/repo.py"
+    namespace = {}
+    exec(compile(source.read_text(), str(source), "exec"), namespace)
+    record = {"feedback_id": "owned-id", "app_id": "app", "chat_id": "chat", "user_id": "owner", "outcome_id": "result"}
+    existing = None if existing_kind == "missing" else {**record, **({"outcome_id": "other"} if existing_kind == "conflicting" else {})}
+    rows = SimpleNamespace(update_one=AsyncMock(side_effect=error), find_one=AsyncMock(return_value=existing))
+    ctx = SimpleNamespace(user_id="owner", persistence=SimpleNamespace(collection=lambda *_: rows))
+    if duplicate:
+        assert await namespace["insert_once"](ctx, record=record) is False
+        rows.find_one.assert_awaited_once_with({"feedback_id": "owned-id", "user_id": "owner"})
+    else:
+        with pytest.raises(type(error)):
+            await namespace["insert_once"](ctx, record=record)
+        if failure == "connection":
+            rows.find_one.assert_not_awaited()
+
+
 async def _compile_feedback_app():
     """Run production assembly with a selected pack and no model-owned feedback paths."""
     from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks

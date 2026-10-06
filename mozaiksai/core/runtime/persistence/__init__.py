@@ -23,6 +23,7 @@ from .app_data import (
     known_data_aliases,
     load_app_data_contract,
 )
+from .errors import is_unique_constraint_violation
 from .indexes import (
     DatabaseIndexApplyError,
     DataContractIndexPlanItem,
@@ -92,6 +93,7 @@ __all__ = [
     "get_migration_health_report",
     "index_data_contract_by_entity",
     "known_data_aliases",
+    "is_unique_constraint_violation",
     "load_app_data_contract",
     "load_data_contract",
     "load_data_migrations",
