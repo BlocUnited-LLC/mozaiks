@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import re
-
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from fastapi.responses import RedirectResponse
 
 from mozaiksai.core.auth import UserPrincipal, optional_user, require_any_auth
 from mozaiksai.core.auth.dependencies import validate_path_id
+from mozaiksai.core.media.http import media_content_response
 from mozaiksai.core.media.store import MediaContentNotFoundError, get_media_asset_store
 from mozaiksai.core.media.types import AssetVisibility
 
@@ -29,11 +28,6 @@ def _has_backer_access(principal: UserPrincipal, app_id: str, asset_id: str) -> 
     return asset_id in backer_assets
 
 
-def _safe_download_filename(value: str | None) -> str:
-    filename = re.sub(r"[^A-Za-z0-9._-]+", "-", str(value or "").strip()).strip(".-")
-    return filename or "generated-media.bin"
-
-
 def _is_cdn_url(content_ref: str | None) -> bool:
     """Return True when the content_ref is an absolute HTTPS URL (CDN or blob)."""
     return bool(content_ref and str(content_ref).startswith("https://"))
@@ -44,6 +38,7 @@ async def get_media_asset_content(
     app_id: str,
     asset_id: str,
     download: bool = Query(default=False),
+    range_header: str | None = Header(default=None, alias="Range"),
     principal: UserPrincipal = Depends(require_any_auth),
 ) -> Response:
     """Serve generated media bytes for authenticated users.
@@ -88,16 +83,14 @@ async def get_media_asset_content(
     except MediaContentNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Media content not found") from exc
 
-    disposition = "attachment" if download else "inline"
-    filename = _safe_download_filename(asset.filename)
     cache_control = "public, max-age=3600" if visibility == AssetVisibility.PUBLIC else "private, max-age=300"
-    return Response(
-        content=content,
+    return media_content_response(
+        content,
         media_type=asset.media_type,
-        headers={
-            "Cache-Control": cache_control,
-            "Content-Disposition": f'{disposition}; filename="{filename}"',
-        },
+        filename=asset.filename,
+        download=download,
+        cache_control=cache_control,
+        range_header=range_header,
     )
 
 
@@ -106,6 +99,7 @@ async def get_public_media_asset_content(
     app_id: str,
     asset_id: str,
     download: bool = Query(default=False),
+    range_header: str | None = Header(default=None, alias="Range"),
     principal: UserPrincipal | None = Depends(optional_user),
 ) -> Response:
     """Serve promoted media assets without requiring authentication.
@@ -146,15 +140,13 @@ async def get_public_media_asset_content(
     except MediaContentNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Media content not found") from exc
 
-    disposition = "attachment" if download else "inline"
-    filename = _safe_download_filename(asset.filename)
-    return Response(
-        content=content,
+    return media_content_response(
+        content,
         media_type=asset.media_type,
-        headers={
-            "Cache-Control": "public, max-age=3600",
-            "Content-Disposition": f'{disposition}; filename="{filename}"',
-        },
+        filename=asset.filename,
+        download=download,
+        cache_control="public, max-age=3600",
+        range_header=range_header,
     )
 
 

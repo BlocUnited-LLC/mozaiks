@@ -12,6 +12,7 @@ from .artifacts import (
     generated_media_artifact_payload,
     media_asset_content_url,
 )
+from .http import media_content_response
 from .store import (
     GridFSMediaContentStore,
     LocalMediaContentStore,
@@ -72,6 +73,7 @@ __all__ = [
     "media_input_refs_to_ag2_inputs",
     "media_kind_from_mime",
     "media_asset_content_url",
+    "media_content_response",
     "multimodal_inputs_enabled",
     "normalize_media_type",
     "prepare_llm_config_for_media",

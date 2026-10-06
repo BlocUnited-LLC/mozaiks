@@ -108,6 +108,36 @@ assets = await harvest_generated_media_response(
 )
 ```
 
+### Generated video previews
+
+An app-owned generation tool can persist a short video through the same media
+store by passing an AG2 `BinaryResult` with explicit video metadata:
+
+```python
+from ag2.events import BinaryResult
+from mozaiksai.core.media import get_media_asset_store
+
+asset = await get_media_asset_store().persist_generated_binary_result(
+    BinaryResult(video_bytes, metadata={"media_type": "video/mp4", "filename": "clip.mp4"}),
+    app_id=app_id,
+    source_workflow=workflow_name,
+    source_chat_id=chat_id,
+)
+```
+
+`generated_media_artifact_payload(...)` provides the existing review artifact,
+and `CoreMediaGeneratedAsset` shows `video/*` assets with playback controls.
+The authenticated media endpoint supports one HTTP byte range per request for
+browser seeking. Product routes with their own verified access scope can reuse
+`mozaiksai.core.media.media_content_response(...)` after authorization.
+
+The current byte-store interface loads the full asset before building a range
+response. Use this path for short previews; large video delivery needs an object
+store/CDN with native range support. The default private media route permits
+operator/admin roles, so app-owner access must use an app-owned scoped route.
+This capability stores and previews video; model inference remains with the
+calling app or provider adapter.
+
 ## Byte Storage — MediaContentStore
 
 `MediaContentStore` is a `typing.Protocol`. The framework ships three built-in
@@ -162,8 +192,8 @@ AZURE_STORAGE_CONTAINER_NAME=mozaiks-media   # must exist before deployment
 **Optional CDN redirect:** Set `AZURE_STORAGE_CDN_BASE_URL` to a CDN endpoint
 or the container's public base URL. When set, the `azure_blob` backend returns
 the full public URL as the `content_ref`, enabling the API serve route to issue
-`302` redirects instead of proxying bytes. Without this, the route streams bytes
-from the blob client.
+`302` redirects instead of proxying bytes. Without this, the route loads the
+blob bytes before returning them.
 
 ```
 AZURE_STORAGE_CDN_BASE_URL=https://cdn.example.com/media
