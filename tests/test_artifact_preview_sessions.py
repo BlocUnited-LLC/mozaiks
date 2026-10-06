@@ -184,7 +184,7 @@ async def test_two_workers_reuse_the_same_durable_preview():
 
 
 @pytest.mark.asyncio
-async def test_recover_build_keeps_all_versions_after_worker_restart_without_provider_access(monkeypatch):
+async def test_recover_build_keeps_all_versions_across_worker_restart_without_provider_access(monkeypatch):
     adapter = FakeSandboxAdapter()
     manager = _manager(adapter)
     first = await _create(manager, "artifact-old")
