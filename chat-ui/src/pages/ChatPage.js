@@ -118,8 +118,12 @@ const ChatPage = () => {
   const currentChatIdRef = useRef(null);
   // A server-created review successor can keep the same app preview mounted.
   const reviewContinuationRef = useRef(null);
+  // A handed-off review run cannot announce revision success, even if its
+  // terminal event arrives after the trigger failed or requested approval.
+  const revisionHandoffRef = useRef(null);
   const setCurrentChatId = useCallback((id) => {
     if (reviewContinuationRef.current?.chat_id !== id) reviewContinuationRef.current = null;
+    if (revisionHandoffRef.current?.chatId !== id) revisionHandoffRef.current = null;
     currentChatIdRef.current = id;
     _setCurrentChatId(id);
   }, []);
@@ -1447,6 +1451,11 @@ const ChatPage = () => {
       triggerPayload.revision_id = pendingHarnessDecision.revision_id;
     }
 
+    revisionHandoffRef.current = { chatId: submissionChatId };
+    if (pendingTransitionIdRef.current === 'workflow_complete') {
+      setPendingTransitionId(null);
+      setPendingTransitionContext({});
+    }
     try {
       const result = await startPendingHarnessWorkflow(workflowId, contextVariables, {
         trigger_source: pendingHarnessDecision.trigger_source || 'refinement',
@@ -3722,7 +3731,9 @@ const ChatPage = () => {
         const isCompletionForAbandonedChat = Boolean(
           completedChatId && activeChatIdNow && completedChatId !== activeChatIdNow,
         );
-        if (!pendingTransitionIdRef.current && !isHumanInTheLoop && !isCompletionForAbandonedChat) {
+        const isRevisionHandoff = Boolean(revisionHandoffRef.current
+          && revisionHandoffRef.current.chatId === (completedChatId || activeChatIdNow));
+        if (!pendingTransitionIdRef.current && !isHumanInTheLoop && !isCompletionForAbandonedChat && !isRevisionHandoff) {
           const duration = data.duration_sec || data.data?.duration_sec;
           const tokensUsed = data.total_tokens || data.data?.total_tokens;
           // Only carry a summary when a field actually has a value. An object
@@ -3738,7 +3749,7 @@ const ChatPage = () => {
         }
         return;
       }
-      case 'chat.revision_requested': {
+      case 'revision_requested': {
         // Emitted by AppReview's submit_revision_request tool when the user
         // requests changes. Route into the refinement control plane and switch
         // the active chat session to the new workflow in-place.
@@ -3781,6 +3792,11 @@ const ChatPage = () => {
         const sourceArtifact = findRevisionArtifact(buildRegistryId, artifactKind, artifactVersionId);
         const sourceToolCallId = sourceArtifact?.tool_call_id;
         const isCurrentRevision = () => currentChatIdRef.current === sourceChatId;
+        revisionHandoffRef.current = { chatId: sourceChatId };
+        if (pendingTransitionIdRef.current === 'workflow_complete') {
+          setPendingTransitionId(null);
+          setPendingTransitionContext({});
+        }
         if (sourceToolCallId) {
           dynamicUIHandler.processUIEvent({
             type: 'ui.update', tool_call_id: sourceToolCallId,
@@ -3801,7 +3817,9 @@ const ChatPage = () => {
         }, { auth })
           .then(async (res) => {
             if (!res.ok) {
-              throw new Error('The revision could not be started. Please retry from the app review.');
+              const errorBody = await res.json().catch(() => null);
+              const detail = typeof errorBody?.detail === 'string' ? errorBody.detail.trim() : '';
+              throw new Error(detail || 'The revision could not be started. Please retry from the app review.');
             }
             const triggerData = await res.json();
             if (!isCurrentRevision()) return;

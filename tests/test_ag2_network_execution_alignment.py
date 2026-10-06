@@ -3,11 +3,13 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import UTC, datetime
+from pathlib import Path
 from time import perf_counter
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+import yaml
 from ag2 import Agent
 from ag2.events.input_events import TextInput
 from ag2.knowledge import MemoryKnowledgeStore
@@ -52,6 +54,10 @@ from mozaiksai.core.workflow.context.adapter import create_context_container
 from mozaiksai.core.workflow.context.authority import (
     ContextAuthorityError,
     build_context_authority_policy,
+)
+from mozaiksai.core.workflow.execution.network_graph import (
+    compile_transition_rules_to_graph,
+    resolve_next_agent,
 )
 from mozaiksai.core.workflow.orchestration_patterns import run_workflow_orchestration
 from mozaiksai.core.workflow.task_batches import parse_task_batches_config
@@ -729,6 +735,59 @@ async def test_ag2_network_runner_fails_missing_user_return_edge() -> None:
     assert continued.status is RunStatus.FAILED
     assert continued.close_reason == "no_transition_matched"
     assert continued.error == "no_transition_matched"
+
+
+@pytest.fixture
+def app_review_graph_contract():
+    root = Path(__file__).resolve().parents[1] / "factory_app/workflows/AppReview"
+    rules = yaml.safe_load((root / "transition_graph.yaml").read_text(encoding="utf-8"))["transition_rules"]
+    definitions = yaml.safe_load((root / "context_variables.yaml").read_text(encoding="utf-8"))["definitions"]
+    policy = build_context_authority_policy(
+        workflow_name="AppReview", definitions=definitions, transition_rules=rules,
+    )
+    return rules, policy
+
+
+@pytest.mark.parametrize(("source", "complete", "expected"), [
+    ("user", False, "ReviewAgent"),
+    ("ReviewAgent", False, "user"),
+    ("ReviewAgent", True, "terminate"),
+])
+def test_app_review_compiled_graph_returns_replies_without_bypassing_completion(
+    app_review_graph_contract, source, complete, expected,
+):
+    rules, policy = app_review_graph_contract
+    graph = compile_transition_rules_to_graph(
+        rules, initial_agent_name="ReviewAgent", agent_id_by_name={"ReviewAgent": "ReviewAgent"},
+        context_authority_policy=policy,
+    )
+    assert resolve_next_agent(
+        graph, current_agent_name=source, context_variables={"review_complete": complete},
+        agent_name_by_id={"ReviewAgent": "ReviewAgent"}, participant_order=["ReviewAgent", "user"],
+    ) == expected
+
+
+@pytest.mark.anyio
+async def test_app_review_live_user_replies_reach_review_agent(app_review_graph_contract):
+    rules, policy = app_review_graph_contract
+    agent = _DeterministicAgent("ReviewAgent", "Tell me what you would like to change.")
+    initial = await AG2NetworkRunner().run(AG2NetworkRunnerRequest(
+        workflow_name="AppReview", chat_id="app-review-replies", app_id="test-app",
+        agents={"ReviewAgent": agent}, transition_rules=rules,
+        initial_agent_name="ReviewAgent", initial_message="Review the saved draft.",
+        context_variables={"review_complete": False}, context_authority_policy=policy,
+        idle_timeout_seconds=3.0,
+    ))
+    assert initial.status is RunStatus.PAUSED, initial.error
+    assert initial.live_run is not None
+    try:
+        for count, text in enumerate(("Make the timer teal.", "Keep the task list."), start=2):
+            continued = await initial.live_run.continue_with_user_message(text)
+            assert continued.status is RunStatus.PAUSED, continued.error
+            assert len(agent.ask_calls) == count
+            assert text in repr(agent.ask_calls[-1]["msg"])
+    finally:
+        await initial.live_run.close()
 
 
 @pytest.mark.anyio

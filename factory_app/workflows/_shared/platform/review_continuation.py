@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from anyio import CancelScope
 
+from factory_app.workflows.AppReview.tools.review_context import saved_review_context
 from mozaiksai.core.artifacts import ArtifactLifecycleStatus, ArtifactValidationStatus
 from mozaiksai.core.multitenant import build_app_scope_filter
 from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
@@ -89,15 +90,8 @@ async def continue_inline_app_review(
         if candidate_id else
         "The last edit did not produce a saved draft. Your previous draft is still selected; describe a narrower change to retry."
     )
-    acceptance = metadata.get("app_bundle_acceptance") or {}
     context = validate_context_for_workflow("AppReview", {
-        "artifact_kind": version.build_family, "artifact_key": version.build_key,
-        "artifact_version_id": version.id, "bundle_path": metadata.get("workspace_dir"),
-        "lifecycle_state": record["lifecycle_state"],
-        "app_validation_status": version.app_validation_status,
-        "app_validation_strategy_used": version.app_validation_strategy,
-        "app_bundle_acceptance_status": acceptance.get("status"),
-        "integration_tests_passed": acceptance.get("passed"),
+        **saved_review_context(version, lifecycle_state=record["lifecycle_state"]),
         # A parent's advisory report does not certify its child.
         "security_readiness_summary": {}, "review_notice": notice,
     })
@@ -116,15 +110,15 @@ async def continue_inline_app_review(
         owner_user_id=user_id, app_id=app_id, chat_id=chat_id, workflow_name="AppReview",
         build_registry_id=binding.build_registry_id, persisted_binding=binding.model_dump(),
     )
-    await create_routed_chat_session(
-        workflow_id="AppReview", app_id=app_id, user_id=user_id, chat_id=chat_id,
-        context_variables=context, persistence_manager=persistence,
-        session_fields={"run_build_binding": verified_binding.model_dump()},
-        trigger_meta={"trigger_source": "transition", "transition_id": "app_review",
-                      "requested_workflow_id": "AppReview", "resolved_workflow_id": "AppReview",
-                      "source_chat_id": source_chat_id},
-    )
     try:
+        await create_routed_chat_session(
+            workflow_id="AppReview", app_id=app_id, user_id=user_id, chat_id=chat_id,
+            context_variables=context, persistence_manager=persistence,
+            session_fields={"run_build_binding": verified_binding.model_dump()},
+            trigger_meta={"trigger_source": "transition", "transition_id": "app_review",
+                          "requested_workflow_id": "AppReview", "resolved_workflow_id": "AppReview",
+                          "source_chat_id": source_chat_id},
+        )
         saved = await registry.update_build_status(
             owner_user_id=user_id, build_registry_id=binding.build_registry_id,
             expected_build_id=binding.build_id, expected_lifecycle_state=record["lifecycle_state"],

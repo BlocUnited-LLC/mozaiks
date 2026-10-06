@@ -67,6 +67,8 @@ This project follows a practical pre-1.0 changelog format:
   review against the settled build so another change can be requested in chat.
   Hiding the panel retains the running preview; failed drafts cannot replace a
   checked preview or inherit their parent's activation checks.
+  Review replies route back to the agent and start refinement against the owned
+  saved draft. Completion notices no longer obscure a pending edit or its error.
 
 - An experimental Capacitor Android packaging reference for Common Ground,
   with web-asset verification, a diagnostic debug APK build in CI, and explicit

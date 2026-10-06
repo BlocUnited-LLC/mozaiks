@@ -1,4 +1,8 @@
 transition_rules:
+- source_agent: user
+  target_agent: ReviewAgent
+  transition_type: after_turn
+  transition_target: AgentTarget
 - source_agent: ReviewAgent
   target_agent: user
   transition_type: after_turn

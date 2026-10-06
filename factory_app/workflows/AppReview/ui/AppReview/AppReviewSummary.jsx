@@ -1,12 +1,8 @@
 /**
- * AppReviewSummary — In-chat agentic UI artifact for the build review step.
+ * AppReviewSummary — Check details and activation controls inside AppReviewWorkspace.
  *
- * Rendered by WorkflowUIRouter when present_review_summary.py emits a
- * UI_Surface tool call. Receives build validation results via the payload prop
- * and exposes a Promote button that promotes the reviewed artifact version.
- *
- * This is an agentic UI artifact, not a transition overlay.
- * It lives in the chat surface alongside the ReviewAgent conversation.
+ * Receives the selected saved draft's review evidence from its workspace owner.
+ * Acceptance is handled there; this component activates an accepted version.
  */
 
 import { useState, useCallback } from 'react';
@@ -87,6 +83,14 @@ export default function AppReviewSummary({ payload = {} }) {
     && Boolean(payload?.artifact_version_id)
     && Boolean(payload?.build_registry_id)
   );
+  const awaitingAcceptance = (
+    payload.can_accept === true
+    && validationStatus === 'passed'
+    && acceptanceStatus === 'passed'
+    && integrationStatus === 'passed'
+    && Boolean(payload?.artifact_version_id)
+    && Boolean(payload?.build_registry_id)
+  );
 
   return (
     <Panel>
@@ -94,14 +98,17 @@ export default function AppReviewSummary({ payload = {} }) {
         Review your app
       </p>
       <h3 className="text-xl font-semibold tracking-tight text-foreground">
-        {promoted ? 'Your version is active' : canPromote ? 'Ready for your decision' : 'This draft needs attention'}
+        {promoted ? 'Your version is active' : canPromote ? 'Ready for your decision'
+          : awaitingAcceptance ? 'Checks passed · Ready for your review' : 'This draft needs attention'}
       </h3>
       <p className="mt-2 mb-5 text-sm leading-relaxed text-muted-foreground">
         {promoted
           ? 'The reviewed version is now active in this workspace. Hosting and public access are managed separately.'
           : canPromote
             ? 'Required checks passed. Activate this version when you are happy with it, or describe a change in chat.'
-            : 'Required checks are incomplete or failed. Review the check results before activating this version.'}
+            : awaitingAcceptance
+              ? 'Accept this draft before activation, or request a change.'
+              : 'Required checks are incomplete or failed. Review the check results before activating this version.'}
       </p>
 
       <details className="mb-4 rounded-lg border border-border/40 bg-muted/30 px-4 py-3">

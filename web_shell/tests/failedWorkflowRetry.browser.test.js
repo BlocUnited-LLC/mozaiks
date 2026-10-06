@@ -30,7 +30,7 @@ const failureText = `The app build cannot continue.\n\n**Blocking errors:**\n\n$
 
 async function failureMessageFromEvent() {
   const source = await fs.readFile(path.join(ui, 'pages/ChatPage.js'), 'utf8');
-  const completion = source.split("case 'run_complete':")[1].split("case 'chat.revision_requested':")[0];
+  const completion = source.split("case 'run_complete':")[1].split("case 'revision_requested':")[0];
   let messages = [{ id: 'thinking', isThinking: true }];
   vm.runInNewContext(`(() => { switch (data.type) { case 'run_complete': ${completion} } })()`, {
     data: { type: 'run_complete', data: { status: 2, error: failureText } },
@@ -154,7 +154,7 @@ test('ChatPage observes persisted status on reopen and refreshes it after termin
   const hydration = source.split('const hydrateServerArtifactForChat =')[1].split('const handleIncomingRef =')[0];
   assert.match(hydration, /await api\.get\(`\/api\/chats\/meta\//);
   assert.match(hydration, /observeSessionMeta\(meta\)/);
-  const completion = source.split("case 'run_complete':")[1].split("case 'chat.revision_requested':")[0];
+  const completion = source.split("case 'run_complete':")[1].split("case 'revision_requested':")[0];
   assert.match(completion, /hydrateServerArtifactForChat\(/);
   assert.match(completion, /force: true, reason: 'workflow_failed'/);
   assert.equal((source.match(/failedWorkflowRetry=\{failedWorkflowRetry.available \? failedWorkflowRetry : null\}/g) || []).length, 2);

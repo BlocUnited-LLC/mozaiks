@@ -52,6 +52,7 @@ export default function AppReviewWorkspace({ payload = {} }) {
     // Security evidence belongs to this review version; never carry the parent's
     // payload into a refinement candidate or treat a missing scan as passed.
     security_readiness_summary: !result && body && !editError ? payload.security_readiness_summary : {},
+    can_accept: !pending && !incomplete && validationPassed && body?.review?.can_accept === true,
     can_promote: !pending && !incomplete && validationPassed && body?.review?.can_promote === true,
   };
 

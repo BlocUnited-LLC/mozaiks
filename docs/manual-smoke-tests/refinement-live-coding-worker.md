@@ -158,6 +158,11 @@ For acceptance, continue a real AppReview conversation and verify:
 2. Request a change in the chat composer. Keep using the original preview while
    the agents work. A checked successor enables **Update preview**; an unsuccessful
    attempt keeps the previous working preview and identifies the failed change.
+   Confirm the actual `chat.revision_requested` websocket event reaches the
+   normal Studio trigger endpoint with the saved artifact version. An agent's
+   acknowledgement alone does not prove that an edit started. The source review's
+   completion must not cover an ongoing edit, approval decision, or error with
+   a success dialog.
 3. After an inline refinement, Studio creates a new AppReview session bound to
    the settled build. The client adopts only its matching server descriptor;
    connecting its websocket starts the review through the existing launch owner.
@@ -169,5 +174,9 @@ For acceptance, continue a real AppReview conversation and verify:
    before activation becomes available.
 5. Repeat the explicit update and provider-confirmed Stop checks above. Record
    real model/provider receipts separately from browser tests with HTTP fixtures.
+
+Passing checks makes a draft ready for the user's review. **Accept this draft**
+records that acceptance; **Activate this version** promotes it into the app
+workspace. Neither action provisions hosting or publishes a public deployment.
 
 

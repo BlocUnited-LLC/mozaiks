@@ -27,6 +27,10 @@ const chatPage = await fs.readFile(path.resolve(shell, '../chat-ui/src/pages/Cha
 await transform(chatPage, { loader: 'jsx' });
 const revisionHelpers = chatPage.slice(chatPage.indexOf('  const findRevisionArtifact ='),
   chatPage.indexOf('  const handlePendingHarnessDecisionAction ='));
+const incomingStart = chatPage.indexOf('  const handleIncoming = useCallback(');
+const incomingEnd = chatPage.indexOf('    handleIncomingRef.current = handleIncoming;', incomingStart);
+const incomingCallback = chatPage.slice(incomingStart + '  const handleIncoming = useCallback('.length,
+  chatPage.lastIndexOf('}, [', incomingEnd) + 1);
 
 test('previous socket metadata cannot revert a synchronously adopted review successor', () => {
   const start=chatPage.indexOf('          onMessage: (data) => {',chatPage.indexOf('connection = api.createWebSocketConnection('));
@@ -50,9 +54,6 @@ test('ChatPage approvals preserve original request identity through real browser
   const normalizer = chatPage.slice(normalizerStart, chatPage.indexOf('  const applySessionStatePendingHarnessDecision =', normalizerStart));
   const approvalStart = chatPage.indexOf('  const handlePendingHarnessDecisionAction =');
   const approval = chatPage.slice(approvalStart, chatPage.indexOf('  useEffect(', approvalStart));
-  const revisionStart = chatPage.indexOf("case 'chat.revision_requested': {");
-  const eventCase = chatPage.slice(revisionStart, chatPage.indexOf("case 'error': {", revisionStart));
-  const revision = eventCase.slice(eventCase.indexOf('{') + 1, eventCase.lastIndexOf('}'));
   const decision = (round = 1) => ({
     decision_id:`decision-${round}`, decision_type:'workflow_reentry',
     message:'This change needs a reviewed workflow.', rationale:'The request changes the saved design.',
@@ -77,12 +78,15 @@ test('ChatPage approvals preserve original request identity through real browser
         const auth={};
         const [currentChatId,changeChat]=useState('review-chat');
         const currentChatIdRef=useRef(currentChatId),reviewContinuationRef=useRef(null);
+        const revisionHandoffRef=useRef(null),pendingTransitionIdRef=useRef(null);
         const currentArtifactMessagesRef=useRef([{toolCall:{tool_call_id:'original-tool-call',
           payload:{build_registry_id:'owned-build',artifact_kind:'app_bundle',artifact_version_id:'baseline',target_app_id:'target-app'}}}]);
         const setCurrentChatId=id=>{currentChatIdRef.current=id;changeChat(id);};
         const setActiveChatId=()=>{},setCurrentWorkflowName=()=>{},setActiveWorkflowName=()=>{},rememberWorkflowChatSession=()=>{};
         const setConversationMode=()=>{},setWorkflowCompleted=()=>{},setCompletionData=()=>{},setPendingTransitionId=()=>{},setPendingTransitionContext=()=>{};
         const setLoading=()=>{},setPendingWorkflowReply=()=>{},setMessagesWithLogging=()=>{};
+        const appId=currentAppId,user={id:currentUserId},config={};
+        const dispatchSurfaceEvent=()=>{},debugFlag=()=>false,initSpinnerShownRef=useRef(false);
         const dynamicUIHandler={processUIEvent:async event=>{window.fixtureUpdates ||= [];window.fixtureUpdates.push(event);}};
         const {startWorkflow:startPendingHarnessWorkflow,starting:pendingHarnessDecisionBusy,
           error:pendingHarnessWorkflowStartError}=useWorkflowStart();
@@ -92,12 +96,9 @@ test('ChatPage approvals preserve original request identity through real browser
         useEffect(()=>{
           if(window.savedDecision) setPendingHarnessDecision(buildPendingHarnessDecision(window.savedDecision));
         },[]);
-        const beginRevision=()=>{
-          const data={data:{refinement_request:'Update the accent.',artifact_kind:'app_bundle',artifact_key:'app_bundle',
-            artifact_version_id:'baseline',source_surface:'app_review',extra:{build_registry_id:'owned-build'}}};
-          const appId=currentAppId,user={id:currentUserId},config={};
-          ${revision}
-        };
+        const receive=${incomingCallback};
+        const beginRevision=()=>receive({type:'chat.revision_requested',data:{refinement_request:'Update the accent.',artifact_kind:'app_bundle',artifact_key:'app_bundle',
+            artifact_version_id:'baseline',source_surface:'app_review',extra:{build_registry_id:'owned-build'}}});
         return <><button onClick={beginRevision}>Request revision</button><output aria-label="Review session">{currentChatId}</output>
           <HarnessDecisionCard decision={pendingHarnessDecision} busy={pendingHarnessDecisionBusy}
             error={pendingHarnessDecisionError} onAction={handlePendingHarnessDecisionAction}/></>;
@@ -228,16 +229,16 @@ async function routeRevisionResult(triggerData, {
   triggerStatus = 200, bundleStatus = 200,
   workbenchUI = { component: 'ReviewWorkspace', workflow_name: 'ExampleBuilder' },
   artifactMessages = [], bundlePatch = {}, abandonChat = false,
+  onTriggerPending = null, initialTransition = null,
 } = {}) {
-  const start = chatPage.indexOf("case 'chat.revision_requested': {");
-  const eventCase = chatPage.slice(start, chatPage.indexOf("case 'error': {", start));
-  const body = eventCase.slice(eventCase.indexOf('{') + 1, eventCase.lastIndexOf('}'));
   const requests = [];
   const updates = [];
   const messages = [];
   const state = {};
   const currentChatIdRef = { current: 'review-chat' };
   const reviewContinuationRef = { current: null };
+  const revisionHandoffRef = { current: null };
+  const pendingTransitionIdRef = { current: initialTransition };
   const handler = new DynamicUIHandler();
   handler.uiUpdateCallbacks.add(update => updates.push(update));
   const setters = Object.fromEntries([
@@ -247,19 +248,23 @@ async function routeRevisionResult(triggerData, {
   ].map(name => [`set${name}`, value => {
     state[name] = value;
     if (name === 'CurrentChatId') currentChatIdRef.current = value;
+    if (name === 'PendingTransitionId') pendingTransitionIdRef.current = value;
   }]));
-  await vm.runInNewContext(`${revisionHelpers}\n(function(){${body}})();`, {
+  const receive = vm.runInNewContext(`${revisionHelpers}\n(${incomingCallback});`, {
     useCallback:fn=>fn,
-    data: {data: {refinement_request: 'Update the title', artifact_kind: 'app_bundle', artifact_key: 'app_bundle',
-      artifact_version_id: 'baseline', source_surface: 'app_review', extra: {build_registry_id: 'owned-build'}}},
+    dispatchSurfaceEvent:()=>{},debugFlag:()=>false,initSpinnerShownRef:{current:false},
     appId: 'studio-host', user: {id: 'owner'}, config: {}, auth: {fixture: true}, currentChatId: 'review-chat',
     currentChatIdRef, reviewContinuationRef, currentArtifactMessagesRef: { current: artifactMessages },
+    revisionHandoffRef, pendingTransitionIdRef,
+    currentWorkflowName:'AppReview',currentWorkflowNameRef:{current:'AppReview'},workflowConfig:null,
+    isFailedWorkflowSession:status=>status===2,
     dynamicUIHandler: handler, console: {error() {}}, ...setters,
     rememberWorkflowChatSession: (chatId, workflow) => {state.remembered = [chatId, workflow];},
     buildPendingHarnessDecision: decision => decision,
     setMessagesWithLogging: update => {messages.splice(0, messages.length, ...update(messages));},
     authFetch: async (url, options, authOptions) => {
       requests.push({url, options, authOptions});
+      if (url === '/api/workflows/trigger') await onTriggerPending?.({receive,state,revisionHandoffRef,currentChatIdRef});
       if (abandonChat) currentChatIdRef.current = 'different-chat';
       return url === '/api/workflows/trigger'
         ? Response.json(triggerData, {status: triggerStatus})
@@ -270,7 +275,10 @@ async function routeRevisionResult(triggerData, {
           ...bundlePatch}, {status: bundleStatus});
     },
   });
-  return {requests, updates, messages, state};
+  await receive({type:'chat.revision_requested',data:{refinement_request:'Update the title',
+    artifact_kind:'app_bundle',artifact_key:'app_bundle',artifact_version_id:'baseline',
+    source_surface:'app_review',extra:{build_registry_id:'owned-build'}}});
+  return {requests, updates, messages, state, revisionHandoffRef, receive};
 }
 
 const reviewArtifact = {
@@ -279,6 +287,58 @@ const reviewArtifact = {
     payload: { build_registry_id: 'owned-build', artifact_kind: 'app_bundle',
       artifact_version_id: 'baseline', target_app_id: 'target-app' } },
 };
+
+test('wire revision suppresses only its source completion during the handoff', async () => {
+  const { requests, revisionHandoffRef } = await routeRevisionResult({execution_mode:'harness_decision'}, {
+    initialTransition:'workflow_complete',
+    onTriggerPending: ({receive,state,revisionHandoffRef,currentChatIdRef}) => {
+      assert.equal(revisionHandoffRef.current.chatId,'review-chat');
+      assert.equal(state.PendingTransitionId,null,'A completion that arrived first must be dismissed');
+      receive({type:'chat.run_complete',data:{chat_id:'review-chat',status:1}});
+      assert.equal(state.PendingTransitionId,null,'The source completion must not block the pending edit');
+      currentChatIdRef.current='unrelated-chat';
+      receive({type:'chat.run_complete',data:{chat_id:'unrelated-chat',status:1}});
+      assert.equal(state.PendingTransitionId,'workflow_complete','An unrelated active chat still completes normally');
+    },
+  });
+  assert.equal(requests.length,1);
+  assert.equal(revisionHandoffRef.current.chatId,'review-chat');
+});
+
+test('a rejected revision remains visible when its source run completes after the HTTP response', async () => {
+  const {receive,state,messages}=await routeRevisionResult({detail:'The selected draft was not found.'}, {triggerStatus:404});
+  receive({type:'chat.run_complete',data:{chat_id:'review-chat',status:1}});
+  assert.notEqual(state.PendingTransitionId,'workflow_complete');
+  assert.equal(messages[0].content,'The selected draft was not found.');
+});
+
+test('a pending approval is not covered by a late source completion', async () => {
+  const decision={decision_id:'decision',actions:[]};
+  const {receive,state}=await routeRevisionResult({execution_mode:'harness_decision',harness_decision:decision});
+  receive({type:'chat.run_complete',data:{chat_id:'review-chat',status:1}});
+  assert.notEqual(state.PendingTransitionId,'workflow_complete');
+  assert.deepEqual(state.PendingHarnessDecision,decision);
+});
+
+test('structured backend error detail uses the safe revision fallback', async () => {
+  const {messages}=await routeRevisionResult({detail:[{input:'not a user-facing message'}]}, {triggerStatus:422});
+  assert.match(messages[0].content,/could not be started/);
+  assert.doesNotMatch(messages[0].content,/not a user-facing message|object Object/);
+});
+
+test('navigating away clears the revision handoff synchronously', () => {
+  const start=chatPage.indexOf('  const setCurrentChatId = useCallback(');
+  const end=chatPage.indexOf('  const LOCAL_STORAGE_KEY',start);
+  const revisionHandoffRef={current:{chatId:'review-chat'}};
+  const currentChatIdRef={current:'review-chat'};
+  const change=vm.runInNewContext(`${chatPage.slice(start,end)}\nsetCurrentChatId;`,{
+    useCallback:fn=>fn,revisionHandoffRef,currentChatIdRef,reviewContinuationRef:{current:null},_setCurrentChatId(){},
+  });
+  change('review-chat');
+  assert.ok(revisionHandoffRef.current);
+  change('other-chat');
+  assert.equal(revisionHandoffRef.current,null);
+});
 
 test('chat refinement patches the existing app artifact without remounting its preview', async () => {
   const response = {execution_mode: 'coding_worker', coding_worker: {

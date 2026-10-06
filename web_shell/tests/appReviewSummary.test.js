@@ -125,8 +125,12 @@ test('review workspace previews owned snapshots and keeps revision evidence sepa
   assert.equal(await frameNode.evaluate(node=>node===document.querySelector('iframe')),true,'Payload update must preserve the running iframe');
   assert.equal(requests.filter(r=>r.url.startsWith('/api/artifacts/')).length,1,'A child result must not allocate automatically');
   await expect(page.getByRole('button',{name:'Activate this version',exact:true})).toBeDisabled();
+  await expect(page.getByRole('heading',{name:'Checks passed · Ready for your review',exact:true})).toBeVisible();
+  await expect(page.getByText('Accept this draft before activation, or request a change.',{exact:true})).toBeVisible();
+  await expect(page.getByText('Required checks are incomplete or failed.',{exact:false})).toHaveCount(0);
   await page.getByRole('button',{name:'Accept this draft',exact:true}).click();
   await expect(page.getByRole('button',{name:'Activate this version',exact:true})).toBeEnabled();
+  await expect(page.getByRole('heading',{name:'Ready for your decision',exact:true})).toBeVisible();
   assert.ok(requests.some(r=>r.method==='POST' && r.url==='/api/studio/build/artifacts/child/accept?build_registry_id=registry-a'));
   await page.getByRole('button',{name:'Update preview',exact:true}).click();
   await expect(page.getByText('Preview based on version child')).toBeVisible();
@@ -257,6 +261,27 @@ test('review needs an explicit positive readiness decision and does not claim de
   assert.match(ready, /Ready for your decision/);
   assert.match(ready, /<details[^>]*>/);
   assert.doesNotMatch(ready, /<details[^>]*open/);
+});
+
+test('validated draft awaiting acceptance is ready for review without enabling activation', () => {
+  const payload = {
+    app_validation_status: 'passed', app_bundle_acceptance_status: 'passed', integration_tests_passed: true,
+    artifact_version_id: 'draft', build_registry_id: 'owned-build', can_accept: true, can_promote: false,
+  };
+  const html = render(payload);
+  assert.match(html, /Checks passed · Ready for your review/);
+  assert.match(html, /Accept this draft before activation, or request a change\./);
+  assert.doesNotMatch(html, /Required checks are incomplete or failed/);
+  assert.match(html, /<button disabled=""/);
+  for (const inconsistent of [
+    { app_validation_status: 'failed' }, { app_bundle_acceptance_status: null },
+    { integration_tests_passed: false }, { artifact_version_id: null }, { build_registry_id: null },
+  ]) {
+    const blocked = render({ ...payload, ...inconsistent });
+    assert.match(blocked, /This draft needs attention/);
+    assert.doesNotMatch(blocked, /Checks passed · Ready for your review/);
+    assert.match(blocked, /<button disabled=""/);
+  }
 });
 
 test('failed checks stay Failed and promotion remains disabled', () => {

@@ -1,3 +1,4 @@
+from asyncio import CancelledError
 from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -179,4 +180,17 @@ async def test_cas_failure_terminates_unlaunched_session_and_returns_no_descript
         await review.continue_inline_app_review(**fixture.request)
     chat_id = fixture.persistence.create_chat_session.await_args.kwargs["chat_id"]
     fixture.persistence.mark_chat_failed.assert_awaited_once_with(chat_id, app_id="factory")
+    fixture.router.bind_workflow_session.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", [RuntimeError("binding write failed"), CancelledError()])
+async def test_incomplete_session_creation_is_closed_before_registration(continuation, error):
+    fixture = continuation
+    fixture.persistence.persist_server_owned_session_fields.side_effect = error
+    with pytest.raises(type(error)):
+        await review.continue_inline_app_review(**fixture.request)
+    chat_id = fixture.persistence.create_chat_session.await_args.kwargs["chat_id"]
+    fixture.persistence.mark_chat_failed.assert_awaited_once_with(chat_id, app_id="factory")
+    fixture.registry.update_build_status.assert_not_awaited()
     fixture.router.bind_workflow_session.assert_not_awaited()
