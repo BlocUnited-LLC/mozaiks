@@ -260,6 +260,7 @@ class ExtensionSlot(StrEnum):
     SERVICE_ADAPTER = "service_adapter"
     SERVICE_ROUTE = "service_route"
     BUILD_CONTEXT_PACK = "build_context_pack"
+    ANDROID_DELIVERY = "android_delivery"
 
 
 class ArtifactFamily(LayoutModel):
@@ -412,6 +413,9 @@ class LayoutExtension(LayoutModel):
             if not self.path:
                 raise ValueError("capability_pack_output extensions require an exact path")
             _validate_capability_pack_output_path(self.path)
+        elif self.slot == ExtensionSlot.ANDROID_DELIVERY:
+            if self.pack_id != "mobile" or self.path is not None:
+                raise ValueError("android_delivery requires pack_id=mobile and no path override")
         elif self.path is not None:
             raise ValueError("path is only valid for capability_pack_output extensions")
         return self
@@ -719,27 +723,6 @@ def _core_families() -> tuple[ArtifactFamily, ...]:
         _family(ArtifactKind.APP_DEPLOYMENT_ARTIFACT, LayoutOwner.DOWNLOAD_RENDERER, Requirement.GENERATED, deployment, "deployment.manifest.json", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.DOWNLOAD_EXPORT, condition=ConditionIdentifier.WHEN_DEPLOYMENT_EXPORT_REQUESTED, security=SecurityClass.DEPLOYMENT_METADATA),
         _family(ArtifactKind.APP_DEPLOYMENT_ARTIFACT, LayoutOwner.DOWNLOAD_RENDERER, Requirement.GENERATED, deployment, ".github/workflows/deploy.yml", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.DOWNLOAD_EXPORT, condition=ConditionIdentifier.WHEN_DEPLOYMENT_EXPORT_REQUESTED, security=SecurityClass.DEPLOYMENT_METADATA),
         _family(ArtifactKind.APP_DEPLOYMENT_ARTIFACT, LayoutOwner.DOWNLOAD_RENDERER, Requirement.GENERATED, deployment, ".github/workflows/readiness.yml", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.DOWNLOAD_EXPORT, condition=ConditionIdentifier.WHEN_DEPLOYMENT_EXPORT_REQUESTED, security=SecurityClass.DEPLOYMENT_METADATA),
-        *(
-            _family(
-                ArtifactKind.APP_DEPLOYMENT_ARTIFACT,
-                LayoutOwner.DOWNLOAD_RENDERER,
-                Requirement.GENERATED,
-                workspace,
-                path,
-                ValidatorIdentifier.GENERATED_APP_VALIDATOR,
-                RuntimeConsumerIdentifier.DOWNLOAD_EXPORT,
-                condition=ConditionIdentifier.WHEN_DEPLOYMENT_EXPORT_REQUESTED,
-                materializer=MaterializerIdentifier.DOWNLOAD_DEPLOYMENT_RENDERER,
-                security=(SecurityClass.EXECUTABLE_STUB if path.endswith(".mjs") else SecurityClass.DEPLOYMENT_METADATA),
-            )
-            for path in (
-                "mobile/package.json",
-                "mobile/package-lock.json",
-                "mobile/capacitor.config.json",
-                "mobile/build.mjs",
-                "mobile/delivery.manifest.json",
-            )
-        ),
         _family(ArtifactKind.APP_MANIFEST, LayoutOwner.PLATFORM, Requirement.REQUIRED, workspace, "app/app.json", ValidatorIdentifier.APP_LOADER, RuntimeConsumerIdentifier.APP_LOADER, inputs=application_inputs),
         _family(ArtifactKind.WORKFLOW_MANIFEST, LayoutOwner.WORKFLOW, Requirement.CONDITIONAL, workspace, "workflows/{workflow_id}/orchestrator.yaml", ValidatorIdentifier.WORKFLOW_MANAGER, RuntimeConsumerIdentifier.WORKFLOW_MANAGER, condition=ConditionIdentifier.WHEN_WORKFLOW_DECLARED, multiplicity=Multiplicity.MANY, inputs=workflow_inputs),
         _family(ArtifactKind.WORKFLOW_MANIFEST, LayoutOwner.WORKFLOW, Requirement.CONDITIONAL, workflow, "orchestrator.yaml", ValidatorIdentifier.WORKFLOW_MANAGER, RuntimeConsumerIdentifier.WORKFLOW_MANAGER, condition=ConditionIdentifier.WHEN_WORKFLOW_DECLARED, inputs=workflow_inputs),
@@ -845,7 +828,26 @@ _PROHIBITED_APP_BUNDLE_TEMPLATES = (
 def _extension_families(extensions: tuple[LayoutExtension, ...]) -> tuple[ArtifactFamily, ...]:
     result: list[ArtifactFamily] = []
     for extension in extensions:
-        if extension.slot == ExtensionSlot.MANAGED_CAPABILITY_CONFIG:
+        if extension.slot == ExtensionSlot.ANDROID_DELIVERY:
+            result.extend(
+                _family(
+                    ArtifactKind.APP_DEPLOYMENT_ARTIFACT,
+                    LayoutOwner.DOWNLOAD_RENDERER,
+                    Requirement.GENERATED,
+                    PathScope.WORKSPACE_ROOT,
+                    path,
+                    ValidatorIdentifier.GENERATED_APP_VALIDATOR,
+                    RuntimeConsumerIdentifier.DOWNLOAD_EXPORT,
+                    condition=ConditionIdentifier.WHEN_EXTENSION_SELECTED,
+                    materializer=MaterializerIdentifier.DOWNLOAD_DEPLOYMENT_RENDERER,
+                    security=(SecurityClass.EXECUTABLE_STUB if path.endswith(".mjs") else SecurityClass.DEPLOYMENT_METADATA),
+                )
+                for path in (
+                    "mobile/package.json", "mobile/package-lock.json", "mobile/capacitor.config.json",
+                    "mobile/build.mjs", "mobile/delivery.manifest.json",
+                )
+            )
+        elif extension.slot == ExtensionSlot.MANAGED_CAPABILITY_CONFIG:
             result.append(
                 _family(
                     ArtifactKind.APP_INTEGRATIONS_CONFIG,

@@ -98,11 +98,11 @@ failed build records failure. Compilation alone reports
 | Premium access, delivery jobs, authorized downloads | Hosted product, when implemented |
 
 Mobile templates remain app-relative build-context templates. The layout
-registry separately admits the five renderer-owned `mobile/` tooling files at
-workspace scope. Generated native build outputs do not become app contracts.
-These rows change the registry digest. The semantic compilation corpus retains
-its existing app units and reports the five delivery inputs as unresolved;
-the explicit delivery command supplies those inputs outside that corpus.
+registry admits the five renderer-owned `mobile/` tooling files at workspace
+scope only through the explicit `android_delivery` extension with
+`pack_id: mobile`. The validated Android renderer selects this extension.
+The default registry and ordinary semantic compilation plans retain their
+existing identity. Generated native build outputs do not become app contracts.
 This command does not change AppBuildPlan, DownloadRequest, or deployment target
 taxonomies, and does not create a second runtime or persistence authority.
 

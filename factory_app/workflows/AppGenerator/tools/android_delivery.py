@@ -26,6 +26,8 @@ from pydantic import BaseModel, ConfigDict, Field, HttpUrl, ValidationError, fie
 from mozaiksai import resources
 from mozaiksai.core.runtime.app.auth_contract import validate_app_auth_contract
 from mozaiksai.core.runtime.app.layout_registry import (
+    ExtensionSlot,
+    LayoutExtension,
     LayoutOwner,
     PathScope,
     Requirement,
@@ -373,7 +375,9 @@ def _render_delivery(source: dict[str, bytes], spec: AndroidDeliverySpec) -> tup
         "files": _inventory(exported),
     }
     exported["mobile/delivery.manifest.json"] = _json_bytes(manifest)
-    registry = build_app_layout_registry()
+    registry = build_app_layout_registry((LayoutExtension(
+        slot=ExtensionSlot.ANDROID_DELIVERY, pack_id="mobile",
+    ),))
     for name in exported:
         if name.startswith("mobile/"):
             family = registry.match_path(name, PathScope.WORKSPACE_ROOT).family

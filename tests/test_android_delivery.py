@@ -86,7 +86,7 @@ def test_renderer_requires_registered_workspace_tooling(workspace, framework, sp
     class Unregistered:
         def match_path(self, name, scope):
             raise ValueError("unregistered workspace tooling")
-    monkeypatch.setattr(delivery, "build_app_layout_registry", lambda: Unregistered())
+    monkeypatch.setattr(delivery, "build_app_layout_registry", lambda *_args: Unregistered())
     with pytest.raises(ValueError, match="unregistered workspace tooling"):
         delivery.materialize_android_workspace(workspace, spec, tmp_path / "output")
     assert not (tmp_path / "output").exists()
