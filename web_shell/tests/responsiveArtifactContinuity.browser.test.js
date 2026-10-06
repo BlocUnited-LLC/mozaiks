@@ -22,7 +22,7 @@ test('ChatPage retains one live artifact and conversation across responsive layo
   const artifactToggle = source.slice(source.indexOf('  const artifactToggleHandler ='),source.indexOf('  const artifactToggleLabel ='));
   const bundle = await build({
     stdin: { resolveDir: shell, loader: 'jsx', contents: `
-      import React, {useState, useEffect, useRef, useReducer, useCallback} from 'react';
+      import React, {useState, useEffect, useLayoutEffect, useRef, useReducer, useCallback} from 'react';
       import {createRoot} from 'react-dom/client';
       import FluidChatLayout from ${JSON.stringify(path.join(ui, 'components/chat/FluidChatLayout.jsx'))};
       import MobileArtifactDrawer from ${JSON.stringify(path.join(ui, 'components/chat/MobileArtifactDrawer.jsx'))};
@@ -88,7 +88,9 @@ test('ChatPage retains one live artifact and conversation across responsive layo
         };
         window.clearTestArtifact = () => setHasArtifact(false);
         window.setTestConversation = mode => dispatch({type:'SET_CONVERSATION_MODE',mode});
-        window.testState = {layoutMode,isMobileView,mobileDrawerState,isSidePanelOpen};
+        useLayoutEffect(() => {
+          window.testState = {layoutMode,isMobileView,mobileDrawerState,isSidePanelOpen,conversationMode};
+        }, [layoutMode,isMobileView,mobileDrawerState,isSidePanelOpen,conversationMode]);
         useChatArtifactLayoutEffects({connectionStatus:'disconnected',currentChatId:'chat-1',chatExists:false,
           artifactRestoredOnceRef,conversationMode,currentWorkflowName:'Review',restoreStoredArtifactForChat:noop,
           layoutMode,setLayoutMode,setIsMobileView,setForceOverlay,widgetOverlayOpen:false,setWidgetOverlayOpen:noop,
@@ -153,10 +155,23 @@ test('ChatPage retains one live artifact and conversation across responsive layo
   page.on('pageerror',error=>errors.push(error.message));
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   const lifecycle = () => page.evaluate(()=>window.lifecycle);
+  const expectState = state => expect.poll(()=>page.evaluate(()=>window.testState)).toMatchObject(state);
+  const setLayout = async mode => {
+    await page.evaluate(mode=>window.setTestLayout(mode),mode);
+    await expectState({layoutMode:mode,isSidePanelOpen:mode!=='full'});
+    if (page.viewportSize().width < 768) {
+      await expectState({mobileDrawerState:mode==='full'?'peek':'expanded'});
+    }
+  };
+  const resize = async viewport => {
+    await page.setViewportSize(viewport);
+    await expectState({isMobileView:viewport.width<768});
+  };
   await expect(page.getByLabel('Message',{exact:true})).toBeVisible();
   await page.getByLabel('Message',{exact:true}).fill('Keep this unsent draft');
   await expect(page.locator('iframe')).toHaveCount(0);
   await page.getByRole('button',{name:'Open artifact',exact:true}).click();
+  await expectState({layoutMode:'split',isSidePanelOpen:true});
   const frame = page.frameLocator('iframe[title="Live app preview"]');
   await expect(frame.getByRole('button',{name:'Add item',exact:true})).toBeVisible();
   await frame.getByRole('button',{name:'Add item',exact:true}).click();
@@ -165,7 +180,7 @@ test('ChatPage retains one live artifact and conversation across responsive layo
 
   await t.test('open desktop preview crosses 768px in both directions without remounting',async()=>{
     for (const width of [767,390,768,1280]) {
-      await page.setViewportSize({width,height:900});
+      await resize({width,height:900});
       await expect(frame.getByRole('button',{name:'Item added',exact:true})).toBeVisible();
       await expect(frame.getByLabel('Preview note')).toHaveValue('Keep this app state');
       await expect(page.locator('textarea')).toHaveValue('Keep this unsent draft');
@@ -184,7 +199,7 @@ test('ChatPage retains one live artifact and conversation across responsive layo
 
   await t.test('full, minimized, view and closed mobile states preserve content and hide interaction',async()=>{
     for (const mode of ['minimized','view','split','full']) {
-      await page.evaluate(mode=>window.setTestLayout(mode),mode);
+      await setLayout(mode);
       await expect(page.locator('iframe')).toHaveCount(1);
       await expect(page.locator('textarea')).toHaveValue('Keep this unsent draft');
       if (mode==='full') await expect(page.locator('iframe')).toBeHidden();
@@ -196,6 +211,7 @@ test('ChatPage retains one live artifact and conversation across responsive layo
         await page.locator('textarea').evaluate(element=>element.focus());
         await expect(expand).toBeFocused();
         await expand.click();
+        await expectState({layoutMode:'split'});
         await expect(page.getByLabel('Message',{exact:true})).toBeVisible();
         await expect(page.getByLabel('Message',{exact:true})).toHaveValue('Keep this unsent draft');
       }
@@ -204,11 +220,13 @@ test('ChatPage retains one live artifact and conversation across responsive layo
     await page.locator('button').filter({hasText:'Artifact action'}).evaluate(button=>button.focus());
     await expect(page.getByLabel('Message',{exact:true})).toBeFocused();
     assert.equal(await page.locator('iframe').evaluate(element=>element.closest('[inert]')?.getAttribute('aria-hidden')), 'true');
-    await page.setViewportSize({width:390,height:900});
+    await resize({width:390,height:900});
     await expect(page.locator('iframe')).toBeHidden();
     await page.getByRole('button',{name:'Open artifact',exact:true}).click();
+    await expectState({layoutMode:'split',mobileDrawerState:'expanded'});
     await expect(frame.getByRole('button',{name:'Item added',exact:true})).toBeVisible();
     await page.getByRole('button',{name:'Collapse artifact workspace',exact:true}).click();
+    await expectState({layoutMode:'full',isSidePanelOpen:false,mobileDrawerState:'peek'});
     await expect(page.locator('iframe')).toBeHidden();
     await expect(page.getByLabel('Message',{exact:true})).toBeVisible();
     const composerBox = await page.getByLabel('Message',{exact:true}).boundingBox();
@@ -216,9 +234,10 @@ test('ChatPage retains one live artifact and conversation across responsive layo
     await page.getByLabel('Message',{exact:true}).focus();
     await frame.getByLabel('Preview note').evaluate(element=>element.focus());
     await expect(page.getByLabel('Message',{exact:true})).toBeFocused();
-    await page.setViewportSize({width:1280,height:900});
+    await resize({width:1280,height:900});
     await expect(page.locator('iframe')).toBeHidden();
     await page.getByRole('button',{name:'Open artifact',exact:true}).click();
+    await expectState({layoutMode:'split',isSidePanelOpen:true});
     await expect(frame.getByLabel('Preview note')).toHaveValue('Keep this app state');
     assert.deepEqual(await lifecycle(),{mounts:1,active:1,maximum:1,chatMounts:1});
     assert.equal(previewRequests,1);
@@ -226,48 +245,53 @@ test('ChatPage retains one live artifact and conversation across responsive layo
 
   await t.test('view and minimized layouts retain their state across narrow and short viewports',async()=>{
     for (const mode of ['view','minimized']) {
-      await page.evaluate(mode=>window.setTestLayout(mode),mode);
+      await setLayout(mode);
       for (const viewport of [{width:390,height:844},{width:900,height:430},{width:1280,height:900}]) {
-        await page.setViewportSize(viewport);
+        await resize(viewport);
         await expect(frame.getByRole('button',{name:'Item added',exact:true})).toBeVisible();
         assert.equal(await page.evaluate(()=>window.testState.layoutMode),mode);
         await expect(page.locator('textarea')).toHaveValue('Keep this unsent draft');
       }
     }
-    await page.evaluate(()=>window.setTestLayout('split'));
+    await setLayout('split');
     assert.deepEqual(await lifecycle(),{mounts:1,active:1,maximum:1,chatMounts:1});
     assert.equal(previewRequests,1);
   });
 
   await t.test('mobile artifact toggle preserves an explicit close through desktop resize',async()=>{
-    await page.setViewportSize({width:390,height:900});
+    await resize({width:390,height:900});
     await expect(frame.getByRole('button',{name:'Item added',exact:true})).toBeVisible();
     await page.evaluate(()=>window.toggleTestArtifact());
+    await expectState({layoutMode:'full',isSidePanelOpen:false,mobileDrawerState:'peek'});
     await expect(page.locator('iframe')).toBeHidden();
-    await page.setViewportSize({width:1280,height:900});
+    await resize({width:1280,height:900});
     await expect(page.locator('iframe')).toBeHidden();
     await expect(page.locator('textarea')).toHaveValue('Keep this unsent draft');
     await page.getByRole('button',{name:'Open artifact',exact:true}).click();
+    await expectState({layoutMode:'split',isSidePanelOpen:true});
     await expect(frame.getByLabel('Preview note')).toHaveValue('Keep this app state');
     assert.equal(previewRequests,1);
   });
 
   await t.test('Ask history sidebar insertion and mobile presentation retain the composer',async()=>{
     await page.evaluate(()=>window.setTestConversation('ask'));
+    await expectState({conversationMode:'ask',layoutMode:'full',isSidePanelOpen:false});
     await expect(page.getByText('Saved conversations',{exact:true})).toBeVisible();
     await expect(page.locator('iframe')).toBeHidden();
-    await page.setViewportSize({width:390,height:900});
+    await resize({width:390,height:900});
     await expect(page.locator('textarea')).toHaveValue('Keep this unsent draft');
-    await page.setViewportSize({width:1280,height:900});
+    await resize({width:1280,height:900});
     await expect(page.locator('textarea')).toHaveValue('Keep this unsent draft');
     assert.equal((await lifecycle()).chatMounts,1);
-    await page.evaluate(()=>{window.setTestConversation('workflow');window.setTestLayout('split');});
+    await page.evaluate(()=>window.setTestConversation('workflow'));
+    await expectState({conversationMode:'workflow'});
+    await setLayout('split');
     await expect(frame.getByRole('button',{name:'Item added',exact:true})).toBeVisible();
   });
 
   await t.test('artifact chrome and iframe fill their allocated pane at tablet breakpoints',async()=>{
     for (const width of [767,768,900,1280]) {
-      await page.setViewportSize({width,height:900});
+      await resize({width,height:900});
       await expect.poll(()=>page.getByRole('region',{name:'Artifact output stream'}).evaluate(region=>{
         const chrome = region.parentElement;
         return Math.abs(chrome.getBoundingClientRect().width - chrome.parentElement.getBoundingClientRect().width);
@@ -287,11 +311,12 @@ test('ChatPage retains one live artifact and conversation across responsive layo
       Promise.all(element.getAnimations().map(animation=>animation.finished.catch(()=>{}))));
     await settleLayout();
     await page.screenshot({path:path.join(screenshotDir,'desktop-artifact.png')});
-    await page.setViewportSize({width:390,height:844});
+    await resize({width:390,height:844});
     await expect(frame.getByRole('button',{name:'Item added',exact:true})).toBeVisible();
     await settleLayout();
     await page.screenshot({path:path.join(screenshotDir,'mobile-artifact.png')});
     await page.getByRole('button',{name:'Collapse artifact workspace',exact:true}).click();
+    await expectState({layoutMode:'full',isSidePanelOpen:false,mobileDrawerState:'peek'});
     await expect(page.getByLabel('Message',{exact:true})).toBeVisible();
     await settleLayout();
     await page.screenshot({path:path.join(screenshotDir,'mobile-composer.png')});
