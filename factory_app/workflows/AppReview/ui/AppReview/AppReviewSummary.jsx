@@ -68,6 +68,7 @@ export default function AppReviewSummary({ payload = {} }) {
   const securityStatus = securitySummary.status || (securitySummary.finding_count > 0 ? 'attention_required' : null);
   const securityFindings = Array.isArray(securitySummary.findings) ? securitySummary.findings : [];
   const validationStatus = payload.app_validation_status || null;
+  const updatingDraft = payload.refinement_pending === true;
   const acceptanceStatus = payload.app_bundle_acceptance_status || null;
   const integrationStatus =
     payload.integration_tests_passed === true
@@ -76,7 +77,7 @@ export default function AppReviewSummary({ payload = {} }) {
       ? 'failed'
       : null;
   const canPromote = (
-    payload.can_promote === true
+    !updatingDraft && payload.can_promote === true
     && validationStatus === 'passed'
     && acceptanceStatus === 'passed'
     && integrationStatus === 'passed'
@@ -84,7 +85,7 @@ export default function AppReviewSummary({ payload = {} }) {
     && Boolean(payload?.build_registry_id)
   );
   const awaitingAcceptance = (
-    payload.can_accept === true
+    !updatingDraft && payload.can_accept === true
     && validationStatus === 'passed'
     && acceptanceStatus === 'passed'
     && integrationStatus === 'passed'
@@ -98,11 +99,13 @@ export default function AppReviewSummary({ payload = {} }) {
         Review your app
       </p>
       <h3 className="text-xl font-semibold tracking-tight text-foreground">
-        {promoted ? 'Your version is active' : canPromote ? 'Ready for your decision'
+        {updatingDraft ? 'Updating your draft' : promoted ? 'Your version is active' : canPromote ? 'Ready for your decision'
           : awaitingAcceptance ? 'Checks passed · Ready for your review' : 'This draft needs attention'}
       </h3>
       <p className="mt-2 mb-5 text-sm leading-relaxed text-muted-foreground">
-        {promoted
+        {updatingDraft
+          ? 'You can keep trying the preview while changes are checked.'
+          : promoted
           ? 'The reviewed version is now active in this workspace. Hosting and public access are managed separately.'
           : canPromote
             ? 'Required checks passed. Activate this version when you are happy with it, or describe a change in chat.'

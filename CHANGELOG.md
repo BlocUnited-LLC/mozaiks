@@ -69,6 +69,8 @@ This project follows a practical pre-1.0 changelog format:
   checked preview or inherit their parent's activation checks.
   Review replies route back to the agent and start refinement against the owned
   saved draft. Completion notices no longer obscure a pending edit or its error.
+  The saved-build page can reopen the current draft in chat without allocating
+  another build; ongoing edits show progress instead of a failed-check heading.
 
 - An experimental Capacitor Android packaging reference for Common Ground,
   with web-asset verification, a diagnostic debug APK build in CI, and explicit

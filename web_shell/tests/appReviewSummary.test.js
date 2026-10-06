@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -30,6 +31,112 @@ const compiled = await build({
 const module = { exports: {} };
 new Function('module', 'exports', 'require', compiled.outputFiles[0].text)(module, module.exports, createRequire(import.meta.url));
 const render = payload => renderToStaticMarkup(createElement(module.exports.default, { payload }));
+
+test('saved build review continues only its current build through the authenticated chat launcher', async (t) => {
+  const root = path.dirname(shell);
+  const api = await fs.readFile(path.join(root, 'chat-ui/src/adapters/api.js'), 'utf8');
+  const authHelpers = api.slice(api.indexOf('function getAccessToken('), api.indexOf('export class ApiAdapter'));
+  const stubs = {
+    '@mozaiks/chat-ui': 'export const UIToolRenderer=()=> <p>Saved workspace</p>;',
+    '@mozaiks/chat-ui/workspace': 'export const WorkspaceLayout=({children})=><main>{children}</main>;',
+    '../../ui/components/StudioShared.jsx': `export const ActionButton=({children,...props})=><button {...props}>{children}</button>;
+      export const StudioErrorState=({title,message})=><p role="alert">{title}: {message}</p>;
+      export const StudioInlineEmptyState=({title})=><p>{title}</p>; export const StudioLoadingState=({label})=><p>{label}</p>;
+      export const Panel=({children})=><section>{children}</section>; export const StatusPill=({children})=><span>{children}</span>;`,
+    './CarryForwardReportSummary.jsx': 'export default function Report(){return null;}',
+    './AppStudioChrome.jsx': 'export const formatDateTimeLabel=value=>value; export default function Hero({title}){return <h1>{title}</h1>;}',
+    './useAppStudioData.js': 'export const useAppStudioData=()=>window.fixture;',
+    '../context/ChatUIContext': `export const useChatUI=()=>({user:{id:'owner',app_id:'studio-host'},config:{appId:'studio-host'},
+      auth:{getAccessToken:()=> 'fixture-token'}});`,
+    '../adapters/api': `const platform={getAccessToken:()=>null}; ${authHelpers}`,
+  };
+  const output = await build({
+    stdin:{resolveDir:shell,loader:'jsx',contents:`
+      import React from 'react'; import {createRoot} from 'react-dom/client';
+      import {BrowserRouter,Routes,Route} from 'react-router-dom';
+      import Review from ${JSON.stringify(path.join(root,'factory_app/app/admin/pages/AppBuildReviewPage.jsx'))};
+      window.mozaiksAuth={getAccessToken:()=> 'fixture-token'};
+      createRoot(document.getElementById('root')).render(<BrowserRouter><Routes>
+        <Route path="/apps/:appId/activity" element={<Review/>}/><Route path="/chat" element={<h1>Review conversation</h1>}/>
+      </Routes></BrowserRouter>);`},
+    bundle:true,write:false,format:'esm',jsx:'automatic',loader:{'.js':'jsx'},nodePaths:[path.join(shell,'node_modules')],
+    alias:{'@mozaiks/chat-ui/hooks/useWorkflowStart.js':path.join(root,'chat-ui/src/hooks/useWorkflowStart.js'),
+      react:path.join(shell,'node_modules/react'),'react-dom':path.join(shell,'node_modules/react-dom'),
+      'react-router-dom':path.join(shell,'node_modules/react-router-dom')},
+    plugins:[{name:'review-page-boundaries',setup(builder){
+      builder.onResolve({filter:/.*/},args=>Object.hasOwn(stubs,args.path)?{path:args.path,namespace:'fixture'}:undefined);
+      builder.onLoad({filter:/.*/,namespace:'fixture'},args=>({contents:stubs[args.path],loader:'jsx',resolveDir:shell}));
+    }}],
+  });
+  const data=()=>({buildRegistryId:'registry-a',summary:{app:{lifecycle_state:'review',current_build_run:{artifact_version_id:'current'}}},
+    buildHistory:{artifact_versions:[{id:'current',version_number:2,created_at:'today'},{id:'older',version_number:1,created_at:'yesterday'}]}});
+  let fixture={data:data(),loading:false,error:null,dataMode:'live'};
+  let reject=false;
+  const requests=[];
+  const server=http.createServer(async(req,res)=>{
+    if(req.url==='/fixture.js'){res.setHeader('Content-Type','text/javascript');res.end(output.outputFiles[0].text);return;}
+    if(!req.url.startsWith('/api/')){res.setHeader('Content-Type','text/html');res.end(`<div id="root"></div><script>window.fixture=${JSON.stringify(fixture)}</script><script type="module" src="/fixture.js"></script>`);return;}
+    if(req.method==='POST'){
+      const chunks=[];for await(const chunk of req)chunks.push(chunk);
+      requests.push({url:req.url,headers:req.headers,body:JSON.parse(Buffer.concat(chunks).toString())});
+      res.setHeader('Content-Type','application/json');res.statusCode=reject?409:200;
+      res.end(JSON.stringify(reject?{detail:'The current build changed. Refresh its review.'}:{chat_id:'new-review',workflow_id:'AppReview'}));return;
+    }
+    const id=req.url.split('/')[5];
+    res.setHeader('Content-Type','application/json');res.end(JSON.stringify({artifact_version_id:id,app_id:'target-app',build_family:'app_bundle',
+      workbench:{artifact_version_id:id,target_app_id:'target-app',build_registry_id:'registry-a',build_family:'app_bundle'},
+      workbench_ui:{component:'AppWorkbench',workflow_name:'AppGenerator'}}));
+  });
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  t.after(()=>new Promise(resolve=>{server.closeAllConnections();server.close(resolve);}));
+  const browser=await chromium.launch({headless:true});t.after(()=>browser.close());
+  const origin=`http://127.0.0.1:${server.address().port}`;
+  await t.test('older selection is disabled; current selection posts selectors only and navigates to the acknowledged chat',async()=>{
+    const page=await browser.newPage();
+    try{
+      await page.goto(origin+'/apps/target-app/activity');
+      await page.getByLabel('Starting version').selectOption('older');
+      await expect(page.getByRole('button',{name:'Continue in chat',exact:true})).toBeDisabled();
+      await expect(page.getByText('Select the current build to continue in chat.')).toBeVisible();
+      assert.equal(requests.length,0);
+      await page.getByLabel('Starting version').selectOption('current');
+      await page.getByRole('button',{name:'Continue in chat',exact:true}).click();
+      await expect(page.getByRole('heading',{name:'Review conversation'})).toBeVisible();
+      assert.equal(requests.length,1);
+      assert.equal(requests[0].url,'/api/workflows/trigger');
+      assert.equal(requests[0].headers.authorization,'Bearer fixture-token');
+      assert.deepEqual(requests[0].body,{trigger_source:'manual',context_variables:{},app_id:'studio-host',user_id:'owner',
+        build_registry_id:'registry-a',workflow_id:'AppReview'});
+      assert.equal(new URL(page.url()).searchParams.get('chat_id'),'new-review');
+    }finally{await page.close();}
+  });
+  await t.test('server rejection is visible and keeps the saved review open',async()=>{
+    reject=true;requests.length=0;
+    const page=await browser.newPage();
+    try{
+      await page.goto(origin+'/apps/target-app/activity');
+      await page.getByRole('button',{name:'Continue in chat',exact:true}).click();
+      await expect(page.getByRole('alert')).toContainText('The current build changed. Refresh its review.');
+      await expect(page.getByRole('button',{name:'Continue in chat',exact:true})).toBeEnabled();
+      assert.equal(new URL(page.url()).pathname,'/apps/target-app/activity');
+      assert.equal(requests.length,1);
+    }finally{reject=false;await page.close();}
+  });
+  for(const mode of ['demo','missing-current','building']){
+    await t.test(`recovery stays unavailable for ${mode}`,async()=>{
+      fixture={data:data(),loading:false,error:null,dataMode:mode==='demo'?'demo':'live'};
+      if(mode==='missing-current')delete fixture.data.summary.app.current_build_run.artifact_version_id;
+      if(mode==='building')fixture.data.summary.app.lifecycle_state='building';
+      requests.length=0;
+      const page=await browser.newPage();
+      try{
+        await page.goto(origin+'/apps/target-app/activity');
+        await expect(page.getByRole('button',{name:'Continue in chat',exact:true})).toBeDisabled();
+        assert.equal(requests.length,0);
+      }finally{await page.close();}
+    });
+  }
+});
 
 test('review workspace previews owned snapshots and keeps revision evidence separate', async (t) => {
   const root = path.dirname(shell);
@@ -118,6 +225,8 @@ test('review workspace previews owned snapshots and keeps revision evidence sepa
   const frameNode=await page.locator('iframe').elementHandle();
   await patch({refinement_pending:true});
   await expect(page.getByText('Making your changes. You can keep trying this preview.')).toBeVisible();
+  await expect(page.getByRole('heading',{name:'Updating your draft',exact:true})).toBeVisible();
+  await expect(page.getByText('Required checks are incomplete or failed.',{exact:false})).toHaveCount(0);
   await expect(page.getByRole('button',{name:'Activate this version',exact:true})).toBeDisabled();
   await patch({refinement_pending:false,refinement_result:result('child')});
   await expect(page.getByRole('button',{name:'Update preview',exact:true})).toBeVisible();
@@ -261,6 +370,18 @@ test('review needs an explicit positive readiness decision and does not claim de
   assert.match(ready, /Ready for your decision/);
   assert.match(ready, /<details[^>]*>/);
   assert.doesNotMatch(ready, /<details[^>]*open/);
+});
+
+test('pending draft updates show progress without granting activation or claiming failed checks', () => {
+  const payload={refinement_pending:true,can_accept:true,can_promote:true,app_validation_status:'passed',
+    app_bundle_acceptance_status:'passed',integration_tests_passed:true,artifact_version_id:'draft',build_registry_id:'owned-build'};
+  const html=render(payload);
+  assert.match(html,/Updating your draft/);
+  assert.match(html,/You can keep trying the preview while changes are checked\./);
+  assert.doesNotMatch(html,/This draft needs attention|Required checks are incomplete or failed/);
+  assert.match(html,/<button disabled=""/);
+  const failed=render({...payload,refinement_pending:false,can_accept:false,can_promote:false,app_validation_status:'failed'});
+  assert.match(failed,/This draft needs attention/);
 });
 
 test('validated draft awaiting acceptance is ready for review without enabling activation', () => {

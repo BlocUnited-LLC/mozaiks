@@ -61,6 +61,7 @@ async def bind_factory_session(
         resume=phase == "resume",
         refinement=trigger_source == "refinement",
         allow_create=workflow_name in {"ValueEngine", "ExistingAppDiscovery"},
+        allow_current_build=(workflow_name == "AppReview" and phase == "prepare" and trigger_source != "refinement"),
     )
     fields: dict[str, Any] = {"run_build_binding": binding.model_dump()}
     if workflow_name == "AppReview" and phase == "prepare":

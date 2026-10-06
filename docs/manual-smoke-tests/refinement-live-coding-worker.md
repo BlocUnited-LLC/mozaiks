@@ -174,6 +174,13 @@ For acceptance, continue a real AppReview conversation and verify:
    before activation becomes available.
 5. Repeat the explicit update and provider-confirmed Stop checks above. Record
    real model/provider receipts separately from browser tests with HTTP fixtures.
+6. From **Review builds**, select the current saved version and choose **Continue
+   in chat**. This also supports a saved inline result with no active review chat.
+   Verify the new review loads the owned current artifact without allocating a
+   build, and historical selections cannot start this recovery. Explicit old
+   source chats and stale resumed bindings must still be rejected. During a chat
+   edit, the review heading reads **Updating your draft**; acceptance and
+   activation remain disabled until that edit settles with saved checks.
 
 Passing checks makes a draft ready for the user's review. **Accept this draft**
 records that acceptance; **Activate this version** promotes it into the app

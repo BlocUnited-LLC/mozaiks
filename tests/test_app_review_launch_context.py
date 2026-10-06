@@ -1,5 +1,6 @@
 """New review sessions hydrate saved build facts before the first model turn."""
 
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -8,6 +9,7 @@ import pytest
 import yaml
 from ag2 import Agent
 
+from factory_app.app.modules.app_registry.backend.service import AppRegistryService
 from factory_app.workflows._shared.platform import build_target
 from factory_app.workflows.AppReview.tools import review_context
 from mozaiksai.core.adapters.ag2_network_runner import AG2NetworkRunner, AG2NetworkRunnerRequest
@@ -77,6 +79,7 @@ async def test_new_review_hydrates_from_owned_build_without_a_handoff(review_lau
         owner_user_id="owner", build_registry_id="registry",
     )
     review_launch.store.get_build_record.assert_awaited_once_with(app_id="target", build_record_id="saved")
+    assert review_launch.registry.resolve_build_binding.await_args.kwargs["allow_current_build"] is True
 
 
 @pytest.mark.asyncio
@@ -119,6 +122,7 @@ async def test_resume_and_other_workflows_keep_the_existing_binding_contract(rev
         phase=phase, session_fields=fields,
     )
     assert result == fields
+    assert review_launch.registry.resolve_build_binding.await_args.kwargs["allow_current_build"] is False
     review_launch.registry.get_app_record.assert_not_awaited()
     review_launch.store.get_build_record.assert_not_awaited()
 
@@ -168,3 +172,95 @@ async def test_hydrated_review_user_reply_keeps_saved_artifact_in_revision_event
         assert events[-1]["extra"]["build_id"] == "build"
     finally:
         await result.live_run.close()
+
+
+@pytest.fixture
+def current_review(review_launch, monkeypatch):
+    fixture = review_launch
+    fixture.record.update(build_registry_id="registry", active_chat_id=None)
+    repo = SimpleNamespace(
+        get_by_build_registry_id=AsyncMock(return_value=fixture.record),
+        get_owned_chat_binding=AsyncMock(return_value=fixture.binding.model_copy(update={"build_id": "older"}).model_dump()),
+        update_lifecycle_state=AsyncMock(), upsert_app_record=AsyncMock(),
+    )
+    service = AppRegistryService(repo)
+    monkeypatch.setattr(build_target, "AppRegistryService", lambda: service)
+    fixture.repo = repo
+    return fixture
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["review", "needs_revision", "active"])
+@pytest.mark.parametrize("phase", ["genesis", "refinement"])
+async def test_current_saved_build_reopens_without_a_chat_or_new_build(current_review, state, phase):
+    fixture = current_review
+    fixture.binding = fixture.binding.model_copy(update={"phase": phase})
+    fixture.version.commit_metadata.metadata["phase"] = phase
+    fixture.record["current_build_run"]["phase"] = phase
+    fixture.record["lifecycle_state"] = state
+    before = deepcopy(fixture.record)
+    persistence = SimpleNamespace(create_chat_session=AsyncMock(), persist_server_owned_session_fields=AsyncMock())
+    await launcher.create_routed_chat_session(
+        workflow_id="AppReview", app_id="factory", user_id="owner", chat_id="reopened-review",
+        context_variables={}, trigger_meta={"trigger_source": "manual"},
+        build_registry_id="registry", persistence_manager=persistence,
+    )
+    assert persistence.persist_server_owned_session_fields.await_args.kwargs["fields"] == {
+        "run_build_binding": fixture.binding.model_dump(),
+    }
+    assert persistence.create_chat_session.await_args.kwargs["extra_fields"]["artifact_version_id"] == "saved"
+    assert fixture.record == before
+    fixture.repo.update_lifecycle_state.assert_not_awaited()
+    fixture.repo.upsert_app_record.assert_not_awaited()
+    fixture.repo.get_owned_chat_binding.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("damage", ["missing", "foreign_host", "building", "draft", "artifact", "build_id", "phase", "race"])
+async def test_current_build_reopen_fails_before_session_creation(current_review, damage):
+    fixture = current_review
+    if damage == "missing":
+        fixture.repo.get_by_build_registry_id.return_value = None
+    elif damage == "foreign_host":
+        fixture.record["chat_app_id"] = "other"
+    elif damage in {"building", "draft"}:
+        fixture.record["lifecycle_state"] = damage
+    elif damage in {"artifact", "build_id", "phase"}:
+        fixture.record["current_build_run"].pop("artifact_version_id" if damage == "artifact" else damage)
+    else:
+        newer = deepcopy(fixture.record)
+        newer["current_build_run"]["build_id"] = "newer"
+        fixture.repo.get_by_build_registry_id.side_effect = [fixture.record, newer]
+    persistence = SimpleNamespace(create_chat_session=AsyncMock(), persist_server_owned_session_fields=AsyncMock())
+    with pytest.raises(ValueError):
+        await launcher.create_routed_chat_session(
+            workflow_id="AppReview", app_id="factory", user_id="owner", chat_id="reopened-review",
+            context_variables={}, trigger_meta={"trigger_source": "manual"},
+            build_registry_id="registry", persistence_manager=persistence,
+        )
+    persistence.create_chat_session.assert_not_awaited()
+    fixture.repo.update_lifecycle_state.assert_not_awaited()
+    fixture.repo.upsert_app_record.assert_not_awaited()
+    assert fixture.repo.get_by_build_registry_id.await_args.kwargs["owner_user_id"] == "owner"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["old_source", "resume_old", "resume_missing", "other_workflow"])
+async def test_current_build_policy_does_not_replace_explicit_or_resumed_bindings(current_review, mode):
+    fixture = current_review
+    extra = {}
+    if mode == "old_source":
+        extra["source_chat_id"] = "old-review"
+    elif mode == "resume_old":
+        extra.update(phase="resume", session_fields={
+            "run_build_binding": fixture.binding.model_copy(update={"build_id": "older"}).model_dump(),
+        })
+    elif mode == "resume_missing":
+        extra["phase"] = "resume"
+    with pytest.raises(ValueError):
+        await fixture.hooks.call_chat_session_fields(
+            app_id="factory", user_id="owner", chat_id="reopened-review", build_registry_id="registry",
+            workflow_name="AppGenerator" if mode == "other_workflow" else "AppReview", **extra,
+        )
+    fixture.repo.update_lifecycle_state.assert_not_awaited()
+    fixture.repo.upsert_app_record.assert_not_awaited()

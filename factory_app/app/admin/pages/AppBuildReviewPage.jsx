@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { UIToolRenderer } from '@mozaiks/chat-ui'
+import { useWorkflowStart } from '@mozaiks/chat-ui/hooks/useWorkflowStart.js'
 import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
 import {
   ActionButton,
@@ -102,11 +103,24 @@ export default function AppBuildReviewPage() {
   const { appId = 'workspace-app' } = useParams()
   const { data, loading, error, dataMode } = useAppStudioData(appId)
   const [selectedArtifactId, setSelectedArtifactId] = useState(null)
+  const { startWorkflow, starting, error: chatError } = useWorkflowStart()
   const snapshot = useMemo(() => getAppStudioSnapshot(appId, data, dataMode), [appId, data, dataMode])
   const buildHistory = snapshot.buildHistory || []
   const latestArtifact = buildHistory[0] || null
   const selectedArtifact = buildHistory.find(artifact => artifactId(artifact) === selectedArtifactId) || latestArtifact
   const activeArtifactId = artifactId(selectedArtifact)
+  const currentArtifactId = snapshot.app?.current_build_run?.artifact_version_id
+  const canContinueInChat = dataMode === 'live' && Boolean(data?.buildRegistryId && currentArtifactId)
+    && activeArtifactId === currentArtifactId
+    && ['review', 'needs_revision', 'active'].includes(snapshot.lifecycleState)
+
+  async function continueInChat() {
+    if (!canContinueInChat || starting) return
+    await startWorkflow('AppReview', {}, {
+      trigger_source: 'manual',
+      build_registry_id: data.buildRegistryId,
+    })
+  }
 
   if (loading) return <StudioLoadingState label="Loading build review..." />
   if (error || !data?.summary) return <StudioErrorState title="Build Review Unavailable" message={error || 'No summary returned.'} />
@@ -141,7 +155,14 @@ export default function AppBuildReviewPage() {
                   </option>
                 ))}
               </select>
+              <ActionButton disabled={!canContinueInChat || starting} onClick={continueInChat}>
+                {starting ? 'Opening review chat…' : 'Continue in chat'}
+              </ActionButton>
             </div>
+            {currentArtifactId && activeArtifactId !== currentArtifactId && (
+              <p className="text-sm text-muted-foreground">Select the current build to continue in chat.</p>
+            )}
+            {chatError && <StudioErrorState title="Review chat unavailable" message={chatError} />}
 
             <SavedArtifactWorkbench
               appId={appId}

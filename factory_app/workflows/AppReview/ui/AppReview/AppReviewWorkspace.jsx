@@ -43,6 +43,7 @@ export default function AppReviewWorkspace({ payload = {} }) {
   const incomplete = needsRevision || Boolean(editError) || Boolean(body && !validationPassed)
     || Boolean(result && (!body || result.status !== 'validated' || !validationPassed));
   const reviewPayload = {
+    refinement_pending: pending,
     artifact_version_id: reviewedId,
     build_registry_id: registryId,
     app_validation_status: editError ? null : body ? buildStatus : result?.status === 'failed' ? 'failed' : null,
