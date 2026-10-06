@@ -129,8 +129,13 @@ preview. Verify those separately against a recorded OSS commit:
 6. Inspect desktop and narrow-screen screenshots. Status and the next action
    stay visible; technical failure details and logs can be expanded when needed.
    Verify no horizontal overflow, working controls, expiry, and reload behavior.
-7. Stop the preview and verify the provider session is absent. Stop owned local
-   services and retain private evidence without publishing credentials.
+7. Stop the preview and verify the provider session is absent. A background
+   health check can briefly return a busy response; stopping retries that
+   response up to three requests, using a bounded `Retry-After` delay. A failed
+   stop must retain its cleanup handle and block replacement allocation. Seeing
+   the Start button again is not proof of cleanup: verify the stop response and
+   provider absence. Stop owned local services and retain private evidence
+   without publishing credentials.
 
 The **AppReview conversation** is a separate entry into the same refinement
 boundary. Test it through a real journey with its prerequisite artifacts;

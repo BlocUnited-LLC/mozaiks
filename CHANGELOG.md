@@ -436,7 +436,8 @@ This project follows a practical pre-1.0 changelog format:
 - Studio keeps an existing preview visible while a newer version is ready,
   labels the version actually displayed, and offers an explicit **Update preview**.
   Detailed validation errors and logs start collapsed while failed checks remain
-  visible.
+  visible. Stopping briefly retries busy responses from background health checks;
+  a replacement waits until the prior preview is confirmed stopped.
 
 - Refinement confirmations ignore unbound nested actions and retain the original
   request, build and revision through ChatPage. Pending decisions normalize their

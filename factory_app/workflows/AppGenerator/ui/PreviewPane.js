@@ -86,7 +86,7 @@ const PreviewPane = ({
         ) : (
           <>
             <div className="mt-3 text-sm text-[var(--color-text-muted)]">
-              {sandboxError ? 'Preview could not start' : 'Start the preview to try your app.'}
+              {sandboxError ? 'Preview needs attention' : 'Start the preview to try your app.'}
             </div>
             {onStartPreview && canStartPreview ? (
               <>

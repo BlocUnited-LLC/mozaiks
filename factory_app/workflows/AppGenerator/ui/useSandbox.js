@@ -2,6 +2,24 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { openAuthenticatedWebSocket } from '@mozaiks/chat-ui/adapters/websocketAuth.js';
 import { getStudioAccessToken, studioFetch } from '../../../app/admin/pages/studioApi.js';
 
+async function stopSandbox(sandboxId, isCurrent) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (!isCurrent()) return false;
+    const response = await studioFetch(`/api/sandbox/${encodeURIComponent(sandboxId)}/stop`, { method: 'POST' });
+    if (response.ok || response.status === 404) return true;
+    const result = await response.json().catch(() => ({}));
+    if (response.status !== 409 || attempt === 2) {
+      throw new Error(result.detail || 'Preview could not be stopped');
+    }
+    // Status observation can briefly own the operation lease. Keep admission
+    // until cleanup is confirmed, with at most two bounded busy waits.
+    const retryAfter = Number(response.headers.get('Retry-After')?.trim() || 2);
+    const delay = Number.isFinite(retryAfter) ? Math.max(0, Math.min(retryAfter, 5)) * 1000 : 2000;
+    await new Promise((resolve) => window.setTimeout(resolve, delay));
+  }
+  return false;
+}
+
 export function useSandbox(artifactId, buildRegistryId) {
   const [session, setSession] = useState(null);
   const [sandboxStatus, setSandboxStatus] = useState(null);
@@ -101,13 +119,13 @@ export function useSandbox(artifactId, buildRegistryId) {
     setSession(null);
     applyStatus({ status: 'starting' });
 
-    async function post(url, body, allowMissing = false) {
+    async function post(url, body) {
       const response = await studioFetch(url, {
         method: 'POST',
         ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}),
       });
       const result = await response.json();
-      if (!response.ok && !(allowMissing && response.status === 404)) throw new Error(result.detail || `Preview request failed (${response.status})`);
+      if (!response.ok) throw new Error(result.detail || `Preview request failed (${response.status})`);
       return result;
     }
 
@@ -115,7 +133,7 @@ export function useSandbox(artifactId, buildRegistryId) {
       const previous = lastSession.current;
       if (previous && (previous.artifactId !== artifactId || previous.buildRegistryId !== buildRegistryId || previous.requiresStop)) {
         previous.requiresStop = true;
-        await post(`/api/sandbox/${encodeURIComponent(previous.sandboxId)}/stop`, null, true);
+        if (!await stopSandbox(previous.sandboxId, isCurrent)) return;
         if (lastSession.current === previous) lastSession.current = null;
         if (!isCurrent()) return;
       }
@@ -149,9 +167,7 @@ export function useSandbox(artifactId, buildRegistryId) {
     if (lastSession.current?.sandboxId === sandboxId) lastSession.current.requiresStop = true;
     applyStatus({ status: 'stopping' });
     try {
-      const response = await studioFetch(`/api/sandbox/${encodeURIComponent(sandboxId)}/stop`, { method: 'POST' });
-      const result = await response.json();
-      if (!response.ok && response.status !== 404) throw new Error(result.detail || 'Preview could not be stopped');
+      if (!await stopSandbox(sandboxId, isCurrent)) return;
       if (lastSession.current?.sandboxId === sandboxId) lastSession.current = null;
       if (isCurrent()) {
         generation.current += 1;

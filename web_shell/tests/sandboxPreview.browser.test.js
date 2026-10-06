@@ -21,6 +21,9 @@ test('draft preview preserves workspace branding, opens separately, and follows 
   let delayNextStop = false;
   let previousExpired = false;
   let failStop = false;
+  let stopFailureStatus = 500;
+  let busyStops = 0;
+  let stopRetryAfter = '2';
   let failedSessionRemoved = false;
   let delayedStatus = null;
   let delayNextStatus = false;
@@ -39,6 +42,7 @@ test('draft preview preserves workspace branding, opens separately, and follows 
         const [refining, setRefining] = useState(false);
         const preview = useSandbox('artifact-' + version, registry);
         window.tryPreview = () => preview.syncAndRestart({'app.json':'{}'});
+        window.tryStop = () => preview.stopPreview();
         return <main>
           <h1 id="workspace-brand" style={{color:'var(--color-primary)',fontFamily:'sans-serif'}}>Mozaiks builder</h1>
           <PreviewPane
@@ -63,7 +67,9 @@ test('draft preview preserves workspace branding, opens separately, and follows 
           <output aria-label="State" style={{display:'block',overflowWrap:'anywhere'}}>{JSON.stringify({status:preview.sandboxStatus,url:preview.livePreviewUrl,version:preview.previewArtifactId,error:preview.sandboxError,syncing:preview.syncing,stopping:preview.stopping})}</output>
         </main>;
       }
-      createRoot(document.getElementById('root')).render(<Fixture />);
+      const root = createRoot(document.getElementById('root'));
+      window.unmountPreview = () => root.unmount();
+      root.render(<Fixture />);
     ` },
     bundle: true, write: false, jsx: 'automatic', loader: {'.js': 'jsx'}, nodePaths: [path.join(shell, 'node_modules')],
     plugins: [{ name: 'preview-transport-fixture', setup(builder) {
@@ -106,8 +112,13 @@ test('draft preview preserves workspace branding, opens separately, and follows 
     } else if (req.url.endsWith('/stop') && delayNextStop) {
       delayNextStop = false;
       delayedStop = () => { activeSessions.delete(sandboxId); res.end('{"ok":true}'); };
+    } else if (req.url.endsWith('/stop') && busyStops > 0) {
+      busyStops -= 1;
+      res.statusCode = 409;
+      if (stopRetryAfter !== null) res.setHeader('Retry-After', stopRetryAfter);
+      res.end('{"detail":"Preview operation is already in progress"}');
     } else if (req.url.endsWith('/stop') && failStop) {
-      res.statusCode = 500;
+      res.statusCode = stopFailureStatus;
       res.end('{"detail":"Provider could not confirm termination"}');
     } else if (req.url.endsWith('/stop') && previousExpired) {
       activeSessions.delete(sandboxId);
@@ -214,7 +225,7 @@ test('draft preview preserves workspace branding, opens separately, and follows 
   await expect.poll(async () => (await state()).error).toBe('Backend startup failed');
   assert.equal(requests.filter(url => url.endsWith('/status')).length, failedPolls,
     'A failed preview stops polling; sandbox cleanup must not replace the startup cause');
-  await expect(page.getByText('Preview could not start', {exact:true})).toBeVisible();
+  await expect(page.getByText('Preview needs attention', {exact:true})).toBeVisible();
   await expect(page.getByText('Backend startup failed', {exact:true})).toBeHidden();
   await page.getByText('Preview details', {exact:true}).click();
   await expect(page.getByText('Backend startup failed', {exact:true})).toBeVisible();
@@ -349,6 +360,124 @@ test('draft preview preserves workspace branding, opens separately, and follows 
     '/api/artifacts/artifact-11/sandbox?build_registry_id=registry-b',
   ]);
   assert.equal(maxActiveSessions, 1, 'Replacement never exceeds one allocated preview');
+
+  await t.test('busy stops retry within bounds without duplicate requests or premature allocation', async () => {
+    await page.clock.pauseAt(await page.evaluate(() => new Date(Date.now() + 1000).toISOString()));
+    const stop11 = '/api/sandbox/sandbox-artifact-11-registry-b/stop';
+    const stop12 = '/api/sandbox/sandbox-artifact-12-registry-b/stop';
+    const busyResponse = () => page.waitForResponse(response => response.url().endsWith('/stop') && response.status() === 409);
+    const firstBusy = busyResponse();
+    busyStops = 1;
+    const beforeExplicitStop = requests.length;
+    const retainedSocket = await page.evaluateHandle(() => window.previewSocket);
+    await page.getByRole('button', {name:'Stop preview',exact:true}).click();
+    await (await firstBusy).finished();
+    await expect.poll(async () => (await state()).stopping).toBe(true);
+    await expect(page.getByRole('button', {name:'Stopping preview…',exact:true})).toBeDisabled();
+    await retainedSocket.evaluate(socket => socket.onmessage({data:JSON.stringify({type:'status',status:'running',previewUrl:'/stale-preview'})}));
+    await page.evaluate(() => { window.tryPreview(); window.tryStop(); });
+    await page.clock.runFor(1999);
+    assert.deepEqual(requests.slice(beforeExplicitStop), [stop11]);
+    assert.equal((await state()).url, null, 'Status events cannot revive a preview while stop waits to retry');
+    await page.clock.runFor(1);
+    await expect.poll(async () => (await state()).status).toBe(null);
+    assert.deepEqual(requests.slice(beforeExplicitStop), [stop11, stop11]);
+    await expect(page.getByRole('button', {name:'Start draft preview',exact:true})).toBeVisible();
+    await page.getByRole('button', {name:'Start draft preview',exact:true}).click();
+    await expect.poll(async () => (await state()).status).toBe('running');
+
+    // A replacement has the same retry semantics and keeps the quota occupied
+    // until the old preview's stop has actually succeeded.
+    await page.getByRole('button', {name:'Next version',exact:true}).click();
+    busyStops = 1;
+    const replacementBusy = busyResponse();
+    const beforeReplacement = requests.length;
+    await page.getByRole('button', {name:'Update preview',exact:true}).click();
+    await (await replacementBusy).finished();
+    await expect.poll(async () => (await state()).syncing).toBe(true);
+    await page.evaluate(() => window.tryPreview());
+    await page.clock.runFor(1999);
+    assert.deepEqual(requests.slice(beforeReplacement), [stop11]);
+    assert.deepEqual([...activeSessions], ['sandbox-artifact-11-registry-b']);
+    await page.clock.runFor(1);
+    await expect.poll(async () => (await state()).version).toBe('artifact-12');
+    assert.deepEqual(requests.slice(beforeReplacement), [
+      stop11, stop11,
+      '/api/artifacts/artifact-12/sandbox?build_registry_id=registry-b',
+      '/api/sandbox/sandbox-artifact-12-registry-b/sync',
+      '/api/sandbox/sandbox-artifact-12-registry-b/start',
+    ]);
+
+    // Persistent contention is bounded, including an excessive Retry-After.
+    busyStops = 10;
+    stopRetryAfter = '600';
+    const beforeExhaustion = requests.length;
+    let busy = busyResponse();
+    await page.getByRole('button', {name:'Stop preview',exact:true}).click();
+    await (await busy).finished();
+    busy = busyResponse();
+    await page.clock.runFor(5000);
+    await (await busy).finished();
+    busy = busyResponse();
+    await page.clock.runFor(5000);
+    await (await busy).finished();
+    await expect.poll(async () => (await state()).error).toBe('Preview operation is already in progress');
+    await expect(page.getByText('Preview needs attention', {exact:true})).toBeVisible();
+    await expect(page.getByRole('button', {name:'Stop preview',exact:true})).toBeEnabled();
+    await page.clock.runFor(10000);
+    assert.deepEqual(requests.slice(beforeExhaustion), [stop12, stop12, stop12]);
+    assert.deepEqual([...activeSessions], ['sandbox-artifact-12-registry-b']);
+    busyStops = 0;
+    stopRetryAfter = '2';
+    await page.getByRole('button', {name:'Start draft preview',exact:true}).click();
+    await expect.poll(async () => (await state()).status).toBe('running');
+    assert.deepEqual(requests.slice(beforeExhaustion + 3, beforeExhaustion + 5), [
+      stop12, '/api/artifacts/artifact-12/sandbox?build_registry_id=registry-b',
+    ], 'Retrying the same artifact first confirms the retained cleanup handle');
+
+    failStop = true;
+    stopFailureStatus = 403;
+    const beforeForbidden = requests.length;
+    await page.getByRole('button', {name:'Stop preview',exact:true}).click();
+    await expect.poll(async () => (await state()).error).toBe('Provider could not confirm termination');
+    await page.clock.runFor(10000);
+    assert.deepEqual(requests.slice(beforeForbidden), [stop12], 'Forbidden stops are never retried');
+    failStop = false;
+    await page.getByRole('button', {name:'Start draft preview',exact:true}).click();
+    await expect.poll(async () => (await state()).status).toBe('running');
+
+    // A new selection cancels future retry requests but retains the handle for
+    // cleanup when the user explicitly starts the newly selected candidate.
+    await page.getByRole('button', {name:'Next version',exact:true}).click();
+    busyStops = 1;
+    stopRetryAfter = null;
+    const beforeCancelledRetry = requests.length;
+    busy = busyResponse();
+    await page.getByRole('button', {name:'Update preview',exact:true}).click();
+    await (await busy).finished();
+    await page.getByRole('button', {name:'Next version',exact:true}).click();
+    await page.evaluate(() => window.tryPreview());
+    await page.clock.runFor(2000);
+    await expect.poll(async () => (await state()).syncing).toBe(false);
+    assert.deepEqual(requests.slice(beforeCancelledRetry), [stop12]);
+    assert.equal((await state()).url, null);
+    await page.getByRole('button', {name:'Start draft preview',exact:true}).click();
+    await expect.poll(async () => (await state()).version).toBe('artifact-14');
+    assert.deepEqual(requests.slice(beforeCancelledRetry, beforeCancelledRetry + 3), [
+      stop12, stop12, '/api/artifacts/artifact-14/sandbox?build_registry_id=registry-b',
+    ]);
+
+    busyStops = 1;
+    const beforeUnmount = requests.length;
+    busy = busyResponse();
+    await page.getByRole('button', {name:'Stop preview',exact:true}).click();
+    await (await busy).finished();
+    await page.evaluate(() => window.unmountPreview());
+    await page.clock.runFor(10000);
+    assert.deepEqual(requests.slice(beforeUnmount), ['/api/sandbox/sandbox-artifact-14-registry-b/stop']);
+    assert.equal(activeSessions.size, 1, 'Cancelling a busy stop must not claim provider cleanup completed');
+    assert.equal(maxActiveSessions, 1);
+  });
 });
 
 test('standalone shell identifies drafts through loading and navigation without blocking app controls', async (t) => {
