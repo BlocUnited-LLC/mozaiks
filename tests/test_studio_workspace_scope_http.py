@@ -200,6 +200,9 @@ def studio(monkeypatch):
     monkeypatch.setattr(connector_service, "_get_store", lambda store_arg=None: store)
     monkeypatch.setattr(connector_service, "get_connector_vault_backend", lambda: vault)
     monkeypatch.setattr(connector_health, "ConnectorStore", _StoreClass(store))
+    # Hosts register live provider checks process-wide; a health check here
+    # reports configuration health instead of calling a provider.
+    monkeypatch.setattr(connector_health, "_PROVIDERS", {})
     monkeypatch.setattr(module_router, "record_action_invocation", lambda **_: None)
     hooks = PlatformHookRegistry()
     monkeypatch.setattr(module_router, "get_platform_hooks", lambda: hooks)
