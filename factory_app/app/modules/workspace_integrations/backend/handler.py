@@ -2,19 +2,8 @@ from __future__ import annotations
 
 from mozaiksai.core.runtime.composition.module_context import ModuleContext
 
+from .policy import connector_overlay_workspace_id, connector_workspace_id
 from .service import WorkspaceIntegrationsService
-
-_DEFAULT_WORKSPACE_ID = "demo-workspace"
-
-
-def _workspace_id_from_context(ctx: ModuleContext, workspace_id: str | None = None) -> str:
-    """Resolve workspace scope for workspace-level connector actions."""
-    return str(
-        workspace_id
-        or ctx.workspace_id
-        or ctx.tenant_id
-        or _DEFAULT_WORKSPACE_ID
-    )
 
 
 class WorkspaceIntegrationsModule:
@@ -92,7 +81,7 @@ class WorkspaceIntegrationsModule:
     ) -> dict:
         return await self.service.list_app_integration_needs(
             app_id=ctx.app_id,
-            workspace_id=_workspace_id_from_context(ctx),
+            workspace_id=connector_overlay_workspace_id(ctx),
         )
 
     async def upsert_app_integration_need(
@@ -151,7 +140,7 @@ class WorkspaceIntegrationsModule:
         **_: object,
     ) -> dict:
         return await self.service.save_workspace_connector(
-            workspace_id=_workspace_id_from_context(ctx, workspace_id),
+            workspace_id=connector_workspace_id(ctx, workspace_id),
             service=service,
             secret_value=secret_value,
             display_name=display_name,
@@ -169,7 +158,7 @@ class WorkspaceIntegrationsModule:
         **_: object,
     ) -> dict:
         return await self.service.list_workspace_connectors(
-            workspace_id=_workspace_id_from_context(ctx, workspace_id),
+            workspace_id=connector_workspace_id(ctx, workspace_id),
         )
 
     async def check_workspace_connector_health(
@@ -181,7 +170,7 @@ class WorkspaceIntegrationsModule:
         **_: object,
     ) -> dict:
         return await self.service.check_workspace_connector_health(
-            workspace_id=_workspace_id_from_context(ctx, workspace_id),
+            workspace_id=connector_workspace_id(ctx, workspace_id),
             service=service,
         )
 
@@ -194,6 +183,6 @@ class WorkspaceIntegrationsModule:
         **_: object,
     ) -> dict:
         return await self.service.delete_workspace_connector(
-            workspace_id=_workspace_id_from_context(ctx, workspace_id),
+            workspace_id=connector_workspace_id(ctx, workspace_id),
             service=service,
         )

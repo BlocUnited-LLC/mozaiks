@@ -60,6 +60,17 @@ Main actions:
 
 No action returns raw secret values.
 
+Workspace connector actions act only on the caller's verified workspace: the
+workspace the validated token is bound to (`AUTH_WORKSPACE_ID_CLAIM`, default
+`workspace_id`), or a membership the host's `module_scope_resolver` hook
+asserted with `verified_workspace_id`. The optional `workspace_id` argument must
+name that workspace; any other workspace is refused, and a workspace or tenant
+selected by the request never chooses one. A signed-in caller with no verified
+workspace cannot use the connector actions, and `list_app_integration_needs`
+then returns declarations without a connector overlay. With authentication off
+and development access, the action uses the requested workspace, then the
+dispatch workspace or tenant, then `demo-workspace`.
+
 The connector vault uses the same explicit app or workspace scope as the
 metadata record. A workspace connector is never selected by an app ID alone.
 App-level overrides and workspace defaults remain distinct even when their

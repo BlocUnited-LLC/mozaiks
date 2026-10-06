@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -26,6 +27,9 @@ from factory_app.app.modules.workspace_integrations.backend.schemas import (
 from factory_app.app.modules.workspace_integrations.backend.service import (
     WorkspaceIntegrationsService,
 )
+from mozaiksai.core.runtime.composition.module_authority import ModuleDispatchAuthority
+from mozaiksai.core.runtime.composition.module_context import ModuleContext
+from mozaiksai.core.runtime.persistence.adapter import PersistencePrincipal
 
 
 def _workspace() -> Path:
@@ -314,17 +318,28 @@ class _FakeConnectorActionService:
 
 
 @pytest.mark.asyncio
-async def test_handler_workspace_connector_actions_default_to_context_workspace() -> None:
-    ctx = _FakeCtx()
-    ctx.workspace_id = "workspace_123"
+async def test_handler_workspace_connector_actions_use_the_verified_workspace() -> None:
+    # Dispatch scope names one workspace; the verified principal is bound to another.
+    ctx = ModuleContext(
+        app_id="studio",
+        user_id="user_1",
+        tenant_id="tenant_123",
+        workspace_id="workspace_123",
+        dispatch_authority=ModuleDispatchAuthority(
+            kind="authenticated_user", permission_mode="enforce", reason="test"
+        ),
+        persistence=SimpleNamespace(principal=PersistencePrincipal("user_1", "workspace_verified")),  # type: ignore[arg-type]
+    )
     service = _FakeConnectorActionService()
     module = WorkspaceIntegrationsModule(service=service)  # type: ignore[arg-type]
 
     await module.list_workspace_connectors(ctx)
-    await module.check_workspace_connector_health(ctx, service="openai")
+    await module.check_workspace_connector_health(ctx, service="openai", workspace_id="workspace_verified")
     await module.delete_workspace_connector(ctx, service="openai")
+    with pytest.raises(PermissionError):
+        await module.list_workspace_connectors(ctx, workspace_id="workspace_123")
 
-    assert service.workspace_ids == ["workspace_123", "workspace_123", "workspace_123"]
+    assert service.workspace_ids == ["workspace_verified", "workspace_verified", "workspace_verified"]
 
 
 class _WrapperStyleCollection:
