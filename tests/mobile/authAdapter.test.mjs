@@ -177,6 +177,65 @@ test('a cold callback without a surviving transaction is ignored without native 
   assert.deepEqual(navigation, []);
 });
 
+for (const failure of ['rejection', 'timeout']) {
+  test(`pending native authorization survives launch-intent ${failure} and permits fresh sign-in`, async t => {
+    let deliverRequest;
+    let abandonPreviousPage;
+    const opened = new Promise(resolve => { deliverRequest = resolve; });
+    const previousOptions = options();
+    previousOptions.authConfig.frontend = { ...previousOptions.authConfig.frontend, ...previousOptions.authConfig.frontend.android };
+    const previous = createAuthAdapter({ ...previousOptions, authorizationTransport: {
+      open(request) { deliverRequest(request); return new Promise((_resolve, reject) => { abandonPreviousPage = reject; }); },
+    } });
+    const unfinished = previous.login({ returnPath: '/community/retained' });
+    const stopped = assert.rejects(unfinished, /Previous WebView ended/);
+    const callback = grant((await opened).url);
+    const transactionKey = [...storage.keys()].find(key => key.endsWith(':transactions'));
+    const transactionBefore = storage.get(transactionKey);
+    const host = nativeHost();
+    let launchRequested;
+    let deliverLateLaunch;
+    const requested = new Promise(resolve => { launchRequested = resolve; });
+    host.dependencies.App.getLaunchUrl = () => {
+      launchRequested();
+      return failure === 'rejection'
+        ? Promise.reject(new Error('Native bridge unavailable'))
+        : new Promise(resolve => { deliverLateLaunch = resolve; });
+    };
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    try {
+      const boot = createNativeAppAuthAdapter(options(), host.dependencies);
+      await requested;
+      if (failure === 'timeout') t.mock.timers.tick(5000);
+      const adapter = await boot;
+      t.mock.timers.reset();
+      assert.equal(adapter.hasPendingAuthorization(), true);
+      assert.equal(storage.get(transactionKey), transactionBefore);
+      assert.equal(adapter.getAccessToken(), null);
+      assert.equal(storage.has(receiptKey), false);
+      assert.deepEqual(navigation, []);
+      assert.equal(requests.filter(request => request.method === 'POST').length, 0);
+      if (failure === 'timeout') {
+        deliverLateLaunch({ url: callback });
+        await Promise.resolve();
+        await Promise.resolve();
+        assert.equal(adapter.getAccessToken(), null);
+        assert.equal(storage.has(receiptKey), false);
+        assert.deepEqual(host.handled, []);
+      }
+      const result = await adapter.login({ returnPath: '/community/fresh' });
+      assert.equal(result.returnPath, '/community/fresh');
+      assert.equal(adapter.getAccessToken(), 'fixture-native-access-token');
+      assert.equal(host.opens, 1);
+      assert.equal(requests.filter(request => request.method === 'POST').length, 1);
+    } finally {
+      t.mock.timers.reset();
+      abandonPreviousPage(new Error('Previous WebView ended'));
+      await stopped;
+    }
+  });
+}
+
 test('a post-logout bootstrap cannot wait on an irrelevant retained native launch intent', async () => {
   const host = nativeHost();
   const first = await createNativeAppAuthAdapter(options(), host.dependencies);

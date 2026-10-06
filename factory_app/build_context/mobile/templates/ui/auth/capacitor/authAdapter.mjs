@@ -40,7 +40,20 @@ export async function createNativeAppAuthAdapter(options, { App, Browser, create
   // particular, logout clears those transactions before navigating; reading
   // a native launch intent then cannot add identity and needlessly blocks boot.
   if (!adapter.hasPendingAuthorization()) return adapter;
-  const launch = await App.getLaunchUrl();
+  let launch;
+  let launchTimer;
+  try {
+    launch = await Promise.race([
+      Promise.resolve().then(() => App.getLaunchUrl()),
+      new Promise(resolve => { launchTimer = setTimeout(() => resolve(undefined), 5000); }),
+    ]);
+  } catch {
+    // A failed native bridge must leave fresh sign-in available. Pending PKCE
+    // state stays with the shared adapter; a launch intent never grants identity.
+    return adapter;
+  } finally {
+    clearTimeout(launchTimer);
+  }
   if (launch?.url) {
     const receipt = await digest(launch.url);
     if (window.sessionStorage.getItem(receiptKey) !== receipt) {
