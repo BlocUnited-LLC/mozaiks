@@ -63,9 +63,20 @@ class _StatusResponse(BaseModel):
     lastError: str | None = None
 
 
+class _RecoveredSession(_StatusResponse):
+    sandboxId: str
+    artifactId: str
+    buildRegistryId: str
+
+
+class _SessionsResponse(BaseModel):
+    sessions: list[_RecoveredSession]
+
+
 def create_sandbox_router(
     *,
     resolve_scope: Callable[[UserPrincipal], tuple[str, str]],
+    resolve_build: Callable[[UserPrincipal, str], Awaitable[str]],
     resolve_artifact: Callable[[UserPrincipal, str, str], Awaitable[tuple[str, dict[str, str | bytes]]]],
 ) -> APIRouter:
     router = APIRouter()
@@ -84,6 +95,29 @@ def create_sandbox_router(
         except Exception as exc:
             raise HTTPException(status_code=503, detail="Preview coordination unavailable; try again shortly") from exc
         return manager
+
+    @router.get("/api/sandbox", response_model=_SessionsResponse)
+    async def recover_previews(
+        build_registry_id: str, principal: UserPrincipal = Depends(require_user_scope),
+    ):
+        app_id, user_id = resolve_scope(principal)
+        try:
+            target_app_id = await resolve_build(principal, build_registry_id)
+            states = await get_artifact_preview_sessions().list_for_build(
+                app_id=app_id, user_id=user_id, target_app_id=target_app_id,
+                build_registry_id=build_registry_id,
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            # An unavailable ledger is not evidence that no preview exists.
+            _logger.warning("preview_recovery_failed exception=%s", type(exc).__name__)
+            raise HTTPException(status_code=503, detail="Preview recovery unavailable; try again shortly") from exc
+        return {"sessions": [{
+            "sandboxId": state.sandbox_id, "artifactId": state.artifact_id,
+            "buildRegistryId": state.build_registry_id, "status": state.status,
+            "previewUrl": state.preview_url, "lastError": state.last_error,
+        } for state in states]}
 
     @router.post("/api/artifacts/{artifactId}/sandbox", response_model=_SandboxCreateResponse)
     async def create_preview(

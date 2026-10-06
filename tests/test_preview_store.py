@@ -72,6 +72,70 @@ async def _attach(store, reservation):
     })
 
 
+async def test_manager_recovery_keeps_queued_and_unconfirmed_allocation_handles(storage, monkeypatch):
+    from mozaiksai.core.sandbox import preview_sessions
+
+    monkeypatch.setattr(preview_sessions, "_utcnow", lambda: storage[1][0])
+    store = _store(storage)
+    first = await _reserve(store, "previous-artifact")
+    await _allocate(store, first, storage[1][0])
+    second = await _reserve(store, "newer-artifact")
+
+    def no_provider():
+        pytest.fail("Recovery must not contact, create, or stop a provider")
+
+    manager = preview_sessions.ArtifactPreviewSessionManager(
+        store=_store(storage), provider_resolver=no_provider,
+    )
+    identity = dict(app_id="host", user_id="owner", target_app_id="target", build_registry_id="build")
+    states = await manager.list_for_build(**identity)
+    assert {state.sandbox_id for state in states} == {first["sandbox_id"], second["sandbox_id"]}
+    assert {state.phase for state in states} == {"queued", "provisioning"}
+    assert all(state.status == "starting" and state.preview_url is None for state in states)
+
+    # Motor returns naive BSON dates by default; the store normalizes queue
+    # deadlines before recovery compares them with the manager's UTC clock.
+    queued = await store.get(second["sandbox_id"])
+    assert queued["queue_deadline"].utcoffset() == timedelta(0)
+    storage[1][0] += timedelta(seconds=16)
+    pending = {state.sandbox_id: state for state in await manager.list_for_build(**identity)}
+    assert pending[first["sandbox_id"]].status == "starting"
+    assert pending[second["sandbox_id"]].status == "error"
+
+    storage[1][0] += timedelta(seconds=315)
+    expired = await manager.list_for_build(**identity)
+    assert {state.sandbox_id for state in expired} == {first["sandbox_id"], second["sandbox_id"]}
+    assert all(state.status == "error" and state.preview_url is None for state in expired)
+    assert len(await store.list()) == 2
+
+
+async def test_manager_recovery_after_restart_keeps_running_identity_and_interrupted_handle(storage, monkeypatch):
+    from mozaiksai.core.sandbox import preview_sessions
+
+    monkeypatch.setattr(preview_sessions, "_utcnow", lambda: storage[1][0])
+    store = _store(storage)
+    first = await _reserve(store, "old-artifact", max_owner_sessions=2)
+    first = await _allocate(store, first, storage[1][0])
+    await _attach(store, first)
+    second = await _reserve(store, "failed-artifact", max_owner_sessions=2)
+    second = await _allocate(store, second, storage[1][0])
+    await _attach(store, second)
+    await store.claim_operation(second["sandbox_id"], kind="sync", lease_seconds=5)
+    storage[1][0] += timedelta(seconds=6)
+    manager = preview_sessions.ArtifactPreviewSessionManager(store=_store(storage))
+    states = {state.artifact_id: state for state in await manager.list_for_build(
+        app_id="host", user_id="owner", target_app_id="target", build_registry_id="build",
+    )}
+    assert states["old-artifact"].sandbox_id == first["sandbox_id"]
+    assert states["old-artifact"].status == "running"
+    assert states["old-artifact"].preview_url == "https://preview.example"
+    assert states["failed-artifact"].sandbox_id == second["sandbox_id"]
+    assert states["failed-artifact"].status == "error"
+    assert states["failed-artifact"].preview_url is None
+    assert "interrupted" in states["failed-artifact"].last_error
+    assert len(await store.list()) == 2
+
+
 async def test_cross_worker_deduplication_and_immutable_identity(storage):
     workers = [_store(storage) for _ in range(24)]
     results = await asyncio.gather(*(_reserve(worker) for worker in workers))

@@ -134,6 +134,9 @@ const AppWorkbench = ({
     previewArtifactId,
     sandboxError: sandboxSyncError,
     syncing: sandboxSyncing,
+    recovering: sandboxRecovering,
+    recoveryError: sandboxRecoveryError,
+    retryRecovery,
     sandboxId,
     stopping: sandboxStopping,
     stopPreview,
@@ -504,6 +507,9 @@ const AppWorkbench = ({
                 config={config}
                 onStartPreview={() => syncAndRestart(filesMap)}
                 onStopPreview={sandboxId ? stopPreview : null}
+                sandboxRecovering={sandboxRecovering}
+                sandboxRecoveryError={sandboxRecoveryError}
+                onRetryRecovery={retryRecovery}
                 sandboxStopping={sandboxStopping}
                 canStartPreview={Boolean(artifactVersionId && buildRegistryId && Object.keys(filesMap || {}).length > 0)}
               />

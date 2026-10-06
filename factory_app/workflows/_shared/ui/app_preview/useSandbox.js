@@ -27,33 +27,19 @@ export function useSandbox(artifactId, buildRegistryId) {
   const [sandboxError, setSandboxError] = useState(null);
   const [syncing, setSyncing] = useState(false);
   const [stopping, setStopping] = useState(false);
+  const [recovering, setRecovering] = useState(Boolean(buildRegistryId));
+  const [recoveryError, setRecoveryError] = useState(null);
   const generation = useRef(0);
   const observation = useRef(0);
   const selectedRegistry = useRef(buildRegistryId);
+  selectedRegistry.current = buildRegistryId;
+  const registryScope = useRef(null);
   const inFlight = useRef(false);
   const lastSession = useRef(null);
   const currentStatus = useRef(null);
   // Hide a different app synchronously, before the selection effect runs.
   const visibleSession = session?.buildRegistryId === buildRegistryId ? session : null;
   const sandboxId = visibleSession?.sandboxId || null;
-
-  useEffect(() => {
-    generation.current += 1;
-    const retainPreview = selectedRegistry.current === buildRegistryId
-      && currentStatus.current === 'running' && !inFlight.current;
-    selectedRegistry.current = buildRegistryId;
-    if (!retainPreview) {
-      observation.current += 1;
-      setSession(null);
-      setSandboxStatus(null);
-      currentStatus.current = null;
-      setLivePreviewUrl(null);
-      setSandboxError(null);
-    }
-    // A new version waits for the previous request before adopting a session.
-    setSyncing(inFlight.current);
-    return () => { generation.current += 1; };
-  }, [artifactId, buildRegistryId]);
 
   const applyStatus = useCallback((message) => {
     currentStatus.current = message.status || null;
@@ -62,8 +48,85 @@ export function useSandbox(artifactId, buildRegistryId) {
     setSandboxError(message.error || message.lastError || message.message || null);
   }, []);
 
+  const isSelectedRegistry = useCallback((scope) => registryScope.current === scope
+    && selectedRegistry.current === scope.buildRegistryId, []);
+
+  const restoreSession = useCallback((scope) => {
+    if (!isSelectedRegistry(scope)) return;
+    const sessions = [...scope.sessions.values()];
+    const restored = sessions.find(value => value.status === 'running' && value.previewUrl)
+      || sessions[0] || null;
+    lastSession.current = restored;
+    setSession(restored);
+    if (!inFlight.current) applyStatus(restored || { status: null });
+  }, [applyStatus, isSelectedRegistry]);
+
+  const recoverSessions = useCallback((scope) => {
+    if (scope.recovery) return scope.recovery;
+    if (!isSelectedRegistry(scope)) return Promise.resolve(false);
+    setRecovering(true);
+    setRecoveryError(null);
+    scope.error = null;
+    scope.recovery = (async () => {
+      try {
+        const response = await studioFetch(`/api/sandbox?build_registry_id=${encodeURIComponent(scope.buildRegistryId)}`);
+        const body = await response.json();
+        if (!isSelectedRegistry(scope)) return false;
+        if (!response.ok) throw new Error(body.detail || 'Existing previews could not be recovered');
+        if (!Array.isArray(body.sessions) || body.sessions.some(value => !value?.sandboxId
+          || !value.artifactId || value.buildRegistryId !== scope.buildRegistryId)) {
+          throw new Error('Existing preview identities could not be verified');
+        }
+        // Keep uncertain local cleanup handles until Stop confirms termination,
+        // even if a concurrent list no longer contains them.
+        for (const value of body.sessions) scope.sessions.set(value.sandboxId, value);
+        restoreSession(scope);
+        return true;
+      } catch (error) {
+        if (isSelectedRegistry(scope)) {
+          scope.error = error.message || 'Existing previews could not be recovered';
+          setRecoveryError(scope.error);
+        }
+        return false;
+      } finally {
+        scope.recovery = null;
+        if (isSelectedRegistry(scope)) setRecovering(false);
+      }
+    })();
+    return scope.recovery;
+  }, [isSelectedRegistry, restoreSession]);
+
   useEffect(() => {
-    if (!sandboxId || syncing || stopping || !['starting', 'running'].includes(sandboxStatus)) return undefined;
+    generation.current += 1;
+    if (inFlight.current) {
+      observation.current += 1;
+      applyStatus({ status: null });
+    }
+    setSyncing(inFlight.current);
+    return () => { generation.current += 1; };
+  }, [artifactId, buildRegistryId, applyStatus]);
+
+  useEffect(() => {
+    const scope = { buildRegistryId, sessions: new Map(), recovery: null, error: null };
+    registryScope.current = scope;
+    observation.current += 1;
+    lastSession.current = null;
+    setSession(null);
+    applyStatus({ status: null });
+    setRecoveryError(null);
+    setRecovering(Boolean(buildRegistryId));
+    if (buildRegistryId) recoverSessions(scope);
+    return () => { if (registryScope.current === scope) registryScope.current = null; };
+  }, [buildRegistryId, applyStatus, recoverSessions]);
+
+  const retryRecovery = useCallback(() => {
+    const scope = registryScope.current;
+    if (scope?.buildRegistryId && !inFlight.current) return recoverSessions(scope);
+    return Promise.resolve(false);
+  }, [recoverSessions]);
+
+  useEffect(() => {
+    if (!sandboxId || syncing || stopping || recovering || !['starting', 'running'].includes(sandboxStatus)) return undefined;
     const currentObservation = observation.current;
     let closed = false;
     let timer;
@@ -105,19 +168,48 @@ export function useSandbox(artifactId, buildRegistryId) {
       window.clearTimeout(timer);
       socket.close();
     };
-  }, [sandboxId, sandboxStatus, syncing, stopping, applyStatus]);
+  }, [sandboxId, sandboxStatus, syncing, stopping, recovering, applyStatus]);
+
+  const stopRegistrySessions = useCallback(async (scope, isCurrent) => {
+    for (const previous of [...scope.sessions.values()]) {
+      if (!isCurrent() || previous.buildRegistryId !== scope.buildRegistryId) return false;
+      if (!await stopSandbox(previous.sandboxId, isCurrent)) return false;
+      scope.sessions.delete(previous.sandboxId);
+      if (lastSession.current?.sandboxId === previous.sandboxId && isSelectedRegistry(scope)) {
+        lastSession.current = scope.sessions.values().next().value || null;
+        setSession(lastSession.current);
+      }
+    }
+    return isCurrent();
+  }, [isSelectedRegistry]);
+
+  const finishOperation = useCallback(async (scope) => {
+    inFlight.current = false;
+    const selected = registryScope.current;
+    if (!selected) return;
+    setSyncing(false);
+    setStopping(false);
+    // Navigation can recreate even the same registry while allocation is
+    // pending. Finish its earlier lookup before reading the settled handles.
+    if (selected !== scope) {
+      if (selected.recovery) await selected.recovery;
+      if (isSelectedRegistry(selected)) await recoverSessions(selected);
+    }
+  }, [isSelectedRegistry, recoverSessions]);
 
   const syncAndRestart = useCallback(async (filesMap) => {
     if (!artifactId || !buildRegistryId || inFlight.current) return;
     const entries = Object.entries(filesMap || {});
     if (!entries.length) return;
+    const scope = registryScope.current;
+    if (!scope || !isSelectedRegistry(scope) || scope.error) return;
     const currentGeneration = generation.current;
-    const isCurrent = () => generation.current === currentGeneration;
+    const isCurrent = () => generation.current === currentGeneration && isSelectedRegistry(scope);
     inFlight.current = true;
     observation.current += 1;
     setSyncing(true);
-    setSession(null);
     applyStatus({ status: 'starting' });
+    let allocating = false;
 
     async function post(url, body) {
       const response = await studioFetch(url, {
@@ -130,18 +222,24 @@ export function useSandbox(artifactId, buildRegistryId) {
     }
 
     try {
-      const previous = lastSession.current;
-      if (previous && (previous.artifactId !== artifactId || previous.buildRegistryId !== buildRegistryId || previous.requiresStop)) {
-        previous.requiresStop = true;
-        if (!await stopSandbox(previous.sandboxId, isCurrent)) return;
-        if (lastSession.current === previous) lastSession.current = null;
-        if (!isCurrent()) return;
+      if (!await recoverSessions(scope)) {
+        if (isCurrent()) applyStatus({ status: null });
+        return;
       }
-      const query = `?build_registry_id=${encodeURIComponent(buildRegistryId)}`;
-      const { sandboxId: sid } = await post(`/api/artifacts/${encodeURIComponent(artifactId)}/sandbox${query}`);
-      lastSession.current = { sandboxId: sid, artifactId, buildRegistryId };
       if (!isCurrent()) return;
-      setSession(lastSession.current);
+      applyStatus({ status: 'starting' });
+      if (!await stopRegistrySessions(scope, isCurrent)) return;
+      const query = `?build_registry_id=${encodeURIComponent(buildRegistryId)}`;
+      allocating = true;
+      const { sandboxId: sid } = await post(`/api/artifacts/${encodeURIComponent(artifactId)}/sandbox${query}`);
+      allocating = false;
+      const created = { sandboxId: sid, artifactId, buildRegistryId };
+      scope.sessions.set(sid, created);
+      if (isSelectedRegistry(scope)) {
+        lastSession.current = created;
+        setSession(created);
+      }
+      if (!isCurrent()) return;
       await post(`/api/sandbox/${encodeURIComponent(sid)}/sync`, {
         files: entries.map(([path, content]) => ({ path, content: String(content) })), deleted: [],
       });
@@ -149,26 +247,33 @@ export function useSandbox(artifactId, buildRegistryId) {
       const result = await post(`/api/sandbox/${encodeURIComponent(sid)}/start`);
       if (isCurrent()) applyStatus(result);
     } catch (error) {
+      // A failed response can still leave a durable reservation or provider
+      // allocation. Recover its cleanup handle without retrying allocation.
+      if (allocating && isSelectedRegistry(scope)) await recoverSessions(scope);
       if (isCurrent()) applyStatus({ status: 'error', message: error.message || 'Preview failed' });
     } finally {
-      inFlight.current = false;
-      setSyncing(false);
-      setStopping(false);
+      await finishOperation(scope);
     }
-  }, [artifactId, buildRegistryId, applyStatus]);
+  }, [artifactId, buildRegistryId, applyStatus, isSelectedRegistry, recoverSessions, stopRegistrySessions, finishOperation]);
 
   const stopPreview = useCallback(async () => {
     if (!sandboxId || inFlight.current) return;
-    const currentGeneration = generation.current;
-    const isCurrent = () => generation.current === currentGeneration;
+    const scope = registryScope.current;
+    if (!scope || !isSelectedRegistry(scope)) return;
+    // Stop owns registry cleanup, independent of whichever draft arrives next.
+    const isCurrent = () => isSelectedRegistry(scope);
     inFlight.current = true;
     observation.current += 1;
     setStopping(true);
-    if (lastSession.current?.sandboxId === sandboxId) lastSession.current.requiresStop = true;
     applyStatus({ status: 'stopping' });
     try {
-      if (!await stopSandbox(sandboxId, isCurrent)) return;
-      if (lastSession.current?.sandboxId === sandboxId) lastSession.current = null;
+      if (!await recoverSessions(scope)) {
+        if (isCurrent()) applyStatus({ status: null });
+        return;
+      }
+      if (!isCurrent()) return;
+      applyStatus({ status: 'stopping' });
+      if (!await stopRegistrySessions(scope, isCurrent)) return;
       if (isCurrent()) {
         generation.current += 1;
         setSession(null);
@@ -177,15 +282,13 @@ export function useSandbox(artifactId, buildRegistryId) {
     } catch (error) {
       if (isCurrent()) applyStatus({ status: 'error', message: error.message || 'Preview could not be stopped' });
     } finally {
-      inFlight.current = false;
-      setSyncing(false);
-      setStopping(false);
+      await finishOperation(scope);
     }
-  }, [sandboxId, applyStatus]);
+  }, [sandboxId, applyStatus, isSelectedRegistry, recoverSessions, stopRegistrySessions, finishOperation]);
 
   return {
     sandboxId, sandboxStatus, livePreviewUrl: visibleSession ? livePreviewUrl : null,
-    previewArtifactId: visibleSession && livePreviewUrl ? visibleSession.artifactId : null,
-    sandboxError, syncing, stopping, syncAndRestart, stopPreview,
+    previewArtifactId: visibleSession?.artifactId || null,
+    sandboxError, syncing, stopping, recovering, recoveryError, retryRecovery, syncAndRestart, stopPreview,
   };
 }

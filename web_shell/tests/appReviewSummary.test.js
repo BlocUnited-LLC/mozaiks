@@ -164,9 +164,11 @@ test('review workspace previews owned snapshots and keeps revision evidence sepa
     }}],
   });
   const requests = [];
+  const recoveryRequests = [];
   const bodies = new Map();
   const delayed = new Map();
   const active = new Set();
+  const sessions = new Map();
   let maxActive = 0;
   let origin;
   const saved = (id, status='passed') => ({
@@ -185,9 +187,15 @@ test('review workspace previews owned snapshots and keeps revision evidence sepa
     if (req.url==='/fixture.js') {res.setHeader('Content-Type','text/javascript');res.end(bundle.outputFiles[0].text);return;}
     if (req.url.startsWith('/preview/')) {res.setHeader('Content-Type','text/html');res.end('<h1>Customer app</h1><button onclick="this.textContent=\'Added\'">Add item</button>');return;}
     if (!req.url.startsWith('/api/')) {res.setHeader('Content-Type','text/html');res.end('<div id="root"></div><script src="/fixture.js"></script>');return;}
-    requests.push({url:req.url,method:req.method});
     res.setHeader('Content-Type','application/json');
     const url = new URL(req.url,'http://fixture');
+    if (req.method === 'GET' && url.pathname === '/api/sandbox') {
+      recoveryRequests.push(req.url);
+      const registry = url.searchParams.get('build_registry_id');
+      res.end(JSON.stringify({sessions:[...sessions.values()].filter(value => active.has(value.sandboxId) && value.buildRegistryId === registry)}));
+      return;
+    }
+    requests.push({url:req.url,method:req.method});
     const id = url.pathname.split('/')[5];
     if (url.pathname.endsWith('/bundle')) {
       const finish = () => res.end(JSON.stringify(bodies.get(id)));
@@ -198,12 +206,16 @@ test('review workspace previews owned snapshots and keeps revision evidence sepa
       res.end(JSON.stringify({review:next.review}));
     } else if (url.pathname.endsWith('/promote')) {res.end('{"promoted":true}');}
     else if (url.pathname.startsWith('/api/artifacts/')) {
-      const sid='session-'+url.pathname.split('/')[3];
+      const artifactId=url.pathname.split('/')[3];
+      const sid='session-'+artifactId;
       if (active.size) {res.statusCode=409;res.end('{"detail":"quota"}');return;}
+      sessions.set(sid,{sandboxId:sid,artifactId,buildRegistryId:url.searchParams.get('build_registry_id'),status:'starting',previewUrl:null,lastError:null});
       active.add(sid);maxActive=Math.max(maxActive,active.size);res.end(JSON.stringify({sandboxId:sid}));
     } else if (url.pathname.endsWith('/stop')) {active.delete(url.pathname.split('/')[3]);res.end('{"ok":true}');}
     else if (url.pathname.endsWith('/start') || url.pathname.endsWith('/status')) {
-      res.end(JSON.stringify({status:'running',previewUrl:origin+'/preview/'+url.pathname.split('/')[3]}));
+      const session=sessions.get(url.pathname.split('/')[3]);
+      Object.assign(session,{status:'running',previewUrl:origin+'/preview/'+session.sandboxId});
+      res.end(JSON.stringify(session));
     } else res.end('{"ok":true}');
   });
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
@@ -218,6 +230,7 @@ test('review workspace previews owned snapshots and keeps revision evidence sepa
   const result=(id,status='validated')=>({execution_mode:'coding_worker',coding_worker:{status,metadata:id?{build_record_id:id}:{},
     validation_result:{validation_status:status==='validated'?'passed':'failed'},applied_files:{'app.json':'untrusted inline files'}}});
   await expect(page.getByRole('button',{name:'Start draft preview',exact:true})).toBeVisible();
+  assert.deepEqual(recoveryRequests,['/api/sandbox?build_registry_id=registry-a']);
   assert.equal(requests[0].url,'/api/studio/build/artifacts/parent/bundle?build_registry_id=registry-a');
   await page.getByRole('button',{name:'Start draft preview',exact:true}).click();
   const iframe=page.frameLocator('iframe[title="Draft app preview"]');

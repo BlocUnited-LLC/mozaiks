@@ -10,8 +10,67 @@ const shell = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const hook = path.join(path.dirname(shell), 'factory_app/workflows/_shared/ui/app_preview/useSandbox.js');
 const pane = path.join(path.dirname(shell), 'factory_app/workflows/_shared/ui/app_preview/PreviewPane.js');
 
+async function previewFixtureBundle() {
+  return build({
+    stdin: { resolveDir: shell, loader: 'jsx', contents: `
+      import React, { useState } from 'react';
+      import { createRoot } from 'react-dom/client';
+      import { useSandbox } from ${JSON.stringify(hook)};
+      import PreviewPane from ${JSON.stringify(pane)};
+      function Fixture() {
+        const [version, setVersion] = useState(1);
+        const [registry, setRegistry] = useState('registry-a');
+        const [refining, setRefining] = useState(false);
+        const preview = useSandbox('artifact-' + version, registry);
+        window.tryPreview = () => preview.syncAndRestart({'app.json':'{}'});
+        window.tryStop = () => preview.stopPreview();
+        window.tryRecover = () => preview.retryRecovery();
+        return <main>
+          <h1 id="workspace-brand" style={{color:'var(--color-primary)',fontFamily:'sans-serif'}}>Mozaiks builder</h1>
+          <PreviewPane
+            previewUrl={preview.livePreviewUrl}
+            artifactVersionId={'artifact-' + version}
+            previewArtifactId={preview.previewArtifactId}
+            refinementPending={refining}
+            sandboxStatus={preview.sandboxStatus}
+            sandboxSyncing={preview.syncing}
+            sandboxError={preview.sandboxError}
+            onStartPreview={() => preview.syncAndRestart({'app.json':'{}'})}
+            onStopPreview={preview.sandboxId ? preview.stopPreview : null}
+            sandboxStopping={preview.stopping}
+            sandboxRecovering={preview.recovering}
+            sandboxRecoveryError={preview.recoveryError}
+            onRetryRecovery={preview.retryRecovery}
+            canStartPreview
+          />
+          <button onClick={() => setVersion(version + 1)}>Next version</button>
+          <button onClick={() => setVersion(version - 1)}>Previous version</button>
+          <button onClick={() => setRegistry('registry-b')}>Other app</button>
+          <button onClick={() => setRegistry('registry-a')}>Original app</button>
+          <button onClick={() => setRefining(!refining)}>Toggle refinement</button>
+          <button onClick={() => window.previewSocket.onmessage({data:JSON.stringify({type:'status',status:'error',lastError:'Container expired'})})}>Expire</button>
+          <output aria-label="Version">{version}</output>
+          <output aria-label="State" style={{display:'block',overflowWrap:'anywhere'}}>{JSON.stringify({status:preview.sandboxStatus,url:preview.livePreviewUrl,version:preview.previewArtifactId,error:preview.sandboxError,syncing:preview.syncing,stopping:preview.stopping,recovering:preview.recovering,recoveryError:preview.recoveryError})}</output>
+        </main>;
+      }
+      const root = createRoot(document.getElementById('root'));
+      window.unmountPreview = () => root.unmount();
+      root.render(<Fixture />);
+    ` },
+    bundle: true, write: false, jsx: 'automatic', loader: {'.js': 'jsx'}, nodePaths: [path.join(shell, 'node_modules')],
+    plugins: [{ name: 'preview-transport-fixture', setup(builder) {
+      builder.onResolve({filter: /websocketAuth\.js$/}, () => ({path: 'socket', namespace: 'fixture'}));
+      builder.onResolve({filter: /studioApi\.js$/}, () => ({path: 'http', namespace: 'fixture'}));
+      builder.onLoad({filter: /.*/, namespace: 'fixture'}, ({path: kind}) => ({contents: kind === 'socket'
+        ? 'export function openAuthenticatedWebSocket() { const socket = {close(){}}; window.previewSockets ||= []; window.previewSockets.push(socket); window.previewSocket = socket; return socket; }'
+        : 'export const getStudioAccessToken = () => null; export const studioFetch = (...args) => fetch(...args);', loader: 'js'}));
+    }}],
+  });
+}
+
 test('draft preview preserves workspace branding, opens separately, and follows saved version lifecycle', async (t) => {
   const requests = [];
+  const recoveryRequests = [];
   let failStart = false;
   let delayedStart = null;
   let delayNextStart = false;
@@ -29,57 +88,9 @@ test('draft preview preserves workspace branding, opens separately, and follows 
   let delayNextStatus = false;
   let previewUrl;
   const activeSessions = new Set();
+  const sessionRecords = new Map();
   let maxActiveSessions = 0;
-  const bundle = await build({
-    stdin: { resolveDir: shell, loader: 'jsx', contents: `
-      import React, { useState } from 'react';
-      import { createRoot } from 'react-dom/client';
-      import { useSandbox } from ${JSON.stringify(hook)};
-      import PreviewPane from ${JSON.stringify(pane)};
-      function Fixture() {
-        const [version, setVersion] = useState(1);
-        const [registry, setRegistry] = useState('registry-a');
-        const [refining, setRefining] = useState(false);
-        const preview = useSandbox('artifact-' + version, registry);
-        window.tryPreview = () => preview.syncAndRestart({'app.json':'{}'});
-        window.tryStop = () => preview.stopPreview();
-        return <main>
-          <h1 id="workspace-brand" style={{color:'var(--color-primary)',fontFamily:'sans-serif'}}>Mozaiks builder</h1>
-          <PreviewPane
-            previewUrl={preview.livePreviewUrl}
-            artifactVersionId={'artifact-' + version}
-            previewArtifactId={preview.previewArtifactId}
-            refinementPending={refining}
-            sandboxStatus={preview.sandboxStatus}
-            sandboxSyncing={preview.syncing}
-            sandboxError={preview.sandboxError}
-            onStartPreview={() => preview.syncAndRestart({'app.json':'{}'})}
-            onStopPreview={preview.sandboxId ? preview.stopPreview : null}
-            sandboxStopping={preview.stopping}
-            canStartPreview
-          />
-          <button onClick={() => setVersion(version + 1)}>Next version</button>
-          <button onClick={() => setVersion(version - 1)}>Previous version</button>
-          <button onClick={() => setRegistry('registry-b')}>Other app</button>
-          <button onClick={() => setRefining(!refining)}>Toggle refinement</button>
-          <button onClick={() => window.previewSocket.onmessage({data:JSON.stringify({type:'status',status:'error',lastError:'Container expired'})})}>Expire</button>
-          <output aria-label="Version">{version}</output>
-          <output aria-label="State" style={{display:'block',overflowWrap:'anywhere'}}>{JSON.stringify({status:preview.sandboxStatus,url:preview.livePreviewUrl,version:preview.previewArtifactId,error:preview.sandboxError,syncing:preview.syncing,stopping:preview.stopping})}</output>
-        </main>;
-      }
-      const root = createRoot(document.getElementById('root'));
-      window.unmountPreview = () => root.unmount();
-      root.render(<Fixture />);
-    ` },
-    bundle: true, write: false, jsx: 'automatic', loader: {'.js': 'jsx'}, nodePaths: [path.join(shell, 'node_modules')],
-    plugins: [{ name: 'preview-transport-fixture', setup(builder) {
-      builder.onResolve({filter: /websocketAuth\.js$/}, () => ({path: 'socket', namespace: 'fixture'}));
-      builder.onResolve({filter: /studioApi\.js$/}, () => ({path: 'http', namespace: 'fixture'}));
-      builder.onLoad({filter: /.*/, namespace: 'fixture'}, ({path: kind}) => ({contents: kind === 'socket'
-        ? 'export function openAuthenticatedWebSocket() { const socket = {close(){}}; window.previewSockets ||= []; window.previewSockets.push(socket); window.previewSocket = socket; return socket; }'
-        : 'export const getStudioAccessToken = () => null; export const studioFetch = (...args) => fetch(...args);', loader: 'js'}));
-    }}],
-  });
+  const bundle = await previewFixtureBundle();
   const server = http.createServer((req, res) => {
     if (req.url === '/fixture.js') { res.setHeader('Content-Type', 'text/javascript'); res.end(bundle.outputFiles[0].text); return; }
     if (req.url.startsWith('/preview')) {
@@ -88,26 +99,39 @@ test('draft preview preserves workspace branding, opens separately, and follows 
       return;
     }
     if (!req.url.startsWith('/api/')) { res.setHeader('Content-Type', 'text/html'); res.end('<style>:root{--color-primary:#06b6d4}</style><div id="root"></div><script src="/fixture.js"></script>'); return; }
-    requests.push(req.url);
     res.setHeader('Content-Type', 'application/json');
+    if (req.url.startsWith('/api/sandbox?')) {
+      recoveryRequests.push(req.url);
+      const registry = new URL(req.url, 'http://local').searchParams.get('build_registry_id');
+      res.end(JSON.stringify({sessions:[...sessionRecords.values()].filter(value => activeSessions.has(value.sandboxId) && value.buildRegistryId === registry)}));
+      return;
+    }
+    requests.push(req.url);
     const sandboxId = req.url.split('/')[3];
     if (req.url.includes('/artifacts/')) {
       const finish = () => {
-        const sid = 'sandbox-' + new URL(req.url, 'http://local').pathname.split('/')[3]
-          + '-' + new URL(req.url, 'http://local').searchParams.get('build_registry_id');
-        if (activeSessions.size && !activeSessions.has(sid)) {
+        const artifactId = new URL(req.url, 'http://local').pathname.split('/')[3];
+        const buildRegistryId = new URL(req.url, 'http://local').searchParams.get('build_registry_id');
+        const sid = 'sandbox-' + artifactId + '-' + buildRegistryId;
+        const registrySessions = [...activeSessions].filter(id => sessionRecords.get(id)?.buildRegistryId === buildRegistryId);
+        if (registrySessions.length && !activeSessions.has(sid)) {
           res.statusCode = 409;
           res.end('{"detail":"Preview quota one exceeded"}');
           return;
         }
         activeSessions.add(sid);
-        maxActiveSessions = Math.max(maxActiveSessions, activeSessions.size);
+        sessionRecords.set(sid, {sandboxId:sid, artifactId, buildRegistryId, status:'starting', previewUrl:null, lastError:null});
+        maxActiveSessions = Math.max(maxActiveSessions, registrySessions.length || 1);
         res.end(JSON.stringify({sandboxId:sid}));
       };
       if (delayNextCreate) { delayNextCreate = false; delayedCreate = finish; } else finish();
     }
     else if (req.url.endsWith('/start')) {
-      const finish = () => res.end(JSON.stringify(failStart ? {status:'error',previewUrl:null,message:'Backend startup failed'} : {status:'running',previewUrl:previewUrl + '?session=' + sandboxId}));
+      const finish = () => {
+        const state = failStart ? {status:'error',previewUrl:null,lastError:'Backend startup failed'} : {status:'running',previewUrl:previewUrl + '?session=' + sandboxId,lastError:null};
+        Object.assign(sessionRecords.get(sandboxId), state);
+        res.end(JSON.stringify(state));
+      };
       if (delayNextStart) { delayNextStart = false; delayedStart = finish; } else finish();
     } else if (req.url.endsWith('/stop') && delayNextStop) {
       delayNextStop = false;
@@ -236,7 +260,7 @@ test('draft preview preserves workspace branding, opens separately, and follows 
   await expect.poll(() => Boolean(delayedStart)).toBe(true);
   await page.getByRole('button', {name:'Next version',exact:true}).click();
   await expect(page.getByLabel('Version')).toHaveText('4');
-  await expect(page.getByText('Version artifact-4')).toBeVisible();
+  await expect(page.getByText('Preview based on version artifact-3')).toBeVisible();
   delayedStart();
   await expect.poll(async () => (await state()).syncing).toBe(false);
   assert.equal((await state()).url, null);
@@ -355,11 +379,14 @@ test('draft preview preserves workspace branding, opens separately, and follows 
   assert.equal(requests.length, beforeRegistryChange, 'Switching app hides its preview without allocating another');
   await page.getByRole('button', {name:'Start draft preview',exact:true}).click();
   await expect.poll(async () => (await state()).url).toBe(runningUrl(11, 'registry-b'));
-  assert.deepEqual(requests.slice(beforeRegistryChange, beforeRegistryChange + 2), [
-    '/api/sandbox/sandbox-artifact-11-registry-a/stop',
+  assert.deepEqual(requests.slice(beforeRegistryChange, beforeRegistryChange + 3), [
     '/api/artifacts/artifact-11/sandbox?build_registry_id=registry-b',
-  ]);
-  assert.equal(maxActiveSessions, 1, 'Replacement never exceeds one allocated preview');
+    '/api/sandbox/sandbox-artifact-11-registry-b/sync',
+    '/api/sandbox/sandbox-artifact-11-registry-b/start',
+  ], 'Starting another registry must not stop the former registry preview');
+  assert.ok(activeSessions.has('sandbox-artifact-11-registry-a'));
+  assert.equal(maxActiveSessions, 1, 'Replacement never exceeds one allocated preview per registry');
+  assert.ok(recoveryRequests.length > 0);
 
   await t.test('busy stops retry within bounds without duplicate requests or premature allocation', async () => {
     await page.clock.pauseAt(await page.evaluate(() => new Date(Date.now() + 1000).toISOString()));
@@ -398,7 +425,7 @@ test('draft preview preserves workspace branding, opens separately, and follows 
     await page.evaluate(() => window.tryPreview());
     await page.clock.runFor(1999);
     assert.deepEqual(requests.slice(beforeReplacement), [stop11]);
-    assert.deepEqual([...activeSessions], ['sandbox-artifact-11-registry-b']);
+    assert.deepEqual([...activeSessions], ['sandbox-artifact-11-registry-a', 'sandbox-artifact-11-registry-b']);
     await page.clock.runFor(1);
     await expect.poll(async () => (await state()).version).toBe('artifact-12');
     assert.deepEqual(requests.slice(beforeReplacement), [
@@ -426,7 +453,7 @@ test('draft preview preserves workspace branding, opens separately, and follows 
     await expect(page.getByRole('button', {name:'Stop preview',exact:true})).toBeEnabled();
     await page.clock.runFor(10000);
     assert.deepEqual(requests.slice(beforeExhaustion), [stop12, stop12, stop12]);
-    assert.deepEqual([...activeSessions], ['sandbox-artifact-12-registry-b']);
+    assert.deepEqual([...activeSessions], ['sandbox-artifact-11-registry-a', 'sandbox-artifact-12-registry-b']);
     busyStops = 0;
     stopRetryAfter = '2';
     await page.getByRole('button', {name:'Start draft preview',exact:true}).click();
@@ -475,9 +502,358 @@ test('draft preview preserves workspace branding, opens separately, and follows 
     await page.evaluate(() => window.unmountPreview());
     await page.clock.runFor(10000);
     assert.deepEqual(requests.slice(beforeUnmount), ['/api/sandbox/sandbox-artifact-14-registry-b/stop']);
-    assert.equal(activeSessions.size, 1, 'Cancelling a busy stop must not claim provider cleanup completed');
+    assert.deepEqual([...activeSessions], ['sandbox-artifact-11-registry-a', 'sandbox-artifact-14-registry-b'],
+      'Cancelling a busy stop must not claim provider cleanup completed');
     assert.equal(maxActiveSessions, 1);
   });
+});
+
+test('durable preview recovery preserves actual identity and cleanup across reloads and registry changes', async (t) => {
+  const bundle = await previewFixtureBundle();
+  const sessions = new Map();
+  const mutations = [];
+  const recoveries = [];
+  let delayRegistry = null;
+  let delayedRecoveries = [];
+  let recoveryUnavailable = false;
+  let failCreateAfterReserve = false;
+  let delayNextCreateResponse = false;
+  let delayedCreateResponse = null;
+  let delayNextStopResponse = false;
+  let delayedStopResponse = null;
+  let quota = 1;
+  let maxAllocated = 0;
+  let origin;
+  const saved = (sandboxId, artifactId, buildRegistryId = 'registry-a', status = 'running') => ({
+    sandboxId, artifactId, buildRegistryId, status,
+    previewUrl: status === 'running' ? `${origin}/preview?session=${sandboxId}` : null,
+    lastError: status === 'error' ? 'Previous termination needs retry' : null,
+  });
+  const server = http.createServer((req, res) => {
+    if (req.url === '/fixture.js') { res.setHeader('Content-Type', 'text/javascript'); res.end(bundle.outputFiles[0].text); return; }
+    if (req.url.startsWith('/preview')) { res.setHeader('Content-Type', 'text/html'); res.end('<h1>Recovered preview</h1>'); return; }
+    if (!req.url.startsWith('/api/')) { res.setHeader('Content-Type', 'text/html'); res.end('<div id="root"></div><script src="/fixture.js"></script>'); return; }
+    res.setHeader('Content-Type', 'application/json');
+    const url = new URL(req.url, 'http://fixture');
+    if (req.method === 'GET' && url.pathname === '/api/sandbox') {
+      recoveries.push(req.url);
+      if (recoveryUnavailable) { res.statusCode = 503; res.end('{"detail":"Existing previews are temporarily unavailable"}'); return; }
+      const registry = url.searchParams.get('build_registry_id');
+      const body = {sessions:[...sessions.values()].filter(value => value.buildRegistryId === registry)};
+      const finish = () => res.end(JSON.stringify(body));
+      if (delayRegistry === registry) delayedRecoveries.push(finish);
+      else finish();
+      return;
+    }
+    if (req.method !== 'POST') { res.statusCode = 404; res.end('{"detail":"Unknown request"}'); return; }
+    mutations.push(req.url);
+    if (url.pathname.startsWith('/api/artifacts/')) {
+      if (sessions.size >= quota) { res.statusCode = 429; res.end('{"detail":"Preview quota one exceeded"}'); return; }
+      const artifactId = url.pathname.split('/')[3];
+      const buildRegistryId = url.searchParams.get('build_registry_id');
+      const sandboxId = `sandbox-${artifactId}-${buildRegistryId}`;
+      sessions.set(sandboxId, saved(sandboxId, artifactId, buildRegistryId, 'starting'));
+      maxAllocated = Math.max(maxAllocated, sessions.size);
+      const finish = () => {
+        if (failCreateAfterReserve) {
+          res.statusCode = 503;
+          res.end('{"detail":"Allocation cleanup is pending"}');
+        } else res.end(JSON.stringify({sandboxId}));
+      };
+      if (delayNextCreateResponse) { delayNextCreateResponse = false; delayedCreateResponse = finish; }
+      else finish();
+      return;
+    }
+    const sandboxId = url.pathname.split('/')[3];
+    if (url.pathname.endsWith('/stop')) {
+      const finish = () => { sessions.delete(sandboxId); res.end('{"ok":true}'); };
+      if (delayNextStopResponse) { delayNextStopResponse = false; delayedStopResponse = finish; }
+      else finish();
+    } else if (url.pathname.endsWith('/start')) {
+      const current = sessions.get(sandboxId);
+      Object.assign(current, saved(sandboxId, current.artifactId, current.buildRegistryId));
+      res.end(JSON.stringify(current));
+    } else res.end('{"ok":true}');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  origin = `http://127.0.0.1:${server.address().port}`;
+  t.after(() => new Promise(resolve => { server.closeAllConnections(); server.close(resolve); }));
+  const browser = await chromium.launch({headless:true});
+  t.after(() => browser.close());
+  const reset = () => {
+    sessions.clear();
+    mutations.length = 0;
+    recoveries.length = 0;
+    delayRegistry = null;
+    delayedRecoveries = [];
+    recoveryUnavailable = false;
+    failCreateAfterReserve = false;
+    delayNextCreateResponse = false;
+    delayedCreateResponse = null;
+    delayNextStopResponse = false;
+    delayedStopResponse = null;
+    quota = 1;
+    maxAllocated = 0;
+  };
+  const state = async page => JSON.parse(await page.getByLabel('State').textContent());
+
+  await t.test('reload then early edit restores the old version and Update releases quota before allocation', async () => {
+    reset();
+    const page = await browser.newPage();
+    try {
+      await page.goto(origin);
+      await page.getByRole('button', {name:'Start draft preview',exact:true}).click();
+      await expect.poll(async () => (await state(page)).status).toBe('running');
+      assert.equal(sessions.size, 1);
+      assert.deepEqual(recoveries, [
+        '/api/sandbox?build_registry_id=registry-a',
+        '/api/sandbox?build_registry_id=registry-a',
+      ]);
+      const beforeReload = mutations.length;
+      delayRegistry = 'registry-a';
+      await page.reload();
+      await expect.poll(() => delayedRecoveries.length).toBe(1);
+      await page.getByRole('button', {name:'Next version',exact:true}).click();
+      await expect(page.getByLabel('Version')).toHaveText('2');
+      await expect(page.getByText('Recovering existing previews…', {exact:true})).toBeVisible();
+      await expect(page.getByRole('button', {name:'Start draft preview',exact:true})).toHaveCount(0);
+      assert.deepEqual(mutations.slice(beforeReload), []);
+      delayRegistry = null;
+      delayedRecoveries.shift()();
+      await expect(page.getByText('Preview based on version artifact-1', {exact:true})).toBeVisible();
+      await expect(page.getByRole('button', {name:'Stop preview',exact:true})).toBeEnabled();
+      await expect(page.getByRole('button', {name:'Update preview',exact:true})).toBeEnabled();
+      assert.equal((await state(page)).version, 'artifact-1');
+      assert.deepEqual(mutations.slice(beforeReload), []);
+      await page.getByRole('button', {name:'Update preview',exact:true}).click();
+      await expect.poll(async () => (await state(page)).version).toBe('artifact-2');
+      await expect.poll(async () => (await state(page)).status).toBe('running');
+      assert.deepEqual(mutations.slice(beforeReload), [
+        '/api/sandbox/sandbox-artifact-1-registry-a/stop',
+        '/api/artifacts/artifact-2/sandbox?build_registry_id=registry-a',
+        '/api/sandbox/sandbox-artifact-2-registry-a/sync',
+        '/api/sandbox/sandbox-artifact-2-registry-a/start',
+      ]);
+      assert.equal(maxAllocated, 1);
+      await page.getByRole('button', {name:'Stop preview',exact:true}).click();
+      await expect.poll(() => sessions.size).toBe(0);
+      await expect(page.locator('iframe')).toHaveCount(0);
+      assert.deepEqual(mutations.slice(beforeReload + 4), ['/api/sandbox/sandbox-artifact-2-registry-a/stop']);
+    } finally { await page.close(); }
+  });
+
+  await t.test('Stop recovers and clears every same-registry handle including errors without touching another app', async () => {
+    reset();
+    for (const session of [
+      saved('error-old', 'failed-draft', 'registry-a', 'error'),
+      saved('running-old', 'running-draft'),
+      saved('pending-old', 'pending-draft', 'registry-a', 'starting'),
+      saved('foreign', 'foreign-draft', 'registry-b'),
+    ]) sessions.set(session.sandboxId, session);
+    const page = await browser.newPage();
+    try {
+      await page.goto(origin);
+      await expect.poll(async () => (await state(page)).version).toBe('running-draft');
+      await expect(page.getByText('Preview based on version running-draf', {exact:true})).toBeVisible();
+      delayNextStopResponse = true;
+      await page.getByRole('button', {name:'Stop preview',exact:true}).click();
+      await expect.poll(() => Boolean(delayedStopResponse)).toBe(true);
+      await page.getByRole('button', {name:'Next version',exact:true}).click();
+      delayedStopResponse();
+      await expect.poll(async () => (await state(page)).status).toBe(null);
+      await expect.poll(() => sessions.size).toBe(1);
+      assert.deepEqual(mutations, [
+        '/api/sandbox/error-old/stop', '/api/sandbox/running-old/stop', '/api/sandbox/pending-old/stop',
+      ]);
+      assert.deepEqual([...sessions.keys()], ['foreign']);
+      await expect(page.getByRole('button', {name:'Stop preview',exact:true})).toHaveCount(0);
+    } finally { await page.close(); }
+  });
+
+  await t.test('Update cleans multiple recovered handles before creating and error-only recovery still exposes Stop', async () => {
+    reset();
+    sessions.set('error-old', saved('error-old', 'failed-draft', 'registry-a', 'error'));
+    const page = await browser.newPage();
+    try {
+      await page.goto(origin);
+      await expect.poll(async () => (await state(page)).version).toBe('failed-draft');
+      await expect(page.getByText('Preview based on version failed-draft', {exact:true})).toBeVisible();
+      await expect(page.getByRole('button', {name:'Stop preview',exact:true})).toBeEnabled();
+      // A second handle created elsewhere must be discovered by the explicit
+      // action even though it was absent from the mount recovery.
+      sessions.set('running-old', saved('running-old', 'old-draft'));
+      await page.getByRole('button', {name:'Start draft preview',exact:true}).click();
+      await expect.poll(async () => (await state(page)).status).toBe('running');
+      assert.deepEqual(mutations, [
+        '/api/sandbox/error-old/stop', '/api/sandbox/running-old/stop',
+        '/api/artifacts/artifact-1/sandbox?build_registry_id=registry-a',
+        '/api/sandbox/sandbox-artifact-1-registry-a/sync',
+        '/api/sandbox/sandbox-artifact-1-registry-a/start',
+      ]);
+      assert.equal(maxAllocated, 1);
+      await page.getByRole('button', {name:'Stop preview',exact:true}).click();
+      await expect.poll(() => sessions.size).toBe(0);
+    } finally { await page.close(); }
+  });
+
+  await t.test('failed recovery blocks allocation until explicit retry, including discovery before Update', async () => {
+    reset();
+    sessions.set('running-old', saved('running-old', 'old-draft'));
+    recoveryUnavailable = true;
+    const page = await browser.newPage();
+    try {
+      await page.goto(origin);
+      await expect(page.getByRole('button', {name:'Retry preview recovery',exact:true})).toBeEnabled();
+      await expect(page.getByRole('button', {name:'Start draft preview',exact:true})).toHaveCount(0);
+      await page.evaluate(() => { window.tryPreview(); });
+      assert.deepEqual(mutations, []);
+      assert.deepEqual(recoveries, ['/api/sandbox?build_registry_id=registry-a']);
+      recoveryUnavailable = false;
+      await page.getByRole('button', {name:'Retry preview recovery',exact:true}).click();
+      await expect.poll(async () => (await state(page)).version).toBe('old-draft');
+      recoveryUnavailable = true;
+      await page.getByRole('button', {name:'Update preview',exact:true}).click();
+      await expect(page.getByRole('button', {name:'Retry preview recovery',exact:true})).toBeEnabled();
+      assert.deepEqual(mutations, []);
+      assert.deepEqual([...sessions.keys()], ['running-old']);
+      await page.evaluate(() => { window.tryPreview(); });
+      assert.deepEqual(recoveries, Array(3).fill('/api/sandbox?build_registry_id=registry-a'));
+      recoveryUnavailable = false;
+      await page.getByRole('button', {name:'Retry preview recovery',exact:true}).click();
+      await expect(page.getByRole('button', {name:'Update preview',exact:true})).toBeEnabled();
+      await page.getByRole('button', {name:'Update preview',exact:true}).click();
+      await expect.poll(async () => (await state(page)).status).toBe('running');
+      assert.deepEqual(mutations, [
+        '/api/sandbox/running-old/stop',
+        '/api/artifacts/artifact-1/sandbox?build_registry_id=registry-a',
+        '/api/sandbox/sandbox-artifact-1-registry-a/sync',
+        '/api/sandbox/sandbox-artifact-1-registry-a/start',
+      ]);
+      await page.getByRole('button', {name:'Stop preview',exact:true}).click();
+      await expect.poll(() => sessions.size).toBe(0);
+    } finally { await page.close(); }
+  });
+
+  await t.test('a failed create recovers its durable reservation and exposes Stop without another Start or reload', async () => {
+    reset();
+    failCreateAfterReserve = true;
+    const page = await browser.newPage();
+    try {
+      await page.goto(origin);
+      await page.getByRole('button', {name:'Start draft preview',exact:true}).click();
+      await expect.poll(async () => (await state(page)).error).toBe('Allocation cleanup is pending');
+      await expect(page.getByRole('button', {name:'Stop preview',exact:true})).toBeEnabled();
+      await expect(page.getByText('Preview based on version artifact-1', {exact:true})).toBeVisible();
+      assert.deepEqual(mutations, ['/api/artifacts/artifact-1/sandbox?build_registry_id=registry-a']);
+      assert.deepEqual(recoveries, Array(3).fill('/api/sandbox?build_registry_id=registry-a'));
+      await page.getByRole('button', {name:'Stop preview',exact:true}).click();
+      await expect.poll(() => sessions.size).toBe(0);
+      assert.deepEqual(mutations, [
+        '/api/artifacts/artifact-1/sandbox?build_registry_id=registry-a',
+        '/api/sandbox/sandbox-artifact-1-registry-a/stop',
+      ]);
+    } finally { await page.close(); }
+  });
+
+  await t.test('switching registry during allocation restores the new registry once the old request settles', async () => {
+    reset();
+    quota = 2;
+    sessions.set('current-registry', saved('current-registry', 'current-draft', 'registry-b'));
+    const page = await browser.newPage();
+    try {
+      await page.goto(origin);
+      delayNextCreateResponse = true;
+      await page.getByRole('button', {name:'Start draft preview',exact:true}).click();
+      await expect.poll(() => Boolean(delayedCreateResponse)).toBe(true);
+      await page.getByRole('button', {name:'Other app',exact:true}).click();
+      await expect.poll(async () => (await state(page)).version).toBe('current-draft');
+      await expect.poll(async () => (await state(page)).recovering).toBe(false);
+      assert.equal((await state(page)).syncing, true);
+      delayedCreateResponse();
+      await expect.poll(async () => (await state(page)).status).toBe('running');
+      assert.equal((await state(page)).url, `${origin}/preview?session=current-registry`);
+      assert.deepEqual(mutations, ['/api/artifacts/artifact-1/sandbox?build_registry_id=registry-a']);
+      await page.getByRole('button', {name:'Stop preview',exact:true}).click();
+      await expect.poll(async () => (await state(page)).status).toBe(null);
+      assert.deepEqual([...sessions.keys()], ['sandbox-artifact-1-registry-a']);
+      await page.getByRole('button', {name:'Original app',exact:true}).click();
+      await expect.poll(async () => (await state(page)).version).toBe('artifact-1');
+      await page.getByRole('button', {name:'Stop preview',exact:true}).click();
+      await expect.poll(() => sessions.size).toBe(0);
+      assert.deepEqual(mutations, [
+        '/api/artifacts/artifact-1/sandbox?build_registry_id=registry-a',
+        '/api/sandbox/current-registry/stop',
+        '/api/sandbox/sandbox-artifact-1-registry-a/stop',
+      ]);
+    } finally { await page.close(); }
+  });
+
+  await t.test('a late recovery from the previous registry cannot replace the current preview or enter its cleanup list', async () => {
+    reset();
+    sessions.set('old-registry', saved('old-registry', 'old-artifact'));
+    sessions.set('current-registry', saved('current-registry', 'current-draft', 'registry-b'));
+    delayRegistry = 'registry-a';
+    const page = await browser.newPage();
+    try {
+      await page.goto(origin);
+      await expect.poll(() => delayedRecoveries.length).toBe(1);
+      await page.getByRole('button', {name:'Other app',exact:true}).click();
+      await expect.poll(async () => (await state(page)).version).toBe('current-draft');
+      delayRegistry = null;
+      delayedRecoveries.shift()();
+      await expect(page.getByText('Preview based on version current-draf', {exact:true})).toBeVisible();
+      assert.equal((await state(page)).url, `${origin}/preview?session=current-registry`);
+      assert.deepEqual(mutations, []);
+      assert.deepEqual(recoveries, ['/api/sandbox?build_registry_id=registry-a', '/api/sandbox?build_registry_id=registry-b']);
+      await page.getByRole('button', {name:'Stop preview',exact:true}).click();
+      await expect.poll(async () => (await state(page)).status).toBe(null);
+      assert.deepEqual(mutations, ['/api/sandbox/current-registry/stop']);
+      assert.deepEqual([...sessions.keys()], ['old-registry']);
+    } finally { await page.close(); }
+  });
+
+  for (const failedCreate of [false, true]) {
+    await t.test(`returning to the original registry during a ${failedCreate ? 'failed' : 'successful'} allocation recovers its late handle`, async () => {
+      reset();
+      failCreateAfterReserve = failedCreate;
+      const page = await browser.newPage();
+      let releaseCreate;
+      await page.route('**/api/artifacts/*/sandbox?*', route => {
+        releaseCreate = () => route.continue();
+      });
+      try {
+        await page.goto(origin);
+        await page.getByRole('button', {name:'Start draft preview',exact:true}).click();
+        await expect.poll(() => Boolean(releaseCreate)).toBe(true);
+        await page.getByRole('button', {name:'Other app',exact:true}).click();
+        await expect.poll(async () => (await state(page)).recovering).toBe(false);
+        delayRegistry = 'registry-a';
+        await page.getByRole('button', {name:'Original app',exact:true}).click();
+        await expect.poll(() => delayedRecoveries.length).toBe(1);
+        const created = page.waitForResponse(response => response.url().includes('/api/artifacts/'));
+        await releaseCreate();
+        await (await created).finished();
+        assert.deepEqual(recoveries, [
+          '/api/sandbox?build_registry_id=registry-a', '/api/sandbox?build_registry_id=registry-a',
+          '/api/sandbox?build_registry_id=registry-b', '/api/sandbox?build_registry_id=registry-a',
+        ]);
+        // This earlier snapshot is empty. A fresh lookup must follow it after
+        // the old request settles, even though the registry name matches again.
+        delayRegistry = null;
+        delayedRecoveries.shift()();
+        await expect(page.getByRole('button', {name:'Stop preview',exact:true})).toBeEnabled();
+        await expect(page.getByText('Preview based on version artifact-1', {exact:true})).toBeVisible();
+        assert.equal(recoveries.length, 5);
+        assert.deepEqual(mutations, ['/api/artifacts/artifact-1/sandbox?build_registry_id=registry-a']);
+        await page.getByRole('button', {name:'Stop preview',exact:true}).click();
+        await expect.poll(() => sessions.size).toBe(0);
+        assert.deepEqual(mutations, [
+          '/api/artifacts/artifact-1/sandbox?build_registry_id=registry-a',
+          '/api/sandbox/sandbox-artifact-1-registry-a/stop',
+        ]);
+      } finally { await page.close(); }
+    });
+  }
 });
 
 test('standalone shell identifies drafts through loading and navigation without blocking app controls', async (t) => {

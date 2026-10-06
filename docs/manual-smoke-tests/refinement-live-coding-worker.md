@@ -174,6 +174,17 @@ For acceptance, continue a real AppReview conversation and verify:
    before activation becomes available.
 5. Repeat the explicit update and provider-confirmed Stop checks above. Record
    real model/provider receipts separately from browser tests with HTTP fixtures.
+   Reload while a preview is running, then submit another edit before preview
+   recovery completes. Studio must recover the preview's actual artifact and
+   cleanup handle from its owner/build-registry records. The newer selected
+   draft must not relabel the older iframe. With an owner quota of one, Update
+   must stop the recovered preview before allocating its replacement; Stop
+   must remain available after recovery even when that preview needs attention.
+   Also cover multiple retained sessions for the same build registry: explicit
+   Update/Stop cleans them all, without touching another registry's sessions.
+   A failed recovery read must prevent allocation until recovery succeeds.
+   Recovery uses the authenticated `GET /api/sandbox?build_registry_id=...`
+   read; URLs and cleanup handles must not enter transcripts or client storage.
 6. From **Review builds**, select the current saved version and choose **Continue
    in chat**. This also supports a saved inline result with no active review chat.
    Verify the new review loads the owned current artifact without allocating a

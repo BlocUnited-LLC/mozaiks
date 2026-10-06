@@ -337,6 +337,27 @@ class ArtifactPreviewSessionManager:
             raise KeyError("Sandbox not found")
         return await self._ensure_alive(sandbox_id)
 
+    async def list_for_build(
+        self, *, app_id: str, user_id: str, target_app_id: str, build_registry_id: str,
+    ) -> list[PreviewSessionState]:
+        """Recover every owned cleanup handle without allocating or probing providers."""
+        if not all(is_valid_artifact_id(value) for value in (app_id, target_app_id, build_registry_id)) or not user_id:
+            raise ValueError("Invalid preview identity")
+        identity = (app_id, user_id, target_app_id, build_registry_id)
+        states = []
+        # The admission ledger is bounded. Do not truncate to today's owner quota:
+        # older reservations, pending allocations and failed cleanup still count.
+        for record in await self._store.list():
+            if tuple(record[name] for name in ("app_id", "user_id", "target_app_id", "build_registry_id")) != identity:
+                continue
+            state = PreviewSessionState.from_record(record)
+            if self._is_expired(state) or (state.phase == "queued" and record["queue_deadline"] <= _utcnow()):
+                state.status = "error"
+                state.preview_url = None
+                state.last_error = "Preview expired; stop it before starting another preview"
+            states.append(state)
+        return sorted(states, key=lambda state: (state.created_at, state.sandbox_id), reverse=True)
+
     @asynccontextmanager
     async def _operation(self, sandbox_id: str, kind: str) -> AsyncIterator[tuple[PreviewSessionState, str]]:
         token = await self._store.claim_operation(sandbox_id, kind=kind, lease_seconds=self._lease_seconds)

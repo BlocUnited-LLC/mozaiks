@@ -3414,10 +3414,15 @@ async def trigger_workflow(
     }
 
 
+async def _resolve_preview_build(principal: UserPrincipal, build_registry_id: str) -> str:
+    target_app_id, _ = await _resolve_studio_artifact_scope(principal, build_registry_id=build_registry_id)
+    return target_app_id
+
+
 async def _resolve_preview_artifact(
     principal: UserPrincipal, artifact_version_id: str, build_registry_id: str,
 ) -> tuple[str, dict[str, str | bytes]]:
-    target_app_id, _ = await _resolve_studio_artifact_scope(principal, build_registry_id=build_registry_id)
+    target_app_id = await _resolve_preview_build(principal, build_registry_id)
     version = await get_artifact_store().get_build_record(app_id=target_app_id, build_record_id=artifact_version_id)
     if version is None:
         raise HTTPException(status_code=404, detail="Artifact not found")
@@ -3440,7 +3445,10 @@ async def _resolve_preview_artifact(
     return target_app_id, files
 
 
-app.include_router(create_sandbox_router(resolve_scope=_resolve_studio_preview_scope, resolve_artifact=_resolve_preview_artifact))
+app.include_router(create_sandbox_router(
+    resolve_scope=_resolve_studio_preview_scope, resolve_build=_resolve_preview_build,
+    resolve_artifact=_resolve_preview_artifact,
+))
 
 
 app.router.routes[:] = sorted(

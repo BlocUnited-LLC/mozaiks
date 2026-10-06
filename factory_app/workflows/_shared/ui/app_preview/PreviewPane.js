@@ -19,6 +19,9 @@ const PreviewPane = ({
   canStartPreview = false,
   onStopPreview = null,
   sandboxStopping = false,
+  sandboxRecovering = false,
+  sandboxRecoveryError = null,
+  onRetryRecovery = null,
   unavailableMessage = 'Your preview will be available once this build is saved.',
 }) => {
   const previewCfg = config?.artifacts?.['e2b-preview'] || {};
@@ -43,14 +46,25 @@ const PreviewPane = ({
     setIframeKey((k) => k + 1);
   }, []);
 
-  const isRestarting = sandboxSyncing || sandboxStopping || sandboxStatus === 'starting';
+  const isRestarting = sandboxSyncing || sandboxStopping || sandboxRecovering || sandboxStatus === 'starting';
   const differentDraftSelected = Boolean(url && previewArtifactId && artifactVersionId && previewArtifactId !== artifactVersionId);
-  const displayedVersion = url ? previewArtifactId : artifactVersionId;
+  const displayedVersion = previewArtifactId || artifactVersionId;
+  const recoveryFailure = sandboxRecoveryError && (
+    <div role="alert" className="mt-3 text-sm text-destructive">
+      <p>{sandboxRecoveryError}</p>
+      {onRetryRecovery && (
+        <button type="button" onClick={onRetryRecovery} disabled={isRestarting}
+          className="mt-2 rounded-lg border border-border px-3 py-2 text-xs text-foreground disabled:opacity-50">
+          Retry preview recovery
+        </button>
+      )}
+    </div>
+  );
   const stopControl = onStopPreview && (
     <button
       type="button"
       onClick={onStopPreview}
-      disabled={sandboxSyncing || sandboxStopping}
+      disabled={sandboxSyncing || sandboxStopping || sandboxRecovering}
       className="inline-flex items-center px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-50 text-xs text-[var(--color-text-secondary)]"
     >
       {sandboxStopping ? 'Stopping preview…' : 'Stop preview'}
@@ -62,7 +76,7 @@ const PreviewPane = ({
         <div className="text-sm font-semibold text-white">Draft app preview</div>
         {displayedVersion && (
           <span className="text-[10px] text-[var(--color-text-muted)] font-mono" title={displayedVersion}>
-            {url ? 'Preview based on version' : 'Version'} {displayedVersion.slice(0, 12)}
+            {previewArtifactId ? 'Preview based on version' : 'Version'} {displayedVersion.slice(0, 12)}
           </span>
         )}
       </div>
@@ -82,14 +96,14 @@ const PreviewPane = ({
         {isRestarting ? (
           <div className="mt-3 flex items-center gap-2 text-sm text-[var(--color-text-muted)]">
             <div className="h-4 w-4 border-2 border-[var(--color-primary-light)] border-t-transparent rounded-full animate-spin flex-shrink-0" />
-            {sandboxStopping ? 'Stopping preview…' : 'Starting draft preview...'}
+            {sandboxRecovering ? 'Recovering existing previews…' : sandboxStopping ? 'Stopping preview…' : 'Starting draft preview...'}
           </div>
         ) : (
           <>
             <div className="mt-3 text-sm text-[var(--color-text-muted)]">
               {sandboxError ? 'Preview needs attention' : 'Start the preview to try your app.'}
             </div>
-            {onStartPreview && canStartPreview ? (
+            {onStartPreview && canStartPreview && !sandboxRecoveryError ? (
               <>
                 <button
                   type="button"
@@ -106,6 +120,7 @@ const PreviewPane = ({
             )}
           </>
         )}
+        {recoveryFailure}
         {sandboxError && (
           <details className="mt-3 text-xs text-red-300">
             <summary className="cursor-pointer">Preview details</summary>
@@ -123,7 +138,7 @@ const PreviewPane = ({
         {previewIdentity}
         <div className="flex flex-wrap items-center gap-2">
           {stopControl}
-          {onStartPreview && canStartPreview && (
+          {onStartPreview && canStartPreview && !sandboxRecoveryError && (
             <button
               type="button"
               onClick={onStartPreview}
@@ -156,6 +171,7 @@ const PreviewPane = ({
           </a>
         </div>
       </div>
+      {recoveryFailure}
 
       <div className="relative h-[520px] bg-white">
         {isRestarting && (

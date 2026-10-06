@@ -81,3 +81,25 @@ async def test_preview_never_launches_a_partially_read_archive(studio, monkeypat
     with pytest.raises(HTTPException) as raised:
         await module._resolve_preview_artifact(None, "version-one", "registry_tracker")
     assert raised.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_preview_recovery_resolves_registry_without_loading_any_artifact(studio, monkeypatch):
+    module, service = studio
+
+    def unavailable_archive():
+        pytest.fail("Cleanup recovery must not depend on the selected artifact or archive")
+
+    monkeypatch.setattr(module, "get_artifact_store", unavailable_archive)
+    assert await module._resolve_preview_build(None, "registry_tracker") == "tracker"
+    service.get_app_record.assert_awaited_once_with(build_registry_id="registry_tracker", owner_user_id="owner")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("record", [None, {"app_id": "tracker", "chat_app_id": "foreign_host"}])
+async def test_preview_recovery_rejects_missing_and_foreign_registry(studio, record):
+    module, service = studio
+    service.get_app_record.return_value = {"app": record}
+    with pytest.raises(HTTPException) as raised:
+        await module._resolve_preview_build(None, "registry_tracker")
+    assert raised.value.status_code == 404
