@@ -1891,6 +1891,51 @@ class AG2PersistenceManager:
         except Exception as e:
             logger.error("[TOOL_CALL_METADATA] Failed to attach metadata for %s: %s", chat_id, e, exc_info=True)
 
+    async def save_workflow_feedback_receipt(self, evidence: dict[str, Any]) -> bool:
+        """Insert one immutable authenticated UI response in its owning session.
+
+        Called by the owner-checked transport, never a model tool or public route.
+        Receipts are kept separately from replaceable tool display metadata.
+        """
+        from mozaiksai.core.workflow.outcome_feedback import WorkflowFeedbackEvidence
+
+        receipt = WorkflowFeedbackEvidence.model_validate(evidence).model_dump(mode="json")
+        app_id, chat_id = receipt["app_id"], receipt["chat_id"]
+        key = self._workflow_tool_call_storage_key(receipt["ui_event_id"])
+        path = f"workflow_ui_state.feedback_receipts.{key}"
+        query = {"_id": chat_id, **build_app_scope_filter(app_id), "user_id": receipt["user_id"]}
+        coll = await self._coll()
+        result = await coll.update_one(
+            {**query, path: {"$exists": False}},
+            {"$set": {path: receipt}},
+        )
+        if result.matched_count:
+            return True
+        prior = await self.get_workflow_feedback_receipt(
+            app_id=app_id, chat_id=chat_id, user_id=receipt["user_id"],
+            ui_event_id=receipt["ui_event_id"],
+        )
+        # Idempotent retries retain the first observed timestamp and answer.
+        return bool(prior and all(
+            prior.get(field) == value for field, value in receipt.items() if field != "observed_at"
+        ))
+
+    async def get_workflow_feedback_receipt(
+        self, *, app_id: str, chat_id: str, user_id: str, ui_event_id: str,
+    ) -> dict[str, Any] | None:
+        """Read feedback only through an exact app/session/owner/event binding."""
+        if not all(isinstance(value, str) and value for value in (app_id, chat_id, user_id, ui_event_id)):
+            return None
+        key = self._workflow_tool_call_storage_key(ui_event_id)
+        path = f"workflow_ui_state.feedback_receipts.{key}"
+        coll = await self._coll()
+        doc = await coll.find_one(
+            {"_id": chat_id, **build_app_scope_filter(app_id), "user_id": user_id},
+            {path: 1},
+        )
+        receipt = (((doc or {}).get("workflow_ui_state") or {}).get("feedback_receipts") or {}).get(key)
+        return deepcopy(receipt) if isinstance(receipt, dict) else None
+
     async def update_tool_call_state(
         self,
         *,

@@ -175,7 +175,7 @@ def test_use_ui_tool_requests_response_and_returns_event_id() -> None:
 
     async def _fake_wait(event_id, timeout=None):
         assert event_id == "evt_interactive_1"
-        return {"status": "ok"}
+        return {"status": "ok", "ui_event_id": "browser-forged-event"}
 
     ui_tools_module._emit_tool_call_core = _fake_emit
     ui_tools_module._wait_for_tool_call_response_internal = _fake_wait

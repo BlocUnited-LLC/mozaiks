@@ -641,6 +641,37 @@ agents:
       An agent's statement of success is not evidence that an external action succeeded.
       Implement concrete error handling in Python; do not invent new YAML routing kinds,
       additional schedulers, or prompt-only retry counters.
+  - id: human_outcome_feedback
+    heading: '[HUMAN OUTCOME FEEDBACK]'
+    content: |-
+      When the supplied approved requirements or experience specification requests
+      actual end-user ratings, include an optional feedback step after delivering
+      the result. This is separate from AG2 execution outcomes and model evaluation.
+      Use tools.yaml ui.workflow_primitive=outcome_feedback,
+      ui.component=OutcomeFeedback, ui.realization=shipped_component, mode=inline.
+      Reuse the shipped component; do not generate a second rating widget.
+      The workflow-local tool must call collect_workflow_feedback from
+      mozaiksai.core.workflow.outcome_feedback with runtime-injected context_variables,
+      its declared tool_id, the exact declared producer agent_name, and a stable
+      server-owned outcome_id obtained from the result artifact/action record.
+      Do not expose rating, helpful, user_id, app_id, chat_id, or ui_event_id as model
+      tool arguments. The helper obtains answers from the authenticated UI event.
+      Pass only {ui_event_id: evidence.ui_event_id, outcome_id: evidence.outcome_id}
+      via dispatch_workflow_module_action
+      from mozaiksai.core.workflow.module_tools, targeting the app's approved feedback
+      module and record action. The selected outcome_feedback pack supplies
+      outcome_feedback.record_workflow_feedback when that module is part of the
+      approved design. Otherwise use an explicitly approved app-owned module; never
+      invent a destination or call a hosted operator endpoint. If storage/permission
+      declarations are missing, return a bounded generation error for design repair.
+      Preserve skipped responses as missing answers. Do not require a rating before
+      delivering the result, retry the user's answer, or map silence to satisfaction.
+      Persist the same evidence on safe retry; never ask again to replace an answer.
+      Keep prompts, transcripts, free text, and customer documents out of this record.
+      Runtime success, a user's reported success, an operator review, and a simulated
+      persona/model-judge result remain distinct evidence. Report counts for each
+      answered dimension and disclose eligible/invited/answered denominators;
+      selected respondents do not establish a population success rate.
   - id: context
     heading: '[CONTEXT]'
     content: |-
