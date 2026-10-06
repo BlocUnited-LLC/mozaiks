@@ -1106,6 +1106,11 @@ async function mockStudioApis(page) {
     const versionId = new URL(route.request().url()).pathname.split('/').at(-2);
     await route.fulfill({ json: { review: savedBuildBundle(versionId).review } });
   });
+  await page.route('**/api/sandbox?**', async (route) => {
+    expect(route.request().method()).toBe('GET');
+    expect(new URL(route.request().url()).searchParams.get('build_registry_id')).toBeTruthy();
+    await route.fulfill({ json: { sessions: [] } });
+  });
 
   await page.route('**/api/studio/integrations?**', async (route) => {
     const url = new URL(route.request().url());
@@ -2188,7 +2193,7 @@ test('saved build review preserves candidate source through a failed selection a
   await expect(page.getByText('Version B temporarily unavailable.', { exact: true })).toBeVisible();
   await page.getByLabel('Starting version', { exact: true }).selectOption('ver-17');
   await expect(page.getByText('Saved build ver-17', { exact: true })).toBeVisible();
-  await expect(page.getByText('Version candidate-a2', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Preview based on version candidate-a2', { exact: true })).toBeVisible();
   await expect(page.getByText('Candidate A2 review evidence', { exact: true })).toBeVisible();
   await expect(page.getByText('Strategy: docker', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Accept artifact', exact: true })).toBeVisible();
@@ -2205,9 +2210,11 @@ test('saved build review preserves candidate source through a failed selection a
 
   failOtherVersion = false;
   await page.getByLabel('Starting version', { exact: true }).selectOption('ver-16');
-  await expect(page.getByText('Version ver-16', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Saved build ver-16', { exact: true })).toBeVisible();
+  await expect(page.getByText('Preview based on version candidate-a2', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Start draft preview', exact: true }).click();
   await expect.poll(() => receipts.filter(item => item.action === 'sync').length).toBe(3);
+  await expect(page.getByText('Preview based on version ver-16', { exact: true })).toBeVisible();
   expect(receipts.filter(item => item.action === 'allocate').at(-1).versionId).toBe('ver-16');
   expect(receipts.filter(item => item.action === 'sync').at(-1).files).toEqual([{ path: 'README.md', content: '# Saved fixture ver-16' }]);
 });
