@@ -17,9 +17,28 @@ def _clean(value: Any) -> str:
     return str(value or "").strip()
 
 
+def _is_local_development(ctx) -> bool:
+    authority = getattr(ctx, "dispatch_authority", None)
+    return getattr(authority, "kind", None) == "local_development"
+
+
+def _verified_workspace_id(ctx) -> str:
+    """The workspace the caller's validated credential or host-verified membership binds.
+
+    ``ctx.workspace_id`` is requested dispatch scope, which an unbound
+    credential may choose freely; it never qualifies.
+    """
+    principal = getattr(getattr(ctx, "persistence", None), "principal", None)
+    if principal is None or principal.source != "authenticated":
+        return ""
+    return _clean(principal.workspace_id)
+
+
 def _scope_authority(ctx, scope_type: str) -> str:
     if scope_type == "workspace":
-        return _clean(getattr(ctx, "workspace_id", None))
+        if _is_local_development(ctx):
+            return _clean(getattr(ctx, "workspace_id", None))
+        return _verified_workspace_id(ctx)
     return _clean(getattr(ctx, "app_id", None))
 
 
@@ -32,6 +51,9 @@ def resolve_scope(ctx, *, scope_type: str | None = None, scope_id: str | None = 
     requested_id = _clean(scope_id)
     if requested_id and authorized_id and requested_id != authorized_id:
         raise PermissionError(f"{resolved_type} message scope must match the current context")
+    # Outside local development a workspace is never taken from the request.
+    if resolved_type == "workspace" and not authorized_id and not _is_local_development(ctx):
+        raise PermissionError("workspace message scope requires a verified workspace")
     return resolved_type, authorized_id or requested_id or None
 
 

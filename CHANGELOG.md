@@ -367,6 +367,18 @@ This project follows a practical pre-1.0 changelog format:
   Apps that sell tenant- or workspace-scoped plans need tokens that carry the
   tenant (`AUTH_TENANT_ID_CLAIM`) or workspace (`AUTH_WORKSPACE_ID_CLAIM`) claim.
 
+- Studio workspace connector actions (list, save, health check and delete) and
+  workspace-scoped message threads act only on the caller's verified
+  workspace: the workspace the validated token is bound to, or a membership a
+  host scope hook verified (`verified_workspace_id`). A workspace or tenant
+  named by the request no longer selects one, a request naming another
+  workspace is refused, and a signed-in caller with no verified workspace is
+  refused instead of falling back to its tenant or a shared demo workspace.
+  The per-app integrations view overlays connector status only from that
+  workspace. Local runs with `AUTH_ENABLED=false` keep their existing
+  workspace selection. Deployments whose tokens carry no workspace claim need
+  `AUTH_WORKSPACE_ID_CLAIM` or a host membership hook to use these actions.
+
 ### Changed
 
 - Enabled refinement checkpoints now require named profiles with non-empty models; inline capability model settings and unknown capability fields are rejected.
