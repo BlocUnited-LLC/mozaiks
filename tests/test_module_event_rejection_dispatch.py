@@ -131,15 +131,22 @@ class TaskBoardModule:
         await self._tasks(ctx).insert_one({"task_id": task_id, "title": title})
         return task_id
 
+    @staticmethod
+    def _outcome(rejection):
+        # What a caller that must know learns from emit: None, or the rejection.
+        return None if rejection is None else rejection.event_id
+
     async def create_task(self, ctx, *, title):
         task_id = await self._store(ctx, title)
-        await ctx.emit("domain.task_board.task_created", {"task_id": task_id, "title": title})
-        return {"task_id": task_id}
+        rejection = await ctx.emit("domain.task_board.task_created", {"task_id": task_id, "title": title})
+        return {"task_id": task_id, "rejected_event_id": self._outcome(rejection)}
 
     async def create_task_valid(self, ctx, *, title):
         task_id = await self._store(ctx, title)
-        await ctx.emit("domain.task_board.task_created", {"task_id": task_id, "title": title, "owner": ctx.user_id})
-        return {"task_id": task_id}
+        rejection = await ctx.emit(
+            "domain.task_board.task_created", {"task_id": task_id, "title": title, "owner": ctx.user_id},
+        )
+        return {"task_id": task_id, "rejected_event_id": self._outcome(rejection)}
 
     async def create_task_raises(self, ctx, *, title):
         await self._store(ctx, title)
@@ -147,8 +154,8 @@ class TaskBoardModule:
 
     async def delete_task(self, ctx, *, task_id):
         result = await self._tasks(ctx).delete_one({"task_id": task_id})
-        await ctx.emit("domain.task_board.task_deleted", {"task_id": task_id})
-        return {"deleted": result.deleted_count == 1}
+        rejection = await ctx.emit("domain.task_board.task_deleted", {"task_id": task_id})
+        return {"deleted": result.deleted_count == 1, "rejected_event_id": self._outcome(rejection)}
 
     async def on_task_created(self, ctx, **payload):
         self.reactions.append(payload["task_id"])
@@ -316,8 +323,10 @@ async def test_write_then_rejected_event_succeeds_and_stores_the_record_once(run
     assert response.status_code == 200, response.text
     task_id = response.json()["task_id"]
     [result] = runtime.results
-    assert (result.success, result.data, result.error_code) == (True, {"task_id": task_id}, None)
     [rejection] = result.rejected_events
+    # The handler got the same rejection back from ctx.emit that the result names.
+    assert response.json() == {"task_id": task_id, "rejected_event_id": rejection.event_id}
+    assert (result.success, result.data, result.error_code) == (True, response.json(), None)
     assert rejection.event_id.startswith("evt_")
     assert rejection.to_dict() == {
         "event_id": rejection.event_id, "event_type": CREATED, "category": "value_invalid",
@@ -350,6 +359,7 @@ async def test_write_then_valid_event_is_unchanged(runtime):
 
     assert response.status_code == 200, response.text
     task_id = response.json()["task_id"]
+    assert response.json()["rejected_event_id"] is None
     [result] = runtime.results
     assert (result.success, result.rejected_events) == (True, ())
     assert runtime.handler.reactions == [task_id]
@@ -380,8 +390,8 @@ async def test_delete_then_rejected_event_succeeds_and_the_record_is_gone(runtim
     response = await runtime.call("delete_task", {"task_id": task_id})
 
     assert response.status_code == 200, response.text
-    assert response.json() == {"deleted": True}
     result = runtime.results[-1]
+    assert response.json() == {"deleted": True, "rejected_event_id": result.rejected_events[0].event_id}
     assert result.success is True
     assert [(item.event_type, item.reason) for item in result.rejected_events] == [
         (DELETED, "Missing required properties: 'owner'."),
@@ -419,6 +429,7 @@ async def test_workflow_tool_dispatch_reports_success_with_the_rejected_event(ru
     assert (result.success, result.error_code) == (True, None)
     [rejection] = result.rejected_events
     assert (rejection.event_type, rejection.category) == (CREATED, "value_invalid")
+    assert result.data["rejected_event_id"] == rejection.event_id
     assert [(row["task_id"], row["owner"]) for row in await runtime.stored()] == [(result.data["task_id"], "alice")]
     assert runtime.handler.reactions == []
     [record] = await runtime.audits()

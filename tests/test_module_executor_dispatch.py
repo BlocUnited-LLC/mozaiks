@@ -624,18 +624,30 @@ _CHANGED_SCHEMA = {"type": "object", "required": ["item_id"], "properties": {"it
 
 
 class _EmitsThenReturns:
-    """Emits each (event_type, payload) in order, then completes or raises."""
+    """Emits each (event_type, payload) in order, keeping what emit returned, then completes or raises."""
 
     def __init__(self, *events: tuple[str, dict], raise_after: bool = False) -> None:
         self.events = events
         self.raise_after = raise_after
+        self.outcomes: list = []
 
     async def act(self, ctx) -> dict:
         for event_type, payload in self.events:
-            await ctx.emit(event_type, payload)
+            self.outcomes.append(await ctx.emit(event_type, payload))
         if self.raise_after:
             raise RuntimeError("after its events")
         return {"done": True}
+
+
+class _TwoRejectingActions:
+    async def act(self, ctx) -> dict:
+        await ctx.emit("domain.items.changed", {})
+        await ctx.emit("domain.items.changed", {"item_id": 1})
+        return {}
+
+    async def other(self, ctx) -> dict:
+        await ctx.emit("domain.items.archived", {"item_id": "i1"})
+        return {}
 
 
 class TestEmittedEventRejection:
@@ -666,6 +678,27 @@ class TestEmittedEventRejection:
         assert rejection.reason == "Action items.act does not declare this event in module.yaml emits."
         health = await ex.health()
         assert health["rejected_events"] == {"total": 1, "by_action": {"items.act": 1}}
+
+    @pytest.mark.asyncio
+    async def test_health_totals_every_rejection_across_actions(self):
+        emitted: list = []
+
+        async def emit(event_type: str, envelope: dict) -> None:
+            emitted.append(event_type)
+
+        ex = ModuleExecutor(event_emitter=emit)
+        ex.register(
+            "items", _TwoRejectingActions(), action_method_map={"act": "act", "other": "other"},
+            action_emits={"act": ["domain.items.changed"], "other": ["domain.items.changed"]},
+            event_payload_schemas={"domain.items.changed": _CHANGED_SCHEMA},
+        )
+        for action in ("act", "other", "act"):
+            assert (await ex.execute(_request(module="items", action=action))).success is True
+        assert emitted == []
+        # Five rejections over two actions: the total is their sum, not the number of actions.
+        assert (await ex.health())["rejected_events"] == {
+            "total": 5, "by_action": {"items.act": 4, "items.other": 1},
+        }
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("payload,schema_path", [
@@ -702,6 +735,27 @@ class TestEmittedEventRejection:
         [rejection] = result.rejected_events
         assert rejection.reason == "Missing required properties: 'item_id'."
         assert rejection.event_id != emitted[0][1]["id"]
+        # emit hands the handler the same rejection, and None once its event is on the bus.
+        assert handler.outcomes[0] is rejection
+        assert handler.outcomes[1] is None
+
+    @pytest.mark.asyncio
+    async def test_emit_returns_none_for_every_dispatched_event(self):
+        emitted: list = []
+        handler = _EmitsThenReturns(("domain.items.changed", {"item_id": "i1"}), ("domain.items.changed", {"item_id": "i2"}))
+        ex = self._executor(handler, emitted, emits=["domain.items.changed"])
+        result = await ex.execute(_request(module="items", action="act"))
+        assert (result.success, result.rejected_events) == (True, ())
+        assert handler.outcomes == [None, None]
+        assert len(emitted) == 2
+
+    @pytest.mark.asyncio
+    async def test_emit_without_an_event_bus_does_nothing_and_returns_none(self):
+        handler = _EmitsThenReturns(("domain.items.archived", {}))
+        ex = ModuleExecutor()
+        ex.register("items", handler, action_method_map={"act": "act"}, action_emits={"act": []})
+        result = await ex.execute(_request(module="items", action="act"))
+        assert (result.success, result.rejected_events, handler.outcomes) == (True, (), [None])
 
     @pytest.mark.asyncio
     async def test_handler_that_raises_after_a_rejected_event_fails_and_audits_it(self, monkeypatch):
@@ -718,6 +772,7 @@ class TestEmittedEventRejection:
         await asyncio.sleep(0)
         assert (result.success, result.error_code) == (False, "EXECUTION_ERROR")
         [rejection] = result.rejected_events
+        assert handler.outcomes == [rejection]
         [(audit, error)] = audits
         assert (audit.outcome, error) == ("failed", "RuntimeError")
         assert audit.rejected_events == (rejection,)

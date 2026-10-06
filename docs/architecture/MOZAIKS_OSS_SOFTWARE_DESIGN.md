@@ -366,7 +366,7 @@ Current enforcement:
 
 * event namespace prefixes are validated;
 * `module.yaml.actions[].emits` must reference declared events;
-* `ctx.emit` checks each event against the action's `emits` and the event's `payload_schema` before dispatch. An event that fails is never dispatched, and it never fails the action that emitted it: the action's writes may already be committed. It is named on the dispatch result and audit (event id, type, the schema rule it failed; never payload contents), logged at ERROR and counted;
+* `ctx.emit` checks each event against the action's `emits` and the event's `payload_schema` (which must also be evaluable) before dispatch. An event that fails is never dispatched, and it never fails the action that emitted it: the action's writes may already be committed. `ctx.emit` returns the `ModuleEventRejection` (event id, type, the schema rule it failed; never payload contents), or `None` once the event is on the bus. The rejection is also named on the dispatch result and audit, logged at ERROR and counted;
 * reaction targets must use canonical target kinds and required fields;
 * notification reactions must reference declared notification IDs;
 * generated-app validation checks event, reaction, workflow, capability, and handler wiring;

@@ -1229,19 +1229,26 @@ This project follows a practical pre-1.0 changelog format:
   overwrite a newer authorized repair, and migration registration preserves
   the accepted file bytes used by download and export.
 - A module action whose handler completed is no longer reported as failed
-  when an event it emits breaks its declared contract (an event the action
-  does not list in `emits`, or a payload that fails its `payload_schema`).
-  The write or delete was already committed, yet the caller got HTTP 500
-  `INVALID_EVENT_PAYLOAD`, so a retry duplicated or misreported it. Such an
-  event is still never dispatched, and no reaction or notification runs for
-  it. `ctx.emit` no longer raises for it, so the rest of the handler runs.
-  The rejected event is named on the dispatch result
-  (`ModuleResult.rejected_events`) and the dispatch audit with its event id,
-  type and the schema rule it failed, never payload contents. It is logged at
-  ERROR as `MODULE_EVENT_REJECTED` and counted in `ModuleExecutor.health()`. A
-  handler that raises still fails the action. The AppGenerator runtime smoke
-  reports every rejected event as a failed check, so generation still catches
-  a wrong event payload.
+  when an event it emits breaks its declared contract. That covers three
+  cases: the action does not list the event in `emits`, the payload fails the
+  event's `payload_schema`, or that schema cannot be evaluated.
+  - **Before:** the write or delete was already committed, yet web callers of
+    the module API got a generic `500 Internal server error`. In-process and
+    workflow callers got `INVALID_EVENT_PAYLOAD`. A retry duplicated or
+    misreported the write.
+  - **Now:** the event is still never dispatched, and no reaction or
+    notification runs for it. `ctx.emit` returns normally, so the rest of the
+    handler runs. Its value is the `ModuleEventRejection`, or `None` once the
+    event is on the bus, so code that must know whether an event went out can
+    check.
+  - **Where the rejection is recorded:** it is named on the dispatch result
+    (`ModuleResult.rejected_events`) and the dispatch audit with its event id,
+    type and the schema rule it failed, never payload contents. It is logged
+    at ERROR as `MODULE_EVENT_REJECTED` and counted in
+    `ModuleExecutor.health()`.
+  - A handler that raises still fails the action.
+  - The AppGenerator runtime smoke reports every rejected event as a failed
+    check, so generation still catches a wrong event payload.
 - Factory generation now preserves task failures and successful outputs, supplies
   synthesized workers their actual prerequisites, and recovers eligible rejected
   tasks through the existing AG2 batch within finite budgets. Repairs respect

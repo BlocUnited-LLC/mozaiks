@@ -10,7 +10,7 @@ builds this context from the incoming request and injects it so that:
 
 from __future__ import annotations
 
-from collections.abc import Callable, Coroutine
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -19,6 +19,7 @@ from mozaiksai.core.runtime.composition.module_authority import (
     ModuleDispatchAuthority,
     ModuleDispatchProvenance,
 )
+from mozaiksai.core.runtime.composition.module_event_provenance import ModuleEventRejection
 from mozaiksai.core.runtime.persistence.adapter import ModulePersistenceContext
 
 
@@ -66,9 +67,11 @@ class ModuleContext:
     # ctx.db is intentionally not provided.
     persistence: ModulePersistenceContext | None = None
 
-    # Event emitter — async callable(event_type, payload) -> None
+    # Event emitter — async callable(event_type, payload) -> rejection or None.
     # Injected by ModuleExecutor; no-op if not wired.
-    _emit: Callable[[str, dict[str, Any]], Coroutine] | None = field(default=None, repr=False)
+    _emit: Callable[[str, dict[str, Any]], Awaitable[ModuleEventRejection | None]] | None = field(
+        default=None, repr=False,
+    )
     _metrics: Any | None = field(default=None, repr=False)
 
     @property
@@ -80,12 +83,25 @@ class ModuleContext:
             self._metrics = AppMetrics(self)
         return self._metrics
 
-    async def emit(self, event_type: str, payload: dict[str, Any]) -> None:
+    async def emit(self, event_type: str, payload: dict[str, Any]) -> ModuleEventRejection | None:
         """Emit a domain event through the runtime event bus.
 
+        Returns ``None`` once the event is handed to the event bus. Returns the
+        ``ModuleEventRejection`` when the runtime refused it: this action does
+        not declare the event in module.yaml ``emits``, the payload fails the
+        event's declared ``payload_schema``, or that schema cannot be
+        evaluated. A refused event is never dispatched, so no reaction or
+        notification runs for it, yet emit still returns normally: the action's
+        writes may already be committed, and the dispatch result and audit
+        name the rejection too. Code that must know whether the event went out
+        (an outbox that marks it delivered, for example) checks the value.
+
+        With no event bus wired, emitting does nothing and returns ``None``.
+
         Args:
-            event_type: Dot-delimited event name, e.g. "contacts.created"
-            payload: Arbitrary event data.
+            event_type: Dot-delimited event name, e.g. "domain.contacts.created"
+            payload: Event data, checked against the event's payload_schema.
         """
-        if self._emit is not None:
-            await self._emit(event_type, payload)
+        if self._emit is None:
+            return None
+        return await self._emit(event_type, payload)

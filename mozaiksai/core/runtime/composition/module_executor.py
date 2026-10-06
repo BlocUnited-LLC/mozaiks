@@ -661,7 +661,7 @@ class ModuleExecutor:
                 correlation_id=request.correlation_id,
                 settings=self.resolve_settings(request.module) or None,
                 persistence=self._build_persistence_context(request),
-                _emit=self._build_context_emitter(request, rejected_events),  # type: ignore[arg-type]
+                _emit=self._build_context_emitter(request, rejected_events),
                 dispatch_authority=dispatch_authority,
                 dispatch_provenance=dispatch_provenance,
                 dispatch_audit=dispatch_audit,
@@ -1029,21 +1029,23 @@ class ModuleExecutor:
         self,
         request: ModuleRequest,
         rejected_events: list[ModuleEventRejection],
-    ) -> Callable[[str, dict[str, Any]], Awaitable[Any]] | None:
+    ) -> Callable[[str, dict[str, Any]], Awaitable[ModuleEventRejection | None]] | None:
         if self._event_emitter is None:
             return None
 
-        async def emit_module_event(event_type: str, payload: dict[str, Any]) -> None:
+        async def emit_module_event(event_type: str, payload: dict[str, Any]) -> ModuleEventRejection | None:
+            """Return None once the event is on the bus, or the rejection that kept it off."""
             event_type_text = str(event_type or "").strip()
             event_id = f"evt_{uuid4().hex}"
             rejection = self._event_rejection(request, event_id, event_type_text, payload)
             if rejection is not None:
                 # An event that breaks its contract is dropped and named, never
                 # raised into the handler: its writes may already be committed,
-                # and raising would report them as failed.
+                # and raising would report them as failed. The handler gets the
+                # rejection back, so code that must know can check.
                 self._record_event_rejection(request, rejection)
                 rejected_events.append(rejection)
-                return
+                return rejection
 
             tenant_scope = {
                 "app_id": request.app_id,
@@ -1089,6 +1091,7 @@ class ModuleExecutor:
             result = self._event_emitter(event_type_text, envelope)  # type: ignore[misc]
             if inspect.isawaitable(result):
                 await result
+            return None
 
         return emit_module_event
 
