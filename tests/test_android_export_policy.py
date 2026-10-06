@@ -114,6 +114,8 @@ def test_known_private_paths_are_rejected_even_without_a_recognizable_token(expo
 
 @pytest.mark.parametrize("name,content", [
     ("app/.env.example", f"STORAGE_KEY={SYNTHETIC_TOKEN}\n"),
+    ("app/services/config.py", f'SECRET_KEY = "{SYNTHETIC_TOKEN}"\n'),
+    ("workflows/Fixture/tools/config.py", f'AWS_SECRET_ACCESS_KEY = "{SYNTHETIC_TOKEN}"\n'),
     ("app/config/integration.json", json.dumps({"access_token": SYNTHETIC_TOKEN})),
     ("app/config/integration.json", json.dumps({"accessToken": SYNTHETIC_TOKEN})),
     ("app/config/integration.json", json.dumps({"client": {"client_secret": SYNTHETIC_TOKEN}})),

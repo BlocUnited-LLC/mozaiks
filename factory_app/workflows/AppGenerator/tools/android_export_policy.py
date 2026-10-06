@@ -39,9 +39,12 @@ def _credential_key(value: str) -> bool:
     if value.endswith(("_env", "_ref", "_name", "_names", "_type", "_url", "_uri")):
         return value in {"mongo_uri", "mongodb_uri", "database_url", "database_uri", "redis_url"}
     value = value.removesuffix("_value").removesuffix("_hash")
-    return value.split("_")[-1] in {"token", "secret", "password", "passwd", "pwd", "credential", "credentials", "authorization"} or value in {
-        "apikey", "api_key", "privatekey", "private_key", "connectionstring", "connection_string", "dsn",
-    } or value.endswith(("_api_key", "_private_key", "_secret_key", "_connection_string"))
+    parts = value.split("_")
+    return (
+        parts[-1] == "key" and bool(set(parts) & {"api", "secret", "private", "access", "signing"})
+    ) or parts[-1] in {"token", "secret", "password", "passwd", "pwd", "credential", "credentials", "authorization"} or value in {
+        "apikey", "privatekey", "connectionstring", "connection_string", "dsn",
+    } or value.endswith("_connection_string")
 
 
 def _literal_secret(value: object) -> bool:
