@@ -77,7 +77,8 @@ async def collect_workflow_feedback(
     # Validate trusted attribution before emitting an interaction. The temporary
     # event identifier is never returned; the transport supplies the real one.
     subject = WorkflowFeedbackEvidence(
-        **scope, agent_name=agent_name, outcome_id=outcome_id,
+        app_id=app_id, chat_id=chat_id, workflow_name=workflow_name, user_id=user_id,
+        agent_name=agent_name, outcome_id=outcome_id,
         ui_event_id="pending", observed_at=datetime.now(UTC).isoformat(),
         response=WorkflowFeedbackResponse(status="skipped"),
     )
