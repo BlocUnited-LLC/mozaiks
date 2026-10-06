@@ -14,6 +14,11 @@ any private hosted-product repo to run it.
   `factory_app/workflows/extended_orchestration/extension_registry.json` when no
   app-local workflow root overrides it.
 
+The shell compiles JSX in first-party `.js` source files, including normal Vite
+source queries. CSS, JSON, and `?raw`/`?url` asset imports use Vite's own loaders.
+`npm --prefix web_shell run test:workflow-ui` checks this boundary with the actual
+shell configuration and a production Vite build.
+
 ## Prerequisites
 
 - Python 3.11+ with Mozaiks installed from this checkout
