@@ -34,7 +34,13 @@ neutral text and the resolved semantic tokens.
 `app/brand/theme_config.json` remains the visual authority. This ordering does
 not create a separate bootstrap theme, alter sign-in requirements, or copy
 Studio branding into a generated app. Theme fetches are bounded; unavailable
-theme configuration uses the existing neutral fallback.
+theme configuration uses the existing neutral fallback. The base request and
+optional app override each have a four-second timeout. A neutral loading
+screen may appear while those requests finish.
+
+`getTheme` loads and caches data without changing the page. `applyTheme`
+applies the App UI and chat-shell token families together. Consumers reject
+superseded loads before applying them, including when the active app changes.
 
 ## Canonical `shell.json` Shape
 

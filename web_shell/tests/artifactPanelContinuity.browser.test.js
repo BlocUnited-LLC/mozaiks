@@ -140,7 +140,6 @@ test('chat artifact layouts retain visited iframes without exposing hidden contr
       import React, { useEffect, useState } from 'react';
       import { createRoot } from 'react-dom/client';
       import FluidChatLayout from ${JSON.stringify(path.join(chatComponents, 'FluidChatLayout.jsx'))};
-      import MobileArtifactDrawer from ${JSON.stringify(path.join(chatComponents, 'MobileArtifactDrawer.jsx'))};
       window.artifactLifecycle = { mounts: 0, active: 0, maximum: 0, actions: 0 };
       function Artifact() {
         useEffect(() => {
@@ -182,11 +181,10 @@ test('chat artifact layouts retain visited iframes without exposing hidden contr
             ? setDrawer(current => current === 'expanded' ? 'peek' : 'expanded')
             : setLayout(current => current === 'full' ? 'split' : 'full')}>Toggle artifact</button></header>
           <main style={{position:'relative', height:'calc(100dvh - 128px)'}}>
-            {mobile ? <>
-              {chat}
-              <MobileArtifactDrawer state={drawer} onStateChange={setDrawer}
-                onClose={() => setDrawer('peek')} viewMode={viewMode} artifactContent={artifact} />
-            </> : <FluidChatLayout layoutMode={layout} chatContent={chat} artifactContent={artifact} />}
+            <FluidChatLayout isMobile={mobile} layoutMode={viewMode ? 'view' : layout}
+              mobileDrawerState={drawer} onMobileDrawerStateChange={setDrawer}
+              onArtifactClose={() => setDrawer('peek')}
+              chatContent={chat} artifactContent={artifact} />
           </main>
           <button>After workspace</button>
         </>;
@@ -298,22 +296,26 @@ test('chat artifact layouts retain visited iframes without exposing hidden contr
     });
   }
 
-  await t.test('responsive branch changes never mount both artifact layouts', async () => {
+  await t.test('responsive presentation keeps one mounted artifact', async () => {
     const page = await browser.newPage({viewport:{width:1280,height:900}});
     try {
       await page.goto(url);
       await page.getByRole('button', {name:'Toggle artifact',exact:true}).click();
       await expect.poll(() => page.evaluate(() => window.artifactLifecycle.active)).toBe(1);
+      await page.evaluate(() => { window.originalPreviewFrame = document.querySelector('iframe'); });
       await page.setViewportSize({width:390,height:900});
-      await expect(page.locator('iframe')).toHaveCount(0);
-      await expect.poll(() => page.evaluate(() => window.artifactLifecycle.active)).toBe(0);
+      await expect(page.locator('iframe')).toHaveCount(1);
+      await expect(page.locator('iframe')).toBeHidden();
+      await expect.poll(() => page.evaluate(() => window.artifactLifecycle.active)).toBe(1);
       await page.getByRole('button', {name:'Toggle artifact',exact:true}).click();
       await expect(page.locator('iframe')).toHaveCount(1);
-      await expect.poll(() => page.evaluate(() => window.artifactLifecycle.mounts)).toBe(2);
+      await expect(page.locator('iframe')).toBeVisible();
       await page.setViewportSize({width:1280,height:900});
       await expect(page.locator('iframe')).toHaveCount(1);
-      await expect.poll(() => page.evaluate(() => window.artifactLifecycle.mounts)).toBe(3);
-      assert.equal(await page.evaluate(() => window.artifactLifecycle.maximum), 1);
+      await expect(page.locator('iframe')).toBeVisible();
+      assert.equal(await page.evaluate(() => window.originalPreviewFrame === document.querySelector('iframe')), true);
+      assert.deepEqual(await page.evaluate(() => window.artifactLifecycle),
+        {mounts:1,active:1,maximum:1,actions:0});
     } finally {
       await page.close();
     }

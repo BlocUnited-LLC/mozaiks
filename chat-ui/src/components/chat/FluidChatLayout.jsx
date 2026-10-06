@@ -1,15 +1,16 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
+import MobileArtifactDrawer from './MobileArtifactDrawer';
 import '../../styles/mobile.css';
 
 /**
  * FluidChatLayout - Adaptive persistent chat interface
  *
- * Manages 3 fluid states with smooth transitions:
+ * Keeps chat and artifact content mounted across four layout presentations:
  * 1. Full Chat (100% width, no artifact)
  * 2. Split View (chat 50% + artifact 50%)
- * 3. Minimized Chat (chat 60px sidebar + artifact 100%)
- *
- * The chat never disappears - it just transforms based on context.
+ * 3. Minimized Chat (chat rail 10% + artifact 90%)
+ * 4. View (artifact 100%, conversation hidden)
+ * Mobile presents the same artifact subtree in a drawer over the conversation.
  */
 const FluidChatLayout = ({
   // Layout state
@@ -19,6 +20,11 @@ const FluidChatLayout = ({
   // Content components
   chatContent = null,
   artifactContent = null,
+  isMobile = false,
+  mobileDrawerState = 'peek',
+  onMobileDrawerStateChange = () => {},
+  onArtifactClose = () => {},
+  onExitView = null,
 
   // Control handlers
   onToggleArtifact = () => {},
@@ -70,69 +76,76 @@ const FluidChatLayout = ({
   };
 
   const layout = getLayoutStyles();
-  const [artifactVisited, setArtifactVisited] = useState(false);
-  useEffect(() => {
-    if (layout.artifactVisible) setArtifactVisited(true);
-  }, [layout.artifactVisible]);
+  const drawerVisible = mobileDrawerState !== 'hidden'
+    && (mobileDrawerState === 'expanded' || layoutMode === 'view');
+  const chatVisible = isMobile ? !drawerVisible : layout.chatVisible;
+  const composerVisible = chatVisible && (isMobile || layoutMode !== 'minimized');
   const panelContainer =
-    'relative flex flex-col min-h-0 h-full self-stretch transition-all duration-500 ease-in-out pt-0';
+    'relative flex flex-col min-w-0 min-h-0 h-full self-stretch transition-all duration-500 ease-in-out pt-0';
 
   return (
-    <div className={`flex h-full min-h-0 relative overflow-hidden ${layoutMode === 'view' || layoutMode === 'full' ? 'gap-0 p-0' : 'gap-2 p-2'} items-stretch`}>
-      {/* Chat Panel - hidden in view mode */}
-      {layout.chatVisible && (
+    <div className={`flex h-full min-h-0 relative overflow-hidden ${isMobile || layoutMode === 'view' || layoutMode === 'full' ? 'gap-0 p-0' : 'gap-2 p-2'} items-stretch`}>
+      {/* Retain the conversation while its presentation is hidden or minimized. */}
+      <div
+        className={`${panelContainer} chat-pane-transition`}
+        hidden={!isMobile && !layout.chatVisible}
+        inert={!chatVisible}
+        aria-hidden={!chatVisible}
+        style={{ width: isMobile ? '100%' : layout.chatWidth, display: !isMobile && !layout.chatVisible ? 'none' : undefined }}
+      >
+        {/* Chat Content - ChatInterface owns its neon frame */}
         <div
-          className={`${panelContainer} chat-pane-transition`}
-          style={{ width: layout.chatWidth }}
+          className="flex-1 min-h-0 overflow-visible h-full pt-0 flex flex-col"
+          inert={!composerVisible}
+          aria-hidden={!composerVisible}
+          hidden={!isMobile && layoutMode === 'minimized'}
+          style={{ display: !isMobile && layoutMode === 'minimized' ? 'none' : undefined }}
         >
-          {/* Chat Content - ChatInterface owns its neon frame */}
-          {layoutMode !== 'minimized' && (
-            <div className="flex-1 min-h-0 overflow-visible h-full pt-0 flex flex-col">
-              {chatContent}
-            </div>
-          )}
+          {chatContent}
+        </div>
 
-          {/* Minimized Chat - Show vertical text */}
-          {layoutMode === 'minimized' && (
-            <div className="flex-1 flex flex-col items-center justify-center p-2">
-              <div className="flex flex-col items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[var(--color-primary)]/20 to-[var(--color-secondary)]/20 flex items-center justify-center">
-                  <span className="text-lg font-semibold text-white">M</span>
-                </div>
-                <div className="flex flex-col items-center gap-1">
-                  <span
-                    className="text-sm font-semibold text-white"
-                    style={{ writingMode: 'vertical-rl', textOrientation: 'mixed' }}
-                  >
-                    mozaiksai
-                  </span>
-                  <span
-                    className="text-xs text-gray-500"
-                    style={{ writingMode: 'vertical-rl', textOrientation: 'mixed' }}
-                  >
-                    Click to expand
-                  </span>
-                </div>
+        {/* Minimized Chat - Show vertical text */}
+        {!isMobile && layoutMode === 'minimized' && (
+          <button
+            type="button"
+            aria-label="Expand conversation"
+            onClick={() => onLayoutChange('split')}
+            className="flex-1 flex flex-col items-center justify-center p-2"
+          >
+            <div className="flex flex-col items-center gap-3">
+              <svg aria-hidden="true" className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M7 18l-4 3V5a2 2 0 012-2h14a2 2 0 012 2v11a2 2 0 01-2 2H7z" />
+              </svg>
+              <div className="flex flex-col items-center gap-1">
+                <span
+                  className="text-sm font-semibold text-white"
+                  style={{ writingMode: 'vertical-rl', textOrientation: 'mixed' }}
+                >
+                  Conversation
+                </span>
+                <span
+                  className="text-xs text-gray-500"
+                  style={{ writingMode: 'vertical-rl', textOrientation: 'mixed' }}
+                >
+                  Expand
+                </span>
               </div>
             </div>
-          )}
-        </div>
-      )}
+          </button>
+        )}
+      </div>
 
       {/* Artifact Panel - relies on ArtifactPanel component for styling */}
-      {(layout.artifactVisible || artifactVisited) && (
-        <div
-          className={`${panelContainer} artifact-panel h-full`}
-          hidden={!layout.artifactVisible}
-          inert={!layout.artifactVisible}
-          aria-hidden={!layout.artifactVisible}
-          style={{ width: layout.artifactWidth, display: layout.artifactVisible ? undefined : 'none' }}
-        >
-          <div className="flex-1 min-h-0 overflow-visible h-full pt-0 flex flex-col">
-            {artifactContent}
-          </div>
-        </div>
-      )}
+      <MobileArtifactDrawer
+        isMobile={isMobile}
+        state={isMobile ? mobileDrawerState : (layout.artifactVisible ? 'expanded' : 'peek')}
+        desktopWidth={layout.artifactWidth}
+        onStateChange={onMobileDrawerStateChange}
+        onClose={onArtifactClose}
+        onExitView={onExitView}
+        viewMode={layoutMode === 'view'}
+        artifactContent={artifactContent}
+      />
     </div>
   );
 };

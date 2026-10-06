@@ -4,7 +4,6 @@ import Footer from "../components/layout/Footer";
 import ChatInterface from '../components/chat/ChatInterface';
 import ArtifactPanel from '../components/chat/ArtifactPanel';
 import FluidChatLayout from '../components/chat/FluidChatLayout';
-import MobileArtifactDrawer from '../components/chat/MobileArtifactDrawer';
 import { TransitionScreen } from '../ui/screens/TransitionScreen';
 import { applyArtifactUpdate, applyOptimisticUpdate, deriveArtifactId, interpolateParams } from '../core/actions/actionUtils';
 import { useNavigate, useLocation } from "react-router-dom";
@@ -6051,8 +6050,9 @@ const ChatPage = () => {
                 exitViewMode();
                 return;
               }
-              setIsSidePanelOpen(true);
-              setMobileDrawerState((prev) => (prev === 'expanded' ? 'peek' : 'expanded'));
+              const opening = mobileDrawerState !== 'expanded';
+              setIsSidePanelOpen(opening);
+              setMobileDrawerState(opening ? 'expanded' : 'peek');
             }
           : toggleSidePanel);
 
@@ -6443,134 +6443,91 @@ const ChatPage = () => {
         className={`flex-1 flex flex-col min-h-0 overflow-hidden ${mainPaddingClass}`}
         style={mainContentStyle}
       >{/* Padding for header */}
-        {isMobileView ? (
-          <div className="relative flex-1 flex flex-col">
-            <div className={`flex-1 flex flex-col transition-[padding-bottom] duration-300 ${mobileChatTopMarginClass} ${mobileChatPaddingBottomClass}`}>
-              {chatInterface}
-            </div>
-
-            {isSidePanelOpen && mobileDrawerState === 'expanded' && conversationMode === 'workflow' && (
-              <button
-                type="button"
-                aria-label="Collapse artifact workspace"
-                className="absolute inset-x-0 top-0 z-30 h-16 bg-gradient-to-b from-black/40 to-transparent"
-                onClick={() => setMobileDrawerState('peek')}
-              ></button>
-            )}
-
-            {/* Only show mobile artifact drawer in workflow mode (Ask mode has no artifacts) */}
-            {conversationMode === 'workflow' && (
-              <MobileArtifactDrawer
-                state={mobileDrawerState}
-                onStateChange={setMobileDrawerState}
-                onClose={() => {
-                  setMobileDrawerState('peek');
+        <div className={isMobileView
+          ? `relative flex flex-1 min-h-0 flex-col ${mobileChatTopMarginClass} ${mobileChatPaddingBottomClass}`
+          : 'flex flex-1 min-h-0 gap-4 px-3 md:px-6 pt-5 pb-4 items-stretch'}>
+          {showAskHistorySidebar && (
+            <AskHistorySidebar
+              sessions={generalChatSessions}
+              activeChatId={activeGeneralChatId}
+              loading={generalSessionsLoading}
+              onSelectChat={handleSelectGeneralChat}
+              onStartNewChat={handleStartGeneralChat}
+              onRefresh={handleRefreshGeneralSessions}
+              onClear={handleClearGeneralSessions}
+              onDeleteSession={handleDeleteGeneralSession}
+            />
+          )}
+          <div key="conversation-workspace" className={isMobileView
+            ? 'relative flex-1 min-h-0'
+            : 'flex-1 min-w-0 min-h-0 -my-2 h-[calc(100%+1rem)]'}>
+            <FluidChatLayout
+              layoutMode={effectiveLayoutMode}
+              isMobile={isMobileView}
+              mobileDrawerState={conversationMode === 'workflow' ? mobileDrawerState : 'hidden'}
+              onMobileDrawerStateChange={setMobileDrawerState}
+              onArtifactClose={() => {
+                setMobileDrawerState('peek');
+                setIsSidePanelOpen(false);
+              }}
+              onExitView={exitViewMode}
+              onLayoutChange={setLayoutMode}
+              isArtifactAvailable={true}
+              hasActiveChat={!!currentChatId}
+              onToggleArtifact={() => {
+                if (layoutMode === 'full') {
+                  setLayoutMode('split');
+                  setIsSidePanelOpen(true);
+                } else {
+                  setLayoutMode('full');
                   setIsSidePanelOpen(false);
-                }}
-                viewMode={isViewMode}
-                chatTheme={chatTheme}
-                onExitView={exitViewMode}
-                artifactContent={
-                  <ErrorBoundary fallback={<ArtifactErrorFallback onRetry={() => setMobileDrawerState('peek')} />}>
-                    <ArtifactPanel
-                      onClose={() => {
-                        setMobileDrawerState('peek');
-                        setIsSidePanelOpen(false);
-                      }}
-                      isMobile
-                      isEmbedded
-                      viewMode={isViewMode}
-                      onExitView={exitViewMode}
-                      messages={currentArtifactMessages}
-                      loading={artifactPanelLoading}
-                      chatId={currentChatId}
-                      workflowName={currentWorkflowName}
-                      chatTheme={chatTheme}
-                      onArtifactAction={sendArtifactAction}
-                      actionStatusMap={actionStatusMap}
-                      floatingWidget={viewWidget}
-                    />
-                  </ErrorBoundary>
                 }
-                hasUnseenChat={hasUnseenChat}
-                hasUnseenArtifact={hasUnseenArtifact}
-              />
-            )}
-
-            {showMobileHistoryMenu && (
-              <MobileAskHistoryDrawer
-                mode={conversationMode}
-                open={isAskHistoryDrawerOpen}
-                sessions={conversationMode === 'workflow' ? workflowSessions : generalChatSessions}
-                activeChatId={conversationMode === 'workflow' ? (activeChatId || currentChatId) : activeGeneralChatId}
-                loading={conversationMode === 'workflow' ? workflowSessionsLoading : generalSessionsLoading}
-                onSelectChat={handleSelectGeneralChat}
-                onSelectWorkflow={handleSelectWorkflowSession}
-                onStartNewChat={handleStartGeneralChat}
-                onStartEntryWorkflow={() => handleConversationModeChange('workflow')}
-                onRefresh={conversationMode === 'workflow' ? handleRefreshWorkflowSessions : handleRefreshGeneralSessions}
-                onClear={conversationMode === 'workflow' ? handleClearWorkflowSessions : handleClearGeneralSessions}
-                onDeleteSession={conversationMode === 'ask' ? handleDeleteGeneralSession : undefined}
-                onClose={() => setIsAskHistoryDrawerOpen(false)}
-              />
-            )}
-          </div>
-        ) : (
-          <div className="flex flex-1 min-h-0 gap-4 px-3 md:px-6 pt-5 pb-4 items-stretch">
-            {showAskHistorySidebar && (
-              <AskHistorySidebar
-                sessions={generalChatSessions}
-                activeChatId={activeGeneralChatId}
-                loading={generalSessionsLoading}
-                onSelectChat={handleSelectGeneralChat}
-                onStartNewChat={handleStartGeneralChat}
-                onRefresh={handleRefreshGeneralSessions}
-                onClear={handleClearGeneralSessions}
-                onDeleteSession={handleDeleteGeneralSession}
-              />
-            )}
-            <div className="flex-1 min-h-0 -my-2 h-[calc(100%+1rem)]">
-              <FluidChatLayout
-                layoutMode={effectiveLayoutMode}
-                onLayoutChange={setLayoutMode}
-                isArtifactAvailable={true}
-                hasActiveChat={!!currentChatId}
-                onToggleArtifact={() => {
-                  if (layoutMode === 'full') {
-                    setLayoutMode('split');
-                    setIsSidePanelOpen(true);
-                  } else {
-                    setLayoutMode('full');
-                    setIsSidePanelOpen(false);
-                  }
-                }}
-                onToggleChat={() => {
-                  if (layoutMode === 'minimized') {
-                    setLayoutMode('split');
-                  }
-                }}
-                chatContent={chatInterface}
-                artifactContent={
-                  <ErrorBoundary fallback={<ArtifactErrorFallback onRetry={() => setLayoutMode('full')} />}>
-                    <ArtifactPanel
-                      onClose={toggleSidePanel}
-                      viewMode={isViewMode}
-                      onExitView={exitViewMode}
-                      messages={currentArtifactMessages}
-                      loading={artifactPanelLoading}
-                      chatId={currentChatId}
-                      workflowName={currentWorkflowName}
-                      chatTheme={chatTheme}
-                      onArtifactAction={sendArtifactAction}
-                      actionStatusMap={actionStatusMap}
-                      floatingWidget={viewWidget}
-                    />
-                  </ErrorBoundary>
+              }}
+              onToggleChat={() => {
+                if (layoutMode === 'minimized') {
+                  setLayoutMode('split');
                 }
-              />
-            </div>
+              }}
+              chatContent={chatInterface}
+              artifactContent={
+                <ErrorBoundary fallback={<ArtifactErrorFallback onRetry={() => setLayoutMode('full')} />}>
+                  <ArtifactPanel
+                    onClose={toggleSidePanel}
+                    isMobile={isMobileView}
+                    isEmbedded={isMobileView}
+                    viewMode={isViewMode}
+                    onExitView={exitViewMode}
+                    messages={currentArtifactMessages}
+                    loading={artifactPanelLoading}
+                    chatId={currentChatId}
+                    workflowName={currentWorkflowName}
+                    chatTheme={chatTheme}
+                    onArtifactAction={sendArtifactAction}
+                    actionStatusMap={actionStatusMap}
+                    floatingWidget={viewWidget}
+                  />
+                </ErrorBoundary>
+              }
+            />
           </div>
-        )}
+          {showMobileHistoryMenu && (
+            <MobileAskHistoryDrawer
+              mode={conversationMode}
+              open={isAskHistoryDrawerOpen}
+              sessions={conversationMode === 'workflow' ? workflowSessions : generalChatSessions}
+              activeChatId={conversationMode === 'workflow' ? (activeChatId || currentChatId) : activeGeneralChatId}
+              loading={conversationMode === 'workflow' ? workflowSessionsLoading : generalSessionsLoading}
+              onSelectChat={handleSelectGeneralChat}
+              onSelectWorkflow={handleSelectWorkflowSession}
+              onStartNewChat={handleStartGeneralChat}
+              onStartEntryWorkflow={() => handleConversationModeChange('workflow')}
+              onRefresh={conversationMode === 'workflow' ? handleRefreshWorkflowSessions : handleRefreshGeneralSessions}
+              onClear={conversationMode === 'workflow' ? handleClearWorkflowSessions : handleClearGeneralSessions}
+              onDeleteSession={conversationMode === 'ask' ? handleDeleteGeneralSession : undefined}
+              onClose={() => setIsAskHistoryDrawerOpen(false)}
+            />
+          )}
+        </div>
       </div>
       {!isMobileView && <Footer />}
 

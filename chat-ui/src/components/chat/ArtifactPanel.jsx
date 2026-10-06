@@ -77,7 +77,7 @@ const ArtifactPanel = ({
       )}
 
       {/* Panel Content */}
-      <div className={contentClasses} style={{ overflow: 'clip' }}>
+      <div className={contentClasses} style={{ overflow: 'clip', width: '100%' }}>
         {/* Artifact Content Area - match chat scroll treatment */}
         <div className="flex-1 min-h-0 relative overflow-hidden" role="region" aria-label="Artifact output stream">
           <div className="absolute inset-0 pointer-events-none bg-[rgba(0,0,0,0.45)] z-0" />
