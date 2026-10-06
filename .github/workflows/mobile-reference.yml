@@ -129,7 +129,6 @@ jobs:
       PYTHON_DOTENV_DISABLED: '1'
       COMMUNITY_LIVE_CONFIG: ${{ github.workspace }}/.local/evidence/community-env/native-ci/environment.json
       MOBILE_ACCEPTANCE_EVIDENCE: ${{ github.workspace }}/.local/evidence/mobile-native
-      MOBILE_ACCEPTANCE_APK: ${{ runner.temp }}/mobile-common-ground/workspace/mobile/android/app/build/outputs/apk/debug/app-debug.apk
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -214,6 +213,8 @@ jobs:
           (safe_evidence / 'packaging-evidence.json').write_text(json.dumps(receipt, indent=2))
       - name: Exercise real external-browser auth and community actions on Android
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+        env:
+          MOBILE_ACCEPTANCE_APK: ${{ runner.temp }}/mobile-common-ground/workspace/mobile/android/app/build/outputs/apk/debug/app-debug.apk
         with:
           api-level: 35
           target: google_apis
