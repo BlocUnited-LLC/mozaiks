@@ -427,6 +427,31 @@ async def test_every_rejected_event_fails_its_own_check_pointing_at_the_file_to_
     assert sorted(item["check"] for item in result["failed_tests"]) == sorted(expected)
 
 
+async def test_one_event_rejected_for_two_reasons_reports_both(mongo):
+    files = _good()
+    created = "    await ctx.emit('domain.task.created', item)\n"
+    assert files[SERVICE].count(created) == 1
+    files[SERVICE] = files[SERVICE].replace(created, (
+        "    await ctx.emit('domain.task.created', {k: v for k, v in item.items() if k != 'user_id'})\n"
+        "    await ctx.emit('domain.task.created', {**item, 'status': 'archived'})\n"
+    ))
+
+    result = await _smoke(files, mongo.uri)
+
+    assert result["status"] == "failed"
+    check = "event.task_management.create_task.domain.task.created"
+    failed = [row for row in result["results"] if row["status"] == "failed"]
+    assert [row["check"] for row in failed] == [check, check]
+    assert all(row["path"] == SERVICE for row in failed)
+    messages = [row["message"] for row in failed]
+    assert any("(at $.required: Missing required properties: 'user_id'.)" in message for message in messages)
+    assert any("(at $.properties.status.enum: Value does not satisfy the 'enum' constraint.)" in message
+               for message in messages)
+    assert [item["check"] for item in result["failed_tests"]] == [check, check]
+    assert all(row["status"] == "passed" for check_id, row in _by_check(result).items() if check_id.startswith("crud."))
+    assert result["events_emitted"] == ["domain.task.deleted", "domain.task.updated"]
+
+
 async def test_acceptance_fails_a_bundle_whose_event_breaks_its_schema(mongo, monkeypatch):
     monkeypatch.setattr(app_runtime_smoke, "resolve_smoke_mongo_uri", lambda: mongo.uri)
 
