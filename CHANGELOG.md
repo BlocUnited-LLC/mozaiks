@@ -334,6 +334,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Pin shared-shell text checkouts to LF so installed Android framework resources
+  have identical provenance on Windows and Linux. Binary assets stay unchanged.
+
 - Android apps can use a separately registered public sign-in client on the
   same backend as the browser app. Native sign-in requires the configured
   Android profile and a callback matching the packaged application.

@@ -79,6 +79,12 @@ An extracted portable workspace can restore those resources from the matching
 installed Mozaiks revision when `node mobile/build.mjs` runs; set
 `MOZAIKS_PYTHON` if that installation uses a specific Python executable.
 
+Shared-shell resources use LF text checkouts through the repository's
+`.gitattributes`; binary resources retain their bytes. This keeps Windows Git
+installs and Linux compiler installs identical for the recorded resource digest.
+Install the matching revision again if an older checkout policy produced CRLF
+resources. The verifier rejects mismatched bytes even when commit IDs match.
+
 After compilation, `mobile/build-result.json` binds the output to those input
 identities and records the APK's relative path, byte size, and SHA-256. The CLI
 verifies that receipt against the actual file before returning success. A
