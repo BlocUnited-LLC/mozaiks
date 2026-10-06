@@ -82,7 +82,9 @@ migration. DesignDocs must declare its `records` collection in
 `lifecycle.write_mode: workflow_write`. Its generated-module capability declares
 `primary_entities: [WorkflowFeedback]`. The canonical compiler generates policy,
 schemas, and the account export/deletion handler from this declaration. The
-bundle scanner rejects missing ownership, incomplete evidence fields, and any
+production assembler expands the selected pack before canonical compilation;
+template paths stay outside model-owned tasks while receiving compiled methods.
+The bundle scanner rejects missing ownership, incomplete evidence fields, and any
 general create/update/delete action for feedback. Application
 records use `ctx.persistence`; app/user isolation and unique indexes preserve
 one response per app/user/chat/outcome and per event. A later invitation for the
@@ -121,7 +123,9 @@ Focused tests cover strict answers, forged attribution, owner checks,
 persistence failure, replay, cross-manager receipt resolution, generated tool
 validation, and app storage. An opt-in real Mongo test verifies authenticated
 HTTP submission through generated module persistence, concurrent deduplication,
-and foreign-owner rejection. A Playwright test exercises rating/helpful/outcome,
+and foreign-owner rejection. The generated fixture uses production assembly and
+the runtime ModuleLoader verifies actions and account handler registration.
+A Playwright test exercises rating/helpful/outcome,
 authenticated requests, rejection/retry, double clicks, and skip at mobile width.
 These tests are deterministic acceptance; they are not a paid live Factory
 generation or a production user-feedback sample.

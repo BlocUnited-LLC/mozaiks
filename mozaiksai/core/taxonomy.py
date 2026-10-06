@@ -398,6 +398,7 @@ _CORE_CAPABILITIES = (
     "operator_readiness.evidence.local",
     "operator_readiness.launch.check",
     "operator_readiness.profile.select",
+    "outcome_feedback.record",
     "reports.export",
     "reports.view",
     "security_readiness.findings.list",

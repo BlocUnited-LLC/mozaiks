@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ast
 import json
+import sys
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
@@ -215,23 +216,10 @@ async def test_receipt_storage_is_immutable_and_scoped(monkeypatch):
     assert not await pm.save_workflow_feedback_receipt({**receipt, "response": {"status": "submitted", "rating": 5}})
 
 
-def _compile_feedback_app():
-    """Use the same canonical materializers as app assembly, not raw templates."""
-    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
-        resolve_templates_for_pack,
-    )
-    from mozaiksai.core.workflow.generator_support.module_account_data import (
-        materialize_module_account_handlers,
-    )
-    from mozaiksai.core.workflow.generator_support.module_policy import materialize_module_policies
-    from mozaiksai.core.workflow.generator_support.module_read_actions import (
-        materialize_module_read_implementations,
-    )
-    from mozaiksai.core.workflow.generator_support.module_write_actions import (
-        materialize_module_actions,
-        materialize_module_schemas,
-        materialize_module_write_implementations,
-    )
+async def _compile_feedback_app():
+    """Run production assembly with a selected pack and no model-owned feedback paths."""
+    from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
+    from tests.factory_context import factory_context
 
     collection = {
         "name": "records", "entity": "WorkflowFeedback", "scope": "app", "tenancy": "per_user",
@@ -251,31 +239,57 @@ def _compile_feedback_app():
         "primary_entities": ["WorkflowFeedback"],
     }]}
     root = Path(__file__).parents[1] / "factory_app/build_context/outcome_feedback"
-    files = {item["filename"]: item["content"] for item in resolve_templates_for_pack(root, "outcome_feedback", context_variables={})}
-    files["data/contract.json"] = json.dumps(contract)
-    files.update(materialize_module_actions(files, app_build_plan=plan, data_contract=contract))
-    files.update(materialize_module_policies(files, contract))
-    files.update(materialize_module_schemas(files, app_build_plan=plan, data_contract=contract))
-    files.update(materialize_module_account_handlers(files, app_build_plan=plan, data_contract=contract))
-    files.update(materialize_module_read_implementations(files, app_build_plan=plan, data_contract=contract))
-    files.update(materialize_module_write_implementations(files, app_build_plan=plan, data_contract=contract))
-    return files, contract
+
+    class Context(dict):
+        def set(self, key, value):
+            self[key] = value
+
+    context = Context(factory_context({
+        "app_id": "feedback-fixture", "app_build_plan": plan, "data_contract": contract,
+        "build_timestamp": "2026-10-06T12:00:00Z",
+        "capability_packs": [{"id": "outcome_feedback", "capability_source": "generated_module", "pack_source_path": str(root)}],
+        "generated_files": {"data/contract.json": json.dumps(contract)},
+    }))
+    result = await assemble_app_tasks(context_variables=context)
+    assert result["success"], result
+    files = {item["filename"]: item["content"] for item in result["code_files"]}
+    return files, json.loads(files["data/contract.json"])
 
 
-def test_feedback_pack_compiles_with_canonical_ownership_and_no_arbitrary_evidence_crud():
+async def test_feedback_pack_compiles_with_canonical_ownership_and_no_arbitrary_evidence_crud(tmp_path, monkeypatch):
     import yaml
 
     from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import (
         _scan_outcome_feedback_contract,
     )
+    from mozaiksai.core.account import account_data_registry
+    from mozaiksai.core.runtime.app.module_loader import ModuleLoader
 
-    files, contract = _compile_feedback_app()
+    files, contract = await _compile_feedback_app()
     assert _scan_outcome_feedback_contract(files) == []
     actions = yaml.safe_load(files["modules/outcome_feedback/module.yaml"])["actions"]
     assert {action["id"] for action in actions} == {"record_workflow_feedback", "list_my_feedback", "get_records", "list_records"}
     assert "def scoped_query" in files["modules/outcome_feedback/backend/policy.py"]
     assert "class WorkflowFeedbackRecord" in files["modules/outcome_feedback/backend/schemas.py"]
     assert "class AccountDataHandler" in files["modules/outcome_feedback/backend/account_data_handler.py"]
+    for filename, content in files.items():
+        target = tmp_path / filename
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+    package_prefix = "mozaiks_runtime_module_outcome_feedback"
+    existing_modules = {key: value for key, value in sys.modules.items() if key.startswith(package_prefix)}
+    monkeypatch.setattr(account_data_registry, "_handlers", dict(account_data_registry._handlers))
+    try:
+        loaded = ModuleLoader(str(tmp_path)).load("outcome_feedback")
+        assert loaded.definition.module.user_data_scope
+        assert set(loaded.action_method_map) == {action["id"] for action in actions}
+        assert all(callable(getattr(loaded.handler, method)) for method in loaded.action_method_map.values())
+        assert "outcome_feedback" in account_data_registry._handlers
+    finally:
+        for name in list(sys.modules):
+            if name.startswith(package_prefix):
+                sys.modules.pop(name)
+        sys.modules.update(existing_modules)
     contract["surfaces"][0]["collections"][0]["lifecycle"]["write_mode"] = "module_action"
     assert any("arbitrary evidence CRUD" in error for error in _scan_outcome_feedback_contract({
         **files, "data/contract.json": json.dumps(contract),

@@ -32,9 +32,9 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.fixture
-def generated_feedback(monkeypatch, tmp_path):
+async def generated_feedback(monkeypatch, tmp_path):
     app_root = tmp_path / "app"
-    files, contract = _compile_feedback_app()
+    files, contract = await _compile_feedback_app()
     for path, content in files.items():
         target = app_root / path
         target.parent.mkdir(parents=True, exist_ok=True)
