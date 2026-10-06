@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -17,6 +18,7 @@ from mozaiksai.core.semantics.archive import read_archive_manifest
 from mozaiksai.core.session.build_context import project_build_context
 
 ROOT = Path(__file__).resolve().parents[1]
+PNG = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAX+XDSwAAAABJRU5ErkJggg==")
 
 
 def test_mobile_pack_does_not_project_into_ordinary_factory_plans():
@@ -44,7 +46,7 @@ def workspace(tmp_path):
     (root / "app/app.json").write_text(json.dumps({"appId": "alpine-club", "appName": "Alpine Club", "authRequired": False}))
     (root / "app/ui/index.js").write_text("export function register() {}\n")
     (root / "app/brand").mkdir()
-    (root / "app/brand/icon.png").write_bytes(b"\x89PNG\x00\xff\x01")
+    (root / "app/brand/icon.png").write_bytes(PNG)
     (root / ".env").write_text("TEST_SECRET=must-not-be-captured\n")
     return root
 
@@ -78,7 +80,7 @@ def test_export_is_deterministic_preserves_source_and_binary_assets(workspace, f
     assert "mobile/delivery.manifest.json" in paths
     assert not any(".local" in path or "node_modules" in path for path in paths)
     assert not any(path.endswith(".env") for path in paths)
-    assert (Path(first["workspace_dir"]) / "app/brand/icon.png").read_bytes() == b"\x89PNG\x00\xff\x01"
+    assert (Path(first["workspace_dir"]) / "app/brand/icon.png").read_bytes() == PNG
     assert original == {str(p.relative_to(workspace)): p.read_bytes() for p in workspace.rglob("*") if p.is_file()}
 
 

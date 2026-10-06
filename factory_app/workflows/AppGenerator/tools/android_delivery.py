@@ -10,6 +10,7 @@ import base64
 import hashlib
 import importlib.metadata
 import io
+import ipaddress
 import json
 import os
 import re
@@ -40,6 +41,7 @@ from mozaiksai.core.semantics.archive import (
 )
 from mozaiksai.core.semantics.portable_path import detect_collisions, validate_portable_path
 
+from .android_export_policy import BINARY_SUFFIXES, validate_android_export_file
 from .generated_bundle_scanner import scan_app_contracts
 from .resolve_managed_capability_templates import (
     resolve_managed_capability_templates,
@@ -51,9 +53,7 @@ _MAX_FILE_BYTES = 16_000_000
 _MAX_SOURCE_BYTES = 64_000_000
 _PACKAGE_ID = re.compile(r"[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)+")
 _COMMIT = re.compile(r"[0-9a-f]{40}")
-_BINARY_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".woff", ".woff2", ".ttf", ".pdf", ".mp3", ".mp4"}
 _EXCLUDED_PARTS = {".git", ".local", "__pycache__", "node_modules", ".pytest_cache"}
-_ENV_EXAMPLES = {".env.example", ".env.staging.example", ".env.production.example"}
 _WEB_ROOT_FILES = {"App.jsx", "main.jsx", "styles.css", "index.html", "package.json", "package-lock.json", "postcss.config.js", "tailwind.config.js", "vite.config.js", "workflowUi.js"}
 _UI_ROOT_FILES = {"package.json", "package-lock.json", "postcss.config.js", "tailwind.config.js", "tsconfig.json"}
 
@@ -105,6 +105,26 @@ class AndroidDeliverySpec(BaseModel):
             raise ValueError("backend_origin has an invalid port") from exc
         if str(HttpUrl(value)).removesuffix("/") != value:
             raise ValueError("backend_origin must use its canonical lowercase origin without the default port")
+        hostname = parsed.hostname
+        try:
+            address = ipaddress.ip_address(hostname)
+        except ValueError:
+            # This deterministic contract rejects local names without resolving DNS.
+            # Backend reachability and resolved-address checks belong to the host.
+            local_suffixes = ("localhost", "local", "localdomain", "internal", "intranet", "lan", "home", "corp", "home.arpa")
+            labels = hostname.split(".")
+            if (
+                len(hostname) > 253 or len(labels) < 2
+                or any(not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label) for label in labels)
+                or any(hostname == suffix or hostname.endswith("." + suffix) for suffix in local_suffixes)
+            ):
+                raise ValueError("backend_origin must use a public hostname or IP address") from None
+        else:
+            # Use plain IPv4 literals rather than IPv4-mapped IPv6 aliases, whose
+            # reserved-address classification differs between Python versions.
+            mapped_ipv4 = isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None
+            if not address.is_global or address.is_reserved or address.is_multicast or mapped_ipv4:
+                raise ValueError("backend_origin must use a public hostname or IP address")
         return value
 
 
@@ -156,17 +176,14 @@ def _capture_tree(root: Path, prefix: str, *, exclude_build_artifacts: bool = Tr
     for path in entries(root):
         relative = path.relative_to(root)
         name = validate_portable_path(f"{prefix}/{relative.as_posix()}").text
-        if (path.name.startswith(".env") and path.name not in _ENV_EXAMPLES) or path.suffix.lower() in {".key", ".pem", ".jks", ".p12", ".pfx"}:
-            raise AndroidDeliveryError(f"Private environment or signing files must not be exported: {name}")
         if path.stat().st_size > _MAX_FILE_BYTES:
             raise AndroidDeliveryError(f"Source file exceeds the delivery limit: {name}")
         raw = path.read_bytes()
-        if path.name in _ENV_EXAMPLES:
-            from .deployment_contract import validate_deployment_secrets
-
-            errors = validate_deployment_secrets({path.name: raw.decode("utf-8")})
-            if errors:
-                raise AndroidDeliveryError("; ".join(errors))
+        if prefix in {"app", "workflows"}:
+            try:
+                validate_android_export_file(name, raw)
+            except ValueError as exc:
+                raise AndroidDeliveryError(str(exc)) from None
         size += len(raw)
         if len(files) >= _MAX_FILES or size > _MAX_SOURCE_BYTES:
             raise AndroidDeliveryError("Source workspace exceeds the Android delivery limit")
@@ -187,7 +204,7 @@ def _source_contract(files: dict[str, bytes], factory_root: Path) -> tuple[str, 
     for name, raw in files.items():
         if not name.startswith("app/"):
             continue
-        if Path(name).suffix.lower() in _BINARY_SUFFIXES:
+        if Path(name).suffix.lower() in BINARY_SUFFIXES:
             continue
         try:
             text_files[name[4:]] = raw.decode("utf-8")
