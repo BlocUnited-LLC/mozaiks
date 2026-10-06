@@ -35,7 +35,7 @@ const render = payload => renderToStaticMarkup(createElement(module.exports.defa
 test('saved build review continues only its current build through the authenticated chat launcher', async (t) => {
   const root = path.dirname(shell);
   const api = await fs.readFile(path.join(root, 'chat-ui/src/adapters/api.js'), 'utf8');
-  const authHelpers = api.slice(api.indexOf('function getAccessToken('), api.indexOf('export class ApiAdapter'));
+  const authHelpers = api.slice(api.indexOf('function _firstString('), api.indexOf('export class ApiAdapter'));
   const stubs = {
     '@mozaiks/chat-ui': 'export const UIToolRenderer=()=> <p>Saved workspace</p>;',
     '@mozaiks/chat-ui/workspace': 'export const WorkspaceLayout=({children})=><main>{children}</main>;',
@@ -48,7 +48,7 @@ test('saved build review continues only its current build through the authentica
     './useAppStudioData.js': 'export const useAppStudioData=()=>window.fixture;',
     '../context/ChatUIContext': `export const useChatUI=()=>({user:{id:'owner',app_id:'studio-host'},config:{appId:'studio-host'},
       auth:{getAccessToken:()=> 'fixture-token'}});`,
-    '../adapters/api': `const platform={getAccessToken:()=>null}; ${authHelpers}`,
+    '../adapters/api': `const platform={getAccessToken:()=>null,resolveHttpUrl:()=>''}; const config={get:()=>''}; ${authHelpers}`,
   };
   const output = await build({
     stdin:{resolveDir:shell,loader:'jsx',contents:`
