@@ -14,10 +14,18 @@ SERVICE_PACKAGE_MARKER_PATHS = frozenset({
     "services/adapters/{adapter_area}/__init__.py",
 })
 
+ANDROID_DELIVERY_PATHS = frozenset({
+    "mobile/package.json",
+    "mobile/package-lock.json",
+    "mobile/capacitor.config.json",
+    "mobile/build.mjs",
+    "mobile/delivery.manifest.json",
+})
+
 # Registry families added after the historical corpus captures. Excluded with
 # the package markers so pinned migration proofs keep reconstructing exactly
 # the registry they were captured against.
-POST_BASELINE_FAMILY_PATHS = SERVICE_PACKAGE_MARKER_PATHS | frozenset({
+POST_BASELINE_FAMILY_PATHS = SERVICE_PACKAGE_MARKER_PATHS | ANDROID_DELIVERY_PATHS | frozenset({
     "config/metrics.yaml",
     # Registered after these captures for the same reason as metrics.yaml: the
     # platform's profile-layout endpoint reads app/config/profile.yaml and the

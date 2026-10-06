@@ -288,9 +288,10 @@ jobs:
             .local/evidence/mobile-native/service-provenance.json
             .local/evidence/mobile-native/*.png
       - name: Retain the acceptance APK matching the proof checksum
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: mobile-native-acceptance-apk
           retention-days: 7
-          if-no-files-found: error
+          if-no-files-found: warn
           path: ${{ runner.temp }}/mobile-common-ground/workspace/mobile/android/app/build/outputs/apk/debug/app-debug.apk

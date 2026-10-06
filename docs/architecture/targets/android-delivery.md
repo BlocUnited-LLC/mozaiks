@@ -100,6 +100,9 @@ failed build records failure. Compilation alone reports
 Mobile templates remain app-relative build-context templates. The layout
 registry separately admits the five renderer-owned `mobile/` tooling files at
 workspace scope. Generated native build outputs do not become app contracts.
+These rows change the registry digest. The semantic compilation corpus retains
+its existing app units and reports the five delivery inputs as unresolved;
+the explicit delivery command supplies those inputs outside that corpus.
 This command does not change AppBuildPlan, DownloadRequest, or deployment target
 taxonomies, and does not create a second runtime or persistence authority.
 

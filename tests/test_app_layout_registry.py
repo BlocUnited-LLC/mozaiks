@@ -202,6 +202,7 @@ class TestMatchingSemantics:
         assert family.kind is ArtifactKind.APP_DEPLOYMENT_ARTIFACT
         assert family.owner is LayoutOwner.DOWNLOAD_RENDERER
         assert family.condition is ConditionIdentifier.WHEN_DEPLOYMENT_EXPORT_REQUESTED
+        assert family.materializer is MaterializerIdentifier.DOWNLOAD_DEPLOYMENT_RENDERER
         with pytest.raises(ValueError, match="not registered"):
             match_path(path, PathScope.APP_BUNDLE_ROOT)
 

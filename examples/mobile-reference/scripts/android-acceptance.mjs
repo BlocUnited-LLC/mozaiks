@@ -6,6 +6,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { inspectBootstrapFailure, observeBootstrap } from './acceptance-diagnostics.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const requireShell = createRequire(path.join(root, 'web_shell/package.json'));
@@ -103,6 +104,7 @@ try {
   await device.shell(`am start -n ${appId}/.MainActivity`);
   page = await (await device.webView({ pkg: appId })).page();
   page.setDefaultTimeout(45_000);
+  proof.bootstrap = observeBootstrap(page, { backendOrigin: environment.api_url, webviewOrigin: origin });
   await expect.poll(() => page.evaluate(() => location.origin), { timeout: 45_000 }).toBe(origin);
   await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
   proof.checks.bundled_webview = true;
@@ -199,6 +201,8 @@ try {
   // The reference realm maps the full name, without a separate given_name claim.
   await page.getByTitle('Alice Gardener', { exact: true }).click();
   const beforeLogoutDocument = await page.evaluate(() => performance.timeOrigin);
+  proof.before_logout_document_time_origin = beforeLogoutDocument;
+  proof.before_logout_shell_config_requests = proof.bootstrap.shell_config.length;
   stage('external-browser-logout');
   await page.getByRole('button', { name: 'Sign Out', exact: true }).click();
   await expect.poll(() => observed.logouts, { timeout: 45_000 }).toBeGreaterThan(0);
@@ -241,6 +245,7 @@ try {
   proof.failure_type = error?.name || 'Error';
   proof.failure_message = safeFailureMessage(error, privateValues);
   if (page && new URL(page.url()).origin === origin) {
+    proof.bootstrap_failure = await page.evaluate(inspectBootstrapFailure).catch(() => ({ probe: 'unavailable' }));
     proof.failure_ui = await page.evaluate(async targetPost => ({
       has_auth_adapter: Boolean(window.mozaiksAuth),
       authenticated: Boolean(await window.mozaiksAuth?.getAccessToken?.()),

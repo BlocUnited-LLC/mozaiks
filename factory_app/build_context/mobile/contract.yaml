@@ -1,5 +1,6 @@
 contract_id: mobile
 contract_type: build_pack_instructions
+facades: []
 selection_rules:
   - id: explicit_android_delivery
     when:

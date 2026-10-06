@@ -91,7 +91,9 @@ _OTHER_SCOPE = ExecutionAccessScopeRef(tenant_id="tenant2")
 # layout-registry family. The plan digest covers the registry, so any
 # deliberate family addition moves it; the property this test protects is
 # that a fresh interpreter derives the SAME digest, which is asserted below.
-_GOLDEN_PLAN_DIGEST = "fdc88e33746108a99f99db21707f69767e04b043180cf3d5487fe2223cb729be"
+# Android delivery adds five workspace renderer inputs. The migration proof
+# below recovers the preceding digest with all 61 application units unchanged.
+_GOLDEN_PLAN_DIGEST = "9a67d7d73e88592f112fe9faa42b5561d71a66280ea0e2f0b1466ba2363ea443"
 
 
 def _registry():
@@ -209,6 +211,35 @@ def test_service_package_markers_preserve_existing_units_and_gaps() -> None:
         row.kind.value == "app_service_support" and row.requirement.value == "optional"
         for row in marker_rows
     )
+
+
+def test_android_delivery_preserves_existing_units_and_gaps() -> None:
+    from mozaiksai.core.runtime.app.layout_registry import AppLayoutRegistry, _stable_digest
+    from tests.service_package_marker_migration_helpers import ANDROID_DELIVERY_PATHS
+
+    registry = _registry()
+    families = tuple(row for row in registry.families if row.path_template not in ANDROID_DELIVERY_PATHS)
+    before_registry = AppLayoutRegistry(
+        families=families,
+        registry_digest=_stable_digest({
+            "schema_version": registry.schema_version,
+            "families": [family.identity_payload for family in families],
+        }),
+    )
+    graph, payloads = _corpus_graph()
+    previous = derive_compilation_plan(graph=graph, payloads=payloads, registry=before_registry)
+    current = _plan()
+    assert previous.plan_digest == "fdc88e33746108a99f99db21707f69767e04b043180cf3d5487fe2223cb729be"
+    assert len(current.units) == len(previous.units) == 61
+    assert current.units == previous.units
+    added_gaps = [gap for gap in current.gaps if gap not in previous.gaps]
+    assert {gap.path_template for gap in added_gaps} == ANDROID_DELIVERY_PATHS
+    assert {gap.code.value for gap in added_gaps} == {"renderer_input_incomplete"}
+    restored = current.canonical_payload(include_digest=False)
+    restored["registry_digest"] = previous.registry_digest
+    restored["gaps"] = [gap for gap in restored["gaps"] if gap["path_template"] not in ANDROID_DELIVERY_PATHS]
+    assert restored == previous.canonical_payload(include_digest=False)
+    assert canonical_digest(restored) == previous.plan_digest
 
 
 def test_inputs_are_never_mutated() -> None:

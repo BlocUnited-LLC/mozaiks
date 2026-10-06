@@ -729,6 +729,7 @@ def _core_families() -> tuple[ArtifactFamily, ...]:
                 ValidatorIdentifier.GENERATED_APP_VALIDATOR,
                 RuntimeConsumerIdentifier.DOWNLOAD_EXPORT,
                 condition=ConditionIdentifier.WHEN_DEPLOYMENT_EXPORT_REQUESTED,
+                materializer=MaterializerIdentifier.DOWNLOAD_DEPLOYMENT_RENDERER,
                 security=(SecurityClass.EXECUTABLE_STUB if path.endswith(".mjs") else SecurityClass.DEPLOYMENT_METADATA),
             )
             for path in (
