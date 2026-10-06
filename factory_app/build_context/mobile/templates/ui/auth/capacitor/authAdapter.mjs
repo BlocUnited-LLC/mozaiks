@@ -2,6 +2,22 @@ import { createNativeAuthorizationTransport } from './authorizationTransport.mjs
 
 export async function createNativeAppAuthAdapter(options, { App, Browser, createSharedAuthAdapter, platform, window }) {
   if (platform !== 'android') throw new Error('This mobile reference requires Android');
+  const auth = options.authConfig;
+  if (auth?.required && auth.runtime?.enabled) {
+    const native = auth.frontend?.android;
+    const expected = options.env?.VITE_OIDC_REDIRECT_URI;
+    if (!native || typeof native.client_id !== 'string' || !native.client_id.trim()
+        || native.client_id === auth.frontend.client_id
+        || typeof native.redirect_uri !== 'string' || !native.redirect_uri.trim()) {
+      throw new Error('The backend must configure a separately registered Android sign-in client');
+    }
+    if (typeof expected !== 'string' || !expected || native.redirect_uri !== expected) {
+      throw new Error('The registered Android callback does not match this app package');
+    }
+    options = { ...options, authConfig: { ...auth, frontend: {
+      ...auth.frontend, client_id: native.client_id, redirect_uri: native.redirect_uri,
+    } } };
+  }
   const transport = createNativeAuthorizationTransport({ App, Browser });
   const receiptKey = `mozaiks:${encodeURIComponent(options.appId)}:native-callback-delivery`;
   async function digest(url) {

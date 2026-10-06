@@ -19,7 +19,7 @@ runtime_boundaries:
   - id: shared_auth
     rule: Delegate PKCE, token exchange, callback validation and sessions to the shared auth adapter; Capacitor App and Browser own only external-browser navigation.
   - id: provider_configuration
-    rule: Backend-projected auth stays authoritative; configure the backend for the separately registered native public client and exact callback.
+    rule: Backend-projected frontend.android selects a separately registered native public client and exact package callback through MOZAIKS_ANDROID_OIDC_CLIENT_ID and MOZAIKS_ANDROID_OIDC_REDIRECT_URI. Browser frontend identity and shared issuer/API audience remain independent of that selection. A missing or mismatched native profile fails before sign-in.
   - id: source_isolation
     rule: Native preparation changes only a disposable app view; original browser registration remains intact.
   - id: build_evidence

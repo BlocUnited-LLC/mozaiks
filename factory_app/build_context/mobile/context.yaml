@@ -13,7 +13,7 @@ assets:
     kind: catalog
 pack:
   id: mobile
-  version: "0.1.0"
+  version: "0.2.0"
   status: active
   capability_source: framework_pack
 capabilities:

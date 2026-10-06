@@ -60,7 +60,8 @@ python examples/canonical-apps/community/scripts/live_environment.py start \
   --client-origin https://localhost
 ```
 
-The launcher registers the exact native redirect and logout callback and allows
+The launcher keeps the browser registration and adds a separate Android public
+client on the same backend. It registers the exact native redirect and logout callback and allows
 `https://localhost` through CORS. `adb reverse` forwards API port 18443 and
 identity port 28443. The build helper's explicit `--acceptance` option accepts
 only a loopback HTTP backend and writes mixed-content/cleartext overrides to

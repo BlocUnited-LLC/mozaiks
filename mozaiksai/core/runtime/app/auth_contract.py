@@ -47,6 +47,13 @@ class AuthRoutes(_ContractModel):
         return value
 
 
+class AndroidAuthFrontend(_ContractModel):
+    """Public native client handles; issuer and API authority stay shared."""
+
+    client_id_env: Literal["MOZAIKS_ANDROID_OIDC_CLIENT_ID"] = "MOZAIKS_ANDROID_OIDC_CLIENT_ID"
+    redirect_uri_env: Literal["MOZAIKS_ANDROID_OIDC_REDIRECT_URI"] = "MOZAIKS_ANDROID_OIDC_REDIRECT_URI"
+
+
 class AuthFrontend(_ContractModel):
     adapter: Literal["oidc_pkce"]
     client_id_env: Literal["VITE_OIDC_CLIENT_ID"]
@@ -55,6 +62,7 @@ class AuthFrontend(_ContractModel):
     redirect_uri_env: Literal["VITE_OIDC_REDIRECT_URI"]
     scope_env: Literal["VITE_OIDC_SCOPE"]
     default_scopes: list[NonEmptyText]
+    android: AndroidAuthFrontend = Field(default_factory=AndroidAuthFrontend)
 
     @field_validator("default_scopes")
     @classmethod
@@ -264,6 +272,15 @@ async def build_app_auth_projection(
             "redirect_uri": os.getenv(handles.redirect_uri_env, "").strip(),
             "scope": os.getenv(handles.scope_env, "").strip(),
         }
+        android_client = os.getenv(handles.android.client_id_env, "").strip()
+        android_redirect = os.getenv(handles.android.redirect_uri_env, "").strip()
+        # Partial registration is unusable for Android but must not take the
+        # browser offline. Native consumers reject an absent profile.
+        if android_client and android_redirect:
+            frontend["android"] = {
+                "client_id": android_client,
+                "redirect_uri": android_redirect,
+            }
     return {
         "required": contract is not None,
         "contract": contract.model_dump(mode="json") if contract is not None else None,

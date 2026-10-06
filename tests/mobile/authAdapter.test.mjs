@@ -13,6 +13,7 @@ const jwt = claims => `${Buffer.from('{"alg":"RS256"}').toString('base64url')}.$
 function options() {
   return {
     appId: 'common-ground',
+    env: { VITE_OIDC_REDIRECT_URI: callbackUri },
     authConfig: {
       required: true,
       runtime: { enabled: true, provider: 'jwt', local_development: false, user: null },
@@ -21,7 +22,10 @@ function options() {
         routes: { login: '/login', callback: '/auth/callback', logout: '/login', post_login_default: '/community' },
         frontend: { adapter: 'oidc_pkce', default_scopes: ['openid', 'profile', 'email'] },
       },
-      frontend: { authority: issuer, client_id: 'native-client', redirect_uri: callbackUri, scope: 'openid profile email' },
+      frontend: {
+        authority: issuer, client_id: 'browser-client', redirect_uri: 'https://app.example/auth/callback',
+        scope: 'openid profile email', android: { client_id: 'native-client', redirect_uri: callbackUri },
+      },
     },
   };
 }
@@ -60,6 +64,8 @@ beforeEach(() => {
 
 function grant(url) {
   const request = new URL(url);
+  assert.equal(request.searchParams.get('client_id'), 'native-client');
+  assert.equal(request.searchParams.get('redirect_uri'), callbackUri);
   const now = Math.floor(Date.now() / 1000);
   tokenResponse = {
     access_token: 'fixture-native-access-token', token_type: 'Bearer', expires_in: 1800,
@@ -131,7 +137,9 @@ test('a cold launch with a surviving PKCE transaction completes through the shar
   let deliverRequest;
   let abandonPreviousPage;
   const opened = new Promise(resolve => { deliverRequest = resolve; });
-  const previous = createAuthAdapter({ ...options(), authorizationTransport: {
+  const previousOptions = options();
+  previousOptions.authConfig.frontend = { ...previousOptions.authConfig.frontend, ...previousOptions.authConfig.frontend.android };
+  const previous = createAuthAdapter({ ...previousOptions, authorizationTransport: {
     open(request) { deliverRequest(request); return new Promise((_resolve, reject) => { abandonPreviousPage = reject; }); },
   } });
   const unfinished = previous.login({ returnPath: '/community/post-2?tab=comments' });
@@ -193,4 +201,42 @@ test('non-Android hosts fail before native plugin or shared adapter initializati
     }), /requires Android/);
   }
   assert.equal(storage.size, 0);
+});
+
+test('browser and Android select independent clients from the same backend projection', async () => {
+  const input = options();
+  nativeWindow.location.origin = 'https://app.example';
+  nativeWindow.location.href = 'https://app.example/login';
+  const browser = createAuthAdapter(input);
+  await browser.login();
+  const browserRequest = new URL(navigation.at(-1));
+  assert.equal(browserRequest.searchParams.get('client_id'), 'browser-client');
+  assert.equal(browserRequest.searchParams.get('redirect_uri'), 'https://app.example/auth/callback');
+  const native = await createNativeAppAuthAdapter(input, nativeHost().dependencies);
+  await native.login();
+  assert.equal(input.authConfig.frontend.client_id, 'browser-client');
+  assert.equal(input.authConfig.frontend.redirect_uri, 'https://app.example/auth/callback');
+  assert.equal(native.getAccessToken(), 'fixture-native-access-token');
+  assert.equal(browser.getAccessToken(), null);
+});
+
+test('missing, shared, or mismatched Android registrations fail before native plugin use', async () => {
+  const mutations = [
+    input => { delete input.authConfig.frontend.android; },
+    input => { input.authConfig.frontend.android.client_id = ''; },
+    input => { input.authConfig.frontend.android.client_id = 'browser-client'; },
+    input => { input.authConfig.frontend.android.redirect_uri = 'org.other.app:/auth/callback'; },
+    input => { delete input.env.VITE_OIDC_REDIRECT_URI; },
+  ];
+  for (const mutate of mutations) {
+    const input = options();
+    mutate(input);
+    await assert.rejects(createNativeAppAuthAdapter(input, {
+      platform: 'android', window: nativeWindow,
+      createSharedAuthAdapter: () => assert.fail('Invalid profile reached shared auth'),
+      App: { getLaunchUrl: () => assert.fail('Invalid profile called native plugin') },
+      Browser: {},
+    }), /registered Android|Android callback/);
+  }
+  assert.equal(requests.length, 0);
 });

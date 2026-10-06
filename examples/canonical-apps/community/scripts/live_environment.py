@@ -15,6 +15,7 @@ import socket
 import subprocess
 import sys
 import time
+from copy import deepcopy
 from datetime import UTC, datetime
 from importlib.metadata import version
 from pathlib import Path
@@ -77,7 +78,7 @@ def environment(args: argparse.Namespace, evidence: Path) -> tuple[dict, dict]:
         "VITE_OIDC_AUTHORITY": issuer,
         "VITE_OIDC_DISCOVERY_URL": f"{issuer}/.well-known/openid-configuration",
         "VITE_OIDC_CLIENT_ID": "common-ground",
-        "VITE_OIDC_REDIRECT_URI": args.native_callback or f"{web}/auth/callback",
+        "VITE_OIDC_REDIRECT_URI": f"{web}/auth/callback",
         "VITE_OIDC_SCOPE": "openid profile email user_posts.read user_posts.create user_posts.react",
     }
     runtime = {
@@ -110,6 +111,9 @@ def environment(args: argparse.Namespace, evidence: Path) -> tuple[dict, dict]:
         "MOZAIKS_GENERATED_ARTIFACTS_PATH": str(evidence / "generated"),
         "AG2_RUNTIME_LOG_FILE": str(evidence / "ag2-runtime.log"),
     }
+    if args.native_callback:
+        runtime["MOZAIKS_ANDROID_OIDC_CLIENT_ID"] = "common-ground-android"
+        runtime["MOZAIKS_ANDROID_OIDC_REDIRECT_URI"] = args.native_callback
     return frontend, runtime
 
 
@@ -151,8 +155,16 @@ def run(args: argparse.Namespace, evidence: Path) -> None:
     realm = json.loads((WORKSPACE / "tests/identity-realm.json").read_text(encoding="utf-8"))
     web = f"http://127.0.0.1:{args.web_port}"
     realm["clients"][0]["redirectUris"] = [frontend["VITE_OIDC_REDIRECT_URI"]]
-    realm["clients"][0]["webOrigins"] = [args.client_origin or web]
-    realm["clients"][0]["attributes"]["post.logout.redirect.uris"] = args.native_callback or f"{web}/*"
+    realm["clients"][0]["webOrigins"] = [web]
+    realm["clients"][0]["attributes"]["post.logout.redirect.uris"] = f"{web}/*"
+    if args.native_callback:
+        native = deepcopy(realm["clients"][0])
+        native.update(
+            clientId="common-ground-android", name="Common Ground local Android",
+            redirectUris=[args.native_callback], webOrigins=[args.client_origin],
+        )
+        native["attributes"]["post.logout.redirect.uris"] = args.native_callback
+        realm["clients"].append(native)
     write_json(evidence / "identity-realm.json", realm)
     write_json(evidence / "frontend-env.json", frontend)
     write_json(evidence / "runtime-env.json", runtime)

@@ -113,11 +113,26 @@ native browser adapter, which delegates OAuth and PKCE to the shared auth
 implementation. Android opens the system browser and returns to the callback
 derived from the package identifier and the app's canonical callback route.
 
-Authenticated delivery requires a public OIDC client registered for that exact
-native callback and a backend auth profile that selects that client while
-preserving the API audience. A browser deployment's redirect registration is
-insufficient. Hosted selection of separate web and native auth profiles is a
-later integration step.
+Authenticated delivery requires a separate public OIDC client registered for
+that exact native callback. Set these public values on the app backend:
+
+```text
+MOZAIKS_ANDROID_OIDC_CLIENT_ID=<registered Android public client id>
+MOZAIKS_ANDROID_OIDC_REDIRECT_URI=com.example.community:/auth/callback
+```
+
+The canonical auth contract supplies these fixed handles under
+`frontend.android`. `/api/shell-config` projects their configured values as
+`auth.frontend.android`; a partial registration projects no Android profile.
+The mobile facade selects only its client and callback, checks the callback
+against the packaged Android identity, and delegates OAuth to the shared
+adapter. Missing profiles, reused browser client ids, and mismatched callbacks
+fail before sign-in. The browser continues using its existing `VITE_OIDC_*`
+profile. Both clients use the same issuer, scopes, and backend API audience.
+Registration must allow public-client PKCE, the exact login/logout callback,
+and the Android WebView origin for token requests. Configure the backend's CORS
+for that origin too. These values grant no identity or authorization; access
+tokens still pass the normal backend validation and module permission checks.
 
 Supported apps use the shared default auth adapter or its canonical generated
 facade. Custom auth adapters and inherited Factory workflow registries are

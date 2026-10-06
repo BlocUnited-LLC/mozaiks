@@ -58,6 +58,10 @@ try {
   assert.equal(environment.client_origin, origin);
   assert.equal(runtime.AUTH_ENABLED, 'true');
   assert.equal(runtime.AUTH_PROVIDER, 'jwt');
+  assert.equal(runtime.MOZAIKS_ANDROID_OIDC_CLIENT_ID, 'common-ground-android');
+  assert.equal(runtime.MOZAIKS_ANDROID_OIDC_REDIRECT_URI, callback);
+  assert.equal(runtime.VITE_OIDC_CLIENT_ID, 'common-ground');
+  assert.equal(runtime.VITE_OIDC_REDIRECT_URI, `${environment.base_url}/auth/callback`);
   assert.equal(runtime.ADDITIONAL_CORS_ORIGINS, origin);
   assert.match(environment.api_url, /^http:\/\/127\.0\.0\.1:\d+$/);
   assert.match(environment.auth_issuer, /^http:\/\/127\.0\.0\.1:\d+\/realms\/common-ground$/);
@@ -68,7 +72,8 @@ try {
     source_sha: environment.source_sha,
     apk_sha256: createHash('sha256').update(readFileSync(apk)).digest('hex'),
     issuer: environment.auth_issuer,
-    client_id: environment.client_id,
+    client_id: runtime.MOZAIKS_ANDROID_OIDC_CLIENT_ID,
+    browser_client_id: environment.client_id,
     audience: environment.audience,
     auth_enabled: true,
     images: environment.images,
@@ -94,6 +99,8 @@ try {
     const url = new URL(request.url());
     if (`${url.origin}/realms/common-ground` !== environment.auth_issuer) return;
     if (url.pathname.endsWith('/protocol/openid-connect/auth')) {
+      assert.equal(url.searchParams.get('client_id'), runtime.MOZAIKS_ANDROID_OIDC_CLIENT_ID);
+      assert.equal(url.searchParams.get('redirect_uri'), callback);
       observed.authorizations += 1;
       latestAuthorizationState = url.searchParams.get('state');
       privateValues.push(latestAuthorizationState);
