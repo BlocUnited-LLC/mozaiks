@@ -60,7 +60,8 @@ python examples/canonical-apps/community/scripts/live_environment.py start \
   --client-origin https://localhost
 ```
 
-The launcher registers the exact native redirect and logout callback and allows
+The launcher keeps the browser registration and adds a separate Android public
+client on the same backend. It registers the exact native redirect and logout callback and allows
 `https://localhost` through CORS. `adb reverse` forwards API port 18443 and
 identity port 28443. The build helper's explicit `--acceptance` option accepts
 only a loopback HTTP backend and writes mixed-content/cleartext overrides to
@@ -84,7 +85,10 @@ credentials, and browser traces are excluded from uploaded evidence.
 Android receives the reverse-domain scheme; the shared adapter checks the exact
 callback URI and transaction. Callback delivery stores only a SHA-256 receipt
 to prevent replay of a retained launch intent after WebView reload. A process
-restart that loses the pending transaction requires fresh sign-in. Session
+restart that loses the pending transaction requires fresh sign-in. Bootstrap
+reads a retained native callback only when the shared adapter has a surviving
+PKCE transaction; a post-logout launch intent cannot delay sign-in readiness.
+Session
 storage follows the existing browser contract. Persistent native refresh-token
 storage needs separate design and qualification.
 

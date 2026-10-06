@@ -32,7 +32,7 @@ def auth_document():
 @pytest.fixture(autouse=True)
 def isolated_auth(monkeypatch):
     for name in tuple(os.environ):
-        if name.startswith(("AUTH_", "MOZAIKS_OIDC_", "VITE_OIDC_", "SUPABASE_", "KEYCLOAK_")):
+        if name.startswith(("AUTH_", "MOZAIKS_OIDC_", "MOZAIKS_ANDROID_OIDC_", "VITE_OIDC_", "SUPABASE_", "KEYCLOAK_")):
             monkeypatch.delenv(name)
     monkeypatch.setenv("ENV", "test")
     monkeypatch.delenv("ENVIRONMENT", raising=False)
@@ -207,6 +207,42 @@ async def test_public_projection_exposes_only_declared_browser_config(monkeypatc
     serialized = json.dumps(projection)
     assert "must-stay-private" not in serialized
     assert "backend-issuer.invalid" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_android_profile_preserves_browser_and_runtime_authority(monkeypatch, auth_document):
+    monkeypatch.setenv("AUTH_ENABLED", "true")
+    monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+    monkeypatch.setenv("AUTH_AUDIENCE", "shared-api")
+    monkeypatch.setenv("AUTH_ISSUER", "https://issuer.example")
+    monkeypatch.setenv("AUTH_JWKS_URL", "https://issuer.example/jwks")
+    monkeypatch.setenv("VITE_OIDC_CLIENT_ID", "browser")
+    monkeypatch.setenv("VITE_OIDC_REDIRECT_URI", "https://app.example/auth/callback")
+    contract = validate_app_auth_contract(auth_document)
+    browser = await build_app_auth_projection(contract)
+    monkeypatch.setenv("MOZAIKS_ANDROID_OIDC_CLIENT_ID", "android")
+    partial = await build_app_auth_projection(contract)
+    assert partial == browser
+    monkeypatch.setenv("MOZAIKS_ANDROID_OIDC_REDIRECT_URI", "org.example.app:/auth/callback")
+    both = await build_app_auth_projection(contract)
+    assert both["frontend"].pop("android") == {
+        "client_id": "android", "redirect_uri": "org.example.app:/auth/callback",
+    }
+    assert both == browser
+    monkeypatch.delenv("MOZAIKS_ANDROID_OIDC_CLIENT_ID")
+    assert await build_app_auth_projection(contract) == browser
+
+
+def test_android_profile_handles_are_closed_and_names_only(auth_document):
+    contract = validate_app_auth_contract(auth_document)
+    assert contract.frontend.android.model_dump() == {
+        "client_id_env": "MOZAIKS_ANDROID_OIDC_CLIENT_ID",
+        "redirect_uri_env": "MOZAIKS_ANDROID_OIDC_REDIRECT_URI",
+    }
+    for android in ({"client_id": "raw-value"}, {"client_id_env": "CLIENT_SECRET"}, {"provider": "custom"}):
+        auth_document["frontend"]["android"] = android
+        with pytest.raises(AppAuthContractError):
+            validate_app_auth_contract(auth_document)
 
 
 @pytest.mark.asyncio

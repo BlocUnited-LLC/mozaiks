@@ -19,6 +19,9 @@ description: >
   validates against the shared mozaiks.auth.v1 model; ui/auth/authAdapter.js
   delegates to @mozaiks/chat-ui/auth. Do not generate OIDC, token storage, or
   local demo identity implementations. Backend configuration selects auth mode.
+  The optional Android client uses the canonical frontend.android env handles;
+  never replace the browser client, issuer, or API audience to enable mobile.
+  Native client registration belongs to the host/operator, not generated code.
 
 task_contracts:
   page_bundle:
