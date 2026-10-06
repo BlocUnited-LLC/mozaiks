@@ -23,6 +23,19 @@ colors, font families, radius scales, spacing scales, shadows, or page-local
 visual palettes. Those values belong in `app/brand/theme_config.json` and flow
 to the shell through semantic tokens.
 
+## Initial theme loading
+
+The browser host resolves its existing shell/auth configuration, then loads
+the active app's theme through `themeProvider` before mounting the application.
+The same theme cache supplies the first render of `useTheme`; a second,
+temporary brand must not appear while the hook starts. Loading feedback uses
+neutral text and the resolved semantic tokens.
+
+`app/brand/theme_config.json` remains the visual authority. This ordering does
+not create a separate bootstrap theme, alter sign-in requirements, or copy
+Studio branding into a generated app. Theme fetches are bounded; unavailable
+theme configuration uses the existing neutral fallback.
+
 ## Canonical `shell.json` Shape
 
 Generated apps author only this compact shell surface:
