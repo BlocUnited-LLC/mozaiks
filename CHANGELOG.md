@@ -236,6 +236,9 @@ This project follows a practical pre-1.0 changelog format:
 - Studio app-scoped management routes now verify that the signed-in caller
   owns the selected app before returning data or applying changes.
 
+- Code review loads Monaco and its workers locally, using the patched DOMPurify
+  dependency for editor markup with sanitizer hooks isolated from chat rendering.
+
 - Patched DOMPurify and source-map-js in the shipped frontend dependency locks,
   including Monaco's nested DOMPurify dependency.
 
