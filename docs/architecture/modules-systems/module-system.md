@@ -167,6 +167,45 @@ to an action, workflow, page, or transition `target`. The runtime validates
 that `capability_id` values are unique within the module and that `target`
 references a declared action.
 
+### Async action budgets
+
+`actions[].timeout_seconds` is an optional server-declared integer from 1 through
+3600 seconds. Omitted or null keeps `MODULE_ACTION_TIMEOUT_SECONDS` (default 30;
+the existing process setting 0 disables the default timeout). A declared value
+replaces that default for this action only. Strings, booleans, fractional values,
+zero, and values outside the bounds are rejected during loading and generation.
+
+For example, a module's internal background action may declare:
+
+```yaml
+- id: process_exports
+  description: Process one queued export with bounded cleanup.
+  handler_method: process_exports
+  api_surface: internal
+  permissions: []
+  timeout_seconds: 1860
+```
+
+`ModuleExecutor.register_loaded_module()` carries the validated budget from the
+manifest. Direct server registration uses `action_timeouts={"process_exports": 1860}`;
+unknown action references fail. Caller params and HTTP request metadata cannot
+change the budget. Authorization and entitlement checks are unchanged.
+
+The executor cancels timed-out async handlers and returns `ACTION_TIMEOUT` after
+their cancellation cleanup finishes. External cancellation still propagates.
+Handlers must cooperate with cancellation and bound their own cleanup; this is
+not a hard process kill deadline. Services retain ownership of subprocess cleanup,
+durable outcomes, and recovery leases, which must cover execution and cleanup.
+Synchronous handlers retain existing behavior and are not timed out; use async
+handlers for I/O or background work. A `startup_service` may schedule dispatch
+through the executor; it does not establish a separate action authority.
+
+AppGenerator emits the same optional field, materialization validates it before
+writing YAML, and bundle admission reuses the runtime validator. Ordinary
+generated CRUD actions continue to inherit the default.
+
+### Action exposure
+
 `actions[].api_surface` declares the intended external HTTP exposure of an
 action. Common values include `public`, `public_readonly`, `internal`, and
 `admin_internal`. When auth is enabled, the platform requires an authenticated

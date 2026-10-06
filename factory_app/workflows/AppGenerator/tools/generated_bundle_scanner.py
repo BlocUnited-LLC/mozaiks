@@ -56,6 +56,7 @@ from mozaiksai.core.runtime.app.layout_validation import (
     layout_validation_errors,
     validate_file_map_layout,
 )
+from mozaiksai.core.runtime.app.module_loader import validate_action_timeout
 from mozaiksai.core.runtime.app.page_schema import (
     PageSchemaValidationError,
     validate_page_schema,
@@ -1937,7 +1938,7 @@ def _scan_route_manifest_component_files(files_map: dict[str, str]) -> list[str]
 
 
 def _scan_action_api_surface(files_map: dict[str, str]) -> list[str]:
-    """Validate that action api_surface values in module.yaml use the canonical vocabulary.
+    """Validate action exposure and execution metadata against the runtime contract.
 
     Only the four declared strings and actual null are canonical. Keep this
     diagnostic aligned with runtime ActionDef validation.
@@ -1968,6 +1969,12 @@ def _scan_action_api_surface(files_map: dict[str, str]) -> list[str]:
             if not isinstance(action, dict):
                 continue
             action_id = str(action.get("id") or "").strip()
+            try:
+                validate_action_timeout(action.get("timeout_seconds"))
+            except ValueError:
+                errors.append(
+                    f"{path}: action '{action_id}' timeout_seconds must be null or an integer from 1 through 3600."
+                )
             api_surface = action.get("api_surface")
             if api_surface is None:
                 continue

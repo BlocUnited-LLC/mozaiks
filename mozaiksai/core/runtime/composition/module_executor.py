@@ -39,7 +39,7 @@ from uuid import uuid4
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.audit.audit_logger import AuditLogger, get_audit_logger
 from mozaiksai.core.ports.entitlement import EntitlementPort, NoOpEntitlementAdapter
-from mozaiksai.core.runtime.app.module_loader import SettingDef
+from mozaiksai.core.runtime.app.module_loader import SettingDef, validate_action_timeout
 from mozaiksai.core.runtime.composition.bson_safe import (
     ModuleResultNormalizationError,
     json_safe_bson,
@@ -299,6 +299,7 @@ class ModuleExecutor:
         self._action_permissions: dict[str, dict[str, list[str]]] = {}
         self._action_schemas: dict[str, dict[str, dict[str, Any]]] = {}
         self._action_entitlements: dict[str, dict[str, str | None]] = {}
+        self._action_timeouts: dict[str, dict[str, int | None]] = {}
         self._action_emits: dict[str, dict[str, list[str]]] = {}
         self._event_payload_schemas: dict[str, dict[str, dict[str, Any]]] = {}
         self._event_emitter = event_emitter
@@ -332,6 +333,7 @@ class ModuleExecutor:
             action_permissions=loaded_module.action_permissions_map,
             action_schemas=loaded_module.action_schemas_map,
             action_entitlements=loaded_module.action_entitlement_map,
+            action_timeouts=loaded_module.action_timeout_map,
             action_emits=loaded_module.action_emits_map,
             event_payload_schemas=loaded_module.event_payload_schemas_map,
         )
@@ -346,6 +348,7 @@ class ModuleExecutor:
         action_permissions: dict[str, list[str]] | None = None,
         action_schemas: dict[str, dict[str, Any]] | None = None,
         action_entitlements: dict[str, str | None] | None = None,
+        action_timeouts: dict[str, int | None] | None = None,
         action_emits: dict[str, list[str]] | None = None,
         event_payload_schemas: dict[str, dict[str, Any]] | None = None,
     ) -> None:
@@ -373,14 +376,21 @@ class ModuleExecutor:
                                  EntitlementPort.check() before dispatch and returns
                                  ENTITLEMENT_REQUIRED on denial.
             action_emits:        Maps action id -> event types declared in module.yaml.
+            action_timeouts:     Maps action id -> async timeout seconds (integer 1..3600).
+                                 None/omitted inherits MODULE_ACTION_TIMEOUT_SECONDS.
+                                 This is server registration metadata, never request input.
             event_payload_schemas: Maps event type -> payload_schema from contracts/events.yaml.
         """
+        timeouts = {action: validate_action_timeout(value) for action, value in (action_timeouts or {}).items()}
+        if timeouts.keys() - (action_method_map or {}).keys():
+            raise ValueError("Action timeouts must reference declared actions")
         self._modules[name] = handler
         self._action_methods[name] = dict(action_method_map or {})
         self._settings[name] = list(settings or [])
         self._action_permissions[name] = dict(action_permissions or {})
         self._action_schemas[name] = dict(action_schemas or {})
         self._action_entitlements[name] = dict(action_entitlements or {})
+        self._action_timeouts[name] = timeouts
         self._action_emits[name] = {k: list(v) for k, v in (action_emits or {}).items()}
         self._event_payload_schemas[name] = dict(event_payload_schemas or {})
         logger.info("MODULE_REGISTERED: %s (%s)", name, type(handler).__name__)
@@ -669,7 +679,8 @@ class ModuleExecutor:
                 # custom contexts cannot replace its request-bound policy.
                 context.persistence = self._build_persistence_context(request)
 
-        timeout = _action_timeout()
+        declared_timeout = self._action_timeouts.get(request.module, {}).get(request.action)
+        timeout = declared_timeout if declared_timeout is not None else _action_timeout()
         try:
             with bind_persistence_principal(str(request.app_id or "").strip(), request.persistence_principal):
                 if inspect.iscoroutinefunction(action_fn):

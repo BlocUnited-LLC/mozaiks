@@ -14,6 +14,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- Optional bounded `actions[].timeout_seconds` for async module actions, validated
+  through AppGenerator and runtime registration. Ordinary actions keep their
+  existing default; caller payloads cannot override the registered budget.
+
 - Reusable Android delivery of canonical app workspaces through
   `mozaiks package android`, with a declared mobile build-context pack,
   deterministic source/tooling archives, and debug APK build receipts.
