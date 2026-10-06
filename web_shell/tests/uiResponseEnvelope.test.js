@@ -67,18 +67,21 @@ test('ChatPage approvals preserve original request identity through real browser
     stdin:{resolveDir:shell, loader:'jsx', contents:`
       import React, {useState,useCallback,useEffect,useRef} from 'react';
       import {createRoot} from 'react-dom/client';
-      import {MemoryRouter} from 'react-router-dom';
+      import {MemoryRouter,useLocation,useNavigate} from 'react-router-dom';
       import {useWorkflowStart} from ${JSON.stringify(path.join(root,'chat-ui/src/hooks/useWorkflowStart.js'))};
       import {useChatStartupEffects} from ${JSON.stringify(path.join(root,'chat-ui/src/hooks/useChatStartupEffects.js'))};
       import {useConversationModeController} from ${JSON.stringify(path.join(root,'chat-ui/src/hooks/useConversationModeController.js'))};
       import HarnessDecisionCard from ${JSON.stringify(path.join(root,'factory_app/app/ui/components/HarnessDecisionCard.jsx'))};
       const authFetch=(...args)=>fetch(...args);
       function Fixture(){
+        const location=useLocation(),navigate=useNavigate();
+        const queryChatId=new URLSearchParams(location.search).get('chat_id');
         const [pendingHarnessDecision,setPendingHarnessDecision]=useState(null);
         const [pendingHarnessDecisionError,setPendingHarnessDecisionError]=useState(null);
         const currentAppId='studio-host', currentUserId='owner', currentWorkflowName='AppReview';
         const auth={};
         const [currentChatId,changeChat]=useState('review-chat');
+        const [connectionStatus,setConnectionStatus]=useState('connected');
         const [messages,setMessagesWithLogging]=useState([{id:'original-request',sender:'user',content:'Update the accent.'}]);
         const messagesRef=useRef(messages);messagesRef.current=messages;
         const currentChatIdRef=useRef(currentChatId),reviewContinuationRef=useRef(null);
@@ -86,6 +89,12 @@ test('ChatPage approvals preserve original request identity through real browser
         const workflowMessagesCacheRef=useRef(messages),workflowMessagesSharedRef=useRef(messages);
         const workflowReplayPendingRef=useRef(false),generalMessagesCacheRef=useRef([]);
         const currentWorkflowNameRef=useRef('AppReview');
+        useEffect(()=>{
+          // The socket owner connects only after the selected chat's route resolves.
+          if(currentChatId!==queryChatId) return;
+          window.fixtureConnections ||= [];window.fixtureConnections.push(currentChatId);
+          setConnectionStatus('connected');
+        },[currentChatId,queryChatId]);
         const revisionHandoffRef=useRef(null),pendingTransitionIdRef=useRef(null);
         const currentArtifactMessagesRef=useRef([{toolCall:{tool_call_id:'original-tool-call',
           payload:{build_registry_id:'owned-build',artifact_kind:'app_bundle',artifact_version_id:'baseline',target_app_id:'target-app'}}}]);
@@ -104,8 +113,8 @@ test('ChatPage approvals preserve original request identity through real browser
           sendWsMessage:event=>{window.fixtureSwitches ||= [];window.fixtureSwitches.push(event);return true;},
         });
         useChatStartupEffects({currentAppId,currentUserId,currentChatId,activeChatId:currentChatId,
-          queryChatId:currentChatId,queryMode:'workflow',urlWorkflowName:currentWorkflowName,
-          currentWorkflowName,conversationMode,connectionStatus:'connected',isPrimaryChatRoute:true,
+          queryChatId,queryMode:'workflow',urlWorkflowName:currentWorkflowName,
+          currentWorkflowName,conversationMode,connectionStatus,isPrimaryChatRoute:true,
           conversationBootstrapRef,queryResumeHandledRef,workflowConfig,resumeWorkflowSession,
           currentArtifactMessages:currentArtifactMessagesRef.current,layoutMode:'split',
           setActiveChatId,rememberWorkflowChatSession,
@@ -126,11 +135,12 @@ test('ChatPage approvals preserve original request identity through real browser
             artifact_version_id:'baseline',source_surface:'app_review',extra:{build_registry_id:'owned-build'}}});
         return <><button onClick={beginRevision}>Request revision</button><output aria-label="Review session">{currentChatId}</output>
           <output aria-label="Review transcript">{messages.map(message=>message.content).join(' ')}</output>
-          <button onClick={()=>setCurrentChatId('unrelated-review')}>Open another conversation</button>
+          <output aria-label="Route session">{queryChatId}</output>
+          <button onClick={()=>{navigate('/chat?workflow=AppReview&chat_id=unrelated-review&mode=workflow');setCurrentChatId('unrelated-review');}}>Open another conversation</button>
           <HarnessDecisionCard decision={pendingHarnessDecision} busy={pendingHarnessDecisionBusy}
             error={pendingHarnessDecisionError} onAction={handlePendingHarnessDecisionAction}/></>;
       }
-      createRoot(document.getElementById('root')).render(<MemoryRouter><Fixture/></MemoryRouter>);
+      createRoot(document.getElementById('root')).render(<MemoryRouter initialEntries={['/chat?workflow=AppReview&chat_id=review-chat&mode=workflow']}><Fixture/></MemoryRouter>);
     `},
     bundle:true, write:false, jsx:'automatic', loader:{'.js':'jsx'},
     nodePaths:[path.join(shell,'node_modules')],
@@ -233,6 +243,7 @@ test('ChatPage approvals preserve original request identity through real browser
         await page.getByRole('button',{name:'Request revision',exact:true}).click();
         await page.getByRole('button',{name:'Approve design 2',exact:true}).click();
         await expect(page.getByLabel('Review session')).toHaveText('next-review');
+        await expect(page.getByLabel('Route session')).toHaveText('next-review');
         assert.equal(requests.length,3,'One initial trigger, one approval, one saved-bundle GET; no extra workflow launch');
         assert.equal(requests[1].body.source_chat_id,'review-chat');
         assert.equal(requests[1].body.trigger_payload.change_request_id,'change-2');
@@ -243,7 +254,10 @@ test('ChatPage approvals preserve original request identity through real browser
         await expect(page.getByLabel('Review transcript')).toHaveText('Update the accent.');
         assert.deepEqual(await page.evaluate(()=>window.fixtureSwitches||[]),[],
           'Adoption must preserve the transcript instead of starting a destructive route resume');
+        assert.deepEqual(await page.evaluate(()=>window.fixtureConnections),['review-chat','next-review'],
+          'The successor still reaches the normal connection path after its route resolves');
         await page.getByRole('button',{name:'Open another conversation',exact:true}).click();
+        await expect(page.getByLabel('Review session')).toHaveText('unrelated-review');
         await expect(page.getByLabel('Review transcript')).toHaveText('');
         assert.deepEqual(await page.evaluate(()=>window.fixtureSwitches),[
           {type:'chat.switch_workflow',chat_id:'unrelated-review',replay_on_switch:true},
@@ -285,7 +299,7 @@ async function routeRevisionResult(triggerData, {
   const setters = Object.fromEntries([
     'CurrentChatId', 'ActiveChatId', 'CurrentWorkflowName', 'ActiveWorkflowName', 'ConversationMode',
     'WorkflowCompleted', 'PendingHarnessDecision', 'PendingHarnessDecisionError', 'Loading', 'PendingWorkflowReply',
-    'CompletionData', 'PendingTransitionId', 'PendingTransitionContext',
+    'CompletionData', 'PendingTransitionId', 'PendingTransitionContext', 'ConnectionStatus',
   ].map(name => [`set${name}`, value => {
     state[name] = value;
     if (name === 'CurrentChatId') currentChatIdRef.current = value;
@@ -300,6 +314,8 @@ async function routeRevisionResult(triggerData, {
     currentWorkflowName:'AppReview',currentWorkflowNameRef:{current:'AppReview'},workflowConfig:null,
     isFailedWorkflowSession:status=>status===2,
     dynamicUIHandler: handler, console: {error() {}}, ...setters,
+    URLSearchParams, location:{pathname:'/chat',search:'?workflow=AppReview&chat_id=review-chat&mode=workflow&app_id=studio-host'},
+    navigate:(url,options)=>{state.navigation={url,options};},
     rememberWorkflowChatSession: (chatId, workflow) => {state.remembered = [chatId, workflow];},
     buildPendingHarnessDecision: decision => decision,
     setMessagesWithLogging: update => {messages.splice(0, messages.length, ...update(messages));},
@@ -426,6 +442,9 @@ test('chat refinement adopts only the server-created review successor without la
   assert.equal(requests.filter(request => request.options?.method === 'POST').length, 1);
   assert.equal(state.CurrentChatId, 'next-review');
   assert.equal(state.CurrentWorkflowName, 'AppReview');
+  assert.equal(state.navigation.url, '/chat?workflow=AppReview&chat_id=next-review&mode=workflow&app_id=studio-host');
+  assert.equal(state.navigation.options.replace, true);
+  assert.equal(state.ConnectionStatus, 'disconnected');
   assert.equal(state.PendingTransitionId, null);
   assert.equal(state.WorkflowCompleted, false);
   assert.equal(updates.length, 2);
@@ -442,6 +461,8 @@ for (const mismatch of [{target_app_id: 'other'}, {build_registry_id: 'other'},
       review_continuation: {...reviewContinuation, ...mismatch},
     }, {artifactMessages: [reviewArtifact]});
     assert.equal(state.CurrentChatId, undefined);
+    assert.equal(state.navigation, undefined);
+    assert.equal(state.ConnectionStatus, undefined);
     assert.equal(queryResumeHandledRef.current, 'review-chat:AppReview');
     assert.match(messages[0].content, /next review does not match/);
     assert.ok(updates.some(update => update.patch?.refinement_error));
@@ -454,6 +475,8 @@ test('failed review continuation keeps the preview and makes the unavailable nex
     review_continuation_error: 'The saved draft is available, but its next review could not be opened.',
   }, {artifactMessages: [reviewArtifact]});
   assert.equal(state.CurrentChatId, undefined);
+  assert.equal(state.navigation, undefined);
+  assert.equal(state.ConnectionStatus, undefined);
   assert.equal(queryResumeHandledRef.current, 'review-chat:AppReview');
   assert.ok(updates.every(update => update.type === 'ui.update'));
   assert.match(messages[0].content, /next review could not be opened/);

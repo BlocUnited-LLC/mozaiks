@@ -1400,10 +1400,16 @@ const ChatPage = () => {
       throw new Error(triggerData.review_continuation_error);
     }
     if (continuation) {
-      // The successor is already adopted here. Its canonical URL must not
-      // trigger a second resume that clears the conversation before replay.
+      // Adopt state and route together so the previous URL cannot resume the
+      // superseded source, and the successor cannot clear the conversation.
+      const params = new URLSearchParams(location.search || '');
+      params.set('workflow', continuation.workflow_id);
+      params.set('chat_id', continuation.chat_id);
+      params.set('mode', 'workflow');
       queryResumeHandledRef.current = `${continuation.chat_id}:${continuation.workflow_id}`;
       reviewContinuationRef.current = continuation;
+      setConnectionStatus('disconnected');
+      navigate(`${location.pathname}?${params.toString()}`, { replace: true });
       setCurrentChatId(continuation.chat_id);
       setActiveChatId(continuation.chat_id);
       setCurrentWorkflowName(continuation.workflow_id);
@@ -1415,7 +1421,7 @@ const ChatPage = () => {
       setPendingTransitionId(null);
       setPendingTransitionContext({});
     }
-  }, [auth, rememberWorkflowChatSession, setActiveChatId, setActiveWorkflowName,
+  }, [auth, location.pathname, location.search, navigate, rememberWorkflowChatSession, setActiveChatId, setActiveWorkflowName,
     setConversationMode, setCurrentChatId, setCurrentWorkflowName]);
   const handlePendingHarnessDecisionAction = useCallback(async (action) => {
     if (!pendingHarnessDecision || !action) {
