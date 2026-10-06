@@ -287,15 +287,21 @@ export default defineConfig(({ mode }) => {
       name: 'jsx-in-js',
       enforce: 'pre',
       async transform(code, id) {
-      const isChatUiJs = /(?:[\\/]chat-ui[\\/]src[\\/]|[\\/]mozaiks_chat_ui[\\/]src[\\/]).*\.js$/.test(id);
+          // Asset requests belong to Vite's loaders, even when the asset is .js.
+          const request = id.split('#', 1)[0];
+          const queryIndex = request.indexOf('?');
+          const sourceId = (queryIndex < 0 ? request : request.slice(0, queryIndex)).replace(/\\/g, '/');
+          const query = new URLSearchParams(queryIndex < 0 ? '' : request.slice(queryIndex + 1));
+          if (id.startsWith('\0') || !sourceId.endsWith('.js') || query.has('raw') || query.has('url')) return;
+          const isChatUiJs = /(?:\/chat-ui\/src\/|\/mozaiks_chat_ui\/src\/).*\.js$/.test(sourceId);
         const isWorkflowOrModuleUiJs =
-          [platformWorkflowRoot, factoryWorkflowsRoot].some((root) => id.replace(/\\/g, '/').startsWith(root.replace(/\\/g, '/') + '/') && id.endsWith('.js')) ||
-          /[\\/]factory_app[\\/]workflows[\\/].*[\\/]ui[\\/].*\.js$/.test(id) ||
-          /[\\/]factory_app[\\/]app[\\/]workflows[\\/].*[\\/]ui[\\/].*\.js$/.test(id) ||
-          /[\\/]app[\\/](?:workflows|modules)[\\/].*[\\/]ui[\\/].*\.js$/.test(id);
+            [platformWorkflowRoot, factoryWorkflowsRoot].some((root) => sourceId.startsWith(root.replace(/\\/g, '/') + '/')) ||
+            /\/factory_app\/workflows\/.*\/ui\/.*\.js$/.test(sourceId) ||
+            /\/factory_app\/app\/workflows\/.*\/ui\/.*\.js$/.test(sourceId) ||
+            /\/app\/(?:workflows|modules)\/.*\/ui\/.*\.js$/.test(sourceId);
         const isProductUiJs =
-          /[\\/][^/\\]+-platform[\\/].*\.js$/.test(id) ||
-          id.replace(/\\/g, '/').startsWith(platformAppDirForward + '/');
+            /\/[^/]+-platform\/.*\.js$/.test(sourceId) ||
+            sourceId.startsWith(platformAppDirForward + '/');
         if (isChatUiJs || isWorkflowOrModuleUiJs || isProductUiJs) {
           return transformWithEsbuild(code, id, { loader: 'jsx', jsx: 'automatic', jsxImportSource: 'react' });
         }
