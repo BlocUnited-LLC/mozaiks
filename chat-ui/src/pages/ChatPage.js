@@ -1400,6 +1400,9 @@ const ChatPage = () => {
       throw new Error(triggerData.review_continuation_error);
     }
     if (continuation) {
+      // The successor is already adopted here. Its canonical URL must not
+      // trigger a second resume that clears the conversation before replay.
+      queryResumeHandledRef.current = `${continuation.chat_id}:${continuation.workflow_id}`;
       reviewContinuationRef.current = continuation;
       setCurrentChatId(continuation.chat_id);
       setActiveChatId(continuation.chat_id);

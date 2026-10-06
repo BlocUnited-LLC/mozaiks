@@ -181,6 +181,10 @@ For acceptance, continue a real AppReview conversation and verify:
    source chats and stale resumed bindings must still be rejected. During a chat
    edit, the review heading reads **Updating your draft**; acceptance and
    activation remain disabled until that edit settles with saved checks.
+   Request an edit from this reopened chat and verify its messages stay visible
+   when the successor review opens, without reloading the page. The canonical
+   URL update must not resume an already-adopted session a second time; ordinary
+   navigation to another chat must still use the normal resume path.
 
 Passing checks makes a draft ready for the user's review. **Accept this draft**
 records that acceptance; **Activate this version** promotes it into the app

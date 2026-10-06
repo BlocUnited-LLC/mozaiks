@@ -69,6 +69,8 @@ test('ChatPage approvals preserve original request identity through real browser
       import {createRoot} from 'react-dom/client';
       import {MemoryRouter} from 'react-router-dom';
       import {useWorkflowStart} from ${JSON.stringify(path.join(root,'chat-ui/src/hooks/useWorkflowStart.js'))};
+      import {useChatStartupEffects} from ${JSON.stringify(path.join(root,'chat-ui/src/hooks/useChatStartupEffects.js'))};
+      import {useConversationModeController} from ${JSON.stringify(path.join(root,'chat-ui/src/hooks/useConversationModeController.js'))};
       import HarnessDecisionCard from ${JSON.stringify(path.join(root,'factory_app/app/ui/components/HarnessDecisionCard.jsx'))};
       const authFetch=(...args)=>fetch(...args);
       function Fixture(){
@@ -77,14 +79,37 @@ test('ChatPage approvals preserve original request identity through real browser
         const currentAppId='studio-host', currentUserId='owner', currentWorkflowName='AppReview';
         const auth={};
         const [currentChatId,changeChat]=useState('review-chat');
+        const [messages,setMessagesWithLogging]=useState([{id:'original-request',sender:'user',content:'Update the accent.'}]);
+        const messagesRef=useRef(messages);messagesRef.current=messages;
         const currentChatIdRef=useRef(currentChatId),reviewContinuationRef=useRef(null);
+        const queryResumeHandledRef=useRef('review-chat:AppReview'),conversationBootstrapRef=useRef(true);
+        const workflowMessagesCacheRef=useRef(messages),workflowMessagesSharedRef=useRef(messages);
+        const workflowReplayPendingRef=useRef(false),generalMessagesCacheRef=useRef([]);
+        const currentWorkflowNameRef=useRef('AppReview');
         const revisionHandoffRef=useRef(null),pendingTransitionIdRef=useRef(null);
         const currentArtifactMessagesRef=useRef([{toolCall:{tool_call_id:'original-tool-call',
           payload:{build_registry_id:'owned-build',artifact_kind:'app_bundle',artifact_version_id:'baseline',target_app_id:'target-app'}}}]);
         const setCurrentChatId=id=>{currentChatIdRef.current=id;changeChat(id);};
         const setActiveChatId=()=>{},setCurrentWorkflowName=()=>{},setActiveWorkflowName=()=>{},rememberWorkflowChatSession=()=>{};
         const setConversationMode=()=>{},setWorkflowCompleted=()=>{},setCompletionData=()=>{},setPendingTransitionId=()=>{},setPendingTransitionContext=()=>{};
-        const setLoading=()=>{},setPendingWorkflowReply=()=>{},setMessagesWithLogging=()=>{};
+        const setLoading=()=>{},setPendingWorkflowReply=()=>{};
+        const conversationMode='workflow';
+        const workflowConfig={resolveKnownWorkflowName:value=>value,getDefaultWorkflow:()=> 'AppReview'};
+        const {resumeWorkflowSession}=useConversationModeController({
+          currentChatId,setCurrentChatId,currentWorkflowName,currentWorkflowNameRef,
+          setCurrentWorkflowName,setActiveChatId,setActiveWorkflowName,rememberWorkflowChatSession,
+          conversationMode,setConversationMode,setMessagesWithLogging,messagesRef,
+          workflowMessagesCacheRef,workflowMessagesSharedRef,workflowReplayPendingRef,generalMessagesCacheRef,
+          sanitizeVisibleWorkflowMessages:value=>value||[],
+          sendWsMessage:event=>{window.fixtureSwitches ||= [];window.fixtureSwitches.push(event);return true;},
+        });
+        useChatStartupEffects({currentAppId,currentUserId,currentChatId,activeChatId:currentChatId,
+          queryChatId:currentChatId,queryMode:'workflow',urlWorkflowName:currentWorkflowName,
+          currentWorkflowName,conversationMode,connectionStatus:'connected',isPrimaryChatRoute:true,
+          conversationBootstrapRef,queryResumeHandledRef,workflowConfig,resumeWorkflowSession,
+          currentArtifactMessages:currentArtifactMessagesRef.current,layoutMode:'split',
+          setActiveChatId,rememberWorkflowChatSession,
+        });
         const appId=currentAppId,user={id:currentUserId},config={};
         const dispatchSurfaceEvent=()=>{},debugFlag=()=>false,initSpinnerShownRef=useRef(false);
         const dynamicUIHandler={processUIEvent:async event=>{window.fixtureUpdates ||= [];window.fixtureUpdates.push(event);}};
@@ -100,6 +125,8 @@ test('ChatPage approvals preserve original request identity through real browser
         const beginRevision=()=>receive({type:'chat.revision_requested',data:{refinement_request:'Update the accent.',artifact_kind:'app_bundle',artifact_key:'app_bundle',
             artifact_version_id:'baseline',source_surface:'app_review',extra:{build_registry_id:'owned-build'}}});
         return <><button onClick={beginRevision}>Request revision</button><output aria-label="Review session">{currentChatId}</output>
+          <output aria-label="Review transcript">{messages.map(message=>message.content).join(' ')}</output>
+          <button onClick={()=>setCurrentChatId('unrelated-review')}>Open another conversation</button>
           <HarnessDecisionCard decision={pendingHarnessDecision} busy={pendingHarnessDecisionBusy}
             error={pendingHarnessDecisionError} onAction={handlePendingHarnessDecisionAction}/></>;
       }
@@ -109,9 +136,9 @@ test('ChatPage approvals preserve original request identity through real browser
     nodePaths:[path.join(shell,'node_modules')],
     alias:{react:path.join(shell,'node_modules/react'),'react-dom':path.join(shell,'node_modules/react-dom')},
     plugins:[{name:'trigger-boundaries',setup(builder){
-      builder.onResolve({filter:/ChatUIContext$|adapters\/api$/},args=>({path:args.path,namespace:'fixture'}));
+      builder.onResolve({filter:/ChatUIContext$|adapters\/api$|utils\/resolveWorkflow$/},args=>({path:args.path,namespace:'fixture'}));
       builder.onLoad({filter:/.*/,namespace:'fixture'},args=>({loader:'js',resolveDir:shell,
-        contents:args.path.includes('ChatUIContext')
+        contents:args.path.includes('resolveWorkflow') ? "export default ()=> 'AppReview';" : args.path.includes('ChatUIContext')
           ? "export const useChatUI=()=>({auth:{},config:{appId:'studio-host'},user:{id:'owner'}});"
           : 'export const authFetch=(...args)=>fetch(...args);'}));
     }}],
@@ -213,6 +240,14 @@ test('ChatPage approvals preserve original request identity through real browser
         const updates=await page.evaluate(()=>window.fixtureUpdates);
         assert.ok(updates.every(update=>update.type==='ui.update' && update.tool_call_id==='original-tool-call'));
         assert.equal(updates.find(update=>update.patch.refinement_result)?.patch.refinement_result.execution_mode,mode);
+        await expect(page.getByLabel('Review transcript')).toHaveText('Update the accent.');
+        assert.deepEqual(await page.evaluate(()=>window.fixtureSwitches||[]),[],
+          'Adoption must preserve the transcript instead of starting a destructive route resume');
+        await page.getByRole('button',{name:'Open another conversation',exact:true}).click();
+        await expect(page.getByLabel('Review transcript')).toHaveText('');
+        assert.deepEqual(await page.evaluate(()=>window.fixtureSwitches),[
+          {type:'chat.switch_workflow',chat_id:'unrelated-review',replay_on_switch:true},
+        ],'Unrelated navigation still requests the selected conversation history');
       } finally {inlineMode=null;await page.close();}
     });
   }
@@ -242,6 +277,7 @@ async function routeRevisionResult(triggerData, {
   const state = {};
   const currentChatIdRef = { current: 'review-chat' };
   const reviewContinuationRef = { current: null };
+  const queryResumeHandledRef = { current: 'review-chat:AppReview' };
   const revisionHandoffRef = { current: null };
   const pendingTransitionIdRef = { current: initialTransition };
   const handler = new DynamicUIHandler();
@@ -259,7 +295,7 @@ async function routeRevisionResult(triggerData, {
     useCallback:fn=>fn,
     dispatchSurfaceEvent:()=>{},debugFlag:()=>false,initSpinnerShownRef:{current:false},
     appId: 'studio-host', user: {id: 'owner'}, config: {}, auth: {fixture: true}, currentChatId: 'review-chat',
-    currentChatIdRef, reviewContinuationRef, currentArtifactMessagesRef: { current: artifactMessages },
+    currentChatIdRef, reviewContinuationRef, queryResumeHandledRef, currentArtifactMessagesRef: { current: artifactMessages },
     revisionHandoffRef, pendingTransitionIdRef,
     currentWorkflowName:'AppReview',currentWorkflowNameRef:{current:'AppReview'},workflowConfig:null,
     isFailedWorkflowSession:status=>status===2,
@@ -283,7 +319,7 @@ async function routeRevisionResult(triggerData, {
   await receive({type:'chat.revision_requested',data:{refinement_request:'Update the title',
     artifact_kind:'app_bundle',artifact_key:'app_bundle',artifact_version_id:'baseline',
     source_surface:'app_review',extra:{build_registry_id:'owned-build'}}});
-  return {requests, updates, messages, state, revisionHandoffRef, receive};
+  return {requests, updates, messages, state, revisionHandoffRef, queryResumeHandledRef, receive};
 }
 
 const reviewArtifact = {
@@ -401,22 +437,24 @@ test('chat refinement adopts only the server-created review successor without la
 for (const mismatch of [{target_app_id: 'other'}, {build_registry_id: 'other'},
   {source_chat_id: 'other'}, {app_id: 'other'}, {artifact_version_id: 'other'}, {workflow_id: 'ValueEngine'}]) {
   test(`chat refinement rejects a mismatched review successor ${JSON.stringify(mismatch)}`, async () => {
-    const {state, updates, messages} = await routeRevisionResult({
+    const {state, updates, messages, queryResumeHandledRef} = await routeRevisionResult({
       execution_mode: 'coding_worker', coding_worker: {status: 'validated', metadata: {build_record_id: 'saved-candidate'}},
       review_continuation: {...reviewContinuation, ...mismatch},
     }, {artifactMessages: [reviewArtifact]});
     assert.equal(state.CurrentChatId, undefined);
+    assert.equal(queryResumeHandledRef.current, 'review-chat:AppReview');
     assert.match(messages[0].content, /next review does not match/);
     assert.ok(updates.some(update => update.patch?.refinement_error));
   });
 }
 
 test('failed review continuation keeps the preview and makes the unavailable next chat visible', async () => {
-  const {state, updates, messages} = await routeRevisionResult({
+  const {state, updates, messages, queryResumeHandledRef} = await routeRevisionResult({
     execution_mode: 'coding_worker', coding_worker: {status: 'failed'},
     review_continuation_error: 'The saved draft is available, but its next review could not be opened.',
   }, {artifactMessages: [reviewArtifact]});
   assert.equal(state.CurrentChatId, undefined);
+  assert.equal(queryResumeHandledRef.current, 'review-chat:AppReview');
   assert.ok(updates.every(update => update.type === 'ui.update'));
   assert.match(messages[0].content, /next review could not be opened/);
 });
