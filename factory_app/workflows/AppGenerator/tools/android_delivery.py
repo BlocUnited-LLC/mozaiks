@@ -269,19 +269,19 @@ def _framework_snapshot() -> tuple[dict[str, bytes], dict[str, Any]]:
             distribution = importlib.metadata.distribution("mozaiks")
             direct = json.loads(distribution.read_text("direct_url.json") or "{}")
             commit = direct.get("vcs_info", {}).get("commit_id", "")
-            for entry in distribution.files or []:
-                name = str(entry).replace("\\", "/")
+            for distribution_entry in distribution.files or []:
+                name = str(distribution_entry).replace("\\", "/")
                 mapped = name.replace("mozaiks_chat_ui/", "chat-ui/", 1)
                 if not _resource_selected(mapped):
                     continue
-                actual = Path(distribution.locate_file(entry)).resolve()
+                actual = Path(str(distribution.locate_file(distribution_entry))).resolve()
                 expected = (shell if mapped.startswith("web_shell/") else ui) / mapped.split("/", 1)[1]
-                if actual != expected or not entry.hash or entry.hash.mode != "sha256":
+                if actual != expected or not distribution_entry.hash or distribution_entry.hash.mode != "sha256":
                     raise AndroidDeliveryError("Installed resource provenance is missing or mismatched")
                 _check_ancestors(actual)
                 raw = actual.read_bytes()
                 digest = base64.urlsafe_b64encode(hashlib.sha256(raw).digest()).decode().rstrip("=")
-                if digest != entry.hash.value:
+                if digest != distribution_entry.hash.value:
                     raise AndroidDeliveryError("Installed shared-shell resources differ from their distribution")
                 files[mapped] = raw
         except (importlib.metadata.PackageNotFoundError, ValueError, OSError) as exc:
@@ -367,11 +367,11 @@ def _render_delivery(source: dict[str, bytes], spec: AndroidDeliverySpec) -> tup
         "spec": spec.model_dump(), "spec_digest": "sha256:" + _sha(_json_bytes(spec.model_dump())),
         "source_digest": archive_digest(source_archive), "callback_uri": callback_uri,
         "source_files": _inventory(source),
-        "browser_auth": {"mode": auth_mode}, "pack": {key: pack[key] for key in ("pack_id", "version", "digest")},
+        "browser_auth": {"mode": auth_mode},
+        "pack": {"id": pack["pack_id"], "version": pack["version"], "digest": pack["digest"]},
         "framework": framework,
         "files": _inventory(exported),
     }
-    manifest["pack"]["id"] = manifest["pack"].pop("pack_id")
     exported["mobile/delivery.manifest.json"] = _json_bytes(manifest)
     registry = build_app_layout_registry()
     for name in exported:

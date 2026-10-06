@@ -263,5 +263,5 @@ def test_capture_rejects_portable_path_collisions_before_writing(tmp_path):
     root.mkdir()
     (root / "Name.txt").write_text("one")
     (root / "name.txt").write_text("two")
-    with pytest.raises(ValueError, match="collision"):
+    with pytest.raises(ValueError, match="case-fold duplicate"):
         delivery._capture_tree(root, "app")
