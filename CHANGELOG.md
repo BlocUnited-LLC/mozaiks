@@ -12,11 +12,6 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
-### Security
-
-- Patched DOMPurify and source-map-js in the shipped frontend dependency locks,
-  including Monaco's nested DOMPurify dependency.
-
 ### Added
 
 - Reusable Android delivery of canonical app workspaces through
@@ -46,6 +41,9 @@ This project follows a practical pre-1.0 changelog format:
   honor it.
 
 ### Security
+
+- Patched DOMPurify and source-map-js in the shipped frontend dependency locks,
+  including Monaco's nested DOMPurify dependency.
 
 - Shared authenticated fetches now resolve relative backend URLs consistently
   and restrict automatic bearer-token injection to the configured backend origin.
