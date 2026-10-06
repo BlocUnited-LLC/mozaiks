@@ -200,7 +200,8 @@ def _refinement_session_doc(
     )
 
 
-def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch):
+@pytest.mark.parametrize("source_chat_id", [None, "review-original"])
+def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch, _owned_build_target, source_chat_id):
     from mozaiksai.core.auth import reset_auth_adapter
 
     monkeypatch.setenv("AUTH_ENABLED", "false")
@@ -208,6 +209,8 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
     reset_auth_adapter()
     from mozaiksai.hosts import studio as studio_app
 
+    source_binding = AsyncMock(return_value=_BINDING.model_dump())
+    _owned_build_target.repo = SimpleNamespace(get_owned_chat_binding=source_binding)
     captured_prepare: dict = {}
     persisted_changes: list[dict] = []
     persisted_invalidations: list[dict] = []
@@ -280,6 +283,7 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
         json={
             "build_registry_id": "appreg_1",
             "trigger_source": "refinement",
+            **({"source_chat_id": source_chat_id} if source_chat_id else {}),
             "trigger_payload": {
                 "refinement_request": {
                     "artifact_kind": "app_bundle",
@@ -296,7 +300,13 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
     assert response.status_code == 200
     no_inline.assert_not_awaited()
     assert "coding_request" not in captured_prepare["trigger_payload"]
-    assert captured_prepare["source_chat_id"] == "review-original"
+    assert captured_prepare["source_chat_id"] == source_chat_id
+    if source_chat_id:
+        source_binding.assert_awaited_once_with(
+            app_id="factory", owner_user_id="demo-user", chat_id=source_chat_id,
+        )
+    else:
+        source_binding.assert_not_awaited()
     assert response.json() == {
         "execution_mode": "workflow",
         "chat_id": "chat_refine_1",
