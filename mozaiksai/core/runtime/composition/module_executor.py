@@ -356,7 +356,9 @@ class ModuleExecutor:
                                  EntitlementPort.check() before dispatch and returns
                                  ENTITLEMENT_REQUIRED on denial.
             action_emits:        Maps action id -> event types declared in module.yaml.
-                                 Any other emitted event is rejected, not dispatched.
+                                 An action listed here that emits any other event has
+                                 it rejected, not dispatched; an action absent from the
+                                 map is not checked for undeclared events.
             action_timeouts:     Maps action id -> async timeout seconds (integer 1..3600).
                                  None/omitted inherits MODULE_ACTION_TIMEOUT_SECONDS.
                                  This is server registration metadata, never request input.
@@ -404,11 +406,12 @@ class ModuleExecutor:
     async def execute(self, request: ModuleRequest, context: ModuleContext | None = None) -> ModuleResult:
         """Dispatch a ModuleRequest to the appropriate handler action.
 
-        Builds a ModuleContext from the request if one is not supplied. An
-        event the handler emits that fails its declared contract is not
-        dispatched and does not fail the action: the handler's writes may
-        already be committed, so its outcome stands and the result names the
-        rejected event.
+        Builds a ModuleContext from the request if one is not supplied. In
+        that context, an event the handler emits that fails its declared
+        contract is not dispatched and does not fail the action: the handler's
+        writes may already be committed, so its outcome stands, and ctx.emit
+        and the result name the rejected event. A supplied context keeps its
+        own emitter, so its events are neither checked nor named.
         """
         rejected_events: list[ModuleEventRejection] = []
         result = await self._dispatch(request, context, rejected_events)

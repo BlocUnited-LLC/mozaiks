@@ -27,7 +27,8 @@ started: they run outside module dispatch with their own clients.
 An emitted event that breaks its declared contract does not fail the action
 that emitted it: the runtime reports the action as succeeded and names the
 rejected event on its dispatch result. The gate reads that result and records
-every rejected event as its own failed check.
+each distinct rejected event (per action, event type and reason) as its own
+failed check.
 """
 from __future__ import annotations
 

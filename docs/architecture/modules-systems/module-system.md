@@ -391,11 +391,15 @@ action keeps its handler's outcome.
   and the schema rule the event failed, never payload contents.
 
 Code that must know whether an event went out checks the value. An outbox that
-marks an event delivered, for example, must not do so for a rejection:
+marks an event delivered, for example, must not do so for a rejection. Test for
+the rejection type, not for `None`: a test double such as `AsyncMock` returns a
+value that is not `None` even when nothing was refused.
 
 ```python
-rejection = await ctx.emit("domain.my_module.item_created", payload)
-if rejection is not None:
+from mozaiksai.core.runtime.composition import ModuleEventRejection
+
+outcome = await ctx.emit("domain.my_module.item_created", payload)
+if isinstance(outcome, ModuleEventRejection):
     ...  # not delivered: keep the outbox entry retryable
 ```
 
@@ -404,9 +408,20 @@ The rejection is also named on the dispatch result
 as `MODULE_EVENT_REJECTED` and counted in `ModuleExecutor.health()`. The
 AppGenerator runtime smoke fails a generated bundle on any rejected event.
 
-Two cases always return `None`. With no event bus wired, emitting does nothing.
-A reaction handler's `ctx.emit` sends its event straight to the bus, and the
-event router checks it there before any reaction runs.
+These checks and this return value belong to the context `ModuleExecutor`
+builds for a dispatched action. In these cases `ctx.emit` returns `None`
+without them, so `None` does not prove the event was checked or delivered:
+
+- **No event bus wired.** Emitting does nothing.
+- **Caller-supplied context.** A context passed to `ModuleExecutor.execute`
+  keeps its own emitter.
+- **Reaction handlers.** A reaction handler's `ctx.emit` sends its event
+  straight to the bus. There the event router checks only the event's
+  `payload_schema`, and only when exactly one module declares a schema for that
+  event type, before running that event's reactions. It drops an invalid event.
+  It never checks a reaction-emitted event against any `emits` list.
+- **Contexts that code builds itself,** such as the stub context of the
+  generated cron script.
 
 ### `contracts/reactions.yaml`
 

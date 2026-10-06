@@ -94,9 +94,14 @@ class ModuleContext:
         notification runs for it, yet emit still returns normally: the action's
         writes may already be committed, and the dispatch result and audit
         name the rejection too. Code that must know whether the event went out
-        (an outbox that marks it delivered, for example) checks the value.
+        (an outbox that marks it delivered, for example) checks
+        ``isinstance(value, ModuleEventRejection)``; a test double may return
+        something other than ``None`` for an event it accepted.
 
-        With no event bus wired, emitting does nothing and returns ``None``.
+        The checks and the rejection belong to the context ModuleExecutor
+        builds for a dispatched action. With no event bus wired, emitting does
+        nothing and returns ``None``; a context a caller passes to
+        ``ModuleExecutor.execute`` keeps its own emitter.
 
         Args:
             event_type: Dot-delimited event name, e.g. "domain.contacts.created"

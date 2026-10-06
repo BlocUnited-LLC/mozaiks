@@ -376,7 +376,7 @@ Known pre-1.0 hardening gaps:
 
 | Gap | Current status |
 | --- | --- |
-| Event payload-schema enforcement outside module actions | `ctx.emit` enforces it for module actions. Events emitted from reaction handlers bypass the executor: the `ModuleEventRouter` checks them before running reactions, and an invalid one is dropped there without being named on any dispatch result. An executor composed without an event emitter performs no check. |
+| Event contract enforcement outside module actions | `ctx.emit` enforces `emits` and `payload_schema` for module actions whose context the executor builds. Events emitted from reaction handlers bypass the executor. The `ModuleEventRouter` checks only their `payload_schema`, and only when exactly one module declares a schema for the type, before running reactions. It drops an invalid one without naming it on any dispatch result, and it never checks them against `emits`. An executor composed without an event emitter, or given a caller-supplied context, performs no check. |
 | Reaction idempotency | `idempotency_key` is part of the reaction contract, but the router does not yet enforce idempotency. |
 | Reaction permissions | Reaction `permissions` are declared/provenanced, but reaction dispatch does not re-enter public module permission checks. |
 | Cycle detection | No hard deterministic reaction-cycle detector is currently part of runtime validation. |

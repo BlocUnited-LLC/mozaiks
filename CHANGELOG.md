@@ -1247,8 +1247,9 @@ This project follows a practical pre-1.0 changelog format:
     at ERROR as `MODULE_EVENT_REJECTED` and counted in
     `ModuleExecutor.health()`.
   - A handler that raises still fails the action.
-  - The AppGenerator runtime smoke reports every rejected event as a failed
-    check, so generation still catches a wrong event payload.
+  - The AppGenerator runtime smoke reports each distinct rejected event (per
+    action, event type and reason) as a failed check, so generation still
+    catches a wrong event payload.
 - Factory generation now preserves task failures and successful outputs, supplies
   synthesized workers their actual prerequisites, and recovers eligible rejected
   tasks through the existing AG2 batch within finite budgets. Repairs respect
