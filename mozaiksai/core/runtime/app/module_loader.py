@@ -42,7 +42,7 @@ CANONICAL_EVENT_PREFIXES = ("domain.", "platform.", "hosted.", "mozaikspay.")
 CANONICAL_EVENT_PREFIX_LABEL = "domain.*, platform.*, hosted.*, or mozaikspay.*"
 
 ActionTimeoutSeconds = Annotated[int, Field(strict=True, ge=1, le=3600)]
-_ACTION_TIMEOUT_ADAPTER = TypeAdapter(ActionTimeoutSeconds | None)
+_ACTION_TIMEOUT_ADAPTER: TypeAdapter[int | None] = TypeAdapter(ActionTimeoutSeconds | None)
 
 
 def validate_action_timeout(value: Any) -> int | None:
