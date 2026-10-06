@@ -12,6 +12,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Security
+
+- Patched DOMPurify and source-map-js in the shipped frontend dependency locks,
+  including Monaco's nested DOMPurify dependency.
+
 ### Added
 
 - Reusable Android delivery of canonical app workspaces through
