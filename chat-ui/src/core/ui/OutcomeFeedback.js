@@ -1,8 +1,9 @@
-import { useRef, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import { Alert, Button, SurfaceCard } from '../../ui/primitives/index.js';
 
 /** Optional human feedback; attribution is bound by the server UI event. */
 export default function OutcomeFeedback({ onResponse }) {
+  const ratingGroup = useId();
   const [rating, setRating] = useState(null);
   const [helpful, setHelpful] = useState(null);
   const [outcome, setOutcome] = useState('');
@@ -42,10 +43,13 @@ export default function OutcomeFeedback({ onResponse }) {
               <legend className="text-sm font-medium text-foreground">Rating</legend>
               <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Rating out of five">
                 {[1, 2, 3, 4, 5].map((value) => (
-                  <button key={value} type="button" role="radio" aria-checked={rating === value}
-                    aria-label={`${value} ${value === 1 ? 'star' : 'stars'}`}
-                    className={`rounded-md border px-3 py-2 text-sm ${rating === value ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground'}`}
-                    onClick={() => setRating(value)}>{value} <span aria-hidden="true">★</span></button>
+                  <label key={value}
+                    className={`cursor-pointer rounded-md border px-3 py-2 text-sm focus-within:outline focus-within:outline-2 focus-within:outline-primary ${rating === value ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground'}`}>
+                    <input type="radio" name={ratingGroup} value={value} checked={rating === value}
+                      aria-label={`${value} ${value === 1 ? 'star' : 'stars'}`} className="sr-only"
+                      onChange={() => setRating(value)} />
+                    {value} <span aria-hidden="true">★</span>
+                  </label>
                 ))}
               </div>
             </fieldset>

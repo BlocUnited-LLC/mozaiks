@@ -126,17 +126,18 @@ async def test_collector_uses_runtime_identity_and_only_accepts_persisted_receip
     )
     assert result == _evidence()
     assert prompt.await_args.args[1] == {"outcome_id": "result-1", "agent_name": "AnswerAgent"}
-    resolver.return_value = None
-    with pytest.raises(PermissionError, match="receipt_missing"):
-        await outcome_feedback.collect_workflow_feedback(
-            context, tool_id="rate_result", agent_name="AnswerAgent", outcome_id="result-1",
-        )
+    for receipt in (None, _evidence().model_copy(update={"workflow_name": "OtherFlow"})):
+        resolver.return_value = receipt
+        with pytest.raises(PermissionError, match="receipt_missing"):
+            await outcome_feedback.collect_workflow_feedback(
+                context, tool_id="rate_result", agent_name="AnswerAgent", outcome_id="result-1",
+            )
     context["user_id"] = "attacker"
     with pytest.raises(PermissionError, match="scope_mismatch"):
         await outcome_feedback.collect_workflow_feedback(
             context, tool_id="rate_result", agent_name="AnswerAgent", outcome_id="result-1",
         )
-    assert prompt.await_count == 2
+    assert prompt.await_count == 3
 
 
 async def test_public_resolver_exact_scopes_the_receipt(monkeypatch):

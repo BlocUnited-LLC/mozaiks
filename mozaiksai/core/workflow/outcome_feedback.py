@@ -96,7 +96,7 @@ async def collect_workflow_feedback(
         app_id=app_id, chat_id=chat_id, user_id=user_id,
         ui_event_id=event_id, outcome_id=subject.outcome_id,
     )
-    if evidence is None or evidence.agent_name != subject.agent_name:
+    if evidence is None or evidence.agent_name != subject.agent_name or evidence.workflow_name != workflow_name:
         raise PermissionError("authenticated_workflow_feedback_receipt_missing")
     return evidence
 

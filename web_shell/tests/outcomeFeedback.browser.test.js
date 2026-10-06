@@ -51,6 +51,10 @@ test('human feedback awaits authenticated acceptance, retries failures, and perm
   assert.equal(await send.isDisabled(), true);
   assert.equal(await page.getByRole('button', {name: 'Skip', exact: true}).isEnabled(), true);
   await page.getByRole('radio', {name: '4 stars', exact: true}).click();
+  await page.getByRole('radio', {name: '4 stars', exact: true}).press('ArrowRight');
+  assert.equal(await page.getByRole('radio', {name: '5 stars', exact: true}).isChecked(), true);
+  await page.getByRole('radio', {name: '5 stars', exact: true}).press('ArrowLeft');
+  assert.equal(await page.getByRole('radio', {name: '4 stars', exact: true}).isChecked(), true);
   await page.getByRole('button', {name: 'No', exact: true}).click();
   await page.getByRole('combobox').selectOption('partial');
   await send.evaluate(element => { element.click(); element.click(); });
