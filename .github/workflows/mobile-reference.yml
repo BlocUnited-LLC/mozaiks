@@ -12,10 +12,13 @@ on:
       - 'examples/canonical-apps/project-hub/**'
       - 'factory_app/build_context/mobile/**'
       - 'factory_app/workflows/AppGenerator/tools/android_delivery*'
+      - 'factory_app/workflows/AppGenerator/tools/android_export_policy.py'
       - 'factory_app/workflows/AppGenerator/tools/resolve_managed_capability_templates.py'
       - 'mozaiks_cli/**'
       - 'tests/mobile/**'
       - 'tests/test_android_delivery.py'
+      - 'tests/test_android_delivery_origins.py'
+      - 'tests/test_android_export_policy.py'
       - 'tests/test_cli_android_packaging.py'
       - 'mozaiksai/**'
       - 'pyproject.toml'
@@ -32,10 +35,13 @@ on:
       - 'examples/canonical-apps/project-hub/**'
       - 'factory_app/build_context/mobile/**'
       - 'factory_app/workflows/AppGenerator/tools/android_delivery*'
+      - 'factory_app/workflows/AppGenerator/tools/android_export_policy.py'
       - 'factory_app/workflows/AppGenerator/tools/resolve_managed_capability_templates.py'
       - 'mozaiks_cli/**'
       - 'tests/mobile/**'
       - 'tests/test_android_delivery.py'
+      - 'tests/test_android_delivery_origins.py'
+      - 'tests/test_android_export_policy.py'
       - 'tests/test_cli_android_packaging.py'
       - 'mozaiksai/**'
       - 'pyproject.toml'
@@ -72,7 +78,7 @@ jobs:
       - name: Check reusable packaging contracts
         run: |
           python -m pip install -e ".[dev]"
-          python -m pytest -q --no-cov tests/test_android_delivery.py tests/test_cli_android_packaging.py
+          python -m pytest -q --no-cov tests/test_android_delivery.py tests/test_android_delivery_origins.py tests/test_android_export_policy.py tests/test_cli_android_packaging.py
           node --test tests/mobile/*.test.mjs
       - name: Compile a separate external Project Hub workspace through the CLI
         shell: python
