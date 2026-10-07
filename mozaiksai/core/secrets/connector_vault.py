@@ -8,18 +8,21 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import os
 import re
 from datetime import UTC, datetime, timedelta
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from logs.logging_config import get_core_logger
+from mozaiksai.core.data.persistence.connector_store import normalize_connector_service
 
 logger = get_core_logger("connector_vault")
 
 _VALID_SECRET_CHARS = re.compile(r"[^a-z0-9-]+")
 _backend_singleton: ConnectorVaultBackend | None = None
 _backend_signature: tuple[str, str, str] | None = None
+ConnectorScope = Literal["app", "workspace"]
 
 
 class ConnectorVaultBackend(Protocol):
@@ -35,6 +38,7 @@ class ConnectorVaultBackend(Protocol):
     async def store_secret(
         self,
         *,
+        scope: ConnectorScope,
         scope_id: str,
         service: str,
         secret_value: str,
@@ -43,10 +47,10 @@ class ConnectorVaultBackend(Protocol):
     ) -> dict[str, Any]:
         ...
 
-    async def get_secret(self, *, scope_id: str, service: str) -> dict[str, Any]:
+    async def get_secret(self, *, scope: ConnectorScope, scope_id: str, service: str) -> dict[str, Any]:
         ...
 
-    async def delete_secret(self, *, scope_id: str, service: str) -> dict[str, Any]:
+    async def delete_secret(self, *, scope: ConnectorScope, scope_id: str, service: str) -> dict[str, Any]:
         ...
 
 
@@ -72,13 +76,26 @@ def _slug(value: str, *, default: str) -> str:
     return candidate or default
 
 
-def _secret_name(scope_id: str, service: str, *, prefix: str | None = None) -> str:
-    base_prefix = _slug(prefix or _secret_prefix(), default="mozaiks-connector")
-    service_slug = _slug(service, default="service")
-    scope_slug = _slug(scope_id, default="scope")
-    digest = hashlib.sha1(str(scope_id).encode("utf-8")).hexdigest()[:10]
-    name = f"{base_prefix}-{service_slug}-{scope_slug[:40]}-{digest}"
-    return name[:127]
+def _connector_identity(scope: str, scope_id: str, service: str) -> tuple[ConnectorScope, str, str]:
+    if scope not in {"app", "workspace"}:
+        raise ValueError("connector scope must be 'app' or 'workspace'")
+    identity_id = str(scope_id or "")
+    if not identity_id.strip():
+        raise ValueError("connector scope_id is required")
+    normalized_service = normalize_connector_service(service)
+    if not normalized_service:
+        raise ValueError("connector service is required")
+    return scope, identity_id, normalized_service  # type: ignore[return-value]
+
+
+def _secret_name(scope: ConnectorScope, scope_id: str, service: str, *, prefix: str | None = None) -> str:
+    scope, scope_id, service = _connector_identity(scope, scope_id, service)
+    identity = json.dumps([scope, scope_id, service], ensure_ascii=False, separators=(",", ":"))
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
+    base_prefix = _slug(prefix or _secret_prefix(), default="mozaiks-connector")[:20]
+    service_slug = _slug(service, default="service")[:36]
+    scope_id_slug = _slug(scope_id, default="scope")[:32]
+    return f"{base_prefix}-{scope}-{service_slug}-{scope_id_slug}-{digest}"
 
 
 class NoopConnectorVaultBackend:
@@ -94,12 +111,14 @@ class NoopConnectorVaultBackend:
     async def store_secret(
         self,
         *,
+        scope: ConnectorScope,
         scope_id: str,
         service: str,
         secret_value: str,
         display_name: str | None = None,
         ttl_days: int = 30,
     ) -> dict[str, Any]:
+        _connector_identity(scope, scope_id, service)
         return {
             "success": False,
             "provider": "disabled",
@@ -108,7 +127,8 @@ class NoopConnectorVaultBackend:
             "error": "Connector secret backend is not configured.",
         }
 
-    async def get_secret(self, *, scope_id: str, service: str) -> dict[str, Any]:
+    async def get_secret(self, *, scope: ConnectorScope, scope_id: str, service: str) -> dict[str, Any]:
+        _connector_identity(scope, scope_id, service)
         return {
             "success": False,
             "status": "error",
@@ -118,7 +138,8 @@ class NoopConnectorVaultBackend:
             "error": "Connector secret backend is not configured.",
         }
 
-    async def delete_secret(self, *, scope_id: str, service: str) -> dict[str, Any]:
+    async def delete_secret(self, *, scope: ConnectorScope, scope_id: str, service: str) -> dict[str, Any]:
+        _connector_identity(scope, scope_id, service)
         return {
             "success": False,
             "provider": "disabled",
@@ -174,14 +195,16 @@ class AzureKeyVaultConnectorVaultBackend:
     async def store_secret(
         self,
         *,
+        scope: ConnectorScope,
         scope_id: str,
         service: str,
         secret_value: str,
         display_name: str | None = None,
         ttl_days: int = 30,
     ) -> dict[str, Any]:
+        scope, scope_id, service = _connector_identity(scope, scope_id, service)
         client = self._get_client()
-        secret_name = _secret_name(scope_id, service)
+        secret_name = _secret_name(scope, scope_id, service)
         if client is None:
             return {
                 "success": False,
@@ -194,8 +217,9 @@ class AzureKeyVaultConnectorVaultBackend:
         expires_at = datetime.now(UTC) + timedelta(days=max(int(ttl_days), 1))
         tags = {
             "managed_by": "mozaiks",
-            "scope_id": str(scope_id),
-            "service": _slug(service, default="service"),
+            "scope": scope,
+            "scope_id": scope_id,
+            "service": service,
         }
         if display_name:
             tags["display_name"] = str(display_name)[:256]
@@ -229,9 +253,10 @@ class AzureKeyVaultConnectorVaultBackend:
                 "error": "Secret could not be stored.",
             }
 
-    async def get_secret(self, *, scope_id: str, service: str) -> dict[str, Any]:
+    async def get_secret(self, *, scope: ConnectorScope, scope_id: str, service: str) -> dict[str, Any]:
+        scope, scope_id, service = _connector_identity(scope, scope_id, service)
         client = self._get_client()
-        secret_name = _secret_name(scope_id, service)
+        secret_name = _secret_name(scope, scope_id, service)
         if client is None:
             return {
                 "success": False,
@@ -245,8 +270,25 @@ class AzureKeyVaultConnectorVaultBackend:
             from azure.core.exceptions import ResourceNotFoundError
 
             secret = await asyncio.to_thread(client.get_secret, secret_name)
-            value = getattr(secret, "value", None)
             props = getattr(secret, "properties", None)
+            tags = getattr(props, "tags", None)
+            if not isinstance(tags, dict) or any(
+                tags.get(key) != expected
+                for key, expected in {
+                    "managed_by": "mozaiks",
+                    "scope": scope,
+                    "scope_id": scope_id,
+                    "service": service,
+                }.items()
+            ):
+                return {
+                    "success": False,
+                    "provider": "azure_key_vault",
+                    "secret_name": secret_name,
+                    "secret_value": None,
+                    "error": "Secret identity does not match connector.",
+                }
+            value = getattr(secret, "value", None)
             expires_on = getattr(props, "expires_on", None)
             return {
                 "success": bool(value),
@@ -289,9 +331,10 @@ class AzureKeyVaultConnectorVaultBackend:
                 "error": "Secret could not be retrieved.",
             }
 
-    async def delete_secret(self, *, scope_id: str, service: str) -> dict[str, Any]:
+    async def delete_secret(self, *, scope: ConnectorScope, scope_id: str, service: str) -> dict[str, Any]:
+        scope, scope_id, service = _connector_identity(scope, scope_id, service)
         client = self._get_client()
-        secret_name = _secret_name(scope_id, service)
+        secret_name = _secret_name(scope, scope_id, service)
         if client is None:
             return {
                 "success": False,
@@ -373,6 +416,7 @@ class MongoConnectorVaultBackend:
     def __init__(self) -> None:
         self._fernet: Any | None = None
         self._fernet_error: str | None = None
+        self._indexes_ensured = False
 
     def _get_fernet(self) -> Any | None:
         if self._fernet is not None or self._fernet_error is not None:
@@ -398,6 +442,15 @@ class MongoConnectorVaultBackend:
         if client is None:
             raise RuntimeError("Mongo client not initialized")
         return client[SYSTEM_DATABASE][PlatformCollections.CONNECTOR_SECRETS]
+
+    async def _ensure_indexes(self, coll: Any) -> None:
+        if not self._indexes_ensured:
+            await coll.create_index(
+                [("scope", 1), ("scope_id", 1), ("service", 1)],
+                unique=True,
+                name="connector_secret_identity_unique",
+            )
+            self._indexes_ensured = True
 
     def _encrypt(self, value: str) -> str | None:
         f = self._get_fernet()
@@ -428,18 +481,21 @@ class MongoConnectorVaultBackend:
     async def store_secret(
         self,
         *,
+        scope: ConnectorScope,
         scope_id: str,
         service: str,
         secret_value: str,
         display_name: str | None = None,
         ttl_days: int = 30,
     ) -> dict[str, Any]:
+        scope, scope_id, service = _connector_identity(scope, scope_id, service)
+        secret_name = _secret_name(scope, scope_id, service)
         fernet = self._get_fernet()
         if fernet is None:
             return {
                 "success": False,
                 "provider": "mongo",
-                "secret_name": _secret_name(scope_id, service),
+                "secret_name": secret_name,
                 "expires_at": None,
                 "error": self._fernet_error or "Encryption backend unavailable.",
             }
@@ -448,21 +504,22 @@ class MongoConnectorVaultBackend:
             return {
                 "success": False,
                 "provider": "mongo",
-                "secret_name": _secret_name(scope_id, service),
+                "secret_name": secret_name,
                 "expires_at": None,
                 "error": "Encryption failed.",
             }
-        secret_name = _secret_name(scope_id, service)
         now = datetime.now(UTC)
         expires_at = now + timedelta(days=max(int(ttl_days), 1))
         try:
             coll = await self._collection()
+            await self._ensure_indexes(coll)
             await coll.update_one(
-                {"scope_id": str(scope_id), "service": _slug(service, default="service")},
+                {"scope": scope, "scope_id": scope_id, "service": service},
                 {
                     "$set": {
-                        "scope_id": str(scope_id),
-                        "service": _slug(service, default="service"),
+                        "scope": scope,
+                        "scope_id": scope_id,
+                        "service": service,
                         "secret_name": secret_name,
                         "encrypted_value": encrypted,
                         "display_name": display_name,
@@ -484,14 +541,15 @@ class MongoConnectorVaultBackend:
             return {
                 "success": False,
                 "provider": "mongo",
-                "secret_name": _secret_name(scope_id, service),
+                "secret_name": secret_name,
                 "expires_at": None,
                 "error": "Secret could not be stored.",
             }
 
-    async def get_secret(self, *, scope_id: str, service: str) -> dict[str, Any]:
+    async def get_secret(self, *, scope: ConnectorScope, scope_id: str, service: str) -> dict[str, Any]:
+        scope, scope_id, service = _connector_identity(scope, scope_id, service)
         fernet = self._get_fernet()
-        secret_name = _secret_name(scope_id, service)
+        secret_name = _secret_name(scope, scope_id, service)
         if fernet is None:
             return {
                 "success": False,
@@ -503,8 +561,9 @@ class MongoConnectorVaultBackend:
             }
         try:
             coll = await self._collection()
+            await self._ensure_indexes(coll)
             doc = await coll.find_one(
-                {"scope_id": str(scope_id), "service": _slug(service, default="service")}
+                {"scope": scope, "scope_id": scope_id, "service": service, "secret_name": secret_name}
             )
         except Exception as exc:
             logger.error("MongoConnectorVaultBackend.get_secret failed: %s", exc, exc_info=True)
@@ -536,12 +595,14 @@ class MongoConnectorVaultBackend:
             "error": None if decrypted else "Secret could not be decrypted.",
         }
 
-    async def delete_secret(self, *, scope_id: str, service: str) -> dict[str, Any]:
-        secret_name = _secret_name(scope_id, service)
+    async def delete_secret(self, *, scope: ConnectorScope, scope_id: str, service: str) -> dict[str, Any]:
+        scope, scope_id, service = _connector_identity(scope, scope_id, service)
+        secret_name = _secret_name(scope, scope_id, service)
         try:
             coll = await self._collection()
+            await self._ensure_indexes(coll)
             result = await coll.delete_one(
-                {"scope_id": str(scope_id), "service": _slug(service, default="service")}
+                {"scope": scope, "scope_id": scope_id, "service": service, "secret_name": secret_name}
             )
             return {
                 "success": result.deleted_count > 0,

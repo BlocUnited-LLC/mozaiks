@@ -36,6 +36,11 @@ SECRET_METADATA_KEYS = {
 }
 
 
+def normalize_connector_service(service: str) -> str:
+    """Return the service identifier used by connector metadata and vault keys."""
+    return str(service or "").strip().lower().replace(" ", "_")
+
+
 def _redact_public_config(value: dict[str, Any] | None) -> dict[str, Any] | None:
     if value is None:
         return None
@@ -139,7 +144,7 @@ class ConnectorStore:
         await self._ensure_indexes()
         coll = await self._collection()
         now = datetime.now(UTC)
-        normalized_service = str(service or "").strip().lower().replace(" ", "_")
+        normalized_service = normalize_connector_service(service)
         if not normalized_service:
             raise ValueError("service is required")
 
@@ -192,7 +197,7 @@ class ConnectorStore:
     async def get(self, *, scope: str, scope_id: str, service: str) -> dict[str, Any] | None:
         await self._ensure_indexes()
         coll = await self._collection()
-        normalized_service = str(service or "").strip().lower().replace(" ", "_")
+        normalized_service = normalize_connector_service(service)
         doc = await coll.find_one({"scope": str(scope), "scope_id": str(scope_id), "service": normalized_service})
         return self._normalize_doc(doc)
 
@@ -219,7 +224,7 @@ class ConnectorStore:
     ) -> dict[str, Any] | None:
         await self._ensure_indexes()
         coll = await self._collection()
-        normalized_service = str(service or "").strip().lower().replace(" ", "_")
+        normalized_service = normalize_connector_service(service)
         update_fields: dict[str, Any] = {"updated_at": datetime.now(UTC)}
         if user_id:
             update_fields["updated_by_user_id"] = str(user_id)
@@ -258,7 +263,7 @@ class ConnectorStore:
     ) -> dict[str, Any] | None:
         await self._ensure_indexes()
         coll = await self._collection()
-        normalized_service = str(service or "").strip().lower().replace(" ", "_")
+        normalized_service = normalize_connector_service(service)
         update_fields: dict[str, Any] = {
             "updated_at": datetime.now(UTC),
             "health_status": str(health_status or "unknown"),
@@ -277,7 +282,7 @@ class ConnectorStore:
     async def delete(self, *, scope: str, scope_id: str, service: str) -> bool:
         await self._ensure_indexes()
         coll = await self._collection()
-        normalized_service = str(service or "").strip().lower().replace(" ", "_")
+        normalized_service = normalize_connector_service(service)
         result = await coll.delete_one({"scope": str(scope), "scope_id": str(scope_id), "service": normalized_service})
         return bool(getattr(result, "deleted_count", 0))
 
@@ -294,4 +299,4 @@ class ConnectorStore:
         return normalized
 
 
-__all__ = ["ConnectorStore"]
+__all__ = ["ConnectorStore", "normalize_connector_service"]

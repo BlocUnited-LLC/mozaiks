@@ -101,6 +101,7 @@ async def _load_connector_settings(app_id: str | None) -> MozaiksPayConnectorSet
         raw_public_config = record.get("public_config")
         public_config: dict[str, Any] = raw_public_config if isinstance(raw_public_config, dict) else {}
         secret_result = await get_connector_vault_backend().get_secret(
+            scope=ConnectorStore.SCOPE_APP,
             scope_id=str(app_id),
             service=_CONNECTOR_SERVICE,
         )

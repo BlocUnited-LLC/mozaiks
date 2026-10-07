@@ -153,8 +153,8 @@ class _FakeVaultBackend:
             "secret_prefix": "test",
         }
 
-    async def store_secret(self, *, scope_id: str, service: str, secret_value: str, display_name=None, ttl_days: int = 30):
-        key = (scope_id, service)
+    async def store_secret(self, *, scope: str, scope_id: str, service: str, secret_value: str, display_name=None, ttl_days: int = 30):
+        key = (scope, scope_id, service)
         self.secrets[key] = secret_value
         return {
             "success": True,
@@ -164,8 +164,8 @@ class _FakeVaultBackend:
             "secret_available": True,
         }
 
-    async def get_secret(self, *, scope_id: str, service: str):
-        key = (scope_id, service)
+    async def get_secret(self, *, scope: str, scope_id: str, service: str):
+        key = (scope, scope_id, service)
         value = self.secrets.get(key)
         return {
             "success": value is not None,
@@ -176,8 +176,8 @@ class _FakeVaultBackend:
             "error": None if value is not None else "missing",
         }
 
-    async def delete_secret(self, *, scope_id: str, service: str):
-        key = (scope_id, service)
+    async def delete_secret(self, *, scope: str, scope_id: str, service: str):
+        key = (scope, scope_id, service)
         existed = key in self.secrets
         self.secrets.pop(key, None)
         return {
@@ -350,7 +350,7 @@ def test_connector_service_uses_vault_backend_when_available(monkeypatch) -> Non
     connector = asyncio.run(
         get_connector(scope=ConnectorStore.SCOPE_APP, scope_id="app_1", service="payment_provider", store=store)
     )
-    secret = asyncio.run(get_secret(scope_id="app_1", service="payment_provider"))
+    secret = asyncio.run(get_secret(scope="app", scope_id="app_1", service="payment_provider"))
 
     assert stored["success"] is True
     assert stored["connector"]["secret_storage"] == "fake_vault"

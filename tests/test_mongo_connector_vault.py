@@ -35,21 +35,27 @@ class _FakeCollection:
     """In-memory mock for a MongoDB collection."""
 
     def __init__(self) -> None:
-        self._docs: dict[tuple[str, str], dict[str, Any]] = {}
+        self._docs: dict[tuple[str, str, str], dict[str, Any]] = {}
+
+    async def create_index(self, keys, **kwargs):
+        assert keys == [("scope", 1), ("scope_id", 1), ("service", 1)]
+        assert kwargs["unique"] is True
 
     async def update_one(self, filter_: dict, update: dict, upsert: bool = False) -> None:
-        key = (filter_["scope_id"], filter_["service"])
+        key = (filter_["scope"], filter_["scope_id"], filter_["service"])
         doc = self._docs.get(key, {})
         doc.update(update.get("$set", {}))
         self._docs[key] = doc
 
     async def find_one(self, filter_: dict) -> dict[str, Any] | None:
-        key = (filter_["scope_id"], filter_["service"])
-        return self._docs.get(key)
+        key = (filter_["scope"], filter_["scope_id"], filter_["service"])
+        doc = self._docs.get(key)
+        return doc if doc and all(doc.get(field) == value for field, value in filter_.items()) else None
 
     async def delete_one(self, filter_: dict) -> MagicMock:
-        key = (filter_["scope_id"], filter_["service"])
-        existed = key in self._docs
+        key = (filter_["scope"], filter_["scope_id"], filter_["service"])
+        doc = self._docs.get(key)
+        existed = bool(doc and all(doc.get(field) == value for field, value in filter_.items()))
         if existed:
             del self._docs[key]
         result = MagicMock()
@@ -96,7 +102,7 @@ def test_mongo_backend_store_returns_success() -> None:
     backend, coll = _backend_with_collection()
 
     result = asyncio.run(
-        backend.store_secret(scope_id="ws_1", service="openai", secret_value="sk-test-key", ttl_days=30)
+        backend.store_secret(scope="workspace", scope_id="ws_1", service="openai", secret_value="sk-test-key", ttl_days=30)
     )
 
     assert result["success"] is True
@@ -109,9 +115,9 @@ def test_mongo_backend_store_encrypts_value() -> None:
     backend, coll = _backend_with_collection()
     secret = "sk-super-secret-key"
 
-    asyncio.run(backend.store_secret(scope_id="ws_1", service="openai", secret_value=secret, ttl_days=30))
+    asyncio.run(backend.store_secret(scope="workspace", scope_id="ws_1", service="openai", secret_value=secret, ttl_days=30))
 
-    doc = coll._docs.get(("ws_1", "openai"))
+    doc = coll._docs.get(("workspace", "ws_1", "openai"))
     assert doc is not None
     # The stored value must not be the raw secret
     assert doc.get("encrypted_value") != secret
@@ -124,10 +130,10 @@ def test_mongo_backend_store_sets_ttl_expiry() -> None:
     backend, coll = _backend_with_collection()
 
     asyncio.run(
-        backend.store_secret(scope_id="ws_1", service="openai", secret_value="sk-key", ttl_days=14)
+        backend.store_secret(scope="workspace", scope_id="ws_1", service="openai", secret_value="sk-key", ttl_days=14)
     )
 
-    doc = coll._docs.get(("ws_1", "openai"))
+    doc = coll._docs.get(("workspace", "ws_1", "openai"))
     expires_at = doc.get("expires_at")
     assert expires_at is not None
     expires_dt = datetime.datetime.fromisoformat(expires_at)
@@ -142,8 +148,8 @@ def test_mongo_backend_get_secret_decrypts_correctly() -> None:
     backend, _ = _backend_with_collection()
     secret = "sk-roundtrip-test"
 
-    asyncio.run(backend.store_secret(scope_id="ws_1", service="anthropic", secret_value=secret, ttl_days=30))
-    result = asyncio.run(backend.get_secret(scope_id="ws_1", service="anthropic"))
+    asyncio.run(backend.store_secret(scope="workspace", scope_id="ws_1", service="anthropic", secret_value=secret, ttl_days=30))
+    result = asyncio.run(backend.get_secret(scope="workspace", scope_id="ws_1", service="anthropic"))
 
     assert result["success"] is True
     assert result["status"] == "found"
@@ -154,7 +160,7 @@ def test_mongo_backend_get_secret_decrypts_correctly() -> None:
 def test_mongo_backend_get_secret_not_found_returns_failure() -> None:
     backend, _ = _backend_with_collection()
 
-    result = asyncio.run(backend.get_secret(scope_id="ws_1", service="missing_service"))
+    result = asyncio.run(backend.get_secret(scope="workspace", scope_id="ws_1", service="missing_service"))
 
     assert result["success"] is False
     assert result["status"] == "not_found"
@@ -191,8 +197,8 @@ def test_mongo_backend_corrupt_record_is_not_absence() -> None:
 def test_mongo_backend_get_secret_returns_expires_at() -> None:
     backend, _ = _backend_with_collection()
 
-    asyncio.run(backend.store_secret(scope_id="ws_1", service="openai", secret_value="sk-key", ttl_days=7))
-    result = asyncio.run(backend.get_secret(scope_id="ws_1", service="openai"))
+    asyncio.run(backend.store_secret(scope="workspace", scope_id="ws_1", service="openai", secret_value="sk-key", ttl_days=7))
+    result = asyncio.run(backend.get_secret(scope="workspace", scope_id="ws_1", service="openai"))
 
     assert result["expires_at"] is not None
 
@@ -202,17 +208,17 @@ def test_mongo_backend_get_secret_returns_expires_at() -> None:
 def test_mongo_backend_delete_removes_stored_secret() -> None:
     backend, coll = _backend_with_collection()
 
-    asyncio.run(backend.store_secret(scope_id="ws_1", service="openai", secret_value="sk-key", ttl_days=30))
-    result = asyncio.run(backend.delete_secret(scope_id="ws_1", service="openai"))
+    asyncio.run(backend.store_secret(scope="workspace", scope_id="ws_1", service="openai", secret_value="sk-key", ttl_days=30))
+    result = asyncio.run(backend.delete_secret(scope="workspace", scope_id="ws_1", service="openai"))
 
     assert result["success"] is True
-    assert coll._docs.get(("ws_1", "openai")) is None
+    assert coll._docs.get(("workspace", "ws_1", "openai")) is None
 
 
 def test_mongo_backend_delete_missing_returns_failure() -> None:
     backend, _ = _backend_with_collection()
 
-    result = asyncio.run(backend.delete_secret(scope_id="ws_1", service="not_there"))
+    result = asyncio.run(backend.delete_secret(scope="workspace", scope_id="ws_1", service="not_there"))
 
     assert result["success"] is False
 
@@ -222,9 +228,9 @@ def test_mongo_backend_delete_missing_returns_failure() -> None:
 def test_mongo_backend_store_overwrites_existing_secret() -> None:
     backend, _ = _backend_with_collection()
 
-    asyncio.run(backend.store_secret(scope_id="ws_1", service="openai", secret_value="sk-old", ttl_days=30))
-    asyncio.run(backend.store_secret(scope_id="ws_1", service="openai", secret_value="sk-new", ttl_days=30))
-    result = asyncio.run(backend.get_secret(scope_id="ws_1", service="openai"))
+    asyncio.run(backend.store_secret(scope="workspace", scope_id="ws_1", service="openai", secret_value="sk-old", ttl_days=30))
+    asyncio.run(backend.store_secret(scope="workspace", scope_id="ws_1", service="openai", secret_value="sk-new", ttl_days=30))
+    result = asyncio.run(backend.get_secret(scope="workspace", scope_id="ws_1", service="openai"))
 
     assert result["secret_value"] == "sk-new"
 

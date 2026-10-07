@@ -134,9 +134,9 @@ class FakeVaultBackend:
     def __init__(self) -> None:
         self.secrets = {}
 
-    async def store_secret(self, *, scope_id: str, service: str, secret_value: str, display_name=None, ttl_days: int = 30):
+    async def store_secret(self, *, scope: str, scope_id: str, service: str, secret_value: str, display_name=None, ttl_days: int = 30):
         del display_name, ttl_days
-        self.secrets[(scope_id, service)] = secret_value
+        self.secrets[(scope, scope_id, service)] = secret_value
         return {
             "success": True,
             "provider": "fake_vault",
@@ -144,8 +144,8 @@ class FakeVaultBackend:
             "expires_at": "2026-06-01T00:00:00+00:00",
         }
 
-    async def get_secret(self, *, scope_id: str, service: str):
-        value = self.secrets.get((scope_id, service))
+    async def get_secret(self, *, scope: str, scope_id: str, service: str):
+        value = self.secrets.get((scope, scope_id, service))
         return {
             "success": value is not None,
             "provider": "fake_vault",
@@ -154,9 +154,9 @@ class FakeVaultBackend:
             "expires_at": "2026-06-01T00:00:00+00:00" if value is not None else None,
         }
 
-    async def delete_secret(self, *, scope_id: str, service: str):
-        existed = (scope_id, service) in self.secrets
-        self.secrets.pop((scope_id, service), None)
+    async def delete_secret(self, *, scope: str, scope_id: str, service: str):
+        existed = (scope, scope_id, service) in self.secrets
+        self.secrets.pop((scope, scope_id, service), None)
         return {"success": existed, "provider": "fake_vault"}
 
 
@@ -320,7 +320,7 @@ async def run_smoke() -> dict[str, Any]:
                 "workspace_id": "demo-workspace",
             },
             "vault_received_secret": vault.secrets.get(
-                ("app-integration-readiness-smoke", "analytics_provider")
+                ("app", "app-integration-readiness-smoke", "analytics_provider")
             )
             == SECRET_VALUE,
             "generated_output_safe": SECRET_VALUE not in generated_output and "api_key" not in generated_output,

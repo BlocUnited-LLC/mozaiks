@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 from mozaiksai.core.data.persistence import ConnectorStore
+from mozaiksai.core.data.persistence.connector_store import normalize_connector_service
 from mozaiksai.core.secrets import describe_connector_vault_backend, get_connector_vault_backend
 from mozaiksai.core.workflow.generator_support.connector_health import (
     connector_health_check_supported,
@@ -28,6 +29,7 @@ def _get_store(store: ConnectorStore | None = None) -> ConnectorStore:
 async def _vault_store_secret(
     backend: Any,
     *,
+    scope: str,
     scope_id: str,
     service: str,
     secret_value: str,
@@ -37,6 +39,7 @@ async def _vault_store_secret(
     return cast(
         dict[str, Any],
         await backend.store_secret(
+            scope=scope,
             scope_id=scope_id,
             service=service,
             secret_value=secret_value,
@@ -46,16 +49,16 @@ async def _vault_store_secret(
     )
 
 
-async def _vault_get_secret(backend: Any, *, scope_id: str, service: str) -> dict[str, Any]:
-    return cast(dict[str, Any], await backend.get_secret(scope_id=scope_id, service=service))
+async def _vault_get_secret(backend: Any, *, scope: str, scope_id: str, service: str) -> dict[str, Any]:
+    return cast(dict[str, Any], await backend.get_secret(scope=scope, scope_id=scope_id, service=service))
 
 
-async def _vault_delete_secret(backend: Any, *, scope_id: str, service: str) -> dict[str, Any]:
-    return cast(dict[str, Any], await backend.delete_secret(scope_id=scope_id, service=service))
+async def _vault_delete_secret(backend: Any, *, scope: str, scope_id: str, service: str) -> dict[str, Any]:
+    return cast(dict[str, Any], await backend.delete_secret(scope=scope, scope_id=scope_id, service=service))
 
 
 def _normalize_service(service: str) -> str:
-    return str(service or "").strip().lower().replace(" ", "_")
+    return normalize_connector_service(service)
 
 
 def _connector_identity_fields(
@@ -392,6 +395,7 @@ async def save_connector(
     backend = get_connector_vault_backend()
     backend_result = await _vault_store_secret(
         backend,
+        scope=scope,
         scope_id=str(scope_id),
         service=normalized_service,
         secret_value=secret_value,
@@ -573,6 +577,7 @@ async def delete_connector(
     if existing and existing.get("secret_available"):
         secret_result = await _vault_delete_secret(
             get_connector_vault_backend(),
+            scope=scope,
             scope_id=str(scope_id),
             service=normalized_service,
         )
@@ -586,11 +591,12 @@ async def delete_connector(
     }
 
 
-async def get_secret(*, scope_id: str, service: str) -> dict[str, Any]:
-    """Retrieve a vault secret by scope_id and service."""
+async def get_secret(*, scope: str, scope_id: str, service: str) -> dict[str, Any]:
+    """Retrieve a vault secret by its explicit connector identity."""
     backend = get_connector_vault_backend()
     result = await _vault_get_secret(
         backend,
+        scope=scope,
         scope_id=str(scope_id),
         service=_normalize_service(service),
     )

@@ -10,10 +10,12 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from mozaiksai.core.data.persistence import ConnectorStore
+from mozaiksai.core.data.persistence.connector_store import normalize_connector_service
 from mozaiksai.core.secrets import get_connector_vault_backend
+from mozaiksai.core.secrets.connector_vault import ConnectorScope
 
 HEALTH_STATUSES = {"healthy", "unhealthy", "unknown"}
 SECRET_DETAIL_KEYS = {"secret_value", "secret", "api_key", "apikey", "token", "password"}
@@ -144,12 +146,15 @@ class SecretHandle:
 class ConnectorSecretReader:
     """Server-side secret reader passed to health providers."""
 
-    def __init__(self, *, service: str, scope_id: str | None = None, app_id: str | None = None) -> None:
-        self.scope_id = str(scope_id or app_id or "")
-        self.service = _normalize_id(service)
+    def __init__(self, *, scope: ConnectorScope, scope_id: str, service: str) -> None:
+        self.scope = scope
+        self.scope_id = str(scope_id)
+        self.service = normalize_connector_service(service)
 
     async def get_secret(self) -> SecretHandle:
-        result = await get_connector_vault_backend().get_secret(scope_id=self.scope_id, service=self.service)
+        result = await get_connector_vault_backend().get_secret(
+            scope=self.scope, scope_id=self.scope_id, service=self.service
+        )
         return SecretHandle(
             result.get("secret_value"),
             available=bool(result.get("success")),
@@ -157,7 +162,7 @@ class ConnectorSecretReader:
         )
 
     def __repr__(self) -> str:  # pragma: no cover - defensive secret guard
-        return f"ConnectorSecretReader(scope_id={self.scope_id!r}, service={self.service!r})"
+        return f"ConnectorSecretReader(scope={self.scope!r}, scope_id={self.scope_id!r}, service={self.service!r})"
 
 
 class ConnectorHealthProvider(Protocol):
@@ -258,7 +263,11 @@ async def run_connector_health_check(
         checked_by=checked_by,
         safe_context=dict(safe_context or {}),
     )
-    secret_reader = ConnectorSecretReader(scope_id=resolved_scope_id, service=normalized_service)
+    secret_reader = ConnectorSecretReader(
+        scope=cast(ConnectorScope, resolved_scope),
+        scope_id=resolved_scope_id,
+        service=normalized_service,
+    )
     public_config = record.get("public_config") if isinstance(record.get("public_config"), dict) else {}
 
     try:
