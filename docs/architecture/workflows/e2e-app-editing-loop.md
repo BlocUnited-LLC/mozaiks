@@ -247,6 +247,24 @@ either its own process or an AG2 terminal request. Those agent-authored probe
 values are useful only for this controlled offline fixture; a live agent's
 reply can never attest to its own isolation.
 
+`infra/docker/Dockerfile.acp-worker` combines the already built offline proof
+worker image and pinned real ACP adapter image. Its one-shot entrypoint still
+selects the synthetic agent and runs through `execute_repository_docker_turn`
+with `--network none`; the real Codex and Claude adapters only initialize in
+separate credential-free checks. Build those two parent images first, then run:
+
+```powershell
+docker build -f infra/docker/Dockerfile.acp-worker -t mozaiks-acp-worker:local .
+$env:MOZAIKS_RUN_ACP_WORKER_IMAGE_PROOF = '1'
+python -m pytest -q --no-cov tests/test_acp_worker_image.py
+```
+
+This checks that the selected-file worker and both adapter binaries coexist in
+one disposable image. It does not exercise model-backed coding or authorize
+network access, a credential, or PR publication. The image inherits the proof
+base's Factory and synthetic-agent files; a live worker needs a separate minimal
+image after its isolation decision and acceptance gates are satisfied.
+
 The offline ACP proof image consumes the host's exact `create_paths` and
 `delete_paths` alongside selected files. Its coding provider remains
 update-only by default; only that isolated worker instance receives operation
