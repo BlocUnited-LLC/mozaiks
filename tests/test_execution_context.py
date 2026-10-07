@@ -38,16 +38,18 @@ def test_build_request_scopes_baseline_files_and_preserves_context():
         _context(),
         baseline_files={
             "app/modules/support/service.py": "before",
-            "app/security/secrets.yaml": "secret policy",
-            "README.md": "readme",
+            "app/security/secrets.yaml": "FORBIDDEN_SOURCE_CONTENT",
+            "README.md": "OUT_OF_SCOPE_SOURCE_CONTENT",
         },
     )
 
     assert request.files == {"app/modules/support/service.py": "before"}
-    assert request.baseline_files["app/security/secrets.yaml"] == "secret policy"
+    assert request.baseline_files == request.files
     assert request.raw_user_request == "Add a support panel"
     assert request.metadata["approved_plan_digest"] == "b" * 64
     assert request.validation_strategy is None
+    assert "FORBIDDEN_SOURCE_CONTENT" not in request.model_dump_json()
+    assert "OUT_OF_SCOPE_SOURCE_CONTENT" not in request.model_dump_json()
 
 
 def test_prohibited_path_wins_over_allowed_scope():
@@ -55,6 +57,31 @@ def test_prohibited_path_wins_over_allowed_scope():
         build_coding_request_from_execution_context(
             _context(allowed_paths=["app/"]),
             baseline_files={"app/security/secrets.yaml": "secret policy"},
+        )
+
+
+def test_read_only_path_wins_over_allowed_scope_and_excludes_content():
+    request = build_coding_request_from_execution_context(
+        _context(
+            allowed_paths=["app/modules/"],
+            read_only_paths=["app/modules/support/contracts/"],
+        ),
+        baseline_files={
+            "app/modules/support/service.py": "editable",
+            "app/modules/support/contracts/module.yaml": "READ_ONLY_SOURCE_CONTENT",
+        },
+    )
+
+    assert request.files == {"app/modules/support/service.py": "editable"}
+    assert request.baseline_files == request.files
+    assert "READ_ONLY_SOURCE_CONTENT" not in request.model_dump_json()
+
+
+def test_read_only_scope_without_editable_files_fails_closed():
+    with pytest.raises(ValueError, match="no scoped baseline files"):
+        build_coding_request_from_execution_context(
+            _context(read_only_paths=["app/modules/support/"]),
+            baseline_files={"app/modules/support/service.py": "read only"},
         )
 
 

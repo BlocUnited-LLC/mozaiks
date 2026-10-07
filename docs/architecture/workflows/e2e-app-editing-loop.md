@@ -105,6 +105,11 @@ Current implementation status:
   endpoints for enabled actions.
 - External repo, overlay, and full-migration write-back modes are modeled but
   still need provider-specific execution and UX actions.
+- The approved managed-execution context projection passes only editable source
+  files to a coding request. Prohibited and read-only paths override allowed
+  prefixes, and source contents outside the editable scope are excluded. This
+  projection does not execute a repository change or connect the hosted handoff
+  to the generated-app coding worker.
 
 ### Approved Repository Patch Candidate
 
