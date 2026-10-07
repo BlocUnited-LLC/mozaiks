@@ -81,7 +81,7 @@ it never retrieves, decrypts, copies, or prints a credential. It writes
 counts, opaque record references, and a fingerprint to the private report.
 Re-run with
 `--expect-fingerprint <reviewed-fingerprint>` to detect changed metadata.
-There is no automatic apply operation. A report with legacy, missing,
+There is no automatic apply operation. A report with unqualified, missing,
 duplicate, or mismatched entries blocks readiness. A single old record still
 needs operator review; a collision cannot establish which scope owns its
 remaining value. Re-enter credentials separately through the correct scoped

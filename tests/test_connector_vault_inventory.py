@@ -25,11 +25,11 @@ def _owner(scope: str, scope_id: str, service: str, *, provider: str = "mongo") 
 
 def test_legacy_collision_fails_closed_without_projecting_values() -> None:
     owners = [_owner("app", "same", "foo_bar"), _owner("workspace", "same", "foo_bar")]
-    legacy = [{
+    old_record = [{
         "scope_id": "same", "service": "foo-bar", "secret_name": "old-name",
         "encrypted_value": "must-never-enter-report", "secret_value": "must-never-enter-report",
     }]
-    report = build_inventory(owners, legacy, provider="mongo")
+    report = build_inventory(owners, old_record, provider="mongo")
     assert report["ready"] is False
     assert report["counts"]["legacy_ambiguous"] == 1
     assert len(report["findings"][0]["owner_refs"]) == 2

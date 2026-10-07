@@ -63,7 +63,7 @@ def _normalize_service(service: str) -> str:
 
 
 def _qualified_secret_metadata(record: dict[str, Any]) -> bool:
-    """Keep legacy real-vault metadata out of passive readiness results."""
+    """Keep unqualified real-vault metadata out of passive readiness results."""
     if record.get("secret_storage") not in {"mongo", "azure_key_vault"}:
         return True
     scope = record.get("scope")

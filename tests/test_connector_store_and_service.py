@@ -379,7 +379,7 @@ def test_legacy_vault_metadata_does_not_report_connector_ready() -> None:
         secret_storage="mongo",
         secret_available=True,
         key_length=20,
-        extra={"secret_name": "legacy-unqualified-name"},
+        extra={"secret_name": "old-unqualified-name"},
     ))
     record = asyncio.run(get_connector(scope="app", scope_id="same", service="payment_provider", store=store))
     assert record is not None

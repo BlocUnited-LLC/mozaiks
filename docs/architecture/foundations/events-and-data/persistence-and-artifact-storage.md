@@ -166,7 +166,7 @@ Rules:
   already operate Key Vault infrastructure.
 - A connector is `active` when `secret_available: true` (secret stored in vault).
   It is `metadata_only` only when the save itself failed — not simply because no
-  external vault is configured. Legacy secret metadata does not count as ready
+  external vault is configured. Old unqualified secret metadata does not count as ready
   after the scoped vault contract is installed.
 
 ### 3. App Business Data
