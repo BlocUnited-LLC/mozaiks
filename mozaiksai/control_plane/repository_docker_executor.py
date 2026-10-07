@@ -128,17 +128,16 @@ async def _docker(
             process.stdin.close()
 
     assert process.stdout is not None and process.stderr is not None
-    tasks = [
-        asyncio.create_task(send_input()),
-        asyncio.create_task(_read_limited(process.stdout, stdout_limit)),
-        asyncio.create_task(_read_limited(process.stderr, _CLI_STDERR_BYTES)),
-    ]
+    input_task = asyncio.create_task(send_input())
+    stdout_task = asyncio.create_task(_read_limited(process.stdout, stdout_limit))
+    stderr_task = asyncio.create_task(_read_limited(process.stderr, _CLI_STDERR_BYTES))
+    tasks = [input_task, stdout_task, stderr_task]
     try:
-        _, stdout, _ = await asyncio.wait_for(asyncio.gather(*tasks), timeout=timeout_seconds)
+        await asyncio.wait_for(asyncio.gather(*tasks), timeout=timeout_seconds)
         await asyncio.wait_for(process.wait(), timeout=5)
         if process.returncode != 0:
             raise RepositoryDockerExecutionError("REPOSITORY_DOCKER_COMMAND_FAILED")
-        return stdout
+        return stdout_task.result()
     except TimeoutError as exc:
         raise RepositoryDockerExecutionError("REPOSITORY_DOCKER_TIMEOUT") from exc
     finally:
