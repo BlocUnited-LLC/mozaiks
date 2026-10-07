@@ -10,6 +10,7 @@ from __future__ import annotations
 import difflib
 import hashlib
 import io
+import struct
 import zipfile
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -30,6 +31,8 @@ from .workspace import StagedCodingWorkspace, harvest_coding_workspace, material
 
 _MAX_REPOSITORY_ARCHIVE_BYTES = 16_777_216
 _MAX_REPOSITORY_ARCHIVE_FILES = 50
+_ZIP_END_RECORD = struct.Struct("<4s4H2IH")
+_ZIP_CENTRAL_HEADER_SIZE = 46
 _REPOSITORY_ENV_TEMPLATES = frozenset({
     ".env.example", ".env.staging.example", ".env.production.example",
 })
@@ -156,6 +159,52 @@ def _validate_archive_budget(*, max_files: int, max_archive_bytes: int) -> None:
         raise ValueError("REPOSITORY_PATCH_ARCHIVE_BUDGET: invalid byte limit")
 
 
+def _preflight_archive_directory(data: bytes, *, expected_files: int, max_bytes: int) -> None:
+    """Bound central-directory parsing before ZipFile creates entry objects.
+
+    The canonical archive writer emits a single-disk ZIP without a comment or
+    ZIP64 records. Walk the raw directory too: its entry count can disagree
+    with the end record, which ZipFile does not use as a parsing limit.
+    """
+    if len(data) < _ZIP_END_RECORD.size:
+        raise ValueError("REPOSITORY_PATCH_ARCHIVE_FORMAT: missing ZIP end record")
+    end_offset = len(data) - _ZIP_END_RECORD.size
+    signature, disk, directory_disk, disk_files, files, directory_size, directory_offset, comment_size = (
+        _ZIP_END_RECORD.unpack_from(data, end_offset)
+    )
+    if (
+        signature != b"PK\x05\x06"
+        or disk != 0
+        or directory_disk != 0
+        or disk_files != files
+        or comment_size != 0
+        or directory_offset + directory_size != end_offset
+    ):
+        raise ValueError("REPOSITORY_PATCH_ARCHIVE_FORMAT: invalid ZIP directory")
+    if files != expected_files:
+        raise ValueError("REPOSITORY_PATCH_ARCHIVE_BUDGET: entry count exceeds selection")
+
+    offset = directory_offset
+    seen = 0
+    total_bytes = 0
+    while offset < end_offset:
+        if (
+            end_offset - offset < _ZIP_CENTRAL_HEADER_SIZE
+            or data[offset:offset + 4] != b"PK\x01\x02"
+        ):
+            raise ValueError("REPOSITORY_PATCH_ARCHIVE_FORMAT: invalid ZIP directory entry")
+        filename_size, extra_size, entry_comment_size = struct.unpack_from("<HHH", data, offset + 28)
+        total_bytes += struct.unpack_from("<I", data, offset + 24)[0]
+        seen += 1
+        if seen > expected_files or total_bytes > max_bytes:
+            raise ValueError("REPOSITORY_PATCH_ARCHIVE_BUDGET: entry count or size exceeds limit")
+        offset += _ZIP_CENTRAL_HEADER_SIZE + filename_size + extra_size + entry_comment_size
+        if offset > end_offset:
+            raise ValueError("REPOSITORY_PATCH_ARCHIVE_FORMAT: truncated ZIP directory entry")
+    if seen != files:
+        raise ValueError("REPOSITORY_PATCH_ARCHIVE_FORMAT: ZIP directory count mismatch")
+
+
 def export_repository_workspace_archive(
     workspace: StagedCodingWorkspace,
     *,
@@ -279,13 +328,9 @@ def stage_repository_workspace_archive(
     if root.exists() or root.is_symlink():
         raise ValueError("REPOSITORY_PATCH_ARCHIVE_WORKSPACE: target must not exist")
 
-    try:
-        with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
-            infos = archive.infolist()
-            if len(infos) != len(selected_paths) or sum(info.file_size for info in infos) > max_archive_bytes:
-                raise ValueError("REPOSITORY_PATCH_ARCHIVE_BUDGET: entry count or size exceeds limit")
-    except zipfile.BadZipFile as exc:
-        raise ValueError("REPOSITORY_PATCH_ARCHIVE_FORMAT: unreadable archive") from exc
+    _preflight_archive_directory(
+        archive_bytes, expected_files=len(selected_paths), max_bytes=max_archive_bytes,
+    )
     manifest = read_archive_manifest(archive_bytes)
     if {entry.path for entry in manifest.entries} != set(selected_paths):
         raise ValueError("REPOSITORY_PATCH_ARCHIVE_SET: entries differ from approved selection")
@@ -306,9 +351,10 @@ def stage_repository_workspace_archive(
             _validate_output_text(path, content)
             observed[path] = raw
 
-    workspace = StagedCodingWorkspace(workspace_root=root)
+    workspace = StagedCodingWorkspace(workspace_root=root, strict_cleanup=True)
     try:
         workspace = materialize_coding_workspace(dict(baseline_files), workspace_root=root)
+        workspace.strict_cleanup = True
         for path, raw in observed.items():
             (workspace.workspace_root / path).write_bytes(raw)
     except Exception:

@@ -157,10 +157,12 @@ deterministic archive envelope; it does not serialize the provider's own
 changed-file claims as observation. The authenticated host caps the archive
 before parsing and calls `stage_repository_workspace_archive` with the same
 approved context, verified snapshot, exact selected baseline, and path policy.
-The host verifies canonical archive metadata, exact selected paths, hashes,
-and strict UTF-8, then writes output bytes only into a fresh private staging
-tree first materialized from the approved baseline. It passes that tree to
-`finalize_repository_patch` and disposes of it after review candidate creation.
+The host checks the raw central-directory count and declared sizes before ZIP
+parsing can allocate entry objects. It then verifies canonical archive metadata,
+exact selected paths, hashes, and strict UTF-8, and writes output bytes only
+into a fresh private staging tree first materialized from the approved baseline.
+It passes that tree to `finalize_repository_patch` and reports any failure to
+remove the tree after review candidate creation.
 No ZIP entry is extracted by path. Only updates to existing portable UTF-8
 files are supported in this first bridge.
 The snapshot manifest may also describe required read-only tests or docs; those

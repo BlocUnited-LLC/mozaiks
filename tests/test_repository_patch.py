@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import struct
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -239,6 +240,32 @@ def test_archive_import_enforces_host_policy_and_byte_limit_before_writing(tmp_p
     assert not root.exists()
 
 
+def test_archive_import_rejects_many_entries_before_zipfile_parses_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inputs = _inputs(tmp_path)
+    archive = bytearray(build_deterministic_archive([
+        ArchiveEntry(path=f"app/file-{number:04}.py", content=b"")
+        for number in range(1000)
+    ]))
+    assert len(archive) < 200_000
+    # A forged EOCD count alone must not hide a large central directory.
+    struct.pack_into("<HH", archive, len(archive) - 22 + 8, 2, 2)
+    root = tmp_path / "reconstructed"
+    zip_parser = Mock(side_effect=AssertionError("ZipFile parsed unbounded directory"))
+    with monkeypatch.context() as patch:
+        patch.setattr("mozaiksai.control_plane.repository_patch.zipfile.ZipFile", zip_parser)
+        with pytest.raises(ValueError, match="REPOSITORY_PATCH_ARCHIVE_BUDGET"):
+            stage_repository_workspace_archive(
+                inputs["context"], snapshot=inputs["snapshot"],
+                selected_paths=inputs["selected_paths"], baseline_files=inputs["baseline_files"],
+                archive_bytes=bytes(archive), workspace_root=root,
+                validate_path=inputs["validate_path"], max_files=2, max_archive_bytes=200_000,
+            )
+    zip_parser.assert_not_called()
+    assert not root.exists()
+
+
 def test_archive_import_rejects_snapshot_replay_before_writing(tmp_path: Path) -> None:
     inputs = _inputs(tmp_path)
     archive = export_repository_workspace_archive(inputs["workspace"], max_files=2, max_archive_bytes=4096)
@@ -277,6 +304,63 @@ def test_archive_import_cleans_partial_baseline_materialization(
             workspace_root=root, validate_path=inputs["validate_path"],
             max_files=2, max_archive_bytes=4096,
         )
+    assert not root.exists()
+
+
+def test_archive_import_reports_failed_cleanup_after_partial_materialization(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inputs = _inputs(tmp_path)
+    archive = export_repository_workspace_archive(inputs["workspace"], max_files=2, max_archive_bytes=4096)
+    root = tmp_path / "reconstructed"
+
+    def fail_after_partial_write(files: dict[str, str], *, workspace_root: Path) -> None:
+        workspace_root.mkdir(parents=True)
+        (workspace_root / "partial.py").write_text("partial", encoding="utf-8")
+        raise ValueError("baseline materialization failed")
+
+    def deny_cleanup(*args: object, **kwargs: object) -> None:
+        raise PermissionError("locked staging tree")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            "mozaiksai.control_plane.repository_patch.materialize_coding_workspace",
+            fail_after_partial_write,
+        )
+        patch.setattr("mozaiksai.control_plane.workspace.shutil.rmtree", deny_cleanup)
+        with pytest.raises(RuntimeError, match="CODING_WORKSPACE_CLEANUP"):
+            stage_repository_workspace_archive(
+                inputs["context"], snapshot=inputs["snapshot"],
+                selected_paths=inputs["selected_paths"], baseline_files=inputs["baseline_files"],
+                archive_bytes=archive, workspace_root=root, validate_path=inputs["validate_path"],
+                max_files=2, max_archive_bytes=4096,
+            )
+    assert (root / "partial.py").exists()
+
+
+def test_archive_import_reports_failed_cleanup_after_successful_staging(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inputs = _inputs(tmp_path)
+    archive = export_repository_workspace_archive(inputs["workspace"], max_files=2, max_archive_bytes=4096)
+    root = tmp_path / "reconstructed"
+    staged = stage_repository_workspace_archive(
+        inputs["context"], snapshot=inputs["snapshot"], selected_paths=inputs["selected_paths"],
+        baseline_files=inputs["baseline_files"], archive_bytes=archive,
+        workspace_root=root, validate_path=inputs["validate_path"],
+        max_files=2, max_archive_bytes=4096,
+    )
+
+    def deny_cleanup(*args: object, **kwargs: object) -> None:
+        raise PermissionError("locked staging tree")
+
+    with monkeypatch.context() as patch:
+        patch.setattr("mozaiksai.control_plane.workspace.shutil.rmtree", deny_cleanup)
+        with pytest.raises(RuntimeError, match="CODING_WORKSPACE_CLEANUP"):
+            staged.cleanup()
+    assert root.exists()
+    staged.cleanup()
+    staged.cleanup()  # Strict host cleanup remains idempotent.
     assert not root.exists()
 
 

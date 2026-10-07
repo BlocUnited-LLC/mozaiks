@@ -74,10 +74,21 @@ class StagedCodingWorkspace:
 
     workspace_root: Path
     editable_manifest: dict[str, str] = field(default_factory=dict)
+    strict_cleanup: bool = field(default=False, repr=False)
 
     def cleanup(self) -> None:
-        """Remove the workspace tree. Idempotent and best-effort."""
-        shutil.rmtree(self.workspace_root, ignore_errors=True)
+        """Remove the tree; host repository staging reports incomplete removal."""
+        if not self.strict_cleanup:
+            shutil.rmtree(self.workspace_root, ignore_errors=True)
+            return
+        try:
+            shutil.rmtree(self.workspace_root)
+        except FileNotFoundError:
+            pass  # Idempotent when the whole tree is already absent.
+        except OSError as exc:
+            raise RuntimeError("CODING_WORKSPACE_CLEANUP: staged tree removal failed") from exc
+        if self.workspace_root.exists() or self.workspace_root.is_symlink():
+            raise RuntimeError("CODING_WORKSPACE_CLEANUP: staged tree remains after removal")
 
 
 def _sha256_file(path: Path) -> str:
