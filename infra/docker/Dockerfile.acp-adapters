@@ -1,0 +1,28 @@
+# syntax=docker/dockerfile:1
+# Offline packaging and ACP initialize proof for the real Claude/Codex adapters.
+# This image has no Mozaiks host, app workspace, credentials, or live entrypoint.
+ARG NODE_IMAGE=node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392
+ARG PYTHON_IMAGE=python:3.12-slim-bookworm@sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258
+
+FROM ${NODE_IMAGE} AS adapters
+WORKDIR /opt/acp
+COPY infra/docker/acp_proof/package.json infra/docker/acp_proof/package-lock.json ./
+RUN npm ci --omit=dev --no-audit --no-fund \
+    && npm cache clean --force
+
+FROM ${PYTHON_IMAGE}
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH=/opt/acp/node_modules/.bin:$PATH \
+    HOME=/home/sandbox
+RUN python -m pip install --no-cache-dir --no-compile \
+        "ag2[acp]==1.1.2" "agent-client-protocol==0.12.1" \
+    && useradd --create-home --uid 10001 --shell /usr/sbin/nologin sandbox \
+    && mkdir /workspace \
+    && chown sandbox:sandbox /workspace
+COPY --from=adapters /usr/local/bin/node /usr/local/bin/node
+COPY --from=adapters /opt/acp/node_modules /opt/acp/node_modules
+COPY infra/docker/acp_proof/adapter_handshake.py /opt/mozaiks/acp_proof/adapter_handshake.py
+USER 10001:10001
+WORKDIR /workspace
+ENTRYPOINT ["python", "/opt/mozaiks/acp_proof/adapter_handshake.py"]

@@ -181,11 +181,39 @@ $env:MOZAIKS_RUN_ACP_CONTAINER_PROOF = '1'
 pytest -q --no-cov tests/test_acp_container_proof.py
 ```
 
-This proof does not enable a live ACP provider. Its preview-derived image has
-framework files baked into it; a production worker still needs a dedicated
-minimal image, explicit credential custody and controlled egress. Provider
-selection also currently tests ACP availability in the host process, so a
-container-only ACP installation is not yet a selectable runtime capability.
+The separate `Dockerfile.acp-adapters` packages the real Claude Code and Codex
+ACP executables for an offline initialize proof. It starts from pinned
+Node 22.23.3/Python 3.12.15 slim image digests, uses the npm integrity lock for
+`@agentclientprotocol/claude-agent-acp` 0.86.0 and
+`@agentclientprotocol/codex-acp` 2.1.1 (including its locked
+`@openai/codex` 0.159.3 dependency), and installs AG2 1.1.2 with
+`agent-client-protocol` 0.12.1. Neither the preview image nor the Mozaiks app
+or host is copied into this adapter image. Build and run the two opt-in checks:
+
+```powershell
+docker build -f infra/docker/Dockerfile.acp-adapters -t mozaiks-acp-adapters:local .
+$env:MOZAIKS_RUN_ACP_ADAPTER_HANDSHAKE = '1'
+pytest -q --no-cov tests/test_acp_adapter_handshake.py
+```
+
+Each test creates a disposable nonroot container with no network, bind mount,
+volume, model credential, or Docker socket. It checks the container settings
+before starting: read-only root, all Linux capabilities dropped, no-new-
+privileges, no container logs, 128 processes, 2 GiB memory and swap ceiling,
+two CPUs, zero core dump, 1024 open-file limit, and bounded tmpfs mounts for
+the workspace (64 MiB), temporary files (128 MiB), and home (64 MiB).
+The entrypoint takes AG2's pinned `ClaudeCodeConfig` or `CodexConfig` command
+and uses the public ACP Python SDK to send `initialize` with file and terminal
+capabilities disabled. The response must identify the expected adapter and
+ACP protocol version. It does not create an ACP session, call a model, or
+attempt an edit. AG2 has no public initialize-only method; the existing fake
+agent proof above exercises its actual turn and repository workspace flow.
+
+These proofs do not enable a live ACP provider. Credential custody, content
+screening, controlled model egress, bounded host-worker output, and host-owned
+review are still required before real coding turns. Provider selection also
+currently tests ACP availability in the host process, so a container-only ACP
+installation is not yet a selectable runtime capability.
 
 ## 3. Canonical Contracts and Extension Rules
 
