@@ -32,6 +32,40 @@ class _ProofWorkerRequest(CodingWorkerRequest):
     delete_paths: list[StrictStr] = Field(default_factory=list, max_length=3)
 
 
+def _verify_isolation_probe(summary: str, request: _ProofWorkerRequest) -> None:
+    """Fail the synthetic proof if its known agent observed extra authority.
+
+    This is test-fixture evidence only. A real agent's reply is never used as
+    isolation or acceptance evidence.
+    """
+    try:
+        result = json.loads(summary)
+        terminal = result["terminal"]
+        expected = {
+            "adapter_host_secret_visible": False,
+            "adapter_outbound_reachable": False,
+            "baseline_file_visible": (
+                "app/app.json" in request.files or "app/app.json" in request.read_only_files
+            ),
+            "read_only_test_visible": (
+                "tests/test_dashboard.py" in request.files
+                or "tests/test_dashboard.py" in request.read_only_files
+            ),
+            "host_sentinel_visible": False,
+        }
+        if (
+            not isinstance(result, dict)
+            or not isinstance(terminal, dict)
+            or set(result) != {*expected, "terminal"}
+            or any(result[key] is not value for key, value in expected.items())
+            or set(terminal) != {"host_secret_visible", "outbound_reachable"}
+            or any(value is not False for value in terminal.values())
+        ):
+            raise ValueError("isolation probe mismatch")
+    except (KeyError, TypeError, ValueError):
+        raise RuntimeError("ACP_PROOF_ISOLATION_FAILED") from None
+
+
 def _fake_config(*, workspace_root: Path, turn_timeout_seconds: int, **_kwargs: object) -> ACPConfig:
     return ACPConfig(
         command=[sys.executable, _FAKE_AGENT],
@@ -74,6 +108,8 @@ async def _execute() -> str:
     )
     with contextlib.redirect_stdout(sys.stderr):
         proposal = await provider.execute(request)
+    if proposal.status == "completed":
+        _verify_isolation_probe(proposal.summary, request)
     return json.dumps({
         "proposal": proposal.model_dump(mode="json"),
         "workspace_archive_base64": (

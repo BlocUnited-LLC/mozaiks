@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 
+from infra.docker.acp_proof.worker import _ProofWorkerRequest, _verify_isolation_probe
 from mozaiksai.control_plane import (
     CodingWorkerRequest,
     RepositoryDockerExecutionError,
@@ -48,6 +49,50 @@ def _request(**changes: Any) -> CodingWorkerRequest:
     }
     values.update(changes)
     return CodingWorkerRequest(**values)
+
+
+_SAFE_ISOLATION_PROBE = {
+    "adapter_host_secret_visible": False,
+    "adapter_outbound_reachable": False,
+    "baseline_file_visible": False,
+    "read_only_test_visible": False,
+    "host_sentinel_visible": False,
+    "terminal": {"host_secret_visible": False, "outbound_reachable": False},
+}
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        ("adapter_host_secret_visible",),
+        ("adapter_outbound_reachable",),
+        ("baseline_file_visible",),
+        ("read_only_test_visible",),
+        ("host_sentinel_visible",),
+        ("terminal", "host_secret_visible"),
+        ("terminal", "outbound_reachable"),
+    ],
+)
+def test_synthetic_agent_probe_cannot_report_exposure_as_success(path: tuple[str, ...]) -> None:
+    request = _ProofWorkerRequest.model_validate(_request().model_dump())
+    _verify_isolation_probe(json.dumps(_SAFE_ISOLATION_PROBE), request)
+    exposed = json.loads(json.dumps(_SAFE_ISOLATION_PROBE))
+    current = exposed
+    for key in path[:-1]:
+        current = current[key]
+    current[path[-1]] = True
+    with pytest.raises(RuntimeError, match="ACP_PROOF_ISOLATION_FAILED"):
+        _verify_isolation_probe(json.dumps(exposed), request)
+
+
+def test_synthetic_agent_probe_requires_exact_report_for_selected_inspection() -> None:
+    request = _ProofWorkerRequest.model_validate(
+        _request(read_only_files={"tests/test_dashboard.py": "assert True\n"}).model_dump()
+    )
+    visible = {**_SAFE_ISOLATION_PROBE, "read_only_test_visible": True}
+    _verify_isolation_probe(json.dumps(visible), request)
+    with pytest.raises(RuntimeError, match="ACP_PROOF_ISOLATION_FAILED"):
+        _verify_isolation_probe("{}", request)
 
 
 def _context(*, create_paths: list[str], delete_paths: list[str]) -> ApprovedExecutionContext:
