@@ -21,7 +21,11 @@ from factory_app.app.modules.app_registry.backend.schemas import (
     GenesisImportClaim,
 )
 from factory_app.app.modules.app_registry.backend.service import AppRegistryService
-from factory_app.workflows._shared.artifact_bundle import read_artifact_bundle
+from factory_app.workflows._shared.artifact_bundle import (
+    APP_BUNDLE_MAX_FILES,
+    APP_BUNDLE_MAX_TOTAL_BYTES,
+    read_artifact_bundle,
+)
 from mozaiksai.core.artifacts.content_store import (
     ArtifactContentStore,
     get_artifact_content_store,
@@ -39,10 +43,6 @@ from mozaiksai.core.artifacts.models import (
 )
 from mozaiksai.core.artifacts.store import BuildRecordStore, get_artifact_store
 from mozaiksai.core.semantics.portable_path import detect_collisions, validate_portable_path
-
-_MAX_ARCHIVE_BYTES = 64_000_000
-_MAX_SOURCE_BYTES = 64_000_000
-_MAX_SOURCE_FILES = 4096
 
 
 class GenesisImportError(ValueError):
@@ -140,7 +140,7 @@ def _archive_paths(*, bundle_bytes: bytes, bundle_name: str) -> dict[str, zipfil
                     raise GenesisImportError("source archive contains an unsafe or duplicate member")
                 paths[path] = info
                 source_bytes += info.file_size
-                if len(paths) > _MAX_SOURCE_FILES or source_bytes > _MAX_SOURCE_BYTES:
+                if len(paths) > APP_BUNDLE_MAX_FILES or source_bytes > APP_BUNDLE_MAX_TOTAL_BYTES:
                     raise GenesisImportError("source archive exceeds the import size or file limit")
     except (zipfile.BadZipFile, OSError) as exc:
         raise GenesisImportError("source archive is unreadable") from exc
@@ -268,7 +268,7 @@ async def read_imported_genesis_review_bundle(
         execution_app_id=execution_app_id, build_registry_id=build_registry_id,
     ) or (state["status"] == "reserved" and record.lifecycle_status != BuildRecordStatus.DRAFT)):
         raise GenesisImportError("imported Genesis record differs from its reserved source")
-    raw = await read_verified_artifact_bundle(record, max_bytes=_MAX_ARCHIVE_BYTES)
+    raw = await read_verified_artifact_bundle(record, max_bytes=APP_BUNDLE_MAX_TOTAL_BYTES)
     if hashlib.sha256(raw).hexdigest() != claim.bundle_sha256:
         raise GenesisImportError("imported Genesis archive digest differs from its reservation")
     return raw
@@ -323,7 +323,7 @@ async def require_accepted_genesis_baseline(
         execution_app_id=execution_app_id, build_registry_id=build_registry_id,
     ):
         raise GenesisImportError("imported Genesis source has no matching accepted review receipt")
-    if hashlib.sha256(await read_verified_artifact_bundle(record, max_bytes=_MAX_ARCHIVE_BYTES)).hexdigest() != row["genesis_import"]["bundle_sha256"]:
+    if hashlib.sha256(await read_verified_artifact_bundle(record, max_bytes=APP_BUNDLE_MAX_TOTAL_BYTES)).hexdigest() != row["genesis_import"]["bundle_sha256"]:
         raise GenesisImportError("accepted Genesis source bytes changed")
 
 
@@ -370,7 +370,7 @@ async def accept_existing_app_genesis(
 
         require_contained_imported_smoke_runner()
     try:
-        bundle_bytes = await read_verified_artifact_bundle(record, max_bytes=_MAX_ARCHIVE_BYTES)
+        bundle_bytes = await read_verified_artifact_bundle(record, max_bytes=APP_BUNDLE_MAX_TOTAL_BYTES)
         entries, declared = _manifest_entries(
             files_manifest=record.files_manifest, bundle_name=claim.bundle_name,
             bundle_bytes=bundle_bytes,
@@ -485,7 +485,7 @@ async def import_existing_app_genesis_draft(
         provenance = PinnedSourceProvenance.model_validate(source_provenance)
     except ValueError as exc:
         raise GenesisImportError("source identity is invalid") from exc
-    if not isinstance(bundle_bytes, bytes) or not bundle_bytes or len(bundle_bytes) > _MAX_ARCHIVE_BYTES:
+    if not isinstance(bundle_bytes, bytes) or not bundle_bytes or len(bundle_bytes) > APP_BUNDLE_MAX_TOTAL_BYTES:
         raise GenesisImportError("source archive bytes are missing or exceed the import limit")
 
     registry = registry_service or AppRegistryService()
