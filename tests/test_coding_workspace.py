@@ -238,6 +238,18 @@ def test_harvest_flags_symlink_and_never_follows_it(tmp_path: Path) -> None:
     assert all(f.content is None or "host secret" not in f.content for f in harvest.files)
 
 
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="named pipes require POSIX")
+def test_harvest_rejects_named_pipe_without_blocking(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    pipe = workspace.workspace_root / "app/pipe"
+    os.mkfifo(pipe)
+
+    harvest = harvest_coding_workspace(workspace)
+
+    assert not harvest.clean
+    assert any(v.path == "app/pipe" and v.kind == "non_regular" for v in harvest.violations)
+
+
 def test_harvest_of_untouched_workspace_is_clean_and_unmodified(tmp_path: Path) -> None:
     workspace = _workspace(tmp_path)
 

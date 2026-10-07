@@ -14,6 +14,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- Bounded, deterministic transfer of observed isolated ACP workspace files into
+  a host-owned repository patch candidate. The offline container proof now
+  exercises the approved-baseline and external-patch path without enabling a
+  live coding agent or source write.
+
 - A reviewable external-patch candidate for approved repository refinements,
   with snapshot-bound baseline hashes, post-run workspace harvest, per-file host
   policy checks, and unified diffs. Validation and source publication remain

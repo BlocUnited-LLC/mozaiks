@@ -1,22 +1,38 @@
 """Reviewable repository patches from an approved, harvested coding workspace.
 
 The authenticated host owns plan approval, snapshot identity, repository reads,
-and source-control publication. This module only verifies one bounded, already
-staged coding result and returns an external-patch candidate for later review.
+and source-control publication. This module verifies bounded workspace transport
+into disposable host staging and returns an external-patch candidate for review.
 """
 
 from __future__ import annotations
 
 import difflib
 import hashlib
+import io
+import zipfile
 from collections.abc import Callable, Mapping
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from mozaiksai.core.secrets.contract import is_secret_contract_path, validate_secret_contract_text
+from mozaiksai.core.semantics.archive import (
+    ArchiveEntry,
+    build_deterministic_archive,
+    read_archive_manifest,
+)
+
 from .contracts import StagedPatchProposal, is_secret_sensitive_path, safe_artifact_relpath
 from .execution_context import ApprovedExecutionContext
-from .workspace import StagedCodingWorkspace, harvest_coding_workspace
+from .workspace import StagedCodingWorkspace, harvest_coding_workspace, materialize_coding_workspace
+
+_MAX_REPOSITORY_ARCHIVE_BYTES = 16_777_216
+_MAX_REPOSITORY_ARCHIVE_FILES = 50
+_REPOSITORY_ENV_TEMPLATES = frozenset({
+    ".env.example", ".env.staging.example", ".env.production.example",
+})
 
 
 class RepositorySnapshotEvidence(BaseModel):
@@ -107,6 +123,17 @@ def _sha256(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
+def _reject_env_template_path(path: str) -> None:
+    if path.casefold() in _REPOSITORY_ENV_TEMPLATES:
+        raise ValueError(f"REPOSITORY_PATCH_ENV_TEMPLATE: {path!r} needs a names-only content gate")
+
+
+def _validate_output_text(path: str, content: str) -> None:
+    _reject_env_template_path(path)
+    if is_secret_contract_path(path):
+        validate_secret_contract_text(content)
+
+
 def _unified_diff(path: str, before: str, after: str) -> str:
     lines = difflib.unified_diff(
         before.splitlines(keepends=True),
@@ -122,28 +149,61 @@ def _unified_diff(path: str, before: str, after: str) -> str:
     )
 
 
-def finalize_repository_patch(
+def _validate_archive_budget(*, max_files: int, max_archive_bytes: int) -> None:
+    if not 1 <= max_files <= _MAX_REPOSITORY_ARCHIVE_FILES:
+        raise ValueError("REPOSITORY_PATCH_ARCHIVE_BUDGET: invalid file limit")
+    if not 1 <= max_archive_bytes <= _MAX_REPOSITORY_ARCHIVE_BYTES:
+        raise ValueError("REPOSITORY_PATCH_ARCHIVE_BUDGET: invalid byte limit")
+
+
+def export_repository_workspace_archive(
+    workspace: StagedCodingWorkspace,
+    *,
+    max_files: int,
+    max_archive_bytes: int,
+) -> bytes:
+    """Export every observed regular UTF-8 file after the coding turn stops.
+
+    The archive is derived from the whole staged tree, never from the agent's
+    proposed file list. It carries unchanged selected files too, so the host
+    can verify the exact observed workspace set after transport. Run this only
+    inside an isolated worker with filesystem and memory caps: the canonical
+    harvester reads files before this archive byte budget is checked.
+    """
+    _validate_archive_budget(max_files=max_files, max_archive_bytes=max_archive_bytes)
+    harvest = harvest_coding_workspace(workspace)
+    if harvest.violations:
+        raise ValueError("REPOSITORY_PATCH_ARCHIVE_SCOPE: staged tree has violations")
+    if not harvest.files or len(harvest.files) > max_files:
+        raise ValueError("REPOSITORY_PATCH_ARCHIVE_BUDGET: staged file count exceeds limit")
+    entries: list[ArchiveEntry] = []
+    total_bytes = 0
+    for file in harvest.files:
+        path = _canonical_path(file.path)
+        if file.op != "update" or file.content is None:
+            raise ValueError(f"REPOSITORY_PATCH_ARCHIVE_OP: {path!r}")
+        raw = file.content.encode("utf-8")
+        if file.new_sha256 != hashlib.sha256(raw).hexdigest():
+            raise ValueError(f"REPOSITORY_PATCH_ARCHIVE_UTF8: {path!r} is not exact UTF-8")
+        _validate_output_text(path, file.content)
+        total_bytes += len(raw)
+        if total_bytes > max_archive_bytes:
+            raise ValueError("REPOSITORY_PATCH_ARCHIVE_BUDGET: staged contents exceed limit")
+        entries.append(ArchiveEntry(path=path, content=raw))
+    archive_bytes = build_deterministic_archive(entries)
+    if len(archive_bytes) > max_archive_bytes:
+        raise ValueError("REPOSITORY_PATCH_ARCHIVE_BUDGET: archive exceeds limit")
+    return archive_bytes
+
+
+def _verify_selected_baseline(
     context: ApprovedExecutionContext,
     *,
     snapshot: RepositorySnapshotEvidence,
     selected_paths: list[str],
     baseline_files: Mapping[str, str],
-    workspace: StagedCodingWorkspace,
-    proposal: StagedPatchProposal,
     validate_path: Callable[[str], object],
-) -> RepositoryPatchCandidate:
-    """Verify an approved repository edit against an independently harvested tree.
-
-    This function reads the staged workspace and performs no writes, validation
-    commands, Git actions, artifact promotion, or model calls. The host must
-    supply a verified snapshot, fetch baseline files at its immutable commit,
-    keep the provider confined to a disposable workspace, and call this only
-    after the provider has stopped modifying that workspace.
-
-    ``validate_path`` is the host's per-file policy. It must raise for any
-    denied path; the finalizer calls it for every selected and proposed path.
-    """
-
+) -> dict[str, str]:
     if context.schema_version != "managed_refinement.execution_context.v1":
         raise ValueError("REPOSITORY_PATCH_CONTEXT_VERSION: unsupported execution context")
     if (
@@ -169,6 +229,7 @@ def finalize_repository_patch(
         _canonical_path(path)
         if is_secret_sensitive_path(path):
             raise ValueError(f"REPOSITORY_PATCH_SECRET_PATH: {path!r}")
+        _reject_env_template_path(path)
         if (
             not _in_scope(path, context.allowed_paths)
             or _in_scope(path, context.prohibited_paths)
@@ -182,6 +243,109 @@ def finalize_repository_patch(
         if manifest_hash != f"sha256:{content_hash}":
             raise ValueError(f"REPOSITORY_PATCH_BASELINE_HASH: {path!r} differs from approved snapshot")
         expected_hashes[path] = content_hash
+    return expected_hashes
+
+
+def stage_repository_workspace_archive(
+    context: ApprovedExecutionContext,
+    *,
+    snapshot: RepositorySnapshotEvidence,
+    selected_paths: list[str],
+    baseline_files: Mapping[str, str],
+    archive_bytes: bytes,
+    workspace_root: Path,
+    validate_path: Callable[[str], object],
+    max_files: int,
+    max_archive_bytes: int,
+) -> StagedCodingWorkspace:
+    """Verify container output and reconstruct a host-owned disposable tree.
+
+    No archive entry is extracted as a filesystem path. The approved baseline
+    is materialized first, preserving its pre-run manifest; verified output
+    bytes then replace only those exact selected files. The caller must keep
+    this tree private and stable until ``finalize_repository_patch`` returns.
+    """
+    _validate_archive_budget(max_files=max_files, max_archive_bytes=max_archive_bytes)
+    _verify_selected_baseline(
+        context,
+        snapshot=snapshot,
+        selected_paths=selected_paths,
+        baseline_files=baseline_files,
+        validate_path=validate_path,
+    )
+    if len(selected_paths) > max_files or len(archive_bytes) > max_archive_bytes:
+        raise ValueError("REPOSITORY_PATCH_ARCHIVE_BUDGET: input exceeds limit")
+    root = Path(workspace_root)
+    if root.exists() or root.is_symlink():
+        raise ValueError("REPOSITORY_PATCH_ARCHIVE_WORKSPACE: target must not exist")
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
+            infos = archive.infolist()
+            if len(infos) != len(selected_paths) or sum(info.file_size for info in infos) > max_archive_bytes:
+                raise ValueError("REPOSITORY_PATCH_ARCHIVE_BUDGET: entry count or size exceeds limit")
+    except zipfile.BadZipFile as exc:
+        raise ValueError("REPOSITORY_PATCH_ARCHIVE_FORMAT: unreadable archive") from exc
+    manifest = read_archive_manifest(archive_bytes)
+    if {entry.path for entry in manifest.entries} != set(selected_paths):
+        raise ValueError("REPOSITORY_PATCH_ARCHIVE_SET: entries differ from approved selection")
+
+    observed: dict[str, bytes] = {}
+    with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
+        for entry in manifest.entries:
+            path = _canonical_path(entry.path)
+            if validate_path(path) is not None:
+                raise ValueError("REPOSITORY_PATCH_HOST_POLICY: validate_path must raise or return None")
+            raw = archive.read(path)
+            if len(raw) != entry.size_bytes or f"sha256:{hashlib.sha256(raw).hexdigest()}" != entry.content_sha256:
+                raise ValueError(f"REPOSITORY_PATCH_ARCHIVE_HASH: {path!r}")
+            try:
+                content = raw.decode("utf-8", errors="strict")
+            except UnicodeDecodeError as exc:
+                raise ValueError(f"REPOSITORY_PATCH_ARCHIVE_UTF8: {path!r}") from exc
+            _validate_output_text(path, content)
+            observed[path] = raw
+
+    workspace = StagedCodingWorkspace(workspace_root=root)
+    try:
+        workspace = materialize_coding_workspace(dict(baseline_files), workspace_root=root)
+        for path, raw in observed.items():
+            (workspace.workspace_root / path).write_bytes(raw)
+    except Exception:
+        workspace.cleanup()
+        raise
+    return workspace
+
+
+def finalize_repository_patch(
+    context: ApprovedExecutionContext,
+    *,
+    snapshot: RepositorySnapshotEvidence,
+    selected_paths: list[str],
+    baseline_files: Mapping[str, str],
+    workspace: StagedCodingWorkspace,
+    proposal: StagedPatchProposal,
+    validate_path: Callable[[str], object],
+) -> RepositoryPatchCandidate:
+    """Verify an approved repository edit against an independently harvested tree.
+
+    This function reads the staged workspace and performs no writes, validation
+    commands, Git actions, artifact promotion, or model calls. The host must
+    supply a verified snapshot, fetch baseline files at its immutable commit,
+    keep the provider confined to a disposable workspace, and call this only
+    after the provider has stopped modifying that workspace.
+
+    ``validate_path`` is the host's per-file policy. It must raise for any
+    denied path; the finalizer calls it for every selected and proposed path.
+    """
+
+    expected_hashes = _verify_selected_baseline(
+        context,
+        snapshot=snapshot,
+        selected_paths=selected_paths,
+        baseline_files=baseline_files,
+        validate_path=validate_path,
+    )
 
     if workspace.editable_manifest != expected_hashes:
         raise ValueError("REPOSITORY_PATCH_WORKSPACE_BASELINE: staged files differ from selected baseline")
@@ -202,6 +366,7 @@ def finalize_repository_patch(
     for file in harvest.files:
         if file.op != "update" or file.content is None:
             raise ValueError(f"REPOSITORY_PATCH_WORKSPACE_OP: {file.path!r}")
+        _validate_output_text(file.path, file.content)
         observed_hash = _sha256(file.content)
         if (
             file.previous_sha256 != expected_hashes[file.path]
@@ -265,5 +430,7 @@ __all__ = [
     "RepositoryPatchCandidate",
     "RepositoryPatchFile",
     "RepositorySnapshotEvidence",
+    "export_repository_workspace_archive",
     "finalize_repository_patch",
+    "stage_repository_workspace_archive",
 ]

@@ -29,6 +29,7 @@ WorkspaceViolationKind = Literal[
     "unsafe_path",
     "secret_path",
     "symlink",
+    "non_regular",
     "outside_allowlist",
     "delete_denied",
 ]
@@ -179,6 +180,15 @@ def harvest_coding_workspace(
                         path=rel,
                         kind="symlink",
                         detail="Linked or reparse-point file found in workspace; not read.",
+                    )
+                )
+                continue
+            if not stat.S_ISREG(full.lstat().st_mode):
+                violations.append(
+                    WorkspaceScopeViolation(
+                        path=rel,
+                        kind="non_regular",
+                        detail="Non-regular file found in workspace; not read.",
                     )
                 )
                 continue

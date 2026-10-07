@@ -146,6 +146,38 @@ async def test_happy_path_harvests_modified_file(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_completed_workspace_observer_runs_before_cleanup_only_for_accepted_turn(tmp_path: Path) -> None:
+    factory_ref: list = []
+    factory = _FakeConfigFactory(_writing_turn(factory_ref, _SCOPED_PATH, _PATCHED))
+    factory_ref.append(factory)
+    observed: list[bytes] = []
+    provider = ACPCodingProvider(
+        config_loader=_policy(), staging_root=tmp_path / "accepted",
+        acp_config_factory=factory, env_source={},
+        on_completed_workspace=lambda workspace: observed.append(
+            (workspace.workspace_root / _SCOPED_PATH).read_bytes()
+        ),
+    )
+
+    proposal = await provider.execute(_request())
+
+    assert proposal.status == "completed"
+    assert observed == [proposal.changed_files[0].content.encode("utf-8")]
+    assert not factory.calls[0]["workspace_root"].exists()
+
+    rejected_ref: list = []
+    rejected_factory = _FakeConfigFactory(_writing_turn(rejected_ref, "app/rogue.py", "bad\n"))
+    rejected_ref.append(rejected_factory)
+    rejected = ACPCodingProvider(
+        config_loader=_policy(), staging_root=tmp_path / "rejected",
+        acp_config_factory=rejected_factory, env_source={},
+        on_completed_workspace=lambda workspace: observed.append(b"should not run"),
+    )
+    assert (await rejected.execute(_request())).status == "rejected_scope"
+    assert len(observed) == 1
+
+
+@pytest.mark.asyncio
 async def test_out_of_scope_file_rejects_whole_proposal(tmp_path: Path) -> None:
     factory_ref: list = []
     factory = _FakeConfigFactory(_writing_turn(factory_ref, "app/rogue.py", "print('x')\n"))

@@ -138,7 +138,9 @@ from .repository_patch import (
     RepositoryPatchCandidate,
     RepositoryPatchFile,
     RepositorySnapshotEvidence,
+    export_repository_workspace_archive,
     finalize_repository_patch,
+    stage_repository_workspace_archive,
 )
 from .review_package import (
     REVIEW_PACKAGE_SCHEMA_VERSION,
@@ -270,7 +272,9 @@ __all__ = [
     "RepositoryPatchCandidate",
     "RepositoryPatchFile",
     "RepositorySnapshotEvidence",
+    "export_repository_workspace_archive",
     "finalize_repository_patch",
+    "stage_repository_workspace_archive",
     "ControlPlaneToolsManifest",
     "ContextRefreshLaunchResult",
     "ContextRefreshLaunchStatus",
