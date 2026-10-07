@@ -223,6 +223,38 @@ database are never used. A hosted factory may register module scope, permission,
 policy and audit hooks. With the database dropped, nothing the smoke wrote
 remains on the host's Mongo.
 
+### Imported-source runtime smoke
+
+An imported Genesis can contain arbitrary Python. Its acceptance path calls
+`run_contained_imported_app_runtime_smoke(app_root)` on the exact staged app
+bytes. This is a separate opt-in backend; ordinary generated-app acceptance
+continues to use the child-process smoke described above.
+
+The imported backend copies up to 4,096 regular files and 64 MB into a private
+temporary directory, rejecting links and special files. It mounts only that
+copy read-only into the local `mozaiks-sandbox:local` preview image. The Docker
+run uses `--network=none`, a read-only root, a non-root user, dropped capabilities,
+no new privileges, and CPU, memory, process, temporary storage and time limits.
+MongoDB starts inside that same disposable container on loopback. No host Mongo
+URI, application credential, provider key, source repository, Docker socket or
+host workspace is mounted or passed to imported code. The container is forcibly
+removed and its absence checked even after timeout or cancellation. A failed
+teardown is a failed acceptance check. Docker does not persist container logs;
+the parent retains at most 4 MB of result output and 256 KB of error output,
+and exceeding either bound fails acceptance.
+
+The preview image must be rebuilt after changing this smoke module:
+`docker build -f infra/docker/Dockerfile.preview -t mozaiks-sandbox:local .`.
+An operator can select an equivalent trusted local image with
+`DOCKER_SANDBOX_IMAGE`; imported source cannot select the image.
+Docker or image unavailability yields a skipped, blocking acceptance result.
+The image is never pulled automatically during this gate. Docker Engine and the
+trusted preview image are local prerequisites; no paid service is required.
+The container boundary protects the host, but arbitrary app Python can still
+interfere with checks inside its own interpreter. Treat this runtime smoke as
+functional evidence, and retain exact-source review and independent promotion
+approval for adversarial code.
+
 **Results.** Each check passes, fails or did not run, with one message naming
 the action, the user, the expected response and the actual one. A 5xx carries
 the exception and the generated file and line it was raised from. The result is
