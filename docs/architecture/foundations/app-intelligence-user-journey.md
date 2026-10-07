@@ -34,6 +34,10 @@ The import surface collects:
 - source size limits
 - re-index intent
 
+ExistingAppDiscovery may read a private GitHub repository with the token resolved
+for that discovery session. It does not use a server-wide `GITHUB_TOKEN` or
+`GH_TOKEN` as fallback authority for a user's repository request.
+
 Studio creates or updates the app registry record first. Then it starts a
 source import and App Intelligence index job. The app overview becomes the
 visible transition surface while the job runs.
