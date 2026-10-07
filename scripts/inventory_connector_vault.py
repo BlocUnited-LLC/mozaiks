@@ -33,7 +33,7 @@ CONNECTOR_FIELDS = (
     "secret_name", "created_at", "updated_at", "last_submitted_at",
 )
 SECRET_FIELDS = (
-    "scope", "scope_id", "service", "secret_name", "stored_at", "expires_at",
+    "scope", "scope_id", "service", "managed_by", "secret_name", "stored_at", "expires_at",
     "version_count", "version_fingerprint", "version_identity_conflict",
 )
 
@@ -77,6 +77,8 @@ def build_inventory(
     metadata = [_metadata(row, CONNECTOR_FIELDS) for row in connectors]
     vault = [_metadata(row, SECRET_FIELDS) for row in secrets]
     snapshot = {
+        "provider": provider,
+        "prefix": prefix,
         "connectors": sorted(metadata, key=_canonical_json),
         "secrets": sorted(vault, key=_canonical_json),
     }
@@ -102,7 +104,9 @@ def build_inventory(
             key = (scope, scope_id, service)
             matching = owners.get(key, [])
             expected = _secret_name(scope, scope_id, service, prefix=prefix) if scope_id and service else ""
-            if row.get("version_identity_conflict"):
+            if provider == "azure_key_vault" and row.get("managed_by") != "mozaiks":
+                status = "qualified_identity_mismatch"
+            elif row.get("version_identity_conflict"):
                 status = "version_identity_conflict"
             elif qualified_counts[key] > 1:
                 status = "duplicate_qualified_secret"
@@ -219,6 +223,7 @@ def _azure_metadata(vault_name: str, prefix: str) -> list[dict[str, Any]]:
             "scope": tags.get("scope"),
             "scope_id": tags.get("scope_id"),
             "service": tags.get("service"),
+            "managed_by": tags.get("managed_by"),
             "secret_name": properties.name,
             "stored_at": properties.created_on,
             "expires_at": properties.expires_on,

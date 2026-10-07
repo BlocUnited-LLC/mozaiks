@@ -70,6 +70,8 @@ def test_missing_secret_and_fingerprint_drift_fail_closed() -> None:
     assert report["counts"]["missing_qualified_secret"] == 1
     updated = build_inventory([owner | {"updated_at": "later"}], [], provider="mongo")
     assert updated["fingerprint"] != report["fingerprint"]
+    changed_prefix = build_inventory([owner], [], provider="mongo", prefix="different-prefix")
+    assert changed_prefix["fingerprint"] != report["fingerprint"]
     inconsistent = build_inventory([owner | {"secret_available": False, "status": "active"}], [], provider="mongo")
     assert inconsistent["counts"]["missing_qualified_secret"] == 1
 
@@ -91,12 +93,24 @@ def test_azure_version_identity_conflict_blocks_qualified_record() -> None:
     owner = _owner("app", "id", "service", provider="azure_key_vault")
     report = build_inventory(
         [owner],
-        [{"scope": "app", "scope_id": "id", "service": "service", "secret_name": owner["secret_name"],
+        [{"scope": "app", "scope_id": "id", "service": "service", "managed_by": "mozaiks", "secret_name": owner["secret_name"],
           "version_identity_conflict": True, "version_count": 2}],
         provider="azure_key_vault",
     )
     assert report["ready"] is False
     assert report["counts"]["version_identity_conflict"] == 1
+
+
+def test_azure_wrong_owner_tag_blocks_inventory_readiness() -> None:
+    owner = _owner("app", "id", "service", provider="azure_key_vault")
+    report = build_inventory(
+        [owner],
+        [{"scope": "app", "scope_id": "id", "service": "service", "managed_by": "other",
+          "secret_name": owner["secret_name"]}],
+        provider="azure_key_vault",
+    )
+    assert report["ready"] is False
+    assert report["counts"]["qualified_identity_mismatch"] == 1
 
 
 def test_dry_run_requires_new_private_report_and_matching_fingerprint(monkeypatch, tmp_path) -> None:
