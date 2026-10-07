@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
+import json
 import sys
 from pathlib import Path
 
@@ -13,10 +15,13 @@ from mozaiksai.control_plane import (
     CodingWorkerRequest,
     ControlPlaneCodingCapabilityConfig,
     ControlPlaneConfig,
+    export_repository_workspace_archive,
 )
 from mozaiksai.control_plane.implementations.acp_coding_provider import ACPCodingProvider
+from mozaiksai.control_plane.workspace import StagedCodingWorkspace
 
 _FAKE_AGENT = "/opt/mozaiks/acp_proof/fake_agent.py"
+_MAX_ARCHIVE_BYTES = 700_000
 
 
 def _fake_config(*, workspace_root: Path, turn_timeout_seconds: int, **_kwargs: object) -> ACPConfig:
@@ -41,15 +46,29 @@ async def _execute() -> str:
             {"enabled": True, "providers": {"acp": {"enabled": True, "budget": {"max_wall_seconds": 30}}}}
         ),
     )
+    observed_archive: bytes | None = None
+
+    def _capture_workspace(workspace: StagedCodingWorkspace) -> None:
+        nonlocal observed_archive
+        observed_archive = export_repository_workspace_archive(
+            workspace, max_files=3, max_archive_bytes=_MAX_ARCHIVE_BYTES
+        )
+
     provider = ACPCodingProvider(
         config_loader=lambda: policy,
         staging_root=Path("/workspace/acp_staging"),
         acp_config_factory=_fake_config,
         env_source={},
+        on_completed_workspace=_capture_workspace,
     )
     with contextlib.redirect_stdout(sys.stderr):
         proposal = await provider.execute(request)
-    return proposal.model_dump_json()
+    if proposal.status != "completed" or observed_archive is None:
+        raise RuntimeError(f"offline ACP proof did not produce a workspace archive: {proposal.status}")
+    return json.dumps({
+        "proposal": proposal.model_dump(mode="json"),
+        "workspace_archive_base64": base64.b64encode(observed_archive).decode("ascii"),
+    })
 
 
 if __name__ == "__main__":

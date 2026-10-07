@@ -164,8 +164,12 @@ into `SandboxPort` or create a general Mozaiks subprocess framework.
 The opt-in offline proof in `tests/test_acp_container_proof.py` exercises this
 boundary without a model credential. It sends only approved task/files through
 stdin to a disposable Docker container, runs both AG2's ACP client and a real
-fake ACP agent subprocess inside it, and returns a `StagedPatchProposal` on
-stdout for the existing coding worker to validate. The test checks Docker's
+fake ACP agent subprocess inside it, and returns a `StagedPatchProposal` plus
+a bounded deterministic archive of independently harvested workspace files.
+The host verifies and stages that archive against an approved repository
+baseline, then produces a pending external-patch candidate with the repository
+finalizer. The same proposal also passes through the existing generated-app
+coding worker. The test checks Docker's
 no-bind, no-network, nonroot, read-only, and resource-limit settings; it also
 probes an ACP `terminal/create` child process for host-secret and network
 access. To run it locally:

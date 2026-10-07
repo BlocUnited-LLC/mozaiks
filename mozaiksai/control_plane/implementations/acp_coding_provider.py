@@ -184,11 +184,13 @@ class ACPCodingProvider:
         staging_root: Path | None = None,
         acp_config_factory: Callable[..., Any] | None = None,
         env_source: dict[str, str] | None = None,
+        on_completed_workspace: Callable[[StagedCodingWorkspace], None] | None = None,
     ) -> None:
         self._config_loader = config_loader
         self._staging_root = Path(staging_root) if staging_root is not None else DEFAULT_ACP_STAGING_ROOT
         self._acp_config_factory = acp_config_factory or build_acp_agent_config
         self._env_source = env_source
+        self._on_completed_workspace = on_completed_workspace
 
     @property
     def provider_id(self) -> str:
@@ -246,12 +248,17 @@ class ACPCodingProvider:
         workspace: StagedCodingWorkspace | None = None
         try:
             workspace = materialize_coding_workspace(dict(request.files), workspace_root=workspace_root)
-            return await self._run_turn(
+            proposal = await self._run_turn(
                 request=request,
                 workspace=workspace,
                 provider_config=provider_config,
                 provider_id=provider_id,
             )
+            if proposal.status == "completed" and self._on_completed_workspace is not None:
+                # A synchronous observer can export the stopped turn's actual
+                # workspace bytes before this disposable tree is removed.
+                self._on_completed_workspace(workspace)
+            return proposal
         except Exception as exc:
             logger.warning("ACP_CODING_PROVIDER_FAILED app=%s: %s", request.app_id, exc, exc_info=True)
             return self._proposal(status="failed", provider_id=provider_id, error=str(exc))

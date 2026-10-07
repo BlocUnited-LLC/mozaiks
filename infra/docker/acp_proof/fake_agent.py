@@ -75,6 +75,7 @@ class ProofAgent:
             "adapter_host_secret_visible": "MOZAIKS_ACP_HOST_SECRET" in os.environ,
             "adapter_outbound_reachable": _outbound_reachable(),
             "baseline_file_visible": (self.cwd / "app/app.json").exists(),
+            "read_only_test_visible": (self.cwd / "tests/test_dashboard.py").exists(),
             "host_sentinel_visible": Path("/workspace/.host_sentinel").exists(),
             "terminal": terminal_result,
         }

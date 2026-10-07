@@ -8,6 +8,8 @@ host repository mount, or network connection is used.
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
 import json
 import os
 import subprocess
@@ -17,11 +19,15 @@ from typing import Any
 import pytest
 
 from mozaiksai.control_plane import (
+    ApprovedExecutionContext,
     CodingWorkerRequest,
     ControlPlaneCodingCapabilityConfig,
     ControlPlaneConfig,
+    RepositorySnapshotEvidence,
     ScopedRefinementCodingWorker,
     StagedPatchProposal,
+    finalize_repository_patch,
+    stage_repository_workspace_archive,
 )
 from mozaiksai.core.artifacts.models import BuildRecord
 
@@ -34,6 +40,9 @@ _IMAGE = "mozaiks-acp-proof:local"
 _EDITABLE = "app/ui/pages/Dashboard.jsx"
 _ORIGINAL = "export default function Dashboard() {}\n"
 _PATCHED = "export default function Dashboard() { return 1; }\n"
+_READ_ONLY = "tests/test_dashboard.py"
+_READ_ONLY_CONTENT = "def test_dashboard(): assert True\n"
+_MAX_ARCHIVE_BYTES = 700_000
 
 
 class DockerACPProofProvider:
@@ -43,6 +52,8 @@ class DockerACPProofProvider:
 
     def __init__(self) -> None:
         self.container_config: dict[str, Any] = {}
+        self.archive_bytes: bytes | None = None
+        self.proposal: StagedPatchProposal | None = None
 
     async def execute(self, request: CodingWorkerRequest) -> StagedPatchProposal:
         return await asyncio.to_thread(self._execute, request)
@@ -99,8 +110,13 @@ class DockerACPProofProvider:
                 ["docker", "start", "--attach", "--interactive", container_id],
                 input=input_bytes, capture_output=True, timeout=75, check=True,
             )
-            assert len(run.stdout) < 1_000_000, "container proposal exceeded proof limit"
-            return StagedPatchProposal.model_validate_json(run.stdout)
+            assert len(run.stdout) < 1_000_000, "container output exceeded proof limit"
+            output = json.loads(run.stdout)
+            assert set(output) == {"proposal", "workspace_archive_base64"}
+            self.archive_bytes = base64.b64decode(output["workspace_archive_base64"], validate=True)
+            assert len(self.archive_bytes) <= _MAX_ARCHIVE_BYTES
+            self.proposal = StagedPatchProposal.model_validate(output["proposal"])
+            return self.proposal
         finally:
             removed = subprocess.run(["docker", "rm", "--force", container_id], capture_output=True, timeout=30)
             assert removed.returncode == 0, "disposable ACP container was not removed"
@@ -176,6 +192,63 @@ async def test_acp_client_adapter_and_terminal_are_confined_to_disposable_contai
         "adapter_host_secret_visible": False,
         "adapter_outbound_reachable": False,
         "baseline_file_visible": False,
+        "read_only_test_visible": False,
         "host_sentinel_visible": False,
         "terminal": {"host_secret_visible": False, "outbound_reachable": False},
     }
+
+    # The same isolated ACP turn must also support repository refinement.
+    # The host reconstructs a fresh tree from the approved baseline, never
+    # accepting the provider's claimed changed-file content as observation.
+    context = ApprovedExecutionContext.model_validate({
+        "handoff_id": "handoff-proof", "request_id": "request-proof", "plan_id": "plan-proof",
+        "app_id": "proof", "build_registry_id": "registry-proof",
+        "repository_full_name": "example/app", "baseline_commit_sha": "a" * 40,
+        "raw_request": request.raw_user_request, "request_type": "patch",
+        "approved_plan_digest": "b" * 64, "snapshot_digest": "sha256:" + "c" * 64,
+        "graph_identity_digest": "graph-proof", "impact_report_digest": "impact-proof",
+        "execution_strategy_id": "standard_coding_refinement", "rationale": "approved proof",
+        "allowed_paths": ["app/", "tests/"], "read_only_paths": ["tests/"],
+        "required_validation_gates": ["pytest"], "required_security_gates": ["secret_scan"],
+        "required_ci_checks": ["lint"],
+    })
+    baseline_files = dict(request.files)
+    snapshot = RepositorySnapshotEvidence(
+        plan_id=context.plan_id, request_id=context.request_id, app_id=context.app_id,
+        repository_full_name=context.repository_full_name,
+        baseline_commit_sha=context.baseline_commit_sha,
+        snapshot_digest=context.snapshot_digest,
+        file_manifest={
+            path: "sha256:" + hashlib.sha256(content.encode("utf-8")).hexdigest()
+            for path, content in {**baseline_files, _READ_ONLY: _READ_ONLY_CONTENT}.items()
+        },
+    )
+    assert provider.archive_bytes is not None
+    assert provider.proposal is not None
+
+    def host_policy(path: str) -> None:
+        assert path in baseline_files
+
+    staged = stage_repository_workspace_archive(
+        context, snapshot=snapshot, selected_paths=list(baseline_files),
+        baseline_files=baseline_files, archive_bytes=provider.archive_bytes,
+        workspace_root=tmp_path / "repository_staged", validate_path=host_policy,
+        max_files=3, max_archive_bytes=_MAX_ARCHIVE_BYTES,
+    )
+    try:
+        candidate = finalize_repository_patch(
+            context, snapshot=snapshot, selected_paths=list(baseline_files),
+            baseline_files=baseline_files, workspace=staged,
+            proposal=provider.proposal,
+            validate_path=host_policy,
+        )
+    finally:
+        staged.cleanup()
+    assert candidate.validation_state == "pending"
+    assert candidate.mutation_allowed is False
+    assert candidate.changed_files[0].path == _EDITABLE
+    assert candidate.changed_files[0].content == _PATCHED
+    assert candidate.changed_files[0].previous_sha256 == snapshot.file_manifest[_EDITABLE]
+    assert _READ_ONLY in snapshot.file_manifest
+    assert _READ_ONLY not in baseline_files
+    assert all(change.path != _READ_ONLY for change in candidate.changed_files)

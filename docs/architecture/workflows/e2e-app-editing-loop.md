@@ -146,6 +146,39 @@ and keep that tree stable while the finalizer harvests it. A later repository
 executor and host-owned review/publisher must satisfy required gates and
 recheck the destination baseline before publication.
 
+For an isolated executor, `export_repository_workspace_archive` captures every
+selected file from the stopped provider's disposable tree before that tree is
+deleted. It refuses unselected files, links, deletes, non-exact UTF-8 content,
+and archives outside explicit count and byte budgets. The exporter must run
+inside an OS-isolated worker with filesystem and memory limits because the
+canonical workspace harvester reads files before the archive budget is checked.
+It uses the existing
+deterministic archive envelope; it does not serialize the provider's own
+changed-file claims as observation. The authenticated host caps the archive
+before parsing and calls `stage_repository_workspace_archive` with the same
+approved context, verified snapshot, exact selected baseline, and path policy.
+The host checks the raw central-directory count and declared sizes before ZIP
+parsing can allocate entry objects. It then verifies canonical archive metadata,
+exact selected paths, hashes, and strict UTF-8, and writes output bytes only
+into a fresh private staging tree first materialized from the approved baseline.
+It passes that tree to `finalize_repository_patch` and reports any failure to
+remove the tree after review candidate creation.
+No ZIP entry is extracted by path. Only updates to existing portable UTF-8
+files are supported in this first bridge.
+The snapshot manifest may also describe required read-only tests or docs; those
+remain host-owned context and never enter the editable archive or patch. A
+read-only path remains denied even under a broad allowed parent scope.
+The offline proof keeps read-only test/doc bytes on the host; giving an agent
+separate read-only inspection context requires a later executor contract.
+Changed `app/security/secrets.yaml` content must pass the names-only secret
+contract, while root `.env*.example` templates are excluded from this first
+repository patch lane until an equivalent content gate is available.
+
+The opt-in fake-agent Docker proof exercises this full transfer and finalizer
+path. Live ACP remains disabled; a future executor still needs a dedicated
+minimal image, controlled model credential delivery and egress, and a host
+binding to the persisted approval and immutable source snapshot.
+
 ---
 
 ## User-Facing Mental Model

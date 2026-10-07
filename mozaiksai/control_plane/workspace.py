@@ -29,6 +29,7 @@ WorkspaceViolationKind = Literal[
     "unsafe_path",
     "secret_path",
     "symlink",
+    "non_regular",
     "outside_allowlist",
     "delete_denied",
 ]
@@ -73,10 +74,21 @@ class StagedCodingWorkspace:
 
     workspace_root: Path
     editable_manifest: dict[str, str] = field(default_factory=dict)
+    strict_cleanup: bool = field(default=False, repr=False)
 
     def cleanup(self) -> None:
-        """Remove the workspace tree. Idempotent and best-effort."""
-        shutil.rmtree(self.workspace_root, ignore_errors=True)
+        """Remove the tree; host repository staging reports incomplete removal."""
+        if not self.strict_cleanup:
+            shutil.rmtree(self.workspace_root, ignore_errors=True)
+            return
+        try:
+            shutil.rmtree(self.workspace_root)
+        except FileNotFoundError:
+            pass  # Idempotent when the whole tree is already absent.
+        except OSError as exc:
+            raise RuntimeError("CODING_WORKSPACE_CLEANUP: staged tree removal failed") from exc
+        if self.workspace_root.exists() or self.workspace_root.is_symlink():
+            raise RuntimeError("CODING_WORKSPACE_CLEANUP: staged tree remains after removal")
 
 
 def _sha256_file(path: Path) -> str:
@@ -179,6 +191,15 @@ def harvest_coding_workspace(
                         path=rel,
                         kind="symlink",
                         detail="Linked or reparse-point file found in workspace; not read.",
+                    )
+                )
+                continue
+            if not stat.S_ISREG(full.lstat().st_mode):
+                violations.append(
+                    WorkspaceScopeViolation(
+                        path=rel,
+                        kind="non_regular",
+                        detail="Non-regular file found in workspace; not read.",
                     )
                 )
                 continue
