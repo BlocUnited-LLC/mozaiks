@@ -15,7 +15,9 @@ from mozaiksai.core.app_context.refresh import (
     BROWNFIELD_DISCOVERY_REFRESH_SEQUENCE,
     ContextRefreshPlan,
 )
+from mozaiksai.core.auth.adapters import registry as auth_registry
 from mozaiksai.core.auth.adapters.jwt_adapter import GenericJWTAdapter, JWTAdapterConfig
+from mozaiksai.core.auth.config import clear_auth_config_cache
 
 
 @pytest.fixture
@@ -117,21 +119,29 @@ def _selected_app_routes(app_id: str):
     ]
 
 
-def test_selected_app_routes_require_registry_owner_with_signed_tokens(studio_client) -> None:
-    _, client, headers, registry = studio_client
+def test_selected_app_routes_require_registry_owner_with_signed_tokens(studio_client, monkeypatch) -> None:
+    studio, client, headers, registry = studio_client
     routes = _selected_app_routes("alice-app")
     assert len(routes) == 17
+    health_check = AsyncMock()
+    monkeypatch.setattr(studio, "run_connector_health_check", health_check)
 
     for method, path, body in routes:
         other = client.request(method, path, headers=headers("bob"), json=body)
         assert other.status_code == 404, (method, path, other.text)
+
+        bound_to_target = client.request(
+            method, path, headers=headers("bob", "alice-app"), json=body,
+        )
+        assert bound_to_target.status_code == 404, (method, path, bound_to_target.text)
 
         bound_elsewhere = client.request(
             method, path, headers=headers("bob", "bob-app"), json=body,
         )
         assert bound_elsewhere.status_code == 403, (method, path, bound_elsewhere.text)
 
-    assert registry.lookups == [("alice-app", "bob")] * len(routes)
+    assert registry.lookups == [("alice-app", "bob")] * (2 * len(routes))
+    health_check.assert_not_awaited()
 
 
 def test_owned_app_reaches_every_selected_route_with_signed_token(studio_client, monkeypatch) -> None:
@@ -174,11 +184,12 @@ def test_owned_app_reaches_every_selected_route_with_signed_token(studio_client,
     monkeypatch.setattr(studio, "complete_context_refresh", AsyncMock(side_effect=dumped))
 
     for method, path, body in routes:
-        response = client.request(method, path, headers=headers("alice"), json=body)
-        expected = 202 if path.endswith(("/app-intelligence/index", "/source-import")) else 200
-        assert response.status_code == expected, (method, path, response.text)
+        for bound_app_id in (None, app_id):
+            response = client.request(method, path, headers=headers("alice", bound_app_id), json=body)
+            expected = 202 if path.endswith(("/app-intelligence/index", "/source-import")) else 200
+            assert response.status_code == expected, (method, path, bound_app_id, response.text)
 
-    assert registry.lookups == [(app_id, "alice")] * len(routes)
+    assert registry.lookups == [(app_id, "alice")] * (2 * len(routes))
 
 
 def test_owned_and_implicit_app_scopes_keep_their_existing_response(studio_client, monkeypatch) -> None:
@@ -202,3 +213,40 @@ def test_owned_and_implicit_app_scopes_keep_their_existing_response(studio_clien
     claimed_without_selector = client.get("/api/studio/dashboard", headers=headers("bob", "alice-app"))
     assert claimed_without_selector.status_code == 404
     assert registry.lookups[-1] == ("alice-app", "bob")
+
+
+def test_local_development_uses_the_single_developer_as_registry_owner(monkeypatch) -> None:
+    from mozaiksai.hosts import studio
+
+    for name in auth_registry._ALL_AUTH_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("AUTH_ANON_ACCESS", "local")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+    monkeypatch.setattr(studio.platform_app, "_DEFAULT_PROFILE_USER_ID", "demo-user")
+    clear_auth_config_cache()
+    auth_registry.reset_auth_adapter()
+
+    class Registry:
+        def __init__(self):
+            self.lookups = []
+
+        async def get_app_record(self, *, app_id: str, owner_user_id: str):
+            self.lookups.append((app_id, owner_user_id))
+            record = {"app_id": app_id} if (app_id, owner_user_id) == ("owned-app", "demo-user") else None
+            return {"app": record}
+
+    registry = Registry()
+    monkeypatch.setattr(studio, "_get_app_registry_service", lambda: registry)
+    client = TestClient(
+        studio.app, raise_server_exceptions=False,
+        client=("127.0.0.1", 50000), base_url="http://localhost:8000",
+    )
+    try:
+        owned = client.get("/api/studio/dashboard?app_id=owned-app")
+        foreign = client.get("/api/studio/dashboard?app_id=foreign-app")
+        assert (owned.status_code, foreign.status_code) == (200, 404)
+        assert registry.lookups == [("owned-app", "demo-user"), ("foreign-app", "demo-user")]
+    finally:
+        clear_auth_config_cache()
+        auth_registry.reset_auth_adapter()

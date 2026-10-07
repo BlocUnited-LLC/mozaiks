@@ -1749,10 +1749,13 @@ def test_direct_studio_routes_classify_app_ownership_authority() -> None:
     }
     routes_without_app_scope = {"GET /api/shell-config"}
 
+    direct_route_list = [
+        route for route in studio.app.routes
+        if isinstance(route, APIRoute) and _defined_in_studio(route.endpoint)
+    ]
     direct_routes = {
         f"{','.join(sorted(route.methods))} {route.path}": route
-        for route in studio.app.routes
-        if isinstance(route, APIRoute) and _defined_in_studio(route.endpoint)
+        for route in direct_route_list
     }
     classified = (
         owned_app_routes
@@ -1761,7 +1764,7 @@ def test_direct_studio_routes_classify_app_ownership_authority() -> None:
         | execution_host_routes.keys()
         | routes_without_app_scope
     )
-    assert len(direct_routes) == 36
+    assert len(direct_route_list) == len(direct_routes) == 36
     assert direct_routes.keys() == classified
     assert len(owned_app_routes) == 17
     for key in owned_app_routes:
