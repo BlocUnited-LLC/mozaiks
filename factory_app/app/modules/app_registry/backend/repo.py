@@ -65,6 +65,48 @@ class AppRegistryRepo:
                 continue
             await coll.create_index(list(keys), **kwargs)
 
+    async def register_existing_app_record(
+        self, *, owner_user_id: str, app_id: str, chat_app_id: str, name: str | None,
+    ) -> dict[str, Any]:
+        """Claim a fixed, loaded host target once without changing build state."""
+        owner = owner_filter(owner_user_id)["owner_user_id"]
+        if not app_id or app_id != chat_app_id:
+            raise ValueError("Existing target must match its execution host")
+        await self.ensure_indexes()
+        coll = await self._collection()
+        now = datetime.now(UTC)
+        try:
+            doc = await coll.find_one_and_update(
+                {"app_id": app_id},
+                {"$setOnInsert": {
+                    "_id": f"appreg_{uuid4().hex}",
+                    "app_id": app_id,
+                    "chat_app_id": chat_app_id,
+                    "owner_user_id": owner,
+                    "name": name,
+                    "name_source": "imported_app",
+                    "name_status": "named" if name else "provisional",
+                    "description": None,
+                    "lifecycle_state": "draft",
+                    "bundle_path": None,
+                    "created_at": now,
+                    "updated_at": now,
+                }},
+                upsert=True,
+                return_document=ReturnDocument.AFTER,
+            )
+        except DuplicateKeyError:
+            # A concurrent claim may have won the unique app_id index.
+            doc = await coll.find_one({"app_id": app_id})
+        if not isinstance(doc, dict):
+            raise RuntimeError("Existing app target could not be registered")
+        if doc.get("owner_user_id") != owner or doc.get("chat_app_id") != chat_app_id:
+            raise ValueError("Existing app target is already bound to a different owner or host")
+        normalized = self._normalize_doc(doc)
+        if normalized is None:
+            raise RuntimeError("Existing app target could not be loaded")
+        return normalized
+
     async def upsert_app_record(
         self,
         *,

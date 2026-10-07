@@ -30,6 +30,15 @@ class AppRegistryService:
             repo = AppRegistryRepo()
         self.repo = repo
 
+    async def register_existing_app_record(
+        self, *, owner_user_id: str, app_id: str, chat_app_id: str, name: str | None,
+    ) -> dict[str, Any]:
+        """Register a server-verified existing target without starting a build."""
+        return await self.repo.register_existing_app_record(
+            owner_user_id=owner_user_id, app_id=app_id,
+            chat_app_id=chat_app_id, name=name,
+        )
+
     async def resolve_build_binding(
         self,
         *,

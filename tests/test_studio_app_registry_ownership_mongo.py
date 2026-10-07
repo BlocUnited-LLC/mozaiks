@@ -457,6 +457,36 @@ async def test_concurrent_different_owners_cannot_share_an_app_id(registry_host)
         assert response.status_code == 422
 
 
+async def test_existing_self_target_claim_is_atomic_and_does_not_reset_build(registry_host):
+    host = registry_host
+    claims = await asyncio.gather(*[
+        host.service.register_existing_app_record(
+            owner_user_id=owner, app_id="fixed-existing-app",
+            chat_app_id="fixed-existing-app", name="Existing App",
+        ) for owner in ("alice", "bob")
+    ], return_exceptions=True)
+    winners = [claim for claim in claims if isinstance(claim, dict)]
+    denials = [claim for claim in claims if isinstance(claim, ValueError)]
+    assert len(winners) == 1
+    assert len(denials) == 1
+    winner = winners[0]
+    owner = winner["owner_user_id"]
+    await host.collection.update_one(
+        {"app_id": "fixed-existing-app"},
+        {"$set": {
+            "lifecycle_state": "active",
+            "current_build_run": {"build_id": "build_1", "phase": "refinement"},
+        }},
+    )
+    before = await host.collection.find_one({"app_id": "fixed-existing-app"})
+    repeat = await host.service.register_existing_app_record(
+        owner_user_id=owner, app_id="fixed-existing-app",
+        chat_app_id="fixed-existing-app", name="Changed Name",
+    )
+    assert repeat["build_registry_id"] == winner["build_registry_id"]
+    assert await host.collection.find_one({"app_id": "fixed-existing-app"}) == before
+
+
 async def test_interrupted_creation_keeps_ownership_and_allows_owner_retry(registry_host, monkeypatch):
     host = registry_host
     original = host.collection.find_one_and_update
