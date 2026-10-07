@@ -90,10 +90,13 @@ async function fixture(t) {
   t.after(() => browser.close())
   const baseUrl = `http://127.0.0.1:${server.address().port}`
 
-  return async (subtest, { imported = true, reviewFailure = false, mismatchedClaim = false, badArchive = false, acceptanceFailure = false } = {}) => {
+  return async (subtest, {
+    imported = true, selectedAppId = targetAppId, reviewAppId = targetAppId,
+    reviewFailure = false, mismatchedClaim = false, badArchive = false, acceptanceFailure = false,
+  } = {}) => {
     const page = await browser.newPage({ acceptDownloads: true })
     subtest.after(() => page.close())
-    const selected = imported ? version : {
+    const selected = imported ? { ...version, app_id: selectedAppId } : {
       ...version, id: 'av_generated', commit_metadata: { metadata: {} },
     }
     const calls = { review: 0, download: 0, acceptance: [], bundle: 0, unexpected: [], errors: [] }
@@ -116,7 +119,7 @@ async function fixture(t) {
         assert.equal(url.searchParams.get('build_registry_id'), buildRegistryId)
         if (reviewFailure && calls.review === 1) return route.fulfill({ status: 503, json: { detail: 'Review temporarily unavailable' } })
         return route.fulfill({ json: {
-          app_id: targetAppId, artifact_version: version,
+          app_id: reviewAppId, artifact_version: { ...version, app_id: reviewAppId },
           genesis_import: mismatchedClaim ? { ...claim, build_record_id: 'av_another' } : claim,
         } })
       }
@@ -210,7 +213,21 @@ test('imported Genesis requires verified archive inspection and exact digest ack
     assert.equal(calls.download, 0)
     assert.equal(calls.acceptance.length, 0)
   })
-  await t.test('server rejection remains visible and the exact accepted request can be retried', async subtest => {
+  await t.test('a selected source for another route app never loads or accepts', async subtest => {
+    const { page, calls } = await open(subtest, { selectedAppId: 'another-app' })
+    await expect(page.getByRole('alert')).toContainText('selected Genesis source belongs to another app')
+    await expect(page.getByRole('button', { name: 'Accept exact source as Genesis baseline' })).toHaveCount(0)
+    assert.equal(calls.review, 0)
+    assert.equal(calls.acceptance.length, 0)
+  })
+  await t.test('a review target for another route app cannot enable source acceptance', async subtest => {
+    const { page, calls } = await open(subtest, { reviewAppId: 'another-app' })
+    await expect(page.getByRole('alert')).toContainText('does not match the selected imported source')
+    await expect(page.getByRole('button', { name: 'Accept exact source as Genesis baseline' })).toHaveCount(0)
+    assert.equal(calls.review, 1)
+    assert.equal(calls.acceptance.length, 0)
+  })
+  await t.test('409 reloads source review and requires a new download and acknowledgement', async subtest => {
     const { page, calls } = await open(subtest, { acceptanceFailure: true })
     await expect(page.getByRole('heading', { name: 'Review imported Genesis source' })).toBeVisible()
     const download = page.waitForEvent('download')
@@ -218,10 +235,18 @@ test('imported Genesis requires verified archive inspection and exact digest ack
     await download
     await page.getByRole('checkbox').check()
     await page.getByRole('button', { name: 'Accept exact source as Genesis baseline' }).click()
+    await expect.poll(() => calls.review).toBe(2)
     await expect(page.getByRole('alert')).toContainText('Source reservation changed')
-    await expect(page.getByRole('button', { name: 'Accept exact source as Genesis baseline' })).toBeEnabled()
+    await expect(page.getByRole('checkbox')).toBeDisabled()
+    await expect(page.getByRole('button', { name: 'Accept exact source as Genesis baseline' })).toBeDisabled()
+    assert.equal(calls.acceptance.length, 1)
+    const secondDownload = page.waitForEvent('download')
+    await page.getByRole('button', { name: 'Download verified source archive' }).click()
+    await secondDownload
+    await page.getByRole('checkbox').check()
     await page.getByRole('button', { name: 'Accept exact source as Genesis baseline' }).click()
     await expect(page.getByText('Accepted baseline')).toBeVisible()
+    assert.equal(calls.download, 2)
     assert.equal(calls.acceptance.length, 2)
     assert.deepEqual(calls.acceptance[0].body, calls.acceptance[1].body)
   })

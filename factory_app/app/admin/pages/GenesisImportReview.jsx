@@ -15,10 +15,10 @@ function responseError(body, fallback) {
   return typeof body?.detail === 'string' ? body.detail : fallback
 }
 
-function verifiedClaim(body, artifactVersionId, targetAppId) {
+function verifiedClaim(body, artifactVersionId, targetAppId, routeAppId) {
   const claim = body?.genesis_import
   const version = body?.artifact_version
-  if (body?.app_id !== targetAppId || version?.id !== artifactVersionId
+  if (targetAppId !== routeAppId || body?.app_id !== routeAppId || version?.id !== artifactVersionId
     || version?.app_id !== targetAppId || claim?.build_record_id !== artifactVersionId
     || version?.commit_metadata?.metadata?.bundle_mode !== 'brownfield_genesis_import'
     || !['reserved', 'accepted'].includes(claim?.status)
@@ -36,11 +36,12 @@ async function archiveSha256(bytes) {
   return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
 }
 
-export default function GenesisImportReview({ artifactVersionId, buildRegistryId, targetAppId, onAccepted }) {
+export default function GenesisImportReview({ artifactVersionId, buildRegistryId, targetAppId, routeAppId, onAccepted }) {
   const [review, setReview] = useState(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
+  const [conflictMessage, setConflictMessage] = useState(null)
   const [notice, setNotice] = useState(null)
   const [retry, setRetry] = useState(0)
   const [downloadVerified, setDownloadVerified] = useState(false)
@@ -58,10 +59,11 @@ export default function GenesisImportReview({ artifactVersionId, buildRegistryId
     setAcknowledged(false)
     async function load() {
       try {
+        if (targetAppId !== routeAppId) throw new Error('The selected Genesis source belongs to another app.')
         const response = await studioFetch(`${path}/review${query}`, { signal: controller.signal })
         const body = await response.json().catch(() => null)
         if (!response.ok) throw new Error(responseError(body, `Genesis review unavailable: ${response.status}`))
-        verifiedClaim(body, artifactVersionId, targetAppId)
+        verifiedClaim(body, artifactVersionId, targetAppId, routeAppId)
         if (!controller.signal.aborted) setReview(body)
       } catch (reason) {
         if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : 'Genesis review unavailable.')
@@ -71,7 +73,7 @@ export default function GenesisImportReview({ artifactVersionId, buildRegistryId
     }
     load()
     return () => controller.abort()
-  }, [artifactVersionId, buildRegistryId, targetAppId, path, query, retry])
+  }, [artifactVersionId, buildRegistryId, targetAppId, routeAppId, path, query, retry])
 
   const claim = review?.genesis_import
   const version = review?.artifact_version
@@ -84,6 +86,7 @@ export default function GenesisImportReview({ artifactVersionId, buildRegistryId
     setBusy(true)
     setError(null)
     setNotice(null)
+    setConflictMessage(null)
     setDownloadVerified(false)
     setAcknowledged(false)
     try {
@@ -132,12 +135,22 @@ export default function GenesisImportReview({ artifactVersionId, buildRegistryId
         }),
       })
       const body = await response.json().catch(() => null)
-      if (!response.ok) throw new Error(responseError(body, `Genesis acceptance failed: ${response.status}`))
+      if (!response.ok) {
+        const detail = responseError(body, `Genesis acceptance failed: ${response.status}`)
+        if (response.status === 409) {
+          setDownloadVerified(false)
+          setAcknowledged(false)
+          setConflictMessage(`${detail} Source review is reloading. Download and inspect the archive again.`)
+          setRetry(value => value + 1)
+          return
+        }
+        throw new Error(detail)
+      }
       const confirmed = verifiedClaim({
         app_id: body?.app_id,
         artifact_version: body?.artifact_version,
         genesis_import: body?.genesis_import,
-      }, artifactVersionId, targetAppId)
+      }, artifactVersionId, targetAppId, routeAppId)
       if (body?.accepted !== true || body?.app_id !== targetAppId
         || confirmed.claim.bundle_sha256 !== claim.bundle_sha256
         || confirmed.claim.manifest_sha256 !== claim.manifest_sha256
@@ -161,7 +174,7 @@ export default function GenesisImportReview({ artifactVersionId, buildRegistryId
   if (!review) return (
     <div className="space-y-3">
       <StudioErrorState title="Imported Genesis review unavailable" message={error || 'The reserved source could not be loaded.'} />
-      <ActionButton onClick={() => setRetry(value => value + 1)}>Retry loading review</ActionButton>
+      <ActionButton onClick={() => { setConflictMessage(null); setRetry(value => value + 1) }}>Retry loading review</ActionButton>
     </div>
   )
 
@@ -181,7 +194,7 @@ export default function GenesisImportReview({ artifactVersionId, buildRegistryId
         </dl>
         <div className="flex flex-wrap gap-2">
           <ActionButton variant="secondary" onClick={downloadArchive} disabled={busy}>Download verified source archive</ActionButton>
-          <ActionButton variant="secondary" onClick={() => setRetry(value => value + 1)} disabled={busy}>Reload source review</ActionButton>
+          <ActionButton variant="secondary" onClick={() => { setConflictMessage(null); setRetry(value => value + 1) }} disabled={busy}>Reload source review</ActionButton>
         </div>
         {!finalized && (
           <>
@@ -195,6 +208,7 @@ export default function GenesisImportReview({ artifactVersionId, buildRegistryId
           </>
         )}
         {notice && <p role="status" className="text-sm text-foreground">{notice}</p>}
+        {conflictMessage && <StudioErrorState title="Genesis source changed" message={conflictMessage} />}
         {error && <StudioErrorState title="Genesis source review failed" message={error} />}
       </div>
     </Panel>

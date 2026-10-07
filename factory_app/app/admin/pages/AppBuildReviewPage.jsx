@@ -146,10 +146,11 @@ export default function AppBuildReviewPage() {
 
             {selectedArtifact?.commit_metadata?.metadata?.bundle_mode === 'brownfield_genesis_import' ? (
               <GenesisImportReview
-                key={activeArtifactId}
+                key={JSON.stringify([appId, data.buildRegistryId, activeArtifactId])}
                 artifactVersionId={activeArtifactId}
                 buildRegistryId={data.buildRegistryId}
                 targetAppId={selectedArtifact.app_id}
+                routeAppId={appId}
                 onAccepted={refresh}
               />
             ) : (
