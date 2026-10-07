@@ -57,6 +57,9 @@ This project follows a practical pre-1.0 changelog format:
   AG2 does not enforce terminal denial at its bridge; an isolated worker is
   required before ACP can run live.
 
+- Imported repository validation commands and Git imports now receive a
+  minimal process environment instead of the host's runtime secrets.
+
 - Patched DOMPurify and source-map-js in the shipped frontend dependency locks,
   including Monaco's nested DOMPurify dependency.
 

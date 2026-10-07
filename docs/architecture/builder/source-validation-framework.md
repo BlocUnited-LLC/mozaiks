@@ -85,6 +85,9 @@ excludes:
 - Compiled artefacts: `*.pem`, `*.key`, `*.pyc`, `*.pyo`
 
 The temporary directory is cleaned up after the run regardless of outcome.
+The copy protects the original workspace from direct writes; it does not
+isolate the command process from the host filesystem or network. Run commands
+from untrusted repositories only in an OS sandbox with those boundaries.
 
 ### Overlay files
 
@@ -125,6 +128,8 @@ Commands go through four checks before execution:
 
 Commands that fail any check are marked `skipped` with a machine-readable
 `skip_reason`, not `failed`. This keeps aggregate status accurate.
+Allowed tools such as Python and npm can run repository code, so the executable
+allowlist is a command-selection limit rather than an execution sandbox.
 
 ---
 
@@ -202,14 +207,23 @@ class AppSourceValidationResult(BaseModel):
 
 ## Environment During Validation
 
-The runner sets two environment variables before executing commands:
+The runner passes only the host `PATH` and Windows process essentials
+(`PATHEXT`, `SystemRoot`, `WINDIR`, `COMSPEC`). It points home, configuration,
+and temporary-directory variables at the disposable workspace copy. It also
+sets:
 
-- `CI=true` (unless already set)
+- `PYTHONUSERBASE` to the host interpreter's user package base, so installed
+  Python validators remain importable without passing the host profile as home.
+  This path can reflect an operator-supplied `PYTHONUSERBASE` and allows access
+  to packages installed there; it is not filesystem isolation
+- `CI=true`
 - `MOZAIKS_APP_VALIDATION=1`
 
 This signals to frameworks that they are running in a non-interactive
-validation context. All other environment variables from the host process
-are inherited.
+validation context. Host runtime configuration and credentials are not passed
+to the child process. This environment limit does not replace an OS sandbox.
+Network commands that require a host proxy or custom CA setting may fail until
+that configuration is supplied through a separate trusted runner policy.
 
 ---
 
@@ -258,9 +272,8 @@ a staged change or route it to a review checkpoint.
 
 - Do not add framework-specific logic to the validation runner. Executable
   detection and command emission belong in `framework_detection.py`.
-- The allowlist in `_ALLOWED_EXECUTABLES` is the security boundary. Review
-  any addition carefully — adding a general-purpose shell or script runner
-  would defeat the containment model.
+- Review additions to `_ALLOWED_EXECUTABLES` carefully. The allowlist limits
+  which command starts, but several entries can execute repository code.
 - Do not remove the workspace copy step for performance. The isolated copy
   ensures staged overlay files cannot be left behind in the real workspace.
 - Do not pass `copy_workspace=False` from production callers. The direct

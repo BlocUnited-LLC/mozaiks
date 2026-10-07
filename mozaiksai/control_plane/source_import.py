@@ -15,6 +15,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from mozaiksai.core.app_context import safe_scan_relpath
 
+from .process_environment import source_process_env
+
 SourceImportKind = Literal["local_workspace", "git_repository"]
 GitCommandRunner = Callable[[list[str], Path], subprocess.CompletedProcess[str]]
 
@@ -200,6 +202,14 @@ def _source_import_root(import_root: str | Path | None) -> Path:
 
 
 def _run_git(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+    env = source_process_env(cwd)
+    env.update(
+        GIT_CONFIG_NOSYSTEM="1",
+        GIT_CONFIG_GLOBAL=os.devnull,
+        GIT_CEILING_DIRECTORIES=str(cwd.parent.resolve()),
+        GIT_TERMINAL_PROMPT="0",
+        GCM_INTERACTIVE="Never",
+    )
     try:
         return subprocess.run(
             args,
@@ -208,6 +218,7 @@ def _run_git(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
             capture_output=True,
             text=True,
             timeout=180,
+            env=env,
         )
     except FileNotFoundError as exc:
         raise RuntimeError("git executable is required for repository imports") from exc
