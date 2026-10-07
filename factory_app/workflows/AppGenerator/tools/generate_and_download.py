@@ -36,14 +36,22 @@ from factory_app.workflows.AppGenerator.tools.export_app_code import (
     export_app_code_to_github,
     resolve_export_gate,
 )
+from factory_app.workflows.AppGenerator.tools.hydrate_app_revision_context import (
+    read_bound_revision_binary_assets,
+    revision_baseline_required,
+)
 from factory_app.workflows.AppGenerator.tools.requirements_scanner import scan_requirements
 from factory_app.workflows.AppGenerator.tools.schema_migration import inject_migration_into_bundle
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.app_context.store import register_greenfield_app_context_version
+from mozaiksai.core.artifacts.content_store import ContentNotFoundError
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.agent_endpoints import (
     resolve_agent_api_url,
     resolve_agent_websocket_url,
+)
+from mozaiksai.core.workflow.generator_support.code_files import (
+    extract_deleted_file_paths_from_payload,
 )
 from mozaiksai.core.workflow.generator_support.workflow_exports import get_latest_workflow_export
 from mozaiksai.core.workflow.ui_tools import UIToolError, use_ui_tool
@@ -905,6 +913,23 @@ async def generate_and_download(
             "export_gate": export_gate,
         }
 
+    binary_assets: dict[str, bytes] = {}
+    if revision_baseline_required(context_variables):
+        try:
+            source_assets = await read_bound_revision_binary_assets(context_variables)
+            conflicting = set(source_assets) & set(files_map)
+            if conflicting:
+                raise ValueError("revision_binary_text_replacement: " + ", ".join(sorted(conflicting)))
+            deleted = set(extract_deleted_file_paths_from_payload({
+                "deleted_files": _context_get(context_variables, "deleted_files"),
+            }))
+            binary_assets = {path: data for path, data in source_assets.items() if path not in deleted}
+        except (OSError, ValueError, zipfile.BadZipFile, ContentNotFoundError) as exc:
+            return {
+                "status": "error", "outcome": "blocked",
+                "message": f"Revision source assets are unavailable: {exc}",
+            }
+
     bundle_name = str(_context_get(context_variables, "app_name") or "GeneratedApp")
 
     # Normalize bundle name to a safe folder name
@@ -925,7 +950,7 @@ async def generate_and_download(
     app_dir.mkdir(parents=True, exist_ok=True)
 
     if tlog and _log_tool_event:  # type: ignore[truthy-function]
-        _log_tool_event(tlog, action="write_files", status="start", file_count=len(files_map))
+        _log_tool_event(tlog, action="write_files", status="start", file_count=len(files_map) + len(binary_assets))
 
     written_paths: list[str] = []
     for rel_path, content in files_map.items():
@@ -936,6 +961,11 @@ async def generate_and_download(
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(str(content), encoding="utf-8", newline="")
         written_paths.append(safe)
+    for rel_path, binary_content in binary_assets.items():
+        out_path = app_dir / rel_path
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_bytes(binary_content)
+        written_paths.append(rel_path)
 
     migration_record = await _persist_pending_schema_migration(
         pending_migration=pending_migration,

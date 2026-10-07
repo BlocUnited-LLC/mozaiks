@@ -456,17 +456,24 @@ to AppSchemaAgent, and `blocked` to the user. An unset status still fails with
 `no_transition_matched`; prompt middleware does not write this closed-writer
 quality state or recover schema artifacts from chat history.
 
-Partial revisions preload the selected target-owned app-bundle archive into
-`generated_files`. The Factory reader verifies the committed archive digest;
-foreign ownership, retired records, missing content, and incomplete text-file
-loading fail rather than producing a partial baseline. Assembly rechecks the
-baseline, then applies schema/task outputs, accumulated repairs, and explicit
-deletions in that order. Unchanged files remain intact. A stale selected version
-is allowed as revision input because invalidation marks the old version stale;
-it is not thereby accepted or promoted. Explicit conceptual replans and full
-rebuilds retain their separate carry-forward policy and do not copy the old
-implementation wholesale. Binary-containing bundles currently require a
-binary-capable refinement path; this text-file path refuses to silently omit them.
+Partial revisions preload the text files from the selected target-owned app-bundle
+archive into `generated_files`. The Factory reader verifies the committed archive
+digest and canonical root; foreign ownership, retired records, missing content,
+and incomplete loading fail rather than producing a partial baseline. Binary
+assets and SVGs remain in the immutable source archive, outside AG2 context.
+Security readiness may explicitly read SVG text for its secret scan. Assembly
+rechecks the baseline, then applies schema/task outputs, accumulated repairs,
+and explicit deletions in that order. Finalization rechecks the selected record,
+owner, and archive digest before carrying forward unchanged binary bytes into
+the ZIP and file manifest. A text output at a retained binary path blocks the
+download; an explicit deletion removes that asset. The export gate verifies
+those binary bytes again before contacting a source-control provider. A stale
+selected version is allowed as revision input because invalidation marks the old
+version stale; it is not thereby accepted or promoted. Explicit conceptual
+replans and full rebuilds retain their separate carry-forward policy and do not
+copy the old implementation wholesale. The reader bounds archive size, file
+count, and individual file size; a source exceeding these limits blocks the
+revision rather than silently dropping files.
 Auth scaffolding remains deterministic Factory materialization outside build tasks.
 `validate_app_bundle_from_request` invokes `save_auth_scaffold` before every
 acceptance check, including user-reply and repair re-entry. It uses the admitted
@@ -1035,7 +1042,8 @@ refill, or delete that snapshot. An older foreign readback filtered by a save to
 cannot reappear during packaging. Empty current artifacts remain empty.
 Authorized deterministic scaffold additions run before acceptance; migration
 history registration records metadata without rewriting accepted file bytes.
-The archive and export gate consume that same final accepted snapshot.
+The archive and export gate consume that same final accepted text snapshot plus
+only the binary assets verified from the bound revision source.
 
 Download archives may include a single top-level folder named for the bundle
 such as `GeneratedApp/`. Studio artifact promotion treats that folder as a zip

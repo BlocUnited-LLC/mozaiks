@@ -12,32 +12,32 @@ from mozaiksai.control_plane.contracts import safe_artifact_relpath
 from mozaiksai.core.artifacts.content_store import read_verified_artifact_bundle
 from mozaiksai.core.artifacts.models import BuildRecord
 
-_BINARY_ASSET_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".woff", ".woff2", ".ttf", ".pdf", ".mp3", ".mp4"}
-_MAX_FILE_BYTES = 2_000_000
-_MAX_TOTAL_BYTES = 32_000_000
+_BINARY_ASSET_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".ico", ".svg", ".woff", ".woff2", ".ttf", ".otf", ".eot", ".pdf", ".mp3", ".mp4"}
+_MAX_FILE_BYTES = 8_000_000
+_MAX_TOTAL_BYTES = 64_000_000
 _MAX_FILES = 4096
 
 
 @overload
 async def read_artifact_bundle(
-    artifact: BuildRecord, *, include_binary: Literal[False] = False,
+    artifact: BuildRecord, *, include_binary: Literal[False] = False, retain_svg_text: bool = False,
 ) -> tuple[dict[str, str], list[dict[str, Any]]]: ...
 
 
 @overload
 async def read_artifact_bundle(
-    artifact: BuildRecord, *, include_binary: Literal[True],
+    artifact: BuildRecord, *, include_binary: Literal[True], retain_svg_text: bool = False,
 ) -> tuple[dict[str, str | bytes], list[dict[str, Any]]]: ...
 
 
 @overload
 async def read_artifact_bundle(
-    artifact: BuildRecord, *, include_binary: bool,
+    artifact: BuildRecord, *, include_binary: bool, retain_svg_text: bool = False,
 ) -> tuple[dict[str, str | bytes], list[dict[str, Any]]]: ...
 
 
 async def read_artifact_bundle(
-    artifact: BuildRecord, *, include_binary: bool = False,
+    artifact: BuildRecord, *, include_binary: bool = False, retain_svg_text: bool = False,
 ) -> tuple[dict[str, str], list[dict[str, Any]]] | tuple[dict[str, str | bytes], list[dict[str, Any]]]:
     metadata = artifact.commit_metadata.metadata
     raw = await read_verified_artifact_bundle(artifact, max_bytes=_MAX_TOTAL_BYTES)
@@ -55,10 +55,14 @@ async def read_artifact_bundle(
             reason = None
             if stat.S_ISLNK(info.external_attr >> 16):
                 reason = "symlink"
+            elif not path.startswith(prefix):
+                if info.is_dir() and path == metadata["bundle_name"]:
+                    continue
+                reason = "outside_bundle_root"
             elif info.is_dir():
                 continue
             else:
-                path = path.removeprefix(prefix)
+                path = path[len(prefix):]
                 if path in seen:
                     reason = "duplicate_path"
                 elif len(seen) >= _MAX_FILES:
@@ -73,7 +77,19 @@ async def read_artifact_bundle(
             seen.add(path)
             total_bytes += info.file_size
             data = archive.read(info)
-            if PurePosixPath(path).suffix.lower() in _BINARY_ASSET_SUFFIXES:
+            suffix = PurePosixPath(path).suffix.lower()
+            if suffix == ".svg":
+                try:
+                    svg_text = data.decode("utf-8")
+                    if "\x00" in svg_text:
+                        raise UnicodeError
+                except UnicodeError:
+                    diagnostics.append({"path": path, "code": "non_text_source", "blocking": True})
+                    continue
+                if retain_svg_text and not include_binary:
+                    files[path] = svg_text
+                    continue
+            if suffix in _BINARY_ASSET_SUFFIXES:
                 if include_binary:
                     files[path] = data
                 else:

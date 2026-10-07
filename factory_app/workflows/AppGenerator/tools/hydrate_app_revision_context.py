@@ -12,12 +12,18 @@ from mozaiksai.core.artifacts.store import get_artifact_store
 from mozaiksai.core.workflow.context.frozen import detach
 
 
-async def hydrate_app_revision_context(context_variables: Any = None) -> dict[str, Any]:
-    if context_variables is None or context_variables.get("build_mode") != "revision":
-        return {"status": "skipped", "reason": "not_revision"}
-    if context_variables.get("workflow_sequence") in {"conceptual_replan", "full_rebuild"}:
-        return {"status": "skipped", "reason": "explicit_rebuild"}
+def revision_baseline_required(context_variables: Any) -> bool:
+    return bool(
+        context_variables is not None
+        and context_variables.get("build_mode") == "revision"
+        and context_variables.get("workflow_sequence") not in {"conceptual_replan", "full_rebuild"}
+    )
 
+
+async def read_bound_revision_files(
+    context_variables: Any, *, include_binary: bool = False,
+) -> dict[str, str | bytes]:
+    """Recheck the selected immutable source and its owner on every read."""
     binding = require_build_binding(context_variables)
     artifact_id = context_variables.get("artifact_version_id")
     if binding.phase != "refinement" or not artifact_id:
@@ -40,13 +46,31 @@ async def hydrate_app_revision_context(context_variables: Any = None) -> dict[st
 
     # The selected version can be stale after refinement invalidation. Its
     # committed archive remains the baseline; mutable workspace copies do not.
-    files, diagnostics = await read_artifact_bundle(artifact)
-    if diagnostics:
+    files, diagnostics = await read_artifact_bundle(artifact, include_binary=include_binary)
+    blocking = [item for item in diagnostics if item["blocking"]]
+    if blocking:
         raise ValueError("revision_baseline_incomplete: " + ", ".join(
-            str(item["code"]) for item in diagnostics
+            str(item["code"]) for item in blocking
         ))
-    if json.loads(files.get("app.json", "{}")).get("appId") != binding.target_app_id:
+    manifest = files.get("app.json")
+    if not isinstance(manifest, str) or json.loads(manifest).get("appId") != binding.target_app_id:
         raise ValueError("revision_baseline_app_identity_mismatch")
+    return files
+
+
+async def read_bound_revision_binary_assets(context_variables: Any) -> dict[str, bytes]:
+    files = await read_bound_revision_files(context_variables, include_binary=True)
+    return {path: content for path, content in files.items() if isinstance(content, bytes)}
+
+
+async def hydrate_app_revision_context(context_variables: Any = None) -> dict[str, Any]:
+    if context_variables is None or context_variables.get("build_mode") != "revision":
+        return {"status": "skipped", "reason": "not_revision"}
+    if not revision_baseline_required(context_variables):
+        return {"status": "skipped", "reason": "explicit_rebuild"}
+
+    files = await read_bound_revision_files(context_variables)
+    artifact_id = context_variables.get("artifact_version_id")
     current = detach(context_variables.get("generated_files")) or {}
     if not isinstance(current, dict):
         raise ValueError("revision_baseline_generated_files_invalid")
