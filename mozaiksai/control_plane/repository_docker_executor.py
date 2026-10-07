@@ -19,6 +19,7 @@ import re
 import subprocess
 import tempfile
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -26,8 +27,20 @@ from pydantic import ValidationError
 
 from mozaiksai.core.semantics.archive import ArchiveError, read_archive_manifest
 
-from .contracts import CodingWorkerRequest, StagedPatchProposal
-from .repository_patch import _preflight_archive_directory
+from .contracts import (
+    MAX_READ_ONLY_INSPECTION_BYTES,
+    MAX_READ_ONLY_INSPECTION_FILES,
+    CodingWorkerRequest,
+    StagedPatchProposal,
+)
+from .execution_context import ApprovedExecutionContext
+from .repository_patch import (
+    _EMPTY_REPOSITORY_ARCHIVE,
+    RepositorySnapshotEvidence,
+    _preflight_archive_directory,
+    _verify_selected_baseline,
+    select_repository_read_only_files,
+)
 
 MAX_REPOSITORY_DOCKER_REQUEST_BYTES = 20_971_520
 MAX_REPOSITORY_DOCKER_OUTPUT_BYTES = 40_000_000
@@ -219,7 +232,8 @@ def _verify_container(config: Any) -> None:
 
 
 def _parse_turn_output(
-    raw: bytes, *, selected_paths: set[str], max_archive_bytes: int,
+    raw: bytes, *, selected_paths: set[str], create_paths: set[str],
+    delete_paths: set[str], max_archive_bytes: int,
 ) -> RepositoryDockerTurn:
     try:
         output = _strict_json(raw)
@@ -235,12 +249,30 @@ def _parse_turn_output(
         if proposal.status == "completed":
             if archive is None or not proposal.changed_files or len(archive) > max_archive_bytes:
                 raise ValueError("completed turn lacks bounded archive and changes")
-            _preflight_archive_directory(
-                archive, expected_files=len(selected_paths), max_bytes=max_archive_bytes,
-            )
-            manifest = read_archive_manifest(archive)
-            if {entry.path for entry in manifest.entries} != selected_paths:
+            if archive == _EMPTY_REPOSITORY_ARCHIVE:
+                entry_paths: set[str] = set()
+            else:
+                _preflight_archive_directory(
+                    archive,
+                    expected_files=(len(selected_paths) if not create_paths and not delete_paths else None),
+                    max_files=len(selected_paths) + len(create_paths),
+                    max_bytes=max_archive_bytes,
+                )
+                manifest = read_archive_manifest(archive)
+                entry_paths = {entry.path for entry in manifest.entries}
+            if (
+                selected_paths - entry_paths - delete_paths
+                or entry_paths - selected_paths - create_paths
+                or (archive == _EMPTY_REPOSITORY_ARCHIVE and (create_paths or selected_paths != delete_paths))
+            ):
                 raise ValueError("archive paths differ from selected files")
+            for change in proposal.changed_files:
+                if (
+                    (change.op == "update" and change.path not in selected_paths)
+                    or (change.op == "create" and change.path not in create_paths)
+                    or (change.op == "delete" and change.path not in delete_paths)
+                ):
+                    raise ValueError("proposal operation differs from approved grants")
         elif archive is not None or proposal.changed_files:
             raise ValueError("failed turn must not return patch bytes")
     except (UnicodeError, ValueError, TypeError, RecursionError, ValidationError, ArchiveError, binascii.Error):
@@ -265,6 +297,10 @@ def _parse_turn_output(
 async def execute_repository_docker_turn(
     request: CodingWorkerRequest, *, image: str, max_wall_seconds: int = 90,
     max_archive_bytes: int = MAX_REPOSITORY_DOCKER_ARCHIVE_BYTES,
+    approved_context: ApprovedExecutionContext | None = None,
+    snapshot: RepositorySnapshotEvidence | None = None,
+    validate_path: Callable[[str], object] | None = None,
+    validate_create_absence: Callable[[str], object] | None = None,
 ) -> RepositoryDockerTurn:
     """Execute one already-approved file set; only a local, prebuilt image runs.
 
@@ -278,19 +314,66 @@ async def execute_repository_docker_turn(
         raise ValueError("REPOSITORY_DOCKER_WALL_BUDGET")
     if not 1 <= max_archive_bytes <= MAX_REPOSITORY_DOCKER_ARCHIVE_BYTES:
         raise ValueError("REPOSITORY_DOCKER_ARCHIVE_BUDGET")
-    if not 1 <= len(request.files) <= MAX_REPOSITORY_DOCKER_FILES:
+    selected_files = dict(request.files)
+    inspection_files = dict(request.read_only_files)
+    selected_paths = set(selected_files)
+    create_paths = set(approved_context.create_paths) if approved_context is not None else set()
+    delete_paths = set(approved_context.delete_paths) if approved_context is not None else set()
+    if (
+        not 1 <= len(selected_files) + len(create_paths) <= MAX_REPOSITORY_DOCKER_FILES
+        or not delete_paths <= selected_paths
+    ):
         raise ValueError("REPOSITORY_DOCKER_FILE_BUDGET")
+    if approved_context is None:
+        if snapshot is not None or validate_path is not None or validate_create_absence is not None or (
+            request.metadata.get("approved_create_paths") or request.metadata.get("approved_delete_paths")
+        ):
+            raise ValueError("REPOSITORY_DOCKER_CONTEXT_REQUIRED")
+    else:
+        if snapshot is None or validate_path is None:
+            raise ValueError("REPOSITORY_DOCKER_CONTEXT_REQUIRED")
+        if (
+            approved_context.schema_version != "managed_refinement.execution_context.v1"
+            or request.app_id != approved_context.app_id
+            or request.target_app_id not in (None, approved_context.app_id)
+            or request.build_family != "app_bundle"
+            or request.build_key != approved_context.build_registry_id
+            or request.change_class != "patch"
+            or request.raw_user_request != approved_context.raw_request
+        ):
+            raise ValueError("REPOSITORY_DOCKER_CONTEXT_MISMATCH")
+        _verify_selected_baseline(
+            approved_context,
+            snapshot=snapshot,
+            selected_paths=list(selected_files),
+            baseline_files=selected_files,
+            validate_path=validate_path,
+            validate_create_absence=validate_create_absence,
+        )
+        if inspection_files:
+            select_repository_read_only_files(
+                approved_context,
+                snapshot=snapshot,
+                selected_paths=list(inspection_files),
+                baseline_files=inspection_files,
+                validate_path=validate_path,
+                max_files=MAX_READ_ONLY_INSPECTION_FILES,
+                max_bytes=MAX_READ_ONLY_INSPECTION_BYTES,
+            )
 
     # Do not send baseline, user/tenant identity, host context, or metadata.
-    scoped = {
+    scoped: dict[str, object] = {
         "app_id": request.app_id,
         "build_family": request.build_family,
         "build_record_id": request.build_record_id,
         "change_class": request.change_class,
         "raw_user_request": request.raw_user_request,
-        "files": request.files,
-        "read_only_files": request.read_only_files,
+        "files": selected_files,
+        "read_only_files": inspection_files,
     }
+    if create_paths or delete_paths:
+        scoped["create_paths"] = sorted(create_paths)
+        scoped["delete_paths"] = sorted(delete_paths)
     input_bytes = json.dumps(scoped, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     if len(input_bytes) > MAX_REPOSITORY_DOCKER_REQUEST_BYTES:
         raise ValueError("REPOSITORY_DOCKER_REQUEST_BUDGET")
@@ -349,7 +432,9 @@ async def execute_repository_docker_turn(
             if exit_code.strip() != b"0":
                 raise RepositoryDockerExecutionError("REPOSITORY_DOCKER_WORKER_FAILED")
             return _parse_turn_output(
-                raw_output, selected_paths=set(request.files), max_archive_bytes=max_archive_bytes,
+                raw_output, selected_paths=selected_paths,
+                create_paths=create_paths, delete_paths=delete_paths,
+                max_archive_bytes=max_archive_bytes,
             )
         finally:
             _remove_container(container_name, config_dir)

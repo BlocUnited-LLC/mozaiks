@@ -16,6 +16,7 @@ from mozaiksai.control_plane import (
     StagedPatchProposal,
     export_repository_workspace_archive,
     finalize_repository_patch,
+    repository_patch_digest,
     select_repository_read_only_files,
     stage_repository_workspace_archive,
 )
@@ -174,6 +175,17 @@ def test_archive_round_trip_requires_exact_create_and_delete_grants(tmp_path: Pa
     assert changes[OTHER_PATH].new_sha256 is None
     assert changes[OTHER_PATH].diff.startswith(f"--- a/{OTHER_PATH}\n+++ /dev/null\n")
     assert prove_absence.call_count == 2
+    digest = repository_patch_digest(candidate)
+    assert digest.startswith("sha256:") and len(digest) == 71
+    reordered = candidate.model_copy(deep=True)
+    reordered.changed_files.reverse()
+    assert repository_patch_digest(reordered) == digest
+    changed_review = candidate.model_copy(update={"summary": "Different review summary"})
+    assert repository_patch_digest(changed_review) != digest
+    duplicated = candidate.model_copy(deep=True)
+    duplicated.changed_files.append(duplicated.changed_files[0])
+    with pytest.raises(ValueError, match="DIGEST_PATH"):
+        repository_patch_digest(duplicated)
 
 
 def test_delete_only_uses_repository_specific_empty_transport(tmp_path: Path) -> None:

@@ -10,6 +10,7 @@ from __future__ import annotations
 import difflib
 import hashlib
 import io
+import json
 import struct
 import unicodedata
 import zipfile
@@ -128,6 +129,48 @@ class RepositoryPatchCandidate(BaseModel):
     required_validation_gates: list[str]
     required_security_gates: list[str]
     required_ci_checks: list[str]
+
+
+def repository_patch_digest(candidate: RepositoryPatchCandidate) -> str:
+    """Bind one complete v2 patch candidate for validation and publication.
+
+    Operation order and gate-list order are not semantic. Every other field,
+    including review text and diffs, is part of the exact attested candidate.
+    """
+    if not isinstance(candidate, RepositoryPatchCandidate):
+        raise ValueError("REPOSITORY_PATCH_DIGEST_INPUT: invalid candidate")
+    candidate = RepositoryPatchCandidate.model_validate(candidate.model_dump(mode="python"))
+    if not 1 <= len(candidate.changed_files) <= _MAX_REPOSITORY_ARCHIVE_FILES:
+        raise ValueError("REPOSITORY_PATCH_DIGEST_INPUT: invalid candidate or file count")
+    identities: list[str] = []
+    for change in candidate.changed_files:
+        path = _canonical_path(change.path)
+        for digest in (change.previous_sha256, change.new_sha256):
+            if digest is not None and (
+                len(digest) != 71 or not digest.startswith("sha256:")
+                or any(char not in "0123456789abcdef" for char in digest[7:])
+            ):
+                raise ValueError("REPOSITORY_PATCH_DIGEST_HASH: invalid file hash")
+        if change.content is not None and change.new_sha256 != f"sha256:{_sha256(change.content)}":
+            raise ValueError("REPOSITORY_PATCH_DIGEST_HASH: content differs from file hash")
+        folded = path.casefold()
+        if any(
+            folded == other or folded.startswith(f"{other}/") or other.startswith(f"{folded}/")
+            for other in identities
+        ):
+            raise ValueError("REPOSITORY_PATCH_DIGEST_PATH: changed paths collide")
+        identities.append(folded)
+    canonical = candidate.model_dump(mode="json")
+    canonical["changed_files"] = sorted(canonical["changed_files"], key=lambda item: item["path"])
+    for field in ("required_validation_gates", "required_security_gates", "required_ci_checks"):
+        canonical[field] = sorted(set(canonical[field]))
+    raw = json.dumps(
+        {"digest_schema": "mozaiks.refinement.repository_patch_digest.v1", "candidate": canonical},
+        ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")
+    if len(raw) > 64 * 1024 * 1024:
+        raise ValueError("REPOSITORY_PATCH_DIGEST_BUDGET: candidate exceeds digest limit")
+    return "sha256:" + hashlib.sha256(raw).hexdigest()
 
 
 def _canonical_path(path: str) -> str:
