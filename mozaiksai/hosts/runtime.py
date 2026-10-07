@@ -73,6 +73,7 @@ from mozaiksai.core.workflow.workflow_manager import (
     get_workflow_transport,
     workflow_status_summary,
 )
+from mozaiksai.hosts.source_path_policy import authorize_http_workflow_source_paths
 from mozaiksai.version import __version__
 
 env = os.getenv("ENVIRONMENT", "development").lower()
@@ -667,10 +668,9 @@ async def start_chat(
     client_request_id = data.get("client_request_id")
     force_new = str(data.get("force_new", "false")).lower() in {"1", "true", "yes", "on"}
     transport_purpose = str(data.get("transport_purpose") or "").strip().lower()
-    context_variables = _validate_context_for_workflow(
-        workflow_name,
-        data.get("context_variables") if isinstance(data.get("context_variables"), dict) else {},
-    )
+    requested_context = data.get("context_variables") if isinstance(data.get("context_variables"), dict) else {}
+    authorize_http_workflow_source_paths(requested_context, principal=principal)
+    context_variables = _validate_context_for_workflow(workflow_name, requested_context)
 
     idempotency_window_sec = int(os.getenv("CHAT_START_IDEMPOTENCY_SEC", "15"))
     reuse_cutoff = datetime.now(UTC) - timedelta(seconds=idempotency_window_sec)
@@ -825,6 +825,8 @@ async def trigger_workflow(
             status_code=403,
             detail="Workflow trigger requires an internal API key or development access",
         )
+
+    authorize_http_workflow_source_paths(body.context or {}, principal=principal)
 
     from mozaiksai.core.workflow.workflow_manager import workflow_manager
 

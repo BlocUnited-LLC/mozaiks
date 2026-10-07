@@ -149,6 +149,10 @@ from mozaiksai.hosts.platform import (
 )
 from mozaiksai.hosts.routers.sandbox import create_sandbox_router
 from mozaiksai.hosts.runtime import register_app_lifespan
+from mozaiksai.hosts.source_path_policy import (
+    authorize_http_workflow_source_paths,
+    require_http_local_source_mode,
+)
 
 app = platform_app.app
 register_repo_host_bootstrap(app, "studio")
@@ -1296,6 +1300,7 @@ async def index_studio_app_intelligence_context(
 ):
     validate_path_id(app_id, "app_id")
     resolved_app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
+    _authorize_http_source_import(body, principal=principal)
     return await _start_studio_app_intelligence_index_job(
         app_id=resolved_app_id,
         user_id=user_id,
@@ -1313,6 +1318,7 @@ async def import_studio_app_source_context(
 ):
     validate_path_id(app_id, "app_id")
     resolved_app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
+    _authorize_http_source_import(body, principal=principal)
     return await _start_studio_app_intelligence_index_job(
         app_id=resolved_app_id,
         user_id=user_id,
@@ -1376,6 +1382,14 @@ async def run_studio_app_source_validation(
             "validation": result.model_dump(mode="json"),
         }
     )
+
+
+def _authorize_http_source_import(
+    body: AppIntelligenceIndexRequest, *, principal: UserPrincipal,
+) -> None:
+    """Keep server filesystem paths out of authenticated Studio requests."""
+    if body.source_kind == "local_workspace":
+        require_http_local_source_mode(principal)
 
 
 async def _start_studio_app_intelligence_index_job(
@@ -2680,6 +2694,7 @@ async def trigger_workflow(
     principal: UserPrincipal = Depends(require_studio_user),
 ):
     app_id, user_id = _resolve_studio_scope(principal, app_id=body.app_id, user_id=body.user_id)
+    authorize_http_workflow_source_paths(body.context_variables, principal=principal)
     retry_contribution = None
     if body.retry_failed:
         try:

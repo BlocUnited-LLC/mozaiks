@@ -84,6 +84,7 @@ from mozaiksai.core.session.launcher import (
 )
 from mozaiksai.core.workflow.paths import candidate_app_workflows_roots
 from mozaiksai.hosts import runtime as runtime_app
+from mozaiksai.hosts.source_path_policy import authorize_http_workflow_source_paths
 from mozaiksai.resources import resolve_factory_app_root
 from mozaiksai.version import __version__ as _API_VERSION
 
@@ -2339,10 +2340,9 @@ async def start_chat(
 
     client_request_id = data.get("client_request_id")
     force_new = str(data.get("force_new", "false")).lower() in {"1", "true", "yes", "on"}
-    context_variables = validate_context_for_workflow(
-        workflow_name,
-        data.get("context_variables") if isinstance(data.get("context_variables"), dict) else {},
-    )
+    requested_context = data.get("context_variables") if isinstance(data.get("context_variables"), dict) else {}
+    authorize_http_workflow_source_paths(requested_context, principal=principal)
+    context_variables = validate_context_for_workflow(workflow_name, requested_context)
     trigger_meta = data.get("trigger_meta") if isinstance(data.get("trigger_meta"), dict) else {}
 
     idempotency_window_sec = int(os.getenv("CHAT_START_IDEMPOTENCY_SEC", "15"))

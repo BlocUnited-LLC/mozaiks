@@ -25,6 +25,28 @@ The resolver validates that the path exists and is a directory, then selects
 the workspace root (applying `monorepo_path` if provided).
 
 Use this when Studio is running on the same machine as the app workspace.
+The two Studio HTTP indexing routes accept caller-supplied local paths only
+when authentication is explicitly disabled and the request has development
+access. Public visitors and authenticated Studio callers cannot
+submit a server filesystem path, even for an app they own: app ownership does
+not establish ownership of the source directory. Post-promotion indexing uses
+a server-derived workspace path through the internal helper and remains
+available. Authenticated brownfield imports need an owner-bound repository
+connector or another server-authorized source reference, rather than a path
+named by the HTTP caller. The OSS resolver currently rejects
+`auth_connector_id`, so private-repository import through this HTTP route is
+not yet implemented.
+
+HTTP workflow launches without request-scoped development access reject
+caller-selected local discovery sources before dispatch. This applies to Studio's
+`/api/workflows/trigger`, the shared `/api/transitions/resolve` route, and
+runtime chat-start and programmatic workflow trigger routes. Guarded inputs
+include `repo_path`, split frontend/backend repository paths, and
+`uploaded_openapi_path` at the top level or inside `discovery_inputs`.
+Selecting `host_app_source: workspace_app` is blocked too because it resolves
+to the server's `MOZAIKS_APP_WORKSPACE_PATH`. Explicit no-auth local
+development may still use these inputs. Server-derived internal workflow
+context remains separate from the HTTP caller boundary.
 
 ### `git_repository`
 
@@ -101,6 +123,17 @@ Both `monorepo_path` and the git clone directory are validated against their
 parent roots using `Path.relative_to()`. Any path that would escape the
 workspace root is rejected with `ValueError` before the filesystem is
 touched.
+
+Containment alone does not authorize a caller to read a server directory.
+Studio's HTTP gate permits caller-provided `local_workspace` paths only when
+authentication was explicitly disabled and the request has development access.
+Keep that host local and trusted;
+the no-auth setting does not provide per-user filesystem access control.
+With `AUTH_ANON_ACCESS=open`, every client that can reach Studio receives
+development access and can submit a local path; bind that host to a trusted
+network boundary.
+The same restriction applies to caller-selected local source paths in
+ExistingAppDiscovery workflow launch and transition requests.
 
 ### URL validation
 
