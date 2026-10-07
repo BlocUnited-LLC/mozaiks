@@ -745,8 +745,8 @@ async def require_studio_user(
 ) -> UserPrincipal:
     """The caller of a Studio management route, never an anonymous visitor.
 
-    Studio manages workspaces, builds and connectors for whoever calls it. Its
-    startup refuses AUTH_ANON_ACCESS=public; this refuses a visitor
+    Studio manages workspaces, builds and connectors for signed-in callers.
+    Its startup refuses AUTH_ANON_ACCESS=public; this refuses a visitor
     principal on every request too, so a Studio composed without its
     lifespan cannot serve visitors either.
     """
@@ -787,6 +787,16 @@ def _resolve_studio_scope(
     return scope.app_id, scope.user_id
 
 
+async def _resolve_owned_app_scope(
+    principal: UserPrincipal, *, app_id: str | None = None,
+) -> tuple[str, str]:
+    """Resolve an explicitly selected Studio app through its registry owner."""
+    resolved_app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
+    if str(app_id or "").strip() or str(principal.app_id or "").strip():
+        await _get_owned_app_record(resolved_app_id, user_id)
+    return resolved_app_id, user_id
+
+
 @app.get("/api/shell-config")
 async def get_studio_shell_config(request: Request):
     return await build_shell_config(surface="studio", client_scope=request.scope)
@@ -798,7 +808,7 @@ async def get_studio_dashboard_config(
     app_id: str | None = None,
     principal: UserPrincipal = Depends(require_studio_user),
 ):
-    resolved_app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
+    resolved_app_id, _ = await _resolve_owned_app_scope(principal, app_id=app_id)
     manifest = load_dashboard_manifest(resolve_app_root())
     payload = manifest.model_dump(mode="json")
     payload["resolved"] = {
@@ -938,7 +948,7 @@ def _analytics_app_row(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-async def _analytics_owned_app(app_id: str, user_id: str) -> dict[str, Any]:
+async def _get_owned_app_record(app_id: str, user_id: str) -> dict[str, Any]:
     """Resolve one app record through the ownership boundary or 404."""
 
     try:
@@ -949,7 +959,7 @@ async def _analytics_owned_app(app_id: str, user_id: str) -> dict[str, Any]:
     except HTTPException:
         raise
     except Exception as exc:
-        logger.exception("Analytics app record lookup failed")
+        logger.exception("Studio app record lookup failed")
         raise HTTPException(status_code=500, detail="Failed to resolve app record") from exc
     if not isinstance(record, dict):
         raise HTTPException(status_code=404, detail=f"App record not found: {app_id}")
@@ -1027,7 +1037,7 @@ async def get_studio_analytics_app(
 
     _, user_id = _resolve_studio_scope(principal)
     window = _analytics_period(period)
-    record = await _analytics_owned_app(app_id, user_id)
+    record = await _get_owned_app_record(app_id, user_id)
     funnel = _analytics_funnel_for_record(record)
     try:
         return await _get_owner_analytics_service().app_analytics(
@@ -1049,7 +1059,7 @@ async def get_studio_analytics_metric_detail(
 
     _, user_id = _resolve_studio_scope(principal)
     window = _analytics_period(period)
-    record = await _analytics_owned_app(app_id, user_id)
+    record = await _get_owned_app_record(app_id, user_id)
     try:
         peers = (await _get_app_registry_service().list_apps(owner_user_id=user_id)).get(
             "apps"
@@ -1080,7 +1090,7 @@ async def get_app_integrations(
     app_id: str | None = None,
     principal: UserPrincipal = Depends(require_studio_user),
 ):
-    app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
+    app_id, _ = await _resolve_owned_app_scope(principal, app_id=app_id)
     return await build_integrations_summary(app_id=app_id)
 
 
@@ -1089,7 +1099,7 @@ async def get_integration_connectors(
     app_id: str | None = None,
     principal: UserPrincipal = Depends(require_studio_user),
 ):
-    app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
+    app_id, _ = await _resolve_owned_app_scope(principal, app_id=app_id)
     connectors = await list_connectors(scope=ConnectorStore.SCOPE_APP, scope_id=app_id)
     return {
         "app_id": app_id,
@@ -1248,7 +1258,7 @@ async def get_studio_app_context_status(
     principal: UserPrincipal = Depends(require_studio_user),
 ):
     validate_path_id(app_id, "app_id")
-    resolved_app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
+    resolved_app_id, _ = await _resolve_owned_app_scope(principal, app_id=app_id)
     summary = await get_current_app_context_summary(
         app_id=resolved_app_id,
         artifact_store=get_artifact_store(),
@@ -1299,7 +1309,7 @@ async def index_studio_app_intelligence_context(
     principal: UserPrincipal = Depends(require_studio_user),
 ):
     validate_path_id(app_id, "app_id")
-    resolved_app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
+    resolved_app_id, user_id = await _resolve_owned_app_scope(principal, app_id=app_id)
     _authorize_http_source_import(body, principal=principal)
     return await _start_studio_app_intelligence_index_job(
         app_id=resolved_app_id,
@@ -1317,7 +1327,7 @@ async def import_studio_app_source_context(
     principal: UserPrincipal = Depends(require_studio_user),
 ):
     validate_path_id(app_id, "app_id")
-    resolved_app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
+    resolved_app_id, user_id = await _resolve_owned_app_scope(principal, app_id=app_id)
     _authorize_http_source_import(body, principal=principal)
     return await _start_studio_app_intelligence_index_job(
         app_id=resolved_app_id,
@@ -1333,7 +1343,7 @@ async def get_latest_studio_app_intelligence_index_job(
     principal: UserPrincipal = Depends(require_studio_user),
 ):
     validate_path_id(app_id, "app_id")
-    resolved_app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
+    resolved_app_id, _ = await _resolve_owned_app_scope(principal, app_id=app_id)
     job = await get_latest_app_intelligence_index_job(app_id=resolved_app_id)
     return _redact_secret_fields({"app_id": resolved_app_id, "index_job": public_app_intelligence_index_job(job)})
 
@@ -1346,7 +1356,7 @@ async def get_studio_app_intelligence_index_job(
 ):
     validate_path_id(app_id, "app_id")
     validate_path_id(job_id, "job_id")
-    resolved_app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
+    resolved_app_id, _ = await _resolve_owned_app_scope(principal, app_id=app_id)
     job = await get_app_intelligence_index_job(app_id=resolved_app_id, job_id=job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="App Intelligence index job not found.")
@@ -1362,7 +1372,7 @@ async def run_studio_app_source_validation(
     validate_path_id(app_id, "app_id")
     if not body.confirm_execution:
         raise HTTPException(status_code=400, detail="confirm_execution=true is required to run app validation.")
-    resolved_app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
+    resolved_app_id, _ = await _resolve_owned_app_scope(principal, app_id=app_id)
     try:
         result = await run_current_app_source_validation(
             app_id=resolved_app_id,
@@ -1576,7 +1586,7 @@ async def create_studio_app_context_refresh_plan(
     principal: UserPrincipal = Depends(require_studio_user),
 ):
     validate_path_id(app_id, "app_id")
-    resolved_app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
+    resolved_app_id, user_id = await _resolve_owned_app_scope(principal, app_id=app_id)
     summary = await get_current_app_context_summary(
         app_id=resolved_app_id,
         artifact_store=get_artifact_store(),
@@ -1620,7 +1630,7 @@ async def launch_studio_app_context_refresh(
     validate_path_id(app_id, "app_id")
     if not body.confirm_launch:
         raise HTTPException(status_code=400, detail="confirm_launch=true is required to launch context refresh.")
-    resolved_app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
+    resolved_app_id, user_id = await _resolve_owned_app_scope(principal, app_id=app_id)
     try:
         result = await launch_context_refresh_plan(
             body.plan,
@@ -1649,7 +1659,7 @@ async def complete_studio_app_context_refresh(
     principal: UserPrincipal = Depends(require_studio_user),
 ):
     validate_path_id(app_id, "app_id")
-    resolved_app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
+    resolved_app_id, _ = await _resolve_owned_app_scope(principal, app_id=app_id)
     try:
         result = await complete_context_refresh(
             body.plan,
@@ -1677,7 +1687,7 @@ async def create_studio_app_context_policy_override(
     principal: UserPrincipal = Depends(require_studio_user),
 ):
     validate_path_id(app_id, "app_id")
-    resolved_app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
+    resolved_app_id, _ = await _resolve_owned_app_scope(principal, app_id=app_id)
     policy_result = body.policy_result or AppContextPolicyResult(
         decision=body.original_policy_decision,
         allowed=False,
@@ -1723,7 +1733,7 @@ async def create_or_update_integration_connector(
     app_id: str | None = None,
     principal: UserPrincipal = Depends(require_studio_user),
 ):
-    app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
+    app_id, user_id = await _resolve_owned_app_scope(principal, app_id=app_id)
     record = None
     secret_result: dict[str, Any] | None = None
     if body.secret_value:
@@ -1790,7 +1800,7 @@ async def patch_integration_connector(
     principal: UserPrincipal = Depends(require_studio_user),
 ):
     validate_path_id(service, "service")
-    app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
+    app_id, user_id = await _resolve_owned_app_scope(principal, app_id=app_id)
     store = ConnectorStore()
     existing = await store.get(scope=ConnectorStore.SCOPE_APP, scope_id=app_id, service=service)
     if not existing:
@@ -1835,7 +1845,7 @@ async def check_integration_connector_health(
     principal: UserPrincipal = Depends(require_studio_user),
 ):
     validate_path_id(service, "service")
-    app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
+    app_id, _ = await _resolve_owned_app_scope(principal, app_id=app_id)
     result = await run_connector_health_check(app_id=app_id, service=service, checked_by="manual")
     return {
         "app_id": app_id,
@@ -1863,7 +1873,7 @@ async def remove_integration_connector(
     principal: UserPrincipal = Depends(require_studio_user),
 ):
     validate_path_id(service, "service")
-    app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
+    app_id, _ = await _resolve_owned_app_scope(principal, app_id=app_id)
     result = await delete_connector(scope=ConnectorStore.SCOPE_APP, scope_id=app_id, service=service)
     if not result.get("deleted"):
         raise HTTPException(status_code=404, detail=f"Connector not found: {service}")

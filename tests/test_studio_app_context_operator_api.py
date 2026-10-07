@@ -38,6 +38,13 @@ def _studio_app(monkeypatch):
     reset_auth_adapter()
     from mozaiksai.hosts import studio as studio_app
 
+    class Registry:
+        async def get_app_record(self, *, app_id: str, owner_user_id: str):
+            if (app_id, owner_user_id) == ("app_1", "demo-user"):
+                return {"app": {"app_id": app_id, "owner_user_id": owner_user_id}}
+            return {"app": None}
+
+    monkeypatch.setattr(studio_app, "_get_app_registry_service", lambda: Registry())
     monkeypatch.setattr(studio_app, "get_artifact_store", lambda: object())
     return studio_app
 

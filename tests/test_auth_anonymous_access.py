@@ -1674,6 +1674,105 @@ def test_every_studio_route_refuses_an_anonymous_visitor(monkeypatch) -> None:
         assert (response.status_code, response.json()["detail"]) == (403, STUDIO_PUBLIC_MESSAGE)
 
 
+def test_direct_studio_routes_classify_app_ownership_authority() -> None:
+    """Every direct Studio route has a reviewed app-scope gate or exception."""
+    import ast
+    import inspect
+    import textwrap
+
+    from fastapi.routing import APIRoute
+
+    from mozaiksai.hosts import studio
+
+    def named_calls(endpoint: Any, *, awaited_only: bool) -> set[str]:
+        source = textwrap.dedent(inspect.getsource(inspect.unwrap(endpoint)))
+        names = set()
+        for node in ast.walk(ast.parse(source)):
+            if awaited_only:
+                if not isinstance(node, ast.Await) or not isinstance(node.value, ast.Call):
+                    continue
+                function = node.value.func
+            else:
+                if not isinstance(node, ast.Call):
+                    continue
+                function = node.func
+            if isinstance(function, ast.Name):
+                names.add(function.id)
+            elif isinstance(function, ast.Attribute):
+                names.add(function.attr)
+        return names
+
+    owned_app_routes = {
+        "GET /api/studio/dashboard",
+        "GET /api/studio/integrations",
+        "GET /api/studio/integrations/connectors",
+        "POST /api/studio/integrations/connectors",
+        "PATCH /api/studio/integrations/connectors/{service}",
+        "POST /api/studio/integrations/connectors/{service}/health-check",
+        "DELETE /api/studio/integrations/connectors/{service}",
+        "GET /api/studio/apps/{app_id}/context",
+        "POST /api/studio/apps/{app_id}/context/app-intelligence/index",
+        "POST /api/studio/apps/{app_id}/context/source-import",
+        "GET /api/studio/apps/{app_id}/context/app-intelligence/index/latest",
+        "GET /api/studio/apps/{app_id}/context/app-intelligence/index/{job_id}",
+        "POST /api/studio/apps/{app_id}/context/validation/run",
+        "POST /api/studio/apps/{app_id}/context/refresh-plan",
+        "POST /api/studio/apps/{app_id}/context/refresh-launch",
+        "POST /api/studio/apps/{app_id}/context/refresh-complete",
+        "POST /api/studio/apps/{app_id}/context/override",
+    }
+    existing_registry_gates = {
+        "GET /api/studio/overview": "get_app_record",
+        "GET /api/studio/build": "get_app_record",
+        "GET /api/studio/analytics/apps/{app_id}": "_get_owned_app_record",
+        "GET /api/studio/analytics/apps/{app_id}/metrics/{metric_id}": "_get_owned_app_record",
+        "GET /api/studio/build/artifacts/{artifact_version_id}/download": "_resolve_studio_artifact_scope",
+        "GET /api/studio/build/history": "_resolve_studio_artifact_scope",
+        "GET /api/studio/build/artifacts/{artifact_version_id}/bundle": "_resolve_studio_artifact_scope",
+        "GET /api/studio/build/artifacts/{artifact_version_id}/review": "_resolve_studio_artifact_scope",
+        "POST /api/studio/build/artifacts/{artifact_version_id}/accept": "_resolve_studio_artifact_scope",
+        "POST /api/studio/build/artifacts/{artifact_version_id}/reject": "_resolve_studio_artifact_scope",
+        "POST /api/studio/build/artifacts/{artifact_version_id}/promote": "_resolve_studio_artifact_scope",
+        "POST /api/studio/build/restore": "_resolve_studio_artifact_scope",
+    }
+    owner_scoped_registry_operations = {
+        "GET /api/studio/apps": "list_apps",
+        "POST /api/studio/apps": "create_app_record",
+        "DELETE /api/studio/apps/{build_registry_id}": "delete_app",
+        "GET /api/studio/analytics/portfolio": "list_apps",
+        "PUT /api/studio/build": "ensure_status_for_app",
+    }
+    # Workflow triggers name the execution host. Generic launches do not use
+    # the registry; registered build targets have separate owner checks.
+    execution_host_routes = {
+        "POST /api/workflows/trigger": "_resolve_studio_scope",
+    }
+    routes_without_app_scope = {"GET /api/shell-config"}
+
+    direct_routes = {
+        f"{','.join(sorted(route.methods))} {route.path}": route
+        for route in studio.app.routes
+        if isinstance(route, APIRoute) and _defined_in_studio(route.endpoint)
+    }
+    classified = (
+        owned_app_routes
+        | existing_registry_gates.keys()
+        | owner_scoped_registry_operations.keys()
+        | execution_host_routes.keys()
+        | routes_without_app_scope
+    )
+    assert len(direct_routes) == 36
+    assert direct_routes.keys() == classified
+    assert len(owned_app_routes) == 17
+    for key in owned_app_routes:
+        assert "_resolve_owned_app_scope" in named_calls(direct_routes[key].endpoint, awaited_only=True), key
+    for gates in (existing_registry_gates, owner_scoped_registry_operations):
+        for key, expected_call in gates.items():
+            assert expected_call in named_calls(direct_routes[key].endpoint, awaited_only=True), key
+    for key, expected_call in execution_host_routes.items():
+        assert expected_call in named_calls(direct_routes[key].endpoint, awaited_only=False), key
+
+
 def test_studio_preview_routes_refuse_an_anonymous_visitor(monkeypatch) -> None:
     """Studio composes the preview sandbox router with a scope resolver that refuses visitors."""
     from mozaiksai.hosts import studio
