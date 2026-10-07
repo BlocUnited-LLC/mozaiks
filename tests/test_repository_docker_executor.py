@@ -88,13 +88,17 @@ def _operation_output(*, path: str, op: str, content: str | None, archive: bytes
     }).encode()
 
 
-def _worker_output(*, archive: bytes | None = None, status: str = "completed") -> bytes:
+def _worker_output(
+    *, archive: bytes | None = None, status: str = "completed", usage: object | None = None,
+) -> bytes:
     if archive is None and status == "completed":
         archive = build_deterministic_archive([ArchiveEntry(path=_PATH, content=_AFTER.encode())])
     return json.dumps({
         "proposal": {
             "proposal_id": "raw-provider-id", "provider_id": "raw-provider-name",
+            "provider_model": "read-only-source-sentinel",
             "status": status,
+            "usage": usage,
             "summary": "read-only-source-sentinel",
             "rationale": "read-only-source-sentinel",
             "provider_events": [{"kind": "plan", "summary": "read-only-source-sentinel"}],
@@ -171,7 +175,9 @@ def _install_fake(monkeypatch: pytest.MonkeyPatch, fake: FakeDocker) -> None:
 async def test_docker_turn_transmits_only_scoped_input_and_scrubs_provider_text(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    fake = FakeDocker()
+    fake = FakeDocker(output=_worker_output(usage={
+        "prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120,
+    }))
     _install_fake(monkeypatch, fake)
     result = await execute_repository_docker_turn(_request(), image=_IMAGE)
 
@@ -180,6 +186,12 @@ async def test_docker_turn_transmits_only_scoped_input_and_scrubs_provider_text(
     assert result.proposal.provider_id == "acp_docker"
     assert result.proposal.proposal_id != "raw-provider-id"
     assert result.proposal.provider_events == []
+    assert result.proposal.provider_model is None
+    assert result.proposal.usage is None
+    assert result.usage is not None
+    assert result.usage.model_dump() == {
+        "prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120,
+    }
     assert "read-only-source-sentinel" not in result.proposal.model_dump_json()
     assert result.workspace_archive is not None
     assert len(fake.removed) == 1
@@ -408,13 +420,28 @@ async def test_invalid_worker_output_fails_closed_and_removes_container(
 async def test_failed_turn_has_no_archive_or_source_quoting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    fake = FakeDocker(output=_worker_output(status="rejected_scope"))
+    fake = FakeDocker(output=_worker_output(status="rejected_scope", usage={
+        "prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120,
+    }))
     _install_fake(monkeypatch, fake)
     result = await execute_repository_docker_turn(_request(), image=_IMAGE)
     assert result.workspace_archive is None
     assert result.proposal.status == "rejected_scope"
     assert result.proposal.error == "Isolated coding turn reported rejected_scope."
+    assert result.usage is not None and result.usage.total_tokens == 120
     assert "read-only-source-sentinel" not in result.proposal.model_dump_json()
+
+
+@pytest.mark.asyncio
+async def test_malformed_container_usage_does_not_invalidate_patch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = FakeDocker(output=_worker_output(usage={"prompt_tokens": "source-secret"}))
+    _install_fake(monkeypatch, fake)
+    result = await execute_repository_docker_turn(_request(), image=_IMAGE)
+    assert result.proposal.status == "completed"
+    assert result.usage is None
+    assert "source-secret" not in result.proposal.model_dump_json()
 
 
 @pytest.mark.asyncio

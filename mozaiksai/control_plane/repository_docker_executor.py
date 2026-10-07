@@ -34,6 +34,7 @@ from .contracts import (
     StagedPatchProposal,
 )
 from .execution_context import ApprovedExecutionContext
+from .repository_acp_usage import IsolatedACPUsage, parse_isolated_acp_usage
 from .repository_patch import (
     _EMPTY_REPOSITORY_ARCHIVE,
     RepositorySnapshotEvidence,
@@ -62,6 +63,7 @@ class RepositoryDockerExecutionError(RuntimeError):
 class RepositoryDockerTurn:
     proposal: StagedPatchProposal
     workspace_archive: bytes | None
+    usage: IsolatedACPUsage | None = None
 
 
 def _local_docker_endpoint() -> str:
@@ -239,7 +241,13 @@ def _parse_turn_output(
         output = _strict_json(raw)
         if not isinstance(output, dict) or set(output) != {"proposal", "workspace_archive_base64"}:
             raise ValueError("unexpected worker output shape")
-        proposal = StagedPatchProposal.model_validate(output["proposal"])
+        raw_proposal = output["proposal"]
+        if not isinstance(raw_proposal, dict):
+            raise ValueError("invalid proposal")
+        usage = parse_isolated_acp_usage(raw_proposal.get("usage"))
+        # Usage is advisory. Its absence or malformed shape cannot invalidate
+        # an otherwise valid patch, and it never enters the safe proposal.
+        proposal = StagedPatchProposal.model_validate({**raw_proposal, "usage": None})
         encoded = output["workspace_archive_base64"]
         if encoded is not None and not isinstance(encoded, str):
             raise ValueError("invalid archive encoding")
@@ -291,7 +299,7 @@ def _parse_turn_output(
         owned_paths=proposal.owned_paths,
         error=(f"Isolated coding turn reported {proposal.status}." if proposal.status != "completed" else None),
     )
-    return RepositoryDockerTurn(proposal=safe_proposal, workspace_archive=archive)
+    return RepositoryDockerTurn(proposal=safe_proposal, workspace_archive=archive, usage=usage)
 
 
 async def execute_repository_docker_turn(
