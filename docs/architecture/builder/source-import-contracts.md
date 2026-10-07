@@ -36,6 +36,16 @@ named by the HTTP caller. The OSS resolver currently rejects
 `auth_connector_id`, so private-repository import through this HTTP route is
 not yet implemented.
 
+Authenticated HTTP workflow launches also reject caller-selected local
+discovery sources before dispatch. This applies to Studio's
+`/api/workflows/trigger` and the shared `/api/transitions/resolve` route,
+including `repo_path`, split frontend/backend repository paths, and
+`uploaded_openapi_path` at the top level or inside `discovery_inputs`.
+Selecting `host_app_source: workspace_app` is blocked too because it resolves
+to the server's `MOZAIKS_APP_WORKSPACE_PATH`. Explicit no-auth local
+development may still use these inputs. Server-derived internal workflow
+context remains separate from the HTTP caller boundary.
+
 ### `git_repository`
 
 The resolver clones a remote repository to `generated/source_imports/` before
@@ -119,6 +129,8 @@ the no-auth setting does not provide per-user filesystem access control.
 With `AUTH_ANON_ACCESS=open`, every client that can reach Studio receives
 development access and can submit a local path; bind that host to a trusted
 network boundary.
+The same restriction applies to caller-selected local source paths in
+ExistingAppDiscovery workflow launch and transition requests.
 
 ### URL validation
 

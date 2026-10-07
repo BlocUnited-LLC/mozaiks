@@ -88,7 +88,7 @@ from mozaiksai.core.artifacts.content_store import (
     ContentNotFoundError,
     read_verified_artifact_bundle,
 )
-from mozaiksai.core.auth import UserPrincipal, is_auth_explicitly_disabled, require_user_scope
+from mozaiksai.core.auth import UserPrincipal, require_user_scope
 from mozaiksai.core.auth.anonymous_access import ANONYMOUS_PROVENANCE, STUDIO_PUBLIC_MESSAGE
 from mozaiksai.core.auth.dependencies import validate_path_id
 from mozaiksai.core.dashboard import load_dashboard_manifest
@@ -149,6 +149,10 @@ from mozaiksai.hosts.platform import (
 )
 from mozaiksai.hosts.routers.sandbox import create_sandbox_router
 from mozaiksai.hosts.runtime import register_app_lifespan
+from mozaiksai.hosts.source_path_policy import (
+    authorize_http_workflow_source_paths,
+    require_http_local_source_mode,
+)
 
 app = platform_app.app
 register_repo_host_bootstrap(app, "studio")
@@ -1382,11 +1386,8 @@ async def run_studio_app_source_validation(
 
 def _authorize_http_source_import(body: AppIntelligenceIndexRequest) -> None:
     """Keep server filesystem paths out of authenticated Studio requests."""
-    if body.source_kind == "local_workspace" and not is_auth_explicitly_disabled():
-        raise HTTPException(
-            status_code=403,
-            detail="HTTP local workspace import is available only when authentication is explicitly disabled.",
-        )
+    if body.source_kind == "local_workspace":
+        require_http_local_source_mode()
 
 
 async def _start_studio_app_intelligence_index_job(
@@ -2691,6 +2692,7 @@ async def trigger_workflow(
     principal: UserPrincipal = Depends(require_studio_user),
 ):
     app_id, user_id = _resolve_studio_scope(principal, app_id=body.app_id, user_id=body.user_id)
+    authorize_http_workflow_source_paths(body.context_variables)
     retry_contribution = None
     if body.retry_failed:
         try:

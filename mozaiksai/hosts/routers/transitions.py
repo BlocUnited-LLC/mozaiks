@@ -19,6 +19,7 @@ from mozaiksai.core.auth import UserPrincipal, require_user_scope
 from mozaiksai.core.auth.dependencies import resolve_scope_from_principal
 from mozaiksai.core.session.build_binding import BuildIdentity
 from mozaiksai.core.session.launcher import launch_transition
+from mozaiksai.hosts.source_path_policy import authorize_http_workflow_source_paths
 
 router = APIRouter(tags=["transitions"])
 
@@ -115,6 +116,7 @@ async def resolve_transition_route(
     from logs.logging_config import get_workflow_logger
 
     _logger = get_workflow_logger("transitions_router")
+    authorize_http_workflow_source_paths(body.context_variables)
     try:
         app_id, user_id = resolve_scope_from_principal(principal, app_id=body.app_id, user_id=body.user_id)
         launch_result = await launch_transition(

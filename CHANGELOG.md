@@ -95,8 +95,10 @@ This project follows a practical pre-1.0 changelog format:
   caller has not connected an account.
 
 - Studio HTTP source indexing rejects caller-supplied local filesystem roots
-  unless authentication was explicitly disabled for local development. The
-  server-derived post-promotion indexing path remains available.
+  unless authentication was explicitly disabled for local development.
+  Authenticated workflow triggers and transition requests also reject local
+  ExistingAppDiscovery paths, including nested and split repository inputs.
+  Server-derived indexing and local no-auth development remain available.
 
 - Patched DOMPurify and source-map-js in the shipped frontend dependency locks,
   including Monaco's nested DOMPurify dependency.
