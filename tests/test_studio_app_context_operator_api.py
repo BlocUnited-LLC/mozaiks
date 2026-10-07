@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import inspect
+from types import SimpleNamespace
 from typing import Any
 
 from fastapi.testclient import TestClient
 
+from mozaiksai.control_plane import app_validation as core_validation
 from mozaiksai.control_plane.app_context import (
     APP_CONTEXT_MISSING_WARNING,
     AppContextGraphLookupResult,
@@ -27,7 +29,7 @@ from mozaiksai.core.app_context.refresh import (
     ContextRefreshResult,
     ContextRefreshResultStatus,
 )
-from mozaiksai.core.auth import reset_auth_adapter
+from mozaiksai.core.auth import UserPrincipal, reset_auth_adapter
 
 
 def _studio_app(monkeypatch):
@@ -258,6 +260,60 @@ def test_app_source_validation_endpoint_runs_current_context_validation(monkeypa
     assert captured["allowed_kinds"] == ["test"]
     assert captured["max_commands"] == 1
     assert captured["confirm_execution"] is True
+
+
+def test_authenticated_app_source_validation_http_skips_host_commands(
+    tmp_path, monkeypatch,
+) -> None:
+    studio_app = _studio_app(monkeypatch)
+    monkeypatch.setenv("AUTH_ENABLED", "true")
+    monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+    monkeypatch.setenv("AUTH_AUDIENCE", "source-validation-test")
+    principal = UserPrincipal(
+        user_id="owner", email=None, name=None, roles=[], scopes=[], raw_claims={},
+        app_id="app_1", auth_provenance="token_validated",
+    )
+    monkeypatch.setitem(studio_app.app.dependency_overrides, studio_app.require_studio_user, lambda: principal)
+    workspace = tmp_path / "imported-repository"
+    workspace.mkdir()
+    (workspace / "pyproject.toml").write_text("[project]\nname = 'audit'\n", encoding="utf-8")
+    (workspace / "service.py").write_text("VALUE = 1\n", encoding="utf-8")
+
+    class Registry:
+        async def get_app_record(self, *, app_id: str, owner_user_id: str) -> dict[str, Any]:
+            assert (app_id, owner_user_id) == ("app_1", "owner")
+            return {"app": {"app_id": app_id}}
+
+    async def latest_job(**kwargs: Any) -> SimpleNamespace:
+        return SimpleNamespace(workspace_root=str(workspace))
+
+    async def framework_detection(**kwargs: Any) -> dict[str, Any]:
+        return {
+            "validation_commands": [
+                {"kind": "test", "command": "python -m pytest", "working_directory": "."}
+            ],
+        }
+
+    def forbidden_host_runner(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("Authenticated request reached the host subprocess runner")
+
+    monkeypatch.setattr(studio_app, "_get_app_registry_service", lambda: Registry())
+    monkeypatch.setattr(core_validation, "get_latest_app_intelligence_index_job", latest_job)
+    monkeypatch.setattr(core_validation, "_current_framework_detection", framework_detection)
+    monkeypatch.setattr(core_validation, "_run_subprocess_command", forbidden_host_runner)
+
+    response = TestClient(studio_app.app).post(
+        "/api/studio/apps/app_1/context/validation/run",
+        json={"confirm_execution": True, "allowed_kinds": ["test"]},
+    )
+
+    assert response.status_code == 200
+    validation = response.json()["validation"]
+    assert validation["validation_status"] == "warning"
+    assert validation["command_results"] == []
+    assert validation["planned_commands"][0]["skip_reason"] == (
+        "host_command_execution_requires_isolation"
+    )
 
 
 def test_refresh_plan_is_non_mutating_and_does_not_launch(monkeypatch) -> None:

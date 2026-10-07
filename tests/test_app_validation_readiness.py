@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from factory_app.workflows.AppGenerator.tools import app_validation as factory_validation
+from mozaiksai.control_plane import app_validation as source_validation
 from mozaiksai.control_plane.app_validation import run_app_source_validation
 
 
@@ -120,7 +121,7 @@ def _detection(*commands):
     return {"validation_commands": [{"kind": kind, "command": command} for kind, command in commands]}
 
 
-def test_source_validation_runs_real_app_test_before_passing(tmp_path: Path):
+def test_source_validation_runs_real_app_test_before_passing_with_injected_runner(tmp_path: Path):
     (tmp_path / "service.py").write_text("def total(values):\n    return sum(values)\n", encoding="utf-8")
     (tmp_path / "test_service.py").write_text(
         "from service import total\ndef test_total():\n    assert total([2, 3]) == 5\n", encoding="utf-8",
@@ -128,7 +129,7 @@ def test_source_validation_runs_real_app_test_before_passing(tmp_path: Path):
     result = run_app_source_validation(
         app_id="reference-app", workspace_root=tmp_path,
         framework_detection=_detection(("test", "python -m pytest -q --no-cov")),
-        confirm_execution=True,
+        confirm_execution=True, command_runner=source_validation._run_subprocess_command,
     )
     assert result.validation_status == "passed", result.model_dump()
     assert result.command_results[0].exit_code == 0
@@ -149,13 +150,16 @@ def test_empty_source_workspace_is_skipped(tmp_path: Path):
 
 
 def test_unavailable_test_executable_cannot_be_replaced_by_json_parse(tmp_path: Path, monkeypatch):
-    from mozaiksai.control_plane import app_validation
-
     (tmp_path / "package.json").write_text('{"scripts":{"test":"vitest run"}}', encoding="utf-8")
-    monkeypatch.setattr(app_validation, "_resolve_command_argv", lambda argv: (argv, "executable_unavailable"))
+    monkeypatch.setattr(source_validation, "_resolve_command_argv", lambda argv: (argv, "executable_unavailable"))
+
+    def never_run(*args, **kwargs):
+        raise AssertionError("Unavailable commands must not reach the runner")
+
     result = run_app_source_validation(
         app_id="reference-app", workspace_root=tmp_path,
         framework_detection=_detection(("test", "npm run test")), confirm_execution=True,
+        command_runner=never_run,
     )
     assert result.command_results[0].status == "skipped"
     assert result.validation_status == "warning"

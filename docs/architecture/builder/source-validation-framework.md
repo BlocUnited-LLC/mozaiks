@@ -1,8 +1,12 @@
 # Source Validation Framework
 
-The source validation framework runs framework-detected commands against a
+The source validation framework plans framework-detected commands against a
 workspace to measure source health before and after code changes. It is
-intentionally opt-in: command execution requires `confirm_execution=True`.
+intentionally opt-in: command execution requires `confirm_execution=True` and
+a trusted injected runner. The default host subprocess does not run repository
+commands in any auth mode until OS isolation is available. After confirmation,
+the Studio and refinement-harness entry points currently return static checks
+with required commands marked as skipped.
 
 Related documents:
 
@@ -50,8 +54,8 @@ result = run_app_source_validation(
 )
 ```
 
-Used by the refinement harness tool when it supplies a specific workspace
-root and staged overlay files.
+This direct API accepts a specific workspace root and staged overlay files.
+The current refinement-harness tool instead uses the App Intelligence context.
 
 ---
 
@@ -66,13 +70,14 @@ framework_detection
         → reject disallowed executables
         → reject out-of-workspace working directories
         → cap at max_commands (default 4)
-    → isolated workspace copy (tempfile)
+    → disposable workspace copy (tempfile)
     → apply overlay_files (staged changes)
-    → execute planned commands in order
+    → execute planned commands in order only through a trusted injected runner
+      (default host subprocess is blocked)
     → if no commands ran → fallback checks
 ```
 
-### Isolation
+### Workspace copy
 
 By default (`copy_workspace=True`), the runner creates a temporary directory
 and copies the workspace into it before executing any command. The copy
@@ -85,9 +90,10 @@ excludes:
 - Compiled artefacts: `*.pem`, `*.key`, `*.pyc`, `*.pyo`
 
 The temporary directory is cleaned up after the run regardless of outcome.
-The copy protects the original workspace from direct writes; it does not
-isolate the command process from the host filesystem or network. Run commands
-from untrusted repositories only in an OS sandbox with those boundaries.
+The copy keeps ordinary relative writes out of the original workspace. It
+does not isolate a command process from the host filesystem or network: code
+can use absolute paths. Run commands from untrusted repositories only in an OS
+sandbox with those boundaries.
 
 ### Overlay files
 
@@ -130,6 +136,13 @@ Commands that fail any check are marked `skipped` with a machine-readable
 `skip_reason`, not `failed`. This keeps aggregate status accurate.
 Allowed tools such as Python and npm can run repository code, so the executable
 allowlist is a command-selection limit rather than an execution sandbox.
+The default runner marks otherwise runnable commands `skipped` with
+`host_command_execution_requires_isolation` even when the caller confirms
+execution. This also applies in no-auth local and open development modes.
+Static fallback checks may run, but required commands remain incomplete, so
+the result cannot be `passed`. A caller-injected runner is an internal Python
+seam, unavailable through Studio requests and workflow tool schemas. Its owner
+must provide OS isolation before using it for untrusted source.
 
 ---
 
@@ -199,8 +212,8 @@ class AppSourceValidationResult(BaseModel):
 | Condition | Status |
 |---|---|
 | Any command or check `failed` | `failed` |
-| Any command or check `passed`, none `failed` | `passed` |
-| Any `warning`, none `passed` or `failed` | `warning` |
+| Every selected required command and check completed and passed | `passed` |
+| Some checks passed, but required commands were skipped or unavailable | `warning` |
 | All `skipped` | `skipped` |
 
 ---
@@ -245,12 +258,15 @@ The refinement harness calls source validation through
 `factory_app/refinement_harness/tools/app_validation.py`. The tool:
 
 1. Reads the current framework detection from App Intelligence.
-2. Applies any staged overlay files from the harness context.
-3. Calls `run_current_app_source_validation()` with `confirm_execution=True`.
+2. Uses the workspace root from the current App Intelligence index job.
+3. Forwards its caller's `confirm_execution` choice (default `False`) to
+   `run_current_app_source_validation()`; it does not supply overlay files.
 4. Returns the result as a structured tool output for the LLM checkpoint.
 
 The LLM uses validation results as a signal when deciding whether to accept
-a staged change or route it to a review checkpoint.
+a staged change or route it to a review checkpoint. Confirming execution in
+this tool currently does not run repository commands: command readiness stays
+unverified until an isolated runner is connected.
 
 ---
 
