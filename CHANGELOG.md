@@ -14,6 +14,8 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- An internal, permission-checked host API for registering a loaded existing
+  app as its own Factory build target without resetting its build lifecycle.
 - Offline ACP proof-worker support for exact approved repository file creation
   and deletion; generated-app ACP coding remains update-only by default.
 - Host preflight for approved repository create/delete turns in the offline

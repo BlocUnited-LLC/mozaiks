@@ -270,6 +270,9 @@ async def _platform_startup() -> None:
     app.state.startup_degraded = False
     app.state.startup_degraded_reason = None
     app.state.failed_module_names = []
+    app.state.loaded_app_root = None
+    app.state.loaded_app_id = None
+    app.state.loaded_app_name = None
     app_root = resolve_app_root()
     database_startup_policy = get_database_startup_policy()
     logger.info("DATABASE_STARTUP_POLICY: policy=%s app_root=%s", database_startup_policy, app_root)
@@ -277,6 +280,9 @@ async def _platform_startup() -> None:
         module_defaults_path = getattr(app.state, "module_defaults_path", None)
         load_options = {"module_defaults_path": module_defaults_path} if module_defaults_path else {}
         load_result = await AppLoader.load(str(app_root), **load_options)
+        app.state.loaded_app_root = app_root.resolve()
+        app.state.loaded_app_id = load_result.definition.config.get("appId")
+        app.state.loaded_app_name = load_result.definition.config.get("appName")
         app.state.subscriptions_config = load_result.subscriptions_config
         app.state.metrics_config = load_result.metrics_config
         app.state.page_schemas = {
@@ -499,6 +505,9 @@ async def _platform_startup() -> None:
 
 async def _platform_shutdown() -> None:
     global _runtime_services
+    app.state.loaded_app_root = None
+    app.state.loaded_app_id = None
+    app.state.loaded_app_name = None
     if not _runtime_services:
         return
     try:
