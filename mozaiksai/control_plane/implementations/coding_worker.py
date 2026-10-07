@@ -300,6 +300,8 @@ class ScopedRefinementCodingWorker:
         resolved_strategy: str,
     ) -> CodingWorkerPlan:
         """Reconstruct the checkpoint-facing plan from a provider proposal."""
+        if any(change.op != "update" or change.content is None for change in proposal.changed_files):
+            raise ValueError("Generated-app coding worker only supports updates to selected files")
         changed_paths = [change.path for change in proposal.changed_files]
         if not changed_paths:
             raise ValueError("Coding provider returned no file changes")
@@ -323,7 +325,7 @@ class ScopedRefinementCodingWorker:
             summary=proposal.summary,
             owned_paths=[path for path in proposal.owned_paths if path in allowed_paths],
             updated_files=[
-                FileUpdate(path=change.path, content=change.content) for change in changes
+                FileUpdate(path=change.path, content=cast(str, change.content)) for change in changes
             ],
             validation_strategy=cast(Any, resolved_strategy),
             validation_commands=list(proposal.validation_commands),

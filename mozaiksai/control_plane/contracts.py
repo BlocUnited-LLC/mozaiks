@@ -447,8 +447,14 @@ class ProposedFileChange(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     path: str = Field(min_length=1)
-    op: Literal["create", "update"] = "update"
-    content: str
+    op: Literal["create", "update", "delete"] = "update"
+    content: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_operation_content(self) -> ProposedFileChange:
+        if (self.op == "delete") != (self.content is None):
+            raise ValueError("delete requires no content; create and update require content")
+        return self
 
 
 class ProviderEventRecord(BaseModel):

@@ -128,16 +128,19 @@ The snapshot has no build-registry ID; the host verifies the approved context's
 again before publishing a PR.
 
 The finalizer checks every selected file against the approved `sha256:` file
-manifest, harvests the stopped provider's staged tree, rejects symlinks,
-unselected files, creates, and deletes, and requires the provider's proposal
-to match the observed changed bytes. It calls the host path policy for baseline,
+manifest, harvests the stopped provider's staged tree, rejects symlinks and
+unselected files, and requires the provider's proposal to match the observed
+create, update, and delete operations and bytes. Creates and deletes require
+exact `create_paths` and `delete_paths` in the approved plan digest; directory
+scope alone never grants them. A create also requires a host callback that
+proves absence and no path collision in the complete Git tree at the pinned
+baseline, including excluded entries. It calls the host path policy for baseline,
 selected, observed, and proposed paths; broad approved scopes do not bypass
 host-specific protected descendants. The returned
 `RepositoryPatchCandidate` contains the approval and provider identities,
-before/after hashes, updated content, unified diffs, and required gate names.
+nullable before/after hashes, updated content or a deletion, unified diffs, and required gate names.
 Its `validation_state` is `pending` and `mutation_allowed` is `false`.
-This first repository patch contract supports updates to selected existing
-files only; adding a file requires a later explicit scope and manifest contract.
+The candidate contract is `mozaiks.refinement.repository_patch.v2`.
 
 This function reads the staged tree and does not invoke an agent, run validation
 commands, persist a review record, publish a branch/PR, or mutate the source
@@ -148,7 +151,7 @@ baseline before publication.
 
 For an isolated executor, `export_repository_workspace_archive` captures every
 selected file from the stopped provider's disposable tree before that tree is
-deleted. It refuses unselected files, links, deletes, non-exact UTF-8 content,
+deleted. It refuses ungranted creates or deletes, links, non-exact UTF-8 content,
 and archives outside explicit count and byte budgets. The exporter must run
 inside an OS-isolated worker with filesystem and memory limits because the
 canonical workspace harvester reads files before the archive budget is checked.
@@ -159,12 +162,14 @@ before parsing and calls `stage_repository_workspace_archive` with the same
 approved context, verified snapshot, exact selected baseline, and path policy.
 The host checks the raw central-directory count and declared sizes before ZIP
 parsing can allocate entry objects. It then verifies canonical archive metadata,
-exact selected paths, hashes, and strict UTF-8, and writes output bytes only
+exact approved operation paths, hashes, and strict UTF-8, and writes output bytes only
 into a fresh private staging tree first materialized from the approved baseline.
 It passes that tree to `finalize_repository_patch` and reports any failure to
 remove the tree after review candidate creation.
-No ZIP entry is extracted by path. Only updates to existing portable UTF-8
-files are supported in this first bridge.
+No ZIP entry is extracted by path. Deletion-only output uses a repository-specific
+empty transport marker; the shared deterministic archive contract still rejects
+empty ZIPs. The bridge accepts only portable UTF-8 files and remains inactive
+until the hosted product binds a trusted executor and full-tree absence proof.
 The host may pass selected tests or docs to an isolated ACP turn through
 `select_repository_read_only_files`. Each file must be within both an approved
 allowed path and an approved read-only path, outside prohibited paths, accepted

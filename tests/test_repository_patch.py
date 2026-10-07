@@ -109,7 +109,7 @@ def test_finalizes_observed_update_as_unvalidated_external_patch(tmp_path: Path)
 
     candidate = finalize_repository_patch(**inputs)
 
-    assert candidate.schema_version == "mozaiks.refinement.repository_patch.v1"
+    assert candidate.schema_version == "mozaiks.refinement.repository_patch.v2"
     assert candidate.write_back_mode == "external_patch"
     assert candidate.validation_state == "pending"
     assert candidate.mutation_allowed is False
@@ -128,6 +128,175 @@ def test_finalizes_observed_update_as_unvalidated_external_patch(tmp_path: Path)
     assert "-    return 1\n+    return 2\n" in change.diff
     assert staged_path.read_bytes() == before_finalization
     assert inputs["validate_path"].call_count == 7  # baseline, selected, harvested, output
+
+
+def test_archive_round_trip_requires_exact_create_and_delete_grants(tmp_path: Path) -> None:
+    inputs = _inputs(tmp_path)
+    created = "app/modules/support/backend/new.py"
+    created_content = "def added():\n    return True\n"
+    inputs["context"] = _context(create_paths=[created], delete_paths=[OTHER_PATH])
+    (inputs["workspace"].workspace_root / created).write_bytes(created_content.encode("utf-8"))
+    (inputs["workspace"].workspace_root / OTHER_PATH).unlink()
+    inputs["proposal"] = _proposal(
+        owned_paths=[PATH, OTHER_PATH, created],
+        changed_files=[
+            ProposedFileChange(path=PATH, op="update", content=AFTER),
+            ProposedFileChange(path=created, op="create", content=created_content),
+            ProposedFileChange(path=OTHER_PATH, op="delete"),
+        ],
+    )
+    archive = export_repository_workspace_archive(
+        inputs["workspace"], max_files=3, max_archive_bytes=4096,
+        create_paths=[created], delete_paths=[OTHER_PATH],
+    )
+    assert {entry.path for entry in read_archive_manifest(archive).entries} == {PATH, created}
+    prove_absence = Mock(return_value=None)
+    staged = stage_repository_workspace_archive(
+        inputs["context"], snapshot=inputs["snapshot"], selected_paths=inputs["selected_paths"],
+        baseline_files=inputs["baseline_files"], archive_bytes=archive,
+        workspace_root=tmp_path / "reconstructed", validate_path=inputs["validate_path"],
+        validate_create_absence=prove_absence, max_files=3, max_archive_bytes=4096,
+    )
+    try:
+        candidate = finalize_repository_patch(
+            **{**inputs, "workspace": staged, "validate_create_absence": prove_absence}
+        )
+    finally:
+        staged.cleanup()
+    changes = {change.path: change for change in candidate.changed_files}
+    assert set(changes) == {PATH, OTHER_PATH, created}
+    assert changes[created].op == "create"
+    assert changes[created].previous_sha256 is None
+    assert changes[created].new_sha256 == _sha256(created_content)
+    assert changes[created].diff.startswith(f"--- /dev/null\n+++ b/{created}\n")
+    assert changes[OTHER_PATH].op == "delete"
+    assert changes[OTHER_PATH].content is None
+    assert changes[OTHER_PATH].new_sha256 is None
+    assert changes[OTHER_PATH].diff.startswith(f"--- a/{OTHER_PATH}\n+++ /dev/null\n")
+    assert prove_absence.call_count == 2
+
+
+def test_delete_only_uses_repository_specific_empty_transport(tmp_path: Path) -> None:
+    context = _context(delete_paths=[PATH])
+    snapshot = RepositorySnapshotEvidence(
+        plan_id=context.plan_id, request_id=context.request_id, app_id=context.app_id,
+        repository_full_name=context.repository_full_name,
+        baseline_commit_sha=context.baseline_commit_sha, snapshot_digest=context.snapshot_digest,
+        file_manifest={PATH: _sha256(BEFORE)},
+    )
+    workspace = materialize_coding_workspace({PATH: BEFORE}, workspace_root=tmp_path / "worker")
+    (workspace.workspace_root / PATH).unlink()
+    archive = export_repository_workspace_archive(
+        workspace, max_files=1, max_archive_bytes=4096, delete_paths=[PATH]
+    )
+    assert archive == b"mozaiks.repository.empty.v1\n"
+    staged = stage_repository_workspace_archive(
+        context, snapshot=snapshot, selected_paths=[PATH], baseline_files={PATH: BEFORE},
+        archive_bytes=archive, workspace_root=tmp_path / "host", validate_path=Mock(return_value=None),
+        max_files=1, max_archive_bytes=4096,
+    )
+    try:
+        candidate = finalize_repository_patch(
+            context, snapshot=snapshot, selected_paths=[PATH], baseline_files={PATH: BEFORE},
+            workspace=staged,
+            proposal=_proposal(owned_paths=[PATH], changed_files=[ProposedFileChange(path=PATH, op="delete")]),
+            validate_path=Mock(return_value=None),
+        )
+    finally:
+        staged.cleanup()
+    assert [(change.path, change.op) for change in candidate.changed_files] == [(PATH, "delete")]
+
+
+def test_create_only_accepts_empty_selected_baseline_with_full_tree_proof(tmp_path: Path) -> None:
+    context = _context(create_paths=[PATH])
+    snapshot = RepositorySnapshotEvidence(
+        plan_id=context.plan_id, request_id=context.request_id, app_id=context.app_id,
+        repository_full_name=context.repository_full_name,
+        baseline_commit_sha=context.baseline_commit_sha, snapshot_digest=context.snapshot_digest,
+        file_manifest={},
+    )
+    workspace = materialize_coding_workspace({}, workspace_root=tmp_path / "worker")
+    destination = workspace.workspace_root / PATH
+    destination.parent.mkdir(parents=True)
+    destination.write_bytes(AFTER.encode("utf-8"))
+    archive = export_repository_workspace_archive(
+        workspace, max_files=1, max_archive_bytes=4096, create_paths=[PATH]
+    )
+    with pytest.raises(ValueError, match="CREATE_PROOF"):
+        stage_repository_workspace_archive(
+            context, snapshot=snapshot, selected_paths=[], baseline_files={}, archive_bytes=archive,
+            workspace_root=tmp_path / "unproven", validate_path=Mock(return_value=None),
+            max_files=1, max_archive_bytes=4096,
+        )
+    prove_absence = Mock(return_value=None)
+    staged = stage_repository_workspace_archive(
+        context, snapshot=snapshot, selected_paths=[], baseline_files={}, archive_bytes=archive,
+        workspace_root=tmp_path / "host", validate_path=Mock(return_value=None),
+        validate_create_absence=prove_absence, max_files=1, max_archive_bytes=4096,
+    )
+    try:
+        candidate = finalize_repository_patch(
+            context, snapshot=snapshot, selected_paths=[], baseline_files={}, workspace=staged,
+            proposal=_proposal(owned_paths=[PATH], changed_files=[ProposedFileChange(path=PATH, op="create", content=AFTER)]),
+            validate_path=Mock(return_value=None), validate_create_absence=prove_absence,
+        )
+    finally:
+        staged.cleanup()
+    assert candidate.changed_files[0].op == "create"
+    assert candidate.changed_files[0].previous_sha256 is None
+
+
+def test_create_proof_rejects_existing_excluded_or_case_colliding_baseline(tmp_path: Path) -> None:
+    inputs = _inputs(tmp_path)
+    created = "app/modules/support/backend/NEW.py"
+    inputs["context"] = _context(create_paths=[created])
+    inputs["snapshot"] = inputs["snapshot"].model_copy(update={
+        "file_manifest": {**inputs["snapshot"].file_manifest, created.lower(): _sha256("hidden\n")},
+    })
+    archive = export_repository_workspace_archive(
+        inputs["workspace"], max_files=3, max_archive_bytes=4096
+    )
+    with pytest.raises(ValueError, match="CREATE_EXISTS"):
+        stage_repository_workspace_archive(
+            inputs["context"], snapshot=inputs["snapshot"], selected_paths=inputs["selected_paths"],
+            baseline_files=inputs["baseline_files"], archive_bytes=archive,
+            workspace_root=tmp_path / "host", validate_path=Mock(return_value=None),
+            validate_create_absence=Mock(return_value=None), max_files=3, max_archive_bytes=4096,
+        )
+
+
+def test_create_and_delete_outside_exact_grants_are_rejected(tmp_path: Path) -> None:
+    inputs = _inputs(tmp_path)
+    new_path = "app/modules/support/backend/ungranted.py"
+    (inputs["workspace"].workspace_root / new_path).write_bytes(b"ungranted\n")
+    with pytest.raises(ValueError, match="ARCHIVE_SCOPE"):
+        export_repository_workspace_archive(
+            inputs["workspace"], max_files=3, max_archive_bytes=4096
+        )
+    with pytest.raises(ValueError, match="ARCHIVE_OP"):
+        export_repository_workspace_archive(
+            inputs["workspace"], max_files=3, max_archive_bytes=4096,
+            create_paths=["app/modules/support/backend/other.py"],
+        )
+    (inputs["workspace"].workspace_root / new_path).unlink()
+    (inputs["workspace"].workspace_root / OTHER_PATH).unlink()
+    with pytest.raises(ValueError, match="ARCHIVE_SCOPE"):
+        export_repository_workspace_archive(
+            inputs["workspace"], max_files=2, max_archive_bytes=4096
+        )
+    with pytest.raises(ValueError, match="ARCHIVE_OP"):
+        export_repository_workspace_archive(
+            inputs["workspace"], max_files=2, max_archive_bytes=4096, delete_paths=[PATH]
+        )
+
+
+def test_repository_bridge_blocks_case_variant_of_prohibited_path(tmp_path: Path) -> None:
+    inputs = _inputs(tmp_path)
+    inputs["context"] = _context(
+        prohibited_paths=["app/modules/support/backend/SERVICE.py"]
+    )
+    with pytest.raises(ValueError, match="REPOSITORY_PATCH_SCOPE"):
+        finalize_repository_patch(**inputs)
 
 
 def test_archive_transport_reconstructs_approved_baseline_before_finalization(tmp_path: Path) -> None:
@@ -392,7 +561,7 @@ def test_read_only_snapshot_context_cannot_enter_editable_archive(tmp_path: Path
     try:
         candidate = finalize_repository_patch(**{**inputs, "workspace": staged})
         assert [change.path for change in candidate.changed_files] == [PATH]
-        assert candidate.summary == "Selected repository file updates: 1."
+        assert candidate.summary == "Approved repository file operations: 1."
         assert candidate.rationale == (
             "Derived from approved snapshot and host-verified workspace bytes; validation pending."
         )
