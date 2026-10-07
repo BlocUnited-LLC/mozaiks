@@ -2,7 +2,7 @@
 
 Date: 2026-10-07
 
-Status: Proposed. No runtime implementation or live acceptance is authorized by this proposal.
+Status: Accepted. Runtime implementation and live acceptance require their own verification.
 
 ## Decision
 
