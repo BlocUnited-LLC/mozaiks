@@ -261,7 +261,9 @@ python -m pytest -q --no-cov tests/test_acp_worker_image.py
 
 This checks that the selected-file worker and both adapter binaries coexist in
 one disposable image. It does not exercise model-backed coding or authorize
-network access, a credential, or PR publication.
+network access, a credential, or PR publication. The image inherits the proof
+base's Factory and synthetic-agent files; a live worker needs a separate minimal
+image after its isolation decision and acceptance gates are satisfied.
 
 The offline ACP proof image consumes the host's exact `create_paths` and
 `delete_paths` alongside selected files. Its coding provider remains
