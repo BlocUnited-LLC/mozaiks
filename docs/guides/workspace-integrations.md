@@ -47,7 +47,7 @@ Main actions:
 
 | Action | Responsibility |
 |--------|----------------|
-| `list_integrations` | Return catalog entries, environment-derived status, notes, and app usage counts. |
+| `list_integrations` | Return catalog entries, environment-derived status, notes, and usage counts for apps owned by the caller. |
 | `get_integration` | Return one catalog entry with safe setup metadata. |
 | `set_integration_note` | Save an operator note. |
 | `save_workspace_connector` | Save a workspace-scoped connector and vault secret reference. |
@@ -70,6 +70,13 @@ workspace cannot use the connector actions, and `list_app_integration_needs`
 then returns declarations without a connector overlay. With authentication off
 and development access, the action uses the requested workspace, then the
 dispatch workspace or tenant, then `demo-workspace`.
+
+Workspace actions refuse a dispatch workspace or tenant that conflicts with the
+verified principal before storage or message events. App declaration actions
+require the selected app to have an app registry record owned by the caller;
+the app ID in the action must match the dispatch app. Catalog usage counts are
+limited to the caller's registry-owned apps. The AppGenerator tool writes
+declarations through the service directly under its build authorization.
 
 The connector vault uses the same explicit app or workspace scope as the
 metadata record. A workspace connector is never selected by an app ID alone.

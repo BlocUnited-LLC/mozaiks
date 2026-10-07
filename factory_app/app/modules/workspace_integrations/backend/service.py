@@ -12,6 +12,7 @@ from .schemas import (
 )
 
 if TYPE_CHECKING:
+    from factory_app.app.modules.app_registry.backend.service import AppRegistryService
     from mozaiksai.core.runtime.composition.module_context import ModuleContext
 
     from .repo import IntegrationDeclarationsRepo, WorkspaceIntegrationsRepo
@@ -22,6 +23,7 @@ class WorkspaceIntegrationsService:
         self,
         repo: WorkspaceIntegrationsRepo | None = None,
         declarations_repo: IntegrationDeclarationsRepo | None = None,
+        app_registry: AppRegistryService | None = None,
     ) -> None:
         if repo is None:
             from .repo import WorkspaceIntegrationsRepo
@@ -29,8 +31,35 @@ class WorkspaceIntegrationsService:
         if declarations_repo is None:
             from .repo import IntegrationDeclarationsRepo
             declarations_repo = IntegrationDeclarationsRepo()
+        if app_registry is None:
+            from factory_app.app.modules.app_registry.backend.service import AppRegistryService
+
+            app_registry = AppRegistryService()
         self.repo = repo
         self.declarations_repo = declarations_repo
+        self.app_registry = app_registry
+
+    @staticmethod
+    def _caller_owner_id(ctx: ModuleContext) -> str:
+        principal = ctx.persistence.principal if ctx.persistence is not None else None
+        if principal is None or not principal.user_id:
+            raise PermissionError("App integration access requires an authenticated owner.")
+        if principal.source == "development" and getattr(ctx.dispatch_authority, "kind", None) != "local_development":
+            raise PermissionError("App integration access requires an authenticated owner.")
+        return principal.user_id
+
+    async def require_owned_app(self, ctx: ModuleContext, app_id: str) -> None:
+        if not app_id or app_id != ctx.app_id:
+            raise PermissionError("App integration target must match the dispatch app.")
+        owner_id = self._caller_owner_id(ctx)
+        record = await self.app_registry.get_app_record(app_id=app_id, owner_user_id=owner_id)
+        if not isinstance(record.get("app"), dict):
+            raise PermissionError("App integration target is not owned by the caller.")
+
+    async def _owned_app_ids(self, ctx: ModuleContext) -> list[str]:
+        owner_id = self._caller_owner_id(ctx)
+        records = await self.app_registry.list_apps(owner_user_id=owner_id)
+        return [str(app["app_id"]) for app in records.get("apps", []) if isinstance(app, dict) and app.get("app_id")]
 
     @staticmethod
     def _declaration_from_need(
@@ -86,7 +115,10 @@ class WorkspaceIntegrationsService:
             catalog = [e for e in catalog if e["category"] == category]
         catalog_ids = [entry["id"] for entry in catalog]
         try:
-            usage_counts = await self.declarations_repo.get_catalog_usage_counts(catalog_ids=catalog_ids)
+            app_ids = await self._owned_app_ids(ctx)
+            usage_counts = await self.declarations_repo.get_catalog_usage_counts(
+                app_ids=app_ids, catalog_ids=catalog_ids,
+            ) if app_ids else {}
         except Exception:
             usage_counts = {}
 

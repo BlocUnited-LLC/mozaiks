@@ -128,9 +128,53 @@ class _Vault:
 
 
 class _Declarations:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, Any]] = []
+        self.rows = [
+            {"app_id": "built-app", "service": "openai", "catalog_id": "openai", "display_name": "OpenAI",
+             "kind": "api_key", "connector_status": "not_configured", "required_at": "runtime", "optional": False},
+            {"app_id": "foreign-app", "service": "resend", "catalog_id": "resend", "display_name": "Resend",
+             "kind": "api_key", "connector_status": "not_configured", "required_at": "runtime", "optional": False},
+        ]
+
     async def get_for_app(self, *, app_id):
-        return [{"app_id": app_id, "service": "openai", "display_name": "OpenAI", "kind": "api_key",
-                 "connector_status": "not_configured", "required_at": "runtime", "optional": False}]
+        self.calls.append(("get", app_id))
+        return [dict(row) for row in self.rows if row["app_id"] == app_id]
+
+    async def upsert_declarations(self, *, app_id, declarations):
+        self.calls.append(("upsert", app_id))
+        self.rows.extend({**row, "app_id": app_id} for row in declarations)
+        return declarations
+
+    async def soft_delete_declaration(self, *, app_id, service, removed_by=None):
+        self.calls.append(("delete", app_id))
+        for row in self.rows:
+            if row["app_id"] == app_id and row["service"] == service:
+                row["removed"] = True
+                return True
+        return False
+
+    async def get_catalog_usage_counts(self, *, app_ids, catalog_ids=None):
+        self.calls.append(("usage", tuple(app_ids)))
+        return {
+            catalog_id: len({row["app_id"] for row in self.rows if row.get("catalog_id") == catalog_id
+                             and row["app_id"] in app_ids and not row.get("removed")})
+            for catalog_id in (catalog_ids or [])
+        }
+
+
+class _AppRegistry:
+    def __init__(self) -> None:
+        self.owned = {"studio-user": {"built-app"}, "other-user": {"foreign-app"}, "anonymous": {"built-app"}}
+        self.calls: list[tuple[str, str, str | None]] = []
+
+    async def get_app_record(self, *, app_id, owner_user_id):
+        self.calls.append(("get", owner_user_id, app_id))
+        return {"app": {"app_id": app_id} if app_id in self.owned.get(owner_user_id, set()) else None}
+
+    async def list_apps(self, *, owner_user_id):
+        self.calls.append(("list", owner_user_id, None))
+        return {"apps": [{"app_id": app_id} for app_id in sorted(self.owned.get(owner_user_id, set()))]}
 
 
 def _matches(row: dict[str, Any], query: dict[str, Any]) -> bool:
@@ -232,9 +276,12 @@ def studio(monkeypatch):
         clear_auth_config_cache()
         auth_registry.reset_auth_adapter()
 
-    def token(*, workspace: str | None = None, tenant: str | None = None) -> dict[str, str]:
-        claims: dict[str, Any] = {"sub": "studio-user", "iss": "https://auth.test", "aud": "studio-api",
+    def token(*, workspace: str | None = None, tenant: str | None = None,
+              user: str = "studio-user", app_id: str | None = None) -> dict[str, str]:
+        claims: dict[str, Any] = {"sub": user, "iss": "https://auth.test", "aud": "studio-api",
                                   "exp": int(time.time()) + 300, "scp": SCOPES}
+        if app_id is not None:
+            claims["app_id"] = app_id
         if workspace is not None:
             claims["workspace_id"] = workspace
         if tenant is not None:
@@ -246,7 +293,10 @@ def studio(monkeypatch):
     database: defaultdict[str, defaultdict[str, _Collection]] = defaultdict(lambda: defaultdict(_Collection))
     loader = ModuleLoader(str(STUDIO_APP))
     loaded = [loader.load("workspace_integrations"), loader.load("messages")]
-    loaded[0].handler.service.declarations_repo = _Declarations()
+    declarations = _Declarations()
+    registry = _AppRegistry()
+    loaded[0].handler.service.declarations_repo = declarations
+    loaded[0].handler.service.app_registry = registry
     executor = ModuleExecutor(persistence_client=database, persistence_database="studio_scope")
     for module in loaded:
         executor.register_loaded_module(module)
@@ -264,6 +314,7 @@ def studio(monkeypatch):
 
     return SimpleNamespace(
         store=store, vault=vault, hooks=hooks, token=token, client=client, threads=threads,
+        declarations=declarations, registry=registry, executor=executor,
         authenticated=authenticated, development=development,
     )
 
@@ -386,14 +437,14 @@ def test_the_callers_own_connector_workspace_is_served(studio, action, name_it) 
         assert studio.vault.scope_ids == [OWN]
 
 
-def test_listing_returns_only_the_callers_workspace_connectors(studio) -> None:
+def test_a_foreign_dispatch_tenant_is_refused_before_connector_access(studio) -> None:
     studio.authenticated()
     response = _connector(
         studio.client(), "list_workspace_connectors", studio.token(workspace=OWN), context={"tenant_id": FOREIGN},
     )
 
-    assert response.status_code == 200
-    assert [connector["scope_id"] for connector in response.json()["connectors"]] == [OWN]
+    assert response.status_code == 403
+    assert studio.store.calls == []
 
 
 def test_a_host_verified_membership_is_the_connector_workspace(studio) -> None:
@@ -404,12 +455,48 @@ def test_a_host_verified_membership_is_the_connector_workspace(studio) -> None:
     client = studio.client()
 
     assert _connector(client, "list_workspace_connectors", studio.token()).status_code == 200
-    assert _connector(client, "list_workspace_connectors", studio.token(workspace=OWN)).status_code == 200
+    assert _connector(client, "list_workspace_connectors", studio.token(workspace=OWN)).status_code == 403
     assert studio.store.scope_ids() == {"workspace-member"}
 
     refused = _connector(client, "list_workspace_connectors", studio.token(), params={"workspace_id": OWN})
     assert refused.status_code == 403
     assert studio.store.scope_ids() == {"workspace-member"}
+
+
+@pytest.mark.parametrize("action", sorted(CONNECTOR_ACTIONS))
+@pytest.mark.parametrize("request_scope", [
+    {"context": {"workspace_id": FOREIGN}},
+    {"query": f"?workspace_id={FOREIGN}"},
+], ids=["context", "query"])
+def test_a_verified_member_cannot_name_a_different_dispatch_workspace(studio, action, request_scope) -> None:
+    studio.authenticated()
+    studio.hooks.register_bundle(
+        {"module_scope_resolver": lambda **_scope: {"verified_workspace_id": OWN}}, source="test",
+    )
+
+    response = _connector(studio.client(), action, studio.token(), params=CONNECTOR_ACTIONS[action], **request_scope)
+
+    assert response.status_code == 403
+    assert studio.store.calls == []
+    assert studio.vault.scope_ids == []
+
+
+@pytest.mark.parametrize("request_scope", [
+    {"context": {"tenant_id": FOREIGN}},
+    {"query": f"?tenant_id={FOREIGN}"},
+], ids=["context", "query"])
+def test_a_verified_member_cannot_name_a_different_dispatch_tenant(studio, request_scope) -> None:
+    studio.authenticated()
+    studio.hooks.register_bundle(
+        {"module_scope_resolver": lambda **_scope: {
+            "verified_workspace_id": OWN, "verified_tenant_id": "tenant-own",
+        }}, source="test",
+    )
+
+    response = _connector(studio.client(), "list_workspace_connectors", studio.token(), **request_scope)
+
+    assert response.status_code == 403
+    assert studio.store.calls == []
 
 
 def test_a_host_revoking_the_workspace_leaves_no_connector_workspace(studio) -> None:
@@ -431,10 +518,10 @@ def test_an_unverified_host_scope_does_not_select_the_connector_workspace(studio
     )
     client = studio.client()
 
-    assert _connector(client, "list_workspace_connectors", studio.token(workspace=OWN)).status_code == 200
-    assert studio.store.scope_ids() == {OWN}
+    assert _connector(client, "list_workspace_connectors", studio.token(workspace=OWN)).status_code == 403
+    assert studio.store.calls == []
     assert _connector(client, "list_workspace_connectors", studio.token()).status_code == 403
-    assert studio.store.scope_ids() == {OWN}
+    assert studio.store.calls == []
 
 
 def test_app_integration_needs_overlay_only_the_verified_workspace(studio) -> None:
@@ -453,6 +540,63 @@ def test_app_integration_needs_overlay_only_the_verified_workspace(studio) -> No
     assert bound.status_code == 200
     assert bound.json()["declarations"][0]["workspace_connector_status"] == "partial"
     assert studio.store.calls == [("list", ConnectorStore.SCOPE_WORKSPACE, OWN)]
+
+
+DECLARATION_ACTIONS = {
+    "list_app_integration_needs": {},
+    "declare_app_integration_needs": {"needs": [{"service": "sendgrid"}]},
+    "upsert_app_integration_need": {"need": {"service": "twilio"}},
+    "delete_app_integration_need": {"service": "resend"},
+}
+
+
+@pytest.mark.parametrize("action", sorted(DECLARATION_ACTIONS))
+def test_a_signed_app_unbound_caller_cannot_touch_another_owners_declarations(studio, action) -> None:
+    studio.authenticated()
+    response = _connector(
+        studio.client(), action, studio.token(workspace=OWN),
+        params={"app_id": "foreign-app", **DECLARATION_ACTIONS[action]},
+    )
+
+    assert response.status_code == 403
+    assert studio.declarations.calls == []
+    assert studio.store.calls == []
+    assert studio.registry.calls == [("get", "studio-user", "foreign-app")]
+
+
+@pytest.mark.parametrize("action", sorted(DECLARATION_ACTIONS))
+def test_owned_app_declarations_remain_accessible_to_an_app_unbound_caller(studio, action) -> None:
+    studio.authenticated()
+    response = _connector(
+        studio.client(), action, studio.token(workspace=OWN),
+        params={"app_id": "built-app", **DECLARATION_ACTIONS[action]},
+    )
+
+    assert response.status_code == 200, response.text
+    assert studio.declarations.calls == [
+        ("get" if action == "list_app_integration_needs" else
+         "delete" if action == "delete_app_integration_need" else "upsert", "built-app"),
+    ]
+    if action == "list_app_integration_needs":
+        assert [row["service"] for row in response.json()["declarations"]] == ["openai"]
+
+
+def test_catalog_usage_counts_only_registry_owned_apps(studio) -> None:
+    studio.authenticated()
+    client = studio.client()
+    own = _connector(client, "list_integrations", studio.token(workspace=OWN))
+    other = _connector(client, "list_integrations", studio.token(user="other-user", workspace=FOREIGN))
+    unowned = _connector(client, "list_integrations", studio.token(user="third-user"))
+
+    assert own.status_code == other.status_code == unowned.status_code == 200
+    own_counts = {row["id"]: row["app_usage_count"] for row in own.json()["integrations"]}
+    other_counts = {row["id"]: row["app_usage_count"] for row in other.json()["integrations"]}
+    unowned_counts = {row["id"]: row["app_usage_count"] for row in unowned.json()["integrations"]}
+    assert (own_counts["openai"], own_counts["resend"]) == (1, 0)
+    assert (other_counts["openai"], other_counts["resend"]) == (0, 1)
+    assert (unowned_counts["openai"], unowned_counts["resend"]) == (0, 0)
+    assert ("usage", ("foreign-app",)) in studio.declarations.calls
+    assert ("usage", ("built-app",)) in studio.declarations.calls
 
 
 @pytest.mark.parametrize(
@@ -546,9 +690,6 @@ def test_an_identity_without_a_verified_workspace_keeps_app_threads(studio) -> N
 
 def test_workspace_threads_stay_in_the_verified_workspace(studio) -> None:
     studio.authenticated()
-    studio.hooks.register_bundle(
-        {"module_scope_resolver": lambda **_scope: {"workspace_id": FOREIGN}}, source="test",
-    )
     client = studio.client()
     headers = studio.token(workspace=OWN)
 
@@ -581,6 +722,46 @@ def test_a_host_verified_membership_is_the_thread_workspace(studio) -> None:
 
     assert created.status_code == 200, created.text
     assert created.json()["thread"]["scope_id"] == "workspace-member"
+
+
+@pytest.mark.parametrize("request_scope", [
+    {"context": {"workspace_id": FOREIGN}},
+    {"query": f"?workspace_id={FOREIGN}"},
+    {"context": {"tenant_id": FOREIGN}},
+    {"query": f"?tenant_id={FOREIGN}"},
+], ids=["context_workspace", "query_workspace", "context_tenant", "query_tenant"])
+def test_a_mismatched_thread_dispatch_emits_no_foreign_envelope(studio, request_scope) -> None:
+    studio.authenticated()
+    studio.hooks.register_bundle(
+        {"module_scope_resolver": lambda **_scope: {"verified_workspace_id": OWN}}, source="test",
+    )
+    events: list[dict[str, Any]] = []
+
+    async def capture(_event_type, envelope):
+        events.append(envelope)
+
+    studio.executor._event_emitter = capture
+    client = studio.client()
+    headers = studio.token()
+    thread_params = {**WORKSPACE_THREAD, "subject_app_id": "default", "related_type": "test", "related_id": "test"}
+    refused = _message(client, "create_thread", headers, params=thread_params, **request_scope)
+    listed = _message(client, "list_threads", headers, params={"scope_type": "workspace"}, **request_scope)
+
+    assert refused.status_code == listed.status_code == 403
+    assert studio.threads() == []
+    assert events == []
+
+    created = _message(client, "create_thread", headers, params=thread_params, context={"workspace_id": OWN})
+    assert created.status_code == 200, created.text
+    assert len(events) == 1
+    assert events[0]["tenant"]["workspace_id"] == OWN
+    assert events[0]["payload"]["scope_id"] == OWN
+
+    thread_id = created.json()["thread"]["thread_id"]
+    by_id = _message(client, "send_message", headers, params={"thread_id": thread_id, "body": "hello"},
+                     **request_scope)
+    assert by_id.status_code == 403
+    assert len(events) == 1
 
 
 @pytest.mark.parametrize(

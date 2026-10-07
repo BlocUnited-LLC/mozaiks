@@ -75,6 +75,14 @@ def _verified_workspace_id(ctx: ModuleContext) -> str | None:
     return principal.workspace_id or None
 
 
+def _assert_dispatch_scope(ctx: ModuleContext, verified_workspace: str) -> None:
+    principal = ctx.persistence.principal if ctx.persistence is not None else None
+    if ctx.workspace_id and str(ctx.workspace_id) != verified_workspace:
+        raise PermissionError("The dispatch workspace is not the caller's verified workspace.")
+    if ctx.tenant_id and (principal is None or str(ctx.tenant_id) != str(principal.tenant_id or "")):
+        raise PermissionError("The dispatch tenant is not the caller's verified tenant.")
+
+
 def connector_workspace_id(ctx: ModuleContext, requested: str | None = None) -> str:
     """Return the workspace a workspace connector action acts on.
 
@@ -91,6 +99,7 @@ def connector_workspace_id(ctx: ModuleContext, requested: str | None = None) -> 
     verified = _verified_workspace_id(ctx)
     if verified is None:
         raise PermissionError("Workspace connectors require a verified workspace.")
+    _assert_dispatch_scope(ctx, verified)
     if requested not in (None, "") and str(requested) != verified:
         raise PermissionError("The requested workspace is not the caller's verified workspace.")
     return verified
@@ -104,4 +113,7 @@ def connector_overlay_workspace_id(ctx: ModuleContext) -> str | None:
     """
     if _is_local_development(ctx):
         return str(ctx.workspace_id or ctx.tenant_id or _DEVELOPMENT_WORKSPACE_ID)
-    return _verified_workspace_id(ctx)
+    verified = _verified_workspace_id(ctx)
+    if verified:
+        _assert_dispatch_scope(ctx, verified)
+    return verified

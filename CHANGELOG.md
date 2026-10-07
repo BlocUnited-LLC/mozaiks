@@ -379,6 +379,12 @@ This project follows a practical pre-1.0 changelog format:
   workspace selection. Deployments whose tokens carry no workspace claim need
   `AUTH_WORKSPACE_ID_CLAIM` or a host membership hook to use these actions.
 
+- Studio refuses workspace connector and message actions when a selected
+  dispatch workspace or tenant conflicts with verified membership, preventing
+  misleading workspace event provenance. App integration declarations now
+  require an app registry record owned by the caller, and catalog usage counts
+  include only that caller's registered apps.
+
 ### Changed
 
 - Enabled refinement checkpoints now require named profiles with non-empty models; inline capability model settings and unknown capability fields are rejected.

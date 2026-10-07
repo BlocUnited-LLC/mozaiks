@@ -62,7 +62,7 @@ actions:
                 type: ["string", "null"]
               app_usage_count:
                 type: integer
-                description: Number of distinct apps that currently declare this catalog integration.
+                description: Number of the caller's registered apps that currently declare this catalog integration.
         summary:
           type: object
           properties:

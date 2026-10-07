@@ -31,7 +31,13 @@ def _verified_workspace_id(ctx) -> str:
     principal = getattr(getattr(ctx, "persistence", None), "principal", None)
     if principal is None or principal.source != "authenticated":
         return ""
-    return _clean(principal.workspace_id)
+    verified = _clean(principal.workspace_id)
+    if verified and _clean(getattr(ctx, "workspace_id", None)) not in ("", verified):
+        raise PermissionError("workspace message dispatch must match the verified workspace")
+    tenant = _clean(getattr(ctx, "tenant_id", None))
+    if verified and tenant and tenant != _clean(principal.tenant_id):
+        raise PermissionError("workspace message dispatch must match the verified tenant")
+    return verified
 
 
 def _scope_authority(ctx, scope_type: str) -> str:

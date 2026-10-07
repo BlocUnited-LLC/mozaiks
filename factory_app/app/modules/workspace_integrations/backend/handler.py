@@ -62,6 +62,7 @@ class WorkspaceIntegrationsModule:
         **_: object,
     ) -> dict:
         from datetime import UTC, datetime
+        await self.service.require_owned_app(ctx, app_id)
         result = await self.service.declare_app_integration_needs(
             app_id=app_id,
             needs=needs,
@@ -77,11 +78,15 @@ class WorkspaceIntegrationsModule:
     async def list_app_integration_needs(
         self,
         ctx: ModuleContext,
+        *,
+        app_id: str,
         **_: object,
     ) -> dict:
+        workspace_id = connector_overlay_workspace_id(ctx)
+        await self.service.require_owned_app(ctx, app_id)
         return await self.service.list_app_integration_needs(
-            app_id=ctx.app_id,
-            workspace_id=connector_overlay_workspace_id(ctx),
+            app_id=app_id,
+            workspace_id=workspace_id,
         )
 
     async def upsert_app_integration_need(
@@ -94,6 +99,7 @@ class WorkspaceIntegrationsModule:
         **_: object,
     ) -> dict:
         from datetime import UTC, datetime
+        await self.service.require_owned_app(ctx, app_id)
         result = await self.service.upsert_app_integration_need(
             app_id=app_id,
             need=need,
@@ -114,6 +120,7 @@ class WorkspaceIntegrationsModule:
         service: str,
         **_: object,
     ) -> dict:
+        await self.service.require_owned_app(ctx, app_id)
         result = await self.service.delete_app_integration_need(
             app_id=app_id,
             service=service,
