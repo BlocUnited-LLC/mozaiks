@@ -152,12 +152,22 @@ Rules:
 - MongoDB (`Connectors` collection) stores connector metadata, status, timestamps,
   and ownership only — never raw secrets.
 - `ConnectorSecrets` collection stores encrypted secret values managed by
-  `MongoConnectorVaultBackend`. These are framework-internal records, not app data.
+  `MongoConnectorVaultBackend`. Each record is uniquely keyed by
+  `(scope, scope_id, normalized_service)` where `scope` is `app` or `workspace`.
+  These are framework-internal records, not app data.
+- Azure secret names include the scope kind and a digest of the complete connector
+  identity. Reads verify the returned identity tags before releasing a value.
+- The vault backend requires an explicit scope on every save, read, and delete.
+  Unqualified older records are never used as a fallback.
+- Before upgrading an environment with saved connectors, run the private
+  metadata-only inventory described in the workspace integration guide. Old
+  records need operator review; ambiguous records need credential re-entry.
 - Azure Key Vault remains the recommended backend for production deployments that
   already operate Key Vault infrastructure.
 - A connector is `active` when `secret_available: true` (secret stored in vault).
   It is `metadata_only` only when the save itself failed — not simply because no
-  external vault is configured.
+  external vault is configured. Legacy secret metadata does not count as ready
+  after the scoped vault contract is installed.
 
 ### 3. App Business Data
 

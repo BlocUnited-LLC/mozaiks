@@ -15,6 +15,7 @@ from typing import Any, cast
 from mozaiksai.core.data.persistence import ConnectorStore
 from mozaiksai.core.data.persistence.connector_store import normalize_connector_service
 from mozaiksai.core.secrets import describe_connector_vault_backend, get_connector_vault_backend
+from mozaiksai.core.secrets.connector_vault import ConnectorScope, _secret_name
 from mozaiksai.core.workflow.generator_support.connector_health import (
     connector_health_check_supported,
 )
@@ -59,6 +60,23 @@ async def _vault_delete_secret(backend: Any, *, scope: str, scope_id: str, servi
 
 def _normalize_service(service: str) -> str:
     return normalize_connector_service(service)
+
+
+def _qualified_secret_metadata(record: dict[str, Any]) -> bool:
+    """Keep legacy real-vault metadata out of passive readiness results."""
+    if record.get("secret_storage") not in {"mongo", "azure_key_vault"}:
+        return True
+    scope = record.get("scope")
+    scope_id = record.get("scope_id")
+    service = record.get("service")
+    if scope not in {"app", "workspace"} or not isinstance(scope_id, str) or not isinstance(service, str):
+        return False
+    try:
+        return record.get("secret_name") == _secret_name(
+            cast(ConnectorScope, scope), scope_id, service
+        )
+    except ValueError:
+        return False
 
 
 def _connector_identity_fields(
@@ -142,7 +160,9 @@ def compute_connector_health(
     fields = _normalize_required_fields(required_fields or record.get("required_fields"))
     public_config = record.get("public_config") if isinstance(record.get("public_config"), dict) else {}
     missing_fields: list[str] = []
-    has_secret = bool(record.get("secret_available")) or int(record.get("key_length") or 0) > 0
+    has_secret = (
+        bool(record.get("secret_available")) or int(record.get("key_length") or 0) > 0
+    ) and _qualified_secret_metadata(record)
 
     for field in fields:
         if not bool(field.get("required", True)):
@@ -203,7 +223,11 @@ def _with_connector_health(
         required_fields=required_fields,
         checked_by=checked_by,
     )
-    configuration_complete = enriched["health"]["status"] != "not_configured" and not enriched["health"].get("missing_fields")
+    configuration_complete = (
+        enriched["health"]["status"] != "not_configured"
+        and not enriched["health"].get("missing_fields")
+        and _qualified_secret_metadata(enriched)
+    )
     classified = _classify_connector_status(enriched)
     lifecycle_status = classified.get("status")
     # Passive readiness (inventory) never runs live provider health checks.
@@ -297,7 +321,7 @@ def _summarize_connector_inventory(
     ready_services = sorted(ready_candidates)
     known_services = sorted({service for values in by_status.values() for service in values})
     missing_required_services = sorted(required_set - set(ready_services))
-    known_but_unready_required = sorted(required_set & (set(by_status.get("metadata_only", [])) | set(by_status.get("expired", [])) | set(by_status.get("revoked", []))))
+    known_but_unready_required = sorted((required_set & set(known_services)) - set(ready_services))
     entirely_missing_required = sorted(required_set - set(known_services))
 
     return {

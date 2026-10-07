@@ -15,9 +15,10 @@ Covers:
 
   _secret_name:
     - returns string starting with prefix
+    - includes an explicit app or workspace scope
     - contains service slug
-    - contains app_id slug (truncated to 40 chars)
-    - contains 10-char sha1 digest of app_id
+    - contains scope_id slug (bounded)
+    - ends with an untruncated digest of the complete canonical identity
     - total length capped at 127
     - prefix override applied
     - default prefix used when no prefix arg
@@ -29,6 +30,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+
+import pytest
 
 from mozaiksai.core.secrets.connector_vault import (
     _secret_name,
@@ -109,7 +112,7 @@ class TestSecretName:
         result = _secret_name("app", "myapp", "payment_provider")
         assert "myapp" in result
 
-    def test_contains_sha1_digest(self):
+    def test_contains_full_identity_digest(self):
         app_id = "myapp"
         digest = hashlib.sha256(json.dumps(["app", app_id, "payment_provider"], separators=(",", ":")).encode()).hexdigest()[:24]
         result = _secret_name("app", app_id, "payment_provider")
@@ -144,3 +147,27 @@ class TestSecretName:
         r1 = _secret_name("app", "app-1", "payment_provider")
         r2 = _secret_name("app", "app-1", "openai")
         assert r1 != r2
+
+    def test_scope_and_service_aliases_have_distinct_names(self):
+        assert _secret_name("app", "same", "foo_bar") != _secret_name("workspace", "same", "foo_bar")
+        assert _secret_name("app", "same", "foo_bar") != _secret_name("app", "same", "foo-bar")
+
+    def test_long_name_keeps_full_digest(self):
+        scope_id = "id" * 200
+        service = "service" * 80
+        identity = json.dumps(["workspace", scope_id, service], separators=(",", ":"))
+        digest = hashlib.sha256(identity.encode()).hexdigest()[:24]
+        result = _secret_name("workspace", scope_id, service, prefix="prefix" * 100)
+        assert len(result) <= 127
+        assert result.endswith(digest)
+        assert result.startswith("prefix")
+
+    @pytest.mark.parametrize("scope,scope_id,service", [
+        ("tenant", "id", "service"),
+        ("", "id", "service"),
+        ("app", "", "service"),
+        ("app", "id", ""),
+    ])
+    def test_invalid_identity_is_rejected(self, scope, scope_id, service):
+        with pytest.raises(ValueError):
+            _secret_name(scope, scope_id, service)

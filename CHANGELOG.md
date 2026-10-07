@@ -91,6 +91,10 @@ This project follows a practical pre-1.0 changelog format:
   remain outside the observer's verified scope and cannot authorize imported
   Genesis acceptance yet.
 
+- Scoped connector vault keys now separate app and workspace credentials, and
+  older unqualified records fail closed. Self-hosters must inventory existing
+  connector metadata and re-enter any ambiguous credentials before use.
+
 - Studio and refinement-harness source validation now skip repository-defined
   host commands in every auth mode until a trusted isolated runner is supplied.
   Static checks remain available but cannot certify command readiness.

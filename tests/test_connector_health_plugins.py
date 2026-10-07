@@ -419,6 +419,35 @@ def test_workspace_scope_health_check_updates_workspace_connector(monkeypatch) -
     assert provider.calls[0]["secret_available"] is True
 
 
+def test_health_reader_uses_selected_scope_when_identifiers_match(monkeypatch) -> None:
+    store = _store()
+    vault = _FakeVaultBackend()
+
+    class ScopeProvider:
+        provider_id = "scope_probe"
+        supported_integration_ids = ["analytics_provider"]
+
+        async def check(self, *, connector, secret_reader, public_config, context):
+            del connector, public_config
+            handle = await secret_reader.get_secret()
+            expected = "app-value" if context.scope == "app" else "workspace-value"
+            return ConnectorHealthResult(status="healthy" if handle.value == expected else "unhealthy")
+
+    for scope, value in (("app", "app-value"), ("workspace", "workspace-value")):
+        asyncio.run(store.upsert(
+            scope=scope, scope_id="same", service="analytics_provider", status="active",
+            secret_storage="fake_vault", secret_available=True, key_length=len(value),
+        ))
+        vault.secrets[(scope, "same", "analytics_provider")] = value
+    monkeypatch.setattr(connector_health, "get_connector_vault_backend", lambda: vault)
+    register_connector_health_provider(ScopeProvider())
+    for scope in ("app", "workspace"):
+        result = asyncio.run(run_connector_health_check(
+            scope=scope, scope_id="same", service="analytics_provider", store=store
+        ))
+        assert result["status"] == "healthy"
+
+
 def test_collect_missing_connector_needs_does_not_run_provider_health(monkeypatch) -> None:
     provider = _DemoHealthProvider()
     register_connector_health_provider(provider)

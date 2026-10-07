@@ -60,6 +60,35 @@ Main actions:
 
 No action returns raw secret values.
 
+The connector vault uses the same explicit app or workspace scope as the
+metadata record. A workspace connector is never selected by an app ID alone.
+App-level overrides and workspace defaults remain distinct even when their
+identifiers and service names happen to match.
+
+### Existing vault records before 0.2.0
+
+The scoped vault contract does not read old unqualified secrets. From a
+private operator session with read access to the intended environment, run a
+dry-run inventory:
+
+```powershell
+python scripts/inventory_connector_vault.py --provider mongo --report <private-new-report-path>
+```
+
+For Azure Key Vault, use `--provider azure_key_vault`. The script projects
+only connector metadata and vault properties, including version properties;
+it never retrieves, decrypts, copies, or prints a credential. It writes
+counts, opaque record references, and a fingerprint to the private report.
+Re-run with
+`--expect-fingerprint <reviewed-fingerprint>` to detect changed metadata.
+There is no automatic apply operation. A report with legacy, missing,
+duplicate, or mismatched entries blocks readiness. A single old record still
+needs operator review; a collision cannot establish which scope owns its
+remaining value. Re-enter credentials separately through the correct scoped
+Studio UI when ownership is ambiguous. Keep old vault records as rollback
+material until a separately reviewed cleanup; do not copy one ambiguous value
+into both scopes.
+
 ## Build Workflow
 
 AppGenerator owns the build-time flow:

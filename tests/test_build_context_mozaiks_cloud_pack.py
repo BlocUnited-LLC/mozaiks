@@ -524,6 +524,7 @@ def test_mozaiks_cloud_transport_client_reads_credentials_from_env_or_connector(
     assert "get_connector_vault_backend" in client_text, (
         "mozaiks_cloud_client.py must use the connector vault for secret resolution"
     )
+    assert "scope=ConnectorStore.SCOPE_APP" in client_text
 
 
 def test_mozaiks_cloud_client_no_hardcoded_credentials() -> None:

@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 from mozaiksai.core.workflow.generator_support.connector_service import (
     compute_connector_health,
+    delete_connector,
     get_connector,
     get_connector_inventory,
     get_secret,
@@ -366,6 +367,47 @@ def test_connector_service_uses_vault_backend_when_available(monkeypatch) -> Non
     assert connector["health"]["missing_fields"] == []
     assert secret["success"] is True
     assert secret["secret_value"] == SECRET_VALUE
+
+
+def test_legacy_vault_metadata_does_not_report_connector_ready() -> None:
+    store = ConnectorStore(pm=_FakePersistenceManager())
+    asyncio.run(store.upsert(
+        scope="app",
+        scope_id="same",
+        service="payment_provider",
+        status="active",
+        secret_storage="mongo",
+        secret_available=True,
+        key_length=20,
+        extra={"secret_name": "legacy-unqualified-name"},
+    ))
+    record = asyncio.run(get_connector(scope="app", scope_id="same", service="payment_provider", store=store))
+    assert record is not None
+    assert record["ready"] is False
+    assert record["configured"] is False
+    inventory = asyncio.run(get_connector_inventory(
+        scope="app", scope_id="same", required_services=["payment_provider"], store=store
+    ))
+    assert inventory["ready_services"] == []
+    assert inventory["known_but_unready_required_services"] == ["payment_provider"]
+
+
+def test_service_save_get_and_delete_keep_app_and_workspace_secrets_apart(monkeypatch) -> None:
+    import mozaiksai.core.workflow.generator_support.connector_service as connector_service
+
+    store = ConnectorStore(pm=_FakePersistenceManager())
+    backend = _FakeVaultBackend()
+    monkeypatch.setattr(connector_service, "get_connector_vault_backend", lambda: backend)
+    for scope, value in (("app", "app-value"), ("workspace", "workspace-value")):
+        stored = asyncio.run(save_connector(
+            scope=scope, scope_id="same", service="billing", secret_value=value, store=store
+        ))
+        assert stored["success"]
+        assert asyncio.run(get_secret(scope=scope, scope_id="same", service="billing"))["secret_value"] == value
+    deleted = asyncio.run(delete_connector(scope="app", scope_id="same", service="billing", store=store))
+    assert deleted["secret_deleted"]
+    assert asyncio.run(get_secret(scope="app", scope_id="same", service="billing"))["success"] is False
+    assert asyncio.run(get_secret(scope="workspace", scope_id="same", service="billing"))["secret_value"] == "workspace-value"
 
 
 def test_connector_inventory_summarizes_ready_vs_missing_services(monkeypatch) -> None:
