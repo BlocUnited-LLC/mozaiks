@@ -1033,7 +1033,9 @@ async def _scan_github_repo(github_repo: str, github_ref: str | None, github_tok
         return {"success": False, "error": f"Invalid github_repo '{github_repo}'"}
 
     owner, repo = normalized_repo.split("/", 1)
-    token = github_token or os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN")
+    # Only the token resolved for this discovery session may authorize reads.
+    # A server-wide token could expose a private repository to another user.
+    token = github_token
     async with httpx.AsyncClient(
         timeout=httpx.Timeout(15.0, connect=10.0),
         limits=httpx.Limits(max_connections=20, max_keepalive_connections=20),
@@ -1216,7 +1218,7 @@ async def _collect_github_context_graph_file_map(
     )
 
     policy = default_context_graph_scan_policy(scan_policy_inputs)
-    token = github_token or os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN")
+    token = github_token
     candidates: list[tuple[int, int, str, str, str, str, str, str]] = []
     warnings: list[str] = []
     access_issues: list[dict[str, Any]] = []

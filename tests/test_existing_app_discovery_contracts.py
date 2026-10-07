@@ -1146,13 +1146,15 @@ def test_existing_app_github_repo_scan_returns_access_recovery_for_private_repo(
         def json(self) -> dict:
             return {"message": "Not Found"}
 
+    seen_tokens: list[str | None] = []
+
     async def _fake_github_request(url: str, token: str | None, **kwargs):
         assert url.endswith("/repos/BlocUnited-LLC/mozaiks-app")
-        assert token is None
+        seen_tokens.append(token)
         return _FakeResponse()
 
-    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
-    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.setenv("GITHUB_TOKEN", "server-wide-token-must-not-be-used")
+    monkeypatch.setenv("GH_TOKEN", "server-wide-token-must-not-be-used")
     monkeypatch.setattr(module, "_github_request", _fake_github_request)
 
     result = asyncio.run(module._scan_github_repo("https://github.com/BlocUnited-LLC/mozaiks-app", None))
@@ -1165,6 +1167,8 @@ def test_existing_app_github_repo_scan_returns_access_recovery_for_private_repo(
     assert result["repo_access_recovery"]["http_status"] == 404
     assert result["repo_access_recovery"]["auth_present"] is False
     assert result["repo_access_recovery"]["recovery_actions"][0]["id"] == "connect_github"
+    asyncio.run(module._scan_github_repo("BlocUnited-LLC/mozaiks-app", None, "session-token"))
+    assert seen_tokens == [None, "session-token"]
 
 
 def test_existing_app_github_context_graph_sets_access_recovery_on_lookup_failure(
@@ -1181,13 +1185,15 @@ def test_existing_app_github_context_graph_sets_access_recovery_on_lookup_failur
         def json(self) -> dict:
             return {"message": "Not Found"}
 
+    seen_tokens: list[str | None] = []
+
     async def _fake_github_request(url: str, token: str | None, **kwargs):
         assert url.endswith("/repos/BlocUnited-LLC/mozaiks-app")
-        assert token is None
+        seen_tokens.append(token)
         return _FakeResponse()
 
-    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
-    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.setenv("GITHUB_TOKEN", "server-wide-token-must-not-be-used")
+    monkeypatch.setenv("GH_TOKEN", "server-wide-token-must-not-be-used")
     monkeypatch.setattr(module, "_github_request", _fake_github_request)
 
     result = asyncio.run(
@@ -1203,6 +1209,14 @@ def test_existing_app_github_context_graph_sets_access_recovery_on_lookup_failur
     assert result.health["access_issues"][0]["github_repo"] == "BlocUnited-LLC/mozaiks-app"
     assert result.health["skipped"]["github_repo_lookup_failed"] == 1
     assert result.warnings == ["github_repo_lookup_failed:BlocUnited-LLC/mozaiks-app:404"]
+    asyncio.run(
+        module._collect_github_context_graph_file_map(
+            [("", "BlocUnited-LLC/mozaiks-app")],
+            github_ref=None,
+            github_token="session-token",
+        )
+    )
+    assert seen_tokens == [None, "session-token"]
 
 
 def test_existing_app_preload_builds_context_graph_pack_for_github_repo_url(

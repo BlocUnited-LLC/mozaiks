@@ -60,6 +60,10 @@ This project follows a practical pre-1.0 changelog format:
 - Imported repository validation commands and Git imports now receive a
   minimal process environment instead of the host's runtime secrets.
 
+- ExistingAppDiscovery GitHub scans use only the token resolved for the current
+  discovery session; they no longer inherit a server-wide GitHub token when a
+  caller has not connected an account.
+
 - Patched DOMPurify and source-map-js in the shipped frontend dependency locks,
   including Monaco's nested DOMPurify dependency.
 
