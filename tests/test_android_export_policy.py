@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import zlib
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -23,6 +24,13 @@ PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4"
     "DwABBAEAX+XDSwAAAABJRU5ErkJggg=="
 )
+
+
+def _png_with_text(kind: bytes, payload: bytes) -> bytes:
+    assert PNG[-8:-4] == b"IEND"
+    chunk = len(payload).to_bytes(4, "big") + kind + payload
+    chunk += zlib.crc32(kind + payload).to_bytes(4, "big")
+    return PNG[:-12] + chunk + PNG[-12:]
 
 
 def _write(root: Path, name: str, content: str | bytes) -> None:
@@ -127,10 +135,21 @@ def test_known_private_paths_are_rejected_even_without_a_recognizable_token(expo
     ("app/config/integration.ini", f"[provider]\nAPI_TOKEN={SYNTHETIC_TOKEN}\n"),
     ("workflows/Fixture/tools/provider.conf", f"API_TOKEN={SYNTHETIC_TOKEN}\n"),
     ("app/config/integration.toml", f"API_TOKEN={SYNTHETIC_TOKEN}\n"),
+    ("app/config/provider.toml", f"API_TOKEN = '''{SYNTHETIC_TOKEN}'''\n"),
+    ("app/config/runtime.txt", f"API_TOKEN={SYNTHETIC_TOKEN}\n"),
+    ("app/config/provider.json", json.dumps({"authHeader": f"Bearer {SYNTHETIC_TOKEN}"})),
+    ("app/config/provider.json", json.dumps({"authorizationHeader": f"Basic {SYNTHETIC_TOKEN}"})),
+    ("app/config/provider.json", json.dumps({"access_token_b64": base64.b64encode(SYNTHETIC_TOKEN.encode()).decode()})),
+    ("app/services/provider.py", (
+        'PART_ONE = "SYNTHETIC_NOT_A_REAL_"\n'
+        'PART_TWO = "TOKEN_1234567890"\n'
+        'API_TOKEN = PART_ONE + PART_TWO\n'
+    )),
     ("workflows/Fixture/tools/provider.properties", f"API_TOKEN={SYNTHETIC_TOKEN}\n"),
     ("app/config/integration.json", json.dumps({
         "url": f"https://user:{SYNTHETIC_TOKEN}@api.example.invalid",
     })),
+    ("app/services/integration_catalog.py", 'POSTGRES_EXAMPLE = "postgresql://user:pass@db.example.net:5432/dbname"\n'),
     ("app/services/config.py", f'API_TOKEN: str = "{SYNTHETIC_TOKEN}"\n'),
     ("app/services/config.py", f'API_TOKEN = (\n    "{SYNTHETIC_TOKEN}"\n)\n'),
     ("app/services/config.py", f'CONFIG = {{"token": "{SYNTHETIC_TOKEN}"}}\n'),
@@ -174,6 +193,29 @@ def test_obvious_credential_values_in_app_and_workflow_inputs_fail_closed(export
         '<svg xmlns="http://www.w3.org/2000/svg"><metadata>'
         + json.dumps({"access_token": SYNTHETIC_TOKEN}) + "</metadata></svg>"
     )),
+    ("app/brand/assets/logo.svg", (
+        '<svg xmlns="http://www.w3.org/2000/svg"><metadata><access_token>'
+        + SYNTHETIC_TOKEN + "</access_token></metadata></svg>"
+    )),
+    ("app/brand/assets/logo.svg", (
+        '<svg xmlns="http://www.w3.org/2000/svg" '
+        + 'data-access-token="' + SYNTHETIC_TOKEN + '" />'
+    )),
+    ("app/brand/assets/icon.png", _png_with_text(
+        b"tEXt", b"Access Token\0" + SYNTHETIC_TOKEN.encode(),
+    )),
+    ("app/brand/assets/icon.png", _png_with_text(
+        b"zTXt", b"access_token\0\0" + zlib.compress(SYNTHETIC_TOKEN.encode()),
+    )),
+    ("app/brand/assets/icon.png", _png_with_text(
+        b"iTXt", b"Description\0\x01\0en\0Access Token\0"
+        + zlib.compress(SYNTHETIC_TOKEN.encode()),
+    )),
+    ("app/brand/assets/icon.png", _png_with_text(
+        b"zTXt", b"Title\0\0" + zlib.compress(b"x" * (1024 * 1024 + 1)),
+    )),
+    ("app/brand/assets/icon.png", PNG + b"trailing bytes"),
+    ("app/brand/assets/logo.svg", '<!DOCTYPE svg><svg xmlns="http://www.w3.org/2000/svg"/>'),
 ])
 def test_public_brand_surface_accepts_only_declared_asset_types(export_input, name, content):
     workspace, spec, output = export_input
@@ -215,9 +257,18 @@ def test_both_archives_preserve_public_assets_and_names_only_secret_inputs(expor
     workspace, spec, output = export_input
     safe_inputs = {
         "app/brand/icon.png": PNG,
+        "app/brand/assets/metadata.png": _png_with_text(
+            b"tEXt", b"Access Token\0${INTEGRATION_API_TOKEN}",
+        ),
+        "app/brand/assets/title.png": _png_with_text(b"tEXt", b"Title\0Public logo"),
         "app/brand/assets/logo.svg": (
             b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1">'
             b'<path d="M0 0h1v1H0z"/></svg>'
+        ),
+        "app/brand/assets/metadata.svg": (
+            b'<svg xmlns="http://www.w3.org/2000/svg"><metadata>'
+            b'<access_token>${INTEGRATION_API_TOKEN}</access_token>'
+            b'</metadata></svg>'
         ),
         "app/brand/theme_config.json": json.dumps({
             "identity": {"name": "Source export"},
@@ -256,6 +307,12 @@ def test_both_archives_preserve_public_assets_and_names_only_secret_inputs(expor
         "app/.env.example": b"INTEGRATION_API_TOKEN=\nINTEGRATION_REFRESH_TOKEN=\n",
         "app/config/provider.json": (
             b'{"url":"https://user:${INTEGRATION_PASSWORD}@api.example.invalid"}'
+        ),
+        "app/config/header.json": b'{"authHeader":"Bearer ${INTEGRATION_API_TOKEN}"}',
+        "app/config/provider.toml": b'[provider]\napi_token_env = "INTEGRATION_API_TOKEN"\napi_token = "${INTEGRATION_API_TOKEN}"\n',
+        "app/config/runtime.txt": b'API_TOKEN=${INTEGRATION_API_TOKEN}\n',
+        "app/services/integration_catalog.py": (
+            b'POSTGRES_EXAMPLE = "postgresql://user:pass@host:port/dbname"\n'
         ),
     }
     for name, content in safe_inputs.items():

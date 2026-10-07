@@ -10,7 +10,9 @@ from __future__ import annotations
 import ast
 import json
 import re
+import tomllib
 import xml.etree.ElementTree as ET
+import zlib
 from pathlib import PurePosixPath
 
 import yaml
@@ -31,26 +33,38 @@ _ASSIGNMENT = re.compile(r'''(?<![\w$-])["']?(?P<key>[A-Za-z_$][\w$-]*)["']?\s*\
 _QUOTED = re.compile(r'''^(?P<prefix>[rubfRUBF]{0,2})(?P<quote>["'`])(?P<value>(?:\\.|(?!\2).)*?)\2''', re.DOTALL)
 _MARKERS = re.compile(r"-----BEGIN (?:[A-Z ]*PRIVATE KEY|OPENSSH PRIVATE KEY)-----|\bghp_[A-Za-z0-9]{30,}|\bgithub_pat_[A-Za-z0-9_]{30,}|\bAKIA[0-9A-Z]{16}\b")
 _URI_USERINFO = re.compile(r'''\b[a-z][a-z0-9+.-]*://(?P<userinfo>[^\s/'"<>@?#]+)@''', re.IGNORECASE)
-_UNQUOTED_CONFIG = {".ini", ".conf", ".cfg", ".toml", ".properties"}
+_DOCUMENTATION_URI = "postgresql://user:pass@host:port/dbname"
+_UNQUOTED_CONFIG = {".ini", ".conf", ".cfg", ".toml", ".properties", ".txt"}
+_PNG_TEXT_LIMIT = 1024 * 1024
+_PNG_TOTAL_TEXT_LIMIT = 2 * _PNG_TEXT_LIMIT
 
 
 def _credential_key(value: str) -> bool:
-    value = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", value).lower().replace("-", "_")
+    value = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", value)
+    value = re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
     if value.endswith(("_env", "_ref", "_name", "_names", "_type", "_url", "_uri")):
         return value in {"mongo_uri", "mongodb_uri", "database_url", "database_uri", "redis_url"}
-    value = value.removesuffix("_value").removesuffix("_hash")
+    for suffix in ("_value", "_hash", "_b64", "_base64", "_hex", "_encoded"):
+        value = value.removesuffix(suffix)
     parts = value.split("_")
     return (
         parts[-1] == "key" and bool(set(parts) & {"api", "secret", "private", "access", "signing"})
     ) or parts[-1] in {"token", "secret", "password", "passwd", "pwd", "credential", "credentials", "authorization"} or value in {
         "apikey", "privatekey", "connectionstring", "connection_string", "dsn",
-    } or value.endswith("_connection_string")
+    } or value.endswith("_connection_string") or value in {"auth_header", "authorization_header"}
 
 
 def _literal_secret(value: object) -> bool:
     if value is None or isinstance(value, bool) or value == "":
         return False
-    return not (isinstance(value, str) and _REFERENCE.fullmatch(value.strip()))
+    if isinstance(value, str):
+        normalized = value.strip()
+        if _REFERENCE.fullmatch(normalized):
+            return False
+        scheme = re.fullmatch(r"(?:Bearer|Basic)\s+(.+)", normalized, re.IGNORECASE)
+        if scheme and _REFERENCE.fullmatch(scheme[1]):
+            return False
+    return True
 
 
 def _structured_credentials(
@@ -96,12 +110,33 @@ def _python_literals(node: ast.AST):
                 yield from _python_literals(keyword.value)
 
 
+def _python_static_join(node: ast.AST, bindings: dict[str, str]) -> str | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.Name):
+        return bindings.get(node.id)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left = _python_static_join(node.left, bindings)
+        right = _python_static_join(node.right, bindings)
+        if left is not None and right is not None:
+            return left + right
+    return None
+
+
 def _python_credentials(text: str) -> bool:
     try:
         tree = ast.parse(text)
     except (SyntaxError, ValueError):
         # General literal scanning still applies to unsupported source syntax.
         return False
+    bindings = {
+        target.id: node.value.value
+        for node in tree.body
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant)
+        and isinstance(node.value.value, str)
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    }
     for node in ast.walk(tree):
         if isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr)):
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
@@ -114,6 +149,9 @@ def _python_credentials(text: str) -> bool:
                 elif isinstance(target, ast.Subscript) and isinstance(target.slice, ast.Constant):
                     keys.append(str(target.slice.value))
             if node.value is not None and any(_credential_key(key) for key in keys):
+                joined = _python_static_join(node.value, bindings)
+                if joined is not None and _literal_secret(joined):
+                    return True
                 if any(_literal_secret(value) for value in _python_literals(node.value)):
                     return True
     return False
@@ -124,6 +162,13 @@ def _text_credentials(text: str, *, unquoted_config: bool = False) -> bool:
         return True
     for match in _URI_USERINFO.finditer(text):
         # URL userinfo is a credential even when its enclosing key is just "url".
+        # This exact example has a nonnumeric port and a documentation hostname.
+        example_end = match.start() + len(_DOCUMENTATION_URI)
+        if (
+            text[match.start():example_end] == _DOCUMENTATION_URI
+            and (example_end == len(text) or text[example_end] in "\"'` )\n\r\t,;")
+        ):
+            continue
         password = match["userinfo"].partition(":")[2] if ":" in match["userinfo"] else match["userinfo"]
         if _literal_secret(password):
             return True
@@ -182,6 +227,76 @@ def _valid_binary(suffix: str, raw: bytes) -> bool:
     return raw.startswith(signatures[suffix])
 
 
+def _png_text(raw: bytes) -> list[tuple[str, str]]:
+    """Read bounded standard PNG text chunks; fail closed on malformed chunks."""
+    position = 8
+    total_text = 0
+    total_decoded = 0
+    found_end = False
+    metadata = []
+    while position + 12 <= len(raw):
+        length = int.from_bytes(raw[position:position + 4], "big")
+        end = position + 12 + length
+        if end > len(raw):
+            raise ValueError("Invalid PNG chunk")
+        kind = raw[position + 4:position + 8]
+        payload = raw[position + 8:end - 4]
+        checksum = int.from_bytes(raw[end - 4:end], "big")
+        if zlib.crc32(payload, zlib.crc32(kind)) != checksum:
+            raise ValueError("Invalid PNG checksum")
+        if position == 8 and (kind != b"IHDR" or length != 13):
+            raise ValueError("Invalid PNG header")
+        if kind in {b"tEXt", b"zTXt", b"iTXt"}:
+            total_text += length
+            if length > _PNG_TEXT_LIMIT or total_text > _PNG_TOTAL_TEXT_LIMIT:
+                raise ValueError("PNG metadata exceeds limit")
+            keyword, separator, remainder = payload.partition(b"\0")
+            if not separator or not keyword or len(keyword) > 79:
+                raise ValueError("Invalid PNG text keyword")
+            if kind == b"tEXt":
+                value = remainder.decode("latin-1")
+            elif kind == b"zTXt":
+                if not remainder.startswith(b"\0"):
+                    raise ValueError("Invalid compressed PNG text")
+                value = _inflate_png_text(remainder[1:]).decode("latin-1")
+            else:
+                if len(remainder) < 2 or remainder[0] not in (0, 1) or remainder[1] != 0:
+                    raise ValueError("Invalid international PNG text")
+                compressed = remainder[0] == 1
+                language, separator, remainder = remainder[2:].partition(b"\0")
+                if not separator or any(byte > 127 for byte in language):
+                    raise ValueError("Invalid international PNG language")
+                translated, separator, value_bytes = remainder.partition(b"\0")
+                if not separator:
+                    raise ValueError("Invalid international PNG text")
+                if compressed:
+                    value_bytes = _inflate_png_text(value_bytes)
+                value = value_bytes.decode("utf-8")
+                if translated:
+                    metadata.append((translated.decode("utf-8"), value))
+            total_decoded += len(value)
+            if total_decoded > _PNG_TOTAL_TEXT_LIMIT:
+                raise ValueError("PNG text exceeds limit")
+            metadata.append((keyword.decode("latin-1"), value))
+        position = end
+        if kind == b"IEND":
+            if length or position != len(raw):
+                raise ValueError("Invalid PNG end")
+            found_end = True
+            break
+    if not found_end:
+        raise ValueError("Missing PNG end")
+    return metadata
+
+
+def _inflate_png_text(raw: bytes) -> bytes:
+    inflater = zlib.decompressobj()
+    value = inflater.decompress(raw, _PNG_TEXT_LIMIT + 1)
+    if len(value) > _PNG_TEXT_LIMIT or not inflater.eof or inflater.unused_data or inflater.unconsumed_tail:
+        raise ValueError("Invalid compressed PNG text")
+    return value
+
+
 def validate_android_export_file(name: str, raw: bytes) -> None:
     """Apply the same admission rule to every captured app or workflow file."""
     path = PurePosixPath(name.lower())
@@ -212,17 +327,41 @@ def validate_android_export_file(name: str, raw: bytes) -> None:
     forbidden = _text_credentials(text, unquoted_config=path.suffix in _UNQUOTED_CONFIG)
     if path.suffix == ".svg":
         try:
-            if ET.fromstring(text).tag not in {"svg", "{http://www.w3.org/2000/svg}svg"}:
+            if "<!DOCTYPE" in text.upper() or "<!ENTITY" in text.upper():
+                raise ValueError("XML entity declarations are not supported")
+            svg = ET.fromstring(text)
+            if svg.tag not in {"svg", "{http://www.w3.org/2000/svg}svg"}:
                 raise ValueError("Not an SVG root")
+            for element in svg.iter():
+                if _credential_key(element.tag.rpartition("}")[2]) and _literal_secret("".join(element.itertext()).strip()):
+                    forbidden = True
+                if any(
+                    _credential_key(key.rpartition("}")[2]) and _literal_secret(value)
+                    for key, value in element.attrib.items()
+                ):
+                    forbidden = True
         except (ET.ParseError, ValueError):
+            raise ValueError(f"Public asset content does not match its declared type: {name}") from None
+    if path.suffix == ".png":
+        try:
+            metadata = _png_text(raw)
+            forbidden = forbidden or any(
+                (_credential_key(key) and _literal_secret(value)) or _text_credentials(value, unquoted_config=True)
+                for key, value in metadata
+            )
+        except (UnicodeError, ValueError, zlib.error):
             raise ValueError(f"Public asset content does not match its declared type: {name}") from None
     if path.suffix == ".py":
         forbidden = forbidden or _python_credentials(text)
     if secret_contract:
         validate_secret_contract_text(text)
-    if path.suffix in {".json", ".yaml", ".yml"}:
+    if path.suffix in {".json", ".yaml", ".yml", ".toml"}:
         try:
-            value = json.loads(text) if path.suffix == ".json" else yaml.safe_load(text)
+            value = (
+                json.loads(text) if path.suffix == ".json"
+                else tomllib.loads(text) if path.suffix == ".toml"
+                else yaml.safe_load(text)
+            )
             forbidden = forbidden or _structured_credentials(value)
         except (ValueError, yaml.YAMLError, RecursionError):
             raise ValueError(f"Invalid export configuration: {name}") from None
