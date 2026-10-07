@@ -1300,7 +1300,7 @@ async def index_studio_app_intelligence_context(
 ):
     validate_path_id(app_id, "app_id")
     resolved_app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
-    _authorize_http_source_import(body)
+    _authorize_http_source_import(body, principal=principal)
     return await _start_studio_app_intelligence_index_job(
         app_id=resolved_app_id,
         user_id=user_id,
@@ -1318,7 +1318,7 @@ async def import_studio_app_source_context(
 ):
     validate_path_id(app_id, "app_id")
     resolved_app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
-    _authorize_http_source_import(body)
+    _authorize_http_source_import(body, principal=principal)
     return await _start_studio_app_intelligence_index_job(
         app_id=resolved_app_id,
         user_id=user_id,
@@ -1384,10 +1384,12 @@ async def run_studio_app_source_validation(
     )
 
 
-def _authorize_http_source_import(body: AppIntelligenceIndexRequest) -> None:
+def _authorize_http_source_import(
+    body: AppIntelligenceIndexRequest, *, principal: UserPrincipal,
+) -> None:
     """Keep server filesystem paths out of authenticated Studio requests."""
     if body.source_kind == "local_workspace":
-        require_http_local_source_mode()
+        require_http_local_source_mode(principal)
 
 
 async def _start_studio_app_intelligence_index_job(
@@ -2692,7 +2694,7 @@ async def trigger_workflow(
     principal: UserPrincipal = Depends(require_studio_user),
 ):
     app_id, user_id = _resolve_studio_scope(principal, app_id=body.app_id, user_id=body.user_id)
-    authorize_http_workflow_source_paths(body.context_variables)
+    authorize_http_workflow_source_paths(body.context_variables, principal=principal)
     retry_contribution = None
     if body.retry_failed:
         try:

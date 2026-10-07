@@ -116,7 +116,7 @@ async def resolve_transition_route(
     from logs.logging_config import get_workflow_logger
 
     _logger = get_workflow_logger("transitions_router")
-    authorize_http_workflow_source_paths(body.context_variables)
+    authorize_http_workflow_source_paths(body.context_variables, principal=principal)
     try:
         app_id, user_id = resolve_scope_from_principal(principal, app_id=body.app_id, user_id=body.user_id)
         launch_result = await launch_transition(
