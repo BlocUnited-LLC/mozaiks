@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from mozaiksai.control_plane import app_validation as validation_module
 from mozaiksai.control_plane.app_validation import (
     plan_app_source_validation_commands,
     run_app_source_validation,
@@ -122,10 +123,49 @@ def test_validation_child_process_does_not_receive_host_secret(tmp_path: Path, m
             [{"kind": "test", "command": "python check_env.py", "working_directory": "."}]
         ),
         confirm_execution=True,
+        command_runner=validation_module._run_subprocess_command,
     )
 
     assert result.validation_status == "passed", result.command_results
     assert result.command_results[0].status == "passed"
+
+
+@pytest.mark.parametrize(
+    ("auth_enabled", "auth_provider", "anon_access"),
+    [("true", "jwt", "open"), ("false", "none", "local"), ("false", "none", "open")],
+)
+def test_default_source_validation_does_not_run_repository_code(
+    tmp_path: Path, monkeypatch, auth_enabled: str, auth_provider: str, anon_access: str,
+) -> None:
+    monkeypatch.setenv("AUTH_ENABLED", auth_enabled)
+    monkeypatch.setenv("AUTH_PROVIDER", auth_provider)
+    monkeypatch.setenv("AUTH_ANON_ACCESS", anon_access)
+    monkeypatch.setenv("AUTH_AUDIENCE", "source-validation-test")
+    workspace = tmp_path / "imported-repository"
+    workspace.mkdir()
+    marker = tmp_path / "host-marker"
+    (workspace / "pyproject.toml").write_text("[project]\nname = 'audit'\n", encoding="utf-8")
+    (workspace / "test_host_access.py").write_text(
+        "from pathlib import Path\n"
+        f"def test_host_access():\n    Path({str(marker)!r}).write_text('executed')\n",
+        encoding="utf-8",
+    )
+
+    result = run_app_source_validation(
+        app_id="app_1",
+        workspace_root=workspace,
+        framework_detection=_framework_detection(
+            [{"kind": "test", "command": "python -m pytest", "working_directory": "."}]
+        ),
+        confirm_execution=True,
+    )
+
+    assert not marker.exists()
+    assert result.command_results == []
+    assert result.planned_commands[0].status == "skipped"
+    assert result.planned_commands[0].skip_reason == "host_command_execution_requires_isolation"
+    assert result.validation_status == "warning"
+    assert any(check.name == "python_syntax" and check.status == "passed" for check in result.fallback_checks)
 
 
 def test_app_source_validation_rejects_unsafe_commands_and_uses_fallback(tmp_path: Path) -> None:

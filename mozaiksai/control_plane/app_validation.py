@@ -244,11 +244,13 @@ def run_app_source_validation(
     command_runner: ValidationCommandRunner | None = None,
     source: Literal["app_intelligence_context", "explicit_workspace"] = "explicit_workspace",
 ) -> AppSourceValidationResult:
-    """Run framework-aware validation commands in an isolated source workspace.
+    """Run framework-aware validation in a disposable workspace copy by default.
 
     Command execution is intentionally opt-in through ``confirm_execution``.
     Detected commands run with ``shell=False`` after argv parsing, executable
-    allowlisting, and working-directory containment checks.
+    allowlisting, and working-directory containment checks. Repository-defined
+    commands require a trusted injected runner; the default host subprocess is
+    blocked because a workspace copy and reduced environment do not isolate it.
     """
     started = datetime.now(UTC)
     start_monotonic = time.monotonic()
@@ -316,14 +318,24 @@ def run_app_source_validation(
             warnings=[*warnings, "validation_command_execution_requires_confirmation"],
         )
 
+    if runnable and command_runner is None:
+        planned = [
+            item.model_copy(update={
+                "status": "skipped",
+                "skip_reason": "host_command_execution_requires_isolation",
+            }) if item.status == "planned" else item
+            for item in planned
+        ]
+        runnable = []
+        warnings.append("host_command_execution_requires_isolation")
+
     timeout = max(5, min(int(timeout_seconds or 120), 900))
-    runner = command_runner or _run_subprocess_command
     command_results: list[AppValidationCommandResult] = []
     fallback_checks: list[AppValidationFallbackCheckResult] = []
     overlay_count = 0
     execution_mode: Literal["isolated_workspace_copy", "direct_workspace", "not_executed"] = "not_executed"
 
-    if runnable:
+    if runnable and command_runner is not None:
         with _validation_workspace(root=root, copy_workspace=copy_workspace) as validation_root:
             execution_mode = "isolated_workspace_copy" if copy_workspace else "direct_workspace"
             overlay_count = _apply_overlay_files(validation_root, overlay_files)
@@ -333,7 +345,7 @@ def run_app_source_validation(
                         item,
                         root=validation_root,
                         timeout_seconds=timeout,
-                        runner=runner,
+                        runner=command_runner,
                     )
                 )
             if command_results and all(result.status == "skipped" for result in command_results):
