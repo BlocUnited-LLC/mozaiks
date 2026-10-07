@@ -1,4 +1,8 @@
-"""Trusted host seam for registering the loaded app as a Factory build target."""
+"""In-process integration for registering the loaded app as a Factory target.
+
+App Python and the platform host share a process. Dispatch metadata catches
+incorrect wiring; it cannot authenticate arbitrary Python in that process.
+"""
 
 from __future__ import annotations
 
@@ -47,13 +51,14 @@ def _loaded_host_identity() -> tuple[str, str | None]:
     return loaded_app_id, name
 
 
-def _operator_identity(ctx: ModuleContext) -> str:
+def _consistent_dispatch_actor(ctx: ModuleContext) -> str:
+    """Check the supplied dispatch facts for consistency, not provenance."""
     authority = ctx.dispatch_authority
     audit = ctx.dispatch_audit
     actor = str(ctx.user_id or "").strip()
     permission_check = audit.permission_check if audit is not None else None
     if (
-        not actor
+        actor in {"", "anonymous", "system"}
         or authority is None
         or authority.kind != "app_internal"
         or authority.permission_mode != "enforce"
@@ -80,12 +85,14 @@ def _operator_identity(ctx: ModuleContext) -> str:
 async def register_existing_self_build_target(ctx: ModuleContext) -> ExistingSelfBuildTarget:
     """Insert or reopen the exact loaded-host Factory target after app authorization.
 
-    Call only from an app-internal ModuleExecutor action that declares
-    ``factory.build_target.register_self``. The app must first verify its own
-    owner/tenant/workspace authority. There is no request-supplied target ID,
-    source path, lifecycle state, or build pointer.
+    Trusted app code must first verify its own durable owner, tenant, and
+    workspace authority, then call through an app-internal ModuleExecutor
+    action declaring ``factory.build_target.register_self``. The dispatch
+    facts are constructible in-process and do not replace that owner check.
+    There is no request-supplied target ID, source path, lifecycle state, or
+    build pointer.
     """
-    owner_user_id = _operator_identity(ctx)
+    owner_user_id = _consistent_dispatch_actor(ctx)
     target_app_id, name = _loaded_host_identity()
     if ctx.app_id != target_app_id:
         raise ValueError("Execution app does not match the loaded host target")

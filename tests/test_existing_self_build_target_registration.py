@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -11,7 +12,12 @@ from unittest.mock import AsyncMock
 import pytest
 
 from factory_app.app.modules.app_registry.backend.repo import AppRegistryRepo
-from mozaiksai.core.runtime.composition.module_authority import ModuleDispatchAuthority
+from mozaiksai.core.runtime.composition.module_authority import (
+    ModuleDispatchAudit,
+    ModuleDispatchAuthority,
+    ModulePermissionCheck,
+)
+from mozaiksai.core.runtime.composition.module_context import ModuleContext
 from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, ModuleRequest
 from mozaiksai.hosts import build_target_registration as registration
 from mozaiksai.hosts import platform
@@ -115,7 +121,7 @@ def _request(
 
 
 @pytest.mark.asyncio
-async def test_only_declared_enforced_internal_action_can_register(monkeypatch, tmp_path) -> None:
+async def test_executor_rejects_ungranted_or_noninternal_registration(monkeypatch, tmp_path) -> None:
     _host(monkeypatch, tmp_path)
     service = SimpleNamespace(register_existing_app_record=AsyncMock(return_value={
         "build_registry_id": "appreg_1", "app_id": "existing-app",
@@ -154,6 +160,53 @@ async def test_only_declared_enforced_internal_action_can_register(monkeypatch, 
 
     service.register_existing_app_record.return_value["owner_user_id"] = "foreign"
     assert (await executor.execute(_request())).success is False
+
+
+@pytest.mark.asyncio
+async def test_in_process_code_can_construct_matching_dispatch_facts(monkeypatch, tmp_path) -> None:
+    """Audit dataclasses check wiring; they cannot prove ModuleExecutor origin."""
+    _host(monkeypatch, tmp_path)
+    service = SimpleNamespace(register_existing_app_record=AsyncMock(return_value={
+        "build_registry_id": "appreg_1", "app_id": "existing-app",
+        "chat_app_id": "existing-app", "owner_user_id": "operator",
+    }))
+    monkeypatch.setattr(registration, "_app_registry_service", lambda: service)
+    bare = ModuleContext(app_id="existing-app", user_id="operator")
+    with pytest.raises(PermissionError, match="enforced operator action"):
+        await registration.register_existing_self_build_target(bare)
+
+    # No executor runs here. Trusted in-process code can construct every
+    # structural field the registration seam checks.
+    copied = ModuleContext(
+        app_id="existing-app",
+        user_id="operator",
+        module_id="operator",
+        action_id="register",
+        dispatch_authority=_request().authority,
+        dispatch_audit=ModuleDispatchAudit(
+            app_id="existing-app",
+            actor_id="operator",
+            module="operator",
+            action="register",
+            authority_kind="app_internal",
+            permission_mode="enforce",
+            permission_check=ModulePermissionCheck(
+                checked=True,
+                granted=(registration.REGISTER_SELF_PERMISSION,),
+                required_permissions=(registration.REGISTER_SELF_PERMISSION,),
+            ),
+        ),
+    )
+    result = await registration.register_existing_self_build_target(copied)
+    assert result.build_registry_id == "appreg_1"
+    service.register_existing_app_record.assert_awaited_once()
+    for actor in ("anonymous", "system"):
+        copied.user_id = actor
+        copied.dispatch_authority = replace(copied.dispatch_authority, actor_id=actor)
+        copied.dispatch_audit = replace(copied.dispatch_audit, actor_id=actor)
+        with pytest.raises(PermissionError, match="enforced operator action"):
+            await registration.register_existing_self_build_target(copied)
+    service.register_existing_app_record.assert_awaited_once()
 
 
 @pytest.mark.asyncio
