@@ -460,7 +460,8 @@ This project follows a practical pre-1.0 changelog format:
   reach the app checks instead of failing on an unrelated missing import.
 
 - Android delivery checks every app and workflow input before creating either
-  archive, rejects credential/developer files and obvious credential literals,
+  archive, rejects credential/developer files, virtual environments, type-checker
+  caches and obvious credential literals,
   and restricts public brand content to the theme and supported image/font assets.
   Ordinary delivery manifests also reject local/internal backend destinations;
   deliberate local test origins remain confined to explicit acceptance tooling.

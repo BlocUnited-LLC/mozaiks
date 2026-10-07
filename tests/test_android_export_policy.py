@@ -95,6 +95,8 @@ def test_demonstrated_leaks_are_rejected_independently_before_either_archive(exp
     "app/.npmrc",
     "workflows/Fixture/tools/.NPMRC",
     "app/services/.git-credentials",
+    "app/.venv/lib/site-packages/cache.py",
+    "workflows/Fixture/.mypy_cache/state.json",
     "app/services/id_rsa",
     "workflows/Fixture/tools/ID_ED25519",
     "app/config/release.pem",

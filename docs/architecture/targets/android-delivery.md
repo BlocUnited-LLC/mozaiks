@@ -62,7 +62,9 @@ archive is constructed or the output directory is written. Verification of an
 extracted delivery applies that policy again, independently of inventory hashes.
 Known environment, credential, signing and developer files are rejected,
 including developer JSON/YAML, credential stores and developer IDE directories.
-Installed dependencies and local build caches remain outside the captured input.
+Virtual environments and type-checker caches under app or workflow inputs are
+rejected; other installed dependencies and local build caches remain outside
+the captured input.
 
 Recognizable credential literals in configuration and Python/JavaScript
 assignments are rejected, including hardcoded environment lookup defaults.
