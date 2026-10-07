@@ -331,8 +331,6 @@ async def test_retry_seed_runs_canonical_before_chat_baseline_loader(retry, monk
         with zipfile.ZipFile(archive, "a") as bundle:
             bundle.writestr("bundle/changed.txt", "changed since commit")
         expected_error = "artifact_bundle_digest_mismatch"
-    elif fault == "binary":
-        expected_error = "revision_baseline_incomplete: binary_asset"
     elif fault == "retired_after_launch":
         retry.baseline.lifecycle_status = "deleted"
         expected_error = "revision_baseline_artifact_retired"

@@ -428,6 +428,18 @@ def test_safe_artifact_relpath_normalization() -> None:
     assert safe_artifact_relpath(None) is None
 
 
+@pytest.mark.parametrize("path", [
+    "app/brand/x:payload.png",
+    "app/brand/CON.png",
+    "app/brand/COM¹.png",
+    "app/brand/LPT².png",
+    "app/brand/trailing. ",
+    "app/brand/name?.png",
+])
+def test_safe_artifact_relpath_rejects_windows_unsafe_components(path: str) -> None:
+    assert safe_artifact_relpath(path) is None
+
+
 # ---------------------------------------------------------------------------
 # Workspace-backed persistence (PR-2)
 # ---------------------------------------------------------------------------

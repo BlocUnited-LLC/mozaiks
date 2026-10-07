@@ -7,11 +7,17 @@ from pathlib import Path
 from typing import Any
 
 from factory_app.workflows.AgentGenerator.tools.export_to_github import export_to_github_tool
+from factory_app.workflows.AppGenerator.tools.hydrate_app_revision_context import (
+    revision_asset_evidence,
+    revision_baseline_required,
+    revision_source_artifact_id,
+)
 from factory_app.workflows.AppGenerator.tools.task_integrity import (
     artifact_snapshot_digest,
     planned_artifact_diagnostics,
 )
 from logs.logging_config import get_workflow_logger
+from mozaiksai.core.artifacts.content_store import ContentNotFoundError
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.app_code_versions import (
     build_snapshot_document,
@@ -81,6 +87,14 @@ def resolve_export_gate(context_variables: Any | None, *, files: dict[str, str] 
 
     snapshot = files if files is not None else (_read_ctx(context_variables, "generated_files") or {})
     reasons.extend(item["error"] for item in planned_artifact_diagnostics(context_variables, snapshot))
+    if revision_baseline_required(context_variables):
+        source_evidence = _read_ctx(context_variables, "revision_asset_evidence")
+        if (
+            not isinstance(source_evidence, dict)
+            or source_evidence.get("source_artifact_version_id") != revision_source_artifact_id(context_variables)
+            or not isinstance(source_evidence.get("opaque_assets"), list)
+        ):
+            reasons.append("Revision source assets do not have accepted evidence.")
     if acceptance_status == "passed":
         accepted = _read_ctx(context_variables, "app_bundle_acceptance_result") or {}
         try:
@@ -154,6 +168,14 @@ async def export_app_code_to_github(
     if gate["allow_export"]:
         try:
             snapshot: dict[str, str] = {}
+            binary_assets: dict[str, bytes] = {}
+            if revision_baseline_required(context_variables):
+                binary_assets, source_evidence = await revision_asset_evidence(
+                    context_variables, _read_ctx(context_variables, "generated_files") or {},
+                )
+                if source_evidence != _read_ctx(context_variables, "revision_asset_evidence"):
+                    raise ValueError("revision source assets differ from accepted evidence")
+            seen_binary: set[str] = set()
             prefix = Path(bundle_path).stem + "/"
             with zipfile.ZipFile(bundle_path) as archive:
                 for info in archive.infolist():
@@ -164,11 +186,19 @@ async def export_app_code_to_github(
                         raise ValueError(f"noncanonical export path: {info.filename}")
             for entry in extract_files_from_zip_bundle(bundle_path):
                 path = entry["path"].removeprefix(prefix)
-                if path in snapshot:
+                if path in snapshot or path in seen_binary:
                     raise ValueError(f"duplicate export path: {path}")
-                snapshot[path] = base64.b64decode(entry["contentBase64"], validate=True).decode("utf-8")
+                raw = base64.b64decode(entry["contentBase64"], validate=True)
+                if path in binary_assets:
+                    if raw != binary_assets[path]:
+                        raise ValueError(f"changed revision binary asset: {path}")
+                    seen_binary.add(path)
+                else:
+                    snapshot[path] = raw.decode("utf-8")
+            if seen_binary != set(binary_assets):
+                raise ValueError("missing revision binary assets: " + ", ".join(sorted(set(binary_assets) - seen_binary)))
             gate = resolve_export_gate(context_variables, files=snapshot)
-        except (OSError, ValueError, zipfile.BadZipFile) as exc:
+        except (OSError, ValueError, zipfile.BadZipFile, ContentNotFoundError) as exc:
             gate = {**gate, "allow_export": False, "reasons": [f"Final export snapshot unavailable: {exc}"]}
     allow_export = bool(gate["allow_export"])
     reasons = list(gate["reasons"])

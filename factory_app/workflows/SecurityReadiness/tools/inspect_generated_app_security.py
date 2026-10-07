@@ -422,7 +422,7 @@ async def inspect_generated_app_security(context_variables: Any | None = None) -
     _context_set(context_variables, "security_readiness_recorded", False)
     try:
         binding, artifact = await resolve_security_artifact(context_variables)
-        files, diagnostics = await read_artifact_bundle(artifact)
+        files, diagnostics = await read_artifact_bundle(artifact, retain_svg_text=True)
     except Exception as exc:
         return source_exception(context_variables, exc)
     if any(item["blocking"] for item in diagnostics):

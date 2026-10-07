@@ -22,6 +22,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import zipfile
 
 logger = logging.getLogger(__name__)
 from collections.abc import Iterable
@@ -37,6 +38,10 @@ from factory_app.workflows._shared.workflow_integration import (
 from factory_app.workflows.AppGenerator.tools import app_runtime_smoke
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     admitted_app_file_map,
+)
+from factory_app.workflows.AppGenerator.tools.hydrate_app_revision_context import (
+    revision_asset_evidence,
+    revision_baseline_required,
 )
 from factory_app.workflows.AppGenerator.tools.render_auth_scaffold import (
     save_auth_scaffold,
@@ -56,6 +61,7 @@ from factory_app.workflows.AppGenerator.tools.task_integrity import (
     planned_artifact_diagnostics,
 )
 from logs.logging_config import get_workflow_logger
+from mozaiksai.core.artifacts.content_store import ContentNotFoundError
 from mozaiksai.core.runtime.app.auth_contract import AppAuthContractError
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
@@ -2073,6 +2079,17 @@ async def run_app_bundle_acceptance_gate(
     from .validate_wiring import validate_wiring
 
     required_bundle_errors: list[str] = []
+    if revision_baseline_required(context_variables):
+        _context_set(context_variables, "revision_asset_evidence", None)
+        try:
+            _, source_evidence = await revision_asset_evidence(context_variables, generated_files)
+            _context_set(
+                context_variables, "revision_source_artifact_version_id",
+                source_evidence["source_artifact_version_id"],
+            )
+            _context_set(context_variables, "revision_asset_evidence", source_evidence)
+        except (OSError, ValueError, zipfile.BadZipFile, ContentNotFoundError) as exc:
+            required_bundle_errors.append(f"Revision source assets are unavailable: {exc}")
     if not generated_files:
         required_bundle_errors.append("No generated files were available for app-bundle acceptance.")
     if "app.json" not in generated_files:

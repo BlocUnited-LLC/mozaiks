@@ -392,6 +392,14 @@ def is_repository_env_template_path(path: str) -> bool:
     return path.casefold() in {".env.example", ".env.staging.example", ".env.production.example"}
 
 
+_WINDOWS_RESERVED_DEVICE_NAMES = frozenset(
+    {"con", "prn", "aux", "nul"}
+    | {f"com{index}" for index in range(1, 10)}
+    | {f"lpt{index}" for index in range(1, 10)}
+    | {f"{prefix}{index}" for prefix in ("com", "lpt") for index in ("¹", "²", "³")}
+)
+
+
 def safe_artifact_relpath(raw: Any) -> str | None:
     """Normalize a proposed artifact path to a safe bundle-relative POSIX path.
 
@@ -399,7 +407,7 @@ def safe_artifact_relpath(raw: Any) -> str | None:
     values, empty strings, null bytes, POSIX-absolute and UNC paths,
     drive-qualified Windows paths (which ``PurePosixPath`` would treat as
     relative, letting ``workspace / path`` escape the workspace on Windows),
-    and any path with a ``..`` traversal component.
+    traversal components, and Windows-unsafe file names.
     """
     if not isinstance(raw, str):
         return None
@@ -411,6 +419,13 @@ def safe_artifact_relpath(raw: Any) -> str | None:
     posix_path = PurePosixPath(normalized)
     if posix_path.is_absolute() or any(part == ".." for part in posix_path.parts):
         return None
+    for part in posix_path.parts:
+        if (
+            part.endswith((".", " "))
+            or part.split(".", 1)[0].casefold() in _WINDOWS_RESERVED_DEVICE_NAMES
+            or any(char in '<>:"|?*' or ord(char) < 32 for char in part)
+        ):
+            return None
     return str(posix_path)
 
 

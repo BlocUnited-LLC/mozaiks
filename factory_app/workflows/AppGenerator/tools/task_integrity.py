@@ -188,6 +188,10 @@ def planned_artifact_diagnostics(context: Any, files: dict[str, str]) -> list[di
 
 def artifact_snapshot_digest(context: Any, files: dict[str, str]) -> str:
     """Bind acceptance to its approved inputs and the exact exported contents."""
+    revision = (
+        _get(context, "build_mode") == "revision"
+        and _get(context, "workflow_sequence") not in {"conceptual_replan", "full_rebuild"}
+    )
     snapshot = {
         "plan": _get(context, "app_build_plan"),
         "tasks": _get(context, "app_task_batch_items"),
@@ -195,6 +199,12 @@ def artifact_snapshot_digest(context: Any, files: dict[str, str]) -> str:
         "binding": _get(context, "run_build_binding"),
         "files": files,
     }
+    if revision:
+        snapshot["revision_source_artifact_version_id"] = (
+            _get(context, "revision_source_artifact_version_id") or _get(context, "artifact_version_id")
+        )
+        snapshot["revision_asset_evidence"] = _get(context, "revision_asset_evidence")
+        snapshot["deleted_files"] = _get(context, "deleted_files")
     encoded = json.dumps(snapshot, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 

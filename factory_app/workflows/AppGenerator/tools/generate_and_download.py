@@ -36,10 +36,16 @@ from factory_app.workflows.AppGenerator.tools.export_app_code import (
     export_app_code_to_github,
     resolve_export_gate,
 )
+from factory_app.workflows.AppGenerator.tools.hydrate_app_revision_context import (
+    revision_asset_evidence,
+    revision_baseline_required,
+    revision_source_artifact_id,
+)
 from factory_app.workflows.AppGenerator.tools.requirements_scanner import scan_requirements
 from factory_app.workflows.AppGenerator.tools.schema_migration import inject_migration_into_bundle
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.app_context.store import register_greenfield_app_context_version
+from mozaiksai.core.artifacts.content_store import ContentNotFoundError
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.agent_endpoints import (
     resolve_agent_api_url,
@@ -571,7 +577,11 @@ async def _register_app_bundle_artifact_version(
     sandbox_provider = None
     if context_variables is not None and hasattr(context_variables, "get"):
         try:
-            parent_version_id = context_variables.get("artifact_version_id")
+            parent_version_id = (
+                revision_source_artifact_id(context_variables)
+                if revision_baseline_required(context_variables)
+                else context_variables.get("artifact_version_id")
+            )
             validation_status_raw = context_variables.get("app_bundle_acceptance_status")
             # Sandbox build-validation outcome, persisted first-class so
             # "which builds passed e2b/docker validation" is queryable
@@ -905,6 +915,18 @@ async def generate_and_download(
             "export_gate": export_gate,
         }
 
+    binary_assets: dict[str, bytes] = {}
+    if revision_baseline_required(context_variables):
+        try:
+            binary_assets, source_evidence = await revision_asset_evidence(context_variables, files_map)
+            if source_evidence != _context_get(context_variables, "revision_asset_evidence"):
+                raise ValueError("revision source assets differ from accepted evidence")
+        except (OSError, ValueError, zipfile.BadZipFile, ContentNotFoundError) as exc:
+            return {
+                "status": "error", "outcome": "blocked",
+                "message": f"Revision source assets are unavailable: {exc}",
+            }
+
     bundle_name = str(_context_get(context_variables, "app_name") or "GeneratedApp")
 
     # Normalize bundle name to a safe folder name
@@ -925,7 +947,7 @@ async def generate_and_download(
     app_dir.mkdir(parents=True, exist_ok=True)
 
     if tlog and _log_tool_event:  # type: ignore[truthy-function]
-        _log_tool_event(tlog, action="write_files", status="start", file_count=len(files_map))
+        _log_tool_event(tlog, action="write_files", status="start", file_count=len(files_map) + len(binary_assets))
 
     written_paths: list[str] = []
     for rel_path, content in files_map.items():
@@ -936,6 +958,11 @@ async def generate_and_download(
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(str(content), encoding="utf-8", newline="")
         written_paths.append(safe)
+    for rel_path, binary_content in binary_assets.items():
+        out_path = app_dir / rel_path
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_bytes(binary_content)
+        written_paths.append(rel_path)
 
     migration_record = await _persist_pending_schema_migration(
         pending_migration=pending_migration,
