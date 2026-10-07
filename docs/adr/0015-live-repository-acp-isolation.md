@@ -13,6 +13,14 @@ retains approval, source snapshot, path grants, validation, and publication
 authority; AG2 and its Codex or Claude ACP adapter perform one bounded coding
 turn against selected files inside a disposable container.
 
+`execute_repository_docker_turn` remains the single OSS host-side execution
+port. A future typed, trusted-worker-only live profile selects the new internal
+transport; no user request, plan, or agent output may select that profile.
+The caller still supplies `CodingWorkerRequest`, approved execution context,
+snapshot, and host path callbacks, and receives `RepositoryDockerTurn`. Offline
+execution remains the default. App Zero must not launch a parallel Codex or
+Claude subprocess path.
+
 No live mode may start until the fixed image, model credential route, restricted
 model egress, and an opt-in real-model acceptance turn have been verified. This
 ADR does not enable live mode or change the offline executor.
