@@ -241,6 +241,11 @@ does not perform a live model turn. The executor is not wired into a hosted
 route or enabled in refinement policy. Live ACP needs a dedicated minimal
 image, controlled model credential delivery and egress, a trusted job worker,
 and a binding to persisted approval and source snapshot before activation.
+The proof worker fails the synthetic turn if its known ACP agent reports
+outbound network access, host-secret visibility, or unexpected host files from
+either its own process or an AG2 terminal request. Those agent-authored probe
+values are useful only for this controlled offline fixture; a live agent's
+reply can never attest to its own isolation.
 
 The offline ACP proof image consumes the host's exact `create_paths` and
 `delete_paths` alongside selected files. Its coding provider remains
