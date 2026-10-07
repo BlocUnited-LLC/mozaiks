@@ -108,6 +108,9 @@ This project follows a practical pre-1.0 changelog format:
   local ExistingAppDiscovery paths, including nested and split repository inputs.
   Server-derived indexing and local no-auth development remain available.
 
+- Studio app-scoped management routes now verify that the signed-in caller
+  owns the selected app before returning data or applying changes.
+
 - Patched DOMPurify and source-map-js in the shipped frontend dependency locks,
   including Monaco's nested DOMPurify dependency.
 

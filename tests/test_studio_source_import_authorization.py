@@ -14,6 +14,16 @@ from mozaiksai.hosts import platform, runtime, studio
 from mozaiksai.hosts.routers import transitions
 
 
+@pytest.fixture(autouse=True)
+def _owned_studio_app(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Registry:
+        async def get_app_record(self, *, app_id: str, owner_user_id: str):
+            record = {"app_id": app_id} if (app_id, owner_user_id) == ("app_1", "alice") else None
+            return {"app": record}
+
+    monkeypatch.setattr(studio, "_get_app_registry_service", Registry)
+
+
 def _principal(provenance: str) -> UserPrincipal:
     return UserPrincipal(
         user_id="alice", email=None, name=None, roles=[], scopes=[], raw_claims={},

@@ -503,7 +503,10 @@ async def test_studio_connector_read_response_redacts_secret_shaped_fields(monke
             }
         ]
 
-    monkeypatch.setattr(studio, "_resolve_studio_scope", lambda principal, app_id=None: (app_id, "user-operator"))
+    async def fake_owned_scope(principal, *, app_id=None):
+        return app_id, "user-operator"
+
+    monkeypatch.setattr(studio, "_resolve_owned_app_scope", fake_owned_scope)
     monkeypatch.setattr(studio, "list_connectors", fake_list_connectors)
 
     response = await studio.get_integration_connectors(app_id="app-analytics-smoke", principal=object())

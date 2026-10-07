@@ -484,7 +484,10 @@ def test_studio_health_check_endpoint_requires_auth_and_returns_redacted_health(
             "frontend_safe": True,
         }
 
-    monkeypatch.setattr(studio, "_resolve_studio_scope", lambda principal, app_id=None: (app_id, "user_1"))
+    async def fake_owned_scope(principal, *, app_id=None):
+        return app_id, "user_1"
+
+    monkeypatch.setattr(studio, "_resolve_owned_app_scope", fake_owned_scope)
     monkeypatch.setattr(studio, "run_connector_health_check", fake_runner)
 
     response = asyncio.run(
