@@ -161,6 +161,28 @@ whole-app acceptance/preview. A mobile build executor or GPU job service may
 require a new public port after an owner/API review. Do not force every workload
 into `SandboxPort` or create a general Mozaiks subprocess framework.
 
+The opt-in offline proof in `tests/test_acp_container_proof.py` exercises this
+boundary without a model credential. It sends only approved task/files through
+stdin to a disposable Docker container, runs both AG2's ACP client and a real
+fake ACP agent subprocess inside it, and returns a `StagedPatchProposal` on
+stdout for the existing coding worker to validate. The test checks Docker's
+no-bind, no-network, nonroot, read-only, and resource-limit settings; it also
+probes an ACP `terminal/create` child process for host-secret and network
+access. To run it locally:
+
+```powershell
+docker build -f infra/docker/Dockerfile.preview -t mozaiks-sandbox:local .
+docker build -f infra/docker/Dockerfile.acp-proof -t mozaiks-acp-proof:local .
+$env:MOZAIKS_RUN_ACP_CONTAINER_PROOF = '1'
+pytest -q --no-cov tests/test_acp_container_proof.py
+```
+
+This proof does not enable a live ACP provider. Its preview-derived image has
+framework files baked into it; a production worker still needs a dedicated
+minimal image, explicit credential custody and controlled egress. Provider
+selection also currently tests ACP availability in the host process, so a
+container-only ACP installation is not yet a selectable runtime capability.
+
 ## 3. Canonical Contracts and Extension Rules
 
 ### One app, multiple delivery artifacts
