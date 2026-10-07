@@ -135,6 +135,7 @@ const AppWorkbench = ({
     sandboxError: sandboxSyncError,
     syncing: sandboxSyncing,
     recovering: sandboxRecovering,
+    recoveredStarting: sandboxRecoveredStarting,
     recoveryError: sandboxRecoveryError,
     retryRecovery,
     sandboxId,
@@ -508,6 +509,7 @@ const AppWorkbench = ({
                 onStartPreview={() => syncAndRestart(filesMap)}
                 onStopPreview={sandboxId ? stopPreview : null}
                 sandboxRecovering={sandboxRecovering}
+                sandboxRecoveredStarting={sandboxRecoveredStarting}
                 sandboxRecoveryError={sandboxRecoveryError}
                 onRetryRecovery={retryRecovery}
                 sandboxStopping={sandboxStopping}

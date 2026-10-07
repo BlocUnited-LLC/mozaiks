@@ -20,6 +20,7 @@ const PreviewPane = ({
   onStopPreview = null,
   sandboxStopping = false,
   sandboxRecovering = false,
+  sandboxRecoveredStarting = false,
   sandboxRecoveryError = null,
   onRetryRecovery = null,
   unavailableMessage = 'Your preview will be available once this build is saved.',
@@ -46,7 +47,8 @@ const PreviewPane = ({
     setIframeKey((k) => k + 1);
   }, []);
 
-  const isRestarting = sandboxSyncing || sandboxStopping || sandboxRecovering || sandboxStatus === 'starting';
+  const isRestarting = sandboxSyncing || sandboxStopping || sandboxRecovering
+    || (sandboxStatus === 'starting' && !sandboxRecoveredStarting);
   const differentDraftSelected = Boolean(url && previewArtifactId && artifactVersionId && previewArtifactId !== artifactVersionId);
   const displayedVersion = previewArtifactId || artifactVersionId;
   const recoveryFailure = sandboxRecoveryError && (
@@ -93,7 +95,7 @@ const PreviewPane = ({
     return (
       <div className="rounded-lg border border-white/10 bg-black/30 p-4" role="status">
         {previewIdentity}
-        {isRestarting ? (
+        {sandboxRecoveryError ? recoveryFailure : isRestarting ? (
           <div className="mt-3 flex items-center gap-2 text-sm text-[var(--color-text-muted)]">
             <div className="h-4 w-4 border-2 border-[var(--color-primary-light)] border-t-transparent rounded-full animate-spin flex-shrink-0" />
             {sandboxRecovering ? 'Recovering existing previews…' : sandboxStopping ? 'Stopping preview…' : 'Starting draft preview...'}
@@ -101,16 +103,19 @@ const PreviewPane = ({
         ) : (
           <>
             <div className="mt-3 text-sm text-[var(--color-text-muted)]">
-              {sandboxError ? 'Preview needs attention' : 'Start the preview to try your app.'}
+              {sandboxError || sandboxRecoveredStarting ? 'Preview needs attention' : 'Start the preview to try your app.'}
             </div>
-            {onStartPreview && canStartPreview && !sandboxRecoveryError ? (
+            {sandboxRecoveredStarting && (
+              <p className="mt-1 text-xs text-[var(--color-text-muted)]">Preview setup has not finished. Retry or stop it to continue.</p>
+            )}
+            {onStartPreview && canStartPreview ? (
               <>
                 <button
                   type="button"
                   onClick={onStartPreview}
                   className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-semibold text-white border border-white/10 transition-colors"
                 >
-                  <Play className="w-3.5 h-3.5" /> Start draft preview
+                  <Play className="w-3.5 h-3.5" /> {sandboxRecoveredStarting ? 'Retry draft preview' : 'Start draft preview'}
                 </button>
               </>
             ) : (
@@ -120,7 +125,7 @@ const PreviewPane = ({
             )}
           </>
         )}
-        {recoveryFailure}
+        {!sandboxRecoveryError && recoveryFailure}
         {sandboxError && (
           <details className="mt-3 text-xs text-red-300">
             <summary className="cursor-pointer">Preview details</summary>

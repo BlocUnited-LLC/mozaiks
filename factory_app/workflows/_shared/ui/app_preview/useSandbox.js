@@ -20,6 +20,17 @@ async function stopSandbox(sandboxId, isCurrent) {
   return false;
 }
 
+async function readBuildSessions(buildRegistryId) {
+  const response = await studioFetch(`/api/sandbox?build_registry_id=${encodeURIComponent(buildRegistryId)}`);
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.detail || 'Existing previews could not be recovered');
+  if (!Array.isArray(body.sessions) || body.sessions.some(value => !value?.sandboxId
+    || !value.artifactId || value.buildRegistryId !== buildRegistryId)) {
+    throw new Error('Existing preview identities could not be verified');
+  }
+  return body.sessions;
+}
+
 export function useSandbox(artifactId, buildRegistryId) {
   const [session, setSession] = useState(null);
   const [sandboxStatus, setSandboxStatus] = useState(null);
@@ -34,12 +45,15 @@ export function useSandbox(artifactId, buildRegistryId) {
   const selectedRegistry = useRef(buildRegistryId);
   selectedRegistry.current = buildRegistryId;
   const registryScope = useRef(null);
+  const priorScopes = useRef(new Map());
   const inFlight = useRef(false);
   const lastSession = useRef(null);
   const currentStatus = useRef(null);
   // Hide a different app synchronously, before the selection effect runs.
   const visibleSession = session?.buildRegistryId === buildRegistryId ? session : null;
   const sandboxId = visibleSession?.sandboxId || null;
+  const recoveredStarting = visibleSession?.status === 'starting' && sandboxStatus === 'starting'
+    && !syncing && !stopping && !recovering;
 
   const applyStatus = useCallback((message) => {
     currentStatus.current = message.status || null;
@@ -69,17 +83,11 @@ export function useSandbox(artifactId, buildRegistryId) {
     scope.error = null;
     scope.recovery = (async () => {
       try {
-        const response = await studioFetch(`/api/sandbox?build_registry_id=${encodeURIComponent(scope.buildRegistryId)}`);
-        const body = await response.json();
+        const sessions = await readBuildSessions(scope.buildRegistryId);
         if (!isSelectedRegistry(scope)) return false;
-        if (!response.ok) throw new Error(body.detail || 'Existing previews could not be recovered');
-        if (!Array.isArray(body.sessions) || body.sessions.some(value => !value?.sandboxId
-          || !value.artifactId || value.buildRegistryId !== scope.buildRegistryId)) {
-          throw new Error('Existing preview identities could not be verified');
-        }
         // Keep uncertain local cleanup handles until Stop confirms termination,
         // even if a concurrent list no longer contains them.
-        for (const value of body.sessions) scope.sessions.set(value.sandboxId, value);
+        for (const value of sessions) scope.sessions.set(value.sandboxId, value);
         restoreSession(scope);
         return true;
       } catch (error) {
@@ -107,7 +115,12 @@ export function useSandbox(artifactId, buildRegistryId) {
   }, [artifactId, buildRegistryId, applyStatus]);
 
   useEffect(() => {
-    const scope = { buildRegistryId, sessions: new Map(), recovery: null, error: null };
+    const retained = priorScopes.current.get(buildRegistryId);
+    priorScopes.current.delete(buildRegistryId);
+    const scope = {
+      buildRegistryId, sessions: new Map(retained?.sessions || []),
+      uncertainStops: new Set(retained?.uncertainStops || []), recovery: null, error: null,
+    };
     registryScope.current = scope;
     observation.current += 1;
     lastSession.current = null;
@@ -116,7 +129,14 @@ export function useSandbox(artifactId, buildRegistryId) {
     setRecoveryError(null);
     setRecovering(Boolean(buildRegistryId));
     if (buildRegistryId) recoverSessions(scope);
-    return () => { if (registryScope.current === scope) registryScope.current = null; };
+    return () => {
+      if (registryScope.current === scope) {
+        registryScope.current = null;
+        if (buildRegistryId && (scope.sessions.size || scope.recovery || inFlight.current)) {
+          priorScopes.current.set(buildRegistryId, scope);
+        }
+      }
+    };
   }, [buildRegistryId, applyStatus, recoverSessions]);
 
   const retryRecovery = useCallback(() => {
@@ -170,10 +190,20 @@ export function useSandbox(artifactId, buildRegistryId) {
     };
   }, [sandboxId, sandboxStatus, syncing, stopping, recovering, applyStatus]);
 
-  const stopRegistrySessions = useCallback(async (scope, isCurrent) => {
+  const stopRegistrySessions = useCallback(async (scope, isCurrent, retainSandboxId = null) => {
     for (const previous of [...scope.sessions.values()]) {
       if (!isCurrent() || previous.buildRegistryId !== scope.buildRegistryId) return false;
-      if (!await stopSandbox(previous.sandboxId, isCurrent)) return false;
+      if (previous.sandboxId === retainSandboxId) continue;
+      try {
+        if (!await stopSandbox(previous.sandboxId, isCurrent)) {
+          scope.uncertainStops.add(previous.sandboxId);
+          return false;
+        }
+      } catch (error) {
+        scope.uncertainStops.add(previous.sandboxId);
+        throw error;
+      }
+      scope.uncertainStops.delete(previous.sandboxId);
       scope.sessions.delete(previous.sandboxId);
       if (lastSession.current?.sandboxId === previous.sandboxId && isSelectedRegistry(scope)) {
         lastSession.current = scope.sessions.values().next().value || null;
@@ -182,6 +212,18 @@ export function useSandbox(artifactId, buildRegistryId) {
     }
     return isCurrent();
   }, [isSelectedRegistry]);
+
+  const stopPriorScopes = useCallback(async (isCurrent) => {
+    for (const prior of [...priorScopes.current.values()]) {
+      if (!isCurrent()) return false;
+      const sessions = await readBuildSessions(prior.buildRegistryId);
+      if (!isCurrent()) return false;
+      for (const value of sessions) prior.sessions.set(value.sandboxId, value);
+      if (!await stopRegistrySessions(prior, isCurrent)) return false;
+      priorScopes.current.delete(prior.buildRegistryId);
+    }
+    return isCurrent();
+  }, [stopRegistrySessions]);
 
   const finishOperation = useCallback(async (scope) => {
     inFlight.current = false;
@@ -228,7 +270,10 @@ export function useSandbox(artifactId, buildRegistryId) {
       }
       if (!isCurrent()) return;
       applyStatus({ status: 'starting' });
-      if (!await stopRegistrySessions(scope, isCurrent)) return;
+      if (!await stopPriorScopes(isCurrent)) return;
+      const reusable = [...scope.sessions.values()].find(value => value.artifactId === artifactId
+        && value.status !== 'error' && !scope.uncertainStops.has(value.sandboxId));
+      if (!await stopRegistrySessions(scope, isCurrent, reusable?.sandboxId)) return;
       const query = `?build_registry_id=${encodeURIComponent(buildRegistryId)}`;
       allocating = true;
       const { sandboxId: sid } = await post(`/api/artifacts/${encodeURIComponent(artifactId)}/sandbox${query}`);
@@ -254,7 +299,7 @@ export function useSandbox(artifactId, buildRegistryId) {
     } finally {
       await finishOperation(scope);
     }
-  }, [artifactId, buildRegistryId, applyStatus, isSelectedRegistry, recoverSessions, stopRegistrySessions, finishOperation]);
+  }, [artifactId, buildRegistryId, applyStatus, isSelectedRegistry, recoverSessions, stopPriorScopes, stopRegistrySessions, finishOperation]);
 
   const stopPreview = useCallback(async () => {
     if (!sandboxId || inFlight.current) return;
@@ -289,6 +334,6 @@ export function useSandbox(artifactId, buildRegistryId) {
   return {
     sandboxId, sandboxStatus, livePreviewUrl: visibleSession ? livePreviewUrl : null,
     previewArtifactId: visibleSession?.artifactId || null,
-    sandboxError, syncing, stopping, recovering, recoveryError, retryRecovery, syncAndRestart, stopPreview,
+    sandboxError, syncing, stopping, recovering, recoveredStarting, recoveryError, retryRecovery, syncAndRestart, stopPreview,
   };
 }

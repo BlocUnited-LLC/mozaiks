@@ -93,6 +93,7 @@ export default function AppReviewWorkspace({ payload = {} }) {
         onStopPreview={preview.sandboxId ? preview.stopPreview : null}
         sandboxStopping={preview.stopping}
         sandboxRecovering={preview.recovering}
+        sandboxRecoveredStarting={preview.recoveredStarting}
         sandboxRecoveryError={preview.recoveryError}
         onRetryRecovery={preview.retryRecovery}
         unavailableMessage={body && !validationPassed ? 'This saved draft needs passed checks before previewing.' : undefined}
