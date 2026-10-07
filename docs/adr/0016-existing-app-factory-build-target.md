@@ -36,11 +36,11 @@ registry row directly. That row uses target ID `mozaiks-platform-app-zero`,
 execution host `mozaiks-platform`, and the commercial registry ID as its
 `_id`. It cannot serve as the complete-source target described here because
 the unchanged brownfield `app/app.json` has ID `mozaiks-platform`. The
-registration path must not silently create a second usable lineage beside a
-legacy row. App Zero must stop that direct write and inspect existing local
-rows before linking the new target. An active build or artifact on the legacy
-row requires an explicit migration decision; an empty draft can be retired
-under a checked operator procedure.
+registration path must not silently create a second usable lineage beside an
+earlier bootstrap row. App Zero must stop that direct write and inspect
+existing local rows before linking the new target. An active build or artifact
+on that earlier row requires an explicit migration decision; an empty draft
+can be retired under a checked operator procedure.
 
 Once a Factory target exists, the current Studio route, `bind_factory_session`,
 build lifecycle hook, and AppGenerator all resolve and compare the same Factory
