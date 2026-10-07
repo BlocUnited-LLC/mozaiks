@@ -462,7 +462,7 @@ This project follows a practical pre-1.0 changelog format:
 - Android delivery checks every app and workflow input before creating either
   archive, rejects credential/developer files, virtual environments, type-checker
   caches and recognizable credential literals in structured config, text,
-  source assignments, SVG fields and standard PNG text metadata,
+  source assignments, XML/SVG fields and standard PNG text metadata,
   and restricts public brand content to the theme and supported image/font assets.
   Ordinary delivery manifests also reject local/internal backend destinations;
   deliberate local test origins remain confined to explicit acceptance tooling.

@@ -140,6 +140,18 @@ def test_known_private_paths_are_rejected_even_without_a_recognizable_token(expo
     ("app/config/provider.json", json.dumps({"authHeader": f"Bearer {SYNTHETIC_TOKEN}"})),
     ("app/config/provider.json", json.dumps({"authorizationHeader": f"Basic {SYNTHETIC_TOKEN}"})),
     ("app/config/provider.json", json.dumps({"access_token_b64": base64.b64encode(SYNTHETIC_TOKEN.encode()).decode()})),
+    ("app/config/provider.xml", f"<configuration><access_token>{SYNTHETIC_TOKEN}</access_token></configuration>"),
+    ("workflows/Fixture/tools/provider.xml", f"<configuration><access_token>{SYNTHETIC_TOKEN}</access_token></configuration>"),
+    ("app/config/provider.xml", f'<configuration><entry name="access_token" value="{SYNTHETIC_TOKEN}"/></configuration>'),
+    ("app/config/provider.xml", f'<configuration><property name="access_token" defaultValue="{SYNTHETIC_TOKEN}"/></configuration>'),
+    ("app/config/provider.xml", (
+        "<configuration><entry><key>access_token</key><value>"
+        + SYNTHETIC_TOKEN + "</value></entry></configuration>"
+    )),
+    ("app/config/provider.plist", (
+        '<plist version="1.0"><dict><key>access_token</key><string>'
+        + SYNTHETIC_TOKEN + "</string></dict></plist>"
+    )),
     ("app/services/provider.py", (
         'PART_ONE = "SYNTHETIC_NOT_A_REAL_"\n'
         'PART_TWO = "TOKEN_1234567890"\n'
@@ -201,6 +213,14 @@ def test_obvious_credential_values_in_app_and_workflow_inputs_fail_closed(export
         '<svg xmlns="http://www.w3.org/2000/svg" '
         + 'data-access-token="' + SYNTHETIC_TOKEN + '" />'
     )),
+    ("app/brand/assets/logo.svg", (
+        '<svg xmlns="http://www.w3.org/2000/svg"><metadata><![CDATA['
+        + f"<access_token>{SYNTHETIC_TOKEN}</access_token>" + "]]></metadata></svg>"
+    )),
+    ("app/brand/assets/logo.svg", (
+        '<svg xmlns="http://www.w3.org/2000/svg"><metadata>&lt;access_token&gt;'
+        + SYNTHETIC_TOKEN + "&lt;/access_token&gt;</metadata></svg>"
+    )),
     ("app/brand/assets/icon.png", _png_with_text(
         b"tEXt", b"Access Token\0" + SYNTHETIC_TOKEN.encode(),
     )),
@@ -210,6 +230,18 @@ def test_obvious_credential_values_in_app_and_workflow_inputs_fail_closed(export
     ("app/brand/assets/icon.png", _png_with_text(
         b"iTXt", b"Description\0\x01\0en\0Access Token\0"
         + zlib.compress(SYNTHETIC_TOKEN.encode()),
+    )),
+    ("app/brand/assets/icon.png", _png_with_text(
+        b"iTXt", b"XML:com.adobe.xmp\0\x00\0\0\0"
+        + f"<access_token>{SYNTHETIC_TOKEN}</access_token>".encode(),
+    )),
+    ("app/brand/assets/icon.png", _png_with_text(
+        b"zTXt", b"XML:com.adobe.xmp\0\0"
+        + zlib.compress(f"<access_token>{SYNTHETIC_TOKEN}</access_token>".encode()),
+    )),
+    ("app/brand/assets/icon.png", _png_with_text(
+        b"tEXt", b"XML:com.adobe.xmp\0"
+        + f"<access_token>{SYNTHETIC_TOKEN}</access_token>".encode(),
     )),
     ("app/brand/assets/icon.png", _png_with_text(
         b"zTXt", b"Title\0\0" + zlib.compress(b"x" * (1024 * 1024 + 1)),
@@ -261,6 +293,10 @@ def test_both_archives_preserve_public_assets_and_names_only_secret_inputs(expor
             b"tEXt", b"Access Token\0${INTEGRATION_API_TOKEN}",
         ),
         "app/brand/assets/title.png": _png_with_text(b"tEXt", b"Title\0Public logo"),
+        "app/brand/assets/xmp.png": _png_with_text(
+            b"iTXt", b"XML:com.adobe.xmp\0\x00\0\0\0"
+            b"<metadata><title>Public logo</title></metadata>",
+        ),
         "app/brand/assets/logo.svg": (
             b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1">'
             b'<path d="M0 0h1v1H0z"/></svg>'
@@ -311,6 +347,19 @@ def test_both_archives_preserve_public_assets_and_names_only_secret_inputs(expor
         "app/config/header.json": b'{"authHeader":"Bearer ${INTEGRATION_API_TOKEN}"}',
         "app/config/provider.toml": b'[provider]\napi_token_env = "INTEGRATION_API_TOKEN"\napi_token = "${INTEGRATION_API_TOKEN}"\n',
         "app/config/runtime.txt": b'API_TOKEN=${INTEGRATION_API_TOKEN}\n',
+        "app/config/provider.xml": b'<configuration><access_token>${INTEGRATION_API_TOKEN}</access_token></configuration>',
+        "app/config/provider_defaults.xml": (
+            b'<configuration><property name="access_token" '
+            b'defaultValue="${INTEGRATION_API_TOKEN}"/></configuration>'
+        ),
+        "app/config/provider_entries.xml": (
+            b'<configuration><entry><key>access_token</key>'
+            b'<value>${INTEGRATION_API_TOKEN}</value></entry></configuration>'
+        ),
+        "app/config/provider.plist": (
+            b'<plist version="1.0"><dict><key>access_token</key>'
+            b'<string>${INTEGRATION_API_TOKEN}</string></dict></plist>'
+        ),
         "app/services/integration_catalog.py": (
             b'POSTGRES_EXAMPLE = "postgresql://user:pass@host:port/dbname"\n'
         ),

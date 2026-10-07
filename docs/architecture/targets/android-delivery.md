@@ -69,7 +69,8 @@ the captured input.
 Recognizable credential literals in configuration and Python/JavaScript
 assignments are rejected, including hardcoded environment lookup defaults.
 The policy parses JSON, YAML and TOML values, inspects env-style text, and
-checks statically joined Python credential assignments. A documented
+checks XML and property-list fields and statically joined Python credential
+assignments. A documented
 `postgresql://user:pass@host:port/dbname` placeholder is permitted.
 Declare runtime secret names in the canonical `app/security/secrets.yaml`
 contract and resolve them through the configured secret backend. Environment
@@ -85,6 +86,7 @@ are rejected there. Binary assets must match their type signature; SVG files
 must have an SVG root. Accepted bytes are preserved, and recognizable plaintext
 credentials in assets are also rejected. The policy checks sensitive SVG
 elements and attributes and bounded PNG `tEXt`, `zTXt` and `iTXt` metadata.
+XML carried in PNG text metadata and encoded SVG metadata is checked too.
 This is admission checking, not a media sanitizer; pixels, arbitrary binary
 metadata and deliberately obscured values are outside its proof. Move developer
 configuration out of the exported app/workflow inputs.

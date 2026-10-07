@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import ast
 import json
+import plistlib
 import re
 import tomllib
 import xml.etree.ElementTree as ET
 import zlib
 from pathlib import PurePosixPath
+from xml.parsers.expat import ExpatError
 
 import yaml
 
@@ -297,6 +299,61 @@ def _inflate_png_text(raw: bytes) -> bytes:
     return value
 
 
+def _xml_credentials(text: str, *, require_svg: bool = False, nested_depth: int = 0) -> bool:
+    if "<!DOCTYPE" in text.upper() or "<!ENTITY" in text.upper():
+        raise ValueError("XML entity declarations are not supported")
+    root = ET.fromstring(text)
+    if require_svg and root.tag not in {"svg", "{http://www.w3.org/2000/svg}svg"}:
+        raise ValueError("Not an SVG root")
+    for element in root.iter():
+        children = list(element)
+        for index, child in enumerate(children[:-1]):
+            if child.tag.rpartition("}")[2].lower() in {"key", "name"} and _credential_key(
+                "".join(child.itertext()).strip()
+            ):
+                next_child = children[index + 1]
+                next_name = next_child.tag.rpartition("}")[2].lower()
+                if next_name in {"value", "string", "default"} and _literal_secret(
+                    "".join(next_child.itertext()).strip()
+                ):
+                    return True
+        if _credential_key(element.tag.rpartition("}")[2]) and _literal_secret("".join(element.itertext()).strip()):
+            return True
+        if any(
+            _credential_key(key.rpartition("}")[2]) and _literal_secret(value)
+            for key, value in element.attrib.items()
+        ):
+            return True
+        attributes = {
+            re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", key.rpartition("}")[2]).lower().replace("-", "_"): value
+            for key, value in element.attrib.items()
+        }
+        declared_key = attributes.get("name") or attributes.get("key")
+        if declared_key and _credential_key(declared_key) and (
+            any(
+                _literal_secret(attributes.get(key))
+                for key in ("value", "default", "default_value", "secret_value", "data")
+            )
+            or _literal_secret("".join(element.itertext()).strip())
+        ):
+            return True
+        fragment = (element.text or "").strip()
+        if nested_depth < 2 and fragment.startswith("<") and "</" in fragment:
+            if _xml_credentials(fragment, nested_depth=nested_depth + 1):
+                return True
+    return False
+
+
+def _png_metadata_credentials(key: str, value: str) -> bool:
+    if _credential_key(key) and _literal_secret(value):
+        return True
+    if _text_credentials(value, unquoted_config=True):
+        return True
+    if value.lstrip().startswith("<"):
+        return _xml_credentials(value)
+    return False
+
+
 def validate_android_export_file(name: str, raw: bytes) -> None:
     """Apply the same admission rule to every captured app or workflow file."""
     path = PurePosixPath(name.lower())
@@ -325,31 +382,21 @@ def validate_android_export_file(name: str, raw: bytes) -> None:
         if "\x00" in text:
             raise ValueError(f"Unsupported binary source: {name}")
     forbidden = _text_credentials(text, unquoted_config=path.suffix in _UNQUOTED_CONFIG)
-    if path.suffix == ".svg":
+    if path.suffix in {".svg", ".xml", ".xmp", ".plist"}:
         try:
-            if "<!DOCTYPE" in text.upper() or "<!ENTITY" in text.upper():
-                raise ValueError("XML entity declarations are not supported")
-            svg = ET.fromstring(text)
-            if svg.tag not in {"svg", "{http://www.w3.org/2000/svg}svg"}:
-                raise ValueError("Not an SVG root")
-            for element in svg.iter():
-                if _credential_key(element.tag.rpartition("}")[2]) and _literal_secret("".join(element.itertext()).strip()):
-                    forbidden = True
-                if any(
-                    _credential_key(key.rpartition("}")[2]) and _literal_secret(value)
-                    for key, value in element.attrib.items()
-                ):
-                    forbidden = True
-        except (ET.ParseError, ValueError):
+            forbidden = _xml_credentials(text, require_svg=path.suffix == ".svg") or forbidden
+            if path.suffix == ".plist":
+                forbidden = _structured_credentials(plistlib.loads(raw)) or forbidden
+        except (ET.ParseError, ExpatError, ValueError):
             raise ValueError(f"Public asset content does not match its declared type: {name}") from None
     if path.suffix == ".png":
         try:
             metadata = _png_text(raw)
             forbidden = forbidden or any(
-                (_credential_key(key) and _literal_secret(value)) or _text_credentials(value, unquoted_config=True)
+                _png_metadata_credentials(key, value)
                 for key, value in metadata
             )
-        except (UnicodeError, ValueError, zlib.error):
+        except (ET.ParseError, UnicodeError, ValueError, zlib.error):
             raise ValueError(f"Public asset content does not match its declared type: {name}") from None
     if path.suffix == ".py":
         forbidden = forbidden or _python_credentials(text)
