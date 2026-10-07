@@ -9,16 +9,17 @@ Authority model: the provider receives an explicitly scoped
 :class:`CodingWorkerRequest` and returns a :class:`StagedPatchProposal`. It
 holds no routing, scope, acceptance, or promotion authority, and nothing in
 this module trusts the CLI agent: the workspace contains only copies of the
-scoped files, the subprocess environment is an explicit allowlist, the agent's
-question/permission channels are closed (``elicitation_policy="decline"``,
-terminal capability not advertised), and every accepted change comes from the
+scoped files, Mozaiks passes only the selected adapter's API credential, and
+user questions and terminal access are not advertised. Permission requests are
+auto-approved for this local turn; every accepted change comes from the
 post-run hash harvest — never from the agent's own claims. Out-of-scope edits
-reject the whole proposal.
+reject the whole proposal. The local subprocess can still access host files and
+disk-based login state; this provider is not a security sandbox.
 
 This provider is dark by default: ``refinement_policy.yaml``'s
 ``coding.providers.acp.enabled`` is ``false``, the ``ag2[acp]`` extra is
-optional, and no production path constructs it yet (provider selection lands
-separately).
+optional, and the default local process path refuses execution until an
+isolated execution provider replaces it.
 """
 
 from __future__ import annotations
@@ -87,11 +88,10 @@ def record_provider_event(event: Any, records: list[ProviderEventRecord]) -> Non
     elif isinstance(event, ACPModeChange):
         records.append(ProviderEventRecord(kind="mode_change", summary=str(event.mode_id)[:500]))
 
-# The only host environment variables that may reach the CLI agent subprocess.
-# Everything else — including the Mozaiks runtime's own provider keys, Mongo
-# URIs, and platform secrets — is withheld. Model-selection variables are
-# adapter-owned and intentionally not forwarded from the host.
-_ENV_PASSTHROUGH_KEYS = ("ANTHROPIC_API_KEY", "CODEX_API_KEY", "OPENAI_API_KEY")
+# Only the selected adapter's API credential may be passed explicitly to AG2.
+# AG2 also inherits OS-specific process variables such as HOME on Unix and
+# profile paths on Windows; this filter does not isolate the agent from files
+# or disk-based logins.
 
 _ADAPTERS = ("claude_code", "codex", "opencode")
 
@@ -111,22 +111,27 @@ def build_acp_agent_config(
     """Build the hardened ACPConfig for one provider execution.
 
     Every safety-relevant field is set explicitly rather than defaulted:
-    the workspace is both ``cwd`` and ``fs_root``; the subprocess env is an
-    explicit allowlist over ``env_source``; ``expose_tools=False`` (the AG2
+    the workspace is both ``cwd`` and ``fs_root``; only the selected adapter's
+    API credential is added from ``env_source``; ``expose_tools=False`` (the AG2
     default is True) so no MCP gateway is started; ``allow_terminal=False``
-    because agent-requested terminal commands would expand the provider beyond
-    the mediated disposable-workspace file bridge; and
+    does not advertise terminal access, although AG2 currently does not deny
+    direct terminal requests; and
     ``elicitation_policy="decline"`` so the question capability is never
-    advertised in headless execution. ``permission_policy="auto"`` is safe
-    only because the blast radius is the disposable workspace plus the
-    harvest filter.
+    advertised in headless execution. ``permission_policy="auto"`` lets the
+    agent edit the disposable workspace; a separate sandbox is required
+    before running this provider for untrusted hosted requests.
     """
     if not acp_available():  # pragma: no cover - guarded by caller
         raise RuntimeError(f"ag2[acp] extra is not installed: {_ACP_IMPORT_ERROR}")
     if adapter not in _ADAPTERS:
         raise ValueError(f"Unknown ACP adapter {adapter!r}; expected one of {_ADAPTERS}")
 
-    env = {key: env_source[key] for key in _ENV_PASSTHROUGH_KEYS if env_source.get(key)}
+    credential_key = {
+        "claude_code": "ANTHROPIC_API_KEY",
+        "codex": "CODEX_API_KEY" if env_source.get("CODEX_API_KEY") else "OPENAI_API_KEY",
+        "opencode": None,
+    }[adapter]
+    env = {credential_key: env_source[credential_key]} if credential_key and env_source.get(credential_key) else None
     preset = {
         "claude_code": ClaudeCodeConfig,
         "codex": CodexConfig,
@@ -135,7 +140,7 @@ def build_acp_agent_config(
     return preset(
         cwd=str(workspace_root),
         fs_root=str(workspace_root),
-        env=env or None,
+        env=env,
         permission_policy="auto",
         elicitation_policy="decline",
         expose_tools=False,
@@ -219,6 +224,12 @@ class ACPCodingProvider:
                 status="unavailable",
                 provider_id=provider_id,
                 error=f"ag2[acp] extra is not installed: {_ACP_IMPORT_ERROR}",
+            )
+        if self._acp_config_factory is build_acp_agent_config:
+            return self._proposal(
+                status="unavailable",
+                provider_id=provider_id,
+                error="Local ACP execution is unavailable until the CLI agent runs in verified OS isolation.",
             )
         budget = provider_config.budget
         if len(request.files) > budget.max_files:
