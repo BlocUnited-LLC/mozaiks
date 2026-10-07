@@ -14,6 +14,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- A reviewable external-patch candidate for approved repository refinements,
+  with snapshot-bound baseline hashes, post-run workspace harvest, per-file host
+  policy checks, and unified diffs. Validation and source publication remain
+  explicit host-owned steps.
+
 - Optional bounded `actions[].timeout_seconds` for async module actions, validated
   through AppGenerator and runtime registration. Ordinary actions keep their
   existing default; caller payloads cannot override the registered budget.
