@@ -141,6 +141,21 @@ Custom services are not in the catalog, so they rely on connector status.
 Optional defaults that a user turns off stay turned off for later builds of the
 same app.
 
+## Connector Vault Scope Migration Prerequisite
+
+Connector metadata distinguishes app and workspace scope, but the current vault
+secret identifier does not include the scope kind. A future scope-aware
+identifier requires a one-time, read-only dry run over existing connector
+records and vault entries before any rename. The dry run should report unique,
+missing, and ambiguous mappings without exposing secret values. Ambiguous
+records need owner review or credential re-entry; metadata alone cannot recover
+an overwritten value.
+
+The eventual change must update vault storage, connector readers and writers,
+health checks, and generated clients together. Stage and verify migrated
+secrets before switching reads, retain a rollback path, and remove previous
+entries only after verification. This note does not migrate existing data.
+
 ## Catalog Ownership
 
 The current catalog is duplicated:
