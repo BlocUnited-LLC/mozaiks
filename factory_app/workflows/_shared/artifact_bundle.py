@@ -63,7 +63,7 @@ async def read_artifact_bundle(
                 continue
             else:
                 path = path[len(prefix):]
-                if path in seen:
+                if path.casefold() in seen:
                     reason = "duplicate_path"
                 elif len(seen) >= _MAX_FILES:
                     reason = "file_limit"
@@ -74,7 +74,7 @@ async def read_artifact_bundle(
             if reason:
                 diagnostics.append({"path": info.filename, "code": reason, "blocking": True})
                 continue
-            seen.add(path)
+            seen.add(path.casefold())
             total_bytes += info.file_size
             data = archive.read(info)
             suffix = PurePosixPath(path).suffix.lower()

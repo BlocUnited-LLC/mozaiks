@@ -213,6 +213,29 @@ async def test_revision_rejects_malformed_or_oversized_opaque_assets(baseline, p
     assert "generated_files" not in baseline.context
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", [
+    "brand/x:payload.png", "brand/CON.png", "brand/COM¹.png", "brand/LPT².png",
+])
+async def test_revision_rejects_nonportable_opaque_asset_name(baseline, path):
+    _replace_archive(baseline, {path: b"\x89PNG"})
+
+    with pytest.raises(ValueError, match="unsafe_path"):
+        await revision.hydrate_app_revision_context(baseline.context)
+    assert "generated_files" not in baseline.context
+
+
+@pytest.mark.asyncio
+async def test_revision_rejects_casefold_colliding_opaque_asset_names(baseline):
+    _replace_archive(baseline, {
+        "brand/Logo.png": b"first", "brand/logo.png": b"second",
+    })
+
+    with pytest.raises(ValueError, match="duplicate_path"):
+        await revision.hydrate_app_revision_context(baseline.context)
+    assert "generated_files" not in baseline.context
+
+
 def _download_context(baseline, *, deleted=(), replacement=None):
     files = dict(baseline.files)
     if replacement is not None:

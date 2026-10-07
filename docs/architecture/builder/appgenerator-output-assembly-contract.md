@@ -458,9 +458,11 @@ quality state or recover schema artifacts from chat history.
 
 Partial revisions preload the text files from the selected target-owned app-bundle
 archive into `generated_files`. The Factory reader verifies the committed archive
-digest and canonical root; foreign ownership, retired records, missing content,
-and incomplete loading fail rather than producing a partial baseline. Binary
-assets and SVGs remain in the immutable source archive, outside AG2 context.
+digest and canonical root. It rejects Windows-unsafe names and case-insensitive
+path collisions before materialization; foreign ownership, retired records,
+missing content, and incomplete loading fail rather than producing a partial
+baseline. Binary assets and SVGs remain in the immutable source archive,
+outside AG2 context.
 Security readiness may explicitly read SVG text for its secret scan. Assembly
 rechecks the baseline, then applies schema/task outputs, accumulated repairs,
 and explicit deletions in that order. Finalization rechecks the selected record,
