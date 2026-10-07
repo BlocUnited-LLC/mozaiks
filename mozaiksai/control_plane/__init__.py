@@ -145,6 +145,7 @@ from .repository_patch import (
     RepositorySnapshotEvidence,
     export_repository_workspace_archive,
     finalize_repository_patch,
+    repository_patch_digest,
     select_repository_read_only_files,
     stage_repository_workspace_archive,
 )
@@ -283,6 +284,7 @@ __all__ = [
     "execute_repository_docker_turn",
     "export_repository_workspace_archive",
     "finalize_repository_patch",
+    "repository_patch_digest",
     "stage_repository_workspace_archive",
     "ControlPlaneToolsManifest",
     "ContextRefreshLaunchResult",

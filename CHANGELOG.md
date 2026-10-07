@@ -14,6 +14,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- Host preflight for approved repository create/delete turns in the offline
+  Docker executor, including pinned baseline and read-only inspection checks;
+  a canonical digest now binds the complete v2 patch candidate for downstream
+  validation and draft PR publication.
 - A bounded, offline Docker transport for one approved repository ACP coding
   turn. A trusted worker pins a local image ID, supplies only selected files on
   stdin, verifies no-network/no-mount container settings, caps output, removes

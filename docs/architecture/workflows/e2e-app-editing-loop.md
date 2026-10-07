@@ -194,8 +194,14 @@ repository patch lane and read-only inspection until an equivalent content
 gate is available.
 
 `execute_repository_docker_turn` is the host-side transport for one scoped
-`CodingWorkerRequest`. A separate trusted worker process or service with local
-Docker socket access must call it; the App Zero web host and the agent
+`CodingWorkerRequest`. For exact create or delete grants, the trusted worker
+passes the approved execution context, matching snapshot, path policy, and a
+host callback that proves each create path absent from the complete typed tree
+at the pinned commit. The transport checks selected baseline and read-only
+inspection hashes before starting Docker. Only the selected file contents and
+exact operation paths enter the container; the full snapshot and host callback
+stay with the trusted worker. A separate trusted worker process or service with
+local Docker socket access must call it; the App Zero web host and the agent
 container must never mount or receive that socket. The caller supplies a fixed,
 prebuilt image reference outside the request. The transport resolves its local
 image ID before creation, uses an empty Docker CLI config and minimal CLI
@@ -206,8 +212,10 @@ credentials; known model and GitHub credential names baked into the image are
 rejected before start. The container runs as a nonroot user with a read-only
 root, limited tmpfs, CPU, memory,
 processes and wall time. Output is byte-capped before strict JSON parsing.
-The worker archive must match the selected file set and canonical archive
-format. Container removal targets a random host-generated name even when the
+The worker archive must match the selected file set adjusted only for approved
+creates and deletes, and use the canonical archive format. A deletion-only turn
+uses the repository bridge's empty archive marker. Container removal targets a
+random host-generated name even when the
 create response is lost. A static label also lets the trusted worker inspect
 and remove abandoned turns. A Docker daemon that finishes a timed-out create
 after cleanup remains a residual daemon race for that worker to monitor.
@@ -215,7 +223,11 @@ after cleanup remains a residual daemon race for that worker to monitor.
 The returned proposal and archive carry no approval authority. The host must
 still call `stage_repository_workspace_archive` and `finalize_repository_patch`
 with its verified snapshot, immutable baseline files, selected paths, and path
-policy. The opt-in fake-agent Docker test proves this offline transport; it
+policy. `repository_patch_digest` gives the host one canonical digest over a
+validated v2 candidate, including operation paths, hashes, content, review
+text, and required gates. It sorts operation and gate lists before hashing;
+validation and publication must use that same candidate digest and separately
+verify the approved baseline. The opt-in fake-agent Docker test proves this offline transport; it
 does not perform a live model turn. The executor is not wired into a hosted
 route or enabled in refinement policy. Live ACP needs a dedicated minimal
 image, controlled model credential delivery and egress, a trusted job worker,

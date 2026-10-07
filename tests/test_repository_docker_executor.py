@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import json
 import os
 from typing import Any
@@ -16,11 +17,20 @@ from mozaiksai.control_plane import (
     execute_repository_docker_turn,
 )
 from mozaiksai.control_plane import repository_docker_executor as executor
+from mozaiksai.control_plane.execution_context import ApprovedExecutionContext
+from mozaiksai.control_plane.repository_patch import (
+    _EMPTY_REPOSITORY_ARCHIVE,
+    RepositorySnapshotEvidence,
+    finalize_repository_patch,
+    stage_repository_workspace_archive,
+)
 from mozaiksai.core.semantics.archive import ArchiveEntry, build_deterministic_archive
 
 _PATH = "app/ui/pages/Dashboard.jsx"
 _BEFORE = "export default function Dashboard() {}\n"
 _AFTER = "export default function Dashboard() { return 1; }\n"
+_NEW_PATH = "app/ui/pages/New.jsx"
+_NEW_CONTENT = "export default function New() {}\n"
 _IMAGE = "mozaiks-acp-proof:local"
 _IMAGE_ID = "sha256:" + "a" * 64
 _CONTAINER_ID = "b" * 64
@@ -38,6 +48,44 @@ def _request(**changes: Any) -> CodingWorkerRequest:
     }
     values.update(changes)
     return CodingWorkerRequest(**values)
+
+
+def _context(*, create_paths: list[str], delete_paths: list[str]) -> ApprovedExecutionContext:
+    return ApprovedExecutionContext(
+        handoff_id="handoff-1", request_id="request-1", plan_id="plan-1",
+        app_id="proof", build_registry_id="registry-1",
+        repository_full_name="org/repo", baseline_commit_sha="a" * 40,
+        raw_request="Make the dashboard return 1", request_type="patch",
+        approved_plan_digest="b" * 64, snapshot_digest="snapshot-1",
+        graph_identity_digest="graph-1", impact_report_digest="impact-1",
+        execution_strategy_id="bounded", rationale="Approved test edit",
+        allowed_paths=["app/ui/pages/"], create_paths=create_paths,
+        delete_paths=delete_paths,
+    )
+
+
+def _snapshot(files: dict[str, str]) -> RepositorySnapshotEvidence:
+    return RepositorySnapshotEvidence(
+        plan_id="plan-1", request_id="request-1", app_id="proof",
+        repository_full_name="org/repo", baseline_commit_sha="a" * 40,
+        snapshot_digest="snapshot-1",
+        file_manifest={
+            path: "sha256:" + hashlib.sha256(content.encode()).hexdigest()
+            for path, content in files.items()
+        },
+    )
+
+
+def _operation_output(*, path: str, op: str, content: str | None, archive: bytes) -> bytes:
+    return json.dumps({
+        "proposal": {
+            "proposal_id": "raw-provider-id", "provider_id": "raw-provider-name",
+            "status": "completed", "summary": "untrusted source quote",
+            "rationale": "untrusted source quote", "owned_paths": [path],
+            "changed_files": [{"path": path, "op": op, "content": content}],
+        },
+        "workspace_archive_base64": base64.b64encode(archive).decode(),
+    }).encode()
 
 
 def _worker_output(*, archive: bytes | None = None, status: str = "completed") -> bytes:
@@ -157,6 +205,159 @@ async def test_docker_turn_transmits_only_scoped_input_and_scrubs_provider_text(
     assert b"host-metadata-sentinel" not in sent
     assert b"host-context-sentinel" not in sent
     assert b"host-user-sentinel" not in sent
+
+
+@pytest.mark.asyncio
+async def test_exact_create_grant_round_trips_through_verified_host_staging(
+    monkeypatch: pytest.MonkeyPatch, tmp_path,
+) -> None:
+    archive = build_deterministic_archive([
+        ArchiveEntry(path=_NEW_PATH, content=_NEW_CONTENT.encode())
+    ])
+    fake = FakeDocker(output=_operation_output(
+        path=_NEW_PATH, op="create", content=_NEW_CONTENT, archive=archive,
+    ))
+    _install_fake(monkeypatch, fake)
+    context = _context(create_paths=[_NEW_PATH], delete_paths=[])
+    snapshot = _snapshot({})
+    request = _request(
+        files={}, baseline_files={}, build_key="registry-1", target_app_id="proof",
+    )
+    proven_paths: list[str] = []
+
+    def prove_absence(path: str) -> None:
+        proven_paths.append(path)
+
+    turn = await execute_repository_docker_turn(
+        request, image=_IMAGE, approved_context=context, snapshot=snapshot,
+        validate_path=lambda _path: None, validate_create_absence=prove_absence,
+    )
+    assert proven_paths == [_NEW_PATH]
+    assert turn.workspace_archive == archive
+    sent = json.loads(fake.calls[3][1])
+    assert sent["files"] == {}
+    assert sent["create_paths"] == [_NEW_PATH]
+    assert sent["delete_paths"] == []
+    assert "execution_context" not in sent
+
+    workspace = stage_repository_workspace_archive(
+        context, snapshot=snapshot, selected_paths=[], baseline_files={},
+        archive_bytes=turn.workspace_archive, workspace_root=tmp_path / "staged",
+        validate_path=lambda _path: None, validate_create_absence=prove_absence,
+        max_files=50, max_archive_bytes=16_777_216,
+    )
+    try:
+        candidate = finalize_repository_patch(
+            context, snapshot=snapshot, selected_paths=[], baseline_files={},
+            workspace=workspace, proposal=turn.proposal,
+            validate_path=lambda _path: None, validate_create_absence=prove_absence,
+        )
+    finally:
+        workspace.cleanup()
+    assert [(file.path, file.op, file.content) for file in candidate.changed_files] == [
+        (_NEW_PATH, "create", _NEW_CONTENT)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_exact_delete_grant_round_trips_empty_transport(
+    monkeypatch: pytest.MonkeyPatch, tmp_path,
+) -> None:
+    fake = FakeDocker(output=_operation_output(
+        path=_PATH, op="delete", content=None, archive=_EMPTY_REPOSITORY_ARCHIVE,
+    ))
+    _install_fake(monkeypatch, fake)
+    context = _context(create_paths=[], delete_paths=[_PATH])
+    snapshot = _snapshot({_PATH: _BEFORE})
+    request = _request(
+        files={_PATH: _BEFORE}, baseline_files={_PATH: _BEFORE},
+        build_key="registry-1", target_app_id="proof",
+    )
+    turn = await execute_repository_docker_turn(
+        request, image=_IMAGE, approved_context=context, snapshot=snapshot,
+        validate_path=lambda _path: None,
+    )
+    assert turn.workspace_archive == _EMPTY_REPOSITORY_ARCHIVE
+    sent = json.loads(fake.calls[3][1])
+    assert sent["create_paths"] == []
+    assert sent["delete_paths"] == [_PATH]
+
+    workspace = stage_repository_workspace_archive(
+        context, snapshot=snapshot, selected_paths=[_PATH], baseline_files=request.files,
+        archive_bytes=turn.workspace_archive, workspace_root=tmp_path / "staged",
+        validate_path=lambda _path: None, max_files=50, max_archive_bytes=16_777_216,
+    )
+    try:
+        candidate = finalize_repository_patch(
+            context, snapshot=snapshot, selected_paths=[_PATH], baseline_files=request.files,
+            workspace=workspace, proposal=turn.proposal, validate_path=lambda _path: None,
+        )
+    finally:
+        workspace.cleanup()
+    assert [(file.path, file.op, file.content) for file in candidate.changed_files] == [
+        (_PATH, "delete", None)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_create_without_complete_baseline_proof_never_starts_docker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = FakeDocker()
+    _install_fake(monkeypatch, fake)
+    context = _context(create_paths=[_NEW_PATH], delete_paths=[])
+    request = _request(files={}, baseline_files={}, build_key="registry-1")
+    with pytest.raises(ValueError, match="REPOSITORY_PATCH_CREATE_PROOF"):
+        await execute_repository_docker_turn(
+            request, image=_IMAGE, approved_context=context, snapshot=_snapshot({}),
+            validate_path=lambda _path: None,
+        )
+    assert fake.calls == []
+
+
+@pytest.mark.asyncio
+async def test_changed_baseline_or_unapproved_inspection_never_reaches_docker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = FakeDocker()
+    _install_fake(monkeypatch, fake)
+    context = _context(create_paths=[], delete_paths=[])
+    snapshot = _snapshot({_PATH: _BEFORE})
+    wrong_baseline = _request(
+        files={_PATH: _AFTER}, build_key="registry-1", target_app_id="proof",
+    )
+    with pytest.raises(ValueError, match="REPOSITORY_PATCH_BASELINE_HASH"):
+        await execute_repository_docker_turn(
+            wrong_baseline, image=_IMAGE, approved_context=context, snapshot=snapshot,
+            validate_path=lambda _path: None,
+        )
+    unapproved_inspection = _request(
+        files={_PATH: _BEFORE}, read_only_files={"docs/private.md": "private"},
+        build_key="registry-1", target_app_id="proof",
+    )
+    with pytest.raises(ValueError, match="REPOSITORY_PATCH_INSPECTION_SCOPE"):
+        await execute_repository_docker_turn(
+            unapproved_inspection, image=_IMAGE, approved_context=context, snapshot=snapshot,
+            validate_path=lambda _path: None,
+        )
+    assert fake.calls == []
+
+
+@pytest.mark.asyncio
+async def test_ungranted_create_output_rejected_after_container_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive = build_deterministic_archive([
+        ArchiveEntry(path=_PATH, content=_BEFORE.encode()),
+        ArchiveEntry(path=_NEW_PATH, content=_NEW_CONTENT.encode()),
+    ])
+    fake = FakeDocker(output=_operation_output(
+        path=_NEW_PATH, op="create", content=_NEW_CONTENT, archive=archive,
+    ))
+    _install_fake(monkeypatch, fake)
+    with pytest.raises(RepositoryDockerExecutionError, match="REPOSITORY_DOCKER_INVALID_OUTPUT"):
+        await execute_repository_docker_turn(_request(), image=_IMAGE)
+    assert len(fake.removed) == 1
 
 
 @pytest.mark.asyncio
