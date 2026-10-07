@@ -165,14 +165,23 @@ It passes that tree to `finalize_repository_patch` and reports any failure to
 remove the tree after review candidate creation.
 No ZIP entry is extracted by path. Only updates to existing portable UTF-8
 files are supported in this first bridge.
-The snapshot manifest may also describe required read-only tests or docs; those
-remain host-owned context and never enter the editable archive or patch. A
-read-only path remains denied even under a broad allowed parent scope.
-The offline proof keeps read-only test/doc bytes on the host; giving an agent
-separate read-only inspection context requires a later executor contract.
+The host may pass selected tests or docs to an isolated ACP turn through
+`select_repository_read_only_files`. Each file must be within both an approved
+allowed path and an approved read-only path, outside prohibited paths, accepted
+by the host's per-file policy, and hash-equal to the immutable snapshot. The
+selection has explicit file and byte limits. A read-only path grants no new
+read authority by itself, even under a broad read-only prefix. The executor
+materializes these files in a separate read-only manifest. Post-turn harvest
+rejects edits or deletion, including when create/delete flags are enabled,
+and excludes those files from the archive and candidate's changed-file list.
+Provider-written summaries can still quote inspected text and require host
+review before publication.
+The generated-app coding worker rejects requests carrying inspection files;
+only the isolated repository provider proof uses this contract today.
 Changed `app/security/secrets.yaml` content must pass the names-only secret
 contract, while root `.env*.example` templates are excluded from this first
-repository patch lane until an equivalent content gate is available.
+repository patch lane and read-only inspection until an equivalent content
+gate is available.
 
 The opt-in fake-agent Docker proof exercises this full transfer and finalizer
 path. Live ACP remains disabled; a future executor still needs a dedicated

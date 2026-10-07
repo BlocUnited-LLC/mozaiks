@@ -63,11 +63,11 @@ async def _execute() -> str:
     )
     with contextlib.redirect_stdout(sys.stderr):
         proposal = await provider.execute(request)
-    if proposal.status != "completed" or observed_archive is None:
-        raise RuntimeError(f"offline ACP proof did not produce a workspace archive: {proposal.status}")
     return json.dumps({
         "proposal": proposal.model_dump(mode="json"),
-        "workspace_archive_base64": base64.b64encode(observed_archive).decode("ascii"),
+        "workspace_archive_base64": (
+            base64.b64encode(observed_archive).decode("ascii") if observed_archive is not None else None
+        ),
     })
 
 

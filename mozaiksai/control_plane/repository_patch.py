@@ -25,7 +25,14 @@ from mozaiksai.core.semantics.archive import (
     read_archive_manifest,
 )
 
-from .contracts import StagedPatchProposal, is_secret_sensitive_path, safe_artifact_relpath
+from .contracts import (
+    MAX_READ_ONLY_INSPECTION_BYTES,
+    MAX_READ_ONLY_INSPECTION_FILES,
+    StagedPatchProposal,
+    is_repository_env_template_path,
+    is_secret_sensitive_path,
+    safe_artifact_relpath,
+)
 from .execution_context import ApprovedExecutionContext
 from .workspace import StagedCodingWorkspace, harvest_coding_workspace, materialize_coding_workspace
 
@@ -33,9 +40,6 @@ _MAX_REPOSITORY_ARCHIVE_BYTES = 16_777_216
 _MAX_REPOSITORY_ARCHIVE_FILES = 50
 _ZIP_END_RECORD = struct.Struct("<4s4H2IH")
 _ZIP_CENTRAL_HEADER_SIZE = 46
-_REPOSITORY_ENV_TEMPLATES = frozenset({
-    ".env.example", ".env.staging.example", ".env.production.example",
-})
 
 
 class RepositorySnapshotEvidence(BaseModel):
@@ -127,7 +131,7 @@ def _sha256(content: str) -> str:
 
 
 def _reject_env_template_path(path: str) -> None:
-    if path.casefold() in _REPOSITORY_ENV_TEMPLATES:
+    if is_repository_env_template_path(path):
         raise ValueError(f"REPOSITORY_PATCH_ENV_TEMPLATE: {path!r} needs a names-only content gate")
 
 
@@ -245,14 +249,10 @@ def export_repository_workspace_archive(
     return archive_bytes
 
 
-def _verify_selected_baseline(
+def _verify_snapshot_identity(
     context: ApprovedExecutionContext,
-    *,
     snapshot: RepositorySnapshotEvidence,
-    selected_paths: list[str],
-    baseline_files: Mapping[str, str],
-    validate_path: Callable[[str], object],
-) -> dict[str, str]:
+) -> None:
     if context.schema_version != "managed_refinement.execution_context.v1":
         raise ValueError("REPOSITORY_PATCH_CONTEXT_VERSION: unsupported execution context")
     if (
@@ -264,6 +264,63 @@ def _verify_selected_baseline(
         or snapshot.snapshot_digest != context.snapshot_digest
     ):
         raise ValueError("REPOSITORY_PATCH_SNAPSHOT_IDENTITY: snapshot does not match approval")
+
+
+def select_repository_read_only_files(
+    context: ApprovedExecutionContext,
+    *,
+    snapshot: RepositorySnapshotEvidence,
+    selected_paths: list[str],
+    baseline_files: Mapping[str, str],
+    validate_path: Callable[[str], object],
+    max_files: int,
+    max_bytes: int,
+) -> dict[str, str]:
+    """Bound host-fetched inspection bytes to approved, immutable snapshot evidence.
+
+    A read-only path must be under both an allowed and read-only scope; the
+    latter only narrows approval. The host supplies exact baseline bytes and
+    a per-path policy callback. Nothing is fetched or persisted here.
+    """
+    _verify_snapshot_identity(context, snapshot)
+    if not 1 <= max_files <= MAX_READ_ONLY_INSPECTION_FILES or not 1 <= max_bytes <= MAX_READ_ONLY_INSPECTION_BYTES:
+        raise ValueError("REPOSITORY_PATCH_INSPECTION_BUDGET: invalid file or byte limit")
+    if len(selected_paths) > max_files or len(set(selected_paths)) != len(selected_paths):
+        raise ValueError("REPOSITORY_PATCH_INSPECTION_SELECTION: paths exceed limit or repeat")
+    if set(baseline_files) != set(selected_paths):
+        raise ValueError("REPOSITORY_PATCH_INSPECTION_SET: files differ from selected paths")
+    total_bytes = 0
+    for path in selected_paths:
+        _canonical_path(path)
+        if is_secret_sensitive_path(path) or is_secret_contract_path(path):
+            raise ValueError(f"REPOSITORY_PATCH_SECRET_PATH: {path!r}")
+        _reject_env_template_path(path)
+        if (
+            not _in_scope(path, context.allowed_paths)
+            or not _in_scope(path, context.read_only_paths)
+            or _in_scope(path, context.prohibited_paths)
+        ):
+            raise ValueError(f"REPOSITORY_PATCH_INSPECTION_SCOPE: {path!r} is not approved read-only context")
+        if validate_path(path) is not None:
+            raise ValueError("REPOSITORY_PATCH_HOST_POLICY: validate_path must raise or return None")
+        content = baseline_files[path]
+        if snapshot.file_manifest.get(path) != f"sha256:{_sha256(content)}":
+            raise ValueError(f"REPOSITORY_PATCH_BASELINE_HASH: {path!r} differs from approved snapshot")
+        total_bytes += len(content.encode("utf-8"))
+        if total_bytes > max_bytes:
+            raise ValueError("REPOSITORY_PATCH_INSPECTION_BUDGET: contents exceed limit")
+    return dict(baseline_files)
+
+
+def _verify_selected_baseline(
+    context: ApprovedExecutionContext,
+    *,
+    snapshot: RepositorySnapshotEvidence,
+    selected_paths: list[str],
+    baseline_files: Mapping[str, str],
+    validate_path: Callable[[str], object],
+) -> dict[str, str]:
+    _verify_snapshot_identity(context, snapshot)
     if not selected_paths or len(set(selected_paths)) != len(selected_paths):
         raise ValueError("REPOSITORY_PATCH_SELECTION: selected paths must be unique and nonempty")
     for path in baseline_files:
@@ -478,5 +535,6 @@ __all__ = [
     "RepositorySnapshotEvidence",
     "export_repository_workspace_archive",
     "finalize_repository_patch",
+    "select_repository_read_only_files",
     "stage_repository_workspace_archive",
 ]

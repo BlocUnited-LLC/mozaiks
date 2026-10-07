@@ -140,6 +140,7 @@ from .repository_patch import (
     RepositorySnapshotEvidence,
     export_repository_workspace_archive,
     finalize_repository_patch,
+    select_repository_read_only_files,
     stage_repository_workspace_archive,
 )
 from .review_package import (
@@ -359,4 +360,5 @@ __all__ = [
     "run_app_validation_fallback_checks",
     "run_current_app_source_validation",
     "source_import_scan_policy",
+    "select_repository_read_only_files",
 ]

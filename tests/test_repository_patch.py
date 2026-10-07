@@ -16,6 +16,7 @@ from mozaiksai.control_plane import (
     StagedPatchProposal,
     export_repository_workspace_archive,
     finalize_repository_patch,
+    select_repository_read_only_files,
     stage_repository_workspace_archive,
 )
 from mozaiksai.control_plane.workspace import materialize_coding_workspace
@@ -413,6 +414,74 @@ def test_read_only_snapshot_context_cannot_enter_editable_archive(tmp_path: Path
         )
     assert not root.exists()
 
+
+def test_read_only_selection_requires_allowed_and_read_only_snapshot_scope(tmp_path: Path) -> None:
+    inputs = _inputs(tmp_path)
+    path = "tests/test_support.py"
+    content = "def test_answer(): assert True\n"
+    context = _context(allowed_paths=["app/", "tests/"], read_only_paths=["tests/"])
+    snapshot = inputs["snapshot"].model_copy(update={
+        "file_manifest": {**inputs["snapshot"].file_manifest, path: _sha256(content)},
+    })
+    validate = Mock(return_value=None)
+
+    selected = select_repository_read_only_files(
+        context, snapshot=snapshot, selected_paths=[path], baseline_files={path: content},
+        validate_path=validate, max_files=2, max_bytes=1024,
+    )
+    assert selected == {path: content}
+    validate.assert_called_once_with(path)
+
+    for denied_context in (
+        _context(allowed_paths=["app/"], read_only_paths=["tests/"]),
+        _context(allowed_paths=["app/", "tests/"], read_only_paths=[]),
+        _context(allowed_paths=["app/", "tests/"], read_only_paths=["tests/"],
+                 prohibited_paths=["tests/test_support.py"]),
+    ):
+        with pytest.raises(ValueError, match="INSPECTION_SCOPE"):
+            select_repository_read_only_files(
+                denied_context, snapshot=snapshot, selected_paths=[path], baseline_files={path: content},
+                validate_path=validate, max_files=2, max_bytes=1024,
+            )
+
+
+def test_read_only_selection_rejects_stale_or_unbounded_content(tmp_path: Path) -> None:
+    inputs = _inputs(tmp_path)
+    path = "tests/test_support.py"
+    content = "expected\n"
+    context = _context(allowed_paths=["app/", "tests/"], read_only_paths=["tests/"])
+    snapshot = inputs["snapshot"].model_copy(update={
+        "file_manifest": {**inputs["snapshot"].file_manifest, path: _sha256(content)},
+    })
+    kwargs = dict(context=context, snapshot=snapshot, selected_paths=[path],
+                  baseline_files={path: content}, validate_path=lambda _path: None,
+                  max_files=1, max_bytes=1024)
+    with pytest.raises(ValueError, match="BASELINE_HASH"):
+        select_repository_read_only_files(**{**kwargs, "baseline_files": {path: "stale\n"}})
+    with pytest.raises(ValueError, match="SNAPSHOT_IDENTITY"):
+        select_repository_read_only_files(**{**kwargs, "snapshot": snapshot.model_copy(update={"plan_id": "other"})})
+    with pytest.raises(ValueError, match="INSPECTION_BUDGET"):
+        select_repository_read_only_files(**{**kwargs, "max_bytes": 3})
+    with pytest.raises(ValueError, match="INSPECTION_SET"):
+        select_repository_read_only_files(**{**kwargs, "baseline_files": {path: content, PATH: BEFORE}})
+    with pytest.raises(ValueError, match="HOST_POLICY"):
+        select_repository_read_only_files(**{**kwargs, "validate_path": lambda _path: False})
+
+
+@pytest.mark.parametrize("path", [".env.example", "app/security/secrets.yaml", "tests/token.txt"])
+def test_read_only_selection_rejects_sensitive_context_path(path: str) -> None:
+    context = _context(allowed_paths=["."], read_only_paths=["."])
+    snapshot = RepositorySnapshotEvidence(
+        plan_id=context.plan_id, request_id=context.request_id, app_id=context.app_id,
+        repository_full_name=context.repository_full_name,
+        baseline_commit_sha=context.baseline_commit_sha, snapshot_digest=context.snapshot_digest,
+        file_manifest={path: _sha256("content")},
+    )
+    with pytest.raises(ValueError, match="SECRET_PATH|ENV_TEMPLATE"):
+        select_repository_read_only_files(
+            context, snapshot=snapshot, selected_paths=[path], baseline_files={path: "content"},
+            validate_path=lambda _path: None, max_files=1, max_bytes=1024,
+        )
 
 def test_changed_secret_contract_cannot_enter_archive_or_review_candidate(tmp_path: Path) -> None:
     path = "app/security/secrets.yaml"

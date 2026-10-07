@@ -14,6 +14,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- Bounded, snapshot-verified read-only test and documentation inspection for
+  isolated repository coding turns. Inspection files stay outside patch archives
+  and candidate changed-file entries; edits and deletion fail scope validation.
+
 - Bounded, deterministic transfer of observed isolated ACP workspace files into
   a host-owned repository patch candidate. The offline container proof now
   exercises the approved-baseline and external-patch path without enabling a
