@@ -131,6 +131,8 @@ host-specific protected descendants. The returned
 `RepositoryPatchCandidate` contains the approval and provider identities,
 before/after hashes, updated content, unified diffs, and required gate names.
 Its `validation_state` is `pending` and `mutation_allowed` is `false`.
+This first repository patch contract supports updates to selected existing
+files only; adding a file requires a later explicit scope and manifest contract.
 
 This function reads the staged tree and does not invoke an agent, run validation
 commands, persist a review record, publish a branch/PR, or mutate the source
