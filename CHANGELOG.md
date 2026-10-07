@@ -14,6 +14,12 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- A bounded, offline Docker transport for one approved repository ACP coding
+  turn. A trusted worker pins a local image ID, supplies only selected files on
+  stdin, verifies no-network/no-mount container settings, caps output, removes
+  the container, and returns a proposal plus archive for host verification.
+  Live model access and source publication remain disabled.
+
 - Bounded, snapshot-verified read-only test and documentation inspection for
   isolated repository coding turns. Inspection files stay outside patch archives
   and candidate changed-file entries; edits and deletion fail scope validation.
