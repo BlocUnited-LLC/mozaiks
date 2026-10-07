@@ -427,7 +427,8 @@ async def accept_existing_app_genesis(
     source_content_sha256 = _canonical_digest(source_digests)
     validator_image_id = smoke.get("validator_image_id") if isinstance(smoke, dict) else None
     if (
-        not isinstance(validator_image_id, str)
+        not isinstance(smoke, dict)
+        or not isinstance(validator_image_id, str)
         or re.fullmatch(r"sha256:[0-9a-f]{64}", validator_image_id) is None
         or smoke.get("source_content_sha256") != source_content_sha256
     ):
