@@ -226,14 +226,17 @@ remains on the host's Mongo.
 ### Imported-source runtime smoke
 
 An imported Genesis can contain arbitrary Python. Its acceptance path calls
-`run_contained_imported_app_runtime_smoke(app_root)` on the exact staged app
-bytes. This is a separate opt-in backend; ordinary generated-app acceptance
+`run_contained_imported_app_runtime_smoke(app_root, expected_source_sha256=...)`
+on the exact staged app bytes. The caller supplies every verified source-file
+digest; the runner checks the copied mount bytes and rejects missing or extra
+files. This is a separate opt-in backend; ordinary generated-app acceptance
 continues to use the child-process smoke described above.
 
 The imported backend copies up to 4,096 regular files and 64 MB into a private
 temporary directory, rejecting links and special files. It mounts only that
-copy read-only into the local `mozaiks-sandbox:local` preview image. The Docker
-run uses `--network=none`, a read-only root, a non-root user, dropped capabilities,
+copy read-only into the local `mozaiks-sandbox:local` preview image. Docker
+registers the container before starting it so cancellation can remove its
+known name even during startup. The container uses `--network=none`, a read-only root, a non-root user, dropped capabilities,
 no new privileges, and CPU, memory, process, temporary storage and time limits.
 MongoDB starts inside that same disposable container on loopback. No host Mongo
 URI, application credential, provider key, source repository, Docker socket or
@@ -247,6 +250,11 @@ The preview image must be rebuilt after changing this smoke module:
 `docker build -f infra/docker/Dockerfile.preview -t mozaiks-sandbox:local .`.
 An operator can select an equivalent trusted local image with
 `DOCKER_SANDBOX_IMAGE`; imported source cannot select the image.
+Set `MOZAIKS_IMPORTED_SMOKE_IMAGE_ID` to the trusted local image ID returned by
+`docker image inspect --format '{{.Id}}' mozaiks-sandbox:local`. The gate checks
+that ID and runs by ID, so a later tag change cannot swap the validator between
+inspection and execution. It returns the image ID and copied-source digest for
+the Genesis acceptance evidence.
 Docker or image unavailability yields a skipped, blocking acceptance result.
 The image is never pulled automatically during this gate. Docker Engine and the
 trusted preview image are local prerequisites; no paid service is required.

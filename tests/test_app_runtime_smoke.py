@@ -9,13 +9,16 @@ c8b9ea2e. The gate runs each bundle in its child process against a real Mongo
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import subprocess
 import tempfile
+import threading
 import time
 from contextlib import suppress
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
@@ -68,7 +71,20 @@ async def _smoke(files: dict[str, str], mongo_uri: str | None, **kwargs) -> dict
 async def _contained_smoke(files: dict[str, str], **kwargs) -> dict:
     with tempfile.TemporaryDirectory(prefix="contained-runtime-smoke-test-") as tmp:
         app_root = Path(tmp) / "app"
-        _write_files_to_dir(app_root, files)
+        for path, content in files.items():
+            target = app_root / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(content.encode("utf-8"))
+        kwargs.setdefault("expected_source_sha256", {
+            path: hashlib.sha256(content.encode("utf-8")).hexdigest()
+            for path, content in files.items()
+        })
+        if image := kwargs.get("image"):
+            inspected = subprocess.run(
+                ["docker", "image", "inspect", "--format", "{{.Id}}", image],
+                capture_output=True, text=True, timeout=5, check=True,
+            )
+            kwargs.setdefault("expected_image_id", inspected.stdout.strip())
         return await run_contained_imported_app_runtime_smoke(app_root, **kwargs)
 
 
@@ -146,6 +162,38 @@ async def test_imported_smoke_without_docker_is_pending_not_a_pass(monkeypatch):
     assert result["checks"][0]["details"]["blocking"] is True
 
 
+async def test_imported_smoke_requires_pinned_validator_image(monkeypatch, tmp_path):
+    from mozaiksai.core.adapters import docker_sandbox
+
+    monkeypatch.setattr(docker_sandbox, "docker_available", lambda: True)
+    monkeypatch.delenv("MOZAIKS_IMPORTED_SMOKE_IMAGE_ID", raising=False)
+    result = await run_contained_imported_app_runtime_smoke(
+        tmp_path, expected_source_sha256={"app.json": hashlib.sha256(b"{}").hexdigest()},
+    )
+    assert result["status"] == "skipped"
+    assert result["skipped_reason"] == "contained validator image identity is unconfigured"
+    assert result["checks"][0]["details"]["blocking"] is True
+
+
+async def test_imported_smoke_rejects_changed_validator_tag_before_staging(monkeypatch, tmp_path):
+    from mozaiksai.core.adapters import docker_sandbox
+
+    monkeypatch.setattr(docker_sandbox, "docker_available", lambda: True)
+    monkeypatch.setattr(app_runtime_smoke.subprocess, "run", lambda *_args, **_kwargs: SimpleNamespace(
+        returncode=0, stdout="sha256:" + "b" * 64,
+    ))
+    monkeypatch.setattr(
+        app_runtime_smoke, "_copy_imported_app",
+        lambda *_args, **_kwargs: pytest.fail("source was staged with a changed validator image"),
+    )
+    result = await run_contained_imported_app_runtime_smoke(
+        tmp_path, expected_source_sha256={"app.json": hashlib.sha256(b"{}").hexdigest()},
+        expected_image_id="sha256:" + "a" * 64,
+    )
+    assert result["status"] == "skipped"
+    assert result["skipped_reason"] == "contained Docker image is unavailable"
+
+
 async def test_imported_smoke_rejects_hardlinked_host_file(tmp_path):
     source = tmp_path / "host-secret"
     source.write_text("host secret", encoding="utf-8")
@@ -170,6 +218,31 @@ def test_imported_smoke_rejects_existing_staging_path(tmp_path):
     with pytest.raises(FileExistsError):
         app_runtime_smoke._copy_imported_app(app_root, destination)
     assert sentinel.read_text(encoding="utf-8") == "unchanged"
+
+
+def test_imported_smoke_rejects_changed_bytes_during_copy(tmp_path):
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+    (app_root / "app.json").write_bytes(b'{"appId":"changed"}')
+    with pytest.raises(ValueError, match="bytes differ"):
+        app_runtime_smoke._copy_imported_app(
+            app_root, tmp_path / "copy", expected_sha256={
+                "app.json": hashlib.sha256(b'{"appId":"verified"}').hexdigest(),
+            },
+        )
+
+
+def test_imported_smoke_rejects_missing_verified_file(tmp_path):
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+    (app_root / "app.json").write_bytes(b"{}")
+    with pytest.raises(ValueError, match="missing a verified source file"):
+        app_runtime_smoke._copy_imported_app(
+            app_root, tmp_path / "copy", expected_sha256={
+                "app.json": hashlib.sha256(b"{}").hexdigest(),
+                "module.yaml": hashlib.sha256(b"missing").hexdigest(),
+            },
+        )
 
 
 def test_imported_smoke_rejects_symlink(tmp_path):
@@ -209,6 +282,34 @@ def test_imported_smoke_rejects_ntfs_junction(tmp_path):
     assert (outside / "secret.txt").read_text(encoding="utf-8") == "outside"
 
 
+async def test_imported_smoke_cancellation_waits_for_container_registration(monkeypatch, tmp_path):
+    entered = threading.Event()
+    release = threading.Event()
+    removed = []
+
+    def create(command, **_kwargs):
+        assert command[:2] == ["docker", "create"]
+        entered.set()
+        assert release.wait(timeout=5)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(app_runtime_smoke.subprocess, "run", create)
+    monkeypatch.setattr(app_runtime_smoke.subprocess, "Popen", lambda *_args, **_kwargs: pytest.fail("cancelled container started"))
+    monkeypatch.setattr(app_runtime_smoke, "_container_removed", lambda name: removed.append(name) or True)
+    child = app_runtime_smoke._ContainedDockerProcess()
+    running = asyncio.create_task(asyncio.to_thread(child.run, tmp_path, "sha256:" + "a" * 64, 1.0))
+    assert await asyncio.to_thread(entered.wait, 5)
+    cancelling = asyncio.create_task(asyncio.to_thread(child.kill))
+    await asyncio.sleep(0.05)
+    assert not cancelling.done()
+    release.set()
+    await cancelling
+    result = await running
+    assert result.contained is True
+    assert result.returncode is None
+    assert removed and set(removed) == {child.name}
+
+
 @pytest.mark.skipif(
     not os.getenv("MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE"),
     reason="set MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE to a freshly built local preview image",
@@ -245,6 +346,8 @@ async def test_imported_smoke_isolated_docker_boot_and_cleanup(monkeypatch, cras
     result = await _contained_smoke(files, image=image)
 
     assert result["status"] == ("failed" if crash else "passed"), result["failed_tests"]
+    assert result["validator_image_id"].startswith("sha256:")
+    assert len(result["source_content_sha256"]) == 64
     assert "host-password" not in json.dumps(result)
     assert "sk-host-secret-must-not-enter-container" not in json.dumps(result)
     assert "smoke.cleanup" not in _by_check(result)
