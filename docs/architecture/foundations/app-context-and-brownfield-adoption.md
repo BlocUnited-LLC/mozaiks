@@ -158,6 +158,33 @@ ownership boundaries and review state.
 Staged patches are proposals. They do not become owned app facts until accepted
 or promoted through the artifact lifecycle.
 
+### Exact Genesis draft import
+
+`import_existing_app_genesis_draft` is the trusted Factory entry point for an
+existing app's first exact app-bundle snapshot. Its caller supplies a pinned,
+authorized source revision, projects the workspace's `app/` contents to bundle
+root and keeps workspace `workflows/` at bundle root, and declares every ZIP
+member's path, byte count, and SHA-256 digest. The source provenance contains
+an opaque source ID plus immutable revision and tree IDs; it carries no
+credential or mutable checkout path.
+
+The importer resolves the owner-scoped Factory target through its registry ID,
+checks the execution host, requires an unstarted draft target, verifies the
+canonical ZIP and complete file manifest, and requires root `app.json` to have
+the registered target app ID. It uses the shared bundle reader in binary mode,
+so unsupported, missing, oversized, or unsafe content fails before a
+`BuildRecord` is inserted. A repeated exact import returns the same draft ID;
+changed bytes under the same pinned source identity fail.
+
+The resulting app-bundle `BuildRecord` is `draft` with validation `pending`. It
+does not update the Factory registry's current artifact or allocate a build
+run. Canonical app validation, explicit Genesis review and acceptance, and a
+trigger gate that rejects unaccepted imported drafts remain required before a
+later request may enter Refinement. Existing Studio trigger and AppGenerator
+hydration code still allow a selected draft baseline; this launch path must
+stay disabled until that gate is implemented. App Intelligence's redacted
+source index is context evidence, not a substitute for the complete archive.
+
 Graph backend mirrors are never source of truth. FalkorDB may mirror graph and
 intelligence artifacts for production-scale querying, but `AppContextVersion`
 and artifact storage remain canonical.

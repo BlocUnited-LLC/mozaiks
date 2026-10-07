@@ -1,0 +1,271 @@
+from __future__ import annotations
+
+import hashlib
+import io
+import json
+import stat
+import zipfile
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
+
+from factory_app.workflows._shared.platform.genesis_import import (
+    GenesisImportError,
+    PinnedSourceProvenance,
+    import_existing_app_genesis_draft,
+)
+from mozaiksai.core.artifacts import content_store as artifact_content_store
+from mozaiksai.core.artifacts.content_store import (
+    ContentIntegrityError,
+    LocalArtifactContentStore,
+    read_verified_artifact_bundle,
+)
+from mozaiksai.core.artifacts.models import (
+    BuildRecord,
+    BuildRecordStatus,
+    BuildRecordValidationStatus,
+)
+
+_BUNDLE = "ExistingApp"
+_PROVENANCE = PinnedSourceProvenance(
+    source_id="managed/app-zero", revision_id="a" * 40, tree_id="b" * 40,
+)
+
+
+def _source(*, app_id: str = "mozaiks-platform", files: dict[str, bytes] | None = None,
+            member_override: dict[str, zipfile.ZipInfo] | None = None):
+    files = files or {
+        "app.json": json.dumps({"appId": app_id, "appName": "Mozaiks"}).encode(),
+        "modules/example/backend/handler.py": b"def handle():\n    return 1\n",
+        "ui/public/logo.png": b"\x89PNG\r\n\x1a\n\x00\x01",
+    }
+    archive_bytes = io.BytesIO()
+    with zipfile.ZipFile(archive_bytes, "w", zipfile.ZIP_DEFLATED) as archive:
+        for path, data in files.items():
+            member = (member_override or {}).get(path, f"{_BUNDLE}/{path}")
+            archive.writestr(member, data)
+    raw = archive_bytes.getvalue()
+    manifest = [{
+        "path": f"{_BUNDLE}/{_BUNDLE}.zip", "sha256": hashlib.sha256(raw).hexdigest(),
+        "size_bytes": len(raw), "content_type": "application/zip",
+    }]
+    manifest.extend({
+        "path": f"{_BUNDLE}/{path}", "sha256": hashlib.sha256(data).hexdigest(),
+        "size_bytes": len(data), "content_type": "application/json" if path == "app.json" else "application/octet-stream",
+    } for path, data in files.items())
+    return raw, manifest
+
+
+@pytest.fixture
+def import_state(tmp_path, monkeypatch):
+    registry_row = {
+        "build_registry_id": "appreg_1", "owner_user_id": "owner_1",
+        "app_id": "mozaiks-platform", "chat_app_id": "mozaiks-platform",
+        "lifecycle_state": "draft", "artifact_version_id": None,
+        "current_build_run": None,
+    }
+    registry = SimpleNamespace(get_app_record=AsyncMock(return_value={"app": registry_row}))
+    records: dict[str, BuildRecord] = {}
+
+    async def get_build_record(*, app_id, build_record_id):
+        record = records.get(build_record_id)
+        return record if record is not None and record.app_id == app_id else None
+
+    async def list_build_records(**_kwargs):
+        return list(records.values())
+
+    async def create_build_record(**kwargs):
+        record = BuildRecord(
+            _id=kwargs["build_record_id"], app_id=kwargs["app_id"],
+            build_family=kwargs["build_family"], build_key=kwargs["build_key"],
+            version_number=1, lineage_root_id=kwargs["build_record_id"],
+            parent_build_record_id=kwargs["parent_build_record_id"],
+            files_manifest=kwargs["files_manifest"],
+            lifecycle_status=kwargs["lifecycle_status"],
+            validation_status=kwargs["validation_status"],
+            commit_metadata=kwargs["commit_metadata"],
+        )
+        records[record.id] = record
+        return record
+
+    store = SimpleNamespace(
+        get_build_record=AsyncMock(side_effect=get_build_record),
+        list_build_records=AsyncMock(side_effect=list_build_records),
+        create_build_record=AsyncMock(side_effect=create_build_record),
+    )
+    content = LocalArtifactContentStore(tmp_path)
+    monkeypatch.setattr(artifact_content_store, "get_artifact_content_store", lambda: content)
+    return registry_row, registry, store, content
+
+
+async def _import(state, raw, manifest, *, provenance=_PROVENANCE):
+    _row, registry, store, content = state
+    return await import_existing_app_genesis_draft(
+        owner_user_id="owner_1", execution_app_id="mozaiks-platform",
+        build_registry_id="appreg_1", bundle_name=_BUNDLE,
+        bundle_bytes=raw, files_manifest=manifest, source_provenance=provenance,
+        registry_service=registry, record_store=store, content_store=content,
+    )
+
+
+@pytest.mark.asyncio
+async def test_exact_existing_source_is_draft_pending_and_idempotent(import_state):
+    raw, manifest = _source()
+    first = await _import(import_state, raw, manifest)
+    second = await _import(import_state, raw, list(reversed(manifest)))
+    assert first is second
+    assert first.lifecycle_status == BuildRecordStatus.DRAFT
+    assert first.validation_status == BuildRecordValidationStatus.PENDING
+    assert first.parent_build_record_id is None
+    assert first.source_workflow is None
+    assert first.app_id == "mozaiks-platform"
+    assert first.commit_metadata.metadata["build_registry_id"] == "appreg_1"
+    assert first.commit_metadata.metadata["brownfield_genesis"] == _PROVENANCE.model_dump()
+    assert first.commit_metadata.metadata["content_digest"] == hashlib.sha256(raw).hexdigest()
+    assert await read_verified_artifact_bundle(first) == raw
+    assert import_state[2].create_build_record.await_count == 1
+    assert import_state[0]["artifact_version_id"] is None
+    assert import_state[0]["current_build_run"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field,value", [
+    ("owner_user_id", "other-owner"), ("chat_app_id", "other-host"),
+    ("lifecycle_state", "active"), ("artifact_version_id", "av_current"),
+    ("current_build_run", {"build_id": "build_1"}),
+])
+async def test_wrong_or_active_factory_target_cannot_receive_import(import_state, field, value):
+    import_state[0][field] = value
+    raw, manifest = _source()
+    with pytest.raises(GenesisImportError, match="Factory target"):
+        await _import(import_state, raw, manifest)
+    import_state[2].create_build_record.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_legacy_app_zero_target_id_is_not_a_source_baseline(import_state):
+    import_state[0]["app_id"] = "mozaiks-platform-app-zero"
+    raw, manifest = _source(app_id="mozaiks-platform")
+    with pytest.raises(GenesisImportError, match="root app.json does not match"):
+        await _import(import_state, raw, manifest)
+    import_state[2].create_build_record.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault", ["missing", "extra", "digest", "size", "archive_digest"])
+async def test_incomplete_or_changed_manifest_creates_no_record(import_state, fault):
+    raw, manifest = _source()
+    if fault == "missing":
+        manifest.pop()
+    elif fault == "extra":
+        manifest.append({"path": f"{_BUNDLE}/never.py", "sha256": "0" * 64,
+                         "size_bytes": 1, "content_type": "text/x-python"})
+    elif fault == "digest":
+        manifest[1]["sha256"] = "0" * 64
+    elif fault == "size":
+        manifest[1]["size_bytes"] += 1
+    else:
+        manifest[0]["sha256"] = "0" * 64
+    with pytest.raises(GenesisImportError):
+        await _import(import_state, raw, manifest)
+    import_state[2].create_build_record.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("member", [
+    "../escape.py", "/absolute.py", "C:/drive.py", "Other/file.py",
+    f"{_BUNDLE}/ui/CON.txt", f"{_BUNDLE}/ui/secret:stream",
+    f"{_BUNDLE}/ui/trailing.",
+])
+async def test_unsafe_or_outside_archive_member_creates_no_record(import_state, member):
+    raw, manifest = _source(member_override={"modules/example/backend/handler.py": member})
+    with pytest.raises(GenesisImportError):
+        await _import(import_state, raw, manifest)
+    import_state[2].create_build_record.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_symlink_archive_member_creates_no_record(import_state):
+    link = zipfile.ZipInfo(f"{_BUNDLE}/modules/example/backend/handler.py")
+    link.create_system = 3
+    link.external_attr = (stat.S_IFLNK | 0o777) << 16
+    raw, manifest = _source(member_override={"modules/example/backend/handler.py": link})
+    with pytest.raises(GenesisImportError, match="unsafe"):
+        await _import(import_state, raw, manifest)
+    import_state[2].create_build_record.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_unsupported_binary_source_creates_no_record(import_state):
+    raw, manifest = _source(files={
+        "app.json": b'{"appId":"mozaiks-platform","appName":"Mozaiks"}',
+        "opaque.bin": b"\x00\xff",
+    })
+    with pytest.raises(GenesisImportError, match="unsupported or incomplete"):
+        await _import(import_state, raw, manifest)
+    import_state[2].create_build_record.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_same_pinned_revision_with_changed_bytes_cannot_create_second_draft(import_state):
+    raw, manifest = _source()
+    await _import(import_state, raw, manifest)
+    changed, changed_manifest = _source(files={
+        "app.json": b'{"appId":"mozaiks-platform","appName":"Changed"}',
+    })
+    with pytest.raises(GenesisImportError, match="different facts"):
+        await _import(import_state, changed, changed_manifest)
+    assert import_state[2].create_build_record.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_different_revision_cannot_create_second_genesis_draft(import_state):
+    raw, manifest = _source()
+    await _import(import_state, raw, manifest)
+    different = _PROVENANCE.model_copy(update={"revision_id": "c" * 40})
+    with pytest.raises(GenesisImportError, match="different facts"):
+        await _import(import_state, raw, manifest, provenance=different)
+    assert import_state[2].create_build_record.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_corrupt_immutable_source_blob_cannot_be_read_as_baseline(import_state, tmp_path):
+    raw, manifest = _source()
+    draft = await _import(import_state, raw, manifest)
+    digest = draft.commit_metadata.metadata["content_digest"]
+    (tmp_path / "sha256" / digest[:2] / digest).write_bytes(b"changed")
+    with pytest.raises(ContentIntegrityError):
+        await read_verified_artifact_bundle(draft)
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_content_authority_cannot_be_read_as_baseline(import_state):
+    raw, manifest = _source()
+    draft = await _import(import_state, raw, manifest)
+    draft.commit_metadata.metadata["content_ref"] = "untrusted-path"
+    with pytest.raises(ContentIntegrityError, match="authority_ambiguous"):
+        await read_verified_artifact_bundle(draft)
+
+
+@pytest.mark.asyncio
+async def test_duplicate_archive_member_is_rejected_before_persistence(import_state):
+    with pytest.warns(UserWarning, match="Duplicate name"):
+        raw, manifest = _source(member_override={
+            "modules/example/backend/handler.py": f"{_BUNDLE}/app.json",
+        })
+    with pytest.raises(GenesisImportError, match="duplicate member"):
+        await _import(import_state, raw, manifest)
+    import_state[2].create_build_record.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_file_directory_collision_is_rejected_before_persistence(import_state):
+    raw, manifest = _source(files={
+        "app.json": b'{"appId":"mozaiks-platform","appName":"Mozaiks"}',
+        "data": b"not a directory",
+        "data/contract.json": b"{}",
+    })
+    with pytest.raises(GenesisImportError, match="colliding paths"):
+        await _import(import_state, raw, manifest)
+    import_state[2].create_build_record.assert_not_awaited()

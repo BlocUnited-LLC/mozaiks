@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from typing import Any
@@ -662,6 +663,7 @@ class BuildRecordStore:
         app_id: str,
         build_family: str,
         build_key: str,
+        build_record_id: str | None = None,
         files_manifest: Iterable[dict[str, Any] | ArtifactFileManifestEntry] | None = None,
         source_workflow: str | None = None,
         source_chat_id: str | None = None,
@@ -689,7 +691,9 @@ class BuildRecordStore:
                 raise ValueError(f"Unknown parent_build_record_id: {parent_build_record_id}")
             parent_doc = BuildRecord.model_validate(parent_raw)
 
-        build_record_id = f"av_{uuid4().hex[:24]}"
+        if build_record_id is not None and re.fullmatch(r"av_[0-9a-f]{24}", build_record_id) is None:
+            raise ValueError("build_record_id must use the canonical av_ identity")
+        build_record_id = build_record_id or f"av_{uuid4().hex[:24]}"
         version_number = await self._next_build_record_version_number(
             app_id=resolved_app_id,
             build_family=build_family,
