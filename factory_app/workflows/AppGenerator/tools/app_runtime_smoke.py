@@ -192,9 +192,17 @@ async def run_app_runtime_smoke(
         client.close()
 
 
+def _is_link_or_reparse(metadata: os.stat_result) -> bool:
+    return stat.S_ISLNK(metadata.st_mode) or bool(
+        getattr(metadata, "st_file_attributes", 0)
+        & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    )
+
+
 def _copy_imported_app(app_root: Path, destination: Path) -> None:
     """Copy only regular staged app files into the sole host path mounted by Docker."""
-    if app_root.is_symlink() or (hasattr(app_root, "is_junction") and app_root.is_junction()) or not app_root.is_dir():
+    root_stat = app_root.lstat()
+    if _is_link_or_reparse(root_stat) or not stat.S_ISDIR(root_stat.st_mode):
         raise ValueError("imported app root must be a directory, not a symlink")
     destination.mkdir()
     total_bytes = 0
@@ -207,13 +215,15 @@ def _copy_imported_app(app_root: Path, destination: Path) -> None:
         relative_dir = source_dir.relative_to(app_root)
         for name in directories:
             source = source_dir / name
-            if source.is_symlink() or (hasattr(source, "is_junction") and source.is_junction()):
+            source_stat = source.lstat()
+            if _is_link_or_reparse(source_stat) or not stat.S_ISDIR(source_stat.st_mode):
                 raise ValueError("imported app contains a directory link")
             (destination / relative_dir / name).mkdir()
         for name in files:
             source = source_dir / name
             source_stat = source.lstat()
-            if not stat.S_ISREG(source_stat.st_mode) or source_stat.st_nlink != 1:
+            if (_is_link_or_reparse(source_stat) or not stat.S_ISREG(source_stat.st_mode)
+                    or source_stat.st_nlink != 1):
                 raise ValueError("imported app contains a link or special file")
             file_count += 1
             total_bytes += source_stat.st_size
@@ -278,7 +288,7 @@ class _ContainedDockerProcess:
             stream = self.process.stdout if index == 0 else self.process.stderr
             assert stream is not None
             try:
-                while chunk := stream.read1(8192):
+                while chunk := os.read(stream.fileno(), 8192):
                     remaining = max(0, limit - len(output[index]))
                     output[index].extend(chunk[:remaining])
                     if len(chunk) > remaining:
@@ -1594,7 +1604,9 @@ def _contained_main() -> int:
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
     mongo_uri = "mongodb://127.0.0.1:27017/?directConnection=true"
-    client = MongoClient(mongo_uri, serverSelectionTimeoutMS=500, connectTimeoutMS=500)
+    client: MongoClient[dict[str, Any]] = MongoClient(
+        mongo_uri, serverSelectionTimeoutMS=500, connectTimeoutMS=500,
+    )
     try:
         deadline = time.monotonic() + _CONTAINER_STARTUP_SECONDS
         while time.monotonic() < deadline and mongod.poll() is None:

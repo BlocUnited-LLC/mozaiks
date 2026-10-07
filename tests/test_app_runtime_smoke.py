@@ -186,6 +186,29 @@ def test_imported_smoke_rejects_symlink(tmp_path):
         app_runtime_smoke._copy_imported_app(app_root, tmp_path / "fresh-copy")
 
 
+@pytest.mark.skipif(os.name != "nt", reason="NTFS junctions are Windows-specific")
+def test_imported_smoke_rejects_ntfs_junction(tmp_path):
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+    (app_root / "app.json").write_text("{}", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("outside", encoding="utf-8")
+    junction = app_root / "linked"
+    created = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(junction), str(outside)],
+        capture_output=True, text=True, check=False,
+    )
+    if created.returncode != 0:
+        pytest.skip("creating an NTFS junction is unavailable")
+    try:
+        with pytest.raises(ValueError, match="directory link"):
+            app_runtime_smoke._copy_imported_app(app_root, tmp_path / "fresh-copy")
+    finally:
+        junction.rmdir()
+    assert (outside / "secret.txt").read_text(encoding="utf-8") == "outside"
+
+
 @pytest.mark.skipif(
     not os.getenv("MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE"),
     reason="set MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE to a freshly built local preview image",
