@@ -88,7 +88,7 @@ from mozaiksai.core.artifacts.content_store import (
     ContentNotFoundError,
     read_verified_artifact_bundle,
 )
-from mozaiksai.core.auth import UserPrincipal, require_user_scope
+from mozaiksai.core.auth import UserPrincipal, is_auth_explicitly_disabled, require_user_scope
 from mozaiksai.core.auth.anonymous_access import ANONYMOUS_PROVENANCE, STUDIO_PUBLIC_MESSAGE
 from mozaiksai.core.auth.dependencies import validate_path_id
 from mozaiksai.core.dashboard import load_dashboard_manifest
@@ -1296,6 +1296,7 @@ async def index_studio_app_intelligence_context(
 ):
     validate_path_id(app_id, "app_id")
     resolved_app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
+    _authorize_http_source_import(body)
     return await _start_studio_app_intelligence_index_job(
         app_id=resolved_app_id,
         user_id=user_id,
@@ -1313,6 +1314,7 @@ async def import_studio_app_source_context(
 ):
     validate_path_id(app_id, "app_id")
     resolved_app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
+    _authorize_http_source_import(body)
     return await _start_studio_app_intelligence_index_job(
         app_id=resolved_app_id,
         user_id=user_id,
@@ -1376,6 +1378,15 @@ async def run_studio_app_source_validation(
             "validation": result.model_dump(mode="json"),
         }
     )
+
+
+def _authorize_http_source_import(body: AppIntelligenceIndexRequest) -> None:
+    """Keep server filesystem paths out of authenticated Studio requests."""
+    if body.source_kind == "local_workspace" and not is_auth_explicitly_disabled():
+        raise HTTPException(
+            status_code=403,
+            detail="HTTP local workspace import is available only when authentication is explicitly disabled.",
+        )
 
 
 async def _start_studio_app_intelligence_index_job(

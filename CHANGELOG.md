@@ -94,6 +94,10 @@ This project follows a practical pre-1.0 changelog format:
   discovery session; they no longer inherit a server-wide GitHub token when a
   caller has not connected an account.
 
+- Studio HTTP source indexing rejects caller-supplied local filesystem roots
+  unless authentication was explicitly disabled for local development. The
+  server-derived post-promotion indexing path remains available.
+
 - Patched DOMPurify and source-map-js in the shipped frontend dependency locks,
   including Monaco's nested DOMPurify dependency.
 
