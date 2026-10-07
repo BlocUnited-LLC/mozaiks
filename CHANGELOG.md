@@ -18,6 +18,8 @@ This project follows a practical pre-1.0 changelog format:
   Docker executor, including pinned baseline and read-only inspection checks;
   a canonical digest now binds the complete v2 patch candidate for downstream
   validation and draft PR publication.
+- Advisory, idempotent usage receipts for isolated repository ACP turns, using
+  host-owned attribution and the existing usage ledger without wallet debits.
 - A bounded, offline Docker transport for one approved repository ACP coding
   turn. A trusted worker pins a local image ID, supplies only selected files on
   stdin, verifies no-network/no-mount container settings, caps output, removes

@@ -134,6 +134,11 @@ from .ports import (
     RoutingPolicyPort,
     ScopeProposalPort,
 )
+from .repository_acp_usage import (
+    IsolatedACPUsage,
+    parse_isolated_acp_usage,
+    record_isolated_acp_usage,
+)
 from .repository_docker_executor import (
     RepositoryDockerExecutionError,
     RepositoryDockerTurn,
@@ -282,6 +287,9 @@ __all__ = [
     "RepositoryDockerExecutionError",
     "RepositoryDockerTurn",
     "execute_repository_docker_turn",
+    "IsolatedACPUsage",
+    "parse_isolated_acp_usage",
+    "record_isolated_acp_usage",
     "export_repository_workspace_archive",
     "finalize_repository_patch",
     "repository_patch_digest",

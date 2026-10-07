@@ -220,6 +220,15 @@ create response is lost. A static label also lets the trusted worker inspect
 and remove abandoned turns. A Docker daemon that finishes a timed-out create
 after cleanup remains a residual daemon race for that worker to monitor.
 
+The Docker result exposes only a strict, bounded token measurement in its
+separate `usage` field. Provider model names, message text, and operational
+events remain outside the sanitized proposal. A trusted host may record that
+measurement through `record_isolated_acp_usage` using the original host-owned
+request, a stable durable attempt ID, and a model identifier from trusted
+configuration. A malformed or missing measurement cannot invalidate a valid
+patch or create a usage receipt. These advisory ACP measurements enter the
+existing runtime usage ledger directly and never trigger token-wallet debits.
+
 The returned proposal and archive carry no approval authority. The host must
 still call `stage_repository_workspace_archive` and `finalize_repository_patch`
 with its verified snapshot, immutable baseline files, selected paths, and path
