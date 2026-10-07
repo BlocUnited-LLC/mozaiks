@@ -214,6 +214,66 @@ def _reserved_claim(import_state: dict[str, Any]) -> GenesisImportClaim:
     })
 
 
+def _record_matches_claim(
+    record: BuildRecord, row: dict[str, Any], claim: GenesisImportClaim, *,
+    owner_user_id: str, execution_app_id: str, build_registry_id: str,
+) -> bool:
+    metadata = record.commit_metadata.metadata
+    return all((
+        row.get("build_registry_id") == build_registry_id,
+        row.get("owner_user_id") == owner_user_id,
+        row.get("chat_app_id") == execution_app_id,
+        record.id == claim.build_record_id,
+        record.app_id == row.get("app_id"),
+        record.parent_build_record_id is None,
+        record.build_family == record.build_key == "app_bundle",
+        record.commit_metadata.author_user_id == owner_user_id,
+        metadata.get("bundle_mode") == "brownfield_genesis_import",
+        metadata.get("build_registry_id") == build_registry_id,
+        metadata.get("execution_app_id") == execution_app_id,
+        metadata.get("target_app_id") == row.get("app_id"),
+        metadata.get("bundle_name") == claim.bundle_name,
+        metadata.get("bundle_sha256") == claim.bundle_sha256,
+        metadata.get("content_digest") == claim.bundle_sha256,
+        metadata.get("content_backend") == claim.content_backend,
+        metadata.get("genesis_import_claim_sha256") == _canonical_digest(claim.model_dump(mode="json")),
+        metadata.get("brownfield_genesis") == {
+            "source_id": claim.source_id, "revision_id": claim.revision_id, "tree_id": claim.tree_id,
+        },
+        _canonical_digest([entry.model_dump(mode="json") for entry in record.files_manifest])
+        == claim.manifest_sha256,
+    ))
+
+
+async def read_imported_genesis_review_bundle(
+    record: BuildRecord, *, owner_user_id: str, execution_app_id: str,
+    build_registry_id: str, registry_service: AppRegistryService | None = None,
+) -> bytes:
+    """Return exact source bytes for owner review, including a reserved draft."""
+    registry = registry_service or AppRegistryService()
+    row = (await registry.get_app_record(
+        owner_user_id=owner_user_id, build_registry_id=build_registry_id,
+    )).get("app")
+    if not isinstance(row, dict):
+        raise GenesisImportError("Factory target is unavailable to this owner")
+    state = row.get("genesis_import")
+    if not isinstance(state, dict) or state.get("status") not in {"reserved", "accepted"}:
+        raise GenesisImportError("Factory target has no reviewed Genesis source")
+    try:
+        claim = _reserved_claim(state)
+    except ValueError as exc:
+        raise GenesisImportError("Factory Genesis reservation is invalid") from exc
+    if (not _record_matches_claim(
+        record, row, claim, owner_user_id=owner_user_id,
+        execution_app_id=execution_app_id, build_registry_id=build_registry_id,
+    ) or (state["status"] == "reserved" and record.lifecycle_status != BuildRecordStatus.DRAFT)):
+        raise GenesisImportError("imported Genesis record differs from its reserved source")
+    raw = await read_verified_artifact_bundle(record, max_bytes=_MAX_ARCHIVE_BYTES)
+    if hashlib.sha256(raw).hexdigest() != claim.bundle_sha256:
+        raise GenesisImportError("imported Genesis archive digest differs from its reservation")
+    return raw
+
+
 def _receipt_matches(
     record: BuildRecord, registry_row: dict[str, Any], *,
     owner_user_id: str, execution_app_id: str, build_registry_id: str,
@@ -229,29 +289,11 @@ def _receipt_matches(
     metadata = record.commit_metadata.metadata
     validation = metadata.get("genesis_validation")
     return bool(
-        registry_row.get("build_registry_id") == build_registry_id
-        and registry_row.get("owner_user_id") == owner_user_id
-        and registry_row.get("app_id") == record.app_id
-        and registry_row.get("chat_app_id") == execution_app_id
+        _record_matches_claim(
+            record, registry_row, claim, owner_user_id=owner_user_id,
+            execution_app_id=execution_app_id, build_registry_id=build_registry_id,
+        )
         and receipt.accepted_by == owner_user_id
-        and record.id == claim.build_record_id
-        and record.parent_build_record_id is None
-        and record.build_family == record.build_key == "app_bundle"
-        and record.commit_metadata.author_user_id == owner_user_id
-        and metadata.get("bundle_mode") == "brownfield_genesis_import"
-        and metadata.get("build_registry_id") == build_registry_id
-        and metadata.get("execution_app_id") == execution_app_id
-        and metadata.get("target_app_id") == record.app_id
-        and metadata.get("bundle_name") == claim.bundle_name
-        and metadata.get("bundle_sha256") == claim.bundle_sha256
-        and metadata.get("content_digest") == claim.bundle_sha256
-        and metadata.get("content_backend") == claim.content_backend
-        and metadata.get("genesis_import_claim_sha256") == _canonical_digest(claim.model_dump(mode="json"))
-        and metadata.get("brownfield_genesis") == {
-            "source_id": claim.source_id, "revision_id": claim.revision_id, "tree_id": claim.tree_id,
-        }
-        and _canonical_digest([entry.model_dump(mode="json") for entry in record.files_manifest])
-        == claim.manifest_sha256
         and isinstance(validation, dict)
         and validation.get("contract") == receipt.validation_contract
         and validation.get("sha256") == receipt.validation_sha256
@@ -316,26 +358,10 @@ async def accept_existing_app_genesis(
         BuildRecordStatus.SUPERSEDED, BuildRecordStatus.STALE,
     }:
         raise GenesisImportError("imported Genesis draft is unavailable for acceptance")
-    metadata = record.commit_metadata.metadata
-    if not all((
-        record.app_id == row["app_id"], record.parent_build_record_id is None,
-        record.build_family == record.build_key == "app_bundle",
-        record.commit_metadata.author_user_id == owner_user_id,
-        metadata.get("bundle_mode") == "brownfield_genesis_import",
-        metadata.get("build_registry_id") == build_registry_id,
-        metadata.get("execution_app_id") == execution_app_id,
-        metadata.get("target_app_id") == row["app_id"],
-        metadata.get("bundle_name") == claim.bundle_name,
-        metadata.get("bundle_sha256") == claim.bundle_sha256,
-        metadata.get("content_digest") == claim.bundle_sha256,
-        metadata.get("content_backend") == claim.content_backend,
-        metadata.get("genesis_import_claim_sha256") == _canonical_digest(claim.model_dump(mode="json")),
-        metadata.get("brownfield_genesis") == {
-            "source_id": claim.source_id, "revision_id": claim.revision_id, "tree_id": claim.tree_id,
-        },
-        _canonical_digest([entry.model_dump(mode="json") for entry in record.files_manifest])
-        == claim.manifest_sha256,
-    )):
+    if not _record_matches_claim(
+        record, row, claim, owner_user_id=owner_user_id,
+        execution_app_id=execution_app_id, build_registry_id=build_registry_id,
+    ):
         raise GenesisImportError("imported Genesis record differs from its reserved source")
     try:
         bundle_bytes = await read_verified_artifact_bundle(record, max_bytes=_MAX_ARCHIVE_BYTES)

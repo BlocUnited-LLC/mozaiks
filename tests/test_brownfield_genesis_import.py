@@ -6,8 +6,9 @@ import json
 import stat
 import zipfile
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
+import httpx
 import pytest
 
 from factory_app.refinement_harness.tools._artifact_workspace import load_artifact_workspace
@@ -380,6 +381,35 @@ async def test_harness_workspaces_fail_closed_on_corrupt_digest(import_state, tm
 
 
 @pytest.mark.asyncio
+async def test_owner_can_download_reserved_exact_genesis_for_review(import_state, monkeypatch, tmp_path):
+    from mozaiksai.core.auth import reset_auth_adapter
+    from mozaiksai.hosts import studio
+
+    raw, manifest = _source()
+    draft = await _import(import_state, raw, manifest)
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+    reset_auth_adapter()
+    monkeypatch.setattr(studio, "_resolve_studio_scope", lambda *_args, **_kwargs: (
+        "mozaiks-platform", "owner_1",
+    ))
+    monkeypatch.setattr(studio, "_get_app_registry_service", lambda: import_state[1])
+    monkeypatch.setattr(studio, "get_artifact_store", lambda: import_state[2])
+    path = f"/api/studio/build/artifacts/{draft.id}/download?build_registry_id=appreg_1"
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=studio.app), base_url="http://test") as client:
+        response = await client.get(path)
+        assert response.status_code == 200, response.text
+        assert response.content == raw
+        assert response.headers["content-type"] == "application/zip"
+        import_state[0]["owner_user_id"] = "other_owner"
+        assert (await client.get(path)).status_code == 409
+        import_state[0]["owner_user_id"] = "owner_1"
+        digest = draft.commit_metadata.metadata["content_digest"]
+        (tmp_path / "sha256" / digest[:2] / digest).write_bytes(b"changed")
+        assert (await client.get(path)).status_code == 409
+
+
+@pytest.mark.asyncio
 async def test_duplicate_archive_member_is_rejected_before_persistence(import_state):
     with pytest.warns(UserWarning, match="Duplicate name"):
         raw, manifest = _source(member_override={
@@ -543,7 +573,9 @@ async def test_imported_runtime_smoke_fails_closed_without_contained_backend(mon
     from factory_app.workflows.AppGenerator.tools import app_validation
 
     host_smoke = AsyncMock(side_effect=AssertionError("host Mongo smoke was invoked"))
+    host_staging = Mock(side_effect=AssertionError("source was staged on Studio host"))
     monkeypatch.setattr(app_validation.app_runtime_smoke, "run_app_runtime_smoke", host_smoke)
+    monkeypatch.setattr(app_validation.tempfile, "TemporaryDirectory", host_staging)
     monkeypatch.delattr(
         app_validation.app_runtime_smoke, "run_contained_imported_app_runtime_smoke", raising=False,
     )
@@ -552,6 +584,7 @@ async def test_imported_runtime_smoke_fails_closed_without_contained_backend(mon
             {"app.json": '{"appId":"mozaiks-platform"}'}, contained_imported_source=True,
         )
     host_smoke.assert_not_awaited()
+    host_staging.assert_not_called()
 
 
 @pytest.mark.asyncio

@@ -29,6 +29,7 @@ from factory_app.workflows._shared.artifact_bundle import read_artifact_bundle
 from factory_app.workflows._shared.platform.genesis_import import (
     GenesisImportError,
     accept_existing_app_genesis,
+    read_imported_genesis_review_bundle,
     require_accepted_genesis_baseline,
 )
 from logs.logging_config import get_workflow_logger
@@ -1920,6 +1921,7 @@ async def download_build_artifact(
     principal: UserPrincipal = Depends(require_studio_user),
 ):
     validate_path_id(artifact_version_id, "artifact_version_id")
+    execution_app_id, owner_user_id = _resolve_studio_scope(principal, app_id=app_id)
     target_app_id, _ = await _resolve_studio_artifact_scope(
         principal, build_registry_id=build_registry_id, app_id=app_id,
     )
@@ -1928,6 +1930,19 @@ async def download_build_artifact(
     )
     if version is None:
         raise HTTPException(status_code=404, detail="Artifact not found")
+    if _version_metadata(version).get("bundle_mode") == "brownfield_genesis_import":
+        try:
+            source_bytes = await read_imported_genesis_review_bundle(
+                version, owner_user_id=owner_user_id,
+                execution_app_id=execution_app_id, build_registry_id=build_registry_id,
+                registry_service=_get_app_registry_service(),
+            )
+        except (GenesisImportError, ValueError, OSError, ContentNotFoundError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return Response(
+            source_bytes, media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{target_app_id}-{artifact_version_id}.zip"'},
+        )
     try:
         binding = RunBuildBinding.model_validate({
             key: _version_metadata(version).get(key) for key in RunBuildBinding.model_fields

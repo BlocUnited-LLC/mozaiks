@@ -23,10 +23,12 @@ build runs and artifacts change their current pointers.
 
 ## Owner Review and Validation
 
-The owner uses the existing Studio artifact review and verified download to
-inspect the imported archive and its recorded source commit/tree. The review
-response includes the owner-scoped reserved digest facts needed for the distinct
-`POST /api/studio/build/artifacts/{build_record_id}/accept-genesis` route
+The owner uses the Studio artifact review and owner-scoped verified download to
+inspect the imported archive, including binary members, and its recorded source
+commit/tree. A reserved `DRAFT` can be downloaded for review while whole-app
+validation is still pending. The review response includes the reserved digest
+facts needed for the distinct
+`POST /api/studio/build/artifacts/{build_record_id}/accept-genesis` route. It
 requires a selected Factory `build_registry_id`, an authenticated owner, the
 explicit `confirm_exact_source_review: true` assertion, and the exact
 `reviewed_bundle_sha256` and `reviewed_manifest_sha256` values. Its digest
@@ -43,12 +45,15 @@ ordinary generated-app smoke is insufficient: its child inherits local
 filesystem/network access and receives the host's configured Mongo URI on
 stdin. An app handler could choose another database with that credential;
 the smoke's disposable database name is not a permission boundary. The
-imported-source path therefore fails closed while a contained runner is
+imported-source path therefore checks for a contained runner before staging
+any imported files on the Studio host and fails closed while the runner is
 unavailable. Its staged workspace includes the verified binary assets.
 The contained runner and its database isolation need independent review before
 live use. A failed, skipped, or
 pending result cannot become an accepted source. Validation evidence is tied
-to the exact archive and manifest digests on the `BuildRecord`.
+to the exact archive and manifest digests on the `BuildRecord`. The first passed
+evidence wins an artifact-store compare and swap; concurrent validation with
+different evidence cannot overwrite the digest named by an accepted receipt.
 
 AppRegistry accepts the exact reserved claim with a single owner/host/target
 compare and swap. Its receipt records reviewer, time, validation contract,
@@ -59,10 +64,19 @@ projection. A competing source, reviewer, digest, or changed target cannot
 reuse the receipt.
 
 Generic artifact accept, reject, and promote routes cannot mutate this
-imported Genesis record. The generic accept override and promotion workspace
-restore are different lifecycle operations. No route is added here for
+imported Genesis record. Core generic status and metadata mutators also exclude
+it, and generic staleness cannot move a reserved `DRAFT` out of review. After
+acceptance, normal refinement may supersede or stale the imported `CURRENT`
+record while its source marker and receipt remain intact. The generic accept
+override and promotion workspace restore are different lifecycle operations.
+No route is added here for
 changing the pinned source after reservation; that requires a separate
 reviewed reset/migration decision.
+
+This draft provides the owner-scoped review, download, and acceptance APIs.
+Studio has no owner-facing control for `accept-genesis` yet, so an operator must
+use the explicit API until that UI is built. No live App Zero import is enabled
+by this ADR.
 
 ## Refinement Boundary
 
