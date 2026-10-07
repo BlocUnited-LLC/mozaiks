@@ -288,6 +288,10 @@ workspace against those exact grants before returning a proposal. The archive
 exporter repeats the operation check, including a canonical empty archive for
 deletion-only turns. Host snapshot and finalizer checks remain authoritative.
 
+The proposed [live repository ACP isolation decision](../../adr/0015-live-repository-acp-isolation.md)
+defines the separate image, credential and network boundary, and acceptance
+gates required before a real Codex or Claude turn can use this bridge.
+
 ---
 
 ## User-Facing Mental Model
