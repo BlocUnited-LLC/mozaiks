@@ -13,8 +13,10 @@ scoped files, Mozaiks passes only the selected adapter's API credential, and
 user questions and terminal access are not advertised. Permission requests are
 auto-approved for this local turn; every accepted change comes from the
 post-run hash harvest — never from the agent's own claims. Out-of-scope edits
-reject the whole proposal. The local subprocess can still access host files and
-disk-based login state; this provider is not a security sandbox.
+reject the whole proposal. Create/delete paths are empty by default; the
+isolated repository worker can supply exact host-approved paths for one turn.
+The local subprocess can still access host files and disk-based login state;
+this provider is not a security sandbox.
 
 This provider is dark by default: ``refinement_policy.yaml``'s
 ``coding.providers.acp.enabled`` is ``false``, the ``ag2[acp]`` extra is
@@ -26,7 +28,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -40,7 +42,10 @@ from mozaiksai.control_plane.contracts import (
     ProposedFileChange,
     ProviderEventRecord,
     StagedPatchProposal,
+    is_repository_env_template_path,
+    is_secret_sensitive_path,
 )
+from mozaiksai.control_plane.repository_patch import _canonical_path
 from mozaiksai.control_plane.workspace import (
     StagedCodingWorkspace,
     WorkspaceHarvest,
@@ -149,7 +154,13 @@ def build_acp_agent_config(
     )
 
 
-def build_provider_prompt(request: CodingWorkerRequest, workspace: StagedCodingWorkspace) -> str:
+def build_provider_prompt(
+    request: CodingWorkerRequest,
+    workspace: StagedCodingWorkspace,
+    *,
+    create_paths: Sequence[str] = (),
+    delete_paths: Sequence[str] = (),
+) -> str:
     """Task framing for the CLI agent.
 
     Informative only — nothing here is load-bearing for safety. The editable
@@ -157,6 +168,23 @@ def build_provider_prompt(request: CodingWorkerRequest, workspace: StagedCodingW
     """
     editable = "\n".join(f"- {path}" for path in sorted(workspace.editable_manifest))
     read_only = "\n".join(f"- {path}" for path in sorted(workspace.read_only_manifest)) or "(none)"
+    operation_instructions = (
+        [
+            "Approved creation paths:",
+            *(f"- {path}" for path in sorted(create_paths)),
+            "",
+            "Approved deletion paths:",
+            *(f"- {path}" for path in sorted(delete_paths)),
+            "",
+            "You may create or delete only the exact paths listed above.",
+            "Do not run commands. When done, reply with a short summary.",
+        ]
+        if create_paths or delete_paths else [
+            "Edit the files in place to satisfy the request. Do not create new",
+            "files, do not delete files, and do not run commands. When you are",
+            "done, reply with a short summary of what you changed and why.",
+        ]
+    )
     return "\n".join(
         [
             "You are performing one bounded, pre-approved code change in this",
@@ -171,11 +199,41 @@ def build_provider_prompt(request: CodingWorkerRequest, workspace: StagedCodingW
             "Read-only inspection files (do not modify or delete):",
             read_only,
             "",
-            "Edit the files in place to satisfy the request. Do not create new",
-            "files, do not delete files, and do not run commands. When you are",
-            "done, reply with a short summary of what you changed and why.",
+            *operation_instructions,
         ]
     )
+
+
+def _validate_operation_grants(
+    request: CodingWorkerRequest, *, create_paths: Sequence[str], delete_paths: Sequence[str],
+) -> None:
+    """Reject malformed or overlapping grants before starting the ACP turn."""
+
+    grants = [*create_paths, *delete_paths]
+    occupied = [*request.files, *request.read_only_files]
+    folded_grants: set[str] = set()
+    for path in grants:
+        _canonical_path(path)
+        if is_secret_sensitive_path(path) or is_repository_env_template_path(path):
+            raise ValueError("ACP_OPERATION_GRANT: secret-sensitive path")
+        folded = path.casefold()
+        if any(
+            folded == other or folded.startswith(other + "/") or other.startswith(folded + "/")
+            for other in folded_grants
+        ):
+            raise ValueError("ACP_OPERATION_GRANT: operation paths overlap")
+        folded_grants.add(folded)
+    if set(delete_paths) - set(request.files):
+        raise ValueError("ACP_OPERATION_GRANT: deletion is not selected")
+    for path in create_paths:
+        folded = path.casefold()
+        if any(
+            folded == other.casefold()
+            or folded.startswith(other.casefold() + "/")
+            or other.casefold().startswith(folded + "/")
+            for other in occupied
+        ):
+            raise ValueError("ACP_OPERATION_GRANT: creation overlaps selected path")
 
 
 class ACPCodingProvider:
@@ -189,12 +247,16 @@ class ACPCodingProvider:
         acp_config_factory: Callable[..., Any] | None = None,
         env_source: dict[str, str] | None = None,
         on_completed_workspace: Callable[[StagedCodingWorkspace], None] | None = None,
+        create_paths: Sequence[str] = (),
+        delete_paths: Sequence[str] = (),
     ) -> None:
         self._config_loader = config_loader
         self._staging_root = Path(staging_root) if staging_root is not None else DEFAULT_ACP_STAGING_ROOT
         self._acp_config_factory = acp_config_factory or build_acp_agent_config
         self._env_source = env_source
         self._on_completed_workspace = on_completed_workspace
+        self._create_paths = tuple(create_paths)
+        self._delete_paths = tuple(delete_paths)
 
     @property
     def provider_id(self) -> str:
@@ -238,7 +300,7 @@ class ACPCodingProvider:
                 error="Local ACP execution is unavailable until the CLI agent runs in verified OS isolation.",
             )
         budget = provider_config.budget
-        scoped_count = len(request.files) + len(request.read_only_files)
+        scoped_count = len(request.files) + len(request.read_only_files) + len(self._create_paths)
         if scoped_count > budget.max_files:
             return self._proposal(
                 status="budget_exceeded",
@@ -252,6 +314,9 @@ class ACPCodingProvider:
         workspace_root = self._staging_root / request.app_id / uuid.uuid4().hex[:12]
         workspace: StagedCodingWorkspace | None = None
         try:
+            _validate_operation_grants(
+                request, create_paths=self._create_paths, delete_paths=self._delete_paths,
+            )
             workspace = materialize_coding_workspace(
                 dict(request.files), workspace_root=workspace_root,
                 read_only_files=dict(request.read_only_files),
@@ -299,7 +364,9 @@ class ACPCodingProvider:
 
         async with acp_config:
             agent = _AG2Agent("MozaiksACPCodingProvider", config=acp_config)
-            prompt = build_provider_prompt(request, workspace)
+            prompt = build_provider_prompt(
+                request, workspace, create_paths=self._create_paths, delete_paths=self._delete_paths,
+            )
             async with agent.run(prompt) as run:
                 run.stream.subscribe(lambda event: record_provider_event(event, events))
                 reply = await run.result()
@@ -320,7 +387,11 @@ class ACPCodingProvider:
                     if isinstance(value, int)
                 }
 
-        harvest = harvest_coding_workspace(workspace, allow_new_files=False, allow_deletes=False)
+        harvest = harvest_coding_workspace(
+            workspace,
+            allow_new_files=bool(self._create_paths),
+            allow_deletes=bool(self._delete_paths),
+        )
 
         if finish_reason == "timeout":
             return self._proposal(
@@ -343,6 +414,20 @@ class ACPCodingProvider:
                 usage=usage,
                 provider_events=events,
                 error=f"workspace harvest found out-of-scope modifications: {details}",
+            )
+        ungranted = [
+            entry.path for entry in harvest.files
+            if (entry.op == "create" and entry.path not in self._create_paths)
+            or (entry.op == "delete" and entry.path not in self._delete_paths)
+        ]
+        if ungranted:
+            return self._proposal(
+                status="rejected_scope",
+                provider_id=provider_id,
+                provider_model=provider_model,
+                usage=usage,
+                provider_events=events,
+                error=f"workspace harvest found unapproved file operations: {sorted(ungranted)}",
             )
 
         return self._build_result_proposal(
@@ -403,8 +488,8 @@ class ACPCodingProvider:
             changed_files=[
                 ProposedFileChange(
                     path=entry.path,
-                    op="create" if entry.op == "create" else "update",
-                    content=entry.content or "",
+                    op=entry.op,
+                    content=entry.content,
                 )
                 for entry in changed
             ],

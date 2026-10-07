@@ -14,6 +14,8 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- Offline ACP proof-worker support for exact approved repository file creation
+  and deletion; generated-app ACP coding remains update-only by default.
 - Host preflight for approved repository create/delete turns in the offline
   Docker executor, including pinned baseline and read-only inspection checks;
   a canonical digest now binds the complete v2 patch candidate for downstream

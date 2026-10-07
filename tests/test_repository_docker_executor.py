@@ -523,3 +523,54 @@ async def test_real_offline_proof_image_uses_host_executor() -> None:
     assert result.proposal.status == "completed"
     assert result.proposal.changed_files[0].content == _AFTER
     assert result.workspace_archive is not None
+
+
+@pytest.mark.skipif(
+    os.getenv("MOZAIKS_RUN_REPOSITORY_DOCKER_PROOF") != "1",
+    reason="opt-in offline Docker ACP proof",
+)
+@pytest.mark.parametrize("operation", ["create", "delete"])
+@pytest.mark.asyncio
+async def test_real_offline_proof_image_executes_exact_operation_grant(tmp_path, operation: str) -> None:
+    create_paths = [_NEW_PATH] if operation == "create" else []
+    delete_paths = [_PATH] if operation == "delete" else []
+    selected_files = {_PATH: _BEFORE} if operation == "delete" else {}
+    context = _context(create_paths=create_paths, delete_paths=delete_paths)
+    snapshot = _snapshot(selected_files)
+    request = _request(
+        files=selected_files, baseline_files=selected_files,
+        build_key="registry-1", target_app_id="proof",
+    )
+    def prove_absence(_path: str) -> None:
+        return None
+
+    turn = await execute_repository_docker_turn(
+        request, image=_IMAGE, approved_context=context, snapshot=snapshot,
+        validate_path=lambda _path: None,
+        validate_create_absence=prove_absence if create_paths else None,
+        max_wall_seconds=75, max_archive_bytes=700_000,
+    )
+    assert turn.proposal.status == "completed"
+    assert [(change.path, change.op, change.content) for change in turn.proposal.changed_files] == [
+        (_NEW_PATH, "create", _NEW_CONTENT) if operation == "create" else (_PATH, "delete", None),
+    ]
+
+    workspace = stage_repository_workspace_archive(
+        context, snapshot=snapshot, selected_paths=list(selected_files),
+        baseline_files=selected_files, archive_bytes=turn.workspace_archive,
+        workspace_root=tmp_path / "staged", validate_path=lambda _path: None,
+        validate_create_absence=prove_absence if create_paths else None,
+        max_files=3, max_archive_bytes=700_000,
+    )
+    try:
+        candidate = finalize_repository_patch(
+            context, snapshot=snapshot, selected_paths=list(selected_files),
+            baseline_files=selected_files, workspace=workspace, proposal=turn.proposal,
+            validate_path=lambda _path: None,
+            validate_create_absence=prove_absence if create_paths else None,
+        )
+    finally:
+        workspace.cleanup()
+    assert [(change.path, change.op) for change in candidate.changed_files] == [
+        (_NEW_PATH, "create") if operation == "create" else (_PATH, "delete"),
+    ]
