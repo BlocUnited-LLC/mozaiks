@@ -13,6 +13,7 @@ from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceMa
 from mozaiksai.core.multitenant import build_app_scope_filter
 
 from .policy import owner_filter
+from .schemas import GenesisImportClaim
 
 IndexSpec = tuple[Sequence[tuple[str, int]], dict[str, Any]]
 APP_REGISTRY_COLLECTION = "AppRegistryRecords"
@@ -112,6 +113,46 @@ class AppRegistryRepo:
             raise RuntimeError("Existing app target could not be loaded")
         return normalized
 
+    async def reserve_genesis_import(
+        self, *, build_registry_id: str, owner_user_id: str, app_id: str,
+        chat_app_id: str, claim: GenesisImportClaim,
+    ) -> dict[str, Any] | None:
+        """Atomically fence a first source import against normal Genesis start."""
+        await self.ensure_indexes()
+        coll = await self._collection()
+        claim_doc = claim.model_dump(mode="json")
+        now = datetime.now(UTC)
+        doc = await coll.find_one_and_update(
+            {
+                "_id": build_registry_id,
+                **owner_filter(owner_user_id),
+                "app_id": app_id,
+                "chat_app_id": chat_app_id,
+                "lifecycle_state": "draft",
+                "active_chat_id": None,
+                "current_build_run": None,
+                "artifact_version_id": None,
+                "bundle_path": None,
+                "genesis_import": {"$exists": False},
+            },
+            {"$set": {"genesis_import": claim_doc, "updated_at": now}},
+            return_document=ReturnDocument.AFTER,
+        )
+        if doc is None:
+            doc = await coll.find_one({"_id": build_registry_id, **owner_filter(owner_user_id)})
+            if not isinstance(doc, dict) or any((
+                doc.get("app_id") != app_id,
+                doc.get("chat_app_id") != chat_app_id,
+                doc.get("lifecycle_state") != "draft",
+                doc.get("active_chat_id") is not None,
+                doc.get("current_build_run") is not None,
+                doc.get("artifact_version_id") is not None,
+                doc.get("bundle_path") is not None,
+                doc.get("genesis_import") != claim_doc,
+            )):
+                return None
+        return self._normalize_doc(doc)
+
     async def upsert_app_record(
         self,
         *,
@@ -151,6 +192,8 @@ class AppRegistryRepo:
                 raise ValueError("App id is not available") from exc
         if existing is None:
             raise RuntimeError("App record ownership could not be established")
+        if isinstance(existing.get("genesis_import"), dict) and existing["genesis_import"].get("status") == "reserved":
+            raise ValueError("Registered app has a reserved Genesis import")
         build_registry_id = str(existing["_id"])
         existing_name_status = str((existing or {}).get("name_status") or "").strip()
         incoming_named = name_status == "named" and bool(name)
@@ -200,7 +243,11 @@ class AppRegistryRepo:
                 build_run,
             )
         doc = await coll.find_one_and_update(
-            {"_id": build_registry_id, **owner_filter(owner_user_id)},
+            {
+                "_id": build_registry_id,
+                **owner_filter(owner_user_id),
+                "genesis_import.status": {"$ne": "reserved"},
+            },
             {"$set": set_fields},
             return_document=ReturnDocument.AFTER,
         )
@@ -259,7 +306,11 @@ class AppRegistryRepo:
         expected_artifact_version_id: str | None = None,
         expected_lifecycle_state: str | None = None,
     ) -> dict[str, Any] | None:
-        query = {"_id": build_registry_id, **owner_filter(owner_user_id)}
+        query = {
+            "_id": build_registry_id,
+            **owner_filter(owner_user_id),
+            "genesis_import.status": {"$ne": "reserved"},
+        }
         if expected_build_id is not None:
             query["current_build_run.build_id"] = expected_build_id
         if expected_artifact_version_id is not None:

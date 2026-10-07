@@ -10,6 +10,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from factory_app.refinement_harness.tools._artifact_workspace import load_artifact_workspace
+from factory_app.refinement_harness.tools._bundle_workspace import load_bundle_workspace
 from factory_app.workflows._shared.platform.genesis_import import (
     GenesisImportError,
     PinnedSourceProvenance,
@@ -65,7 +67,25 @@ def import_state(tmp_path, monkeypatch):
         "lifecycle_state": "draft", "artifact_version_id": None,
         "current_build_run": None,
     }
-    registry = SimpleNamespace(get_app_record=AsyncMock(return_value={"app": registry_row}))
+    async def reserve_genesis_import(*, build_registry_id, owner_user_id, app_id, chat_app_id, claim):
+        if (registry_row["build_registry_id"] != build_registry_id
+                or registry_row["owner_user_id"] != owner_user_id
+                or registry_row["app_id"] != app_id
+                or registry_row["chat_app_id"] != chat_app_id
+                or registry_row["lifecycle_state"] != "draft"
+                or registry_row.get("current_build_run") is not None):
+            return None
+        claim_doc = claim.model_dump(mode="json")
+        existing = registry_row.get("genesis_import")
+        if existing is not None and existing != claim_doc:
+            return None
+        registry_row["genesis_import"] = claim_doc
+        return dict(registry_row)
+
+    registry = SimpleNamespace(
+        get_app_record=AsyncMock(side_effect=lambda **_kwargs: {"app": dict(registry_row)}),
+        reserve_genesis_import=AsyncMock(side_effect=reserve_genesis_import),
+    )
     records: dict[str, BuildRecord] = {}
 
     async def get_build_record(*, app_id, build_record_id):
@@ -123,16 +143,23 @@ async def test_exact_existing_source_is_draft_pending_and_idempotent(import_stat
     assert first.commit_metadata.metadata["build_registry_id"] == "appreg_1"
     assert first.commit_metadata.metadata["brownfield_genesis"] == _PROVENANCE.model_dump()
     assert first.commit_metadata.metadata["content_digest"] == hashlib.sha256(raw).hexdigest()
+    assert first.commit_metadata.metadata["genesis_import_claim_sha256"] == hashlib.sha256(
+        json.dumps(import_state[0]["genesis_import"], sort_keys=True, separators=(",", ":")).encode(),
+    ).hexdigest()
     assert await read_verified_artifact_bundle(first) == raw
     assert import_state[2].create_build_record.await_count == 1
     assert import_state[0]["artifact_version_id"] is None
     assert import_state[0]["current_build_run"] is None
+    assert import_state[0]["genesis_import"]["status"] == "reserved"
+    assert import_state[0]["genesis_import"]["build_record_id"] == first.id
+    assert import_state[1].reserve_genesis_import.await_count == 2
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("field,value", [
     ("owner_user_id", "other-owner"), ("chat_app_id", "other-host"),
     ("lifecycle_state", "active"), ("artifact_version_id", "av_current"),
+    ("bundle_path", "generated/apps/old/app"),
     ("current_build_run", {"build_id": "build_1"}),
 ])
 async def test_wrong_or_active_factory_target_cannot_receive_import(import_state, field, value):
@@ -230,6 +257,35 @@ async def test_different_revision_cannot_create_second_genesis_draft(import_stat
 
 
 @pytest.mark.asyncio
+async def test_conflicting_registry_reservation_stops_before_blob_or_record(import_state, monkeypatch):
+    raw, manifest = _source()
+    import_state[0]["genesis_import"] = {"status": "reserved", "build_record_id": "av_other"}
+    write_blob = AsyncMock()
+    monkeypatch.setattr(import_state[3], "put_blob", write_blob)
+    with pytest.raises(GenesisImportError, match="reserved another Genesis source"):
+        await _import(import_state, raw, manifest)
+    write_blob.assert_not_awaited()
+    import_state[2].create_build_record.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_registry_change_after_blob_write_stops_before_record(import_state, monkeypatch):
+    raw, manifest = _source()
+    content = import_state[3]
+    original_put_blob = content.put_blob
+
+    async def put_then_supersede(data, *, expected_digest):
+        digest = await original_put_blob(data, expected_digest=expected_digest)
+        import_state[0]["lifecycle_state"] = "building"
+        return digest
+
+    monkeypatch.setattr(content, "put_blob", put_then_supersede)
+    with pytest.raises(GenesisImportError, match="changed during source import"):
+        await _import(import_state, raw, manifest)
+    import_state[2].create_build_record.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_corrupt_immutable_source_blob_cannot_be_read_as_baseline(import_state, tmp_path):
     raw, manifest = _source()
     draft = await _import(import_state, raw, manifest)
@@ -246,6 +302,43 @@ async def test_ambiguous_content_authority_cannot_be_read_as_baseline(import_sta
     draft.commit_metadata.metadata["content_ref"] = "untrusted-path"
     with pytest.raises(ContentIntegrityError, match="authority_ambiguous"):
         await read_verified_artifact_bundle(draft)
+
+
+@pytest.mark.asyncio
+async def test_harness_workspaces_read_verified_digest_before_mutable_workspace(import_state, tmp_path):
+    raw, manifest = _source()
+    draft = await _import(import_state, raw, manifest)
+    mutable = tmp_path / "mutable"
+    mutable.mkdir()
+    (mutable / "app.json").write_text('{"appId":"changed"}', encoding="utf-8")
+    draft.commit_metadata.metadata["workspace_dir"] = str(mutable)
+
+    artifact_workspace = await load_artifact_workspace(
+        artifact_store=import_state[2], app_id=draft.app_id, build_record_id=draft.id,
+    )
+    bundle_workspace = await load_bundle_workspace(
+        record_store=import_state[2], app_id=draft.app_id, build_record_id=draft.id,
+    )
+    for workspace in (artifact_workspace, bundle_workspace):
+        assert workspace["present"] is True
+        assert workspace["source"] == "content_digest:local"
+        assert json.loads(workspace["file_map"]["app.json"])["appId"] == "mozaiks-platform"
+
+
+@pytest.mark.asyncio
+async def test_harness_workspaces_fail_closed_on_corrupt_digest(import_state, tmp_path):
+    raw, manifest = _source()
+    draft = await _import(import_state, raw, manifest)
+    digest = draft.commit_metadata.metadata["content_digest"]
+    (tmp_path / "sha256" / digest[:2] / digest).write_bytes(b"changed")
+    artifact_workspace = await load_artifact_workspace(
+        artifact_store=import_state[2], app_id=draft.app_id, build_record_id=draft.id,
+    )
+    bundle_workspace = await load_bundle_workspace(
+        record_store=import_state[2], app_id=draft.app_id, build_record_id=draft.id,
+    )
+    assert artifact_workspace["reason"] == "content_digest_unavailable_or_invalid"
+    assert bundle_workspace["reason"] == "content_digest_unavailable_or_invalid"
 
 
 @pytest.mark.asyncio

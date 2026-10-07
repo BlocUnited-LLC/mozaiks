@@ -7,7 +7,7 @@ from uuid import uuid4
 from mozaiksai.core.session.build_binding import BuildTargetReference, RunBuildBinding
 
 from .policy import is_generic_app_name, normalize_optional_text, validate_lifecycle_state
-from .schemas import ensure_create_payload, ensure_status_payload
+from .schemas import GenesisImportClaim, ensure_create_payload, ensure_status_payload
 
 if TYPE_CHECKING:
     from .repo import AppRegistryRepo
@@ -41,6 +41,15 @@ class AppRegistryService:
 
     async def has_registered_target_app_id(self, *, app_ids: tuple[str, ...]) -> bool:
         return await self.repo.has_registered_target_app_id(app_ids=app_ids)
+
+    async def reserve_genesis_import(
+        self, *, build_registry_id: str, owner_user_id: str, app_id: str,
+        chat_app_id: str, claim: GenesisImportClaim,
+    ) -> dict[str, Any] | None:
+        return await self.repo.reserve_genesis_import(
+            build_registry_id=build_registry_id, owner_user_id=owner_user_id,
+            app_id=app_id, chat_app_id=chat_app_id, claim=claim,
+        )
 
     async def resolve_build_binding(
         self,
@@ -106,6 +115,8 @@ class AppRegistryService:
             if binding is None and not refinement:
                 active_chat = record.get("active_chat_id")
                 if not active_chat:
+                    if record.get("genesis_import") is not None:
+                        raise ValueError("Registered app has a reserved Genesis import")
                     if not allow_create or record.get("lifecycle_state") != "draft":
                         raise ValueError("Registered app has no resumable build session")
                     binding = RunBuildBinding(
@@ -186,6 +197,8 @@ class AppRegistryService:
                 f"registered_host={(record or {}).get('chat_app_id')!r}, "
                 f"record_found={record is not None})"
             )
+        if isinstance(record.get("genesis_import"), dict) and record["genesis_import"].get("status") == "reserved":
+            raise ValueError("Registered app has an unaccepted Genesis import")
         binding = RunBuildBinding(
             build_registry_id=record["build_registry_id"], target_app_id=record["app_id"],
             build_id=f"build_{uuid4().hex}", phase="refinement",

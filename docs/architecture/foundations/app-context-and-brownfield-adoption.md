@@ -173,17 +173,26 @@ checks the execution host, requires an unstarted draft target, verifies the
 canonical ZIP and complete file manifest, and requires root `app.json` to have
 the registered target app ID. It uses the shared bundle reader in binary mode,
 so unsupported, missing, oversized, or unsafe content fails before a
-`BuildRecord` is inserted. A repeated exact import returns the same draft ID;
-changed bytes under the same pinned source identity fail.
+`BuildRecord` is inserted. Before writing the immutable blob or BuildRecord,
+it atomically reserves one exact source on the same Factory AppRegistry row:
+record ID, archive and manifest digests, content backend, bundle name, and
+pinned source revision/tree. The row stays `draft` without a build run or
+current artifact. Generic registry status updates and normal Genesis or
+Refinement launches cannot advance a reserved target. A repeated exact import
+can finish after a partial failure; changed source facts conflict.
 
-The resulting app-bundle `BuildRecord` is `draft` with validation `pending`. It
-does not update the Factory registry's current artifact or allocate a build
-run. Canonical app validation, explicit Genesis review and acceptance, and a
-trigger gate that rejects unaccepted imported drafts remain required before a
-later request may enter Refinement. Existing Studio trigger and AppGenerator
-hydration code still allow a selected draft baseline; this launch path must
-stay disabled until that gate is implemented. App Intelligence's redacted
-source index is context evidence, not a substitute for the complete archive.
+The resulting app-bundle `BuildRecord` is `draft` with validation `pending`.
+It binds its metadata to the registry reservation digest, and the refinement
+harness workspace readers retrieve its digest-backed archive through the
+canonical verified reader before considering any mutable workspace path. They
+do not add a second `content_ref` authority. The reservation is not Genesis
+acceptance: canonical app validation, explicit review and acceptance, and a
+Studio trigger gate that rejects unaccepted imported drafts remain required
+before a later request may enter Refinement. Existing Studio trigger and
+AppGenerator hydration still allow a selected draft baseline, so App Zero must
+keep workflow reentry disabled until that acceptance gate is implemented. App
+Intelligence's redacted source index is context evidence, not a substitute for
+the complete archive.
 
 Graph backend mirrors are never source of truth. FalkorDB may mirror graph and
 intelligence artifacts for production-scale querying, but `AppContextVersion`

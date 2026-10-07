@@ -14,6 +14,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 from pymongo.errors import DuplicateKeyError
 
+from factory_app.app.modules.app_registry.backend.schemas import GenesisImportClaim
 from factory_app.app.modules.app_registry.backend.service import AppRegistryService
 from factory_app.workflows._shared.artifact_bundle import read_artifact_bundle
 from mozaiksai.core.artifacts.content_store import ArtifactContentStore, get_artifact_content_store
@@ -63,6 +64,11 @@ def _import_record_id(*, target_app_id: str, build_registry_id: str, owner_user_
         sort_keys=True, separators=(",", ":"),
     ).encode("utf-8")
     return f"av_{hashlib.sha256(identity).hexdigest()[:24]}"
+
+
+def _canonical_digest(value: Any) -> str:
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _manifest_entries(*, files_manifest: list[BuildRecordFileEntry | dict[str, Any]],
@@ -170,7 +176,7 @@ def _same_draft(record: BuildRecord, *, expected_id: str, target_app_id: str,
                 owner_user_id: str,
                 build_registry_id: str, execution_app_id: str, bundle_name: str,
                 bundle_sha256: str, content_backend: str,
-                provenance: PinnedSourceProvenance,
+                provenance: PinnedSourceProvenance, claim_sha256: str,
                 entries: list[BuildRecordFileEntry]) -> bool:
     metadata = record.commit_metadata.metadata
     return (
@@ -186,6 +192,7 @@ def _same_draft(record: BuildRecord, *, expected_id: str, target_app_id: str,
         and metadata.get("bundle_sha256") == bundle_sha256
         and metadata.get("content_digest") == bundle_sha256
         and metadata.get("content_backend") == content_backend
+        and metadata.get("genesis_import_claim_sha256") == claim_sha256
         and metadata.get("brownfield_genesis") == provenance.model_dump(mode="json")
         and record.files_manifest == entries
     )
@@ -230,7 +237,8 @@ async def import_existing_app_genesis_draft(
             or owned.get("chat_app_id") != execution_app_id
             or not isinstance(owned.get("app_id"), str)
             or owned.get("lifecycle_state") != "draft"
-            or owned.get("artifact_version_id") or owned.get("current_build_run")):
+            or owned.get("artifact_version_id") or owned.get("current_build_run")
+            or owned.get("bundle_path")):
         raise GenesisImportError("Factory target is not an unstarted draft owned by this host")
     target_app_id = owned["app_id"]
 
@@ -260,6 +268,17 @@ async def import_existing_app_genesis_draft(
         target_app_id=target_app_id, build_registry_id=build_registry_id,
         owner_user_id=owner_user_id, execution_app_id=execution_app_id,
     )
+    claim = GenesisImportClaim(
+        build_record_id=record_id,
+        bundle_name=bundle_name,
+        bundle_sha256=bundle_sha256,
+        manifest_sha256=_canonical_digest([entry.model_dump(mode="json") for entry in entries]),
+        content_backend=content_store.backend_name,
+        source_id=provenance.source_id,
+        revision_id=provenance.revision_id,
+        tree_id=provenance.tree_id,
+    )
+    claim_sha256 = _canonical_digest(claim.model_dump(mode="json"))
     prior = await record_store.get_build_record(app_id=target_app_id, build_record_id=record_id)
     if prior is not None:
         if not _same_draft(
@@ -268,16 +287,25 @@ async def import_existing_app_genesis_draft(
             build_registry_id=build_registry_id, execution_app_id=execution_app_id,
             bundle_name=bundle_name, bundle_sha256=bundle_sha256,
             content_backend=content_store.backend_name, provenance=provenance,
+            claim_sha256=claim_sha256,
             entries=entries,
         ):
             raise GenesisImportError("source revision was already imported with different facts")
-        if await content_store.get_verified_blob(bundle_sha256) != bundle_bytes:
-            raise GenesisImportError("stored source archive differs from verified bytes")
-        return prior
-    if await record_store.list_build_records(
+    elif await record_store.list_build_records(
         app_id=target_app_id, build_family="app_bundle", build_key="app_bundle", limit=1,
     ):
         raise GenesisImportError("Factory target already has an app-bundle lineage")
+
+    reserved = await registry.reserve_genesis_import(
+        build_registry_id=build_registry_id, owner_user_id=owner_user_id,
+        app_id=target_app_id, chat_app_id=execution_app_id, claim=claim,
+    )
+    if reserved is None or reserved.get("genesis_import") != claim.model_dump(mode="json"):
+        raise GenesisImportError("Factory target changed or reserved another Genesis source")
+    if prior is not None:
+        if await content_store.get_verified_blob(bundle_sha256) != bundle_bytes:
+            raise GenesisImportError("stored source archive differs from verified bytes")
+        return prior
 
     persisted_digest = await content_store.put_blob(
         bundle_bytes, expected_digest=bundle_sha256,
@@ -291,17 +319,18 @@ async def import_existing_app_genesis_draft(
         "bundle_size_bytes": len(bundle_bytes),
         "content_digest": persisted_digest,
         "content_backend": content_store.backend_name,
+        "genesis_import_claim_sha256": claim_sha256,
         "build_registry_id": build_registry_id,
         "target_app_id": target_app_id,
         "execution_app_id": execution_app_id,
         "brownfield_genesis": provenance.model_dump(mode="json"),
     }
-    # Recheck owner/host/target after content upload; no draft is written for a
-    # target that changed while source bytes were being validated or persisted.
+    # Recheck the exact reservation after content upload. Generic lifecycle
+    # writers cannot advance a target with a reserved Genesis import.
     reloaded = (await registry.get_app_record(
         owner_user_id=owner_user_id, build_registry_id=build_registry_id,
     )).get("app")
-    if reloaded != owned:
+    if reloaded != reserved:
         raise GenesisImportError("Factory target changed during source import")
     try:
         return await record_store.create_build_record(
@@ -325,6 +354,7 @@ async def import_existing_app_genesis_draft(
             build_registry_id=build_registry_id, execution_app_id=execution_app_id,
             bundle_name=bundle_name, bundle_sha256=bundle_sha256,
             content_backend=content_store.backend_name, provenance=provenance,
+            claim_sha256=claim_sha256,
             entries=entries,
         ):
             raise GenesisImportError("concurrent source import did not match verified facts") from exc

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from .policy import (
     is_generic_app_name,
@@ -8,6 +10,22 @@ from .policy import (
     validate_lifecycle_state,
     validate_name_source,
 )
+
+
+class GenesisImportClaim(BaseModel):
+    """Exact source facts reserved on an unstarted Factory target."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    status: Literal["reserved"] = "reserved"
+    build_record_id: str = Field(pattern=r"^av_[0-9a-f]{24}$")
+    bundle_name: str = Field(pattern=r"^[A-Za-z0-9_-]+$")
+    bundle_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    manifest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    content_backend: str = Field(min_length=1, max_length=32)
+    source_id: str = Field(min_length=1, max_length=240, pattern=r"^[A-Za-z0-9._/-]+$")
+    revision_id: str = Field(pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+    tree_id: str = Field(pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 
 
 def ensure_create_payload(

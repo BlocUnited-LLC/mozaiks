@@ -13,7 +13,12 @@ from mozaiksai.core.app_context.scan_policy import (
     is_sensitive_source_path,
     safe_scan_relpath,
 )
-from mozaiksai.core.artifacts.content_store import BundleContentStore, ContentNotFoundError
+from mozaiksai.core.artifacts.content_store import (
+    BundleContentStore,
+    ContentIntegrityError,
+    ContentNotFoundError,
+    read_verified_artifact_bundle,
+)
 from mozaiksai.core.artifacts.store import BuildRecordStore
 
 _MAX_FILE_BYTES = 80_000
@@ -53,10 +58,23 @@ async def load_bundle_workspace(
     metadata = dict(artifact.commit_metadata.metadata or {}) if artifact.commit_metadata else {}
     workspace_dir = metadata.get("workspace_dir")
     bundle_path = metadata.get("artifact_path")
+    content_digest = metadata.get("content_digest")
     content_ref = metadata.get("content_ref")
     content_backend = metadata.get("content_backend")
 
-    if workspace_dir and Path(str(workspace_dir)).exists():
+    if content_digest:
+        try:
+            data = await read_verified_artifact_bundle(artifact, max_bytes=64_000_000)
+            file_map = read_bundle_zip_bytes(data)
+            source = f"content_digest:{content_backend or 'unknown'}"
+        except (ContentIntegrityError, ContentNotFoundError, ValueError, zipfile.BadZipFile):
+            return {
+                "present": False,
+                "reason": "content_digest_unavailable_or_invalid",
+                "build_record_id": artifact.id,
+                "content_digest": content_digest,
+            }
+    elif workspace_dir and Path(str(workspace_dir)).exists():
         file_map = read_workspace_dir(Path(str(workspace_dir)))
         source = "workspace_dir"
     elif bundle_path and Path(str(bundle_path)).exists():
@@ -109,6 +127,7 @@ async def load_bundle_workspace(
         "workspace_dir": workspace_dir,
         "bundle_path": bundle_path,
         "content_ref": content_ref,
+        "content_digest": content_digest,
         "content_backend": content_backend,
     }
 

@@ -18,6 +18,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 
 from factory_app.app.modules.app_registry.backend.handler import AppRegistryModule
 from factory_app.app.modules.app_registry.backend.repo import AppRegistryRepo
+from factory_app.app.modules.app_registry.backend.schemas import GenesisImportClaim
 from factory_app.app.modules.app_registry.backend.service import AppRegistryService
 from mozaiksai.core.auth import reset_auth_adapter
 from mozaiksai.core.session.build_binding import RunBuildBinding
@@ -89,6 +90,41 @@ async def _create(host, *, owner="alice"):
     )
     assert response.status_code == 200, response.text
     return response.json()["app"]
+
+
+async def test_real_mongo_genesis_claim_blocks_generic_build_start(registry_host):
+    host = registry_host
+    target = await host.service.register_existing_app_record(
+        owner_user_id="alice", app_id="existing-app", chat_app_id="existing-app", name="Existing App",
+    )
+    claim = GenesisImportClaim(
+        build_record_id="av_" + "1" * 24, bundle_name="ExistingApp",
+        bundle_sha256="a" * 64, manifest_sha256="b" * 64, content_backend="local",
+        source_id="managed/existing", revision_id="c" * 40, tree_id="d" * 40,
+    )
+    args = {
+        "build_registry_id": target["build_registry_id"], "owner_user_id": "alice",
+        "app_id": "existing-app", "chat_app_id": "existing-app",
+    }
+    saved = await host.service.reserve_genesis_import(**args, claim=claim)
+    assert saved["genesis_import"] == claim.model_dump(mode="json")
+    assert (await host.service.reserve_genesis_import(**args, claim=claim))["build_registry_id"] == target["build_registry_id"]
+    changed = claim.model_copy(update={"bundle_sha256": "e" * 64})
+    assert await host.service.reserve_genesis_import(**args, claim=changed) is None
+    assert (await host.service.update_build_status(
+        owner_user_id="alice", build_registry_id=target["build_registry_id"],
+        status="building", expected_lifecycle_state="draft",
+        current_build_run={"build_id": "build_new", "phase": "genesis"},
+    ))["success"] is False
+    with pytest.raises(ValueError, match="reserved Genesis import"):
+        await host.service.resolve_build_binding(
+            owner_user_id="alice", app_id="existing-app", chat_id="chat_new",
+            workflow_name="ValueEngine", build_registry_id=target["build_registry_id"],
+            allow_create=True,
+        )
+    current = await host.collection.find_one({"_id": target["build_registry_id"]})
+    assert current["lifecycle_state"] == "draft"
+    assert current.get("current_build_run") is None
 
 
 async def _concept_target(host, *, name=None, name_source=None, description=None):
