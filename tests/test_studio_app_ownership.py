@@ -101,8 +101,12 @@ def _selected_app_routes(app_id: str):
         ("POST", connector + "/analytics_provider/health-check" + query, None),
         ("DELETE", connector + "/analytics_provider" + query, None),
         ("GET", context, None),
-        ("POST", context + "/app-intelligence/index", {"workspace_root": "C:/workspace/app"}),
-        ("POST", context + "/source-import", {"workspace_root": "C:/workspace/app"}),
+        ("POST", context + "/app-intelligence/index", {
+            "source_kind": "git_repository", "repo_url": "https://github.com/example/app",
+        }),
+        ("POST", context + "/source-import", {
+            "source_kind": "git_repository", "repo_url": "https://github.com/example/app",
+        }),
         ("GET", context + "/app-intelligence/index/latest", None),
         ("GET", context + "/app-intelligence/index/job-1", None),
         ("POST", context + "/validation/run", {"confirm_execution": True}),
