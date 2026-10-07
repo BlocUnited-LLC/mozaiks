@@ -134,6 +134,12 @@ from .ports import (
     RoutingPolicyPort,
     ScopeProposalPort,
 )
+from .repository_patch import (
+    RepositoryPatchCandidate,
+    RepositoryPatchFile,
+    RepositorySnapshotEvidence,
+    finalize_repository_patch,
+)
 from .review_package import (
     REVIEW_PACKAGE_SCHEMA_VERSION,
     RefinementReviewAction,
@@ -261,6 +267,10 @@ __all__ = [
     "ControlPlaneToolResult",
     "ApprovedExecutionContext",
     "build_coding_request_from_execution_context",
+    "RepositoryPatchCandidate",
+    "RepositoryPatchFile",
+    "RepositorySnapshotEvidence",
+    "finalize_repository_patch",
     "ControlPlaneToolsManifest",
     "ContextRefreshLaunchResult",
     "ContextRefreshLaunchStatus",

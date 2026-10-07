@@ -106,6 +106,41 @@ Current implementation status:
 - External repo, overlay, and full-migration write-back modes are modeled but
   still need provider-specific execution and UX actions.
 
+### Approved Repository Patch Candidate
+
+`finalize_repository_patch` is the offline OSS bridge from an authenticated
+`ApprovedExecutionContext` to a reviewable `external_patch` candidate for an
+existing repository. It accepts a host-verified `RepositorySnapshotEvidence`,
+exact selected baseline files, a disposable `StagedCodingWorkspace`, a
+`StagedPatchProposal`, and the host's per-path `validate_path` policy. The host
+must load the persisted approved snapshot, verify its digest and repository
+identity and plan/request/app IDs against the approval, and fetch regular UTF-8
+files at the immutable `baseline_commit_sha` before staging. The snapshot digest is opaque to OSS:
+the hosted digest includes tenant and excluded-path evidence that is absent
+from `ApprovedExecutionContext`.
+The snapshot has no build-registry ID; the host verifies the approved context's
+`build_registry_id` against its app registry when it retrieves the snapshot and
+again before publishing a PR.
+
+The finalizer checks every selected file against the approved `sha256:` file
+manifest, harvests the stopped provider's staged tree, rejects symlinks,
+unselected files, creates, and deletes, and requires the provider's proposal
+to match the observed changed bytes. It calls the host path policy for baseline,
+selected, observed, and proposed paths; broad approved scopes do not bypass
+host-specific protected descendants. The returned
+`RepositoryPatchCandidate` contains the approval and provider identities,
+before/after hashes, updated content, unified diffs, and required gate names.
+Its `validation_state` is `pending` and `mutation_allowed` is `false`.
+This first repository patch contract supports updates to selected existing
+files only; adding a file requires a later explicit scope and manifest contract.
+
+This function reads the staged tree and does not invoke an agent, run validation
+commands, persist a review record, publish a branch/PR, or mutate the source
+repository. The host must isolate the coding provider to the disposable tree
+and keep that tree stable while the finalizer harvests it. A later repository
+executor and host-owned review/publisher must satisfy required gates and
+recheck the destination baseline before publication.
+
 ---
 
 ## User-Facing Mental Model
