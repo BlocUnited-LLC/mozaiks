@@ -75,6 +75,8 @@ This project follows a practical pre-1.0 changelog format:
   chat URL so further edits continue without a page reload.
   Reloading recovers existing previews and their Stop controls from owned build
   records, including when another edit finishes before recovery completes.
+  A saved chat for another app can recover and release an older owned preview
+  when the owner's preview quota is full.
 
 - An experimental Capacitor Android packaging reference for Common Ground,
   with web-asset verification, a diagnostic debug APK build in CI, and explicit

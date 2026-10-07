@@ -185,6 +185,10 @@ For acceptance, continue a real AppReview conversation and verify:
    A failed recovery read must prevent allocation until recovery succeeds.
    Recovery uses the authenticated `GET /api/sandbox?build_registry_id=...`
    read; URLs and cleanup handles must not enter transcripts or client storage.
+   Then open a different saved app's review chat. With an owner quota of one,
+   Start must recover and stop the former app's preview before retrying the new
+   allocation. This path uses the authenticated owner-wide `GET /api/sandbox`
+   read because the new chat does not retain the old preview hook.
 6. From **Review builds**, select the current saved version and choose **Continue
    in chat**. This also supports a saved inline result with no active review chat.
    Verify the new review loads the owned current artifact without allocating a

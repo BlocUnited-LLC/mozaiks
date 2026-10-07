@@ -207,6 +207,23 @@ async def test_recover_build_keeps_all_versions_across_worker_restart_without_pr
 
 
 @pytest.mark.asyncio
+async def test_recover_owner_finds_other_builds_after_chat_remount_without_leaking_other_owners():
+    adapter = FakeSandboxAdapter()
+    manager = _manager(adapter)
+    first = await _create(manager)
+    second = await _create(manager, "artifact-b", build_registry_id="appreg-b")
+    await _create(manager, "artifact-c", user_id="someone-else")
+    await _create(manager, "artifact-d", app_id="another-host")
+    before = list(adapter.calls)
+
+    recovered = await manager.list_for_owner(app_id="factory", user_id="tester")
+
+    assert {state.sandbox_id for state in recovered} == {first.sandbox_id, second.sandbox_id}
+    assert {state.build_registry_id for state in recovered} == {"appreg-a", "appreg-b"}
+    assert adapter.calls == before
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("field", ["app_id", "user_id", "target_app_id", "build_registry_id"])
 async def test_recover_build_excludes_foreign_scope_before_status_or_cleanup(monkeypatch, field):
     adapter = FakeSandboxAdapter()
@@ -673,6 +690,7 @@ def test_router_recovers_actual_identity_and_safe_dto_without_provider_calls(api
         "sandboxId": sid, "artifactId": "artifact-a", "buildRegistryId": "appreg-a",
         "status": "running", "previewUrl": "https://preview.example", "lastError": None,
     }]}
+    assert client.get("/api/sandbox").json() == response.json()
     assert adapter.calls == before
     assert client.post(f"/api/sandbox/{sid}/stop").status_code == 200
     assert client.get(RECOVER_URL).json() == {"sessions": []}
@@ -682,7 +700,7 @@ def test_router_requires_owned_registry_before_reading_sessions(api_client, monk
     client, adapter, _ = api_client
     listing = AsyncMock(side_effect=AssertionError("Foreign registry read preview ledger"))
     monkeypatch.setattr(preview_sessions._manager, "list_for_build", listing)
-    assert client.get("/api/sandbox").status_code == 422
+    assert client.get("/api/sandbox").json() == {"sessions": []}
     assert client.get("/api/sandbox?build_registry_id=foreign").status_code == 404
     listing.assert_not_awaited()
     assert not adapter.calls
@@ -694,6 +712,12 @@ def test_router_recovery_failure_never_becomes_empty_success_or_leaks_details(ap
         side_effect=RuntimeError("private-database-credential"),
     ))
     response = client.get(RECOVER_URL)
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Preview recovery unavailable; try again shortly"}
+    monkeypatch.setattr(preview_sessions._manager, "list_for_owner", AsyncMock(
+        side_effect=RuntimeError("private-database-credential"),
+    ))
+    response = client.get("/api/sandbox")
     assert response.status_code == 503
     assert response.json() == {"detail": "Preview recovery unavailable; try again shortly"}
     assert not adapter.calls
@@ -730,6 +754,7 @@ def test_all_http_operations_enforce_owner(api_client, field, value):
         assert client.post(f"/api/sandbox/{sid}/{path}", json={"files": [], "deleted": []}).status_code == 404
     assert client.get(f"/api/sandbox/{sid}/status").status_code == 404
     assert client.get(RECOVER_URL).status_code == 404
+    assert client.get("/api/sandbox").json() == {"sessions": []}
     assert len(adapter.calls) == count
 
 

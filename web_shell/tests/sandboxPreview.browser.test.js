@@ -19,7 +19,9 @@ async function previewFixtureBundle() {
       import PreviewPane from ${JSON.stringify(pane)};
       function Fixture() {
         const [version, setVersion] = useState(1);
-        const [registry, setRegistry] = useState('registry-a');
+        const [registry, setRegistry] = useState(
+          new URLSearchParams(window.location.search).get('registry') || 'registry-a'
+        );
         const [refining, setRefining] = useState(false);
         const preview = useSandbox('artifact-' + version, registry);
         window.tryPreview = () => preview.syncAndRestart({'app.json':'{}'});
@@ -102,10 +104,11 @@ test('draft preview preserves workspace branding, opens separately, and follows 
     }
     if (!req.url.startsWith('/api/')) { res.setHeader('Content-Type', 'text/html'); res.end('<style>:root{--color-primary:#06b6d4}</style><div id="root"></div><script src="/fixture.js"></script>'); return; }
     res.setHeader('Content-Type', 'application/json');
-    if (req.url.startsWith('/api/sandbox?')) {
+    if (req.url === '/api/sandbox' || req.url.startsWith('/api/sandbox?')) {
       recoveryRequests.push(req.url);
       const registry = new URL(req.url, 'http://local').searchParams.get('build_registry_id');
-      res.end(JSON.stringify({sessions:[...sessionRecords.values()].filter(value => activeSessions.has(value.sandboxId) && value.buildRegistryId === registry)}));
+      res.end(JSON.stringify({sessions:[...sessionRecords.values()].filter(value => activeSessions.has(value.sandboxId)
+        && (!registry || value.buildRegistryId === registry))}));
       return;
     }
     requests.push(req.url);
@@ -542,9 +545,9 @@ test('durable preview recovery preserves actual identity and cleanup across relo
       recoveries.push(req.url);
       if (recoveryUnavailable) { res.statusCode = 503; res.end('{"detail":"Existing previews are temporarily unavailable"}'); return; }
       const registry = url.searchParams.get('build_registry_id');
-      const body = {sessions:[...sessions.values()].filter(value => value.buildRegistryId === registry)};
+      const body = {sessions:[...sessions.values()].filter(value => !registry || value.buildRegistryId === registry)};
       const finish = () => res.end(JSON.stringify(body));
-      if (delayRegistry === registry) delayedRecoveries.push(finish);
+      if (delayRegistry !== null && delayRegistry === registry) delayedRecoveries.push(finish);
       else finish();
       return;
     }
@@ -600,6 +603,50 @@ test('durable preview recovery preserves actual identity and cleanup across relo
     maxAllocated = 0;
   };
   const state = async page => JSON.parse(await page.getByLabel('State').textContent());
+
+  await t.test('navigating to another saved app releases its preview before quota-one allocation', async () => {
+    reset();
+    const page = await browser.newPage();
+    try {
+      await page.goto(origin);
+      await page.getByRole('button', {name:'Start draft preview',exact:true}).click();
+      await expect.poll(async () => (await state(page)).status).toBe('running');
+      assert.deepEqual([...sessions.keys()], ['sandbox-artifact-1-registry-a']);
+
+      // A full page navigation destroys the old hook and its in-memory map.
+      await page.goto(`${origin}/?registry=registry-b`);
+      await expect.poll(async () => (await state(page)).recovering).toBe(false);
+      assert.equal((await state(page)).version, null);
+      const before = mutations.length;
+      await page.getByRole('button', {name:'Start draft preview',exact:true}).click();
+      await expect.poll(async () => (await state(page)).status).toBe('running');
+      assert.deepEqual(mutations.slice(before), [
+        '/api/artifacts/artifact-1/sandbox?build_registry_id=registry-b',
+        '/api/sandbox/sandbox-artifact-1-registry-a/stop',
+        '/api/artifacts/artifact-1/sandbox?build_registry_id=registry-b',
+        '/api/sandbox/sandbox-artifact-1-registry-b/sync',
+        '/api/sandbox/sandbox-artifact-1-registry-b/start',
+      ]);
+      assert.deepEqual([...sessions.keys()], ['sandbox-artifact-1-registry-b']);
+      assert.equal(maxAllocated, 1);
+      await page.getByRole('button', {name:'Stop preview',exact:true}).click();
+      await expect.poll(() => sessions.size).toBe(0);
+    } finally { await page.close(); }
+  });
+
+  await t.test('a full owner quota with no owned handle retries only once', async () => {
+    reset();
+    quota = 0;
+    const page = await browser.newPage();
+    try {
+      await page.goto(origin);
+      await page.getByRole('button', {name:'Start draft preview',exact:true}).click();
+      await expect.poll(async () => (await state(page)).error).toBe('Preview quota one exceeded');
+      assert.deepEqual(mutations, Array(2).fill('/api/artifacts/artifact-1/sandbox?build_registry_id=registry-a'));
+      assert.ok(recoveries.includes('/api/sandbox'));
+      assert.equal(sessions.size, 0);
+    } finally { await page.close(); }
+  });
 
   await t.test('reload then early edit restores the old version and Update releases quota before allocation', async () => {
     reset();

@@ -119,6 +119,10 @@ and management launches do not display it.
 a different saved version from the same workbench stops its previous preview
 first. Leaving the workspace alone does not stop a preview opened separately;
 its absolute lifetime still applies.
+When a saved-review chat opens another app, the preview hook is recreated. If
+the owner's preview quota is full, Start reads the owner's durable preview
+handles, stops the older session, then retries allocation once. An unavailable
+recovery read or failed stop leaves the quota occupied and shows an error.
 
 App Zero follows the same rule: its preview can share the Mozaiks logo while
 the draft indicator identifies the separate runtime. Its own admin pages do
@@ -140,6 +144,8 @@ These identities do not change the management shell's branding.
   `POST /api/artifacts/{artifactId}/sandbox?build_registry_id=...` (create/reuse),
   `POST /api/sandbox/{id}/sync`, `POST /api/sandbox/{id}/start`,
   `GET /api/sandbox/{id}/status`, `POST /api/sandbox/{id}/stop`,
+  `GET /api/sandbox` (owner's sessions across builds),
+  `GET /api/sandbox?build_registry_id=...` (one owned build),
   `WS /ws/sandbox/{id}` (status stream). Every operation checks the authenticated
   host and owner, including the WebSocket before acceptance. Creation resolves
   the registry's target and verifies the saved app-bundle binding and archive

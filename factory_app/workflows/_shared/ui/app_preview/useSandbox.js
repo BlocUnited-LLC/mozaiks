@@ -31,6 +31,17 @@ async function readBuildSessions(buildRegistryId) {
   return body.sessions;
 }
 
+async function readOwnerSessions() {
+  const response = await studioFetch('/api/sandbox');
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.detail || 'Existing previews could not be recovered');
+  if (!Array.isArray(body.sessions) || body.sessions.some(value => !value?.sandboxId
+    || !value.artifactId || !value.buildRegistryId)) {
+    throw new Error('Existing preview identities could not be verified');
+  }
+  return body.sessions;
+}
+
 export function useSandbox(artifactId, buildRegistryId) {
   const [session, setSession] = useState(null);
   const [sandboxStatus, setSandboxStatus] = useState(null);
@@ -213,12 +224,14 @@ export function useSandbox(artifactId, buildRegistryId) {
     return isCurrent();
   }, [isSelectedRegistry]);
 
-  const stopPriorScopes = useCallback(async (isCurrent) => {
+  const stopPriorScopes = useCallback(async (isCurrent, refresh = true) => {
     for (const prior of [...priorScopes.current.values()]) {
       if (!isCurrent()) return false;
-      const sessions = await readBuildSessions(prior.buildRegistryId);
-      if (!isCurrent()) return false;
-      for (const value of sessions) prior.sessions.set(value.sandboxId, value);
+      if (refresh) {
+        const sessions = await readBuildSessions(prior.buildRegistryId);
+        if (!isCurrent()) return false;
+        for (const value of sessions) prior.sessions.set(value.sandboxId, value);
+      }
       if (!await stopRegistrySessions(prior, isCurrent)) return false;
       priorScopes.current.delete(prior.buildRegistryId);
     }
@@ -259,7 +272,11 @@ export function useSandbox(artifactId, buildRegistryId) {
         ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}),
       });
       const result = await response.json();
-      if (!response.ok) throw new Error(result.detail || `Preview request failed (${response.status})`);
+      if (!response.ok) {
+        const error = new Error(result.detail || `Preview request failed (${response.status})`);
+        error.status = response.status;
+        throw error;
+      }
       return result;
     }
 
@@ -276,7 +293,36 @@ export function useSandbox(artifactId, buildRegistryId) {
       if (!await stopRegistrySessions(scope, isCurrent, reusable?.sandboxId)) return;
       const query = `?build_registry_id=${encodeURIComponent(buildRegistryId)}`;
       allocating = true;
-      const { sandboxId: sid } = await post(`/api/artifacts/${encodeURIComponent(artifactId)}/sandbox${query}`);
+      const createUrl = `/api/artifacts/${encodeURIComponent(artifactId)}/sandbox${query}`;
+      let createResult;
+      try {
+        createResult = await post(createUrl);
+      } catch (error) {
+        if (error.status !== 429) throw error;
+        // A saved-review chat remount loses its old hook. On owner quota
+        // exhaustion, recover every owned handle before one bounded retry.
+        const ownerSessions = await readOwnerSessions();
+        if (!isCurrent()) return;
+        for (const value of ownerSessions) {
+          if (value.buildRegistryId === scope.buildRegistryId) {
+            scope.sessions.set(value.sandboxId, value);
+            continue;
+          }
+          let prior = priorScopes.current.get(value.buildRegistryId);
+          if (!prior) {
+            prior = { buildRegistryId: value.buildRegistryId, sessions: new Map(), uncertainStops: new Set() };
+            priorScopes.current.set(value.buildRegistryId, prior);
+          }
+          prior.sessions.set(value.sandboxId, value);
+        }
+        if (!await stopPriorScopes(isCurrent, false)) return;
+        const recoveredReusable = [...scope.sessions.values()].find(value => value.artifactId === artifactId
+          && value.status !== 'error' && !scope.uncertainStops.has(value.sandboxId));
+        if (!await stopRegistrySessions(scope, isCurrent, recoveredReusable?.sandboxId)) return;
+        if (!isCurrent()) return;
+        createResult = await post(createUrl);
+      }
+      const { sandboxId: sid } = createResult;
       allocating = false;
       const created = { sandboxId: sid, artifactId, buildRegistryId };
       scope.sessions.set(sid, created);

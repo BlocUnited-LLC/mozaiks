@@ -343,12 +343,18 @@ class ArtifactPreviewSessionManager:
         """Recover every owned cleanup handle without allocating or probing providers."""
         if not all(is_valid_artifact_id(value) for value in (app_id, target_app_id, build_registry_id)) or not user_id:
             raise ValueError("Invalid preview identity")
-        identity = (app_id, user_id, target_app_id, build_registry_id)
+        states = await self.list_for_owner(app_id=app_id, user_id=user_id)
+        return [state for state in states if (state.target_app_id, state.build_registry_id) == (target_app_id, build_registry_id)]
+
+    async def list_for_owner(self, *, app_id: str, user_id: str) -> list[PreviewSessionState]:
+        """Recover all of one owner's handles, including previews from other builds."""
+        if not is_valid_artifact_id(app_id) or not user_id:
+            raise ValueError("Invalid preview owner")
         states = []
         # The admission ledger is bounded. Do not truncate to today's owner quota:
         # older reservations, pending allocations and failed cleanup still count.
         for record in await self._store.list():
-            if tuple(record[name] for name in ("app_id", "user_id", "target_app_id", "build_registry_id")) != identity:
+            if (record["app_id"], record["user_id"]) != (app_id, user_id):
                 continue
             state = PreviewSessionState.from_record(record)
             if self._is_expired(state) or (state.phase == "queued" and record["queue_deadline"] <= _utcnow()):

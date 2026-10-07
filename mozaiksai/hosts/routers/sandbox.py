@@ -98,15 +98,19 @@ def create_sandbox_router(
 
     @router.get("/api/sandbox", response_model=_SessionsResponse)
     async def recover_previews(
-        build_registry_id: str, principal: UserPrincipal = Depends(require_user_scope),
+        build_registry_id: str | None = None, principal: UserPrincipal = Depends(require_user_scope),
     ):
         app_id, user_id = resolve_scope(principal)
         try:
-            target_app_id = await resolve_build(principal, build_registry_id)
-            states = await get_artifact_preview_sessions().list_for_build(
-                app_id=app_id, user_id=user_id, target_app_id=target_app_id,
-                build_registry_id=build_registry_id,
-            )
+            manager = get_artifact_preview_sessions()
+            if build_registry_id is None:
+                states = await manager.list_for_owner(app_id=app_id, user_id=user_id)
+            else:
+                target_app_id = await resolve_build(principal, build_registry_id)
+                states = await manager.list_for_build(
+                    app_id=app_id, user_id=user_id, target_app_id=target_app_id,
+                    build_registry_id=build_registry_id,
+                )
         except HTTPException:
             raise
         except Exception as exc:
