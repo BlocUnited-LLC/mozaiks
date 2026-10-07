@@ -371,15 +371,78 @@ def test_build_acp_agent_config_rejects_unknown_adapter(tmp_path: Path) -> None:
         )
 
 
-def test_provider_prompt_lists_only_editable_files(tmp_path: Path) -> None:
+def test_provider_prompt_separates_editable_and_read_only_files(tmp_path: Path) -> None:
     from mozaiksai.control_plane.workspace import materialize_coding_workspace
 
-    workspace = materialize_coding_workspace(_request_files(), workspace_root=tmp_path / "ws")
+    workspace = materialize_coding_workspace(
+        _request_files(), workspace_root=tmp_path / "ws",
+        read_only_files={"tests/test_dashboard.py": "def test_dashboard(): pass\n"},
+    )
     prompt = build_provider_prompt(_request(), workspace)
 
     assert _SCOPED_PATH in prompt
+    assert "Read-only inspection files (do not modify or delete):\n- tests/test_dashboard.py" in prompt
     assert "Make the dashboard return 1" in prompt
-    assert "changes anywhere else are discarded" in prompt
+    assert "changes anywhere else are rejected" in prompt
+
+
+@pytest.mark.asyncio
+async def test_provider_can_inspect_read_only_file_without_exporting_it(tmp_path: Path) -> None:
+    inspected: list[str] = []
+    factory_ref: list[_FakeConfigFactory] = []
+
+    async def _inspect_and_write() -> None:
+        config = factory_ref[0].configs[-1]
+        inspected.append((Path(config.cwd) / "tests/test_dashboard.py").read_text(encoding="utf-8"))
+        session = next(iter(config.sessions.values()))
+        await session.bridge.write_text_file(
+            content=_PATCHED, path=_SCOPED_PATH, session_id="fake-session-1",
+        )
+
+    factory = _FakeConfigFactory(ACPTurn(on_prompt=_inspect_and_write))
+    factory_ref.append(factory)
+    proposal = await _provider(factory, tmp_path).execute(_request(
+        read_only_files={"tests/test_dashboard.py": "def test_dashboard(): pass\n"},
+    ))
+
+    assert inspected == ["def test_dashboard(): pass\n"]
+    assert proposal.status == "completed"
+    assert [change.path for change in proposal.changed_files] == [_SCOPED_PATH]
+
+
+@pytest.mark.asyncio
+async def test_provider_rejects_read_only_edit_from_acp_bridge(tmp_path: Path) -> None:
+    factory_ref: list = []
+    factory = _FakeConfigFactory(_writing_turn(
+        factory_ref, "tests/test_dashboard.py", "changed\n",
+    ))
+    factory_ref.append(factory)
+
+    proposal = await _provider(factory, tmp_path).execute(_request(
+        read_only_files={"tests/test_dashboard.py": "original\n"},
+    ))
+
+    assert proposal.status == "rejected_scope"
+    assert "read_only_modified" in (proposal.error or "")
+    assert proposal.changed_files == []
+
+
+@pytest.mark.asyncio
+async def test_provider_budget_counts_inspection_files(tmp_path: Path) -> None:
+    factory = _FakeConfigFactory()
+    proposal = await _provider(factory, tmp_path).execute(_request(read_only_files={
+        f"tests/test_{index}.py": "pass\n" for index in range(3)
+    }))
+
+    assert proposal.status == "budget_exceeded"
+    assert factory.calls == []
+
+
+def test_request_caps_inspection_content_before_provider() -> None:
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="CODING_READ_ONLY_BUDGET"):
+        _request(read_only_files={"tests/test_large.py": "x" * 2_097_153})
 
 
 # ---------------------------------------------------------------------------

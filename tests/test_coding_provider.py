@@ -379,6 +379,24 @@ async def test_worker_checks_eligibility_before_calling_provider(tmp_path: Path)
     assert provider.requests == []
 
 
+@pytest.mark.asyncio
+async def test_generated_app_worker_rejects_repository_inspection_before_provider(tmp_path: Path) -> None:
+    provider = _StubProvider(_completed_proposal())
+    worker = ScopedRefinementCodingWorker(
+        config_loader=_enabled_control_plane,
+        pack_loader=_pack,
+        candidate_validation_runner=_fake_candidate_validation_runner,
+        artifact_store=_FakeArtifactStore(),
+        output_root=tmp_path,
+        provider=provider,
+    )
+    result = await worker.execute(_request(read_only_files={"tests/test_dashboard.py": "private context\n"}))
+
+    assert result.status == "ineligible"
+    assert "inspection files" in (result.blocked_reason or "")
+    assert provider.requests == []
+
+
 # ---------------------------------------------------------------------------
 # Contract hygiene
 # ---------------------------------------------------------------------------

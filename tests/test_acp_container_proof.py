@@ -27,6 +27,7 @@ from mozaiksai.control_plane import (
     ScopedRefinementCodingWorker,
     StagedPatchProposal,
     finalize_repository_patch,
+    select_repository_read_only_files,
     stage_repository_workspace_archive,
 )
 from mozaiksai.core.artifacts.models import BuildRecord
@@ -68,6 +69,7 @@ class DockerACPProofProvider:
             "change_class": request.change_class,
             "raw_user_request": request.raw_user_request,
             "files": request.files,
+            "read_only_files": request.read_only_files,
         }
         input_bytes = json.dumps(scoped_request).encode("utf-8")
         assert len(input_bytes) < 1_000_000
@@ -113,8 +115,11 @@ class DockerACPProofProvider:
             assert len(run.stdout) < 1_000_000, "container output exceeded proof limit"
             output = json.loads(run.stdout)
             assert set(output) == {"proposal", "workspace_archive_base64"}
-            self.archive_bytes = base64.b64decode(output["workspace_archive_base64"], validate=True)
-            assert len(self.archive_bytes) <= _MAX_ARCHIVE_BYTES
+            encoded_archive = output["workspace_archive_base64"]
+            self.archive_bytes = (
+                base64.b64decode(encoded_archive, validate=True) if encoded_archive is not None else None
+            )
+            assert self.archive_bytes is None or len(self.archive_bytes) <= _MAX_ARCHIVE_BYTES
             self.proposal = StagedPatchProposal.model_validate(output["proposal"])
             return self.proposal
         finally:
@@ -252,3 +257,59 @@ async def test_acp_client_adapter_and_terminal_are_confined_to_disposable_contai
     assert _READ_ONLY in snapshot.file_manifest
     assert _READ_ONLY not in baseline_files
     assert all(change.path != _READ_ONLY for change in candidate.changed_files)
+
+    # Repository mode adds only snapshot-verified read-only inspection bytes.
+    selected_inspection = select_repository_read_only_files(
+        context, snapshot=snapshot, selected_paths=[_READ_ONLY],
+        baseline_files={_READ_ONLY: _READ_ONLY_CONTENT},
+        validate_path=lambda path: None if path == _READ_ONLY else False,
+        max_files=1, max_bytes=1024,
+    )
+    repository_provider = DockerACPProofProvider()
+    repository_proposal = await repository_provider.execute(request.model_copy(update={
+        "read_only_files": selected_inspection,
+    }))
+    assert repository_proposal.status == "completed", repository_proposal.error
+    repository_proof = json.loads(repository_proposal.summary)
+    assert repository_proof["read_only_test_visible"] is True
+    assert repository_proof["host_sentinel_visible"] is False
+    assert repository_provider.archive_bytes is not None
+    from mozaiksai.core.semantics.archive import read_archive_manifest
+    assert {entry.path for entry in read_archive_manifest(repository_provider.archive_bytes).entries} == set(baseline_files)
+    staged_inspection = stage_repository_workspace_archive(
+        context, snapshot=snapshot, selected_paths=list(baseline_files),
+        baseline_files=baseline_files, archive_bytes=repository_provider.archive_bytes,
+        workspace_root=tmp_path / "repository_inspection_staged", validate_path=host_policy,
+        max_files=3, max_archive_bytes=_MAX_ARCHIVE_BYTES,
+    )
+    try:
+        inspected_candidate = finalize_repository_patch(
+            context, snapshot=snapshot, selected_paths=list(baseline_files),
+            baseline_files=baseline_files, workspace=staged_inspection,
+            proposal=repository_proposal, validate_path=host_policy,
+        )
+    finally:
+        staged_inspection.cleanup()
+    assert [change.path for change in inspected_candidate.changed_files] == [_EDITABLE]
+    assert _READ_ONLY_CONTENT not in inspected_candidate.model_dump_json()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation,violation", [
+    ("edit", "read_only_modified"), ("delete", "read_only_missing"),
+])
+async def test_container_rejects_read_only_changes_without_archive(
+    tmp_path: Path, operation: str, violation: str,
+) -> None:
+    provider = DockerACPProofProvider()
+    proposal = await provider.execute(CodingWorkerRequest(
+        app_id="proof", build_family="app_bundle", build_record_id="av_parent",
+        change_class="patch", raw_user_request="Make the dashboard return 1",
+        files={_EDITABLE: _ORIGINAL},
+        read_only_files={_READ_ONLY: f"# proof: {operation}-read-only\n"},
+    ))
+
+    assert proposal.status == "rejected_scope"
+    assert violation in (proposal.error or "")
+    assert provider.archive_bytes is None
+    assert proposal.changed_files == []

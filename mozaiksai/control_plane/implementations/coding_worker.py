@@ -334,6 +334,8 @@ class ScopedRefinementCodingWorker:
 
     @staticmethod
     def _check_eligibility(request: CodingWorkerRequest) -> tuple[bool, str | None]:
+        if request.read_only_files:
+            return False, "generated-app coding worker cannot accept repository inspection files"
         try:
             resolve_coding_validation_strategy(request.validation_strategy)
         except ValueError as exc:

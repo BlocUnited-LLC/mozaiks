@@ -156,16 +156,20 @@ def build_provider_prompt(request: CodingWorkerRequest, workspace: StagedCodingW
     set is enforced by the harvest, not by these instructions.
     """
     editable = "\n".join(f"- {path}" for path in sorted(workspace.editable_manifest))
+    read_only = "\n".join(f"- {path}" for path in sorted(workspace.read_only_manifest)) or "(none)"
     return "\n".join(
         [
             "You are performing one bounded, pre-approved code change in this",
-            "workspace. The workspace contains copies of exactly the files in",
-            "scope; there is no wider repository.",
+            "workspace. The workspace contains only selected editable files and",
+            "read-only inspection files; there is no wider repository.",
             "",
             f"Request: {request.raw_user_request}",
             "",
-            "Editable files (changes anywhere else are discarded):",
+            "Editable files (changes anywhere else are rejected):",
             editable,
+            "",
+            "Read-only inspection files (do not modify or delete):",
+            read_only,
             "",
             "Edit the files in place to satisfy the request. Do not create new",
             "files, do not delete files, and do not run commands. When you are",
@@ -234,12 +238,13 @@ class ACPCodingProvider:
                 error="Local ACP execution is unavailable until the CLI agent runs in verified OS isolation.",
             )
         budget = provider_config.budget
-        if len(request.files) > budget.max_files:
+        scoped_count = len(request.files) + len(request.read_only_files)
+        if scoped_count > budget.max_files:
             return self._proposal(
                 status="budget_exceeded",
                 provider_id=provider_id,
                 error=(
-                    f"scoped file count {len(request.files)} exceeds the ACP provider budget "
+                    f"scoped file count {scoped_count} exceeds the ACP provider budget "
                     f"max_files={budget.max_files}"
                 ),
             )
@@ -247,7 +252,10 @@ class ACPCodingProvider:
         workspace_root = self._staging_root / request.app_id / uuid.uuid4().hex[:12]
         workspace: StagedCodingWorkspace | None = None
         try:
-            workspace = materialize_coding_workspace(dict(request.files), workspace_root=workspace_root)
+            workspace = materialize_coding_workspace(
+                dict(request.files), workspace_root=workspace_root,
+                read_only_files=dict(request.read_only_files),
+            )
             proposal = await self._run_turn(
                 request=request,
                 workspace=workspace,

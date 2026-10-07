@@ -79,6 +79,15 @@ class ProofAgent:
             "host_sentinel_visible": Path("/workspace/.host_sentinel").exists(),
             "terminal": terminal_result,
         }
+        inspection = self.cwd / "tests/test_dashboard.py"
+        if inspection.exists():
+            content = inspection.read_text(encoding="utf-8")
+            if "# proof: edit-read-only" in content:
+                await self.client.write_text_file(
+                    session_id=session_id, path=str(inspection), content="changed inspection\n",
+                )
+            elif "# proof: delete-read-only" in content:
+                inspection.unlink()
         await self.client.write_text_file(
             session_id=session_id,
             path=str(self.cwd / _EDITABLE_PATH),

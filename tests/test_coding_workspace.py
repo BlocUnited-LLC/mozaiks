@@ -50,6 +50,62 @@ def test_materialize_writes_files_and_records_hashes(tmp_path: Path) -> None:
     assert duplicate.editable_manifest == workspace.editable_manifest
 
 
+def test_read_only_inspection_is_visible_but_absent_from_harvest(tmp_path: Path) -> None:
+    inspection = {"tests/test_dashboard.py": "def test_dashboard(): assert True\n"}
+    workspace = materialize_coding_workspace(
+        dict(_FILES), workspace_root=tmp_path / "ws", read_only_files=inspection,
+    )
+
+    assert (workspace.workspace_root / "tests/test_dashboard.py").read_text(encoding="utf-8") == inspection[
+        "tests/test_dashboard.py"
+    ]
+    assert "tests/test_dashboard.py" in workspace.read_only_manifest
+    harvest = harvest_coding_workspace(workspace)
+    assert harvest.clean
+    assert {file.path for file in harvest.files} == set(_FILES)
+    assert all("test_dashboard" not in (file.content or "") for file in harvest.files)
+
+
+@pytest.mark.parametrize("operation,kind", [("edit", "read_only_modified"), ("delete", "read_only_missing")])
+def test_read_only_inspection_change_is_rejected_even_with_create_delete_flags(
+    tmp_path: Path, operation: str, kind: str,
+) -> None:
+    path = "tests/test_dashboard.py"
+    workspace = materialize_coding_workspace(
+        dict(_FILES), workspace_root=tmp_path / "ws", read_only_files={path: "original\n"},
+    )
+    target = workspace.workspace_root / path
+    if operation == "edit":
+        target.write_text("modified\n", encoding="utf-8")
+    else:
+        target.unlink()
+
+    harvest = harvest_coding_workspace(workspace, allow_new_files=True, allow_deletes=True)
+    assert [(item.path, item.kind) for item in harvest.violations] == [(path, kind)]
+    assert all(file.path != path for file in harvest.files)
+
+
+@pytest.mark.parametrize(
+    "read_only_path,error",
+    [
+        ("app/ui/pages/Dashboard.jsx", "WORKSPACE_PATH_COLLISION"),
+        ("APP/UI/PAGES/dashboard.jsx", "WORKSPACE_PATH_COLLISION"),
+        ("app/ui/pages/Dashboard.jsx/child", "WORKSPACE_PATH_COLLISION"),
+        ("tests/../test.py", "WORKSPACE_UNSAFE_PATH"),
+        (".env.example", "WORKSPACE_SECRET_PATH"),
+        ("app/security/secrets.yaml", "WORKSPACE_SECRET_PATH"),
+    ],
+)
+def test_read_only_materialization_rejects_colliding_or_sensitive_paths(
+    tmp_path: Path, read_only_path: str, error: str,
+) -> None:
+    with pytest.raises(ValueError, match=error):
+        materialize_coding_workspace(
+            dict(_FILES), workspace_root=tmp_path / "ws", read_only_files={read_only_path: "inspection"},
+        )
+    assert not (tmp_path / "ws").exists()
+
+
 @pytest.mark.parametrize(
     "bad_path",
     ["../outside.py", "/etc/passwd", "C:/windows/system32/x", "app/../../up.py", ""],

@@ -1,13 +1,12 @@
 """Disposable coding workspaces with deterministic post-run diff harvest.
 
 The coding lane needs one hardened write path: files are materialized into a
-per-request workspace, a provider (the structured-output worker today, an
-ACP-driven CLI coding agent later) operates on that workspace only, and the
-result is harvested by comparing content hashes against the pre-run manifest.
+per-request workspace, a provider operates on that workspace only, and the
+result is harvested by comparing content hashes against the pre-run manifests.
 Enforcement lives here, outside any model: paths are normalized and refused
 before writing, symlinks are never followed, and every post-run change that
-falls outside the editable manifest is reported as a scope violation instead
-of being accepted.
+falls outside the editable manifest or modifies read-only inspection files is
+reported as a scope violation instead of being accepted.
 """
 
 from __future__ import annotations
@@ -22,7 +21,11 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from mozaiksai.control_plane.contracts import is_secret_sensitive_path, safe_artifact_relpath
+from mozaiksai.control_plane.contracts import (
+    is_repository_env_template_path,
+    is_secret_sensitive_path,
+    safe_artifact_relpath,
+)
 from mozaiksai.core.secrets.contract import is_secret_contract_path, validate_secret_contract_text
 
 WorkspaceViolationKind = Literal[
@@ -32,6 +35,8 @@ WorkspaceViolationKind = Literal[
     "non_regular",
     "outside_allowlist",
     "delete_denied",
+    "read_only_modified",
+    "read_only_missing",
 ]
 
 
@@ -74,6 +79,7 @@ class StagedCodingWorkspace:
 
     workspace_root: Path
     editable_manifest: dict[str, str] = field(default_factory=dict)
+    read_only_manifest: dict[str, str] = field(default_factory=dict)
     strict_cleanup: bool = field(default=False, repr=False)
 
     def cleanup(self) -> None:
@@ -110,6 +116,7 @@ def materialize_coding_workspace(
     files: dict[str, str],
     *,
     workspace_root: Path,
+    read_only_files: dict[str, str] | None = None,
 ) -> StagedCodingWorkspace:
     """Write the scoped files into a fresh workspace and record their hashes.
 
@@ -119,30 +126,50 @@ def materialize_coding_workspace(
     unsafe or secret-sensitive path is a scoping bug upstream, not something to
     paper over at the write layer.
     """
+    inspection = read_only_files or {}
+    paths: set[str] = set()
+    for role, selected in (("editable", files), ("read_only", inspection)):
+        for raw_path, content in selected.items():
+            safe = safe_artifact_relpath(raw_path)
+            if safe is None or safe != raw_path:
+                raise ValueError(f"WORKSPACE_UNSAFE_PATH: {raw_path!r} is not a canonical relative path")
+            if is_secret_sensitive_path(safe) or (
+                role == "read_only" and (is_secret_contract_path(safe) or is_repository_env_template_path(safe))
+            ):
+                raise ValueError(f"WORKSPACE_SECRET_PATH: refusing to materialize secret-sensitive path {safe!r}")
+            if role == "editable" and is_secret_contract_path(safe):
+                validate_secret_contract_text(content)
+            folded = safe.casefold()
+            if any(
+                folded == existing or folded.startswith(f"{existing}/") or existing.startswith(f"{folded}/")
+                for existing in paths
+            ):
+                raise ValueError(f"WORKSPACE_PATH_COLLISION: {safe!r} overlaps another selected path")
+            paths.add(folded)
+
     root = workspace_root.resolve()
     root.mkdir(parents=True, exist_ok=True)
 
-    manifest: dict[str, str] = {}
-    for raw_path, content in files.items():
-        safe = safe_artifact_relpath(raw_path)
-        if safe is None:
-            raise ValueError(f"WORKSPACE_UNSAFE_PATH: {raw_path!r} is not a safe bundle-relative path")
-        if is_secret_sensitive_path(safe):
-            raise ValueError(f"WORKSPACE_SECRET_PATH: refusing to materialize secret-sensitive path {safe!r}")
-        if is_secret_contract_path(safe):
-            validate_secret_contract_text(content)
+    editable_manifest: dict[str, str] = {}
+    read_only_manifest: dict[str, str] = {}
+    for selected, manifest in (
+        (files, editable_manifest),
+        (inspection, read_only_manifest),
+    ):
+        for safe, content in selected.items():
+            destination = (root / safe).resolve()
+            if destination != root and not str(destination).startswith(str(root) + os.sep):
+                raise ValueError(f"WORKSPACE_ESCAPE: {safe!r} resolves outside the workspace root")
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            # Byte writes avoid Windows newline translation and preserve hashes.
+            data = content.encode("utf-8")
+            destination.write_bytes(data)
+            manifest[safe] = hashlib.sha256(data).hexdigest()
 
-        destination = (root / safe).resolve()
-        if destination != root and not str(destination).startswith(str(root) + os.sep):
-            raise ValueError(f"WORKSPACE_ESCAPE: {raw_path!r} resolves outside the workspace root")
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        # write_bytes, not write_text: text mode would translate newlines on
-        # Windows and desynchronize the on-disk bytes from the manifest hash.
-        data = str(content).encode("utf-8")
-        destination.write_bytes(data)
-        manifest[safe] = hashlib.sha256(data).hexdigest()
-
-    return StagedCodingWorkspace(workspace_root=root, editable_manifest=manifest)
+    return StagedCodingWorkspace(
+        workspace_root=root, editable_manifest=editable_manifest,
+        read_only_manifest=read_only_manifest,
+    )
 
 
 def harvest_coding_workspace(
@@ -153,11 +180,12 @@ def harvest_coding_workspace(
 ) -> WorkspaceHarvest:
     """Deterministically diff the workspace against its pre-run manifest.
 
-    Walks the real tree without following links or Windows reparse points. Any link is a violation
-    regardless of target. Files outside the editable manifest are violations
-    unless ``allow_new_files``; manifest files missing from disk are violations
-    unless ``allow_deletes``. Nothing here consults the provider's own claims —
-    the walk is the only source of truth.
+    Walks the real tree without following links or Windows reparse points. Any
+    link is a violation regardless of target. Read-only files are hash-checked
+    and omitted from output; modifications and deletion always fail. Files
+    outside both manifests are violations unless ``allow_new_files``; editable
+    files missing from disk are violations unless ``allow_deletes``. Nothing
+    consults the provider's own claims — the walk is the source of truth.
     """
     if _is_link_or_reparse_point(workspace.workspace_root):
         return WorkspaceHarvest(violations=[WorkspaceScopeViolation(
@@ -204,6 +232,14 @@ def harvest_coding_workspace(
                 )
                 continue
             seen.add(rel)
+            read_only_sha = workspace.read_only_manifest.get(rel)
+            if read_only_sha is not None:
+                if _sha256_file(full) != read_only_sha:
+                    violations.append(WorkspaceScopeViolation(
+                        path=rel, kind="read_only_modified",
+                        detail="Read-only inspection file was modified.",
+                    ))
+                continue
             previous = workspace.editable_manifest.get(rel)
             new_sha = _sha256_file(full)
             if previous is None:
@@ -256,6 +292,13 @@ def harvest_coding_workspace(
                     detail="Editable file was deleted from the workspace; deletes are not allowed.",
                 )
             )
+
+    for rel in sorted(workspace.read_only_manifest):
+        if rel not in seen:
+            violations.append(WorkspaceScopeViolation(
+                path=rel, kind="read_only_missing",
+                detail="Read-only inspection file is missing.",
+            ))
 
     return WorkspaceHarvest(files=files, violations=violations, total_content_bytes=total_bytes)
 

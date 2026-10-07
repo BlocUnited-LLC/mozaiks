@@ -186,6 +186,10 @@ class ControlPlaneToolDefinition(BaseModel):
     available_to: list[str] = Field(default_factory=list)
 
 
+MAX_READ_ONLY_INSPECTION_FILES = 20
+MAX_READ_ONLY_INSPECTION_BYTES = 2_097_152
+
+
 class CodingWorkerRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -203,6 +207,7 @@ class CodingWorkerRequest(BaseModel):
     source_surface: str | None = None
     change_class: str
     files: dict[str, str] = Field(default_factory=dict)
+    read_only_files: dict[str, str] = Field(default_factory=dict, repr=False)
     validation_strategy: str | None = None
     start_preview: bool = False
     context_seed: dict[str, Any] = Field(default_factory=dict)
@@ -212,6 +217,10 @@ class CodingWorkerRequest(BaseModel):
     def validate_build_binding(self) -> CodingWorkerRequest:
         if self.run_build_binding is not None and self.run_build_binding.target_app_id != self.artifact_app_id:
             raise ValueError("Coding request target does not match its server build binding")
+        if len(self.read_only_files) > MAX_READ_ONLY_INSPECTION_FILES or sum(
+            len(content.encode("utf-8")) for content in self.read_only_files.values()
+        ) > MAX_READ_ONLY_INSPECTION_BYTES:
+            raise ValueError("CODING_READ_ONLY_BUDGET: inspection context exceeds 20 files or 2 MiB")
         return self
 
     @model_validator(mode="before")
@@ -376,6 +385,11 @@ def is_secret_sensitive_path(path: str) -> bool:
     return any(term in normalized for term in SECRET_SENSITIVE_PATH_TERMS) or any(
         part == ".env" for part in parts
     )
+
+
+def is_repository_env_template_path(path: str) -> bool:
+    """Root environment templates need a names-only gate before repository use."""
+    return path.casefold() in {".env.example", ".env.staging.example", ".env.production.example"}
 
 
 def safe_artifact_relpath(raw: Any) -> str | None:
