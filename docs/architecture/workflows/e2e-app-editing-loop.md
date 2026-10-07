@@ -242,6 +242,14 @@ route or enabled in refinement policy. Live ACP needs a dedicated minimal
 image, controlled model credential delivery and egress, a trusted job worker,
 and a binding to persisted approval and source snapshot before activation.
 
+The offline ACP proof image consumes the host's exact `create_paths` and
+`delete_paths` alongside selected files. Its coding provider remains
+update-only by default; only that isolated worker instance receives operation
+grants. It tells the agent the granted paths, then checks the observed
+workspace against those exact grants before returning a proposal. The archive
+exporter repeats the operation check, including a canonical empty archive for
+deletion-only turns. Host snapshot and finalizer checks remain authoritative.
+
 ---
 
 ## User-Facing Mental Model

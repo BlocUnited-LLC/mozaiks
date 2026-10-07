@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 from ag2.acp import ACPConfig
+from pydantic import Field, StrictStr
 
 from mozaiksai.control_plane import (
     CodingWorkerRequest,
@@ -22,6 +23,13 @@ from mozaiksai.control_plane.workspace import StagedCodingWorkspace
 
 _FAKE_AGENT = "/opt/mozaiks/acp_proof/fake_agent.py"
 _MAX_ARCHIVE_BYTES = 700_000
+
+
+class _ProofWorkerRequest(CodingWorkerRequest):
+    """The host's scoped request plus exact operation grants for this image."""
+
+    create_paths: list[StrictStr] = Field(default_factory=list, max_length=3)
+    delete_paths: list[StrictStr] = Field(default_factory=list, max_length=3)
 
 
 def _fake_config(*, workspace_root: Path, turn_timeout_seconds: int, **_kwargs: object) -> ACPConfig:
@@ -39,7 +47,7 @@ def _fake_config(*, workspace_root: Path, turn_timeout_seconds: int, **_kwargs: 
 
 
 async def _execute() -> str:
-    request = CodingWorkerRequest.model_validate_json(sys.stdin.buffer.read())
+    request = _ProofWorkerRequest.model_validate_json(sys.stdin.buffer.read())
     policy = ControlPlaneConfig(
         enabled=True,
         coding=ControlPlaneCodingCapabilityConfig.model_validate(
@@ -51,7 +59,8 @@ async def _execute() -> str:
     def _capture_workspace(workspace: StagedCodingWorkspace) -> None:
         nonlocal observed_archive
         observed_archive = export_repository_workspace_archive(
-            workspace, max_files=3, max_archive_bytes=_MAX_ARCHIVE_BYTES
+            workspace, max_files=3, max_archive_bytes=_MAX_ARCHIVE_BYTES,
+            create_paths=request.create_paths, delete_paths=request.delete_paths,
         )
 
     provider = ACPCodingProvider(
@@ -60,6 +69,8 @@ async def _execute() -> str:
         acp_config_factory=_fake_config,
         env_source={},
         on_completed_workspace=_capture_workspace,
+        create_paths=request.create_paths,
+        delete_paths=request.delete_paths,
     )
     with contextlib.redirect_stdout(sys.stderr):
         proposal = await provider.execute(request)

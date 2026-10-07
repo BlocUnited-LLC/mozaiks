@@ -15,6 +15,8 @@ from acp import schema
 
 _EDITABLE_PATH = "app/ui/pages/Dashboard.jsx"
 _EDITED_CONTENT = "export default function Dashboard() { return 1; }\n"
+_CREATE_PATH = "app/ui/pages/New.jsx"
+_CREATED_CONTENT = "export default function New() {}\n"
 _TERMINAL_PROBE = """
 import json, os, socket
 s = socket.socket()
@@ -54,7 +56,10 @@ class ProofAgent:
         self.cwd = Path(cwd)
         return schema.NewSessionResponse(session_id="acp-container-proof")
 
-    async def prompt(self, *, session_id: str, **_kwargs: Any) -> schema.PromptResponse:
+    async def prompt(self, *, session_id: str, prompt: list[Any], **_kwargs: Any) -> schema.PromptResponse:
+        instruction = "\n".join(str(getattr(block, "text", "")) for block in prompt)
+        create_granted = f"Approved creation paths:\n- {_CREATE_PATH}" in instruction
+        delete_granted = f"Approved deletion paths:\n- {_EDITABLE_PATH}" in instruction
         terminal = await self.client.create_terminal(
             session_id=session_id,
             command=sys.executable,
@@ -88,11 +93,16 @@ class ProofAgent:
                 )
             elif "# proof: delete-read-only" in content:
                 inspection.unlink()
-        await self.client.write_text_file(
-            session_id=session_id,
-            path=str(self.cwd / _EDITABLE_PATH),
-            content=_EDITED_CONTENT,
-        )
+        if create_granted:
+            await self.client.write_text_file(
+                session_id=session_id, path=str(self.cwd / _CREATE_PATH), content=_CREATED_CONTENT,
+            )
+        if delete_granted:
+            (self.cwd / _EDITABLE_PATH).unlink()
+        if not create_granted and not delete_granted:
+            await self.client.write_text_file(
+                session_id=session_id, path=str(self.cwd / _EDITABLE_PATH), content=_EDITED_CONTENT,
+            )
         await self.client.session_update(
             session_id=session_id,
             update=schema.AgentMessageChunk(

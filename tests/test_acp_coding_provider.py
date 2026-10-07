@@ -32,6 +32,7 @@ from mozaiksai.control_plane.implementations.acp_coding_provider import (  # noq
 _SCOPED_PATH = "app/ui/pages/Dashboard.jsx"
 _ORIGINAL = "export default function Dashboard() {}\n"
 _PATCHED = "export default function Dashboard() { return 1; }\n"
+_NEW_PATH = "app/ui/pages/New.jsx"
 
 
 def _policy(**acp_overrides: Any):
@@ -143,6 +144,91 @@ async def test_happy_path_harvests_modified_file(tmp_path: Path) -> None:
     staging = tmp_path / "acp_staging"
     leftovers = [p for p in staging.rglob("*") if p.is_file()] if staging.exists() else []
     assert leftovers == []
+
+
+@pytest.mark.asyncio
+async def test_exact_create_grant_accepts_only_the_named_new_file(tmp_path: Path) -> None:
+    factory_ref: list = []
+    factory = _FakeConfigFactory(_writing_turn(factory_ref, _NEW_PATH, "export const New = 1;\n"))
+    factory_ref.append(factory)
+    provider = ACPCodingProvider(
+        config_loader=_policy(), staging_root=tmp_path / "create",
+        acp_config_factory=factory, env_source={}, create_paths=[_NEW_PATH],
+    )
+
+    proposal = await provider.execute(_request(files={}))
+
+    assert proposal.status == "completed"
+    assert [(change.path, change.op) for change in proposal.changed_files] == [(_NEW_PATH, "create")]
+    assert proposal.changed_files[0].content is not None
+    assert proposal.changed_files[0].content.replace("\r\n", "\n") == "export const New = 1;\n"
+    assert proposal.owned_paths == [_NEW_PATH]
+
+    rogue_ref: list = []
+    rogue = _FakeConfigFactory(_writing_turn(rogue_ref, "app/ui/pages/Rogue.jsx", "rogue\n"))
+    rogue_ref.append(rogue)
+    rejected = ACPCodingProvider(
+        config_loader=_policy(), staging_root=tmp_path / "rogue",
+        acp_config_factory=rogue, env_source={}, create_paths=[_NEW_PATH],
+    )
+    result = await rejected.execute(_request(files={}))
+    assert result.status == "rejected_scope"
+    assert result.changed_files == []
+
+
+@pytest.mark.asyncio
+async def test_exact_delete_grant_preserves_generated_app_update_only_default(tmp_path: Path) -> None:
+    factory_ref: list = []
+
+    async def _delete() -> None:
+        workspace_root = factory_ref[0].calls[-1]["workspace_root"]
+        (workspace_root / _SCOPED_PATH).unlink()
+
+    factory = _FakeConfigFactory(ACPTurn(on_prompt=_delete))
+    factory_ref.append(factory)
+    granted = ACPCodingProvider(
+        config_loader=_policy(), staging_root=tmp_path / "granted",
+        acp_config_factory=factory, env_source={}, delete_paths=[_SCOPED_PATH],
+    )
+    proposal = await granted.execute(_request())
+    assert proposal.status == "completed"
+    assert [(change.path, change.op, change.content) for change in proposal.changed_files] == [
+        (_SCOPED_PATH, "delete", None),
+    ]
+
+    default = _provider(factory, tmp_path / "default")
+    rejected = await default.execute(_request())
+    assert rejected.status == "rejected_scope"
+    assert rejected.changed_files == []
+
+    other_path = "app/ui/pages/Other.jsx"
+    rogue_ref: list = []
+
+    async def _delete_other() -> None:
+        workspace_root = rogue_ref[0].calls[-1]["workspace_root"]
+        (workspace_root / other_path).unlink()
+
+    rogue = _FakeConfigFactory(ACPTurn(on_prompt=_delete_other))
+    rogue_ref.append(rogue)
+    ungranted = ACPCodingProvider(
+        config_loader=_policy(), staging_root=tmp_path / "ungranted",
+        acp_config_factory=rogue, env_source={}, delete_paths=[_SCOPED_PATH],
+    )
+    result = await ungranted.execute(_request(files={_SCOPED_PATH: _ORIGINAL, other_path: "other\n"}))
+    assert result.status == "rejected_scope"
+    assert result.changed_files == []
+
+
+@pytest.mark.asyncio
+async def test_invalid_operation_grant_fails_before_agent_starts(tmp_path: Path) -> None:
+    factory = _FakeConfigFactory()
+    provider = ACPCodingProvider(
+        config_loader=_policy(), staging_root=tmp_path,
+        acp_config_factory=factory, env_source={}, create_paths=[_SCOPED_PATH],
+    )
+    proposal = await provider.execute(_request())
+    assert proposal.status == "failed"
+    assert factory.calls == []
 
 
 @pytest.mark.asyncio
