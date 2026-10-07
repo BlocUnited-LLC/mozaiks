@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import re
 import stat
 import tempfile
 import zipfile
@@ -418,10 +419,25 @@ async def accept_existing_app_genesis(
     )
     if result.get("status") != "passed" or result.get("passed") is not True:
         raise GenesisImportError("imported Genesis source failed canonical app-bundle runtime validation")
+    smoke = result.get("app_runtime_smoke")
+    source_digests = {
+        path: hashlib.sha256(content.encode("utf-8") if isinstance(content, str) else content).hexdigest()
+        for path, content in files.items()
+    }
+    source_content_sha256 = _canonical_digest(source_digests)
+    validator_image_id = smoke.get("validator_image_id") if isinstance(smoke, dict) else None
+    if (
+        not isinstance(validator_image_id, str)
+        or re.fullmatch(r"sha256:[0-9a-f]{64}", validator_image_id) is None
+        or smoke.get("source_content_sha256") != source_content_sha256
+    ):
+        raise GenesisImportError("imported Genesis runtime evidence lacks the verified source or validator identity")
     evidence = {
         "contract": "app_bundle_acceptance_gate_v1",
         "bundle_sha256": claim.bundle_sha256,
         "manifest_sha256": claim.manifest_sha256,
+        "source_content_sha256": source_content_sha256,
+        "validator_image_id": validator_image_id,
         "snapshot_digest": result.get("snapshot_digest"),
         "passed_checks": [check.get("id") for check in result.get("checks", []) if check.get("passed") is True],
     }

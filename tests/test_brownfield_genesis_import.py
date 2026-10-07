@@ -62,6 +62,14 @@ def _source(*, app_id: str = "mozaiks-platform", files: dict[str, bytes] | None 
     return raw, manifest
 
 
+def _source_content_digest(manifest: list[dict[str, object]]) -> str:
+    digests = {
+        str(entry["path"]).removeprefix(f"{_BUNDLE}/"): entry["sha256"]
+        for entry in manifest if entry["path"] != f"{_BUNDLE}/{_BUNDLE}.zip"
+    }
+    return hashlib.sha256(json.dumps(digests, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
 @pytest.fixture
 def import_state(tmp_path, monkeypatch):
     registry_row = {
@@ -454,6 +462,10 @@ async def test_owner_review_accepts_exact_validated_genesis_without_deployment(i
     gate = AsyncMock(return_value={
         "status": "passed", "passed": True, "snapshot_digest": "e" * 64,
         "checks": [{"id": "app_runtime_load", "passed": True}],
+        "app_runtime_smoke": {
+            "validator_image_id": "sha256:" + "a" * 64,
+            "source_content_sha256": _source_content_digest(manifest),
+        },
     })
     monkeypatch.setattr(app_validation, "run_app_bundle_acceptance_gate", gate)
     with pytest.raises(GenesisImportError, match="no matching accepted review receipt"):
@@ -466,6 +478,8 @@ async def test_owner_review_accepts_exact_validated_genesis_without_deployment(i
     assert accepted.lifecycle_status == BuildRecordStatus.CURRENT
     assert accepted.validation_status == BuildRecordValidationStatus.PASSED
     assert accepted.app_validation_status == "passed"
+    assert accepted.commit_metadata.metadata["genesis_validation"]["validator_image_id"] == "sha256:" + "a" * 64
+    assert accepted.commit_metadata.metadata["genesis_validation"]["source_content_sha256"] == _source_content_digest(manifest)
     assert import_state[0]["genesis_import"]["acceptance"]["accepted_by"] == "owner_1"
     assert import_state[0]["genesis_import"]["status"] == "accepted"
     assert import_state[0]["lifecycle_state"] == "draft"
@@ -503,13 +517,39 @@ async def test_genesis_acceptance_rejects_wrong_review_digest_and_failed_runtime
 
 
 @pytest.mark.asyncio
+async def test_genesis_acceptance_requires_exact_source_and_validator_evidence(import_state, monkeypatch):
+    from factory_app.workflows.AppGenerator.tools import app_validation
+
+    monkeypatch.setattr(app_validation.app_runtime_smoke, "run_contained_imported_app_runtime_smoke", AsyncMock(), raising=False)
+    raw, manifest = _source()
+    draft = await _import(import_state, raw, manifest)
+    monkeypatch.setattr(app_validation, "run_app_bundle_acceptance_gate", AsyncMock(return_value={
+        "status": "passed", "passed": True, "checks": [],
+        "app_runtime_smoke": {
+            "validator_image_id": "sha256:" + "a" * 64,
+            "source_content_sha256": "f" * 64,
+        },
+    }))
+    with pytest.raises(GenesisImportError, match="verified source or validator identity"):
+        await _accept(import_state, draft)
+    assert import_state[0]["genesis_import"]["status"] == "reserved"
+    import_state[2].mark_genesis_build_record_validated.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_genesis_acceptance_recovers_receipt_before_artifact_status(import_state, monkeypatch):
     from factory_app.workflows.AppGenerator.tools import app_validation
 
     monkeypatch.setattr(app_validation.app_runtime_smoke, "run_contained_imported_app_runtime_smoke", AsyncMock(), raising=False)
     raw, manifest = _source()
     draft = await _import(import_state, raw, manifest)
-    gate = AsyncMock(return_value={"status": "passed", "passed": True, "checks": []})
+    gate = AsyncMock(return_value={
+        "status": "passed", "passed": True, "checks": [],
+        "app_runtime_smoke": {
+            "validator_image_id": "sha256:" + "a" * 64,
+            "source_content_sha256": _source_content_digest(manifest),
+        },
+    })
     monkeypatch.setattr(app_validation, "run_app_bundle_acceptance_gate", gate)
     project = import_state[2].accept_genesis_build_record
     project.side_effect = AsyncMock(return_value=draft)
@@ -569,6 +609,34 @@ async def test_imported_runtime_smoke_receives_exact_binary_assets(monkeypatch):
     )
     assert observed["asset"] == b"\x89PNG\r\n\x1a\n"
     assert json.loads(observed["app"])["appId"] == "mozaiks-platform"
+
+
+@pytest.mark.asyncio
+async def test_contained_imported_smoke_receives_verified_text_and_binary_digests(monkeypatch):
+    from factory_app.workflows.AppGenerator.tools import app_validation
+
+    expected_files = {
+        "app.json": b'{"appId":"mozaiks-platform"}',
+        "ui/public/logo.png": b"\x89PNG\r\n\x1a\n",
+    }
+
+    async def inspect_workspace(app_root, *, expected_source_sha256):
+        assert expected_source_sha256 == {
+            path: hashlib.sha256(raw).hexdigest() for path, raw in expected_files.items()
+        }
+        assert {path: (app_root / path).read_bytes() for path in expected_files} == expected_files
+        return {"status": "passed", "passed": True}
+
+    monkeypatch.setattr(
+        app_validation.app_runtime_smoke, "run_contained_imported_app_runtime_smoke",
+        inspect_workspace, raising=False,
+    )
+    result = await app_validation._app_runtime_smoke_result(
+        {"app.json": expected_files["app.json"].decode("utf-8")},
+        binary_assets={"ui/public/logo.png": expected_files["ui/public/logo.png"]},
+        contained_imported_source=True,
+    )
+    assert result["passed"] is True
 
 
 @pytest.mark.asyncio

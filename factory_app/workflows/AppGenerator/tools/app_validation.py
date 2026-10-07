@@ -1541,7 +1541,15 @@ async def _app_runtime_smoke_result(
             out_path.parent.mkdir(parents=True, exist_ok=True)
             out_path.write_bytes(content)
         if contained_imported_source:
-            return await contained_runner(app_root)
+            source_digests = {
+                path: hashlib.sha256(content.encode("utf-8")).hexdigest()
+                for path, content in generated_files.items()
+            }
+            source_digests.update({
+                path: hashlib.sha256(content).hexdigest()
+                for path, content in (binary_assets or {}).items()
+            })
+            return await contained_runner(app_root, expected_source_sha256=source_digests)
         return await app_runtime_smoke.run_app_runtime_smoke(
             app_root, mongo_uri=app_runtime_smoke.resolve_smoke_mongo_uri(),
         )
