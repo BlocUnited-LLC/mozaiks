@@ -18,6 +18,7 @@ from factory_app.app.modules.app_registry.backend.service import AppRegistryServ
 from factory_app.workflows._shared.artifact_bundle import read_artifact_bundle
 from mozaiksai.core.artifacts.content_store import ArtifactContentStore, get_artifact_content_store
 from mozaiksai.core.artifacts.models import (
+    ArtifactCommitMetadata,
     BuildRecord,
     BuildRecordFileEntry,
     BuildRecordStatus,
@@ -75,7 +76,8 @@ def _manifest_entries(*, files_manifest: list[BuildRecordFileEntry | dict[str, A
     provisional = BuildRecord(
         _id="av_" + "0" * 24, app_id="import-check", build_family="app_bundle",
         build_key="app_bundle", version_number=1, lineage_root_id="av_" + "0" * 24,
-        files_manifest=entries, commit_metadata={"metadata": {"bundle_name": bundle_name}},
+        files_manifest=entries,
+        commit_metadata=ArtifactCommitMetadata(metadata={"bundle_name": bundle_name}),
     )
     try:
         archive_entry = resolve_canonical_bundle_entry(provisional)
@@ -146,7 +148,9 @@ async def _verified_source_files(*, bundle_bytes: bytes, bundle_name: str,
             _id="av_" + "0" * 24, app_id="import-check", build_family="app_bundle",
             build_key="app_bundle", version_number=1, lineage_root_id="av_" + "0" * 24,
             files_manifest=entries,
-            commit_metadata={"metadata": {"bundle_name": bundle_name, "artifact_path": str(path)}},
+            commit_metadata=ArtifactCommitMetadata(
+                metadata={"bundle_name": bundle_name, "artifact_path": str(path)},
+            ),
         )
         try:
             files, diagnostics = await read_artifact_bundle(provisional, include_binary=True)
