@@ -142,9 +142,9 @@ files only; adding a file requires a later explicit scope and manifest contract.
 This function reads the staged tree and does not invoke an agent, run validation
 commands, persist a review record, publish a branch/PR, or mutate the source
 repository. The host must isolate the coding provider to the disposable tree
-and keep that tree stable while the finalizer harvests it. A later repository
-executor and host-owned review/publisher must satisfy required gates and
-recheck the destination baseline before publication.
+and keep that tree stable while the finalizer harvests it. A host-owned
+review/publisher must satisfy required gates and recheck the destination
+baseline before publication.
 
 For an isolated executor, `export_repository_workspace_archive` captures every
 selected file from the stopped provider's disposable tree before that tree is
@@ -176,10 +176,11 @@ rejects edits or deletion, including when create/delete flags are enabled,
 and excludes those files from the archive and candidate's changed-file list.
 The repository candidate uses host-derived summary and rationale, never the
 agent's reply or ACP plan events. Raw provider results can still quote inspected
-text; the host must not persist or publish raw provider text or events. Changed
-file content and diffs can also contain text copied from inspection files, so
-the host must apply its content policy before persisting or showing a candidate
-or publishing a PR.
+text; the Docker transport drops those fields and replaces proposal ID and
+provider ID with host-owned metadata. The host must not persist or publish raw
+provider text or events. Changed file content and diffs can also contain text
+copied from inspection files, so the host must apply its content policy before
+persisting or showing a candidate or publishing a PR.
 The generated-app coding worker rejects requests carrying inspection files;
 only the isolated repository provider proof uses this contract today.
 Changed `app/security/secrets.yaml` content must pass the names-only secret
@@ -187,10 +188,33 @@ contract, while root `.env*.example` templates are excluded from this first
 repository patch lane and read-only inspection until an equivalent content
 gate is available.
 
-The opt-in fake-agent Docker proof exercises this full transfer and finalizer
-path. Live ACP remains disabled; a future executor still needs a dedicated
-minimal image, controlled model credential delivery and egress, and a host
-binding to the persisted approval and immutable source snapshot.
+`execute_repository_docker_turn` is the host-side transport for one scoped
+`CodingWorkerRequest`. A separate trusted worker process or service with local
+Docker socket access must call it; the App Zero web host and the agent
+container must never mount or receive that socket. The caller supplies a fixed,
+prebuilt image reference outside the request. The transport resolves its local
+image ID before creation, uses an empty Docker CLI config and minimal CLI
+environment, passes only the task and selected editable/read-only files on
+stdin, and checks the created container before starting it. The container has
+no network, bind or volume mounts, Docker log retention, or forwarded host
+credentials; known model and GitHub credential names baked into the image are
+rejected before start. The container runs as a nonroot user with a read-only
+root, limited tmpfs, CPU, memory,
+processes and wall time. Output is byte-capped before strict JSON parsing.
+The worker archive must match the selected file set and canonical archive
+format. Container removal targets a random host-generated name even when the
+create response is lost. A static label also lets the trusted worker inspect
+and remove abandoned turns. A Docker daemon that finishes a timed-out create
+after cleanup remains a residual daemon race for that worker to monitor.
+
+The returned proposal and archive carry no approval authority. The host must
+still call `stage_repository_workspace_archive` and `finalize_repository_patch`
+with its verified snapshot, immutable baseline files, selected paths, and path
+policy. The opt-in fake-agent Docker test proves this offline transport; it
+does not perform a live model turn. The executor is not wired into a hosted
+route or enabled in refinement policy. Live ACP needs a dedicated minimal
+image, controlled model credential delivery and egress, a trusted job worker,
+and a binding to persisted approval and source snapshot before activation.
 
 ---
 

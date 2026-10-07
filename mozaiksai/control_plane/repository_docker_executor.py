@@ -1,0 +1,361 @@
+"""Run one scoped repository ACP turn in a disposable, offline Docker container.
+
+The authenticated host supplies approved files and a fixed local image. A
+separate trusted worker with local Docker socket access runs this transport;
+the App Zero web host and the agent container must not receive that socket. This
+transport grants no scope, validation, source-control, or promotion authority.
+The returned archive must still pass ``stage_repository_workspace_archive`` and
+the proposal must pass ``finalize_repository_patch`` against host-owned evidence.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import binascii
+import json
+import os
+import re
+import subprocess
+import tempfile
+import uuid
+from dataclasses import dataclass
+from typing import Any
+
+from pydantic import ValidationError
+
+from mozaiksai.core.semantics.archive import ArchiveError, read_archive_manifest
+
+from .contracts import CodingWorkerRequest, StagedPatchProposal
+from .repository_patch import _preflight_archive_directory
+
+MAX_REPOSITORY_DOCKER_REQUEST_BYTES = 20_971_520
+MAX_REPOSITORY_DOCKER_OUTPUT_BYTES = 40_000_000
+MAX_REPOSITORY_DOCKER_ARCHIVE_BYTES = 16_777_216
+MAX_REPOSITORY_DOCKER_FILES = 50
+
+_IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}\Z")
+_CONTAINER_ID = re.compile(r"[0-9a-f]{64}\Z")
+_IMAGE_REFERENCE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_./:@-]{0,255}\Z")
+_CLI_STDERR_BYTES = 65_536
+_CLI_STDOUT_BYTES = 1_048_576
+
+
+class RepositoryDockerExecutionError(RuntimeError):
+    """A container turn failed closed; never includes provider output or source."""
+
+
+@dataclass(frozen=True, slots=True)
+class RepositoryDockerTurn:
+    proposal: StagedPatchProposal
+    workspace_archive: bytes | None
+
+
+def _local_docker_endpoint() -> str:
+    return "npipe:////./pipe/docker_engine" if os.name == "nt" else "unix:///var/run/docker.sock"
+
+
+def _docker_cli_env() -> dict[str, str]:
+    """Keep only process-launch basics; Docker gets an empty config separately."""
+    allowed = ("PATH", "SystemRoot", "WINDIR") if os.name == "nt" else ("PATH",)
+    return {key: os.environ[key] for key in allowed if key in os.environ}
+
+
+def _remove_container(container_name: str, config_dir: str) -> None:
+    """Remove only this random name, including after a lost create response."""
+    prefix = ["docker", "--config", config_dir, "--host", _local_docker_endpoint()]
+    try:
+        removed = subprocess.run(
+            [*prefix, "rm", "--force", container_name],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            env=_docker_cli_env(), timeout=30, check=False,
+        )
+        if removed.returncode == 0:
+            return
+        # A failed create may never have made a container. Distinguish that
+        # from a daemon failure without surfacing Docker stderr to callers.
+        probe = subprocess.run(
+            [*prefix, "container", "inspect", container_name],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            env=_docker_cli_env(), timeout=20, check=False,
+        )
+        if probe.returncode != 0 and (
+            b"No such object: " + container_name.encode("ascii") in probe.stderr
+            or b"No such container: " + container_name.encode("ascii") in probe.stderr
+        ):
+            return
+    except (OSError, subprocess.TimeoutExpired):
+        raise RepositoryDockerExecutionError("REPOSITORY_DOCKER_CLEANUP_FAILED") from None
+    raise RepositoryDockerExecutionError("REPOSITORY_DOCKER_CLEANUP_FAILED")
+
+
+async def _read_limited(reader: asyncio.StreamReader, limit: int) -> bytes:
+    chunks: list[bytes] = []
+    size = 0
+    while chunk := await reader.read(min(65_536, limit - size + 1)):
+        size += len(chunk)
+        if size > limit:
+            raise RepositoryDockerExecutionError("REPOSITORY_DOCKER_OUTPUT_LIMIT")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+async def _docker(
+    args: list[str], *, config_dir: str, stdin_bytes: bytes | None,
+    timeout_seconds: int, stdout_limit: int,
+) -> bytes:
+    command = ["docker", "--config", config_dir, "--host", _local_docker_endpoint(), *args]
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *command,
+            stdin=asyncio.subprocess.PIPE if stdin_bytes is not None else asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=_docker_cli_env(),
+        )
+    except OSError as exc:
+        raise RepositoryDockerExecutionError("REPOSITORY_DOCKER_UNAVAILABLE") from exc
+
+    async def send_input() -> None:
+        if stdin_bytes is None or process.stdin is None:
+            return
+        try:
+            process.stdin.write(stdin_bytes)
+            await process.stdin.drain()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        finally:
+            process.stdin.close()
+
+    assert process.stdout is not None and process.stderr is not None
+    tasks = [
+        asyncio.create_task(send_input()),
+        asyncio.create_task(_read_limited(process.stdout, stdout_limit)),
+        asyncio.create_task(_read_limited(process.stderr, _CLI_STDERR_BYTES)),
+    ]
+    try:
+        _, stdout, _ = await asyncio.wait_for(asyncio.gather(*tasks), timeout=timeout_seconds)
+        await asyncio.wait_for(process.wait(), timeout=5)
+        if process.returncode != 0:
+            raise RepositoryDockerExecutionError("REPOSITORY_DOCKER_COMMAND_FAILED")
+        return stdout
+    except TimeoutError as exc:
+        raise RepositoryDockerExecutionError("REPOSITORY_DOCKER_TIMEOUT") from exc
+    finally:
+        if process.returncode is None:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+            await process.wait()
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON key")
+        result[key] = value
+    return result
+
+
+def _reject_nonfinite(_value: str) -> Any:
+    raise ValueError("nonfinite JSON number")
+
+
+def _strict_json(raw: bytes) -> Any:
+    return json.loads(
+        raw.decode("utf-8", errors="strict"),
+        object_pairs_hook=_strict_object,
+        parse_constant=_reject_nonfinite,
+    )
+
+
+def _verify_container(config: Any) -> None:
+    if not isinstance(config, list) or len(config) != 1 or not isinstance(config[0], dict):
+        raise RepositoryDockerExecutionError("REPOSITORY_DOCKER_INSPECT_FORMAT")
+    container = config[0]
+    host = container.get("HostConfig")
+    image_config = container.get("Config")
+    if not isinstance(host, dict) or not isinstance(image_config, dict):
+        raise RepositoryDockerExecutionError("REPOSITORY_DOCKER_INSPECT_FORMAT")
+    mounts = container.get("Mounts")
+    tmpfs = host.get("Tmpfs")
+    image_env = image_config.get("Env") or []
+    labels = image_config.get("Labels") or {}
+    forbidden_env = {
+        "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "CODEX_API_KEY",
+        "GH_TOKEN", "GITHUB_TOKEN", "MOZAIKS_ACP_HOST_SECRET",
+    }
+    if (
+        host.get("NetworkMode") != "none"
+        or host.get("ReadonlyRootfs") is not True
+        or host.get("Binds") not in (None, [])
+        or not isinstance(mounts, list)
+        or any(not isinstance(mount, dict) or mount.get("Type") != "tmpfs" for mount in mounts)
+        or host.get("Privileged") is not False
+        or host.get("CapDrop") != ["ALL"]
+        or "no-new-privileges" not in (host.get("SecurityOpt") or [])
+        or host.get("PidsLimit") != 64
+        or host.get("Memory") != 768 * 1024 * 1024
+        or host.get("NanoCpus") != 1_000_000_000
+        or not isinstance(host.get("LogConfig"), dict)
+        or host["LogConfig"].get("Type") != "none"
+        or image_config.get("User") != "10001:10001"
+        or not isinstance(labels, dict)
+        or labels.get("mozaiks.refinement.repository_turn") != "offline"
+        or not isinstance(image_env, list)
+        or any(
+            not isinstance(entry, str) or entry.partition("=")[0] in forbidden_env
+            for entry in image_env
+        )
+        or not isinstance(tmpfs, dict)
+        or set(tmpfs) != {"/tmp", "/workspace", "/home/sandbox"}
+    ):
+        raise RepositoryDockerExecutionError("REPOSITORY_DOCKER_ISOLATION_MISMATCH")
+
+
+def _parse_turn_output(
+    raw: bytes, *, selected_paths: set[str], max_archive_bytes: int,
+) -> RepositoryDockerTurn:
+    try:
+        output = _strict_json(raw)
+        if not isinstance(output, dict) or set(output) != {"proposal", "workspace_archive_base64"}:
+            raise ValueError("unexpected worker output shape")
+        proposal = StagedPatchProposal.model_validate(output["proposal"])
+        encoded = output["workspace_archive_base64"]
+        if encoded is not None and not isinstance(encoded, str):
+            raise ValueError("invalid archive encoding")
+        if encoded is not None and len(encoded) > 4 * ((max_archive_bytes + 2) // 3):
+            raise ValueError("encoded archive exceeds limit")
+        archive = base64.b64decode(encoded, validate=True) if encoded is not None else None
+        if proposal.status == "completed":
+            if archive is None or not proposal.changed_files or len(archive) > max_archive_bytes:
+                raise ValueError("completed turn lacks bounded archive and changes")
+            _preflight_archive_directory(
+                archive, expected_files=len(selected_paths), max_bytes=max_archive_bytes,
+            )
+            manifest = read_archive_manifest(archive)
+            if {entry.path for entry in manifest.entries} != selected_paths:
+                raise ValueError("archive paths differ from selected files")
+        elif archive is not None or proposal.changed_files:
+            raise ValueError("failed turn must not return patch bytes")
+    except (UnicodeError, ValueError, TypeError, RecursionError, ValidationError, ArchiveError, binascii.Error):
+        # Pydantic and archive errors can contain file content or paths.
+        raise RepositoryDockerExecutionError("REPOSITORY_DOCKER_INVALID_OUTPUT") from None
+
+    # Model-authored text and operational events can quote read-only source.
+    # The host constructs review text from verified file bytes after staging.
+    safe_proposal = StagedPatchProposal(
+        proposal_id=uuid.uuid4().hex,
+        provider_id="acp_docker",
+        status=proposal.status,
+        summary="Isolated repository coding turn.",
+        rationale="Pending host verification.",
+        changed_files=proposal.changed_files,
+        owned_paths=proposal.owned_paths,
+        error=(f"Isolated coding turn reported {proposal.status}." if proposal.status != "completed" else None),
+    )
+    return RepositoryDockerTurn(proposal=safe_proposal, workspace_archive=archive)
+
+
+async def execute_repository_docker_turn(
+    request: CodingWorkerRequest, *, image: str, max_wall_seconds: int = 90,
+    max_archive_bytes: int = MAX_REPOSITORY_DOCKER_ARCHIVE_BYTES,
+) -> RepositoryDockerTurn:
+    """Execute one already-approved file set; only a local, prebuilt image runs.
+
+    ``image`` is trusted host configuration, never a request field. The host
+    must verify the approved snapshot and path policy before calling this, then
+    stage/finalize the returned archive against those same immutable inputs.
+    """
+    if not _IMAGE_REFERENCE.fullmatch(image) or (":" not in image and "@" not in image):
+        raise ValueError("REPOSITORY_DOCKER_IMAGE: invalid fixed image reference")
+    if not 1 <= max_wall_seconds <= 3600:
+        raise ValueError("REPOSITORY_DOCKER_WALL_BUDGET")
+    if not 1 <= max_archive_bytes <= MAX_REPOSITORY_DOCKER_ARCHIVE_BYTES:
+        raise ValueError("REPOSITORY_DOCKER_ARCHIVE_BUDGET")
+    if not 1 <= len(request.files) <= MAX_REPOSITORY_DOCKER_FILES:
+        raise ValueError("REPOSITORY_DOCKER_FILE_BUDGET")
+
+    # Do not send baseline, user/tenant identity, host context, or metadata.
+    scoped = {
+        "app_id": request.app_id,
+        "build_family": request.build_family,
+        "build_record_id": request.build_record_id,
+        "change_class": request.change_class,
+        "raw_user_request": request.raw_user_request,
+        "files": request.files,
+        "read_only_files": request.read_only_files,
+    }
+    input_bytes = json.dumps(scoped, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    if len(input_bytes) > MAX_REPOSITORY_DOCKER_REQUEST_BYTES:
+        raise ValueError("REPOSITORY_DOCKER_REQUEST_BUDGET")
+
+    with tempfile.TemporaryDirectory(prefix="mozaiks-docker-cli-") as config_dir:
+        image_id_raw = await _docker(
+            ["image", "inspect", "--format", "{{.Id}}", image],
+            config_dir=config_dir, stdin_bytes=None, timeout_seconds=20, stdout_limit=128,
+        )
+        image_id = image_id_raw.decode("ascii", errors="ignore").strip()
+        if not _IMAGE_ID.fullmatch(image_id):
+            raise RepositoryDockerExecutionError("REPOSITORY_DOCKER_IMAGE_ID")
+
+        # A generated name lets us remove the container even if Docker created
+        # it but the create response timed out or was malformed.
+        container_name = f"mozaiks-acp-{uuid.uuid4().hex}"
+        try:
+            created = await _docker(
+                [
+                    "create", "--name", container_name,
+                    "--label", "mozaiks.refinement.repository_turn=offline",
+                    "--interactive", "--init",
+                    "--network", "none", "--read-only", "--log-driver", "none",
+                    "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+                    "--pids-limit", "64", "--memory", "768m", "--cpus", "1",
+                    "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m,mode=1777",
+                    "--tmpfs", "/workspace:rw,nosuid,nodev,size=64m,mode=1777",
+                    "--tmpfs", "/home/sandbox:rw,nosuid,nodev,size=16m,mode=1777",
+                    "--user", "10001:10001", image_id,
+                ],
+                config_dir=config_dir, stdin_bytes=None, timeout_seconds=30,
+                stdout_limit=128,
+            )
+            container_id = created.decode("ascii", errors="ignore").strip()
+            if not _CONTAINER_ID.fullmatch(container_id):
+                raise RepositoryDockerExecutionError("REPOSITORY_DOCKER_CONTAINER_ID")
+            inspected = await _docker(
+                ["inspect", container_id], config_dir=config_dir, stdin_bytes=None,
+                timeout_seconds=20, stdout_limit=_CLI_STDOUT_BYTES,
+            )
+            try:
+                _verify_container(_strict_json(inspected))
+            except (UnicodeError, ValueError, TypeError):
+                raise RepositoryDockerExecutionError("REPOSITORY_DOCKER_INSPECT_FORMAT") from None
+            raw_output = await _docker(
+                ["start", "--attach", "--interactive", container_id],
+                config_dir=config_dir, stdin_bytes=input_bytes,
+                timeout_seconds=max_wall_seconds + 10,
+                stdout_limit=MAX_REPOSITORY_DOCKER_OUTPUT_BYTES,
+            )
+            exit_code = await _docker(
+                ["inspect", "--format", "{{.State.ExitCode}}", container_id],
+                config_dir=config_dir, stdin_bytes=None, timeout_seconds=20,
+                stdout_limit=32,
+            )
+            if exit_code.strip() != b"0":
+                raise RepositoryDockerExecutionError("REPOSITORY_DOCKER_WORKER_FAILED")
+            return _parse_turn_output(
+                raw_output, selected_paths=set(request.files), max_archive_bytes=max_archive_bytes,
+            )
+        finally:
+            _remove_container(container_name, config_dir)
+
+
+__all__ = [
+    "RepositoryDockerExecutionError", "RepositoryDockerTurn", "execute_repository_docker_turn",
+]

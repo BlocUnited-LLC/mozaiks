@@ -134,6 +134,11 @@ from .ports import (
     RoutingPolicyPort,
     ScopeProposalPort,
 )
+from .repository_docker_executor import (
+    RepositoryDockerExecutionError,
+    RepositoryDockerTurn,
+    execute_repository_docker_turn,
+)
 from .repository_patch import (
     RepositoryPatchCandidate,
     RepositoryPatchFile,
@@ -273,6 +278,9 @@ __all__ = [
     "RepositoryPatchCandidate",
     "RepositoryPatchFile",
     "RepositorySnapshotEvidence",
+    "RepositoryDockerExecutionError",
+    "RepositoryDockerTurn",
+    "execute_repository_docker_turn",
     "export_repository_workspace_archive",
     "finalize_repository_patch",
     "stage_repository_workspace_archive",
