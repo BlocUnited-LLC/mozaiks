@@ -174,8 +174,12 @@ read authority by itself, even under a broad read-only prefix. The executor
 materializes these files in a separate read-only manifest. Post-turn harvest
 rejects edits or deletion, including when create/delete flags are enabled,
 and excludes those files from the archive and candidate's changed-file list.
-Provider-written summaries can still quote inspected text and require host
-review before publication.
+The repository candidate uses host-derived summary and rationale, never the
+agent's reply or ACP plan events. Raw provider results can still quote inspected
+text; the host must not persist or publish raw provider text or events. Changed
+file content and diffs can also contain text copied from inspection files, so
+the host must apply its content policy before persisting or showing a candidate
+or publishing a PR.
 The generated-app coding worker rejects requests carrying inspection files;
 only the isolated repository provider proof uses this contract today.
 Changed `app/security/secrets.yaml` content must pass the names-only secret

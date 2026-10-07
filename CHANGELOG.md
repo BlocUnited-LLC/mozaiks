@@ -64,6 +64,10 @@ This project follows a practical pre-1.0 changelog format:
   host commands in every auth mode until a trusted isolated runner is supplied.
   Static checks remain available but cannot certify command readiness.
 
+- Repository patch candidates now use host-derived summary and rationale,
+  preventing model-authored replies from copying read-only inspection text
+  into candidate metadata.
+
 - Scoped ACP coding-provider API credentials to the selected CLI adapter,
   preventing Claude Code, Codex, and OpenCode subprocesses from receiving one
   another's API keys. The default local ACP path now refuses execution because

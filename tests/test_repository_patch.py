@@ -379,6 +379,10 @@ def test_read_only_snapshot_context_cannot_enter_editable_archive(tmp_path: Path
     approved_archive = export_repository_workspace_archive(
         inputs["workspace"], max_files=2, max_archive_bytes=4096
     )
+    inputs["proposal"] = _proposal(
+        summary=f"Agent quoted inspection: {read_only_content}",
+        rationale=read_only_content,
+    )
     staged = stage_repository_workspace_archive(
         inputs["context"], snapshot=inputs["snapshot"], selected_paths=inputs["selected_paths"],
         baseline_files=inputs["baseline_files"], archive_bytes=approved_archive,
@@ -388,6 +392,12 @@ def test_read_only_snapshot_context_cannot_enter_editable_archive(tmp_path: Path
     try:
         candidate = finalize_repository_patch(**{**inputs, "workspace": staged})
         assert [change.path for change in candidate.changed_files] == [PATH]
+        assert candidate.summary == "Selected repository file updates: 1."
+        assert candidate.rationale == (
+            "Derived from approved snapshot and host-verified workspace bytes; validation pending."
+        )
+        assert read_only_content not in candidate.summary
+        assert read_only_content not in candidate.rationale
     finally:
         staged.cleanup()
 
