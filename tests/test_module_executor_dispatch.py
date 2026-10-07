@@ -652,13 +652,16 @@ class _TwoRejectingActions:
 
 class TestEmittedEventRejection:
     @staticmethod
-    def _executor(handler, emitted: list, *, emits: list[str]) -> ModuleExecutor:
+    def _executor(
+        handler, emitted: list, *, emits: list[str], action_timeout: int | None = None,
+    ) -> ModuleExecutor:
         async def emit(event_type: str, envelope: dict) -> None:
             emitted.append((event_type, envelope))
 
         ex = ModuleExecutor(event_emitter=emit)
         ex.register(
             "items", handler, action_method_map={"act": "act"}, action_emits={"act": emits},
+            action_timeouts={"act": action_timeout} if action_timeout is not None else None,
             event_payload_schemas={"domain.items.changed": _CHANGED_SCHEMA},
         )
         return ex
@@ -777,6 +780,37 @@ class TestEmittedEventRejection:
         assert (audit.outcome, error) == ("failed", "RuntimeError")
         assert audit.rejected_events == (rejection,)
         assert audit.to_dict()["rejected_events"] == [rejection.to_dict()]
+
+    @pytest.mark.asyncio
+    async def test_rejected_event_survives_declared_action_timeout_in_result_and_audit(self, monkeypatch):
+        audits: list = []
+
+        async def capture(_self, audit, *, error=None):
+            audits.append((audit, error))
+
+        monkeypatch.setattr(ModuleExecutor, "_emit_dispatch_audit", capture)
+
+        class _RejectsThenWaits:
+            outcome = None
+
+            async def act(self, ctx):
+                self.outcome = await ctx.emit("domain.items.changed", {})
+                await asyncio.Event().wait()
+
+        emitted: list = []
+        handler = _RejectsThenWaits()
+        ex = self._executor(handler, emitted, emits=["domain.items.changed"], action_timeout=1)
+        result = await asyncio.wait_for(ex.execute(_request(module="items", action="act")), timeout=3)
+        await asyncio.sleep(0)
+
+        assert (result.success, result.error_code) == (False, "ACTION_TIMEOUT")
+        [rejection] = result.rejected_events
+        assert handler.outcome is rejection
+        [(audit, error)] = audits
+        assert (audit.outcome, audit.reason, error) == ("failed", "ACTION_TIMEOUT", "ACTION_TIMEOUT")
+        assert audit.rejected_events == (rejection,)
+        assert audit.to_dict()["rejected_events"] == [rejection.to_dict()]
+        assert emitted == []
 
     @pytest.mark.asyncio
     async def test_undeclared_event_type_is_bounded_before_it_is_recorded(self):
