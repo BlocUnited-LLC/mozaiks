@@ -1516,16 +1516,20 @@ async def _app_runtime_load_result(generated_files: dict[str, str]) -> dict[str,
     }
 
 
+def require_contained_imported_smoke_runner():
+    """Fail before imported source is staged when the contained runner is absent."""
+    runner = getattr(app_runtime_smoke, "run_contained_imported_app_runtime_smoke", None)
+    if not callable(runner):
+        raise ValueError("Contained imported-source runtime smoke is unavailable")
+    return runner
+
+
 async def _app_runtime_smoke_result(
     generated_files: dict[str, str], *, binary_assets: dict[str, bytes] | None = None,
     contained_imported_source: bool = False,
 ) -> dict[str, Any]:
     """Boot the bundle in the runtime smoke's child process; generated code never runs here."""
-    contained_runner = None
-    if contained_imported_source:
-        contained_runner = getattr(app_runtime_smoke, "run_contained_imported_app_runtime_smoke", None)
-        if not callable(contained_runner):
-            raise ValueError("Contained imported-source runtime smoke is unavailable")
+    contained_runner = require_contained_imported_smoke_runner() if contained_imported_source else None
     with tempfile.TemporaryDirectory(prefix="mozaiks-app-runtime-smoke-", ignore_cleanup_errors=True) as tmp:
         app_root = Path(tmp) / "app"
         _write_files_to_dir(app_root, generated_files)

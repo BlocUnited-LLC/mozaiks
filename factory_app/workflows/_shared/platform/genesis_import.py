@@ -363,6 +363,12 @@ async def accept_existing_app_genesis(
         execution_app_id=execution_app_id, build_registry_id=build_registry_id,
     ):
         raise GenesisImportError("imported Genesis record differs from its reserved source")
+    if state["status"] == "reserved":
+        from factory_app.workflows.AppGenerator.tools.app_validation import (
+            require_contained_imported_smoke_runner,
+        )
+
+        require_contained_imported_smoke_runner()
     try:
         bundle_bytes = await read_verified_artifact_bundle(record, max_bytes=_MAX_ARCHIVE_BYTES)
         entries, declared = _manifest_entries(

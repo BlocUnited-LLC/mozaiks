@@ -448,6 +448,7 @@ async def _accept(state, record, *, bundle_sha256=None, manifest_sha256=None):
 async def test_owner_review_accepts_exact_validated_genesis_without_deployment(import_state, monkeypatch):
     from factory_app.workflows.AppGenerator.tools import app_validation
 
+    monkeypatch.setattr(app_validation.app_runtime_smoke, "run_contained_imported_app_runtime_smoke", AsyncMock(), raising=False)
     raw, manifest = _source()
     draft = await _import(import_state, raw, manifest)
     gate = AsyncMock(return_value={
@@ -484,6 +485,7 @@ async def test_owner_review_accepts_exact_validated_genesis_without_deployment(i
 async def test_genesis_acceptance_rejects_wrong_review_digest_and_failed_runtime_gate(import_state, monkeypatch):
     from factory_app.workflows.AppGenerator.tools import app_validation
 
+    monkeypatch.setattr(app_validation.app_runtime_smoke, "run_contained_imported_app_runtime_smoke", AsyncMock(), raising=False)
     raw, manifest = _source()
     draft = await _import(import_state, raw, manifest)
     gate = AsyncMock(return_value={"status": "failed", "passed": False, "checks": []})
@@ -504,6 +506,7 @@ async def test_genesis_acceptance_rejects_wrong_review_digest_and_failed_runtime
 async def test_genesis_acceptance_recovers_receipt_before_artifact_status(import_state, monkeypatch):
     from factory_app.workflows.AppGenerator.tools import app_validation
 
+    monkeypatch.setattr(app_validation.app_runtime_smoke, "run_contained_imported_app_runtime_smoke", AsyncMock(), raising=False)
     raw, manifest = _source()
     draft = await _import(import_state, raw, manifest)
     gate = AsyncMock(return_value={"status": "passed", "passed": True, "checks": []})
@@ -589,12 +592,15 @@ async def test_imported_runtime_smoke_fails_closed_without_contained_backend(mon
 
 @pytest.mark.asyncio
 async def test_genesis_owner_acceptance_stays_reserved_without_contained_backend(import_state, monkeypatch):
+    from factory_app.workflows._shared.platform import genesis_import
     from factory_app.workflows.AppGenerator.tools import app_runtime_smoke
 
     raw, manifest = _source()
     draft = await _import(import_state, raw, manifest)
     host_smoke = AsyncMock(side_effect=AssertionError("host Mongo smoke was invoked"))
+    host_staging = AsyncMock(side_effect=AssertionError("source was staged on Studio host"))
     monkeypatch.setattr(app_runtime_smoke, "run_app_runtime_smoke", host_smoke)
+    monkeypatch.setattr(genesis_import, "_verified_source_files", host_staging)
     monkeypatch.delattr(app_runtime_smoke, "run_contained_imported_app_runtime_smoke", raising=False)
     with pytest.raises(ValueError, match="Contained imported-source runtime smoke is unavailable"):
         await _accept(import_state, draft)
@@ -603,3 +609,4 @@ async def test_genesis_owner_acceptance_stays_reserved_without_contained_backend
     assert draft.validation_status == BuildRecordValidationStatus.PENDING
     import_state[2].mark_genesis_build_record_validated.assert_not_awaited()
     host_smoke.assert_not_awaited()
+    host_staging.assert_not_awaited()
