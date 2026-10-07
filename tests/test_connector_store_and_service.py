@@ -392,6 +392,22 @@ def test_legacy_vault_metadata_does_not_report_connector_ready() -> None:
     assert inventory["known_but_unready_required_services"] == ["payment_provider"]
 
 
+def test_connector_saved_in_other_backend_is_not_passively_ready(monkeypatch) -> None:
+    import mozaiksai.core.workflow.generator_support.connector_service as connector_service
+    from mozaiksai.core.secrets.connector_vault import NoopConnectorVaultBackend, _secret_name
+
+    store = ConnectorStore(pm=_FakePersistenceManager())
+    asyncio.run(store.upsert(
+        scope="app", scope_id="same", service="billing", status="active",
+        secret_storage="mongo", secret_available=True, key_length=20,
+        extra={"secret_name": _secret_name("app", "same", "billing")},
+    ))
+    monkeypatch.setattr(connector_service, "get_connector_vault_backend", NoopConnectorVaultBackend)
+    record = asyncio.run(get_connector(scope="app", scope_id="same", service="billing", store=store))
+    assert record is not None
+    assert record["ready"] is False
+
+
 def test_service_save_get_and_delete_keep_app_and_workspace_secrets_apart(monkeypatch) -> None:
     import mozaiksai.core.workflow.generator_support.connector_service as connector_service
 

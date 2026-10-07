@@ -15,7 +15,12 @@ from typing import Any, cast
 from mozaiksai.core.data.persistence import ConnectorStore
 from mozaiksai.core.data.persistence.connector_store import normalize_connector_service
 from mozaiksai.core.secrets import describe_connector_vault_backend, get_connector_vault_backend
-from mozaiksai.core.secrets.connector_vault import ConnectorScope, _secret_name
+from mozaiksai.core.secrets.connector_vault import (
+    AzureKeyVaultConnectorVaultBackend,
+    ConnectorScope,
+    MongoConnectorVaultBackend,
+    _secret_name,
+)
 from mozaiksai.core.workflow.generator_support.connector_health import (
     connector_health_check_supported,
 )
@@ -64,8 +69,14 @@ def _normalize_service(service: str) -> str:
 
 def _qualified_secret_metadata(record: dict[str, Any]) -> bool:
     """Keep unqualified real-vault metadata out of passive readiness results."""
-    if record.get("secret_storage") not in {"mongo", "azure_key_vault"}:
+    storage = record.get("secret_storage")
+    if storage not in {"mongo", "azure_key_vault"}:
         return True
+    backend = get_connector_vault_backend()
+    if storage == "mongo" and not isinstance(backend, MongoConnectorVaultBackend):
+        return False
+    if storage == "azure_key_vault" and not isinstance(backend, AzureKeyVaultConnectorVaultBackend):
+        return False
     scope = record.get("scope")
     scope_id = record.get("scope_id")
     service = record.get("service")
