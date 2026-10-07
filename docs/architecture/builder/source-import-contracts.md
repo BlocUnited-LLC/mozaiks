@@ -116,6 +116,14 @@ For `git_repository`, the URL must:
 imports require a hosted product connector that supplies credentials at clone
 time.
 
+### Git command environment
+
+Clone and commit lookup run with a limited process environment. Host service
+credentials and Git configuration overrides are not inherited; Git system and
+global configuration are disabled, parent repository lookup stops before each
+command's working-directory parent, and interactive credential prompts are
+disabled. The clone still has the host process's filesystem and network access.
+
 ### Ignored path sanitization
 
 `safe_scan_relpath()` is applied to every entry in `ignored_paths` before

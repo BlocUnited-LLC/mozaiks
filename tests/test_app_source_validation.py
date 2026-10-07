@@ -61,7 +61,9 @@ async def test_staged_source_validation_does_not_require_an_indexed_workspace(tm
     assert result.validation_status == "failed"
 
 
-def test_app_source_validation_runs_safe_detected_commands_in_copy(tmp_path: Path) -> None:
+def test_app_source_validation_runs_safe_detected_commands_in_copy(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("MOZAIKS_TEST_HOST_SECRET", "sentinel")
+    monkeypatch.setenv("PYTHONPATH", "host-only-import-path")
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     (workspace / "pyproject.toml").write_text("[project]\nname = 'demo'\n", encoding="utf-8")
@@ -92,11 +94,38 @@ def test_app_source_validation_runs_safe_detected_commands_in_copy(tmp_path: Pat
     assert len(calls) == 1
     assert calls[0]["argv"][:3] == [sys.executable, "-m", "pytest"]
     assert calls[0]["env"]["MOZAIKS_APP_VALIDATION"] == "1"
+    assert calls[0]["env"]["CI"] == "true"
+    assert "MOZAIKS_TEST_HOST_SECRET" not in calls[0]["env"]
+    assert "PYTHONPATH" not in calls[0]["env"]
+    assert calls[0]["env"]["HOME"] == str(calls[0]["cwd"])
+    assert calls[0]["env"]["TEMP"] == str(calls[0]["cwd"])
     assert result.planned_commands[0].kind == "install"
     assert result.planned_commands[0].status == "skipped"
     assert result.planned_commands[0].skip_reason == "install_commands_require_include_install"
     assert result.command_results[0].status == "passed"
     assert result.workspace_root_present is True
+
+
+def test_validation_child_process_does_not_receive_host_secret(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("MOZAIKS_TEST_HOST_SECRET", "sentinel")
+    (tmp_path / "check_env.py").write_text(
+        "import os\n"
+        "if 'MOZAIKS_TEST_HOST_SECRET' in os.environ:\n"
+        "    raise RuntimeError('host secret reached validation child')\n",
+        encoding="utf-8",
+    )
+
+    result = run_app_source_validation(
+        app_id="app_1",
+        workspace_root=tmp_path,
+        framework_detection=_framework_detection(
+            [{"kind": "test", "command": "python check_env.py", "working_directory": "."}]
+        ),
+        confirm_execution=True,
+    )
+
+    assert result.validation_status == "passed", result.command_results
+    assert result.command_results[0].status == "passed"
 
 
 def test_app_source_validation_rejects_unsafe_commands_and_uses_fallback(tmp_path: Path) -> None:

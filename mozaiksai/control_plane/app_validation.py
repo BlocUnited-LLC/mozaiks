@@ -7,6 +7,7 @@ import os
 import re
 import shlex
 import shutil
+import site
 import subprocess
 import sys
 import tempfile
@@ -24,6 +25,7 @@ from mozaiksai.core.utils.sequences import dedupe_strings
 
 from .app_context import get_current_app_intelligence_snapshot
 from .app_intelligence_jobs import AppIntelligenceIndexJob, get_latest_app_intelligence_index_job
+from .process_environment import source_process_env
 
 try:  # pragma: no cover - import failures are represented as skipped fallback checks.
     import yaml
@@ -527,7 +529,7 @@ def _execute_validation_command(
             resolved_argv,
             workdir,
             timeout_seconds,
-            _validation_env(),
+            _validation_env(root),
         )
     except subprocess.TimeoutExpired:
         return AppValidationCommandResult(
@@ -916,9 +918,12 @@ def _validation_result(
     )
 
 
-def _validation_env() -> dict[str, str]:
-    env = dict(os.environ)
-    env["CI"] = env.get("CI") or "true"
+def _validation_env(workspace_root: Path) -> dict[str, str]:
+    env = source_process_env(workspace_root)
+    # User-installed Python validators must remain importable when HOME points
+    # at the disposable workspace rather than the host profile.
+    env["PYTHONUSERBASE"] = site.getuserbase()
+    env["CI"] = "true"
     env["MOZAIKS_APP_VALIDATION"] = "1"
     return env
 
