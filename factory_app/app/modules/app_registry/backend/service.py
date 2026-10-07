@@ -7,7 +7,12 @@ from uuid import uuid4
 from mozaiksai.core.session.build_binding import BuildTargetReference, RunBuildBinding
 
 from .policy import is_generic_app_name, normalize_optional_text, validate_lifecycle_state
-from .schemas import GenesisImportClaim, ensure_create_payload, ensure_status_payload
+from .schemas import (
+    GenesisAcceptanceReceipt,
+    GenesisImportClaim,
+    ensure_create_payload,
+    ensure_status_payload,
+)
 
 if TYPE_CHECKING:
     from .repo import AppRegistryRepo
@@ -49,6 +54,16 @@ class AppRegistryService:
         return await self.repo.reserve_genesis_import(
             build_registry_id=build_registry_id, owner_user_id=owner_user_id,
             app_id=app_id, chat_app_id=chat_app_id, claim=claim,
+        )
+
+    async def accept_genesis_import(
+        self, *, build_registry_id: str, owner_user_id: str, app_id: str,
+        chat_app_id: str, claim: GenesisImportClaim,
+        receipt: GenesisAcceptanceReceipt,
+    ) -> dict[str, Any] | None:
+        return await self.repo.accept_genesis_import(
+            build_registry_id=build_registry_id, owner_user_id=owner_user_id,
+            app_id=app_id, chat_app_id=chat_app_id, claim=claim, receipt=receipt,
         )
 
     async def resolve_build_binding(

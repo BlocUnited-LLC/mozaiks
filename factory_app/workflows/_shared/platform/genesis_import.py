@@ -8,16 +8,25 @@ import json
 import stat
 import tempfile
 import zipfile
+from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 from pymongo.errors import DuplicateKeyError
 
-from factory_app.app.modules.app_registry.backend.schemas import GenesisImportClaim
+from factory_app.app.modules.app_registry.backend.schemas import (
+    GenesisAcceptanceReceipt,
+    GenesisImportClaim,
+)
 from factory_app.app.modules.app_registry.backend.service import AppRegistryService
 from factory_app.workflows._shared.artifact_bundle import read_artifact_bundle
-from mozaiksai.core.artifacts.content_store import ArtifactContentStore, get_artifact_content_store
+from mozaiksai.core.artifacts.content_store import (
+    ArtifactContentStore,
+    get_artifact_content_store,
+    read_verified_artifact_bundle,
+)
 from mozaiksai.core.artifacts.models import (
     ArtifactCommitMetadata,
     BuildRecord,
@@ -71,7 +80,7 @@ def _canonical_digest(value: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _manifest_entries(*, files_manifest: list[BuildRecordFileEntry | dict[str, Any]],
+def _manifest_entries(*, files_manifest: Sequence[BuildRecordFileEntry | dict[str, Any]],
                       bundle_name: str, bundle_bytes: bytes) -> tuple[list[BuildRecordFileEntry], dict[str, BuildRecordFileEntry]]:
     try:
         entries = [BuildRecordFileEntry.model_validate(entry) for entry in files_manifest]
@@ -196,6 +205,225 @@ def _same_draft(record: BuildRecord, *, expected_id: str, target_app_id: str,
         and metadata.get("brownfield_genesis") == provenance.model_dump(mode="json")
         and record.files_manifest == entries
     )
+
+
+def _reserved_claim(import_state: dict[str, Any]) -> GenesisImportClaim:
+    return GenesisImportClaim.model_validate({
+        key: import_state.get(key) for key in GenesisImportClaim.model_fields
+        if key != "status"
+    })
+
+
+def _receipt_matches(
+    record: BuildRecord, registry_row: dict[str, Any], *,
+    owner_user_id: str, execution_app_id: str, build_registry_id: str,
+) -> bool:
+    state = registry_row.get("genesis_import")
+    if not isinstance(state, dict) or state.get("status") != "accepted":
+        return False
+    try:
+        claim = _reserved_claim(state)
+        receipt = GenesisAcceptanceReceipt.model_validate(state.get("acceptance"))
+    except ValueError:
+        return False
+    metadata = record.commit_metadata.metadata
+    validation = metadata.get("genesis_validation")
+    return bool(
+        registry_row.get("build_registry_id") == build_registry_id
+        and registry_row.get("owner_user_id") == owner_user_id
+        and registry_row.get("app_id") == record.app_id
+        and registry_row.get("chat_app_id") == execution_app_id
+        and receipt.accepted_by == owner_user_id
+        and record.id == claim.build_record_id
+        and record.parent_build_record_id is None
+        and record.build_family == record.build_key == "app_bundle"
+        and record.commit_metadata.author_user_id == owner_user_id
+        and metadata.get("bundle_mode") == "brownfield_genesis_import"
+        and metadata.get("build_registry_id") == build_registry_id
+        and metadata.get("execution_app_id") == execution_app_id
+        and metadata.get("target_app_id") == record.app_id
+        and metadata.get("bundle_name") == claim.bundle_name
+        and metadata.get("bundle_sha256") == claim.bundle_sha256
+        and metadata.get("content_digest") == claim.bundle_sha256
+        and metadata.get("content_backend") == claim.content_backend
+        and metadata.get("genesis_import_claim_sha256") == _canonical_digest(claim.model_dump(mode="json"))
+        and metadata.get("brownfield_genesis") == {
+            "source_id": claim.source_id, "revision_id": claim.revision_id, "tree_id": claim.tree_id,
+        }
+        and _canonical_digest([entry.model_dump(mode="json") for entry in record.files_manifest])
+        == claim.manifest_sha256
+        and isinstance(validation, dict)
+        and validation.get("contract") == receipt.validation_contract
+        and validation.get("sha256") == receipt.validation_sha256
+        and validation.get("bundle_sha256") == claim.bundle_sha256
+        and validation.get("manifest_sha256") == claim.manifest_sha256
+        and record.validation_status == BuildRecordValidationStatus.PASSED
+        and record.app_validation_status == "passed"
+        and record.lifecycle_status not in {
+            BuildRecordStatus.DRAFT, BuildRecordStatus.ARCHIVED, BuildRecordStatus.DELETED,
+        }
+    )
+
+
+async def require_accepted_genesis_baseline(
+    record: BuildRecord, *, owner_user_id: str, execution_app_id: str,
+    build_registry_id: str, registry_service: AppRegistryService | None = None,
+) -> None:
+    """Refuse an imported baseline without its durable reviewed-source receipt."""
+    if record.commit_metadata.metadata.get("bundle_mode") != "brownfield_genesis_import":
+        return
+    registry = registry_service or AppRegistryService()
+    row = (await registry.get_app_record(
+        owner_user_id=owner_user_id, build_registry_id=build_registry_id,
+    )).get("app")
+    if not isinstance(row, dict) or not _receipt_matches(
+        record, row, owner_user_id=owner_user_id,
+        execution_app_id=execution_app_id, build_registry_id=build_registry_id,
+    ):
+        raise GenesisImportError("imported Genesis source has no matching accepted review receipt")
+    if hashlib.sha256(await read_verified_artifact_bundle(record, max_bytes=_MAX_ARCHIVE_BYTES)).hexdigest() != row["genesis_import"]["bundle_sha256"]:
+        raise GenesisImportError("accepted Genesis source bytes changed")
+
+
+async def accept_existing_app_genesis(
+    *, owner_user_id: str, execution_app_id: str, build_registry_id: str,
+    build_record_id: str, reviewed_bundle_sha256: str, reviewed_manifest_sha256: str,
+    registry_service: AppRegistryService | None = None,
+    record_store: BuildRecordStore | None = None,
+) -> BuildRecord:
+    """Validate persisted source and commit explicit owner review, without deployment."""
+    registry = registry_service or AppRegistryService()
+    store = record_store or get_artifact_store()
+    row = (await registry.get_app_record(
+        owner_user_id=owner_user_id, build_registry_id=build_registry_id,
+    )).get("app")
+    if not isinstance(row, dict) or row.get("chat_app_id") != execution_app_id:
+        raise GenesisImportError("Factory target is unavailable to this owner and host")
+    state = row.get("genesis_import")
+    if not isinstance(state, dict) or state.get("status") not in {"reserved", "accepted"}:
+        raise GenesisImportError("Factory target has no reserved Genesis source")
+    try:
+        claim = _reserved_claim(state)
+    except ValueError as exc:
+        raise GenesisImportError("Factory Genesis reservation is invalid") from exc
+    if (claim.build_record_id != build_record_id
+            or claim.bundle_sha256 != reviewed_bundle_sha256
+            or claim.manifest_sha256 != reviewed_manifest_sha256):
+        raise GenesisImportError("reviewed source digests do not match the reserved Genesis import")
+    record = await store.get_build_record(app_id=row["app_id"], build_record_id=build_record_id)
+    if record is None or record.lifecycle_status not in {
+        BuildRecordStatus.DRAFT, BuildRecordStatus.CURRENT,
+        BuildRecordStatus.SUPERSEDED, BuildRecordStatus.STALE,
+    }:
+        raise GenesisImportError("imported Genesis draft is unavailable for acceptance")
+    metadata = record.commit_metadata.metadata
+    if not all((
+        record.app_id == row["app_id"], record.parent_build_record_id is None,
+        record.build_family == record.build_key == "app_bundle",
+        record.commit_metadata.author_user_id == owner_user_id,
+        metadata.get("bundle_mode") == "brownfield_genesis_import",
+        metadata.get("build_registry_id") == build_registry_id,
+        metadata.get("execution_app_id") == execution_app_id,
+        metadata.get("target_app_id") == row["app_id"],
+        metadata.get("bundle_name") == claim.bundle_name,
+        metadata.get("bundle_sha256") == claim.bundle_sha256,
+        metadata.get("content_digest") == claim.bundle_sha256,
+        metadata.get("content_backend") == claim.content_backend,
+        metadata.get("genesis_import_claim_sha256") == _canonical_digest(claim.model_dump(mode="json")),
+        metadata.get("brownfield_genesis") == {
+            "source_id": claim.source_id, "revision_id": claim.revision_id, "tree_id": claim.tree_id,
+        },
+        _canonical_digest([entry.model_dump(mode="json") for entry in record.files_manifest])
+        == claim.manifest_sha256,
+    )):
+        raise GenesisImportError("imported Genesis record differs from its reserved source")
+    try:
+        bundle_bytes = await read_verified_artifact_bundle(record, max_bytes=_MAX_ARCHIVE_BYTES)
+        entries, declared = _manifest_entries(
+            files_manifest=record.files_manifest, bundle_name=claim.bundle_name,
+            bundle_bytes=bundle_bytes,
+        )
+        members = _archive_paths(bundle_bytes=bundle_bytes, bundle_name=claim.bundle_name)
+        if set(members) != set(declared) or any(
+            members[path].file_size != entry.size_bytes for path, entry in declared.items()
+        ):
+            raise GenesisImportError("persisted source archive and manifest differ")
+        files = await _verified_source_files(
+            bundle_bytes=bundle_bytes, bundle_name=claim.bundle_name,
+            entries=entries, declared=declared,
+        )
+        app_json = files.get("app.json")
+        app_manifest = json.loads(app_json) if isinstance(app_json, str) else None
+        if not isinstance(app_manifest, dict) or app_manifest.get("appId") != row["app_id"]:
+            raise GenesisImportError("persisted source app identity differs from Factory target")
+    except (ValueError, OSError, zipfile.BadZipFile) as exc:
+        raise GenesisImportError("persisted Genesis source failed complete-content verification") from exc
+    if state["status"] == "accepted":
+        if record.lifecycle_status == BuildRecordStatus.DRAFT:
+            receipt = GenesisAcceptanceReceipt.model_validate(state.get("acceptance"))
+            record = await store.accept_genesis_build_record(
+                app_id=record.app_id, build_record_id=record.id,
+                validation_sha256=receipt.validation_sha256,
+            )
+        if record is None:
+            raise GenesisImportError("accepted Genesis artifact status could not be recovered")
+        await require_accepted_genesis_baseline(
+            record, owner_user_id=owner_user_id, execution_app_id=execution_app_id,
+            build_registry_id=build_registry_id, registry_service=registry,
+        )
+        return record
+    if record.lifecycle_status != BuildRecordStatus.DRAFT:
+        raise GenesisImportError("unreviewed Genesis artifact is no longer a draft")
+
+    from factory_app.workflows.AppGenerator.tools.app_validation import (
+        run_app_bundle_acceptance_gate,
+    )
+
+    result = await run_app_bundle_acceptance_gate(
+        files={path: content for path, content in files.items() if isinstance(content, str)},
+        contained_imported_source=True,
+        runtime_binary_assets={path: content for path, content in files.items() if isinstance(content, bytes)},
+    )
+    if result.get("status") != "passed" or result.get("passed") is not True:
+        raise GenesisImportError("imported Genesis source failed canonical app-bundle runtime validation")
+    evidence = {
+        "contract": "app_bundle_acceptance_gate_v1",
+        "bundle_sha256": claim.bundle_sha256,
+        "manifest_sha256": claim.manifest_sha256,
+        "snapshot_digest": result.get("snapshot_digest"),
+        "passed_checks": [check.get("id") for check in result.get("checks", []) if check.get("passed") is True],
+    }
+    validation_sha256 = _canonical_digest(evidence)
+    evidence["sha256"] = validation_sha256
+    record = await store.mark_genesis_build_record_validated(
+        app_id=record.app_id, build_record_id=record.id, validation=evidence,
+    )
+    if (record is None or record.lifecycle_status != BuildRecordStatus.DRAFT
+            or record.validation_status != BuildRecordValidationStatus.PASSED
+            or record.commit_metadata.metadata.get("genesis_validation") != evidence):
+        raise GenesisImportError("Genesis draft changed before validated review")
+    receipt = GenesisAcceptanceReceipt(
+        accepted_by=owner_user_id, accepted_at=datetime.now(UTC),
+        validation_sha256=validation_sha256,
+    )
+    accepted = await registry.accept_genesis_import(
+        build_registry_id=build_registry_id, owner_user_id=owner_user_id,
+        app_id=row["app_id"], chat_app_id=execution_app_id,
+        claim=claim, receipt=receipt,
+    )
+    if accepted is None:
+        raise GenesisImportError("Factory target changed before Genesis review could be accepted")
+    record = await store.accept_genesis_build_record(
+        app_id=record.app_id, build_record_id=record.id,
+        validation_sha256=validation_sha256,
+    )
+    if record is None:
+        raise GenesisImportError("accepted Genesis artifact status could not be committed")
+    await require_accepted_genesis_baseline(
+        record, owner_user_id=owner_user_id, execution_app_id=execution_app_id,
+        build_registry_id=build_registry_id, registry_service=registry,
+    )
+    return record
 
 
 async def import_existing_app_genesis_draft(
@@ -361,4 +589,7 @@ async def import_existing_app_genesis_draft(
         return raced
 
 
-__all__ = ["GenesisImportError", "PinnedSourceProvenance", "import_existing_app_genesis_draft"]
+__all__ = [
+    "GenesisImportError", "PinnedSourceProvenance", "import_existing_app_genesis_draft",
+    "accept_existing_app_genesis", "require_accepted_genesis_baseline",
+]

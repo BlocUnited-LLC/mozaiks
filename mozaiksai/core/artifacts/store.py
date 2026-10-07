@@ -960,6 +960,51 @@ class BuildRecordStore:
         refreshed = await versions.find_one({"_id": target.id, **build_app_scope_filter(resolved_app_id)})
         return BuildRecord.model_validate(refreshed) if isinstance(refreshed, dict) else target
 
+    async def mark_genesis_build_record_validated(
+        self, *, app_id: str, build_record_id: str, validation: dict[str, Any],
+    ) -> BuildRecord | None:
+        """Record passed whole-app validation only on the imported draft."""
+        versions = await self._coll("ArtifactVersions")
+        await versions.update_one(
+            {
+                "_id": build_record_id, **build_app_scope_filter(app_id),
+                "lifecycle_status": ArtifactLifecycleStatus.DRAFT.value,
+                "commit_metadata.metadata.bundle_mode": "brownfield_genesis_import",
+                "commit_metadata.metadata.bundle_sha256": validation["bundle_sha256"],
+                "validation_status": {"$in": [
+                    ArtifactValidationStatus.PENDING.value, ArtifactValidationStatus.PASSED.value,
+                ]},
+            },
+            {"$set": {
+                "validation_status": ArtifactValidationStatus.PASSED.value,
+                "app_validation_status": "passed",
+                "commit_metadata.metadata.genesis_validation": validation,
+                "updated_at": _utc_now(),
+            }},
+        )
+        return await self.get_build_record(app_id=app_id, build_record_id=build_record_id)
+
+    async def accept_genesis_build_record(
+        self, *, app_id: str, build_record_id: str, validation_sha256: str,
+    ) -> BuildRecord | None:
+        """Project the accepted registry receipt to CURRENT without superseding a lineage."""
+        versions = await self._coll("ArtifactVersions")
+        await versions.update_one(
+            {
+                "_id": build_record_id, **build_app_scope_filter(app_id),
+                "lifecycle_status": ArtifactLifecycleStatus.DRAFT.value,
+                "validation_status": ArtifactValidationStatus.PASSED.value,
+                "app_validation_status": "passed",
+                "commit_metadata.metadata.bundle_mode": "brownfield_genesis_import",
+                "commit_metadata.metadata.genesis_validation.sha256": validation_sha256,
+            },
+            {"$set": {
+                "lifecycle_status": ArtifactLifecycleStatus.CURRENT.value,
+                "updated_at": _utc_now(),
+            }},
+        )
+        return await self.get_build_record(app_id=app_id, build_record_id=build_record_id)
+
     async def set_validation_status_for_build_record(
         self,
         *,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -26,6 +27,17 @@ class GenesisImportClaim(BaseModel):
     source_id: str = Field(min_length=1, max_length=240, pattern=r"^[A-Za-z0-9._/-]+$")
     revision_id: str = Field(pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
     tree_id: str = Field(pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+
+
+class GenesisAcceptanceReceipt(BaseModel):
+    """Owner's durable review of the exact validated imported source."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    accepted_by: str = Field(min_length=1)
+    accepted_at: datetime
+    validation_contract: Literal["app_bundle_acceptance_gate_v1"] = "app_bundle_acceptance_gate_v1"
+    validation_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 def ensure_create_payload(

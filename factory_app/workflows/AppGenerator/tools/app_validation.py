@@ -1516,14 +1516,58 @@ async def _app_runtime_load_result(generated_files: dict[str, str]) -> dict[str,
     }
 
 
-async def _app_runtime_smoke_result(generated_files: dict[str, str]) -> dict[str, Any]:
+async def _app_runtime_smoke_result(
+    generated_files: dict[str, str], *, binary_assets: dict[str, bytes] | None = None,
+    contained_imported_source: bool = False,
+) -> dict[str, Any]:
     """Boot the bundle in the runtime smoke's child process; generated code never runs here."""
     with tempfile.TemporaryDirectory(prefix="mozaiks-app-runtime-smoke-", ignore_cleanup_errors=True) as tmp:
         app_root = Path(tmp) / "app"
         _write_files_to_dir(app_root, generated_files)
+        for rel_path, content in (binary_assets or {}).items():
+            safe = _safe_relpath(rel_path)
+            if not safe or safe in generated_files:
+                raise ValueError("Runtime smoke binary asset path is invalid or overlaps text source")
+            out_path = app_root / safe
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_bytes(content)
+        if contained_imported_source:
+            contained_runner = getattr(app_runtime_smoke, "run_contained_imported_app_runtime_smoke", None)
+            if not callable(contained_runner):
+                raise ValueError("Contained imported-source runtime smoke is unavailable")
+            return await contained_runner(app_root)
         return await app_runtime_smoke.run_app_runtime_smoke(
             app_root, mongo_uri=app_runtime_smoke.resolve_smoke_mongo_uri(),
         )
+
+
+def _runtime_load_from_child_smoke(smoke: dict[str, Any]) -> dict[str, Any]:
+    """Use the smoke child's AppLoader evidence for externally imported source."""
+    outcomes = [item for item in smoke.get("results", [])
+                if isinstance(item, dict) and item.get("check") == "boot.app_load"]
+    failed = [item for item in outcomes if item.get("status") == "failed"]
+    passed = bool(outcomes) and not failed and all(item.get("status") == "passed" for item in outcomes)
+    skipped = smoke.get("status") == "skipped"
+    status = "skipped" if skipped else "passed" if passed else "failed"
+    return {
+        "contract_version": "1.0",
+        "status": status,
+        "passed": None if skipped else passed,
+        "skipped_reason": smoke.get("skipped_reason") if skipped else None,
+        "checks": [{
+            "id": "app_runtime_load", "status": status,
+            "passed": None if skipped else passed,
+            "message": "AppLoader ran in the isolated runtime smoke child process.",
+            "details": {"blocking": not passed, "outcomes": outcomes},
+        }],
+        "failed_tests": [] if skipped or passed else [{
+            "test": "app_runtime_load", "error": (
+                "; ".join(str(item.get("message") or "") for item in failed)
+                or "Runtime smoke child did not confirm AppLoader.load()."
+            ),
+        }],
+        "warnings": [],
+    }
 
 
 async def _agent_backend_integration_result(context_variables: Any | None) -> dict[str, Any]:
@@ -2047,6 +2091,8 @@ async def run_app_bundle_acceptance_gate(
     files: dict[str, str] | None = None,
     context_variables: Any | None = None,
     capability_packs: list[dict[str, Any]] | None = None,
+    contained_imported_source: bool = False,
+    runtime_binary_assets: dict[str, bytes] | None = None,
 ) -> dict[str, Any]:
     """Run the deterministic app-bundle acceptance gate.
 
@@ -2200,8 +2246,15 @@ async def run_app_bundle_acceptance_gate(
         generated_files,
         context_variables,
     )
-    app_runtime_load_result = await _app_runtime_load_result(generated_files)
-    runtime_smoke_result = await _app_runtime_smoke_result(generated_files)
+    if contained_imported_source:
+        runtime_smoke_result = await _app_runtime_smoke_result(
+            generated_files, binary_assets=runtime_binary_assets,
+            contained_imported_source=True,
+        )
+        app_runtime_load_result = _runtime_load_from_child_smoke(runtime_smoke_result)
+    else:
+        app_runtime_load_result = await _app_runtime_load_result(generated_files)
+        runtime_smoke_result = await _app_runtime_smoke_result(generated_files)
 
     completeness_result = {
         "passed": not planned_diagnostics,

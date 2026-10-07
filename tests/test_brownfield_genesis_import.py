@@ -15,7 +15,9 @@ from factory_app.refinement_harness.tools._bundle_workspace import load_bundle_w
 from factory_app.workflows._shared.platform.genesis_import import (
     GenesisImportError,
     PinnedSourceProvenance,
+    accept_existing_app_genesis,
     import_existing_app_genesis_draft,
+    require_accepted_genesis_baseline,
 )
 from mozaiksai.core.artifacts import content_store as artifact_content_store
 from mozaiksai.core.artifacts.content_store import (
@@ -82,9 +84,27 @@ def import_state(tmp_path, monkeypatch):
         registry_row["genesis_import"] = claim_doc
         return dict(registry_row)
 
+    async def accept_genesis_import(*, build_registry_id, owner_user_id, app_id, chat_app_id, claim, receipt):
+        if (registry_row["build_registry_id"] != build_registry_id
+                or registry_row["owner_user_id"] != owner_user_id
+                or registry_row["app_id"] != app_id
+                or registry_row["chat_app_id"] != chat_app_id):
+            return None
+        claim_doc = claim.model_dump(mode="json")
+        state = registry_row.get("genesis_import")
+        if state == claim_doc:
+            registry_row["genesis_import"] = {
+                **claim_doc, "status": "accepted", "acceptance": receipt.model_dump(mode="python"),
+            }
+        elif (state is None or state.get("status") != "accepted"
+              or state.get("acceptance", {}).get("validation_sha256") != receipt.validation_sha256):
+            return None
+        return dict(registry_row)
+
     registry = SimpleNamespace(
         get_app_record=AsyncMock(side_effect=lambda **_kwargs: {"app": dict(registry_row)}),
         reserve_genesis_import=AsyncMock(side_effect=reserve_genesis_import),
+        accept_genesis_import=AsyncMock(side_effect=accept_genesis_import),
     )
     records: dict[str, BuildRecord] = {}
 
@@ -109,10 +129,28 @@ def import_state(tmp_path, monkeypatch):
         records[record.id] = record
         return record
 
+    async def mark_genesis_build_record_validated(*, app_id, build_record_id, validation):
+        record = await get_build_record(app_id=app_id, build_record_id=build_record_id)
+        if record is None or record.lifecycle_status != BuildRecordStatus.DRAFT:
+            return record
+        record.commit_metadata.metadata["genesis_validation"] = validation
+        record.validation_status = BuildRecordValidationStatus.PASSED
+        record.app_validation_status = "passed"
+        return record
+
+    async def accept_genesis_build_record(*, app_id, build_record_id, validation_sha256):
+        record = await get_build_record(app_id=app_id, build_record_id=build_record_id)
+        if (record is not None and record.lifecycle_status == BuildRecordStatus.DRAFT
+                and record.commit_metadata.metadata.get("genesis_validation", {}).get("sha256") == validation_sha256):
+            record.lifecycle_status = BuildRecordStatus.CURRENT
+        return record
+
     store = SimpleNamespace(
         get_build_record=AsyncMock(side_effect=get_build_record),
         list_build_records=AsyncMock(side_effect=list_build_records),
         create_build_record=AsyncMock(side_effect=create_build_record),
+        mark_genesis_build_record_validated=AsyncMock(side_effect=mark_genesis_build_record_validated),
+        accept_genesis_build_record=AsyncMock(side_effect=accept_genesis_build_record),
     )
     content = LocalArtifactContentStore(tmp_path)
     monkeypatch.setattr(artifact_content_store, "get_artifact_content_store", lambda: content)
@@ -362,3 +400,173 @@ async def test_file_directory_collision_is_rejected_before_persistence(import_st
     with pytest.raises(GenesisImportError, match="colliding paths"):
         await _import(import_state, raw, manifest)
     import_state[2].create_build_record.assert_not_awaited()
+
+
+async def _accept(state, record, *, bundle_sha256=None, manifest_sha256=None):
+    row, registry, store, _content = state
+    claim = row["genesis_import"]
+    return await accept_existing_app_genesis(
+        owner_user_id="owner_1", execution_app_id="mozaiks-platform",
+        build_registry_id="appreg_1", build_record_id=record.id,
+        reviewed_bundle_sha256=bundle_sha256 or claim["bundle_sha256"],
+        reviewed_manifest_sha256=manifest_sha256 or claim["manifest_sha256"],
+        registry_service=registry, record_store=store,
+    )
+
+
+@pytest.mark.asyncio
+async def test_owner_review_accepts_exact_validated_genesis_without_deployment(import_state, monkeypatch):
+    from factory_app.workflows.AppGenerator.tools import app_validation
+
+    raw, manifest = _source()
+    draft = await _import(import_state, raw, manifest)
+    gate = AsyncMock(return_value={
+        "status": "passed", "passed": True, "snapshot_digest": "e" * 64,
+        "checks": [{"id": "app_runtime_load", "passed": True}],
+    })
+    monkeypatch.setattr(app_validation, "run_app_bundle_acceptance_gate", gate)
+    with pytest.raises(GenesisImportError, match="no matching accepted review receipt"):
+        await require_accepted_genesis_baseline(
+            draft, owner_user_id="owner_1", execution_app_id="mozaiks-platform",
+            build_registry_id="appreg_1", registry_service=import_state[1],
+        )
+    accepted = await _accept(import_state, draft)
+    assert gate.await_args.kwargs["contained_imported_source"] is True
+    assert accepted.lifecycle_status == BuildRecordStatus.CURRENT
+    assert accepted.validation_status == BuildRecordValidationStatus.PASSED
+    assert accepted.app_validation_status == "passed"
+    assert import_state[0]["genesis_import"]["acceptance"]["accepted_by"] == "owner_1"
+    assert import_state[0]["genesis_import"]["status"] == "accepted"
+    assert import_state[0]["lifecycle_state"] == "draft"
+    assert import_state[0]["artifact_version_id"] is None
+    assert import_state[0]["current_build_run"] is None
+    assert (await _accept(import_state, draft)) is accepted
+    gate.assert_awaited_once()
+    import_state[0]["current_build_run"] = {"build_id": "later-refinement"}
+    accepted.lifecycle_status = BuildRecordStatus.SUPERSEDED
+    await require_accepted_genesis_baseline(
+        accepted, owner_user_id="owner_1", execution_app_id="mozaiks-platform",
+        build_registry_id="appreg_1", registry_service=import_state[1],
+    )
+
+
+@pytest.mark.asyncio
+async def test_genesis_acceptance_rejects_wrong_review_digest_and_failed_runtime_gate(import_state, monkeypatch):
+    from factory_app.workflows.AppGenerator.tools import app_validation
+
+    raw, manifest = _source()
+    draft = await _import(import_state, raw, manifest)
+    gate = AsyncMock(return_value={"status": "failed", "passed": False, "checks": []})
+    monkeypatch.setattr(app_validation, "run_app_bundle_acceptance_gate", gate)
+    with pytest.raises(GenesisImportError, match="reviewed source digests"):
+        await _accept(import_state, draft, bundle_sha256="f" * 64)
+    with pytest.raises(GenesisImportError, match="reviewed source digests"):
+        await _accept(import_state, draft, manifest_sha256="f" * 64)
+    gate.assert_not_awaited()
+    with pytest.raises(GenesisImportError, match="runtime validation"):
+        await _accept(import_state, draft)
+    assert import_state[0]["genesis_import"]["status"] == "reserved"
+    assert draft.lifecycle_status == BuildRecordStatus.DRAFT
+    import_state[2].mark_genesis_build_record_validated.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_genesis_acceptance_recovers_receipt_before_artifact_status(import_state, monkeypatch):
+    from factory_app.workflows.AppGenerator.tools import app_validation
+
+    raw, manifest = _source()
+    draft = await _import(import_state, raw, manifest)
+    gate = AsyncMock(return_value={"status": "passed", "passed": True, "checks": []})
+    monkeypatch.setattr(app_validation, "run_app_bundle_acceptance_gate", gate)
+    project = import_state[2].accept_genesis_build_record
+    project.side_effect = AsyncMock(return_value=draft)
+    with pytest.raises(GenesisImportError, match="no matching accepted review receipt"):
+        await _accept(import_state, draft)
+    assert import_state[0]["genesis_import"]["status"] == "accepted"
+    assert draft.lifecycle_status == BuildRecordStatus.DRAFT
+    async def recover_project(**_kwargs):
+        draft.lifecycle_status = BuildRecordStatus.CURRENT
+        return draft
+
+    project.side_effect = recover_project
+    assert (await _accept(import_state, draft)).lifecycle_status == BuildRecordStatus.CURRENT
+    gate.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_imported_acceptance_gate_loads_source_only_in_runtime_smoke_child(monkeypatch):
+    from factory_app.workflows.AppGenerator.tools import app_validation
+
+    in_process = AsyncMock(side_effect=AssertionError("source Python reached the Studio process"))
+    smoke = AsyncMock(return_value={
+        "status": "passed", "passed": True,
+        "results": [{"check": "boot.app_load", "status": "passed", "message": "Loaded."}],
+        "checks": [{"id": "app_runtime_smoke", "passed": True}],
+        "failed_tests": [], "warnings": [],
+    })
+    monkeypatch.setattr(app_validation, "_app_runtime_load_result", in_process)
+    monkeypatch.setattr(app_validation, "_app_runtime_smoke_result", smoke)
+    result = await app_validation.run_app_bundle_acceptance_gate(
+        files={"app.json": '{"appId":"mozaiks-platform","appName":"Mozaiks"}'},
+        contained_imported_source=True,
+    )
+    assert result["app_runtime_load"]["passed"] is True
+    in_process.assert_not_awaited()
+    smoke.assert_awaited_once()
+    assert app_validation._runtime_load_from_child_smoke({"status": "skipped", "results": []})["status"] == "skipped"
+    assert app_validation._runtime_load_from_child_smoke({"status": "failed", "results": []})["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_imported_runtime_smoke_receives_exact_binary_assets(monkeypatch):
+    from factory_app.workflows.AppGenerator.tools import app_validation
+
+    observed = {}
+
+    async def inspect_workspace(app_root, *, mongo_uri):
+        observed["app"] = (app_root / "app.json").read_text(encoding="utf-8")
+        observed["asset"] = (app_root / "ui/public/logo.png").read_bytes()
+        return {"status": "passed", "passed": True}
+
+    monkeypatch.setattr(app_validation.app_runtime_smoke, "resolve_smoke_mongo_uri", lambda: None)
+    monkeypatch.setattr(app_validation.app_runtime_smoke, "run_app_runtime_smoke", inspect_workspace)
+    await app_validation._app_runtime_smoke_result(
+        {"app.json": '{"appId":"mozaiks-platform"}'},
+        binary_assets={"ui/public/logo.png": b"\x89PNG\r\n\x1a\n"},
+    )
+    assert observed["asset"] == b"\x89PNG\r\n\x1a\n"
+    assert json.loads(observed["app"])["appId"] == "mozaiks-platform"
+
+
+@pytest.mark.asyncio
+async def test_imported_runtime_smoke_fails_closed_without_contained_backend(monkeypatch):
+    from factory_app.workflows.AppGenerator.tools import app_validation
+
+    host_smoke = AsyncMock(side_effect=AssertionError("host Mongo smoke was invoked"))
+    monkeypatch.setattr(app_validation.app_runtime_smoke, "run_app_runtime_smoke", host_smoke)
+    monkeypatch.delattr(
+        app_validation.app_runtime_smoke, "run_contained_imported_app_runtime_smoke", raising=False,
+    )
+    with pytest.raises(ValueError, match="Contained imported-source runtime smoke is unavailable"):
+        await app_validation._app_runtime_smoke_result(
+            {"app.json": '{"appId":"mozaiks-platform"}'}, contained_imported_source=True,
+        )
+    host_smoke.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_genesis_owner_acceptance_stays_reserved_without_contained_backend(import_state, monkeypatch):
+    from factory_app.workflows.AppGenerator.tools import app_runtime_smoke
+
+    raw, manifest = _source()
+    draft = await _import(import_state, raw, manifest)
+    host_smoke = AsyncMock(side_effect=AssertionError("host Mongo smoke was invoked"))
+    monkeypatch.setattr(app_runtime_smoke, "run_app_runtime_smoke", host_smoke)
+    monkeypatch.delattr(app_runtime_smoke, "run_contained_imported_app_runtime_smoke", raising=False)
+    with pytest.raises(ValueError, match="Contained imported-source runtime smoke is unavailable"):
+        await _accept(import_state, draft)
+    assert import_state[0]["genesis_import"]["status"] == "reserved"
+    assert draft.lifecycle_status == BuildRecordStatus.DRAFT
+    assert draft.validation_status == BuildRecordValidationStatus.PENDING
+    import_state[2].mark_genesis_build_record_validated.assert_not_awaited()
+    host_smoke.assert_not_awaited()

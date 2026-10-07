@@ -13,7 +13,7 @@ from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceMa
 from mozaiksai.core.multitenant import build_app_scope_filter
 
 from .policy import owner_filter
-from .schemas import GenesisImportClaim
+from .schemas import GenesisAcceptanceReceipt, GenesisImportClaim
 
 IndexSpec = tuple[Sequence[tuple[str, int]], dict[str, Any]]
 APP_REGISTRY_COLLECTION = "AppRegistryRecords"
@@ -149,6 +149,46 @@ class AppRegistryRepo:
                 doc.get("artifact_version_id") is not None,
                 doc.get("bundle_path") is not None,
                 doc.get("genesis_import") != claim_doc,
+            )):
+                return None
+        return self._normalize_doc(doc)
+
+    async def accept_genesis_import(
+        self, *, build_registry_id: str, owner_user_id: str, app_id: str,
+        chat_app_id: str, claim: GenesisImportClaim,
+        receipt: GenesisAcceptanceReceipt,
+    ) -> dict[str, Any] | None:
+        """Commit one exact owner review without advancing the live build pointer."""
+        if receipt.accepted_by != owner_user_id:
+            return None
+        await self.ensure_indexes()
+        coll = await self._collection()
+        claim_doc = claim.model_dump(mode="json")
+        accepted = {**claim_doc, "status": "accepted", "acceptance": receipt.model_dump(mode="python")}
+        now = datetime.now(UTC)
+        doc = await coll.find_one_and_update(
+            {
+                "_id": build_registry_id, **owner_filter(owner_user_id),
+                "app_id": app_id, "chat_app_id": chat_app_id,
+                "lifecycle_state": "draft", "active_chat_id": None,
+                "current_build_run": None, "artifact_version_id": None,
+                "bundle_path": None, "genesis_import": claim_doc,
+            },
+            {"$set": {"genesis_import": accepted, "updated_at": now}},
+            return_document=ReturnDocument.AFTER,
+        )
+        if doc is None:
+            doc = await coll.find_one({"_id": build_registry_id, **owner_filter(owner_user_id)})
+            if not isinstance(doc, dict):
+                return None
+            existing = doc.get("genesis_import")
+            if not isinstance(existing, dict) or any((
+                doc.get("app_id") != app_id, doc.get("chat_app_id") != chat_app_id,
+                existing.get("status") != "accepted",
+                {key: existing.get(key) for key in claim_doc if key != "status"}
+                != {key: value for key, value in claim_doc.items() if key != "status"},
+                (existing.get("acceptance") or {}).get("accepted_by") != owner_user_id,
+                (existing.get("acceptance") or {}).get("validation_sha256") != receipt.validation_sha256,
             )):
                 return None
         return self._normalize_doc(doc)

@@ -97,6 +97,9 @@ accept an intact brownfield app without replacing its live repository, that
 acceptance contract needs its own explicit decision; a draft-to-refinement
 shortcut is not an acceptable default.
 
+[ADR 0017](0017-accepted-imported-genesis-without-deployment.md) proposes the
+dedicated, no-deployment acceptance and durable Factory receipt for this gate.
+
 An approved nonpatch request keeps the effective refinement-harness route:
 `build_family`, change class, `workflow_sequence`, first workflow, and affected
 families. App Zero verifies approval and its pinned repository snapshot against
