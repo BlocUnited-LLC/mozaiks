@@ -85,6 +85,17 @@ def test_read_only_scope_without_editable_files_fails_closed():
         )
 
 
+def test_prohibited_scope_is_case_insensitive_for_source_selection():
+    with pytest.raises(ValueError, match="no scoped baseline files"):
+        build_coding_request_from_execution_context(
+            _context(
+                allowed_paths=["app/"],
+                prohibited_paths=["app/PROTECTED/"],
+            ),
+            baseline_files={"app/protected/service.py": "should not be exposed"},
+        )
+
+
 def test_rejects_unsafe_context_path():
     with pytest.raises(ValidationError):
         ApprovedExecutionContext.model_validate(_context(allowed_paths=["../app"]))
@@ -95,3 +106,29 @@ def test_empty_scoped_baseline_fails_closed():
         build_coding_request_from_execution_context(
             _context(), baseline_files={"README.md": "readme"}
         )
+
+
+def test_create_only_request_preserves_exact_approved_grant():
+    request = build_coding_request_from_execution_context(
+        _context(create_paths=["app/modules/support/new.py"]), baseline_files={}
+    )
+    assert request.files == {}
+    assert request.metadata["approved_create_paths"] == ["app/modules/support/new.py"]
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"create_paths": ["../outside.py"]},
+        {"create_paths": ["app/modules/support/new.py", "app/modules/support/NEW.py"]},
+        {"create_paths": ["app/modules/support/new", "app/modules/support/new/child.py"]},
+        {"create_paths": ["app/modules/support/cafe\u0301.py"]},
+        {"create_paths": ["app/modules/support/new.py/active/"]},
+        {"create_paths": ["app/modules/support/new.py"], "delete_paths": ["app/modules/support/NEW.py"]},
+        {"create_paths": ["README.md"]},
+        {"delete_paths": ["app/security/secrets.yaml"]},
+    ],
+)
+def test_exact_operation_grants_reject_unsafe_or_unapproved_paths(overrides):
+    with pytest.raises(ValidationError):
+        ApprovedExecutionContext.model_validate(_context(**overrides))

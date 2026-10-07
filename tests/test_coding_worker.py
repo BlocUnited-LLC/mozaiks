@@ -418,6 +418,19 @@ def _candidate_proposal(**updates):
     )
 
 
+@pytest.mark.parametrize("op,content", [("create", "new file"), ("delete", None)])
+def test_generated_app_worker_rejects_repository_operations(op, content):
+    proposal = StagedPatchProposal(
+        proposal_id="proposal", provider_id="offline", status="completed",
+        summary="Change accent", rationale="Requested accent", owned_paths=["brand/theme_config.json"],
+        changed_files=[ProposedFileChange(path="brand/theme_config.json", op=op, content=content)],
+    )
+    with pytest.raises(ValueError, match="only supports updates"):
+        ScopedRefinementCodingWorker._plan_from_proposal(
+            request=_candidate_request(), proposal=proposal, resolved_strategy="local"
+        )
+
+
 def _candidate_evidence(strategy="docker"):
     return {
         "validation_status": "passed", "validation_strategy": strategy,

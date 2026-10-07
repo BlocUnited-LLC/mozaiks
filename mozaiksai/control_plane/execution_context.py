@@ -8,9 +8,10 @@ promote artifacts.
 
 from __future__ import annotations
 
+import unicodedata
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .contracts import CodingWorkerRequest, safe_artifact_relpath
 
@@ -39,6 +40,8 @@ class ApprovedExecutionContext(BaseModel):
     allowed_paths: list[str] = Field(default_factory=list)
     prohibited_paths: list[str] = Field(default_factory=list)
     read_only_paths: list[str] = Field(default_factory=list)
+    create_paths: list[str] = Field(default_factory=list)
+    delete_paths: list[str] = Field(default_factory=list)
     required_validation_gates: list[str] = Field(default_factory=list)
     required_security_gates: list[str] = Field(default_factory=list)
     required_ci_checks: list[str] = Field(default_factory=list)
@@ -68,6 +71,34 @@ class ApprovedExecutionContext(BaseModel):
             normalized.append(path)
         return sorted(set(normalized))
 
+    @field_validator("create_paths", "delete_paths")
+    @classmethod
+    def _validate_exact_paths(cls, values: list[str]) -> list[str]:
+        identities: set[str] = set()
+        for value in values:
+            path = safe_artifact_relpath(value)
+            if path is None or path != value or path == "." or unicodedata.normalize("NFC", path) != path:
+                raise ValueError(f"unsafe exact execution path: {value!r}")
+            identity = path.casefold()
+            if identity in identities:
+                raise ValueError(f"duplicate exact execution path: {value!r}")
+            identities.add(identity)
+        return sorted(values)
+
+    @model_validator(mode="after")
+    def _validate_operation_grants(self) -> ApprovedExecutionContext:
+        identities = [path.casefold() for path in [*self.create_paths, *self.delete_paths]]
+        if len(identities) != len(set(identities)) or any(
+            left.startswith(f"{right}/") or right.startswith(f"{left}/")
+            for index, left in enumerate(identities)
+            for right in identities[index + 1:]
+        ):
+            raise ValueError("exact operation grants overlap")
+        for path in [*self.create_paths, *self.delete_paths]:
+            if not _path_is_allowed(path, self.allowed_paths, self.prohibited_paths, self.read_only_paths):
+                raise ValueError(f"exact operation path is outside approved scope: {path!r}")
+        return self
+
 
 def _path_is_allowed(
     path: str,
@@ -78,8 +109,10 @@ def _path_is_allowed(
     normalized = safe_artifact_relpath(path)
     if normalized is None:
         return False
+    folded = normalized.casefold()
     for denied in [*prohibited_paths, *read_only_paths]:
-        if normalized == denied or normalized.startswith(f"{denied.rstrip('/')}/"):
+        blocked = denied.rstrip("/").casefold()
+        if folded == blocked or folded.startswith(f"{blocked}/"):
             return False
     return any(
         normalized == allowed or normalized.startswith(f"{allowed.rstrip('/')}/")
@@ -116,7 +149,7 @@ def build_coding_request_from_execution_context(
             approved.read_only_paths,
         )
     }
-    if not scoped_files:
+    if not scoped_files and not approved.create_paths:
         raise ValueError("approved execution context produced no scoped baseline files")
     return CodingWorkerRequest(
         app_id=approved.app_id,
@@ -139,5 +172,7 @@ def build_coding_request_from_execution_context(
             "baseline_commit_sha": approved.baseline_commit_sha,
             "repository_full_name": approved.repository_full_name,
             "selected_file_paths": sorted(scoped_files),
+            "approved_create_paths": approved.create_paths,
+            "approved_delete_paths": approved.delete_paths,
         },
     )

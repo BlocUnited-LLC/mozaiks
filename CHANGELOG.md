@@ -19,6 +19,9 @@ This project follows a practical pre-1.0 changelog format:
   stdin, verifies no-network/no-mount container settings, caps output, removes
   the container, and returns a proposal plus archive for host verification.
   Live model access and source publication remain disabled.
+- Exact plan-bound create and delete grants for the offline repository patch
+  bridge, with host-proven create absence at the immutable baseline, observed
+  operation matching, and deletion-only transport.
 
 - Bounded, snapshot-verified read-only test and documentation inspection for
   isolated repository coding turns. Inspection files stay outside patch archives

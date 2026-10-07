@@ -11,16 +11,18 @@ import difflib
 import hashlib
 import io
 import struct
+import unicodedata
 import zipfile
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from mozaiksai.core.secrets.contract import is_secret_contract_path, validate_secret_contract_text
 from mozaiksai.core.semantics.archive import (
     ArchiveEntry,
+    ArchiveManifestEntry,
     build_deterministic_archive,
     read_archive_manifest,
 )
@@ -38,6 +40,7 @@ from .workspace import StagedCodingWorkspace, harvest_coding_workspace, material
 
 _MAX_REPOSITORY_ARCHIVE_BYTES = 16_777_216
 _MAX_REPOSITORY_ARCHIVE_FILES = 50
+_EMPTY_REPOSITORY_ARCHIVE = b"mozaiks.repository.empty.v1\n"
 _ZIP_END_RECORD = struct.Struct("<4s4H2IH")
 _ZIP_CENTRAL_HEADER_SIZE = 46
 
@@ -58,7 +61,7 @@ class RepositorySnapshotEvidence(BaseModel):
     repository_full_name: str = Field(min_length=1)
     baseline_commit_sha: str = Field(min_length=40, max_length=40)
     snapshot_digest: str = Field(min_length=1)
-    file_manifest: dict[str, str] = Field(min_length=1)
+    file_manifest: dict[str, str]
 
     @field_validator("file_manifest")
     @classmethod
@@ -73,16 +76,28 @@ class RepositorySnapshotEvidence(BaseModel):
 
 
 class RepositoryPatchFile(BaseModel):
-    """One update, with bytes independently observed in the staged workspace."""
+    """One exact approved operation, independently observed in the staged tree."""
 
     model_config = ConfigDict(extra="forbid")
 
     path: str
-    op: Literal["update"] = "update"
-    previous_sha256: str
-    new_sha256: str
-    content: str
+    op: Literal["create", "update", "delete"] = "update"
+    previous_sha256: str | None = None
+    new_sha256: str | None = None
+    content: str | None = None
     diff: str
+
+    @model_validator(mode="after")
+    def _validate_operation(self) -> RepositoryPatchFile:
+        expected = {
+            "create": (False, True, True),
+            "update": (True, True, True),
+            "delete": (True, False, False),
+        }[self.op]
+        actual = (self.previous_sha256 is not None, self.new_sha256 is not None, self.content is not None)
+        if actual != expected:
+            raise ValueError("repository patch hashes and content do not match operation")
+        return self
 
 
 class RepositoryPatchCandidate(BaseModel):
@@ -90,8 +105,8 @@ class RepositoryPatchCandidate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["mozaiks.refinement.repository_patch.v1"] = (
-        "mozaiks.refinement.repository_patch.v1"
+    schema_version: Literal["mozaiks.refinement.repository_patch.v2"] = (
+        "mozaiks.refinement.repository_patch.v2"
     )
     write_back_mode: Literal["external_patch"] = "external_patch"
     validation_state: Literal["pending"] = "pending"
@@ -117,13 +132,23 @@ class RepositoryPatchCandidate(BaseModel):
 
 def _canonical_path(path: str) -> str:
     normalized = safe_artifact_relpath(path)
-    if normalized is None or normalized == "." or normalized != path:
+    if (
+        normalized is None or normalized == "." or normalized != path
+        or unicodedata.normalize("NFC", path) != path
+    ):
         raise ValueError(f"REPOSITORY_PATCH_UNSAFE_PATH: {path!r}")
     return normalized
 
 
-def _in_scope(path: str, paths: list[str]) -> bool:
-    return any(path == scope or path.startswith(f"{scope.rstrip('/')}/") for scope in paths)
+def _in_scope(path: str, paths: list[str], *, casefold: bool = False) -> bool:
+    candidate = path.casefold() if casefold else path
+    for scope in paths:
+        root = scope.rstrip("/")
+        if casefold:
+            root = root.casefold()
+        if candidate == root or candidate.startswith(f"{root}/"):
+            return True
+    return False
 
 
 def _sha256(content: str) -> str:
@@ -141,12 +166,12 @@ def _validate_output_text(path: str, content: str) -> None:
         validate_secret_contract_text(content)
 
 
-def _unified_diff(path: str, before: str, after: str) -> str:
+def _unified_diff(path: str, before: str | None, after: str | None) -> str:
     lines = difflib.unified_diff(
-        before.splitlines(keepends=True),
-        after.splitlines(keepends=True),
-        fromfile=f"a/{path}",
-        tofile=f"b/{path}",
+        (before or "").splitlines(keepends=True),
+        (after or "").splitlines(keepends=True),
+        fromfile=f"a/{path}" if before is not None else "/dev/null",
+        tofile=f"b/{path}" if after is not None else "/dev/null",
         lineterm="\n",
     )
     # difflib does not add Git's missing-final-newline marker to content lines.
@@ -163,7 +188,9 @@ def _validate_archive_budget(*, max_files: int, max_archive_bytes: int) -> None:
         raise ValueError("REPOSITORY_PATCH_ARCHIVE_BUDGET: invalid byte limit")
 
 
-def _preflight_archive_directory(data: bytes, *, expected_files: int, max_bytes: int) -> None:
+def _preflight_archive_directory(
+    data: bytes, *, expected_files: int | None, max_bytes: int, max_files: int | None = None
+) -> None:
     """Bound central-directory parsing before ZipFile creates entry objects.
 
     The canonical archive writer emits a single-disk ZIP without a comment or
@@ -185,7 +212,10 @@ def _preflight_archive_directory(data: bytes, *, expected_files: int, max_bytes:
         or directory_offset + directory_size != end_offset
     ):
         raise ValueError("REPOSITORY_PATCH_ARCHIVE_FORMAT: invalid ZIP directory")
-    if files != expected_files:
+    limit = max_files if max_files is not None else expected_files
+    if limit is None:
+        raise ValueError("REPOSITORY_PATCH_ARCHIVE_BUDGET: missing file limit")
+    if files > limit or (expected_files is not None and files != expected_files):
         raise ValueError("REPOSITORY_PATCH_ARCHIVE_BUDGET: entry count exceeds selection")
 
     offset = directory_offset
@@ -200,7 +230,7 @@ def _preflight_archive_directory(data: bytes, *, expected_files: int, max_bytes:
         filename_size, extra_size, entry_comment_size = struct.unpack_from("<HHH", data, offset + 28)
         total_bytes += struct.unpack_from("<I", data, offset + 24)[0]
         seen += 1
-        if seen > expected_files or total_bytes > max_bytes:
+        if seen > limit or total_bytes > max_bytes:
             raise ValueError("REPOSITORY_PATCH_ARCHIVE_BUDGET: entry count or size exceeds limit")
         offset += _ZIP_CENTRAL_HEADER_SIZE + filename_size + extra_size + entry_comment_size
         if offset > end_offset:
@@ -214,6 +244,8 @@ def export_repository_workspace_archive(
     *,
     max_files: int,
     max_archive_bytes: int,
+    create_paths: list[str] | None = None,
+    delete_paths: list[str] | None = None,
 ) -> bytes:
     """Export every observed regular UTF-8 file after the coding turn stops.
 
@@ -224,16 +256,36 @@ def export_repository_workspace_archive(
     harvester reads files before this archive byte budget is checked.
     """
     _validate_archive_budget(max_files=max_files, max_archive_bytes=max_archive_bytes)
-    harvest = harvest_coding_workspace(workspace)
+    creates = set(create_paths or [])
+    deletes = set(delete_paths or [])
+    grants = [*(create_paths or []), *(delete_paths or [])]
+    for path in grants:
+        _canonical_path(path)
+    if len({path.casefold() for path in grants}) != len(grants):
+        raise ValueError("REPOSITORY_PATCH_GRANTS: duplicate operation path")
+    occupied = {path.casefold() for path in [*workspace.editable_manifest, *workspace.read_only_manifest]}
+    if (
+        any(path.casefold() in occupied for path in creates)
+        or deletes - set(workspace.editable_manifest)
+    ):
+        raise ValueError("REPOSITORY_PATCH_GRANTS: operation paths conflict with staged baseline")
+    if len(workspace.editable_manifest) + len(creates) + len(workspace.read_only_manifest) > max_files:
+        raise ValueError("REPOSITORY_PATCH_ARCHIVE_BUDGET: staged file count exceeds limit")
+    harvest = harvest_coding_workspace(workspace, allow_new_files=bool(creates), allow_deletes=bool(deletes))
     if harvest.violations:
         raise ValueError("REPOSITORY_PATCH_ARCHIVE_SCOPE: staged tree has violations")
-    if not harvest.files or len(harvest.files) > max_files:
-        raise ValueError("REPOSITORY_PATCH_ARCHIVE_BUDGET: staged file count exceeds limit")
+    for file in harvest.files:
+        if (file.op == "create" and file.path not in creates) or (
+            file.op == "delete" and file.path not in deletes
+        ):
+            raise ValueError(f"REPOSITORY_PATCH_ARCHIVE_OP: {file.path!r}")
     entries: list[ArchiveEntry] = []
     total_bytes = 0
     for file in harvest.files:
         path = _canonical_path(file.path)
-        if file.op != "update" or file.content is None:
+        if file.op == "delete":
+            continue
+        if file.op not in {"update", "create"} or file.content is None:
             raise ValueError(f"REPOSITORY_PATCH_ARCHIVE_OP: {path!r}")
         raw = file.content.encode("utf-8")
         if file.new_sha256 != hashlib.sha256(raw).hexdigest():
@@ -243,7 +295,7 @@ def export_repository_workspace_archive(
         if total_bytes > max_archive_bytes:
             raise ValueError("REPOSITORY_PATCH_ARCHIVE_BUDGET: staged contents exceed limit")
         entries.append(ArchiveEntry(path=path, content=raw))
-    archive_bytes = build_deterministic_archive(entries)
+    archive_bytes = build_deterministic_archive(entries) if entries else _EMPTY_REPOSITORY_ARCHIVE
     if len(archive_bytes) > max_archive_bytes:
         raise ValueError("REPOSITORY_PATCH_ARCHIVE_BUDGET: archive exceeds limit")
     return archive_bytes
@@ -298,7 +350,7 @@ def select_repository_read_only_files(
         if (
             not _in_scope(path, context.allowed_paths)
             or not _in_scope(path, context.read_only_paths)
-            or _in_scope(path, context.prohibited_paths)
+            or _in_scope(path, context.prohibited_paths, casefold=True)
         ):
             raise ValueError(f"REPOSITORY_PATCH_INSPECTION_SCOPE: {path!r} is not approved read-only context")
         if validate_path(path) is not None:
@@ -319,16 +371,41 @@ def _verify_selected_baseline(
     selected_paths: list[str],
     baseline_files: Mapping[str, str],
     validate_path: Callable[[str], object],
+    validate_create_absence: Callable[[str], object] | None = None,
 ) -> dict[str, str]:
     _verify_snapshot_identity(context, snapshot)
-    if not selected_paths or len(set(selected_paths)) != len(selected_paths):
+    if (
+        (not selected_paths and not context.create_paths)
+        or len({path.casefold() for path in selected_paths}) != len(selected_paths)
+    ):
         raise ValueError("REPOSITORY_PATCH_SELECTION: selected paths must be unique and nonempty")
+    if len(selected_paths) + len(context.create_paths) > _MAX_REPOSITORY_ARCHIVE_FILES:
+        raise ValueError("REPOSITORY_PATCH_SELECTION: selected paths exceed repository budget")
+    if not set(context.delete_paths) <= set(selected_paths):
+        raise ValueError("REPOSITORY_PATCH_GRANTS: delete paths must be selected baseline files")
     for path in baseline_files:
         _canonical_path(path)
         if validate_path(path) is not None:
             raise ValueError("REPOSITORY_PATCH_HOST_POLICY: validate_path must raise or return None")
     if set(baseline_files) != set(selected_paths):
         raise ValueError("REPOSITORY_PATCH_BASELINE_SET: baseline files must match selected paths")
+
+    occupied = {path.casefold() for path in snapshot.file_manifest}
+    if len(occupied) != len(snapshot.file_manifest):
+        raise ValueError("REPOSITORY_PATCH_MANIFEST_COLLISION: baseline paths collide")
+    for path in context.create_paths:
+        _canonical_path(path)
+        if is_secret_sensitive_path(path) or is_secret_contract_path(path):
+            raise ValueError(f"REPOSITORY_PATCH_SECRET_PATH: {path!r}")
+        _reject_env_template_path(path)
+        if path.casefold() in occupied:
+            raise ValueError(f"REPOSITORY_PATCH_CREATE_EXISTS: {path!r}")
+        if validate_path(path) is not None:
+            raise ValueError("REPOSITORY_PATCH_HOST_POLICY: validate_path must raise or return None")
+        if validate_create_absence is None:
+            raise ValueError("REPOSITORY_PATCH_CREATE_PROOF: complete baseline tree proof is required")
+        if validate_create_absence(path) is not None:
+            raise ValueError("REPOSITORY_PATCH_CREATE_PROOF: proof must raise or return None")
 
     expected_hashes: dict[str, str] = {}
     for path in selected_paths:
@@ -338,8 +415,8 @@ def _verify_selected_baseline(
         _reject_env_template_path(path)
         if (
             not _in_scope(path, context.allowed_paths)
-            or _in_scope(path, context.prohibited_paths)
-            or _in_scope(path, context.read_only_paths)
+            or _in_scope(path, context.prohibited_paths, casefold=True)
+            or _in_scope(path, context.read_only_paths, casefold=True)
         ):
             raise ValueError(f"REPOSITORY_PATCH_SCOPE: {path!r} is not editable")
         if validate_path(path) is not None:
@@ -361,6 +438,7 @@ def stage_repository_workspace_archive(
     archive_bytes: bytes,
     workspace_root: Path,
     validate_path: Callable[[str], object],
+    validate_create_absence: Callable[[str], object] | None = None,
     max_files: int,
     max_archive_bytes: int,
 ) -> StagedCodingWorkspace:
@@ -378,26 +456,43 @@ def stage_repository_workspace_archive(
         selected_paths=selected_paths,
         baseline_files=baseline_files,
         validate_path=validate_path,
+        validate_create_absence=validate_create_absence,
     )
-    if len(selected_paths) > max_files or len(archive_bytes) > max_archive_bytes:
+    if len(selected_paths) + len(context.create_paths) > max_files or len(archive_bytes) > max_archive_bytes:
         raise ValueError("REPOSITORY_PATCH_ARCHIVE_BUDGET: input exceeds limit")
     root = Path(workspace_root)
     if root.exists() or root.is_symlink():
         raise ValueError("REPOSITORY_PATCH_ARCHIVE_WORKSPACE: target must not exist")
 
-    _preflight_archive_directory(
-        archive_bytes, expected_files=len(selected_paths), max_bytes=max_archive_bytes,
-    )
-    manifest = read_archive_manifest(archive_bytes)
-    if {entry.path for entry in manifest.entries} != set(selected_paths):
-        raise ValueError("REPOSITORY_PATCH_ARCHIVE_SET: entries differ from approved selection")
+    manifest_entries: tuple[ArchiveManifestEntry, ...]
+    if archive_bytes == _EMPTY_REPOSITORY_ARCHIVE:
+        manifest_entries = ()
+    else:
+        _preflight_archive_directory(
+            archive_bytes,
+            expected_files=len(selected_paths) if not context.create_paths and not context.delete_paths else None,
+            max_files=len(selected_paths) + len(context.create_paths),
+            max_bytes=max_archive_bytes,
+        )
+        manifest_entries = read_archive_manifest(archive_bytes).entries
+    entry_paths = {entry.path for entry in manifest_entries}
+    if (
+        (set(selected_paths) - entry_paths) - set(context.delete_paths)
+        or entry_paths - set(selected_paths) - set(context.create_paths)
+    ):
+        raise ValueError("REPOSITORY_PATCH_ARCHIVE_SET: entries differ from approved operation grants")
 
     observed: dict[str, bytes] = {}
-    with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
-        for entry in manifest.entries:
+    if manifest_entries:
+        archive = zipfile.ZipFile(io.BytesIO(archive_bytes))
+    else:
+        archive = None
+    try:
+        for entry in manifest_entries:
             path = _canonical_path(entry.path)
             if validate_path(path) is not None:
                 raise ValueError("REPOSITORY_PATCH_HOST_POLICY: validate_path must raise or return None")
+            assert archive is not None
             raw = archive.read(path)
             if len(raw) != entry.size_bytes or f"sha256:{hashlib.sha256(raw).hexdigest()}" != entry.content_sha256:
                 raise ValueError(f"REPOSITORY_PATCH_ARCHIVE_HASH: {path!r}")
@@ -407,13 +502,20 @@ def stage_repository_workspace_archive(
                 raise ValueError(f"REPOSITORY_PATCH_ARCHIVE_UTF8: {path!r}") from exc
             _validate_output_text(path, content)
             observed[path] = raw
+    finally:
+        if archive is not None:
+            archive.close()
 
     workspace = StagedCodingWorkspace(workspace_root=root, strict_cleanup=True)
     try:
         workspace = materialize_coding_workspace(dict(baseline_files), workspace_root=root)
         workspace.strict_cleanup = True
+        for path in set(selected_paths) - set(observed):
+            (workspace.workspace_root / path).unlink()
         for path, raw in observed.items():
-            (workspace.workspace_root / path).write_bytes(raw)
+            target = workspace.workspace_root / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(raw)
     except Exception:
         workspace.cleanup()
         raise
@@ -429,6 +531,7 @@ def finalize_repository_patch(
     workspace: StagedCodingWorkspace,
     proposal: StagedPatchProposal,
     validate_path: Callable[[str], object],
+    validate_create_absence: Callable[[str], object] | None = None,
 ) -> RepositoryPatchCandidate:
     """Verify an approved repository edit against an independently harvested tree.
 
@@ -448,11 +551,16 @@ def finalize_repository_patch(
         selected_paths=selected_paths,
         baseline_files=baseline_files,
         validate_path=validate_path,
+        validate_create_absence=validate_create_absence,
     )
 
     if workspace.editable_manifest != expected_hashes:
         raise ValueError("REPOSITORY_PATCH_WORKSPACE_BASELINE: staged files differ from selected baseline")
-    harvest = harvest_coding_workspace(workspace)
+    harvest = harvest_coding_workspace(
+        workspace,
+        allow_new_files=bool(context.create_paths),
+        allow_deletes=bool(context.delete_paths),
+    )
     observed_paths = [file.path for file in harvest.files]
     observed_paths.extend(violation.path for violation in harvest.violations)
     for path in observed_paths:
@@ -462,52 +570,70 @@ def finalize_repository_patch(
     if harvest.violations:
         violations = ", ".join(f"{item.kind}:{item.path}" for item in harvest.violations)
         raise ValueError(f"REPOSITORY_PATCH_WORKSPACE_SCOPE: {violations}")
-    if {file.path for file in harvest.files} != set(selected_paths):
+    if {file.path for file in harvest.files} - set(selected_paths) - set(context.create_paths):
         raise ValueError("REPOSITORY_PATCH_WORKSPACE_SET: harvested files differ from selection")
 
-    harvested_changes: dict[str, str] = {}
+    harvested_changes: dict[str, tuple[Literal["create", "update", "delete"], str | None]] = {}
     for file in harvest.files:
-        if file.op != "update" or file.content is None:
+        if (file.op == "create" and file.path not in context.create_paths) or (
+            file.op == "delete" and file.path not in context.delete_paths
+        ):
+            raise ValueError(f"REPOSITORY_PATCH_WORKSPACE_OP: {file.path!r}")
+        if file.op == "delete":
+            if file.previous_sha256 != expected_hashes[file.path] or file.new_sha256 is not None or file.content is not None or not file.modified:
+                raise ValueError(f"REPOSITORY_PATCH_WORKSPACE_HASH: {file.path!r}")
+            harvested_changes[file.path] = (file.op, None)
+            continue
+        if file.content is None:
             raise ValueError(f"REPOSITORY_PATCH_WORKSPACE_OP: {file.path!r}")
         _validate_output_text(file.path, file.content)
         observed_hash = _sha256(file.content)
-        if (
+        if file.op == "create":
+            if file.previous_sha256 is not None or file.new_sha256 != observed_hash or not file.modified:
+                raise ValueError(f"REPOSITORY_PATCH_WORKSPACE_HASH: {file.path!r}")
+        elif (
             file.previous_sha256 != expected_hashes[file.path]
             or file.new_sha256 != observed_hash
             or file.modified != (observed_hash != expected_hashes[file.path])
         ):
             raise ValueError(f"REPOSITORY_PATCH_WORKSPACE_HASH: {file.path!r}")
         if file.modified:
-            harvested_changes[file.path] = file.content
+            harvested_changes[file.path] = (file.op, file.content)
 
     if proposal.status != "completed" or not harvested_changes:
         raise ValueError("REPOSITORY_PATCH_PROPOSAL_STATUS: completed nonempty edit required")
-    proposed: dict[str, str] = {}
+    proposed: dict[str, tuple[str, str | None]] = {}
     for change in proposal.changed_files:
         path = _canonical_path(change.path)
         if validate_path(path) is not None:
             raise ValueError("REPOSITORY_PATCH_HOST_POLICY: validate_path must raise or return None")
-        if change.op != "update" or path not in expected_hashes or path in proposed:
+        if path in proposed or (
+            change.op == "update" and path not in expected_hashes
+        ) or (
+            change.op == "create" and path not in context.create_paths
+        ) or (
+            change.op == "delete" and path not in context.delete_paths
+        ):
             raise ValueError(f"REPOSITORY_PATCH_PROPOSAL_SCOPE: {path!r}")
-        proposed[path] = change.content
+        proposed[path] = (change.op, change.content)
     if proposed != harvested_changes:
         raise ValueError("REPOSITORY_PATCH_PROPOSAL_MISMATCH: provider output differs from staged bytes")
     owned_paths = [_canonical_path(path) for path in proposal.owned_paths]
-    if len(set(owned_paths)) != len(owned_paths) or not set(owned_paths) <= set(selected_paths):
+    if len(set(owned_paths)) != len(owned_paths) or not set(owned_paths) <= set(selected_paths) | set(context.create_paths):
         raise ValueError("REPOSITORY_PATCH_OWNERSHIP: provider claimed an unselected path")
     if not set(proposed) <= set(owned_paths):
         raise ValueError("REPOSITORY_PATCH_OWNERSHIP: changed paths were not claimed")
 
-    changes = [
-        RepositoryPatchFile(
+    changes = []
+    for path, (op, content) in sorted(harvested_changes.items()):
+        changes.append(RepositoryPatchFile(
             path=path,
-            previous_sha256=f"sha256:{expected_hashes[path]}",
-            new_sha256=f"sha256:{_sha256(harvested_changes[path])}",
-            content=harvested_changes[path],
-            diff=_unified_diff(path, baseline_files[path], harvested_changes[path]),
-        )
-        for path in sorted(harvested_changes)
-    ]
+            op=op,
+            previous_sha256=f"sha256:{expected_hashes[path]}" if op != "create" else None,
+            new_sha256=f"sha256:{_sha256(content)}" if content is not None else None,
+            content=content,
+            diff=_unified_diff(path, baseline_files.get(path), content),
+        ))
     return RepositoryPatchCandidate(
         handoff_id=context.handoff_id,
         request_id=context.request_id,
@@ -520,7 +646,7 @@ def finalize_repository_patch(
         snapshot_digest=context.snapshot_digest,
         proposal_id=proposal.proposal_id,
         provider_id=proposal.provider_id,
-        summary=f"Selected repository file updates: {len(changes)}.",
+        summary=f"Approved repository file operations: {len(changes)}.",
         rationale="Derived from approved snapshot and host-verified workspace bytes; validation pending.",
         changed_files=changes,
         required_validation_gates=context.required_validation_gates,
