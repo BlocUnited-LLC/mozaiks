@@ -465,9 +465,14 @@ Security readiness may explicitly read SVG text for its secret scan. Assembly
 rechecks the baseline, then applies schema/task outputs, accumulated repairs,
 and explicit deletions in that order. Finalization rechecks the selected record,
 owner, and archive digest before carrying forward unchanged binary bytes into
-the ZIP and file manifest. A text output at a retained binary path blocks the
-download; an explicit deletion removes that asset. The export gate verifies
-those binary bytes again before contacting a source-control provider. A stale
+the ZIP and file manifest. Acceptance records the source BuildRecord ID and
+every retained opaque path, byte count, and SHA-256 digest. It also binds the
+current `deleted_files` tombstones to the snapshot digest. A text output at an
+opaque path or a deletion of one blocks acceptance: the current task inventory
+does not grant binary asset deletion. The source ID stays fixed when the newly
+registered result replaces `artifact_version_id` in the workflow context.
+Finalization and GitHub export reread that source and compare the opaque
+manifest to accepted evidence before writing or contacting a provider. A stale
 selected version is allowed as revision input because invalidation marks the old
 version stale; it is not thereby accepted or promoted. Explicit conceptual
 replans and full rebuilds retain their separate carry-forward policy and do not
@@ -1043,7 +1048,7 @@ cannot reappear during packaging. Empty current artifacts remain empty.
 Authorized deterministic scaffold additions run before acceptance; migration
 history registration records metadata without rewriting accepted file bytes.
 The archive and export gate consume that same final accepted text snapshot plus
-only the binary assets verified from the bound revision source.
+only the opaque assets whose source hashes matched acceptance evidence.
 
 Download archives may include a single top-level folder named for the bundle
 such as `GeneratedApp/`. Studio artifact promotion treats that folder as a zip
@@ -1121,8 +1126,9 @@ final snapshot, including revision baseline preservation. A class rename cannot
 complete an absent action method. A successful import cannot waive the workspace
 subclass contract. Missing files, changed plan/evidence, and unresolved quality
 findings block export. Passing evidence binds the plan, inventory/results, build
-binding, and exact file contents; GitHub export checks the actual archive against
-that digest. Final snapshot validation cannot refill omissions from historical
+binding, exact text contents, revision source ID, opaque asset hashes, and
+tombstones; GitHub export checks the actual archive against that digest. Final
+snapshot validation cannot refill omissions from historical
 worker output.
 
 Offline regressions live in `tests/test_appgenerator_bounded_recovery.py`,

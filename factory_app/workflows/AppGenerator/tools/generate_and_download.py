@@ -37,8 +37,9 @@ from factory_app.workflows.AppGenerator.tools.export_app_code import (
     resolve_export_gate,
 )
 from factory_app.workflows.AppGenerator.tools.hydrate_app_revision_context import (
-    read_bound_revision_binary_assets,
+    revision_asset_evidence,
     revision_baseline_required,
+    revision_source_artifact_id,
 )
 from factory_app.workflows.AppGenerator.tools.requirements_scanner import scan_requirements
 from factory_app.workflows.AppGenerator.tools.schema_migration import inject_migration_into_bundle
@@ -49,9 +50,6 @@ from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.agent_endpoints import (
     resolve_agent_api_url,
     resolve_agent_websocket_url,
-)
-from mozaiksai.core.workflow.generator_support.code_files import (
-    extract_deleted_file_paths_from_payload,
 )
 from mozaiksai.core.workflow.generator_support.workflow_exports import get_latest_workflow_export
 from mozaiksai.core.workflow.ui_tools import UIToolError, use_ui_tool
@@ -579,7 +577,11 @@ async def _register_app_bundle_artifact_version(
     sandbox_provider = None
     if context_variables is not None and hasattr(context_variables, "get"):
         try:
-            parent_version_id = context_variables.get("artifact_version_id")
+            parent_version_id = (
+                revision_source_artifact_id(context_variables)
+                if revision_baseline_required(context_variables)
+                else context_variables.get("artifact_version_id")
+            )
             validation_status_raw = context_variables.get("app_bundle_acceptance_status")
             # Sandbox build-validation outcome, persisted first-class so
             # "which builds passed e2b/docker validation" is queryable
@@ -916,14 +918,9 @@ async def generate_and_download(
     binary_assets: dict[str, bytes] = {}
     if revision_baseline_required(context_variables):
         try:
-            source_assets = await read_bound_revision_binary_assets(context_variables)
-            conflicting = set(source_assets) & set(files_map)
-            if conflicting:
-                raise ValueError("revision_binary_text_replacement: " + ", ".join(sorted(conflicting)))
-            deleted = set(extract_deleted_file_paths_from_payload({
-                "deleted_files": _context_get(context_variables, "deleted_files"),
-            }))
-            binary_assets = {path: data for path, data in source_assets.items() if path not in deleted}
+            binary_assets, source_evidence = await revision_asset_evidence(context_variables, files_map)
+            if source_evidence != _context_get(context_variables, "revision_asset_evidence"):
+                raise ValueError("revision source assets differ from accepted evidence")
         except (OSError, ValueError, zipfile.BadZipFile, ContentNotFoundError) as exc:
             return {
                 "status": "error", "outcome": "blocked",

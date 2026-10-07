@@ -8,8 +8,9 @@ from typing import Any
 
 from factory_app.workflows.AgentGenerator.tools.export_to_github import export_to_github_tool
 from factory_app.workflows.AppGenerator.tools.hydrate_app_revision_context import (
-    read_bound_revision_binary_assets,
+    revision_asset_evidence,
     revision_baseline_required,
+    revision_source_artifact_id,
 )
 from factory_app.workflows.AppGenerator.tools.task_integrity import (
     artifact_snapshot_digest,
@@ -27,10 +28,7 @@ from mozaiksai.core.workflow.generator_support.app_code_versions import (
     persist_patchset,
     persist_snapshot,
 )
-from mozaiksai.core.workflow.generator_support.code_files import (
-    extract_deleted_file_paths_from_payload,
-    safe_relpath,
-)
+from mozaiksai.core.workflow.generator_support.code_files import safe_relpath
 from mozaiksai.core.workflow.generator_support.workflow_exports import (
     get_latest_workflow_export,
     record_workflow_export,
@@ -89,6 +87,14 @@ def resolve_export_gate(context_variables: Any | None, *, files: dict[str, str] 
 
     snapshot = files if files is not None else (_read_ctx(context_variables, "generated_files") or {})
     reasons.extend(item["error"] for item in planned_artifact_diagnostics(context_variables, snapshot))
+    if revision_baseline_required(context_variables):
+        source_evidence = _read_ctx(context_variables, "revision_asset_evidence")
+        if (
+            not isinstance(source_evidence, dict)
+            or source_evidence.get("source_artifact_version_id") != revision_source_artifact_id(context_variables)
+            or not isinstance(source_evidence.get("opaque_assets"), list)
+        ):
+            reasons.append("Revision source assets do not have accepted evidence.")
     if acceptance_status == "passed":
         accepted = _read_ctx(context_variables, "app_bundle_acceptance_result") or {}
         try:
@@ -164,11 +170,11 @@ async def export_app_code_to_github(
             snapshot: dict[str, str] = {}
             binary_assets: dict[str, bytes] = {}
             if revision_baseline_required(context_variables):
-                binary_assets = await read_bound_revision_binary_assets(context_variables)
-                deleted = set(extract_deleted_file_paths_from_payload({
-                    "deleted_files": _read_ctx(context_variables, "deleted_files"),
-                }))
-                binary_assets = {path: data for path, data in binary_assets.items() if path not in deleted}
+                binary_assets, source_evidence = await revision_asset_evidence(
+                    context_variables, _read_ctx(context_variables, "generated_files") or {},
+                )
+                if source_evidence != _read_ctx(context_variables, "revision_asset_evidence"):
+                    raise ValueError("revision source assets differ from accepted evidence")
             seen_binary: set[str] = set()
             prefix = Path(bundle_path).stem + "/"
             with zipfile.ZipFile(bundle_path) as archive:

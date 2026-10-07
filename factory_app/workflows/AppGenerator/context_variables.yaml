@@ -227,6 +227,24 @@ definitions:
     source:
       type: state
       default: null
+  revision_source_artifact_version_id:
+    type: string
+    description: Verified source BuildRecord selected for this revision, retained when artifact_version_id becomes the new result.
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source:
+      type: state
+      default: null
+  revision_asset_evidence:
+    type: object
+    description: Exact source BuildRecord, opaque asset hashes, and accepted deleted-file tombstones.
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source:
+      type: state
+      default: null
   sequence_status:
     type: string
     description: >

@@ -11,12 +11,17 @@ import pytest
 import yaml
 
 from factory_app.workflows._shared.artifact_bundle import read_artifact_bundle
-from factory_app.workflows.AppGenerator.tools import export_app_code, generate_and_download
+from factory_app.workflows.AppGenerator.tools import (
+    app_validation,
+    export_app_code,
+    generate_and_download,
+)
 from factory_app.workflows.AppGenerator.tools import hydrate_app_revision_context as revision
 from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
 from factory_app.workflows.AppGenerator.tools.generate_and_download import (
     _build_generated_files_manifest,
 )
+from factory_app.workflows.AppGenerator.tools.task_integrity import artifact_snapshot_digest
 from mozaiksai.core.artifacts import content_store
 from mozaiksai.core.artifacts.models import BuildRecord, resolve_canonical_bundle_entry
 from mozaiksai.core.workflow.context.adapter import create_context_container
@@ -223,9 +228,24 @@ def _download_context(baseline, *, deleted=(), replacement=None):
 def _stub_download_boundaries(monkeypatch, tmp_path):
     monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path / "generated"))
     monkeypatch.setattr(generate_and_download, "_inject_agent_context_env", AsyncMock())
-    monkeypatch.setattr(generate_and_download, "run_app_bundle_acceptance_gate", AsyncMock(return_value={
-        "passed": True, "status": "passed", "bundle_scan": {"errors": []},
-    }))
+    async def accept_source(*, files, context_variables, **_kwargs):
+        try:
+            _, evidence = await revision.revision_asset_evidence(context_variables, files)
+        except (OSError, ValueError) as exc:
+            return {"passed": False, "status": "failed", "bundle_scan": {"errors": [str(exc)]}}
+        context_variables.set("revision_source_artifact_version_id", evidence["source_artifact_version_id"])
+        context_variables.set("revision_asset_evidence", evidence)
+        context_variables.set("generated_files", files)
+        context_variables.set("app_build_plan", {"build_tasks": []})
+        context_variables.set("app_validation_status", "passed")
+        context_variables.set("integration_tests_passed", True)
+        context_variables.set("app_bundle_acceptance_status", "passed")
+        context_variables.set("app_bundle_acceptance_result", {
+            "snapshot_digest": artifact_snapshot_digest(context_variables, files),
+        })
+        return {"passed": True, "status": "passed", "bundle_scan": {"errors": []}}
+
+    monkeypatch.setattr(generate_and_download, "run_app_bundle_acceptance_gate", accept_source)
     monkeypatch.setattr(generate_and_download, "resolve_export_gate", lambda *_args, **_kwargs: {
         "allow_export": True, "reasons": [],
     })
@@ -239,12 +259,11 @@ def _stub_download_boundaries(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("delete", [False, True])
-async def test_revision_final_zip_preserves_exact_binary_and_canonical_manifest(baseline, monkeypatch, tmp_path, delete):
+async def test_revision_final_zip_preserves_exact_binary_and_canonical_manifest(baseline, monkeypatch, tmp_path):
     binary = b"\x89PNG" + bytes(2_100_000)
     svg = b"<svg>" + b"x" * 2_550_000 + b"</svg>"
     _replace_archive(baseline, {"brand/logo.png": binary, "brand/favicon.svg": svg})
-    context = _download_context(baseline, deleted=["brand/logo.png"] if delete else [])
+    context = _download_context(baseline)
     boundaries = _stub_download_boundaries(monkeypatch, tmp_path)
 
     result = await generate_and_download.generate_and_download({}, "Ready", context_variables=context)
@@ -255,21 +274,15 @@ async def test_revision_final_zip_preserves_exact_binary_and_canonical_manifest(
         entries = set(archive.namelist())
         assert "RevisedApp/app.json" in entries
         assert archive.read("RevisedApp/brand/favicon.svg") == svg
-        if delete:
-            assert "RevisedApp/brand/logo.png" not in entries
-        else:
-            assert archive.read("RevisedApp/brand/logo.png") == binary
+        assert archive.read("RevisedApp/brand/logo.png") == binary
     manifest = _build_generated_files_manifest(
         bundle_name="RevisedApp", app_dir=Path(result["bundle_dir"]), written_paths=result["files_written"],
     )
     binary_manifest = [entry for entry in manifest if entry["path"] == "RevisedApp/brand/logo.png"]
-    if delete:
-        assert binary_manifest == []
-    else:
-        assert binary_manifest == [{
-            "path": "RevisedApp/brand/logo.png", "sha256": hashlib.sha256(binary).hexdigest(),
-            "size_bytes": len(binary), "content_type": "application/octet-stream",
-        }]
+    assert binary_manifest == [{
+        "path": "RevisedApp/brand/logo.png", "sha256": hashlib.sha256(binary).hexdigest(),
+        "size_bytes": len(binary), "content_type": "application/octet-stream",
+    }]
     recorded = []
 
     async def create_record(**kwargs):
@@ -296,6 +309,145 @@ async def test_revision_final_zip_preserves_exact_binary_and_canonical_manifest(
     assert [entry.model_dump() for entry in record.files_manifest[1:]] == manifest
     boundaries.registry.assert_awaited_once()
     boundaries.ui.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_revision_opaque_deletion_fails_acceptance_before_zip(baseline, monkeypatch, tmp_path):
+    _replace_archive(baseline, {"brand/logo.png": b"\x89PNG"})
+    context = _download_context(baseline, deleted=["brand/logo.png"])
+    boundaries = _stub_download_boundaries(monkeypatch, tmp_path)
+
+    result = await generate_and_download.generate_and_download({}, "Ready", context_variables=context)
+
+    assert result["status"] == "error" and result["outcome"] == "blocked"
+    assert "revision_binary_deletion_unowned" in result["bundle_errors"][0]
+    assert not list(tmp_path.rglob("*.zip"))
+    boundaries.registry.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mutation", ["late_tombstone", "changed_source_bytes"])
+async def test_revision_rejects_source_changes_after_acceptance_before_zip(
+    baseline, monkeypatch, tmp_path, mutation,
+):
+    _replace_archive(baseline, {"brand/logo.png": b"\x89PNG-original"})
+    context = _download_context(baseline)
+    boundaries = _stub_download_boundaries(monkeypatch, tmp_path)
+    accepted = generate_and_download.run_app_bundle_acceptance_gate
+
+    async def mutate_after_acceptance(**kwargs):
+        result = await accepted(**kwargs)
+        if mutation == "late_tombstone":
+            context.set("deleted_files", ["brand/logo.png"])
+        else:
+            _replace_archive(baseline, {"brand/logo.png": b"\x89PNG-changed"})
+        return result
+
+    monkeypatch.setattr(generate_and_download, "run_app_bundle_acceptance_gate", mutate_after_acceptance)
+    monkeypatch.setattr(generate_and_download, "resolve_export_gate", export_app_code.resolve_export_gate)
+
+    result = await generate_and_download.generate_and_download({}, "Ready", context_variables=context)
+
+    assert result["status"] == "error" and result["outcome"] == "blocked"
+    assert not list(tmp_path.rglob("*.zip"))
+    boundaries.registry.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_revision_acceptance_binds_source_hashes_and_tombstones(baseline, monkeypatch):
+    from scripts.smoke_appgenerator_live_acceptance import (
+        build_appgenerator_acceptance_files,
+        default_workflow_integration,
+    )
+    from tests.test_app_validation_strategy import _accept_support_tasks, _Context
+
+    integration = default_workflow_integration()
+    files = build_appgenerator_acceptance_files(integration)
+    manifest = json.loads(files["app.json"])
+    manifest["appId"] = "customer-app"
+    files["app.json"] = json.dumps(manifest)
+    baseline.files = files
+    binary = b"\x89PNG" + bytes(11)
+    _replace_archive(baseline, {"brand/logo.png": binary})
+    context = _Context({**baseline.context, "generated_files": files, "deleted_files": []})
+    context.set("generated_workflow_name", integration["workflow_name"])
+    context.set("generated_workflow_capability_id", integration["capability_id"])
+    context.set("generated_workflow_startup_mode", integration["startup_mode"])
+    context.set("generated_workflow_trigger_events", integration["trigger_events"])
+    context.set("app_validation_status", "passed")
+    context.set("app_validation_strategy_used", "local")
+    _accept_support_tasks(context, files)
+    monkeypatch.setattr(app_validation.app_runtime_smoke, "run_app_runtime_smoke", AsyncMock(return_value={
+        "status": "passed", "passed": True, "failed_tests": [], "checks": [],
+    }))
+
+    accepted = await app_validation.run_app_bundle_acceptance_gate(files=files, context_variables=context)
+
+    assert accepted["passed"] is True, accepted
+    assert context.get("revision_asset_evidence") == {
+        "source_artifact_version_id": "artifact_1",
+        "opaque_assets": [{
+            "path": "brand/logo.png", "sha256": hashlib.sha256(binary).hexdigest(), "size_bytes": len(binary),
+        }],
+        "deleted_files": [],
+    }
+    assert export_app_code.resolve_export_gate(context)["allow_export"] is True
+
+    context.set("artifact_version_id", "artifact_2")
+    reentered = await app_validation.run_app_bundle_acceptance_gate(files=files, context_variables=context)
+    assert reentered["passed"] is True, reentered
+    assert export_app_code.resolve_export_gate(context)["allow_export"] is True
+    assert all(call.kwargs["build_record_id"] == "artifact_1" for call in baseline.store.get_build_record.await_args_list)
+
+    context.set("deleted_files", ["modules/support_tickets/backend/handler.py"])
+    assert export_app_code.resolve_export_gate(context)["allow_export"] is False
+    context.set("deleted_files", [])
+    evidence = context.get("revision_asset_evidence")
+    evidence["opaque_assets"][0]["sha256"] = "0" * 64
+    assert export_app_code.resolve_export_gate(context)["allow_export"] is False
+
+    context.set("deleted_files", ["brand/logo.png"])
+    denied = await app_validation.run_app_bundle_acceptance_gate(files=files, context_variables=context)
+    assert denied["passed"] is False
+    assert any("revision_binary_deletion_unowned" in error for error in denied["bundle_scan"]["errors"])
+
+
+@pytest.mark.asyncio
+async def test_revision_source_survives_register_then_export(baseline, monkeypatch, tmp_path):
+    binary = b"\x89PNG" + bytes(23)
+    _replace_archive(baseline, {"brand/logo.png": binary})
+    context = _download_context(baseline)
+    boundaries = _stub_download_boundaries(monkeypatch, tmp_path)
+    monkeypatch.setattr(generate_and_download, "_register_app_bundle_artifact_version", boundaries.register)
+    monkeypatch.setattr(generate_and_download, "resolve_export_gate", export_app_code.resolve_export_gate)
+    monkeypatch.setattr(generate_and_download, "_register_greenfield_app_context_for_bundle", AsyncMock())
+    boundaries.ui.return_value = {"status": "completed", "action": "export_to_github"}
+
+    async def create_record(**kwargs):
+        assert kwargs["parent_build_record_id"] == "artifact_1"
+        return BuildRecord(
+            id="artifact_2", app_id=kwargs["app_id"], build_family=kwargs["build_family"],
+            build_key=kwargs["build_key"], version_number=2, lineage_root_id="artifact_1",
+            files_manifest=kwargs["files_manifest"], commit_metadata=kwargs["commit_metadata"],
+        )
+
+    baseline.store.create_build_record = create_record
+    artifacts = importlib.import_module("mozaiksai.core.artifacts")
+    monkeypatch.setattr(artifacts, "get_artifact_store", lambda: baseline.store)
+    monkeypatch.setattr(artifacts, "resolve_latest_artifact_version_refs", AsyncMock(return_value={}))
+    monkeypatch.setattr(export_app_code, "get_latest_workflow_export", AsyncMock(return_value=None))
+    provider = AsyncMock(return_value=SimpleNamespace(success=False, model_dump=lambda: {"success": False}))
+    monkeypatch.setattr(export_app_code.export_to_github_tool, "execute", provider)
+
+    result = await generate_and_download.generate_and_download({}, "Ready", context_variables=context)
+
+    assert context.get("artifact_version_id") == "artifact_2"
+    assert context.get("revision_source_artifact_version_id") == "artifact_1"
+    assert export_app_code.resolve_export_gate(context)["allow_export"] is True
+    assert result["deployment"].get("blocked") is not True, result
+    provider.assert_awaited_once()
+    assert baseline.store.get_build_record.await_count >= 3
+    assert all(call.kwargs["build_record_id"] == "artifact_1" for call in baseline.store.get_build_record.await_args_list)
 
 
 @pytest.mark.asyncio
@@ -327,6 +479,9 @@ async def test_export_verifies_revision_binary_against_bound_source_before_provi
     binary = b"\x89PNG" + bytes(10)
     _replace_archive(baseline, {"brand/logo.png": binary})
     context = _download_context(baseline)
+    _, evidence = await revision.revision_asset_evidence(context, baseline.files)
+    context.set("revision_source_artifact_version_id", evidence["source_artifact_version_id"])
+    context.set("revision_asset_evidence", evidence)
     archive_path = tmp_path / "RevisedApp.zip"
     with zipfile.ZipFile(archive_path, "w") as archive:
         for path, content in baseline.files.items():
