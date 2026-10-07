@@ -46,6 +46,12 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
+- Scoped ACP coding-provider API credentials to the selected CLI adapter,
+  preventing Claude Code, Codex, and OpenCode subprocesses from receiving one
+  another's API keys. The default local ACP path now refuses execution because
+  AG2 does not enforce terminal denial at its bridge; an isolated worker is
+  required before ACP can run live.
+
 - Patched DOMPurify and source-map-js in the shipped frontend dependency locks,
   including Monaco's nested DOMPurify dependency.
 

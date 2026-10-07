@@ -211,6 +211,22 @@ async def test_disabled_provider_is_unavailable(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_default_local_acp_is_unavailable_until_isolated(tmp_path: Path) -> None:
+    staging_root = tmp_path / "acp_staging"
+    provider = ACPCodingProvider(
+        config_loader=_policy(),
+        staging_root=staging_root,
+        env_source={"ANTHROPIC_API_KEY": "test-only"},
+    )
+
+    proposal = await provider.execute(_request())
+
+    assert proposal.status == "unavailable"
+    assert "verified OS isolation" in str(proposal.error)
+    assert not staging_root.exists()
+
+
+@pytest.mark.asyncio
 async def test_file_count_over_budget_fails_before_any_execution(tmp_path: Path) -> None:
     factory = _FakeConfigFactory()
     provider = _provider(factory, tmp_path, budget={"max_files": 1})
@@ -264,16 +280,27 @@ async def test_workspace_is_cleaned_up_even_on_rejection(tmp_path: Path) -> None
 # ---------------------------------------------------------------------------
 
 
-def test_build_acp_agent_config_is_hardened(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("adapter", "expected_env", "expected_command"),
+    [
+        ("claude_code", {"ANTHROPIC_API_KEY": "sk-ant-x"}, ["claude-agent-acp"]),
+        ("codex", {"CODEX_API_KEY": "sk-codex-x"}, ["codex-acp"]),
+        ("opencode", None, ["opencode", "acp"]),
+    ],
+)
+def test_build_acp_agent_config_is_hardened(
+    tmp_path: Path, adapter: str, expected_env: dict[str, str] | None, expected_command: list[str]
+) -> None:
     env_source = {
         "ANTHROPIC_API_KEY": "sk-ant-x",
+        "CODEX_API_KEY": "sk-codex-x",
         "OPENAI_API_KEY": "sk-oai-x",
         "MONGO_URI": "mongodb://secret",
         "MOZAIKSPAY_CLIENT_SECRET": "mps_secret",
         "PATH": "/usr/bin",
     }
     config = build_acp_agent_config(
-        adapter="claude_code",
+        adapter=adapter,
         workspace_root=tmp_path,
         turn_timeout_seconds=300,
         env_source=env_source,
@@ -286,9 +313,20 @@ def test_build_acp_agent_config_is_hardened(tmp_path: Path) -> None:
     assert config.expose_tools is False
     assert config.allow_terminal is False
     assert config.turn_timeout == 300.0
-    # env allowlist: provider keys only — never platform secrets or PATH
-    assert config.env == {"ANTHROPIC_API_KEY": "sk-ant-x", "OPENAI_API_KEY": "sk-oai-x"}
-    assert config.command == ["claude-agent-acp"]
+    # Never forward another adapter's credential or platform secrets.
+    assert config.env == expected_env
+    assert config.command == expected_command
+
+
+def test_codex_uses_openai_key_only_when_codex_key_is_absent(tmp_path: Path) -> None:
+    config = build_acp_agent_config(
+        adapter="codex",
+        workspace_root=tmp_path,
+        turn_timeout_seconds=300,
+        env_source={"ANTHROPIC_API_KEY": "sk-ant-x", "OPENAI_API_KEY": "sk-oai-x"},
+    )
+
+    assert config.env == {"OPENAI_API_KEY": "sk-oai-x"}
 
 
 def test_build_acp_agent_config_rejects_unknown_adapter(tmp_path: Path) -> None:
