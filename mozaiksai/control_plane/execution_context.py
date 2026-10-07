@@ -69,11 +69,16 @@ class ApprovedExecutionContext(BaseModel):
         return sorted(set(normalized))
 
 
-def _path_is_allowed(path: str, allowed_paths: list[str], prohibited_paths: list[str]) -> bool:
+def _path_is_allowed(
+    path: str,
+    allowed_paths: list[str],
+    prohibited_paths: list[str],
+    read_only_paths: list[str],
+) -> bool:
     normalized = safe_artifact_relpath(path)
     if normalized is None:
         return False
-    for denied in prohibited_paths:
+    for denied in [*prohibited_paths, *read_only_paths]:
         if normalized == denied or normalized.startswith(f"{denied.rstrip('/')}/"):
             return False
     return any(
@@ -90,8 +95,10 @@ def build_coding_request_from_execution_context(
     """Build an explicit-scope coding request from a host-approved context.
 
     ``baseline_files`` must already be fetched by the host at the approved
-    baseline SHA. Only files inside the approved path scope are passed to the
-    worker, and an empty scope fails closed.
+    baseline SHA. Only editable files inside the approved path scope are passed
+    to the worker. Prohibited and read-only paths take precedence over allowed
+    paths; their contents are not included in the request. An empty editable
+    scope fails closed.
     """
 
     approved = (
@@ -102,7 +109,12 @@ def build_coding_request_from_execution_context(
     scoped_files = {
         path: content
         for path, content in baseline_files.items()
-        if _path_is_allowed(path, approved.allowed_paths, approved.prohibited_paths)
+        if _path_is_allowed(
+            path,
+            approved.allowed_paths,
+            approved.prohibited_paths,
+            approved.read_only_paths,
+        )
     }
     if not scoped_files:
         raise ValueError("approved execution context produced no scoped baseline files")
@@ -115,7 +127,7 @@ def build_coding_request_from_execution_context(
         raw_user_request=approved.raw_request,
         change_class="patch",
         files=scoped_files,
-        baseline_files=dict(baseline_files),
+        baseline_files=dict(scoped_files),
         context_seed={
             "execution_context": approved.model_dump(mode="python"),
         },
