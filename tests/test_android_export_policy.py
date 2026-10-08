@@ -39,6 +39,25 @@ def _write(root: Path, name: str, content: str | bytes) -> None:
     path.write_bytes(content.encode("utf-8") if isinstance(content, str) else content)
 
 
+def _xml_meta(value: str) -> bytes:
+    return f'<configuration><meta name="access_token" content="{value}"/></configuration>'.encode()
+
+
+def _svg_meta(value: str) -> bytes:
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg"><metadata>'
+        f'<meta name="access_token" content="{value}"/>'
+        f'</metadata></svg>'
+    ).encode()
+
+
+def _png_xmp_meta(value: str) -> bytes:
+    return _png_with_text(
+        b"iTXt", b"XML:com.adobe.xmp\0\x00\0\0\0" +
+        f'<metadata><meta name="access_token" content="{value}"/></metadata>'.encode(),
+    )
+
+
 @pytest.fixture
 def export_input(tmp_path, monkeypatch):
     workspace = tmp_path / "source"
@@ -91,6 +110,57 @@ def test_demonstrated_leaks_are_rejected_independently_before_either_archive(exp
     assert not output.exists()
     assert not list(workspace.parent.rglob("*.zip"))
     assert (workspace / name).read_text() == content
+
+
+@pytest.mark.parametrize("name,make_content", [
+    ("app/config/provider.xml", _xml_meta),
+    ("app/brand/assets/metadata.svg", _svg_meta),
+    ("app/brand/assets/xmp.png", _png_xmp_meta),
+    ("app/config/provider.toml", lambda value: f'[access_token]\ndefaultValue = "{value}"\n'.encode()),
+    ("app/config/provider.toml", lambda value: f'[access_token]\ndefault_value = "{value}"\n'.encode()),
+    ("app/config/provider.toml", lambda value: f'[access_token]\n"default-value" = "{value}"\n'.encode()),
+    ("app/config/provider.json", lambda value: json.dumps({"access_token": {"defaultValue": value}}).encode()),
+    ("app/config/provider.json", lambda value: json.dumps({"access_token": {"default_value": value}}).encode()),
+    ("app/config/provider.json", lambda value: json.dumps({"access_token": {"default-value": value}}).encode()),
+], ids=[
+    "xml-meta-content", "svg-meta-content", "png-xmp-meta-content",
+    "toml-camel-default", "toml-snake-default", "toml-kebab-default",
+    "json-camel-default", "json-snake-default", "json-kebab-default",
+])
+def test_credential_metadata_literals_fail_but_runtime_references_remain_portable(
+    export_input, name, make_content,
+):
+    workspace, spec, output = export_input
+    unsafe = make_content(SYNTHETIC_TOKEN)
+    _write(workspace, name, unsafe)
+
+    with pytest.raises(delivery.AndroidDeliveryError) as caught:
+        delivery.materialize_android_workspace(workspace, spec, output)
+
+    assert SYNTHETIC_TOKEN not in str(caught.value)
+    assert not output.exists()
+    assert not list(workspace.parent.rglob("*.zip"))
+
+    safe = make_content("${INTEGRATION_API_TOKEN}")
+    _write(workspace, name, safe)
+    result = delivery.materialize_android_workspace(workspace, spec, output)
+    delivery.verify_android_delivery(Path(result["mobile_dir"]))
+    for field in ("source_archive", "archive_path"):
+        with ZipFile(result[field]) as archive:
+            assert archive.read(name) == safe
+
+
+def test_ordinary_xml_content_metadata_is_public(export_input):
+    workspace, spec, output = export_input
+    name = "app/config/provider.xml"
+    content = b'<configuration><meta name="title" content="Public title"/></configuration>'
+    _write(workspace, name, content)
+
+    result = delivery.materialize_android_workspace(workspace, spec, output)
+    delivery.verify_android_delivery(Path(result["mobile_dir"]))
+    for field in ("source_archive", "archive_path"):
+        with ZipFile(result[field]) as archive:
+            assert archive.read(name) == content
 
 
 @pytest.mark.parametrize("name", [
@@ -479,6 +549,26 @@ def test_yaml_alias_reused_in_credential_context_does_not_inherit_a_safe_verdict
             '<svg xmlns="http://www.w3.org/2000/svg"><metadata>'
             f'<access_token defaultValue="{SYNTHETIC_TOKEN}"/></metadata></svg>'
         ).encode(),
+    ),
+    (
+        "app/config/provider.xml",
+        _xml_meta("${INTEGRATION_API_TOKEN}"),
+        _xml_meta(SYNTHETIC_TOKEN),
+    ),
+    (
+        "app/brand/assets/xmp.png",
+        _png_xmp_meta("${INTEGRATION_API_TOKEN}"),
+        _png_xmp_meta(SYNTHETIC_TOKEN),
+    ),
+    (
+        "app/config/provider.toml",
+        b'[access_token]\ndefaultValue = "${INTEGRATION_API_TOKEN}"\n',
+        f'[access_token]\ndefaultValue = "{SYNTHETIC_TOKEN}"\n'.encode(),
+    ),
+    (
+        "app/config/provider.json",
+        b'{"access_token":{"defaultValue":"${INTEGRATION_API_TOKEN}"}}',
+        json.dumps({"access_token": {"defaultValue": SYNTHETIC_TOKEN}}).encode(),
     ),
 ])
 def test_delivery_verification_rejects_secret_source_even_with_matching_inventory_hashes(

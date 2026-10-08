@@ -39,11 +39,16 @@ _DOCUMENTATION_URI = "postgresql://user:pass@host:port/dbname"
 _UNQUOTED_CONFIG = {".ini", ".conf", ".cfg", ".toml", ".properties", ".txt"}
 _PNG_TEXT_LIMIT = 1024 * 1024
 _PNG_TOTAL_TEXT_LIMIT = 2 * _PNG_TEXT_LIMIT
+_CREDENTIAL_VALUE_FIELDS = frozenset({"value", "default", "default_value", "secret_value", "data", "content"})
+
+
+def _normalized_key(value: str) -> str:
+    value = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", value)
+    return re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
 
 
 def _credential_key(value: str) -> bool:
-    value = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", value)
-    value = re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
+    value = _normalized_key(value)
     if value.endswith(("_env", "_ref", "_name", "_names", "_type", "_url", "_uri")):
         return value in {"mongo_uri", "mongodb_uri", "database_url", "database_uri", "redis_url"}
     for suffix in ("_value", "_hash", "_b64", "_base64", "_hex", "_encoded"):
@@ -87,7 +92,7 @@ def _structured_credentials(
     if isinstance(value, list):
         return any(_structured_credentials(item, credential=credential, ancestors=ancestors, visited=visited) for item in value)
     for key, item in value.items():
-        sensitive = _credential_key(str(key)) or (credential and key in {"value", "default"})
+        sensitive = _credential_key(str(key)) or (credential and _normalized_key(str(key)) in _CREDENTIAL_VALUE_FIELDS)
         if _structured_credentials(item, credential=sensitive, ancestors=ancestors, visited=visited):
             return True
     return False
@@ -322,10 +327,7 @@ def _xml_credentials(text: str, *, require_svg: bool = False, nested_depth: int 
             for key, value in element.attrib.items()
         ):
             return True
-        attributes = {
-            re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", key.rpartition("}")[2]).lower().replace("-", "_"): value
-            for key, value in element.attrib.items()
-        }
+        attributes = {_normalized_key(key.rpartition("}")[2]): value for key, value in element.attrib.items()}
         declared_key = attributes.get("name") or attributes.get("key")
         credential_field = _credential_key(element.tag.rpartition("}")[2]) or bool(
             declared_key and _credential_key(declared_key)
@@ -333,7 +335,7 @@ def _xml_credentials(text: str, *, require_svg: bool = False, nested_depth: int 
         if credential_field and (
             any(
                 _literal_secret(attributes.get(key))
-                for key in ("value", "default", "default_value", "secret_value", "data")
+                for key in _CREDENTIAL_VALUE_FIELDS
             )
             or _literal_secret("".join(element.itertext()).strip())
         ):
