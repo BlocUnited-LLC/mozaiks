@@ -232,6 +232,13 @@ digest; the runner checks the copied mount bytes and rejects missing or extra
 files. This is a separate opt-in backend; ordinary generated-app acceptance
 continues to use the child-process smoke described above.
 
+Before staging imported source, a caller can use
+`preflight_contained_imported_smoke()` to require a reachable local Docker
+daemon and an exact pinned validator image. It raises on missing capability and
+returns the immutable image ID. The runner repeats the same preflight before
+copying source and runs both containers by that ID; a successful early check
+does not replace the execution-time check.
+
 The imported backend copies up to 4,096 regular files and 64 MB into a private
 temporary directory, rejecting links and special files. It runs two disposable
 containers from the same pinned local image. Container A mounts the verified app

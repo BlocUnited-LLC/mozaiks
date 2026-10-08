@@ -454,33 +454,46 @@ class _ContainedDockerProcess:
             _container_removed(self.name)
 
 
+def preflight_contained_imported_smoke(
+    *, image: str | None = None, expected_image_id: str | None = None,
+) -> str:
+    """Require Docker and the exact trusted image ID before imported-source staging."""
+    from mozaiksai.core.adapters.docker_sandbox import docker_available
+
+    if not docker_available():
+        raise RuntimeError("contained Docker validation is unavailable")
+    pinned_image_id = expected_image_id or os.environ.get("MOZAIKS_IMPORTED_SMOKE_IMAGE_ID")
+    if not pinned_image_id:
+        raise RuntimeError("contained validator image identity is unconfigured")
+    selected_image = image or os.environ.get("DOCKER_SANDBOX_IMAGE") or _CONTAINED_IMAGE
+    try:
+        inspected = subprocess.run(
+            ["docker", "image", "inspect", "--format", "{{.Id}}", selected_image],
+            capture_output=True, text=True, timeout=5, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        raise RuntimeError("contained Docker image is unavailable") from None
+    image_id = inspected.stdout.strip() if inspected.returncode == 0 else ""
+    if image_id != pinned_image_id or not image_id.startswith("sha256:") or len(image_id) != 71:
+        raise RuntimeError("contained Docker image is unavailable")
+    return image_id
+
+
 async def run_contained_imported_app_runtime_smoke(
     app_root: Path, *, timeout_seconds: float = SMOKE_TIMEOUT_SECONDS, image: str | None = None,
     expected_source_sha256: Mapping[str, str] | None = None,
     expected_image_id: str | None = None,
 ) -> dict[str, Any]:
     """Smoke verified imported bytes with a private MongoDB and no container egress."""
-    from mozaiksai.core.adapters.docker_sandbox import docker_available
-
     started = time.monotonic()
-    if not docker_available():
-        return _contained_unavailable("contained Docker validation is unavailable", started=started)
     if not expected_source_sha256:
         return _contained_unavailable("verified imported-source digests are unavailable", started=started)
-    pinned_image_id = expected_image_id or os.environ.get("MOZAIKS_IMPORTED_SMOKE_IMAGE_ID")
-    if not pinned_image_id:
-        return _contained_unavailable("contained validator image identity is unconfigured", started=started)
-    selected_image = image or os.environ.get("DOCKER_SANDBOX_IMAGE") or _CONTAINED_IMAGE
     try:
-        inspected = await asyncio.to_thread(
-            subprocess.run, ["docker", "image", "inspect", "--format", "{{.Id}}", selected_image],
-            capture_output=True, text=True, timeout=5, check=False,
+        image_id = await asyncio.to_thread(
+            preflight_contained_imported_smoke, image=image, expected_image_id=expected_image_id,
         )
-    except (OSError, subprocess.TimeoutExpired):
-        return _contained_unavailable("contained Docker image is unavailable", started=started)
-    image_id = inspected.stdout.strip() if inspected.returncode == 0 else ""
-    if image_id != pinned_image_id or not image_id.startswith("sha256:") or len(image_id) != 71:
-        return _contained_unavailable("contained Docker image is unavailable", started=started)
+    except RuntimeError as exc:
+        return _contained_unavailable(str(exc), started=started)
     with tempfile.TemporaryDirectory(prefix="mozaiks-imported-smoke-") as temporary:
         staged_root = Path(temporary) / "app"
         plan_root = Path(temporary) / "plan"
@@ -1776,6 +1789,7 @@ def _summary(outcomes: list[dict[str, Any]], meta: Mapping[str, Any], *, started
 __all__ = [
     "SMOKE_TIMEOUT_SECONDS",
     "child_environment",
+    "preflight_contained_imported_smoke",
     "resolve_smoke_mongo_uri",
     "run_app_runtime_smoke",
     "run_contained_imported_app_runtime_smoke",

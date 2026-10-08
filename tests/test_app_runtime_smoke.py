@@ -27,6 +27,7 @@ import yaml
 from factory_app.workflows.AppGenerator.tools import app_runtime_smoke
 from factory_app.workflows.AppGenerator.tools.app_runtime_smoke import (
     child_environment,
+    preflight_contained_imported_smoke,
     run_app_runtime_smoke,
     run_contained_imported_app_runtime_smoke,
 )
@@ -165,11 +166,44 @@ async def test_imported_smoke_without_docker_is_pending_not_a_pass(monkeypatch):
     assert result["checks"][0]["details"]["blocking"] is True
 
 
+def test_imported_smoke_preflight_requires_docker_and_pinned_image(monkeypatch):
+    from mozaiksai.core.adapters import docker_sandbox
+
+    monkeypatch.setattr(docker_sandbox, "docker_available", lambda: False)
+    with pytest.raises(RuntimeError, match="contained Docker validation is unavailable"):
+        preflight_contained_imported_smoke(expected_image_id="sha256:" + "a" * 64)
+
+    monkeypatch.setattr(docker_sandbox, "docker_available", lambda: True)
+    monkeypatch.delenv("MOZAIKS_IMPORTED_SMOKE_IMAGE_ID", raising=False)
+    with pytest.raises(RuntimeError, match="contained validator image identity is unconfigured"):
+        preflight_contained_imported_smoke()
+
+
+def test_imported_smoke_preflight_returns_exact_immutable_image_id(monkeypatch):
+    from mozaiksai.core.adapters import docker_sandbox
+
+    image_id = "sha256:" + "a" * 64
+    commands = []
+    monkeypatch.setattr(docker_sandbox, "docker_available", lambda: True)
+
+    def inspect(command, **_kwargs):
+        commands.append(command)
+        return SimpleNamespace(returncode=0, stdout=image_id + "\n")
+
+    monkeypatch.setattr(app_runtime_smoke.subprocess, "run", inspect)
+    assert preflight_contained_imported_smoke(image="trusted:local", expected_image_id=image_id) == image_id
+    assert commands == [["docker", "image", "inspect", "--format", "{{.Id}}", "trusted:local"]]
+
+
 async def test_imported_smoke_requires_pinned_validator_image(monkeypatch, tmp_path):
     from mozaiksai.core.adapters import docker_sandbox
 
     monkeypatch.setattr(docker_sandbox, "docker_available", lambda: True)
     monkeypatch.delenv("MOZAIKS_IMPORTED_SMOKE_IMAGE_ID", raising=False)
+    monkeypatch.setattr(
+        app_runtime_smoke, "_copy_imported_app",
+        lambda *_args, **_kwargs: pytest.fail("source was staged without a pinned validator image"),
+    )
     result = await run_contained_imported_app_runtime_smoke(
         tmp_path, expected_source_sha256={"app.json": hashlib.sha256(b"{}").hexdigest()},
     )
