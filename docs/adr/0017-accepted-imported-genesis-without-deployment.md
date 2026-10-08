@@ -76,6 +76,19 @@ boundary must provide trustworthy event rejection evidence, or a separate
 explicit decision must narrow the public acceptance contract and disclose that
 reduced scope to downstream consumers.
 
+There is also a distinct static-validation gap. The current acceptance call
+reuses `run_app_bundle_acceptance_gate`, whose `scan_generated_bundle` check is
+defined for Factory-generated output. A read-only projection of App Zero's
+tracked `app/` source passes the import archive and manifest limits but fails
+that scanner on authored files and paths outside the generator's file contract.
+The separate workspace-root `workflows/` cannot be represented as members of
+that app bundle either. An improved runtime observer alone would therefore not
+make App Zero's imported source acceptable. Before a live brownfield baseline,
+the acceptance contract must explicitly validate canonical authored-app and
+workspace surfaces without claiming the source passed generated-output rules;
+its receipt must name that scope. This is an unresolved architecture decision,
+not a reason to suppress scanner errors or to mark the current gate passed.
+
 AppRegistry accepts the exact reserved claim with a single owner/host/target
 compare and swap. Its receipt records reviewer, time, validation contract,
 and evidence digest. The artifact store then conditionally projects the
