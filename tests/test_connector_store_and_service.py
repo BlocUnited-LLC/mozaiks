@@ -426,6 +426,27 @@ def test_service_save_get_and_delete_keep_app_and_workspace_secrets_apart(monkey
     assert asyncio.run(get_secret(scope="workspace", scope_id="same", service="billing"))["secret_value"] == "workspace-value"
 
 
+def test_failed_vault_delete_keeps_connector_metadata_for_operator_review(monkeypatch) -> None:
+    import mozaiksai.core.workflow.generator_support.connector_service as connector_service
+
+    store = ConnectorStore(pm=_FakePersistenceManager())
+    backend = _FakeVaultBackend()
+    monkeypatch.setattr(connector_service, "get_connector_vault_backend", lambda: backend)
+    assert asyncio.run(save_connector(
+        scope="app", scope_id="same", service="billing", secret_value="value", store=store
+    ))["success"]
+
+    async def refused_delete(*, scope: str, scope_id: str, service: str):
+        return {"success": False, "error": "Secret identity history could not be verified."}
+
+    monkeypatch.setattr(backend, "delete_secret", refused_delete)
+    result = asyncio.run(delete_connector(scope="app", scope_id="same", service="billing", store=store))
+    assert result["deleted"] is False
+    assert result["secret_deleted"] is False
+    assert result["error"] == "Secret identity history could not be verified."
+    assert asyncio.run(store.get(scope="app", scope_id="same", service="billing")) is not None
+
+
 def test_connector_inventory_summarizes_ready_vs_missing_services(monkeypatch) -> None:
     pm = _FakePersistenceManager()
     store = ConnectorStore(pm=pm)

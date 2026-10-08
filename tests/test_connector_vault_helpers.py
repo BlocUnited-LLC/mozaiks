@@ -112,9 +112,10 @@ class TestSecretName:
         result = _secret_name("app", "myapp", "payment_provider")
         assert "myapp" in result
 
-    def test_contains_full_identity_digest(self):
+    def test_contains_full_identity_digest(self, monkeypatch):
+        monkeypatch.setenv("MOZAIKS_CONNECTOR_SECRET_PREFIX", "mozaiks-connector")
         app_id = "myapp"
-        digest = hashlib.sha256(json.dumps(["app", app_id, "payment_provider"], separators=(",", ":")).encode()).hexdigest()[:24]
+        digest = hashlib.sha256(json.dumps(["mozaiks-connector", "app", app_id, "payment_provider"], separators=(",", ":")).encode()).hexdigest()[:24]
         result = _secret_name("app", app_id, "payment_provider")
         assert digest in result
 
@@ -155,12 +156,20 @@ class TestSecretName:
     def test_long_name_keeps_full_digest(self):
         scope_id = "id" * 200
         service = "service" * 80
-        identity = json.dumps(["workspace", scope_id, service], separators=(",", ":"))
+        identity = json.dumps(["prefix" * 100, "workspace", scope_id, service], separators=(",", ":"))
         digest = hashlib.sha256(identity.encode()).hexdigest()[:24]
         result = _secret_name("workspace", scope_id, service, prefix="prefix" * 100)
         assert len(result) <= 127
         assert result.endswith(digest)
         assert result.startswith("prefix")
+
+    def test_long_prefixes_with_same_visible_start_have_distinct_names(self):
+        first = _secret_name("app", "same-id", "billing", prefix="mozaiks-connector-customer-a")
+        second = _secret_name("app", "same-id", "billing", prefix="mozaiks-connector-customer-b")
+        assert first != second
+        assert first[:20] == second[:20]
+        assert len(first) <= 127
+        assert len(second) <= 127
 
     @pytest.mark.parametrize("scope,scope_id,service", [
         ("tenant", "id", "service"),

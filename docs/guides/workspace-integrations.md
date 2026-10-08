@@ -79,6 +79,17 @@ For Azure Key Vault, use `--provider azure_key_vault`. The script projects
 only connector metadata and vault properties, including version properties;
 it never retrieves, decrypts, copies, or prints a credential. It writes
 counts, opaque record references, and a fingerprint to the private report.
+Azure inventory selects names in the configured connector prefix namespace;
+other platform secrets in a shared vault are outside this cleanup scope even
+when tagged `managed_by=mozaiks`. Never select cleanup targets by that tag
+alone. Azure connector writes and deletes require permission to inspect all
+version properties and refuse a name with any unowned or unknown version.
+Prevent other principals from writing connector names during inspection and
+mutation; Azure has no atomic version-history lock across those calls.
+Deployments sharing one Mongo instance must not rely on different secret
+prefixes for isolation: the connector collection uses a fixed system database
+and its key omits the prefix. Use separate Mongo instances.
+
 Re-run with
 `--expect-fingerprint <reviewed-fingerprint>` to detect changed metadata.
 There is no automatic apply operation. A report with unqualified, missing,
@@ -105,8 +116,10 @@ For each environment with existing connector secrets:
    Keep it only for the reviewed rollback window. Before cleanup, freeze writes
    again and re-run the reviewed snapshot with `--expect-fingerprint`.
 4. Separately approve and perform exact unqualified-record cleanup using the
-   operator's vault/database tooling and private metadata. This inventory
-   script cannot delete, decrypt, or migrate a secret. If cleanup is deferred,
+   operator's vault/database tooling and private metadata. Confirm the exact
+   connector name and owner for each target; exclude other platform secrets
+   in a shared vault. This inventory script cannot delete, decrypt, or migrate
+   a secret. If cleanup is deferred,
    keep the connector-dependent release gate closed.
 5. Write a fresh final inventory to a new private path. Require `ready: true`
    and repeat scoped read/provider checks before opening connector-dependent

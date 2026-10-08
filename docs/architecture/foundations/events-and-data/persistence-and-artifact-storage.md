@@ -155,9 +155,14 @@ Rules:
   `MongoConnectorVaultBackend`. Each record is uniquely keyed by
   `(scope, scope_id, normalized_service)` where `scope` is `app` or `workspace`.
   These are framework-internal records, not app data.
-- Azure secret names include the scope kind and a digest of the complete connector
-  identity. Reads and deletes verify the returned identity tags before using
-  the name.
+- Azure secret names include the scope kind and a digest of the normalized full
+  prefix and complete connector identity. Reads verify the latest identity tags.
+  Stores and name-wide deletes verify the tags on every existing version and
+  fail closed when version listing is unavailable or any version is unowned.
+  Azure needs secret get and list permissions for these mutations.
+- Distinct deployments using Mongo connector secrets need separate Mongo
+  instances; the Mongo key does not include the Azure
+  name prefix, and the fixed system database ignores a URI database suffix.
 - The vault backend requires an explicit scope on every save, read, and delete.
   Unqualified older records are never used as a fallback.
 - Before upgrading an environment with saved connectors, run the private

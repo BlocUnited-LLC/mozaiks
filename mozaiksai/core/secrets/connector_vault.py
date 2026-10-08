@@ -90,9 +90,10 @@ def _connector_identity(scope: str, scope_id: str, service: str) -> tuple[Connec
 
 def _secret_name(scope: ConnectorScope, scope_id: str, service: str, *, prefix: str | None = None) -> str:
     scope, scope_id, service = _connector_identity(scope, scope_id, service)
-    identity = json.dumps([scope, scope_id, service], ensure_ascii=False, separators=(",", ":"))
+    full_prefix = _slug(prefix or _secret_prefix(), default="mozaiks-connector")
+    identity = json.dumps([full_prefix, scope, scope_id, service], ensure_ascii=False, separators=(",", ":"))
     digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
-    base_prefix = _slug(prefix or _secret_prefix(), default="mozaiks-connector")[:20]
+    base_prefix = full_prefix[:20]
     service_slug = _slug(service, default="service")[:36]
     scope_id_slug = _slug(scope_id, default="scope")[:32]
     return f"{base_prefix}-{scope}-{service_slug}-{scope_id_slug}-{digest}"
@@ -157,16 +158,50 @@ class AzureKeyVaultConnectorVaultBackend:
     def _matches_identity_tags(
         secret: Any, *, scope: ConnectorScope, scope_id: str, service: str
     ) -> bool:
-        tags = getattr(getattr(secret, "properties", None), "tags", None)
+        tags = getattr(getattr(secret, "properties", secret), "tags", None)
         return isinstance(tags, dict) and all(
             tags.get(key) == expected
             for key, expected in {
                 "managed_by": "mozaiks",
+                "connector_prefix": _slug(_secret_prefix(), default="mozaiks-connector"),
                 "scope": scope,
                 "scope_id": scope_id,
                 "service": service,
             }.items()
         )
+
+    async def _inspect_identity_history(
+        self, client: Any, *, name: str, scope: ConnectorScope, scope_id: str, service: str
+    ) -> Literal["absent", "owned", "mismatch", "error"]:
+        """Check every existing version before a name-wide Azure mutation."""
+        try:
+            from azure.core.exceptions import ResourceNotFoundError
+
+            latest = await asyncio.to_thread(client.get_secret, name)
+        except ResourceNotFoundError as exc:
+            if getattr(getattr(exc, "error", None), "code", None) == "SecretNotFound":
+                return "absent"
+            return "error"
+        except Exception:
+            logger.error("Failed to inspect connector secret identity %s", name)
+            return "error"
+        if not self._matches_identity_tags(latest, scope=scope, scope_id=scope_id, service=service):
+            return "mismatch"
+        try:
+            # Exhaust pagination in the worker. Azure delete removes every version,
+            # and set_secret adds a version under the same name.
+            versions = await asyncio.to_thread(
+                lambda: list(client.list_properties_of_secret_versions(name))
+            )
+        except Exception:
+            logger.error("Failed to inspect connector secret versions %s", name)
+            return "error"
+        if not versions or any(
+            not self._matches_identity_tags(version, scope=scope, scope_id=scope_id, service=service)
+            for version in versions
+        ):
+            return "mismatch"
+        return "owned"
 
     def _get_vault_url(self) -> str | None:
         name = _vault_name()
@@ -232,12 +267,29 @@ class AzureKeyVaultConnectorVaultBackend:
         expires_at = datetime.now(UTC) + timedelta(days=max(int(ttl_days), 1))
         tags = {
             "managed_by": "mozaiks",
+            "connector_prefix": _slug(_secret_prefix(), default="mozaiks-connector"),
             "scope": scope,
             "scope_id": scope_id,
             "service": service,
         }
         if display_name:
             tags["display_name"] = str(display_name)[:256]
+
+        identity_status = await self._inspect_identity_history(
+            client, name=secret_name, scope=scope, scope_id=scope_id, service=service
+        )
+        if identity_status not in {"absent", "owned"}:
+            return {
+                "success": False,
+                "provider": "azure_key_vault",
+                "secret_name": secret_name,
+                "expires_at": None,
+                "error": (
+                    "Secret identity does not match connector."
+                    if identity_status == "mismatch"
+                    else "Secret identity history could not be verified."
+                ),
+            }
 
         try:
             secret = await asyncio.to_thread(
@@ -351,17 +403,23 @@ class AzureKeyVaultConnectorVaultBackend:
                 "secret_name": secret_name,
                 "error": self._client_error or "Azure Key Vault connector backend is unavailable.",
             }
+        identity_status = await self._inspect_identity_history(
+            client, name=secret_name, scope=scope, scope_id=scope_id, service=service
+        )
+        if identity_status != "owned":
+            return {
+                "success": False,
+                "provider": "azure_key_vault",
+                "secret_name": secret_name,
+                "error": (
+                    "Secret identity does not match connector."
+                    if identity_status == "mismatch"
+                    else "Secret not found."
+                    if identity_status == "absent"
+                    else "Secret identity history could not be verified."
+                ),
+            }
         try:
-            secret = await asyncio.to_thread(client.get_secret, secret_name)
-            if not self._matches_identity_tags(
-                secret, scope=scope, scope_id=scope_id, service=service
-            ):
-                return {
-                    "success": False,
-                    "provider": "azure_key_vault",
-                    "secret_name": secret_name,
-                    "error": "Secret identity does not match connector.",
-                }
             await asyncio.to_thread(client.begin_delete_secret, secret_name)
             return {
                 "success": True,

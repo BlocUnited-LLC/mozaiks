@@ -617,6 +617,14 @@ async def delete_connector(
             service=normalized_service,
         )
 
+    if secret_result and not secret_result.get("success"):
+        return {
+            "deleted": False,
+            "service": normalized_service,
+            "secret_deleted": False,
+            "error": secret_result.get("error") or "Connector secret could not be deleted.",
+        }
+
     metadata_deleted = await connector_store.delete(scope=scope, scope_id=str(scope_id), service=normalized_service)
     return {
         "deleted": metadata_deleted,

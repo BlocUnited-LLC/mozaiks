@@ -110,7 +110,7 @@ def test_azure_version_identity_conflict_blocks_qualified_record() -> None:
     owner = _owner("app", "id", "service", provider="azure_key_vault")
     report = build_inventory(
         [owner],
-        [{"scope": "app", "scope_id": "id", "service": "service", "managed_by": "mozaiks", "secret_name": owner["secret_name"],
+        [{"scope": "app", "scope_id": "id", "service": "service", "managed_by": "mozaiks", "connector_prefix": "mozaiks-connector", "secret_name": owner["secret_name"],
           "version_identity_conflict": True, "version_count": 2}],
         provider="azure_key_vault",
     )
@@ -164,8 +164,14 @@ def test_azure_inventory_only_lists_properties(monkeypatch) -> None:
             return [
                 SimpleNamespace(name="other-secret", tags={}, created_on=None, expires_on=None),
                 SimpleNamespace(
+                    name="tenant-app-id-prod",
+                    tags={"managed_by": "mozaiks", "purpose": "hosted-fulfillment"},
+                    created_on=None,
+                    expires_on=None,
+                ),
+                SimpleNamespace(
                     name="mozaiks-connector-app-id-digest",
-                    tags={"managed_by": "mozaiks", "scope": "app", "scope_id": "id", "service": "service"},
+                    tags={"managed_by": "mozaiks", "connector_prefix": "mozaiks-connector", "scope": "app", "scope_id": "id", "service": "service"},
                     created_on=None,
                     expires_on=None,
                 ),
@@ -178,7 +184,7 @@ def test_azure_inventory_only_lists_properties(monkeypatch) -> None:
             assert name == "mozaiks-connector-app-id-digest"
             return [SimpleNamespace(
                 version="v1", created_on=None, expires_on=None,
-                tags={"managed_by": "mozaiks", "scope": "app", "scope_id": "id", "service": "service"},
+                tags={"managed_by": "mozaiks", "connector_prefix": "mozaiks-connector", "scope": "app", "scope_id": "id", "service": "service"},
             )]
 
     azure = ModuleType("azure")
@@ -196,6 +202,7 @@ def test_azure_inventory_only_lists_properties(monkeypatch) -> None:
     rows = _azure_metadata("test-vault", "mozaiks-connector")
     assert len(rows) == 1
     assert rows[0]["scope"] == "app"
+    assert rows[0]["connector_prefix"] == "mozaiks-connector"
     assert rows[0]["version_count"] == 1
     assert rows[0]["version_identity_conflict"] is False
     assert rows[0]["version_fingerprint"]

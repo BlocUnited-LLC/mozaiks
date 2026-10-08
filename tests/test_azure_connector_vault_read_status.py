@@ -102,7 +102,7 @@ def test_azure_found_secret_keeps_existing_read_value(azure_errors) -> None:
         value="test-secret-value",
         properties=SimpleNamespace(
             expires_on=None,
-            tags={"managed_by": "mozaiks", "scope": "app", "scope_id": "app-1", "service": "mozaikspay"},
+            tags={"managed_by": "mozaiks", "connector_prefix": "mozaiks-connector", "scope": "app", "scope_id": "app-1", "service": "mozaikspay"},
         ),
     )
     result = _read(_FakeClient(secret=secret))
