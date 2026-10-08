@@ -70,8 +70,9 @@ no unverified runtime checks. The evidence digest covers these fields.
 On every baseline read, OSS checks the required evidence fields and recomputes
 their canonical digest against the durable AppRegistry receipt. Replaying an
 already accepted receipt does not require Docker. The probe provides trusted
-external evidence for HTTP readiness, but cannot independently observe the
-runtime's rejected-event audit. The contained runner therefore reports
+external evidence for HTTP readiness and now validates event requests that A
+forwards to B. It cannot prove imported Python forwarded every `ctx.emit`, so
+the contained runner still reports
 `observer_unverified_checks: ["event_rejection"]` on every result. This draft
 requires an empty list, so **live imported Genesis acceptance remains closed**
 before the validated-record or AppRegistry receipt writes. Tests model the

@@ -277,6 +277,8 @@ def _copy_probe_plan(staged_root: Path, plan_root: Path) -> None:
     if modules_root.is_dir():
         paths.extend(Path("modules") / module.name / "module.yaml"
                      for module in modules_root.iterdir() if module.is_dir())
+        paths.extend(Path("modules") / module.name / "contracts/events.yaml"
+                     for module in modules_root.iterdir() if module.is_dir())
     plan_root.mkdir()
     for relative in paths:
         source = staged_root / relative
@@ -528,7 +530,9 @@ async def run_contained_imported_app_runtime_smoke(
         boot = [event for event in events if event.get("event") == "outcome"
                 and event.get("check") == "boot.http_ready" and event.get("status") == "passed"]
         done = [event for event in events if event.get("event") == "done"]
+        audit = done[0].get("event_audit") if len(done) == 1 else None
         valid_receipt = (bool(events) and len(boot) == 1 and len(done) == 1
+                         and _valid_trusted_event_audit(events, audit, observer_nonce)
                          and all(event.get("observer_nonce") == observer_nonce for event in events))
         if result["status"] == "passed" and not valid_receipt:
             result = _summary([*result["results"], {
@@ -539,6 +543,8 @@ async def run_contained_imported_app_runtime_smoke(
         result["source_content_sha256"] = hashlib.sha256(json.dumps(
             expected_source_sha256, sort_keys=True, separators=(",", ":"),
         ).encode("utf-8")).hexdigest()
+        if isinstance(audit, dict):
+            result["trusted_event_audit"] = audit
         if result["status"] == "passed" and valid_receipt:
             result["observer_origin"] = "trusted_external_probe_v1"
             result["observer_run_id"] = observer_nonce
@@ -562,6 +568,26 @@ def _events(stdout: str) -> list[dict[str, Any]]:
         if isinstance(event, dict):
             events.append(event)
     return events
+
+
+def _valid_trusted_event_audit(events: list[dict[str, Any]], audit: Any, run_id: str) -> bool:
+    checks = [event for event in events if event.get("event") == "outcome"
+              and event.get("check") == "event.audit"]
+    fields = {
+        "contract", "run_id", "request_count", "completed_count", "accepted_event_count",
+        "rejected_event_count", "protocol_errors", "passed",
+    }
+    return (
+        isinstance(audit, dict) and set(audit) == fields
+        and audit.get("contract") == "trusted_event_audit_v1" and audit.get("run_id") == run_id
+        and type(audit.get("request_count")) is int and audit["request_count"] > 0
+        and type(audit.get("completed_count")) is int and audit["completed_count"] == audit["request_count"]
+        and type(audit.get("accepted_event_count")) is int and audit["accepted_event_count"] >= 0
+        and type(audit.get("rejected_event_count")) is int and audit["rejected_event_count"] == 0
+        and audit.get("protocol_errors") == [] and audit.get("passed") is True
+        and len(checks) == 1 and checks[0].get("status") == "passed"
+        and checks[0].get("details") == {key: value for key, value in audit.items() if key != "passed"}
+    )
 
 
 def _child_result(run: _ChildRun, *, mongo_uri: str, timeout_seconds: float, started: float) -> dict[str, Any]:
@@ -706,6 +732,127 @@ def _imported_observer_scope(result: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _encode_event_payload(payload: dict[str, Any]) -> str:
+    """BSON preserves the runtime value types that JSON would silently coerce."""
+    from bson import BSON
+
+    encoded = BSON.encode(payload)
+    if len(encoded) > 700_000:
+        raise ValueError("event payload exceeds the trusted observer limit")
+    return base64.b64encode(encoded).decode("ascii")
+
+
+def _decode_event_payload(encoded: Any) -> dict[str, Any]:
+    from datetime import UTC
+
+    from bson import BSON
+    from bson.codec_options import CodecOptions
+
+    if not isinstance(encoded, str) or len(encoded) > 950_000:
+        raise ValueError("event payload is absent or oversized")
+    raw = base64.b64decode(encoded, validate=True)
+    if len(raw) > 700_000:
+        raise ValueError("event payload exceeds the trusted observer limit")
+    return BSON(raw).decode(codec_options=CodecOptions(tz_aware=True, tzinfo=UTC))
+
+
+class _TrustedEventAudit:
+    """B-owned action ledger and canonical event validator; never imports app Python."""
+
+    def __init__(self, run_id: str, modules: list[Any], event_schemas: Mapping[str, Mapping[str, Any]]) -> None:
+        from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor
+
+        self.run_id = run_id
+        self.validator = ModuleExecutor()
+        for module in modules:
+            self.validator.register(
+                module.name, object(), action_method_map=module.action_method_map,
+                action_emits=module.action_emits_map,
+                event_payload_schemas=dict(event_schemas.get(module.name) or {}),
+            )
+        self.requests: dict[str, dict[str, Any]] = {}
+        self.event_ids: set[str] = set()
+        self.protocol_errors: list[str] = []
+        self.rejections: list[tuple[str, str, str, Any]] = []
+        self.accepted_events = 0
+
+    def begin(self, module: str, action: str, principal_label: str) -> str:
+        request_id = uuid4().hex
+        self.requests[request_id] = {
+            "module": module, "action": action, "principal_label": principal_label, "completed": False,
+        }
+        return request_id
+
+    def observe(self, packet: Any) -> dict[str, Any]:
+        """Count every message, including malformed/replayed ones, as evidence of failure."""
+        from bson.errors import InvalidBSON
+
+        from mozaiksai.core.runtime.composition.module_authority import ModuleDispatchAuthority
+        from mozaiksai.core.runtime.composition.module_executor import ModuleRequest
+
+        if not isinstance(packet, dict) or set(packet) != {
+            "run_id", "request_id", "event_id", "module", "action", "event_type", "payload_bson",
+        }:
+            self.protocol_errors.append("malformed event request")
+            return {"accepted": False}
+        request_id = packet["request_id"]
+        row = self.requests.get(request_id) if isinstance(request_id, str) else None
+        if (packet["run_id"] != self.run_id or row is None or row["completed"]
+                or packet["module"] != row["module"] or packet["action"] != row["action"]):
+            self.protocol_errors.append("event request is outside its active action")
+            return {"accepted": False}
+        event_id = packet["event_id"]
+        event_type = packet["event_type"]
+        if (not isinstance(event_id, str) or not event_id.startswith("evt_")
+                or len(event_id) != 36 or event_id in self.event_ids
+                or not isinstance(event_type, str)):
+            self.protocol_errors.append("event request has invalid or replayed content")
+            return {"accepted": False}
+        try:
+            payload = _decode_event_payload(packet["payload_bson"])
+        except (TypeError, ValueError, InvalidBSON):
+            self.protocol_errors.append("event payload cannot be decoded")
+            return {"accepted": False}
+        self.event_ids.add(event_id)
+        if len(self.event_ids) > 1000:
+            self.protocol_errors.append("event request limit exceeded")
+            return {"accepted": False}
+        request = ModuleRequest(
+            module=row["module"], action=row["action"], app_id="runtime-smoke-observer",
+            authority=ModuleDispatchAuthority(
+                kind="authenticated_user", permission_mode="enforce", reason="trusted event validation",
+            ),
+        )
+        rejection = self.validator._event_rejection(request, event_id, event_type, payload)
+        if rejection is not None:
+            self.rejections.append((row["module"], row["action"], row["principal_label"], rejection))
+            return {"accepted": False, "rejection": rejection.to_dict()}
+        self.accepted_events += 1
+        return {"accepted": True}
+
+    def complete(self, request_id: str, *, received_response: bool) -> None:
+        row = self.requests.get(request_id)
+        if row is None or row["completed"]:
+            self.protocol_errors.append("action completion is absent or duplicated")
+            return
+        if not received_response:
+            self.protocol_errors.append("action response is absent")
+            return
+        row["completed"] = True
+
+    def result(self) -> dict[str, Any]:
+        completed = sum(row["completed"] for row in self.requests.values())
+        return {
+            "contract": "trusted_event_audit_v1", "run_id": self.run_id,
+            "request_count": len(self.requests), "completed_count": completed,
+            "accepted_event_count": self.accepted_events,
+            "rejected_event_count": len(self.rejections),
+            "protocol_errors": list(self.protocol_errors),
+            "passed": bool(self.requests) and completed == len(self.requests)
+            and not self.rejections and not self.protocol_errors,
+        }
+
+
 # --------------------------------------------------------------------------- the run
 
 
@@ -733,6 +880,7 @@ class _SmokeRun:
         self.external_server = False
         self.external_probe = False
         self.probe_nonce = ""
+        self.event_audit: _TrustedEventAudit | None = None
 
     @property
     def database(self) -> Any:
@@ -860,7 +1008,8 @@ class _SmokeRun:
         rejected_since = len(self.rejected_events)
         self.emit("calling", module=module, action=action, principal=principal.label)
         url = f"/api/modules/{module}/{action}"
-        headers = {"Authorization": f"Bearer {principal.token}"}
+        request_id = self.event_audit.begin(module, action, principal.label) if self.event_audit is not None else None
+        headers = {"Authorization": f"Bearer {request_id or principal.token}"}
         if self.external_probe:
             assertion = {
                 "nonce": self.probe_nonce, "user_id": principal.user_id,
@@ -870,15 +1019,20 @@ class _SmokeRun:
             headers["X-Mozaiks-Smoke-Principal"] = base64.urlsafe_b64encode(
                 json.dumps(assertion, separators=(",", ":")).encode("utf-8")
             ).decode("ascii")
+        received_response = False
         try:
             if method == "GET":
                 request = self.http.get(url, params={key: str(value) for key, value in params.items()}, headers=headers)
             else:
                 request = self.http.post(url, json=params, headers=headers)
             response = await asyncio.wait_for(request, timeout=_REQUEST_TIMEOUT_SECONDS)
+            received_response = True
         except (TimeoutError, TimeoutException):
             return 0, None, f"no response within {_REQUEST_TIMEOUT_SECONDS:.0f}s"
         finally:
+            if request_id is not None:
+                assert self.event_audit is not None
+                self.event_audit.complete(request_id, received_response=received_response)
             for rejected_module, rejected_action, rejection in self.rejected_events[rejected_since:]:
                 self._record_rejected_event(rejected_module, rejected_action, principal, rejection)
         try:
@@ -1036,6 +1190,39 @@ async def _boot(run: _SmokeRun, initial_environment: set[str]) -> bool:
 
     class _ObservedModuleExecutor(ModuleExecutor):
         """Keeps the events each dispatch rejected; the HTTP response carries only the action's data."""
+
+        def _build_context_emitter(self, request: Any, rejected_events: list[Any]) -> Any:
+            if not run.external_server:
+                return super()._build_context_emitter(request, rejected_events)
+
+            async def emit_to_trusted_probe(event_type: str, payload: dict[str, Any]) -> Any:
+                from httpx import AsyncClient
+
+                from mozaiksai.core.runtime.composition.module_event_provenance import (
+                    ModuleEventRejection,
+                )
+
+                packet = {
+                    "run_id": run.probe_nonce, "request_id": request.auth_token,
+                    "event_id": f"evt_{uuid4().hex}", "module": request.module,
+                    "action": request.action, "event_type": str(event_type or "").strip(),
+                    "payload_bson": _encode_event_payload(payload),
+                }
+                async with AsyncClient(base_url="http://127.0.0.1:8001", timeout=_REQUEST_TIMEOUT_SECONDS,
+                                       trust_env=False) as client:
+                    response = await client.post("/__mozaiks_smoke_event", json=packet)
+                response.raise_for_status()
+                decision = response.json()
+                if decision == {"accepted": True}:
+                    return None
+                rejection = decision.get("rejection") if isinstance(decision, dict) else None
+                if not isinstance(rejection, dict):
+                    raise RuntimeError("trusted smoke event observer refused the request")
+                item = ModuleEventRejection(**rejection)
+                rejected_events.append(item)
+                return item
+
+            return emit_to_trusted_probe
 
         async def execute(self, request: Any, context: Any = None) -> Any:
             result = await super().execute(request, context)
@@ -1886,7 +2073,7 @@ def _probe_contracts(run: _SmokeRun) -> None:
     """Load only copied declarative files; B has no imported Python mount."""
     import yaml
 
-    from mozaiksai.core.runtime.app.module_loader import ModuleDefinition
+    from mozaiksai.core.runtime.app.module_loader import ModuleDefinition, ModuleEventsManifest
     from mozaiksai.core.runtime.app.subscriptions_loader import load_subscriptions_config
     from mozaiksai.core.runtime.persistence.intent_loader import (
         iter_data_contract_collections,
@@ -1897,12 +2084,22 @@ def _probe_contracts(run: _SmokeRun) -> None:
     root = run.app_root
     modules_root = root / "modules"
     modules = []
+    event_schemas: dict[str, dict[str, Any]] = {}
     if modules_root.is_dir():
         for directory in sorted(modules_root.iterdir()):
             manifest = directory / "module.yaml"
             if directory.is_dir() and manifest.is_file():
-                modules.append(ModuleDefinition.model_validate(yaml.safe_load(
-                    manifest.read_text(encoding="utf-8"))))
+                module = ModuleDefinition.model_validate(yaml.safe_load(
+                    manifest.read_text(encoding="utf-8")))
+                modules.append(module)
+                events_path = directory / "contracts" / "events.yaml"
+                if events_path.is_file():
+                    events = ModuleEventsManifest.model_validate(yaml.safe_load(
+                        events_path.read_text(encoding="utf-8")))
+                    event_schemas[module.name] = {
+                        event.type: dict(event.payload_schema)
+                        for event in events.events if event.payload_schema
+                    }
     app_config = json.loads((root / "app.json").read_text(encoding="utf-8"))
     contract = load_data_contract(root)
     run.load = SimpleNamespace(
@@ -1919,11 +2116,35 @@ def _probe_contracts(run: _SmokeRun) -> None:
         collection.get("tenancy") == "per_workspace"
         for _owner, _kind, collection in iter_data_contract_collections(contract, require_complete_ownership=False)
     )
+    run.event_audit = _TrustedEventAudit(run.probe_nonce, modules, event_schemas)
+
+
+def _trusted_event_gateway(audit: _TrustedEventAudit) -> FastAPI:
+    """The observer's only event ingress; malformed worker traffic fails the run."""
+    app = FastAPI()
+
+    @app.post("/__mozaiks_smoke_event")
+    async def observe_event(request: Request) -> dict[str, Any]:
+        content = bytearray()
+        async for chunk in request.stream():
+            content.extend(chunk)
+            if len(content) > 1_000_000:
+                audit.protocol_errors.append("event request exceeds size limit")
+                return {"accepted": False}
+        try:
+            packet = json.loads(content)
+        except (ValueError, UnicodeError):
+            audit.protocol_errors.append("event request is not JSON")
+            return {"accepted": False}
+        return audit.observe(packet)
+
+    return app
 
 
 async def _probe_imported_app(database_name: str, observer_nonce: str,
                               emit: Callable[..., None]) -> None:
     """B checks loopback HTTP and Mongo from a process without imported source."""
+    import uvicorn
     from httpx import AsyncClient, HTTPError
     from motor.motor_asyncio import AsyncIOMotorClient
 
@@ -1934,8 +2155,21 @@ async def _probe_imported_app(database_name: str, observer_nonce: str,
     run.probe_nonce = observer_nonce
     run.http = AsyncClient(base_url="http://127.0.0.1:8000", timeout=_REQUEST_TIMEOUT_SECONDS,
                            trust_env=False)
+    gateway: Any = None
+    gateway_task: asyncio.Task[Any] | None = None
     try:
         _probe_contracts(run)
+        assert run.event_audit is not None
+        gateway = uvicorn.Server(uvicorn.Config(
+            _trusted_event_gateway(run.event_audit), host="127.0.0.1", port=8001,
+            access_log=False, log_level="warning", lifespan="off",
+        ))
+        gateway_task = asyncio.create_task(gateway.serve())
+        deadline = time.monotonic() + _CONTAINER_STARTUP_SECONDS
+        while not gateway.started and time.monotonic() < deadline and not gateway_task.done():
+            await asyncio.sleep(0.05)
+        if not gateway.started:
+            raise RuntimeError("trusted event gateway did not start")
         expected_modules = sorted(module.name for module in run.load.modules)
         deadline = time.monotonic() + _CONTAINER_STARTUP_SECONDS
         response: Any = None
@@ -1967,6 +2201,24 @@ async def _probe_imported_app(database_name: str, observer_nonce: str,
         run.record("smoke.error", False,
                    f"The external observer could not complete: {type(exc).__name__}: {exc}")
     finally:
+        if gateway is not None:
+            gateway.should_exit = True
+        if gateway_task is not None:
+            try:
+                await asyncio.wait_for(gateway_task, timeout=5)
+            except Exception as exc:
+                run.record("event.gateway", False, f"Trusted event gateway did not stop: {type(exc).__name__}")
+                gateway_task.cancel()
+        if run.event_audit is not None:
+            for module, action, label, rejection in run.event_audit.rejections:
+                run._record_rejected_event(module, action, run.principal(label), rejection)
+            audit_result = run.event_audit.result()
+            run.record(
+                "event.audit", audit_result["passed"],
+                "Trusted observer completed its event request audit."
+                if audit_result["passed"] else "Trusted observer found rejected or incomplete event requests.",
+                **{key: value for key, value in audit_result.items() if key != "passed"},
+            )
         await run.http.aclose()
         client.close()
     emit(
@@ -1977,6 +2229,7 @@ async def _probe_imported_app(database_name: str, observer_nonce: str,
             for label, principal in run.principals.items()
         },
         events_emitted=[],
+        event_audit=run.event_audit.result() if run.event_audit is not None else None,
     )
 
 

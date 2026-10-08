@@ -263,10 +263,12 @@ A failed teardown or bounded-output violation fails the smoke. No host Mongo URI
 credential, provider key, source repository, Docker socket, or host workspace is
 mounted or passed to either container.
 
-The observer verifies externally visible HTTP and Mongo behavior. The runtime
-drops a rejected `ctx.emit` before dispatch while preserving the action's write
-and HTTP success; the rejection exists only in A's process. B therefore cannot
-distinguish a rejected emit from no emit. Contained results declare
+The observer verifies externally visible HTTP and Mongo behavior and validates
+event requests forwarded over its bounded channel. It catches a rejected event
+while the action's write and HTTP response succeed. A still runs imported
+Python with the forwarding callback, so B cannot prove every `ctx.emit`
+reached that channel or distinguish a suppressed request from no emit.
+Contained results declare
 `observer_unverified_checks: [event_rejection]`, including when their observed
 checks pass. A's reported rejection list is not trusted evidence. The ordinary
 in-process smoke detects rejected events, but imported Genesis acceptance must
