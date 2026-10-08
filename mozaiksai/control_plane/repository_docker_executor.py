@@ -20,9 +20,9 @@ import tempfile
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 
 from mozaiksai.core.adapters.local_docker_cli import _docker_cli_env, _docker_prefix
 from mozaiksai.core.semantics.archive import ArchiveError, read_archive_manifest
@@ -72,6 +72,37 @@ class RepositoryDockerTurn:
     workspace_archive: bytes | None
     usage: IsolatedACPUsage | None = None
 
+
+@dataclass(frozen=True, slots=True)
+class RepositoryLiveACPProfile:
+    """Trusted-worker-only local profile; never deserialize from a user request.
+
+    The upstream key is delivered to a separate gateway process over stdin.
+    It is never included in the ACP worker's request, image configuration, or
+    Docker command arguments.
+    """
+
+    adapter: Literal["codex", "claude_code"]
+    model: str
+    gateway_image: str
+    gateway_expected_image_id: str
+    upstream_api_key: SecretStr
+
+    def __post_init__(self) -> None:
+        if self.adapter not in {"codex", "claude_code"}:
+            raise ValueError("REPOSITORY_LIVE_ADAPTER")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,127}", self.model):
+            raise ValueError("REPOSITORY_LIVE_MODEL")
+        if not _IMAGE_REFERENCE.fullmatch(self.gateway_image) or (
+            ":" not in self.gateway_image and "@" not in self.gateway_image
+        ):
+            raise ValueError("REPOSITORY_LIVE_GATEWAY_IMAGE")
+        if not _IMAGE_ID.fullmatch(self.gateway_expected_image_id):
+            raise ValueError("REPOSITORY_LIVE_GATEWAY_IMAGE_ID")
+        if not isinstance(self.upstream_api_key, SecretStr):
+            raise TypeError("REPOSITORY_LIVE_CREDENTIAL_TYPE")
+        if not re.fullmatch(r"[!-~]{8,4096}", self.upstream_api_key.get_secret_value()):
+            raise ValueError("REPOSITORY_LIVE_CREDENTIAL")
 
 def _remove_container(container_name: str, config_dir: str) -> None:
     """Remove only this random name, including after a lost create response."""
@@ -306,15 +337,17 @@ async def execute_repository_docker_turn(
     snapshot: RepositorySnapshotEvidence | None = None,
     validate_path: Callable[[str], object] | None = None,
     validate_create_absence: Callable[[str], object] | None = None,
+    live_profile: RepositoryLiveACPProfile | None = None,
 ) -> RepositoryDockerTurn:
-    """Execute one already-approved file set; only a local, prebuilt image runs.
+    """Execute one already-approved file set in a pinned, local image.
 
     ``image`` and ``expected_image_id`` are trusted host configuration, never
     request fields. The expected ID must come from an operator-approved image
     build or equivalent trusted image manifest, not this request or a fresh
     resolution of the tag. The host must verify the approved snapshot and path
     policy before calling this, then stage/finalize the returned archive
-    against those same immutable inputs.
+    against those same immutable inputs. The optional live profile is for a
+    separate trusted worker; the default remains the offline proof.
     """
     if not _IMAGE_REFERENCE.fullmatch(image) or (":" not in image and "@" not in image):
         raise ValueError("REPOSITORY_DOCKER_IMAGE: invalid fixed image reference")
@@ -324,6 +357,10 @@ async def execute_repository_docker_turn(
         raise ValueError("REPOSITORY_DOCKER_WALL_BUDGET")
     if not 1 <= max_archive_bytes <= MAX_REPOSITORY_DOCKER_ARCHIVE_BYTES:
         raise ValueError("REPOSITORY_DOCKER_ARCHIVE_BUDGET")
+    if live_profile is not None and not isinstance(live_profile, RepositoryLiveACPProfile):
+        raise TypeError("REPOSITORY_LIVE_PROFILE_TYPE")
+    if live_profile is not None and (approved_context is None or snapshot is None or validate_path is None):
+        raise ValueError("REPOSITORY_LIVE_CONTEXT_REQUIRED")
     selected_files = dict(request.files)
     inspection_files = dict(request.read_only_files)
     selected_paths = set(selected_files)
@@ -384,6 +421,20 @@ async def execute_repository_docker_turn(
     if create_paths or delete_paths:
         scoped["create_paths"] = sorted(create_paths)
         scoped["delete_paths"] = sorted(delete_paths)
+    if live_profile is not None:
+        from .repository_live_docker import execute_live_repository_docker_turn
+
+        return await execute_live_repository_docker_turn(
+            scoped=scoped,
+            profile=live_profile,
+            image=image,
+            expected_image_id=expected_image_id,
+            selected_paths=selected_paths,
+            create_paths=create_paths,
+            delete_paths=delete_paths,
+            max_wall_seconds=max_wall_seconds,
+            max_archive_bytes=max_archive_bytes,
+        )
     input_bytes = json.dumps(scoped, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     if len(input_bytes) > MAX_REPOSITORY_DOCKER_REQUEST_BYTES:
         raise ValueError("REPOSITORY_DOCKER_REQUEST_BUDGET")
@@ -456,5 +507,6 @@ async def execute_repository_docker_turn(
 
 
 __all__ = [
-    "RepositoryDockerExecutionError", "RepositoryDockerTurn", "execute_repository_docker_turn",
+    "RepositoryDockerExecutionError", "RepositoryDockerTurn", "RepositoryLiveACPProfile",
+    "execute_repository_docker_turn",
 ]

@@ -68,10 +68,13 @@ User submits a change request on an existing artifact
     → coding_refinement  write the scoped change
     [AppGenerator never runs]
 
-  Path B — bigger change (design / feature / core):
-    → contract_surface_planning   map request to contract surfaces
+  Path B — design or feature change to a saved app bundle:
+    → contract_surface_planning   map request to bounded contract surfaces
+    → inline regeneration when the verified surface plan is safe
+    → otherwise launch the selected workflow_sequence
+
+  Path C — core change or broad change without a safe inline plan:
     → launch workflow_sequence    re-enter factory at the right stage
-    [AppGenerator runs as part of the sequence]
 ```
 
 The Refinement Engine does not replace the factory. It routes to it.
@@ -175,6 +178,13 @@ points, including directory junctions, before traversal or file reads. A linked
 workspace root is rejected too. These are scope violations; linked targets are
 never harvested or deleted by the harvester.
 
+ACP provider selection uses the approved artifact kind and file budget, not the
+number of files as a proxy for patch complexity. The shipped refinement policy
+keeps ACP disabled, and the default local ACP subprocess path refuses execution
+until an isolated worker is available. The repository Docker executor currently
+proves the scoped file boundary with an offline agent; it does not perform a
+live Codex or Claude turn.
+
 #### Current readiness and promotion boundaries
 
 `control_plane/app_validation.py` remains the source-project command validator.
@@ -252,8 +262,8 @@ workflow re-entry        launch selected workflow_sequence from extension_regist
 | `refinement_route` | `route_requested` | Deterministic | Maps `{artifact_kind, change_class}` to a `workflow_sequence` name from the routing table. |
 | `decision` | `decision_requested` | Deterministic | Decides outcome: `auto_patch`, `workflow_reentry`, `core_restart`, `clarify_scope`, or `fallback_workflow`. |
 | `scope_selection` | `scope_requested` | LLM | Proposes which files to touch using context graph and artifact workspace catalog. |
-| `contract_surface_planning` | `contract_surface_requested` | LLM | Maps a broader request to specific Mozaiks contract surfaces before workflow re-entry. |
-| `coding_refinement` | `coding_requested` | LLM | Writes the scoped code change against the selected files. |
+| `contract_surface_planning` | `contract_surface_requested` | LLM | Maps design or feature changes to contract surfaces for bounded inline regeneration or workflow re-entry. |
+| `coding_refinement` | `coding_requested` | Coding provider | Produces a staged patch for an approved file scope; the worker validates and persists it. |
 
 ---
 
@@ -714,9 +724,11 @@ Current first-party handler:
 
 LLM-backed contract surface planning for feature and design refinements.
 Maps the request to the specific Mozaiks contract surfaces that need updating
-(`module_action`, `page_binding`, `data_schema`, `workflow_agent`, etc.) before
-workflow re-entry. Fires when a request is broader than a coding patch but
-narrow enough to target specific contract surfaces rather than a full rebuild.
+(`module_action`, `page_binding`, `data_schema`, `workflow_agent`, etc.). For a
+verified saved app bundle, Studio can execute a bounded surface plan inline;
+otherwise it offers the resolved workflow sequence. This checkpoint fires when
+a request is broader than a coding patch but narrow enough to target specific
+contract surfaces rather than a full rebuild.
 
 Current first-party handler:
 
