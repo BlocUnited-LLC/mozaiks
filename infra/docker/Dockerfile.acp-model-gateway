@@ -1,0 +1,10 @@
+# Trusted model egress sidecar for one isolated repository ACP turn.
+# Build with: docker build -f infra/docker/Dockerfile.acp-model-gateway -t mozaiks-acp-model-gateway .
+FROM python:3.13-slim@sha256:bf44cdfcb76cd3b41e879bc058fc37ec5872002ccfde7fcb765e218cde0cd79c
+
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 HOME=/home/sandbox
+WORKDIR /app
+COPY infra/docker/acp_gateway/gateway.py /app/gateway.py
+USER 10001:10001
+EXPOSE 8765
+ENTRYPOINT ["python", "-I", "/app/gateway.py"]
