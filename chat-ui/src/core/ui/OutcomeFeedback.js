@@ -22,7 +22,8 @@ export default function OutcomeFeedback({ onResponse, toolCallId, onRendered }) 
 
   useEffect(() => {
     if (!toolCallId || (!onRendered && !chatUI) || typeof IntersectionObserver === 'undefined') return;
-    const target = root.current;
+    // The form can exceed a phone viewport; the prompt heading is the invitation.
+    const target = root.current?.querySelector('h2');
     if (!target) return;
     let visible = false;
     let cancelled = false;

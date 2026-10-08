@@ -128,7 +128,7 @@ test('feedback acknowledges visibility after mount, not a buffered or offscreen 
   t.after(() => new Promise(resolve => server.close(resolve)));
   const browser = await chromium.launch({ headless: true });
   t.after(() => browser.close());
-  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  const page = await browser.newPage({ viewport: { width: 390, height: 600 } });
   await page.addInitScript(() => {
     window.feedbackHidden = true;
     Object.defineProperty(document, 'visibilityState', {
@@ -138,7 +138,9 @@ test('feedback acknowledges visibility after mount, not a buffered or offscreen 
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(`http://127.0.0.1:${server.address().port}`);
+  await page.addStyleTag({ content: 'section { min-height: 1600px; }' });
   await page.getByText('How was this result?').waitFor({ state: 'attached' });
+  assert.ok(await page.locator('section').evaluate((element) => element.getBoundingClientRect().height > window.innerHeight));
   assert.deepEqual(await page.evaluate(() => window.acks), []);
   await page.getByText('How was this result?').scrollIntoViewIfNeeded();
   assert.deepEqual(await page.evaluate(() => window.acks), []);

@@ -42,7 +42,7 @@ bypass the owner-checked entry point cannot create a human-feedback receipt.
 An accepted retry retains the original response and observation timestamp.
 
 The shipped browser component separately reports that an invitation was visible after at
-least half of it intersects the viewport in a visible document. The
+least half of its prompt heading intersects the viewport in a visible document. The
 `/api/workflow-feedback/rendered` endpoint accepts only the UI event ID. It
 checks the authenticated session owner and the server's pending
 `outcome_feedback` event, then stores one immutable
