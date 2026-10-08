@@ -87,8 +87,13 @@ async def test_insert_once_keeps_lifecycle_and_current_build_unchanged(monkeypat
 
 
 class _RegistrationHandler:
+    def __init__(self, aliases=()):  # noqa: ANN001
+        self.aliases = aliases
+
     async def register(self, ctx):  # noqa: ANN001
-        result = await registration.register_existing_self_build_target(ctx)
+        result = await registration.register_existing_self_build_target(
+            ctx, conflicting_target_app_ids=self.aliases,
+        )
         return result.model_dump()
 
 
@@ -233,3 +238,66 @@ async def test_undeclared_permission_and_unhealthy_or_changed_host_deny(monkeypa
     monkeypatch.setattr(platform.app.state, "loaded_app_root", tmp_path / "different-root")
     assert (await executor.execute(_request())).success is False
     service.register_existing_app_record.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_historical_target_blocks_new_claim_across_owners(monkeypatch, tmp_path) -> None:
+    _host(monkeypatch, tmp_path)
+    service = SimpleNamespace(
+        has_registered_target_app_id=AsyncMock(return_value=True),
+        register_existing_app_record=AsyncMock(),
+    )
+    monkeypatch.setattr(registration, "_app_registry_service", lambda: service)
+    executor = ModuleExecutor()
+    executor.register(
+        "operator", _RegistrationHandler(("old-target",)),
+        action_method_map={"register": "register"},
+        action_permissions={"register": [registration.REGISTER_SELF_PERMISSION]},
+    )
+    rejected = await executor.execute(_request())
+    assert rejected.success is False
+    service.has_registered_target_app_id.assert_awaited_once_with(app_ids=("old-target",))
+    service.register_existing_app_record.assert_not_awaited()
+
+    service.has_registered_target_app_id.return_value = False
+    service.register_existing_app_record.return_value = {
+        "build_registry_id": "appreg_1", "app_id": "existing-app",
+        "chat_app_id": "existing-app", "owner_user_id": "operator",
+    }
+    accepted = await executor.execute(_request())
+    assert accepted.success is True
+    service.register_existing_app_record.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_historical_target_ids_are_bounded_and_cannot_equal_host(monkeypatch, tmp_path) -> None:
+    _host(monkeypatch, tmp_path)
+    service = SimpleNamespace(
+        has_registered_target_app_id=AsyncMock(),
+        register_existing_app_record=AsyncMock(),
+    )
+    monkeypatch.setattr(registration, "_app_registry_service", lambda: service)
+    for aliases in (
+        ("existing-app",), ("old-target", "old-target"),
+        tuple(f"old-{index}" for index in range(9)), ("bad target",), "old-target",
+    ):
+        executor = ModuleExecutor()
+        executor.register(
+            "operator", _RegistrationHandler(aliases),
+            action_method_map={"register": "register"},
+            action_permissions={"register": [registration.REGISTER_SELF_PERMISSION]},
+        )
+        assert (await executor.execute(_request())).success is False
+    service.has_registered_target_app_id.assert_not_awaited()
+    service.register_existing_app_record.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_historical_target_lookup_is_global_and_returns_only_existence(monkeypatch) -> None:
+    collection = SimpleNamespace(find_one=AsyncMock(return_value={"_id": "foreign-owner-row"}))
+    repo = AppRegistryRepo.__new__(AppRegistryRepo)
+    monkeypatch.setattr(repo, "_collection", AsyncMock(return_value=collection))
+    assert await repo.has_registered_target_app_id(app_ids=("old-target",)) is True
+    collection.find_one.assert_awaited_once_with(
+        {"app_id": {"$in": ["old-target"]}}, {"_id": 1},
+    )

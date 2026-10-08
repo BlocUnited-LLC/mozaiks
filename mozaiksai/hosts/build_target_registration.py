@@ -7,6 +7,7 @@ incorrect wiring; it cannot authenticate arbitrary Python in that process.
 from __future__ import annotations
 
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -82,7 +83,9 @@ def _consistent_dispatch_actor(ctx: ModuleContext) -> str:
     return actor
 
 
-async def register_existing_self_build_target(ctx: ModuleContext) -> ExistingSelfBuildTarget:
+async def register_existing_self_build_target(
+    ctx: ModuleContext, *, conflicting_target_app_ids: Sequence[str] = (),
+) -> ExistingSelfBuildTarget:
     """Insert or reopen the exact loaded-host Factory target after app authorization.
 
     Trusted app code must first verify its own durable owner, tenant, and
@@ -90,13 +93,22 @@ async def register_existing_self_build_target(ctx: ModuleContext) -> ExistingSel
     action declaring ``factory.build_target.register_self``. The dispatch
     facts are constructible in-process and do not replace that owner check.
     There is no request-supplied target ID, source path, lifecycle state, or
-    build pointer.
+    build pointer. Trusted app code may name historical target IDs that must
+    be reconciled before this exact loaded-host target can be claimed.
     """
     owner_user_id = _consistent_dispatch_actor(ctx)
     target_app_id, name = _loaded_host_identity()
     if ctx.app_id != target_app_id:
         raise ValueError("Execution app does not match the loaded host target")
-    record = await _app_registry_service().register_existing_app_record(
+    if isinstance(conflicting_target_app_ids, (str, bytes)) or len(conflicting_target_app_ids) > 8:
+        raise ValueError("Too many historical Factory target IDs")
+    aliases = tuple(_build_identity.validate_python(value) for value in conflicting_target_app_ids)
+    if len(set(aliases)) != len(aliases) or target_app_id in aliases:
+        raise ValueError("Historical Factory target IDs must be distinct from the loaded target")
+    service = _app_registry_service()
+    if aliases and await service.has_registered_target_app_id(app_ids=aliases):
+        raise ValueError("Existing Factory lineage requires reconciliation")
+    record = await service.register_existing_app_record(
         owner_user_id=owner_user_id,
         app_id=target_app_id,
         chat_app_id=target_app_id,

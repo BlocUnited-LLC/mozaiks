@@ -50,6 +50,19 @@ to reopen or refine the target. A separate service actor cannot claim the
 target for a different human owner. App-owned commercial registry IDs remain
 separate from the Factory `build_registry_id`.
 
+Trusted app code may pass `conflicting_target_app_ids=("known-old-id",)` when
+an earlier build process used another target ID for the same loaded app. The
+registration seam checks those IDs across Factory owners and refuses the new
+claim while any is present. It returns no historical row details. IDs must be
+distinct from the loaded app ID; the call accepts at most eight. This is a
+preflight guard, not a migration or a substitute for the app-owned scoped
+record check. It deliberately blocks while the historical row exists,
+including when its lifecycle is `archived`: archival alone does not make that
+lineage read-only for every Factory entry path. The existence check and new
+target insert are separate operations, so the operator must also stop historical
+target creation during reconciliation. Never fill this argument from a
+browser request.
+
 An app can link this returned identity to its own scoped record after another
 owner/tenant/workspace compare and swap. Subsequent source import, baseline
 acceptance, refinement approval, workflow launch, and publication each retain

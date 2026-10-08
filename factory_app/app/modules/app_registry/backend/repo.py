@@ -65,6 +65,11 @@ class AppRegistryRepo:
                 continue
             await coll.create_index(list(keys), **kwargs)
 
+    async def has_registered_target_app_id(self, *, app_ids: tuple[str, ...]) -> bool:
+        """Check target IDs globally without exposing a different owner's row."""
+        coll = await self._collection()
+        return await coll.find_one({"app_id": {"$in": list(app_ids)}}, {"_id": 1}) is not None
+
     async def register_existing_app_record(
         self, *, owner_user_id: str, app_id: str, chat_app_id: str, name: str | None,
     ) -> dict[str, Any]:
