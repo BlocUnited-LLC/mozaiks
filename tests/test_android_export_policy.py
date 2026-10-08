@@ -142,6 +142,11 @@ def test_known_private_paths_are_rejected_even_without_a_recognizable_token(expo
     ("app/config/provider.json", json.dumps({"access_token_b64": base64.b64encode(SYNTHETIC_TOKEN.encode()).decode()})),
     ("app/config/provider.xml", f"<configuration><access_token>{SYNTHETIC_TOKEN}</access_token></configuration>"),
     ("workflows/Fixture/tools/provider.xml", f"<configuration><access_token>{SYNTHETIC_TOKEN}</access_token></configuration>"),
+    ("app/config/provider.xml", f'<configuration><access_token value="{SYNTHETIC_TOKEN}"/></configuration>'),
+    ("app/config/provider.xml", f'<configuration><access_token default="{SYNTHETIC_TOKEN}"/></configuration>'),
+    ("app/config/provider.xml", f'<configuration><access_token defaultValue="{SYNTHETIC_TOKEN}"/></configuration>'),
+    ("app/config/provider.xml", f'<configuration><access_token data="{SYNTHETIC_TOKEN}"/></configuration>'),
+    ("app/config/provider.xml", f'<configuration><access_token secretValue="{SYNTHETIC_TOKEN}"/></configuration>'),
     ("app/config/provider.xml", f'<configuration><entry name="access_token" value="{SYNTHETIC_TOKEN}"/></configuration>'),
     ("app/config/provider.xml", f'<configuration><property name="access_token" defaultValue="{SYNTHETIC_TOKEN}"/></configuration>'),
     ("app/config/provider.xml", (
@@ -210,6 +215,10 @@ def test_obvious_credential_values_in_app_and_workflow_inputs_fail_closed(export
         + SYNTHETIC_TOKEN + "</access_token></metadata></svg>"
     )),
     ("app/brand/assets/logo.svg", (
+        '<svg xmlns="http://www.w3.org/2000/svg"><metadata><access_token '
+        + f'value="{SYNTHETIC_TOKEN}"/></metadata></svg>'
+    )),
+    ("app/brand/assets/logo.svg", (
         '<svg xmlns="http://www.w3.org/2000/svg" '
         + 'data-access-token="' + SYNTHETIC_TOKEN + '" />'
     )),
@@ -220,6 +229,10 @@ def test_obvious_credential_values_in_app_and_workflow_inputs_fail_closed(export
     ("app/brand/assets/logo.svg", (
         '<svg xmlns="http://www.w3.org/2000/svg"><metadata>&lt;access_token&gt;'
         + SYNTHETIC_TOKEN + "&lt;/access_token&gt;</metadata></svg>"
+    )),
+    ("app/brand/assets/logo.svg", (
+        '<svg xmlns="http://www.w3.org/2000/svg"><metadata>&lt;access_token '
+        + f'value="{SYNTHETIC_TOKEN}"/&gt;</metadata></svg>'
     )),
     ("app/brand/assets/icon.png", _png_with_text(
         b"tEXt", b"Access Token\0" + SYNTHETIC_TOKEN.encode(),
@@ -234,6 +247,10 @@ def test_obvious_credential_values_in_app_and_workflow_inputs_fail_closed(export
     ("app/brand/assets/icon.png", _png_with_text(
         b"iTXt", b"XML:com.adobe.xmp\0\x00\0\0\0"
         + f"<access_token>{SYNTHETIC_TOKEN}</access_token>".encode(),
+    )),
+    ("app/brand/assets/icon.png", _png_with_text(
+        b"iTXt", b"XML:com.adobe.xmp\0\x00\0\0\0"
+        + f'<access_token defaultValue="{SYNTHETIC_TOKEN}"/>'.encode(),
     )),
     ("app/brand/assets/icon.png", _png_with_text(
         b"zTXt", b"XML:com.adobe.xmp\0\0"
@@ -297,6 +314,10 @@ def test_both_archives_preserve_public_assets_and_names_only_secret_inputs(expor
             b"iTXt", b"XML:com.adobe.xmp\0\x00\0\0\0"
             b"<metadata><title>Public logo</title></metadata>",
         ),
+        "app/brand/assets/xmp_reference.png": _png_with_text(
+            b"iTXt", b"XML:com.adobe.xmp\0\x00\0\0\0"
+            b'<access_token defaultValue="${INTEGRATION_API_TOKEN}"/>',
+        ),
         "app/brand/assets/logo.svg": (
             b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1">'
             b'<path d="M0 0h1v1H0z"/></svg>'
@@ -304,6 +325,16 @@ def test_both_archives_preserve_public_assets_and_names_only_secret_inputs(expor
         "app/brand/assets/metadata.svg": (
             b'<svg xmlns="http://www.w3.org/2000/svg"><metadata>'
             b'<access_token>${INTEGRATION_API_TOKEN}</access_token>'
+            b'</metadata></svg>'
+        ),
+        "app/brand/assets/metadata_reference.svg": (
+            b'<svg xmlns="http://www.w3.org/2000/svg"><metadata>'
+            b'<access_token value="${INTEGRATION_API_TOKEN}"/>'
+            b'</metadata></svg>'
+        ),
+        "app/brand/assets/escaped_metadata_reference.svg": (
+            b'<svg xmlns="http://www.w3.org/2000/svg"><metadata>'
+            b'&lt;access_token value="${INTEGRATION_API_TOKEN}"/&gt;'
             b'</metadata></svg>'
         ),
         "app/brand/theme_config.json": json.dumps({
@@ -348,6 +379,12 @@ def test_both_archives_preserve_public_assets_and_names_only_secret_inputs(expor
         "app/config/provider.toml": b'[provider]\napi_token_env = "INTEGRATION_API_TOKEN"\napi_token = "${INTEGRATION_API_TOKEN}"\n',
         "app/config/runtime.txt": b'API_TOKEN=${INTEGRATION_API_TOKEN}\n',
         "app/config/provider.xml": b'<configuration><access_token>${INTEGRATION_API_TOKEN}</access_token></configuration>',
+        "app/config/provider_direct_attributes.xml": (
+            b'<configuration><access_token value="${INTEGRATION_API_TOKEN}" '
+            b'default="${INTEGRATION_API_TOKEN}" defaultValue="${INTEGRATION_API_TOKEN}" '
+            b'data="${INTEGRATION_API_TOKEN}" secretValue="${INTEGRATION_API_TOKEN}"/>'
+            b'</configuration>'
+        ),
         "app/config/provider_defaults.xml": (
             b'<configuration><property name="access_token" '
             b'defaultValue="${INTEGRATION_API_TOKEN}"/></configuration>'
@@ -423,15 +460,36 @@ def test_yaml_alias_reused_in_credential_context_does_not_inherit_a_safe_verdict
     assert not output.exists()
 
 
-def test_delivery_verification_rejects_secret_source_even_with_matching_inventory_hashes(export_input):
+@pytest.mark.parametrize("name,safe,unsafe", [
+    (
+        "workflows/Fixture/tools/integration.py",
+        b'import os\nAPI_TOKEN = os.environ["INTEGRATION_API_TOKEN"]\n',
+        f'API_TOKEN = "{SYNTHETIC_TOKEN}"\n'.encode(),
+    ),
+    (
+        "app/config/provider.xml",
+        b'<configuration><access_token value="${INTEGRATION_API_TOKEN}"/></configuration>',
+        f'<configuration><access_token value="{SYNTHETIC_TOKEN}"/></configuration>'.encode(),
+    ),
+    (
+        "app/brand/assets/metadata.svg",
+        b'<svg xmlns="http://www.w3.org/2000/svg"><metadata>'
+        b'<access_token defaultValue="${INTEGRATION_API_TOKEN}"/></metadata></svg>',
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg"><metadata>'
+            f'<access_token defaultValue="{SYNTHETIC_TOKEN}"/></metadata></svg>'
+        ).encode(),
+    ),
+])
+def test_delivery_verification_rejects_secret_source_even_with_matching_inventory_hashes(
+    export_input, name, safe, unsafe,
+):
     workspace, spec, output = export_input
-    name = "workflows/Fixture/tools/integration.py"
-    _write(workspace, name, 'import os\nAPI_TOKEN = os.environ["INTEGRATION_API_TOKEN"]\n')
+    _write(workspace, name, safe)
     result = delivery.materialize_android_workspace(workspace, spec, output)
     manifest_path = Path(result["manifest_path"])
     manifest = json.loads(manifest_path.read_text())
     exported_root = Path(result["workspace_dir"])
-    unsafe = f'API_TOKEN = "{SYNTHETIC_TOKEN}"\n'.encode()
     _write(exported_root, name, unsafe)
     for inventory in (manifest["source_files"], manifest["files"]):
         for entry in inventory:
@@ -449,4 +507,3 @@ def test_delivery_verification_rejects_secret_source_even_with_matching_inventor
 
     assert SYNTHETIC_TOKEN not in str(caught.value)
     assert "manifest differs" not in str(caught.value)
-

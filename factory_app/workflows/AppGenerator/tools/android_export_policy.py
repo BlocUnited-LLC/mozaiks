@@ -317,8 +317,6 @@ def _xml_credentials(text: str, *, require_svg: bool = False, nested_depth: int 
                     "".join(next_child.itertext()).strip()
                 ):
                     return True
-        if _credential_key(element.tag.rpartition("}")[2]) and _literal_secret("".join(element.itertext()).strip()):
-            return True
         if any(
             _credential_key(key.rpartition("}")[2]) and _literal_secret(value)
             for key, value in element.attrib.items()
@@ -329,7 +327,10 @@ def _xml_credentials(text: str, *, require_svg: bool = False, nested_depth: int 
             for key, value in element.attrib.items()
         }
         declared_key = attributes.get("name") or attributes.get("key")
-        if declared_key and _credential_key(declared_key) and (
+        credential_field = _credential_key(element.tag.rpartition("}")[2]) or bool(
+            declared_key and _credential_key(declared_key)
+        )
+        if credential_field and (
             any(
                 _literal_secret(attributes.get(key))
                 for key in ("value", "default", "default_value", "secret_value", "data")
@@ -338,7 +339,7 @@ def _xml_credentials(text: str, *, require_svg: bool = False, nested_depth: int 
         ):
             return True
         fragment = (element.text or "").strip()
-        if nested_depth < 2 and fragment.startswith("<") and "</" in fragment:
+        if nested_depth < 2 and fragment.startswith("<") and ("</" in fragment or fragment.endswith("/>")):
             if _xml_credentials(fragment, nested_depth=nested_depth + 1):
                 return True
     return False

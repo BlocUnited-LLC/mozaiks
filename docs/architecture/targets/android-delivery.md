@@ -69,9 +69,9 @@ the captured input.
 Recognizable credential literals in configuration and Python/JavaScript
 assignments are rejected, including hardcoded environment lookup defaults.
 The policy parses JSON, YAML and TOML values, inspects env-style text, and
-checks XML and property-list fields and statically joined Python credential
-assignments. A documented
-`postgresql://user:pass@host:port/dbname` placeholder is permitted.
+checks XML and property-list fields, including literal-bearing attributes on
+credential elements, and statically joined Python credential assignments.
+A documented `postgresql://user:pass@host:port/dbname` placeholder is permitted.
 Declare runtime secret names in the canonical `app/security/secrets.yaml`
 contract and resolve them through the configured secret backend. Environment
 handles, named vault references, runtime lookups and empty/example placeholders
