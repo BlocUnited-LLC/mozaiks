@@ -23,6 +23,12 @@ _backend_signature: tuple[str, str, str] | None = None
 
 
 class ConnectorVaultBackend(Protocol):
+    """Secret reads return status=found, not_found, or error.
+
+    Only a confirmed missing record is not_found. Backend, authentication,
+    transport, and decryption failures are error so callers can fail closed.
+    """
+
     async def describe(self) -> dict[str, Any]:
         ...
 
@@ -105,6 +111,7 @@ class NoopConnectorVaultBackend:
     async def get_secret(self, *, scope_id: str, service: str) -> dict[str, Any]:
         return {
             "success": False,
+            "status": "error",
             "provider": "disabled",
             "secret_name": None,
             "secret_value": None,
@@ -228,28 +235,54 @@ class AzureKeyVaultConnectorVaultBackend:
         if client is None:
             return {
                 "success": False,
+                "status": "error",
                 "provider": "azure_key_vault",
                 "secret_name": secret_name,
                 "secret_value": None,
                 "error": self._client_error or "Azure Key Vault connector backend is unavailable.",
             }
         try:
+            from azure.core.exceptions import ResourceNotFoundError
+
             secret = await asyncio.to_thread(client.get_secret, secret_name)
             value = getattr(secret, "value", None)
             props = getattr(secret, "properties", None)
             expires_on = getattr(props, "expires_on", None)
             return {
                 "success": bool(value),
+                "status": "found" if value else "error",
                 "provider": "azure_key_vault",
                 "secret_name": secret_name,
                 "secret_value": value,
                 "expires_at": expires_on.isoformat() if expires_on else None,
                 "error": None if value else "Secret exists but has no value.",
             }
+        except ResourceNotFoundError as exc:
+            # A 404 alone can also describe a missing vault or route. Only the
+            # service's SecretNotFound code proves this named secret is absent.
+            if getattr(getattr(exc, "error", None), "code", None) == "SecretNotFound":
+                return {
+                    "success": False,
+                    "status": "not_found",
+                    "provider": "azure_key_vault",
+                    "secret_name": secret_name,
+                    "secret_value": None,
+                    "error": "Secret not found.",
+                }
+            logger.error("Failed to fetch connector secret %s: unexpected not-found response", secret_name)
+            return {
+                "success": False,
+                "status": "error",
+                "provider": "azure_key_vault",
+                "secret_name": secret_name,
+                "secret_value": None,
+                "error": "Secret could not be retrieved.",
+            }
         except Exception as exc:  # pragma: no cover - depends on Azure service
             logger.error("Failed to fetch connector secret %s: %s", secret_name, exc, exc_info=True)
             return {
                 "success": False,
+                "status": "error",
                 "provider": "azure_key_vault",
                 "secret_name": secret_name,
                 "secret_value": None,
@@ -462,6 +495,7 @@ class MongoConnectorVaultBackend:
         if fernet is None:
             return {
                 "success": False,
+                "status": "error",
                 "provider": "mongo",
                 "secret_name": secret_name,
                 "secret_value": None,
@@ -476,14 +510,16 @@ class MongoConnectorVaultBackend:
             logger.error("MongoConnectorVaultBackend.get_secret failed: %s", exc, exc_info=True)
             return {
                 "success": False,
+                "status": "error",
                 "provider": "mongo",
                 "secret_name": secret_name,
                 "secret_value": None,
                 "error": "Secret could not be retrieved.",
             }
-        if not doc:
+        if doc is None:
             return {
                 "success": False,
+                "status": "not_found",
                 "provider": "mongo",
                 "secret_name": secret_name,
                 "secret_value": None,
@@ -492,6 +528,7 @@ class MongoConnectorVaultBackend:
         decrypted = self._decrypt(doc.get("encrypted_value") or "")
         return {
             "success": bool(decrypted),
+            "status": "found" if decrypted else "error",
             "provider": "mongo",
             "secret_name": secret_name,
             "secret_value": decrypted,
