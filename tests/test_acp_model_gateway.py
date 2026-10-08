@@ -184,6 +184,14 @@ def test_every_api_path_requires_trusted_model(pair, adapter, path):
     assert not upstream.requests
 
 
+def test_duplicate_request_keys_are_rejected_before_upstream(pair):
+    upstream, start = pair
+    server = start("codex")
+    assert post(server, "/v1/responses", body=b'{"model":"approved-model","model":"other-model"}')[0] == 400
+    assert post(server, "/v1/responses", body=b'{"model":"approved-model","max_output_tokens":10,"max_output_tokens":9000}')[0] == 400
+    assert not upstream.requests
+
+
 def test_bad_output_limits_and_multiple_chat_outputs_are_rejected(pair):
     upstream, start = pair
     server = start("codex")

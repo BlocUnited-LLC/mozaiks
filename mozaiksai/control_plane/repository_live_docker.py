@@ -358,6 +358,7 @@ async def execute_live_repository_docker_turn(
 
             gateway_config = {
                 "adapter": profile.adapter,
+                "model": profile.model,
                 "upstream_api_key": profile.upstream_api_key.get_secret_value(),
                 "job_token": job_token,
             }

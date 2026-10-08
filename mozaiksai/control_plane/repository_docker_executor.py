@@ -91,7 +91,7 @@ class RepositoryLiveACPProfile:
     def __post_init__(self) -> None:
         if self.adapter not in {"codex", "claude_code"}:
             raise ValueError("REPOSITORY_LIVE_ADAPTER")
-        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,127}", self.model):
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}", self.model):
             raise ValueError("REPOSITORY_LIVE_MODEL")
         if not _IMAGE_REFERENCE.fullmatch(self.gateway_image) or (
             ":" not in self.gateway_image and "@" not in self.gateway_image
@@ -361,6 +361,8 @@ async def execute_repository_docker_turn(
         raise TypeError("REPOSITORY_LIVE_PROFILE_TYPE")
     if live_profile is not None and (approved_context is None or snapshot is None or validate_path is None):
         raise ValueError("REPOSITORY_LIVE_CONTEXT_REQUIRED")
+    if live_profile is not None and max_wall_seconds > 600:
+        raise ValueError("REPOSITORY_LIVE_WALL_BUDGET")
     selected_files = dict(request.files)
     inspection_files = dict(request.read_only_files)
     selected_paths = set(selected_files)

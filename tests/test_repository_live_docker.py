@@ -143,6 +143,17 @@ async def test_live_turn_requires_approval_before_docker(monkeypatch: pytest.Mon
 
 
 @pytest.mark.asyncio
+async def test_live_turn_rejects_wall_budget_beyond_gateway_lifetime() -> None:
+    with pytest.raises(ValueError, match="REPOSITORY_LIVE_WALL_BUDGET"):
+        await execute_repository_docker_turn(
+            _request(), image=_WORKER_IMAGE, expected_image_id=_WORKER_IMAGE_ID,
+            approved_context=_context(), snapshot=_snapshot(),
+            validate_path=lambda _path: None, live_profile=_profile(),
+            max_wall_seconds=601,
+        )
+
+
+@pytest.mark.asyncio
 async def test_live_turn_delegates_only_verified_scope(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}
 
@@ -262,6 +273,7 @@ async def test_gateway_failure_withholds_source_and_cleans_docker_resources(
         )
 
     assert gateway_config["upstream_api_key"] == "upstream-private-key"
+    assert gateway_config["model"] == "gpt-5.2-codex"
     assert all(stdin is None for _args, stdin in docker_calls)
     assert "upstream-private-key" not in repr(docker_calls)
     assert len(removed) == 4  # both containers and both unique networks
