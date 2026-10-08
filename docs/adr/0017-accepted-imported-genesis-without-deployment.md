@@ -61,6 +61,11 @@ their canonical digest against the durable AppRegistry receipt. These are
 functional validation results from the contained smoke protocol, not a
 cryptographic attestation that untrusted app code could not forge a child
 outcome; the contained runner and its event provenance still require review.
+Accordingly, this draft unconditionally closes imported acceptance and
+baseline use at a trusted-observer preflight before source staging. There is
+no runtime configuration override. A later reviewed change must replace the
+preflight with evidence bound by an observer outside the untrusted child; a
+container smoke result alone cannot unlock acceptance.
 
 AppRegistry accepts the exact reserved claim with a single owner/host/target
 compare and swap. Its receipt records reviewer, time, validation contract,

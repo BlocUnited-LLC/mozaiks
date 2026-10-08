@@ -189,7 +189,9 @@ do not add a second `content_ref` authority. The reservation is not Genesis
 acceptance: canonical app validation and explicit owner review remain required
 before a later request may enter Refinement. Studio launch and retry plus
 AppGenerator hydration require the accepted receipt and verified source bytes
-for imported drafts. Ordinary revision drafts retain their existing path. App
+for imported drafts. Imported acceptance and baseline use remain closed until
+trusted external observation of runtime validation is available. Ordinary
+revision drafts retain their existing path. App
 Intelligence's redacted source index is context evidence, not a substitute for
 the complete archive.
 

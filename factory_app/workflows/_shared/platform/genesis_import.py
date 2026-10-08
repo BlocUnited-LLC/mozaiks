@@ -50,6 +50,11 @@ class GenesisImportError(ValueError):
     """The source cannot become a complete, owner-bound draft build record."""
 
 
+def _require_trusted_imported_genesis_observer() -> None:
+    """Keep imported-source acceptance closed until externally observed validation exists."""
+    raise GenesisImportError("trusted imported Genesis validation observer is unavailable")
+
+
 class PinnedSourceProvenance(BaseModel):
     """Secret-free source identity asserted by the trusted fetch/projection caller."""
 
@@ -380,6 +385,7 @@ async def require_accepted_genesis_baseline(
     """Refuse an imported baseline without its durable reviewed-source receipt."""
     if record.commit_metadata.metadata.get("bundle_mode") != "brownfield_genesis_import":
         return
+    _require_trusted_imported_genesis_observer()
     registry = registry_service or AppRegistryService()
     row = (await registry.get_app_record(
         owner_user_id=owner_user_id, build_registry_id=build_registry_id,
@@ -435,6 +441,7 @@ async def accept_existing_app_genesis(
         )
 
         require_contained_imported_smoke_runner()
+    _require_trusted_imported_genesis_observer()
     try:
         bundle_bytes = await read_verified_artifact_bundle(record, max_bytes=APP_BUNDLE_MAX_TOTAL_BYTES)
         entries, declared = _manifest_entries(
