@@ -27,6 +27,9 @@ from factory_app.workflows._shared.subscription_contract_context import (
 from factory_app.workflows.AppGenerator.tools.app_build_plan import app_build_plan
 from factory_app.workflows.AppGenerator.tools.app_validation import validate_app_bundle_from_request
 from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
+from factory_app.workflows.AppGenerator.tools.code_file_utils import (
+    extract_code_file_map_from_payload,
+)
 from factory_app.workflows.AppGenerator.tools.export_app_code import resolve_export_gate
 from factory_app.workflows.AppGenerator.tools.materialize_app_config_contracts import (
     materialize_app_config_contracts,
@@ -436,18 +439,6 @@ def validate_assembled_subscription_yaml(content: str | None, contract: dict[str
     return errors
 
 
-def _module_yaml_from_output(output: dict[str, Any], files: dict[str, str]) -> str | None:
-    if files.get(MODULE_PATH):
-        return files[MODULE_PATH]
-    module_contract = output.get("module_contract")
-    if not isinstance(module_contract, dict):
-        return None
-    module_yaml = module_contract.get("module_yaml")
-    if not isinstance(module_yaml, dict):
-        return None
-    return _yaml_text(module_yaml)
-
-
 def validate_module_contract_output(output: dict[str, Any]) -> tuple[str | None, list[str]]:
     errors: list[str] = _structured_output_errors(output, mode_label="module_contract_bundle")
     if output.get("mode") != "module_contract_bundle":
@@ -461,7 +452,11 @@ def validate_module_contract_output(output: dict[str, Any]) -> tuple[str | None,
     if backend_files:
         errors.append(f"module_contract task emitted backend Python files: {backend_files}.")
 
-    content = _module_yaml_from_output(output, files)
+    try:
+        content = extract_code_file_map_from_payload(output).get(MODULE_PATH)
+    except ValueError as exc:
+        errors.append(f"{MODULE_PATH} could not be materialized: {exc}")
+        return None, errors
     if not content:
         errors.append(f"Missing {MODULE_PATH}.")
         return None, errors
@@ -1239,6 +1234,7 @@ async def _run_config_task(
         "ConfigMiddlewareAgent",
         prompt=system_prompt,
         config=llm_config_to_ag2_config(llm_config),
+        response_schema=configured_agent.response_schema,
         # Meter this one-shot call in the runtime usage ledger so live smoke
         # builds produce real per-build token/cost numbers.
         middleware=[
@@ -1269,8 +1265,8 @@ async def _run_config_task(
         structured_output = _coerce_structured_output(content, response_schema)
         if not structured_output:
             raise ValueError(f"Unable to parse structured output from {type(content).__name__}: {content!r}")
-        success = True
-        error = None
+        error = structured_output.get("_schema_validation_error")
+        success = error is None
     except Exception as exc:
         structured_output = {}
         success = False
