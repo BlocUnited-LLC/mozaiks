@@ -127,8 +127,10 @@ This project follows a practical pre-1.0 changelog format:
   the caller's token-bound workspace to match a host-verified membership.
   Earlier support alerts without a workspace owner are hidden from notification
   reads and bulk actions; app-wide alerts and ordinary direct messages remain
-  available. All notification reads and mutations are limited to the app loaded
-  by the host, including when a token has no app claim.
+  available. Role-targeted alerts with tenant or workspace ownership require
+  the matching verified scope, and ownerless role alerts are hidden. All
+  notification reads and mutations are limited to the app loaded by the host,
+  including when a token has no app claim.
 
 - Repository Docker coding turns now require a trusted local image ID, reject
   changed image tags before source transfer, verify the created container's
