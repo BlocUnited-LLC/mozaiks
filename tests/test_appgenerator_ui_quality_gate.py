@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
@@ -422,7 +423,9 @@ async def test_assemble_app_tasks_merges_schema_artifacts_and_task_batch_outputs
         "ui/lib/moduleApi.js",
     }
     assert context.snapshot()["assembled_source"] == "schema_and_task_batch_outputs"
-    assert context.snapshot()["generated_files"]["app.json"] == '{"appName":"Support"}\n'
+    assert json.loads(context.snapshot()["generated_files"]["app.json"]) == {
+        "appName": "Support", "appId": "support",
+    }
     assert context.snapshot()["app_task_batch_results"]["tickets_module"]["code_files"] == [
         {"filename": "modules/tickets/module.yaml", "content": "id: tickets\n"}
     ]

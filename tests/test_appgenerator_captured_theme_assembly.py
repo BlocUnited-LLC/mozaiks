@@ -33,7 +33,9 @@ def test_captured_theme_survives_task_assembly_and_partial_deltas(patch):
     assert result == expected
     assert resolve_app_theme_config(context.get("captured_theme_config"), patch) == expected
     assert context.snapshot()["captured_theme_config"] == original
-    assert files["app.json"] == code_files[0]["content"]
+    assert json.loads(files["app.json"]) == {
+        "appName": "Support Desk", "appId": "support-desk",
+    }
 
 
 def test_no_theme_is_not_replaced_with_an_invented_default():
