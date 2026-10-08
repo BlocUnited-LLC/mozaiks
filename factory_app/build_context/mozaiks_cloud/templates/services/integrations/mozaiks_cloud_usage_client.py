@@ -9,9 +9,17 @@ Sink-agnostic by design: where reports go is entirely determined by the
 mozaiks_cloud connector / MOZAIKS_CLOUD_* configuration. When nothing is
 configured the client reports is_configured() == False and sends nothing —
 generated apps never phone home by default.
+
+An operator may inject MOZAIKS_CLOUD_USAGE_API_KEY at runtime to give this
+client a credential dedicated to usage reporting. This requires an explicit
+MOZAIKS_CLOUD_API_BASE so the key cannot be sent to a connector's unrelated
+endpoint. Without the usage key, the normal connector or API key continues
+to work.
 """
+
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from .mozaiks_cloud_client import (
@@ -20,9 +28,25 @@ from .mozaiks_cloud_client import (
 )
 
 
+async def _no_connector_settings(_app_id: str | None) -> None:
+    return None
+
+
 class MozaiksCloudUsageClient:
     def __init__(self, transport: MozaiksCloudTransport | None = None) -> None:
-        self._transport = transport or MozaiksCloudTransport()
+        if transport is not None:
+            self._transport = transport
+        else:
+            usage_key = os.getenv("MOZAIKS_CLOUD_USAGE_API_KEY", "").strip()
+            if usage_key:
+                usage_base = os.getenv("MOZAIKS_CLOUD_API_BASE", "").strip()
+                self._transport = MozaiksCloudTransport(
+                    api_base=usage_base or None,
+                    api_key=usage_key,
+                    connector_settings_loader=_no_connector_settings,
+                )
+            else:
+                self._transport = MozaiksCloudTransport()
 
     async def is_configured(self) -> bool:
         try:

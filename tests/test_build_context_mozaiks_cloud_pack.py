@@ -92,6 +92,7 @@ def test_mozaiks_cloud_context_declares_deployment_env_secret() -> None:
     deployment_env = context["pack"].get("deployment_env", {})
     secret_vars = set(deployment_env.get("secret", []))
     assert "MOZAIKS_CLOUD_API_KEY" in secret_vars
+    assert "MOZAIKS_CLOUD_USAGE_API_KEY" not in secret_vars
 
 
 def test_mozaiks_cloud_context_deployment_env_optional_vars() -> None:
@@ -100,6 +101,7 @@ def test_mozaiks_cloud_context_deployment_env_optional_vars() -> None:
     optional_vars = set(deployment_env.get("optional", []))
     assert "MOZAIKS_CLOUD_API_BASE" in optional_vars
     assert "MOZAIKS_CLOUD_APP_ID" in optional_vars
+    assert "MOZAIKS_CLOUD_USAGE_API_KEY" not in optional_vars
 
 
 # ---------------------------------------------------------------------------
@@ -469,6 +471,7 @@ def test_mozaiks_cloud_client_templates_compile() -> None:
         "mozaiks_cloud_client.py",
         "mozaiks_cloud_deployment_client.py",
         "mozaiks_cloud_domain_client.py",
+        "mozaiks_cloud_usage_client.py",
     ):
         path = TEMPLATES / "services" / "integrations" / name
         compile(path.read_text(encoding="utf-8"), str(path), "exec")
