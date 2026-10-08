@@ -225,6 +225,7 @@ def http_runtime(monkeypatch):
         )}
         executor.register("tasks", handler, action_method_map=actions)
         app = FastAPI()
+        app.state.loaded_app_id = "ownership-test-app"
         app.state.module_action_surfaces = {"tasks": dict.fromkeys(actions)}
         app.state.executor_registry = SimpleNamespace(module_executor=executor)
         app.include_router(module_router.router)

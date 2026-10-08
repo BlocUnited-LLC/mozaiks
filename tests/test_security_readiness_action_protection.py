@@ -1103,6 +1103,7 @@ async def _compose(tmp_path: Path, files: dict[str, str], mongo: tuple[Any, str]
     registry.register(executor)
 
     app = FastAPI()
+    app.state.loaded_app_id = APP_ID
     app.state.executor_registry = registry
     app.state.module_action_surfaces = {module.name: module.action_api_surface_map for module in load.modules}
     app.state.failed_module_names = []

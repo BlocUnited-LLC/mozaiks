@@ -75,6 +75,7 @@ def _client(
     )
     registry = ExecutorRegistry()
     registry.register(executor)
+    platform_host.app.state.loaded_app_id = "host-app"
     platform_host.app.state.executor_registry = registry
     platform_host.app.state.failed_module_names = []
     if action_surfaces is None:
@@ -90,7 +91,7 @@ def _client(
 _ADMIN_SURFACES = {"billing_ops": {"settle": "admin_internal", "authority": "admin_internal"}}
 
 
-_STATE_KEYS = ("executor_registry", "failed_module_names", "module_action_surfaces")
+_STATE_KEYS = ("loaded_app_id", "executor_registry", "failed_module_names", "module_action_surfaces")
 _ABSENT = object()
 
 
@@ -403,6 +404,7 @@ def test_validation_failure_paths_are_audited(monkeypatch) -> None:
 
     registry = _Reg()
     registry.register(executor)
+    platform_host.app.state.loaded_app_id = "host-app"
     platform_host.app.state.executor_registry = registry
     platform_host.app.state.failed_module_names = []
     platform_host.app.state.module_action_surfaces = _ADMIN_SURFACES

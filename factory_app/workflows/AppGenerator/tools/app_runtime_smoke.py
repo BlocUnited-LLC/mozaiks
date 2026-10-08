@@ -1063,6 +1063,7 @@ async def _boot(run: _SmokeRun, initial_environment: set[str]) -> bool:
     registry.register(executor)
 
     app = FastAPI()
+    app.state.loaded_app_id = run.app_id
     app.state.executor_registry = registry
     app.state.module_action_surfaces = {module.name: module.action_api_surface_map for module in load.modules}
     app.state.failed_module_names = sorted(load.failed_module_names)

@@ -134,6 +134,7 @@ def runtime(monkeypatch):
 
     def client(*, workspace_store=False, surface=None):
         app = FastAPI()
+        app.state.loaded_app_id = APP_ID
         app.state.module_action_surfaces = {"reports": {"export_report": surface}}
         app.state.executor_registry = SimpleNamespace(module_executor=executor(workspace_store=workspace_store))
         app.include_router(module_router.router)

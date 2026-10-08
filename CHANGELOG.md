@@ -118,6 +118,10 @@ This project follows a practical pre-1.0 changelog format:
   clients, Cloud facades, and usage reporters need updating;
   affected connectors require owner-verified credential re-entry.
 
+- HTTP module actions now bind execution and emitted events to the loaded app
+  bundle. Claimless tokens cannot choose another execution app through request
+  parameters, and declared target-app inputs remain business data.
+
 - Repository Docker coding turns now require a trusted local image ID, reject
   changed image tags before source transfer, verify the created container's
   image, and reject unrecognized baked environment keys.
