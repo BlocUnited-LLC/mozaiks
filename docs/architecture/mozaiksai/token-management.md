@@ -220,6 +220,18 @@ Generated app pages should not call it. Generated apps request checkout or
 top-up sessions through an app-owned billing facade; only a trusted adapter
 submits fulfillment after verification.
 
+For a `token_top_up_paid` command interrupted after the wallet credited tokens
+but before its command log reached a terminal state, the trusted adapter may
+submit the **identical** `BillingFulfillmentCommand` to the same apply route.
+The pending-command path closes the command only when its persisted command
+identity and hash match and the token wallet proves the exact applied credit in
+both its ledger entry and balance projection. Recovery only reads the wallet;
+it never issues another credit. A missing, pending, or inconsistent wallet
+entry leaves the command pending (`409`) for operator review. Subscription
+effects and non-paid token grants do not use this recovery path. The hosted
+payment adapter must still check its current paid/refund state before retrying;
+OSS fulfillment does not infer external settlement or refund policy.
+
 Generated app runtime acceptance tests cover this ingress as part of the full
 chain: `POST /api/billing/fulfillment/apply` writes the configured
 `assignment_store`, `ConfiguredEntitlementAdapter` grants the gated action,

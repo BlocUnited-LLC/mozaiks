@@ -822,6 +822,80 @@ class TokenWalletLedger:
         balances, _entries = await self._collections()
         return public_balance(await balances.find_one({"_id": scope.balance_id}), scope)
 
+    async def find_applied_credit(
+        self,
+        *,
+        app_id: str,
+        wallet_id: str,
+        amount: int,
+        idempotency_key: str,
+        user_id: str | None = None,
+        tenant_id: str | None = None,
+        preferred_scope: Literal["user", "tenant"] | None = None,
+        source: str,
+        reason: str,
+        metadata: dict[str, Any],
+    ) -> TokenWalletEntryResult | None:
+        """Read proof of an existing credit without reserving or moving tokens.
+
+        The terminal entry and the balance's applied-entry set must agree on
+        the deterministic movement and its full scope. A pending entry, or an
+        applied entry absent from the balance, cannot prove a committed credit.
+        """
+        scope = _scope_for(
+            app_id=app_id,
+            wallet_id=wallet_id,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            preferred_scope=preferred_scope,
+        )
+        entry_id = _entry_id(scope, _text(idempotency_key))
+        balances, entries = await self._collections()
+        entry = await entries.find_one({"_id": entry_id})
+        if entry is None:
+            return None
+        expected = {
+            "entry_id": entry_id,
+            "idempotency_key": _text(idempotency_key),
+            "balance_id": scope.balance_id,
+            "app_id": scope.app_id,
+            "wallet_id": scope.wallet_id,
+            "scope_type": scope.scope_type,
+            "scope_id": scope.scope_id,
+            "user_id": scope.user_id,
+            "tenant_id": scope.tenant_id,
+            "operation": "credit",
+            "direction": "credit",
+            "amount": amount,
+            "signed_amount": amount,
+            "status": "applied",
+            "source": _text(source),
+            "reason": _text(reason),
+            "metadata": _safe_metadata(metadata),
+        }
+        if (
+            entry.get("_id") != entry_id
+            or any(entry.get(key) != value for key, value in expected.items())
+            or entry.get("applied_at") is None
+        ):
+            return None
+        balance = await balances.find_one({"_id": scope.balance_id})
+        if balance is None or entry_id not in (balance.get("applied_entry_ids") or []):
+            return None
+        for key, value in (
+            ("app_id", scope.app_id),
+            ("wallet_id", scope.wallet_id),
+            ("scope_type", scope.scope_type),
+            ("scope_id", scope.scope_id),
+            ("user_id", scope.user_id),
+            ("tenant_id", scope.tenant_id),
+        ):
+            if balance.get(key) != value:
+                return None
+        return TokenWalletEntryResult(
+            status="applied", entry=public_entry(entry), balance=public_balance(balance, scope)
+        )
+
     async def list_entries(
         self,
         *,
