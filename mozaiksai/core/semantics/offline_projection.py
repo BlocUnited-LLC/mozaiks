@@ -14,7 +14,7 @@ import re
 from collections.abc import Iterable, Mapping, Sequence
 from enum import StrEnum
 from types import NoneType
-from typing import Any, Literal, get_args
+from typing import Any, Literal, cast, get_args
 
 import yaml
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
@@ -423,8 +423,9 @@ _WORKFLOW_STARTUP_MODES = {
     "UserDriven": WorkflowStartupMode.USER_DRIVEN,
     "BackendOnly": WorkflowStartupMode.BACKEND_ONLY,
 }
+# Pydantic's field annotation is the canonical literal; cast its dynamic type for mypy.
 _ORCHESTRATOR_SCHEMA_VERSION: TypeAdapter[str] = TypeAdapter(
-    OrchestratorConfig.model_fields["schema_version"].annotation
+    cast(Any, OrchestratorConfig.model_fields["schema_version"].annotation)
 )
 _ORCHESTRATOR_FIELDS = frozenset(
     {
