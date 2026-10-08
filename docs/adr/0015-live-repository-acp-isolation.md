@@ -18,12 +18,21 @@ port. A future typed, trusted-worker-only live profile selects the new internal
 transport; no user request, plan, or agent output may select that profile.
 The caller still supplies `CodingWorkerRequest`, approved execution context,
 snapshot, and host path callbacks, and receives `RepositoryDockerTurn`. Offline
-execution remains the default. App Zero must not launch a parallel Codex or
-Claude subprocess path.
+execution remains the default. The live profile must reject an absent or
+mismatched approved context, snapshot, path validator, or create-path validator
+when creation is granted. It must verify source and operation grants before
+supplying source or a model credential to the container. The offline port's
+current option to run without an approved context is not a live-mode grant.
+App Zero must not launch a parallel Codex or Claude subprocess path.
 
-No live mode may start until the fixed image, model credential route, restricted
-model egress, and an opt-in real-model acceptance turn have been verified. This
-ADR does not enable live mode or change the offline executor.
+One manually triggered, operator-only local acceptance turn may run after the
+fixed image, credential route, and restricted model egress pass their preflight
+gates. It may create a draft protected PR after the normal validation gates, but
+cannot itself authorize merge, artifact promotion, or release. Unattended or
+customer-facing live execution remains disabled until that real-model turn has
+been reviewed. Multi-tenant live execution remains disabled until a separate
+credential and isolation decision is accepted. This ADR does not enable live
+mode or change the offline executor.
 
 ## Reason
 
@@ -72,24 +81,32 @@ review remain required.
    install packages at turn time. Resolve the local image ID before Docker
    creation and inspect the created container before starting it. The image
    must contain no credentials or app workspace.
-2. Bind the agent only to a dedicated Docker `--internal` network with a
-   trusted egress proxy. The proxy allows the configured model host and port
+2. Bind the agent only to a per-turn Docker `--internal` network whose only
+   other peer is a trusted egress proxy. The proxy allows the configured model
+   host and port
    (`api.openai.com:443` for Codex API-key execution or
    `api.anthropic.com:443` for Claude) and denies other names, IP literals,
-   private addresses, redirects to other hosts, and direct outbound TCP.
+   private addresses, follow-up connections to other hosts after redirects,
+   and direct outbound TCP. A TLS tunnel does not let the proxy inspect model
+   request contents; it can enforce destination and connection policy.
    Ordinary Docker bridge access is insufficient. The trusted worker verifies
    the network and proxy identity at each launch. If the proxy is absent or
    policy cannot be verified, the turn fails before source enters the container.
 3. Use a dedicated, revocable model credential for this worker, with restricted
-   API permissions and a bounded spend limit where the provider supports
-   them. Deliver it from the trusted secret backend to the one-shot worker over
-   its private stdin protocol, then pass it only to the selected ACP adapter's
-   child process. Never put it in an image, Docker `Config.Env`, command line,
-   repository, log, proposal, or result JSON. Docker `inspect` exposes
-   `Config.Env`; the agent can still read its own child environment, so this
-   initial route requires the network and spending limits above. A future
-   proxy-auth route may keep the credential outside the container, but must
-   first prove the chosen ACP adapter can authenticate through that proxy.
+   API permissions and a verified hard spend limit where the provider supports
+   one. An alert-only budget is not a spend cap. Deliver the key from the
+   trusted secret backend to the one-shot worker over its private stdin
+   protocol, then pass it only to the selected ACP adapter's
+   child process. The trusted worker must not intentionally place it in an
+   image, Docker `Config.Env`, command line, repository, log, proposal, or
+   result JSON. Docker `inspect` exposes `Config.Env`. The agent can read the
+   key in its child environment and can print it, encode it into output, or
+   send it to the allowed model endpoint. The proxy cannot prevent disclosure
+   through a permitted model request. The local operator accepts this residual
+   risk for the single-owner acceptance turn; the dedicated key must be
+   revoked or rotated after that turn. A future proxy-auth route may keep the
+   credential outside the container, but must first prove the chosen ACP
+   adapter can authenticate through that proxy.
 4. Set `HOME`, `CODEX_HOME`, and `CLAUDE_CONFIG_DIR` to fresh container tmpfs
    paths. Do not mount or copy the operator's `~/.codex/auth.json` or
    `~/.claude` directory. The [official Codex authentication guidance](https://learn.chatgpt.com/docs/auth)
@@ -107,11 +124,12 @@ review remain required.
    only after validation and candidate-digest checks.
 
 The initial credential route is for local operator acceptance with a dedicated
-key. Multi-tenant operation should use a proven per-tenant credential or
-brokered proxy-auth design before activation. ChatGPT plan access through a
-user-authorized OAuth integration is a separate product decision with its own
-eligibility, consent, and token lifecycle; a cached personal login is not that
-integration. [OpenAI's sandbox security guidance](https://developers.openai.com/api/docs/guides/agents-api/environments/security)
+key. Multi-tenant operation must remain disabled until a separately reviewed
+per-tenant credential or brokered proxy-auth design proves its isolation.
+ChatGPT plan access through a user-authorized OAuth integration is a separate
+product decision with its own eligibility, consent, and token lifecycle; a
+cached personal login is not that integration.
+[OpenAI's sandbox security guidance](https://developers.openai.com/api/docs/guides/agents-api/environments/security)
 likewise recommends isolating workloads, restricting egress, and keeping
 long-lived application credentials outside agent environments.
 
@@ -122,24 +140,30 @@ used; passing the existing fake-agent proof or initialize handshake alone is
 insufficient.
 
 1. **Offline container assertions:** before start, verify image ID, exact
-   internal network/proxy, nonroot user, filesystem and resource limits, no
-   bind/volume mounts, no socket, no host credentials in Docker configuration,
-   fresh tmpfs homes, and no general egress. After a malicious terminal probe,
-   assert that direct internet, host gateway, metadata/private-network targets,
-   DNS bypass, and non-allowlisted proxy destinations are unreachable.
-2. **Credential containment:** use a canary credential to prove it does not
-   appear in image layers, `docker inspect`, process arguments, Docker logs,
-   stderr/stdout, serialized proposals, archives, or PR text. Verify that an
-   injected host-only sentinel and personal auth files are absent. Reject
-   missing credentials and proxy misconfiguration before the turn.
+   per-turn internal network with no other peers, proxy identity and sole
+   egress path, nonroot user, filesystem and resource limits, no bind/volume
+   mounts, no socket, no host credentials in Docker configuration, fresh tmpfs
+   homes, and no general egress. After a malicious terminal probe, assert that
+   direct internet, host gateway, metadata/private-network targets, DNS bypass,
+   and non-allowlisted proxy destinations are unreachable.
+2. **Credential handling:** use a canary credential to verify host-controlled
+   image layers, `docker inspect`, process arguments, and logs do not contain
+   it. Have a malicious test agent deliberately emit the canary through
+   stderr/stdout, a proposal, and an archive; verify that each known disclosure
+   is discarded or fails closed before persistence or PR publication. These
+   checks cannot prove that an agent cannot transform the key or send it in an
+   allowed model request. Verify that an injected host-only sentinel and
+   personal auth files are absent. Reject missing credentials and proxy
+   misconfiguration before the turn.
 3. **Contract and failure tests:** exercise update, exact create, exact delete,
    out-of-scope and read-only mutations, source drift, malformed output,
    timeout, process crash, cleanup failure, and duplicate durable attempts.
    Host validation, candidate digest, and source-control gates must fail
    closed; advisory token usage cannot become wallet authority.
-4. **Opt-in live acceptance:** with an operator-provided dedicated model key,
-   run one real Codex or Claude ACP turn on a deliberately small private
-   repository fixture. Record the pinned OSS and app commits, image ID,
+4. **Opt-in live acceptance:** after gates 1-3, use the operator-only test path
+   and an operator-provided dedicated model key to run one real Codex or Claude
+   ACP turn on a deliberately small private repository fixture. Record the
+   pinned OSS and app commits, image ID,
    configured adapter/model, approved paths, sanitized turn status, candidate
    digest, actual validation result, protected PR number, CI result, and human
    review. Do not publish or tag based on an offline proof. Never run this gate
@@ -179,6 +203,10 @@ validation and promotion, bounded agent authority, and the OSS/operator
 separation in [Architectural Invariants](https://github.com/BlocUnited-LLC/mozaiks/blob/main/ARCHITECTURAL_INVARIANTS.md).
 It extends [ADR 0010](0010-agent-and-app-sandbox-execution-boundary.md): AG2
 still owns agent execution; Mozaiks retains artifact acceptance.
+It defers the semantic-model and typed-decision-ledger direction in
+[issue #411](https://github.com/BlocUnited-LLC/mozaiks/issues/411). This
+decision changes execution containment only; it does not change semantic
+authority, `AppBuildPlan`, artifact contracts, or refinement routing.
 
 ## OSS Boundary
 
