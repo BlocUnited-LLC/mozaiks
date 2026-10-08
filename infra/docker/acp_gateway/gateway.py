@@ -24,7 +24,8 @@ PORT = 8765
 MAX_STARTUP_BYTES = 16 * 1024
 MAX_REQUEST_BYTES = 8 * 1024 * 1024
 MAX_RESPONSE_BYTES = 32 * 1024 * 1024
-MAX_REQUESTS = 128
+MAX_REQUESTS = 16
+MAX_OUTPUT_TOKENS = 8192
 MAX_CONCURRENT_REQUESTS = 4
 MAX_CONNECTIONS = 8
 MAX_UPTIME_SECONDS = 15 * 60
@@ -34,7 +35,9 @@ CHUNK_BYTES = 16 * 1024
 
 _PATHS = {
     "codex": frozenset(("/v1/responses", "/v1/chat/completions")),
-    "claude_code": frozenset(("/v1/messages", "/v1/messages/count_tokens")),
+    "claude_code": frozenset(
+        ("/v1/messages", "/v1/messages?beta=true", "/v1/messages/count_tokens")
+    ),
 }
 _HOSTS = {"codex": "api.openai.com", "claude_code": "api.anthropic.com"}
 _VERSION_RE = re.compile(r"\A[0-9]{4}-[0-9]{2}-[0-9]{2}\Z")
@@ -54,6 +57,7 @@ class StartupConfig:
     adapter: str
     upstream_api_key: str
     job_token: str
+    model: str
 
     @classmethod
     def parse(cls, raw: bytes) -> StartupConfig:
@@ -65,11 +69,13 @@ class StartupConfig:
                 "adapter",
                 "upstream_api_key",
                 "job_token",
+                "model",
             }:
                 raise ValueError
             adapter = data["adapter"]
             key = data["upstream_api_key"]
             token = data["job_token"]
+            model = data["model"]
             if adapter not in _PATHS:
                 raise ValueError
             if (
@@ -84,7 +90,9 @@ class StartupConfig:
                 raise ValueError
             if not re.fullmatch(r"[A-Za-z0-9_-]+", token):
                 raise ValueError
-            return cls(adapter=adapter, upstream_api_key=key, job_token=token)
+            if not isinstance(model, str) or not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", model):
+                raise ValueError
+            return cls(adapter=adapter, upstream_api_key=key, job_token=token, model=model)
         except (UnicodeDecodeError, json.JSONDecodeError, TypeError, KeyError) as exc:
             raise ValueError("invalid gateway startup configuration") from exc
         except ValueError as exc:
@@ -224,14 +232,62 @@ class GatewayHandler(BaseHTTPRequestHandler):
                 return None
             chunks.append(chunk)
             remaining -= len(chunk)
-        body = b"".join(chunks)
+        return b"".join(chunks)
+
+    def _prepare_body(self, body: bytes) -> bytes | None:
         try:
-            if not isinstance(json.loads(body), dict):
+            data = json.loads(body)
+            if not isinstance(data, dict):
                 raise ValueError
         except (ValueError, UnicodeDecodeError, RecursionError):
             self._send_json(400, "invalid_json")
             return None
-        return body
+        if data.get("model") != self.server.config.model:
+            self._send_json(403, "model_not_approved")
+            return None
+
+        if self.path != "/v1/messages/count_tokens":
+            if self.path == "/v1/responses":
+                output_field = "max_output_tokens"
+                minimum = 16  # OpenAI Responses requires at least 16.
+            elif self.path in ("/v1/messages", "/v1/messages?beta=true"):
+                output_field = "max_tokens"
+                minimum = 0  # Anthropic permits zero for cache warmup.
+            else:
+                fields = [
+                    name
+                    for name in ("max_completion_tokens", "max_tokens")
+                    if data.get(name) is not None
+                ]
+                if len(fields) > 1 or type(data.get("n", 1)) is not int or data.get("n", 1) != 1:
+                    self._send_json(400, "invalid_output_limit")
+                    return None
+                output_field = fields[0] if fields else "max_completion_tokens"
+                minimum = 1
+
+            output_limit = data.get(output_field)
+            if output_limit is not None and (
+                type(output_limit) is not int or output_limit < minimum
+            ):
+                self._send_json(400, "invalid_output_limit")
+                return None
+            data[output_field] = (
+                min(output_limit, MAX_OUTPUT_TOKENS)
+                if output_limit is not None
+                else MAX_OUTPUT_TOKENS
+            )
+
+        try:
+            encoded = json.dumps(
+                data, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+            ).encode("utf-8")
+        except ValueError:
+            self._send_json(400, "invalid_json")
+            return None
+        if len(encoded) > MAX_REQUEST_BYTES:
+            self._send_json(413, "request_too_large")
+            return None
+        return encoded
 
     def _upstream_headers(self, body: bytes) -> dict[str, str] | None:
         headers = {"Content-Type": "application/json", "Content-Length": str(len(body))}
@@ -276,6 +332,9 @@ class GatewayHandler(BaseHTTPRequestHandler):
                 self.server.started_at + MAX_UPTIME_SECONDS,
             )
             body = self._read_request_body(deadline)
+            if body is None:
+                return
+            body = self._prepare_body(body)
             if body is None:
                 return
             headers = self._upstream_headers(body)
