@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import io
 import json
@@ -50,9 +51,16 @@ class GenesisImportError(ValueError):
     """The source cannot become a complete, owner-bound draft build record."""
 
 
-def _require_trusted_imported_genesis_observer() -> None:
-    """Keep imported-source acceptance closed until externally observed validation exists."""
-    raise GenesisImportError("trusted imported Genesis validation observer is unavailable")
+async def _preflight_imported_smoke() -> str:
+    """Check the trusted Docker image before staging reserved imported source."""
+    from factory_app.workflows.AppGenerator.tools.app_runtime_smoke import (
+        preflight_contained_imported_smoke,
+    )
+
+    try:
+        return await asyncio.to_thread(preflight_contained_imported_smoke)
+    except RuntimeError as exc:
+        raise GenesisImportError(f"trusted imported Genesis validation observer is unavailable: {exc}") from exc
 
 
 class PinnedSourceProvenance(BaseModel):
@@ -89,7 +97,8 @@ def _canonical_digest(value: Any) -> str:
 _REQUIRED_RUNTIME_CHECKS = frozenset({"app_runtime_load", "app_runtime_smoke"})
 _GENESIS_EVIDENCE_FIELDS = frozenset({
     "contract", "bundle_sha256", "manifest_sha256", "source_content_sha256",
-    "validator_image_id", "snapshot_digest", "passed_checks", "runtime_boot", "sha256",
+    "validator_image_id", "snapshot_digest", "passed_checks", "observer_origin",
+    "observer_run_id", "observed_boot", "observer_unverified_checks", "sha256",
 })
 
 
@@ -111,23 +120,35 @@ def _passed_gate_checks(result: dict[str, Any]) -> list[str]:
     return names
 
 
-def _verified_runtime_boot(result: dict[str, Any], smoke: dict[str, Any]) -> dict[str, str]:
+def _verified_observer_evidence(result: dict[str, Any], smoke: dict[str, Any]) -> dict[str, Any]:
+    if smoke.get("observer_unverified_checks") != []:
+        raise GenesisImportError("imported Genesis observer has unverified runtime checks")
     runtime_load = result.get("app_runtime_load")
     outcomes = smoke.get("results")
     smoke_checks = smoke.get("checks")
-    boot = [item for item in outcomes if isinstance(item, dict) and item.get("check") == "boot.app_load"] if isinstance(outcomes, list) else []
+    boot = [item for item in outcomes if isinstance(item, dict) and item.get("check") == "boot.http_ready"] if isinstance(outcomes, list) else []
+    observed_boot = {"check": "boot.http_ready", "status": "passed"}
+    run_id = smoke.get("observer_run_id")
     if (
         smoke.get("status") != "passed" or smoke.get("passed") is not True
         or not isinstance(runtime_load, dict)
         or runtime_load.get("status") != "passed" or runtime_load.get("passed") is not True
         or len(boot) != 1 or boot[0].get("status") != "passed"
+        or smoke.get("observed_boot") != observed_boot
+        or smoke.get("observer_origin") != "trusted_external_probe_v1"
+        or not isinstance(run_id, str) or re.fullmatch(r"[0-9a-f]{32}", run_id) is None
         or not isinstance(smoke_checks, list)
         or not any(isinstance(check, dict) and check.get("id") == "app_runtime_smoke"
                    and check.get("passed") is True and check.get("status") == "passed"
                    for check in smoke_checks)
     ):
-        raise GenesisImportError("imported Genesis runtime smoke lacks a passed boot check")
-    return {"check": "boot.app_load", "status": "passed"}
+        raise GenesisImportError("imported Genesis runtime smoke lacks trusted observer boot evidence")
+    return {
+        "observer_origin": "trusted_external_probe_v1",
+        "observer_run_id": run_id,
+        "observed_boot": observed_boot,
+        "observer_unverified_checks": [],
+    }
 
 
 def _validation_matches_receipt(
@@ -148,7 +169,11 @@ def _validation_matches_receipt(
         or any(not isinstance(check, str) or not check for check in checks)
         or len(checks) != len(set(checks))
         or not _REQUIRED_RUNTIME_CHECKS.issubset(checks)
-        or validation.get("runtime_boot") != {"check": "boot.app_load", "status": "passed"}
+        or validation.get("observer_origin") != "trusted_external_probe_v1"
+        or not isinstance(validation.get("observer_run_id"), str)
+        or re.fullmatch(r"[0-9a-f]{32}", validation["observer_run_id"]) is None
+        or validation.get("observed_boot") != {"check": "boot.http_ready", "status": "passed"}
+        or validation.get("observer_unverified_checks") != []
         or validation.get("sha256") != receipt.validation_sha256
     ):
         return False
@@ -385,7 +410,6 @@ async def require_accepted_genesis_baseline(
     """Refuse an imported baseline without its durable reviewed-source receipt."""
     if record.commit_metadata.metadata.get("bundle_mode") != "brownfield_genesis_import":
         return
-    _require_trusted_imported_genesis_observer()
     registry = registry_service or AppRegistryService()
     row = (await registry.get_app_record(
         owner_user_id=owner_user_id, build_registry_id=build_registry_id,
@@ -435,34 +459,6 @@ async def accept_existing_app_genesis(
         execution_app_id=execution_app_id, build_registry_id=build_registry_id,
     ):
         raise GenesisImportError("imported Genesis record differs from its reserved source")
-    if state["status"] == "reserved":
-        from factory_app.workflows.AppGenerator.tools.app_validation import (
-            require_contained_imported_smoke_runner,
-        )
-
-        require_contained_imported_smoke_runner()
-    _require_trusted_imported_genesis_observer()
-    try:
-        bundle_bytes = await read_verified_artifact_bundle(record, max_bytes=APP_BUNDLE_MAX_TOTAL_BYTES)
-        entries, declared = _manifest_entries(
-            files_manifest=record.files_manifest, bundle_name=claim.bundle_name,
-            bundle_bytes=bundle_bytes,
-        )
-        members = _archive_paths(bundle_bytes=bundle_bytes, bundle_name=claim.bundle_name)
-        if set(members) != set(declared) or any(
-            members[path].file_size != entry.size_bytes for path, entry in declared.items()
-        ):
-            raise GenesisImportError("persisted source archive and manifest differ")
-        files = await _verified_source_files(
-            bundle_bytes=bundle_bytes, bundle_name=claim.bundle_name,
-            entries=entries, declared=declared,
-        )
-        app_json = files.get("app.json")
-        app_manifest = json.loads(app_json) if isinstance(app_json, str) else None
-        if not isinstance(app_manifest, dict) or app_manifest.get("appId") != row["app_id"]:
-            raise GenesisImportError("persisted source app identity differs from Factory target")
-    except (ValueError, OSError, zipfile.BadZipFile) as exc:
-        raise GenesisImportError("persisted Genesis source failed complete-content verification") from exc
     if state["status"] == "accepted":
         if record.lifecycle_status == BuildRecordStatus.DRAFT:
             receipt = GenesisAcceptanceReceipt.model_validate(state.get("acceptance"))
@@ -488,6 +484,33 @@ async def accept_existing_app_genesis(
         return record
     if record.lifecycle_status != BuildRecordStatus.DRAFT:
         raise GenesisImportError("unreviewed Genesis artifact is no longer a draft")
+    from factory_app.workflows.AppGenerator.tools.app_validation import (
+        require_contained_imported_smoke_runner,
+    )
+
+    require_contained_imported_smoke_runner()
+    pinned_image_id = await _preflight_imported_smoke()
+    try:
+        bundle_bytes = await read_verified_artifact_bundle(record, max_bytes=APP_BUNDLE_MAX_TOTAL_BYTES)
+        entries, declared = _manifest_entries(
+            files_manifest=record.files_manifest, bundle_name=claim.bundle_name,
+            bundle_bytes=bundle_bytes,
+        )
+        members = _archive_paths(bundle_bytes=bundle_bytes, bundle_name=claim.bundle_name)
+        if set(members) != set(declared) or any(
+            members[path].file_size != entry.size_bytes for path, entry in declared.items()
+        ):
+            raise GenesisImportError("persisted source archive and manifest differ")
+        files = await _verified_source_files(
+            bundle_bytes=bundle_bytes, bundle_name=claim.bundle_name,
+            entries=entries, declared=declared,
+        )
+        app_json = files.get("app.json")
+        app_manifest = json.loads(app_json) if isinstance(app_json, str) else None
+        if not isinstance(app_manifest, dict) or app_manifest.get("appId") != row["app_id"]:
+            raise GenesisImportError("persisted source app identity differs from Factory target")
+    except (ValueError, OSError, zipfile.BadZipFile) as exc:
+        raise GenesisImportError("persisted Genesis source failed complete-content verification") from exc
 
     from factory_app.workflows.AppGenerator.tools.app_validation import (
         run_app_bundle_acceptance_gate,
@@ -506,8 +529,8 @@ async def accept_existing_app_genesis(
         raise GenesisImportError("imported Genesis acceptance gate lacks a valid snapshot digest")
     passed_checks = _passed_gate_checks(result)
     if not isinstance(smoke, dict):
-        raise GenesisImportError("imported Genesis runtime smoke lacks a passed boot check")
-    runtime_boot = _verified_runtime_boot(result, smoke)
+        raise GenesisImportError("imported Genesis runtime smoke lacks trusted observer boot evidence")
+    observer_evidence = _verified_observer_evidence(result, smoke)
     source_digests = {
         path: hashlib.sha256(content.encode("utf-8") if isinstance(content, str) else content).hexdigest()
         for path, content in files.items()
@@ -517,6 +540,7 @@ async def accept_existing_app_genesis(
     if (
         not isinstance(validator_image_id, str)
         or re.fullmatch(r"sha256:[0-9a-f]{64}", validator_image_id) is None
+        or validator_image_id != pinned_image_id
         or smoke.get("source_content_sha256") != source_content_sha256
     ):
         raise GenesisImportError("imported Genesis runtime evidence lacks the verified source or validator identity")
@@ -528,7 +552,7 @@ async def accept_existing_app_genesis(
         "validator_image_id": validator_image_id,
         "snapshot_digest": snapshot_digest,
         "passed_checks": passed_checks,
-        "runtime_boot": runtime_boot,
+        **observer_evidence,
     }
     validation_sha256 = _canonical_digest(evidence)
     evidence["sha256"] = validation_sha256

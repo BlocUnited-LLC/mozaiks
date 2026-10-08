@@ -81,10 +81,14 @@ def _successful_gate_result(manifest: list[dict[str, object]]) -> dict[str, obje
         "app_runtime_load": {"status": "passed", "passed": True},
         "app_runtime_smoke": {
             "status": "passed", "passed": True,
-            "results": [{"check": "boot.app_load", "status": "passed"}],
+            "results": [{"check": "boot.http_ready", "status": "passed"}],
             "checks": [{"id": "app_runtime_smoke", "status": "passed", "passed": True}],
             "validator_image_id": "sha256:" + "a" * 64,
             "source_content_sha256": _source_content_digest(manifest),
+            "observer_origin": "trusted_external_probe_v1",
+            "observer_run_id": "b" * 32,
+            "observed_boot": {"check": "boot.http_ready", "status": "passed"},
+            "observer_unverified_checks": [],
         },
     }
 
@@ -93,7 +97,9 @@ def _successful_gate_result(manifest: list[dict[str, object]]) -> dict[str, obje
 def trusted_observer_test_override(monkeypatch):
     from factory_app.workflows._shared.platform import genesis_import
 
-    monkeypatch.setattr(genesis_import, "_require_trusted_imported_genesis_observer", lambda: None)
+    preflight = AsyncMock(return_value="sha256:" + "a" * 64)
+    monkeypatch.setattr(genesis_import, "_preflight_imported_smoke", preflight)
+    return preflight
 
 
 @pytest.fixture
@@ -501,9 +507,12 @@ async def test_owner_review_accepts_exact_validated_genesis_without_deployment(
     assert accepted.app_validation_status == "passed"
     assert accepted.commit_metadata.metadata["genesis_validation"]["validator_image_id"] == "sha256:" + "a" * 64
     assert accepted.commit_metadata.metadata["genesis_validation"]["source_content_sha256"] == _source_content_digest(manifest)
-    assert accepted.commit_metadata.metadata["genesis_validation"]["runtime_boot"] == {
-        "check": "boot.app_load", "status": "passed",
+    assert accepted.commit_metadata.metadata["genesis_validation"]["observed_boot"] == {
+        "check": "boot.http_ready", "status": "passed",
     }
+    assert accepted.commit_metadata.metadata["genesis_validation"]["observer_origin"] == "trusted_external_probe_v1"
+    assert accepted.commit_metadata.metadata["genesis_validation"]["observer_run_id"] == "b" * 32
+    assert accepted.commit_metadata.metadata["genesis_validation"]["observer_unverified_checks"] == []
     assert import_state[0]["genesis_import"]["acceptance"]["accepted_by"] == "owner_1"
     assert import_state[0]["genesis_import"]["status"] == "accepted"
     assert import_state[0]["lifecycle_state"] == "draft"
@@ -517,36 +526,31 @@ async def test_owner_review_accepts_exact_validated_genesis_without_deployment(
         accepted, owner_user_id="owner_1", execution_app_id="mozaiks-platform",
         build_registry_id="appreg_1", registry_service=import_state[1],
     )
+    trusted_observer_test_override.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_trusted_observer_missing_keeps_genesis_acceptance_and_baseline_dark(import_state, monkeypatch):
+async def test_missing_trusted_image_blocks_genesis_before_source_staging(import_state, monkeypatch):
     from factory_app.workflows._shared.platform import genesis_import
-    from factory_app.workflows.AppGenerator.tools import app_validation
+    from factory_app.workflows.AppGenerator.tools import app_runtime_smoke, app_validation
 
     monkeypatch.setattr(app_validation.app_runtime_smoke, "run_contained_imported_app_runtime_smoke", AsyncMock(), raising=False)
     raw, manifest = _source()
     draft = await _import(import_state, raw, manifest)
     gate = AsyncMock(return_value=_successful_gate_result(manifest))
     monkeypatch.setattr(app_validation, "run_app_bundle_acceptance_gate", gate)
+    monkeypatch.setattr(
+        app_runtime_smoke, "preflight_contained_imported_smoke",
+        Mock(side_effect=RuntimeError("contained validator image identity is unconfigured")),
+    )
     host_staging = AsyncMock(side_effect=AssertionError("source was staged before trusted validation"))
-    with monkeypatch.context() as early:
-        early.setattr(genesis_import, "_verified_source_files", host_staging)
-        with pytest.raises(GenesisImportError, match="trusted imported Genesis validation observer is unavailable"):
-            await _accept(import_state, draft)
+    monkeypatch.setattr(genesis_import, "_verified_source_files", host_staging)
+    with pytest.raises(GenesisImportError, match="trusted imported Genesis validation observer is unavailable"):
+        await _accept(import_state, draft)
     host_staging.assert_not_awaited()
     gate.assert_not_awaited()
     assert import_state[0]["genesis_import"]["status"] == "reserved"
     assert draft.validation_status == BuildRecordValidationStatus.PENDING
-    with monkeypatch.context() as test_only:
-        test_only.setattr(genesis_import, "_require_trusted_imported_genesis_observer", lambda: None)
-        accepted = await _accept(import_state, draft)
-    assert accepted.lifecycle_status == BuildRecordStatus.CURRENT
-    with pytest.raises(GenesisImportError, match="trusted imported Genesis validation observer is unavailable"):
-        await require_accepted_genesis_baseline(
-            accepted, owner_user_id="owner_1", execution_app_id="mozaiks-platform",
-            build_registry_id="appreg_1", registry_service=import_state[1],
-        )
 
 
 @pytest.mark.asyncio
@@ -596,10 +600,15 @@ async def test_genesis_acceptance_requires_exact_source_and_validator_evidence(
     ("malformed_snapshot", "snapshot digest"),
     ("empty_checks", "passed checks"),
     ("missing_runtime_check", "required runtime checks"),
-    ("missing_boot", "passed boot check"),
-    ("failed_boot", "passed boot check"),
-    ("missing_smoke_status", "passed boot check"),
-    ("missing_smoke_check", "passed boot check"),
+    ("missing_boot", "trusted observer boot evidence"),
+    ("failed_boot", "trusted observer boot evidence"),
+    ("missing_smoke_status", "trusted observer boot evidence"),
+    ("missing_smoke_check", "trusted observer boot evidence"),
+    ("missing_observer_origin", "trusted observer boot evidence"),
+    ("invalid_observer_run_id", "trusted observer boot evidence"),
+    ("missing_observed_boot", "trusted observer boot evidence"),
+    ("unverified_event_rejection", "unverified runtime checks"),
+    ("missing_unverified_checks", "unverified runtime checks"),
 ])
 async def test_genesis_acceptance_rejects_incomplete_passed_gate(
     import_state, monkeypatch, trusted_observer_test_override, missing_evidence, expected_error,
@@ -626,6 +635,16 @@ async def test_genesis_acceptance_rejects_incomplete_passed_gate(
         gate_result["app_runtime_smoke"].pop("status")
     elif missing_evidence == "missing_smoke_check":
         gate_result["app_runtime_smoke"]["checks"] = []
+    elif missing_evidence == "missing_observer_origin":
+        gate_result["app_runtime_smoke"].pop("observer_origin")
+    elif missing_evidence == "invalid_observer_run_id":
+        gate_result["app_runtime_smoke"]["observer_run_id"] = "not-a-run-id"
+    elif missing_evidence == "missing_observed_boot":
+        gate_result["app_runtime_smoke"].pop("observed_boot")
+    elif missing_evidence == "unverified_event_rejection":
+        gate_result["app_runtime_smoke"]["observer_unverified_checks"] = ["event_rejection"]
+    elif missing_evidence == "missing_unverified_checks":
+        gate_result["app_runtime_smoke"].pop("observer_unverified_checks")
     monkeypatch.setattr(app_validation, "run_app_bundle_acceptance_gate", AsyncMock(return_value=gate_result))
     with pytest.raises(GenesisImportError, match=expected_error):
         await _accept(import_state, draft)
@@ -635,10 +654,32 @@ async def test_genesis_acceptance_rejects_incomplete_passed_gate(
 
 
 @pytest.mark.asyncio
+async def test_contained_observer_unverified_event_rejection_never_writes_acceptance(
+    import_state, monkeypatch, trusted_observer_test_override,
+):
+    from factory_app.workflows.AppGenerator.tools import app_validation
+
+    monkeypatch.setattr(app_validation.app_runtime_smoke, "run_contained_imported_app_runtime_smoke", AsyncMock())
+    raw, manifest = _source()
+    draft = await _import(import_state, raw, manifest)
+    gate_result = _successful_gate_result(manifest)
+    gate_result["app_runtime_smoke"]["observer_unverified_checks"] = ["event_rejection"]
+    monkeypatch.setattr(app_validation, "run_app_bundle_acceptance_gate", AsyncMock(return_value=gate_result))
+    with pytest.raises(GenesisImportError, match="unverified runtime checks"):
+        await _accept(import_state, draft)
+    import_state[2].mark_genesis_build_record_validated.assert_not_awaited()
+    import_state[1].accept_genesis_import.assert_not_awaited()
+    assert import_state[0]["genesis_import"]["status"] == "reserved"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("field,replacement", [
     ("snapshot_digest", "f" * 64),
     ("validator_image_id", "sha256:" + "f" * 64),
-    ("runtime_boot", {"check": "boot.app_load", "status": "failed"}),
+    ("observed_boot", {"check": "boot.http_ready", "status": "failed"}),
+    ("observer_origin", "unknown_probe"),
+    ("observer_run_id", "not-a-run-id"),
+    ("observer_unverified_checks", ["event_rejection"]),
 ])
 async def test_genesis_baseline_rejects_changed_evidence_with_original_receipt(
     import_state, monkeypatch, trusted_observer_test_override, field, replacement,
@@ -670,6 +711,7 @@ async def test_genesis_baseline_rejects_changed_evidence_with_original_receipt(
 async def test_genesis_acceptance_recovers_receipt_before_artifact_status(
     import_state, monkeypatch, trusted_observer_test_override,
 ):
+    from factory_app.workflows._shared.platform import genesis_import
     from factory_app.workflows.AppGenerator.tools import app_validation
 
     monkeypatch.setattr(app_validation.app_runtime_smoke, "run_contained_imported_app_runtime_smoke", AsyncMock(), raising=False)
@@ -683,6 +725,8 @@ async def test_genesis_acceptance_recovers_receipt_before_artifact_status(
         await _accept(import_state, draft)
     assert import_state[0]["genesis_import"]["status"] == "accepted"
     assert draft.lifecycle_status == BuildRecordStatus.DRAFT
+    host_staging = AsyncMock(side_effect=AssertionError("accepted receipt retry staged source"))
+    monkeypatch.setattr(genesis_import, "_verified_source_files", host_staging)
     evidence = draft.commit_metadata.metadata["genesis_validation"]
     original_digest = evidence["snapshot_digest"]
     evidence["snapshot_digest"] = "f" * 64
@@ -696,18 +740,23 @@ async def test_genesis_acceptance_recovers_receipt_before_artifact_status(
 
     project.side_effect = recover_project
     assert (await _accept(import_state, draft)).lifecycle_status == BuildRecordStatus.CURRENT
+    host_staging.assert_not_awaited()
     gate.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_imported_acceptance_gate_loads_source_only_in_runtime_smoke_child(monkeypatch):
+async def test_imported_acceptance_gate_loads_source_only_in_contained_smoke(monkeypatch):
     from factory_app.workflows.AppGenerator.tools import app_validation
 
     in_process = AsyncMock(side_effect=AssertionError("source Python reached the Studio process"))
     smoke = AsyncMock(return_value={
         "status": "passed", "passed": True,
-        "results": [{"check": "boot.app_load", "status": "passed", "message": "Loaded."}],
+        "results": [{"check": "boot.http_ready", "status": "passed", "message": "Ready."}],
         "checks": [{"id": "app_runtime_smoke", "passed": True}],
+        "observer_origin": "trusted_external_probe_v1",
+        "observer_run_id": "b" * 32,
+        "observed_boot": {"check": "boot.http_ready", "status": "passed"},
+        "observer_unverified_checks": [],
         "failed_tests": [], "warnings": [],
     })
     monkeypatch.setattr(app_validation, "_app_runtime_load_result", in_process)
@@ -719,8 +768,15 @@ async def test_imported_acceptance_gate_loads_source_only_in_runtime_smoke_child
     assert result["app_runtime_load"]["passed"] is True
     in_process.assert_not_awaited()
     smoke.assert_awaited_once()
-    assert app_validation._runtime_load_from_child_smoke({"status": "skipped", "results": []})["status"] == "skipped"
-    assert app_validation._runtime_load_from_child_smoke({"status": "failed", "results": []})["status"] == "failed"
+    assert app_validation._runtime_load_from_observer_smoke({"status": "skipped", "results": []})["status"] == "skipped"
+    assert app_validation._runtime_load_from_observer_smoke({"status": "failed", "results": []})["status"] == "failed"
+    assert app_validation._runtime_load_from_observer_smoke({
+        "status": "passed", "passed": True,
+        "results": [{"check": "boot.app_load", "status": "passed"}],
+        "observer_origin": "trusted_external_probe_v1",
+        "observed_boot": {"check": "boot.http_ready", "status": "passed"},
+    })["status"] == "failed"
+    assert app_validation._runtime_load_from_observer_smoke({"status": "passed", "results": None})["status"] == "failed"
 
 
 @pytest.mark.asyncio

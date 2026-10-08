@@ -45,27 +45,36 @@ ordinary generated-app smoke is insufficient: its child inherits local
 filesystem/network access and receives the host's configured Mongo URI on
 stdin. An app handler could choose another database with that credential;
 the smoke's disposable database name is not a permission boundary. The
-imported-source path therefore checks for a contained runner before staging
-any imported files on the Studio host and fails closed while the runner is
-unavailable. Its staged workspace includes the verified binary assets.
-The contained runner and its database isolation need independent review before
-live use. A failed, skipped, or
-pending result cannot become an accepted source. Validation evidence is tied
+acceptance path checks Docker and the exact pinned validator image before
+its runtime-smoke staging of imported files on the Studio host. Draft import
+already reads the archive into a temporary verification workspace without
+executing app Python. The runner repeats that image
+check before its own source copy. Its staged workspace includes the verified
+binary assets. The runner uses a separate image-owned probe container to
+observe app HTTP readiness; imported app stdout is diagnostic only. A failed,
+skipped, or pending result cannot become an accepted source. Validation evidence is tied
 to the exact archive and manifest digests on the `BuildRecord`. The first passed
 evidence wins an artifact-store compare and swap; concurrent validation with
 different evidence cannot overwrite the digest named by an accepted receipt.
 Before that write, the gate must report a valid snapshot digest, successful
-runtime-load and runtime-smoke checks, and one passed `boot.app_load` outcome.
+runtime-load and runtime-smoke checks, a passed `boot.http_ready` outcome from
+the separate probe, its host-bound run ID, the exact validator image ID, and
+no unverified runtime checks. The evidence digest covers these fields.
 On every baseline read, OSS checks the required evidence fields and recomputes
-their canonical digest against the durable AppRegistry receipt. These are
-functional validation results from the contained smoke protocol, not a
-cryptographic attestation that untrusted app code could not forge a child
-outcome; the contained runner and its event provenance still require review.
-Accordingly, this draft unconditionally closes imported acceptance and
-baseline use at a trusted-observer preflight before source staging. There is
-no runtime configuration override. A later reviewed change must replace the
-preflight with evidence bound by an observer outside the untrusted child; a
-container smoke result alone cannot unlock acceptance.
+their canonical digest against the durable AppRegistry receipt. Replaying an
+already accepted receipt does not require Docker. The probe provides trusted
+external evidence for HTTP readiness, but cannot independently observe the
+runtime's rejected-event audit. The contained runner therefore reports
+`observer_unverified_checks: ["event_rejection"]` on every result. This draft
+requires an empty list, so **live imported Genesis acceptance remains closed**
+before the validated-record or AppRegistry receipt writes. Tests model the
+future complete observer result with explicit mocks; they do not demonstrate
+live acceptance. A generic bundle gate `passed` result describes its scoped
+functional checks; it is not an imported Genesis acceptance receipt. There is
+no runtime setting or browser override for this gate. A later reviewed runtime
+boundary must provide trustworthy event rejection evidence, or a separate
+explicit decision must narrow the public acceptance contract and disclose that
+reduced scope to downstream consumers.
 
 AppRegistry accepts the exact reserved claim with a single owner/host/target
 compare and swap. Its receipt records reviewer, time, validation contract,

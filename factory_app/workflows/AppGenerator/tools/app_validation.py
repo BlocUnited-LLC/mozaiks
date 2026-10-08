@@ -1555,12 +1555,18 @@ async def _app_runtime_smoke_result(
         )
 
 
-def _runtime_load_from_child_smoke(smoke: dict[str, Any]) -> dict[str, Any]:
-    """Use the smoke child's AppLoader evidence for externally imported source."""
-    outcomes = [item for item in smoke.get("results", [])
-                if isinstance(item, dict) and item.get("check") == "boot.app_load"]
+def _runtime_load_from_observer_smoke(smoke: dict[str, Any]) -> dict[str, Any]:
+    """Use the separate observer's HTTP readiness result for imported source."""
+    raw_outcomes = smoke.get("results")
+    outcomes = [item for item in raw_outcomes if isinstance(item, dict)
+                and item.get("check") == "boot.http_ready"] if isinstance(raw_outcomes, list) else []
     failed = [item for item in outcomes if item.get("status") == "failed"]
-    passed = bool(outcomes) and not failed and all(item.get("status") == "passed" for item in outcomes)
+    passed = (
+        smoke.get("status") == "passed" and smoke.get("passed") is True
+        and len(outcomes) == 1 and not failed and outcomes[0].get("status") == "passed"
+        and smoke.get("observed_boot") == {"check": "boot.http_ready", "status": "passed"}
+        and smoke.get("observer_origin") == "trusted_external_probe_v1"
+    )
     skipped = smoke.get("status") == "skipped"
     status = "skipped" if skipped else "passed" if passed else "failed"
     return {
@@ -1571,13 +1577,13 @@ def _runtime_load_from_child_smoke(smoke: dict[str, Any]) -> dict[str, Any]:
         "checks": [{
             "id": "app_runtime_load", "status": status,
             "passed": None if skipped else passed,
-            "message": "AppLoader ran in the isolated runtime smoke child process.",
+            "message": "The separate runtime observer checked loopback app readiness.",
             "details": {"blocking": not passed, "outcomes": outcomes},
         }],
         "failed_tests": [] if skipped or passed else [{
             "test": "app_runtime_load", "error": (
                 "; ".join(str(item.get("message") or "") for item in failed)
-                or "Runtime smoke child did not confirm AppLoader.load()."
+                or "The external observer did not confirm app HTTP readiness."
             ),
         }],
         "warnings": [],
@@ -2265,7 +2271,7 @@ async def run_app_bundle_acceptance_gate(
             generated_files, binary_assets=runtime_binary_assets,
             contained_imported_source=True,
         )
-        app_runtime_load_result = _runtime_load_from_child_smoke(runtime_smoke_result)
+        app_runtime_load_result = _runtime_load_from_observer_smoke(runtime_smoke_result)
     else:
         app_runtime_load_result = await _app_runtime_load_result(generated_files)
         runtime_smoke_result = await _app_runtime_smoke_result(generated_files)
