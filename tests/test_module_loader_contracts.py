@@ -556,7 +556,7 @@ async def test_module_executor_wraps_handler_events_in_canonical_envelope(tmp_pa
 
 
 @pytest.mark.asyncio
-async def test_module_executor_rejects_invalid_emitted_event_payload(tmp_path: Path) -> None:
+async def test_module_executor_rejects_invalid_emitted_event_without_failing_the_action(tmp_path: Path) -> None:
     module_dir = _write_canonical_module(tmp_path)
     module_dir.joinpath("backend", "handler.py").write_text(
         """
@@ -592,12 +592,13 @@ class TasksModule:
         )
     )
 
-    assert result.success is False
-    assert result.error_code == "INVALID_EVENT_PAYLOAD"
-    assert "domain.tasks.task_created" in (result.error or "")
-    assert "module=tasks" in (result.error or "")
-    assert "action=create" in (result.error or "")
+    assert result.success is True
+    assert result.data == {"task_id": "task_1", "title": "Draft"}
     assert emitted == []
+    [rejection] = result.rejected_events
+    assert (rejection.event_type, rejection.category, rejection.reason) == (
+        "domain.tasks.task_created", "value_invalid", "Missing required properties: 'title'.",
+    )
 
 
 @pytest.mark.asyncio

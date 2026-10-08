@@ -376,6 +376,53 @@ events:
         owner_id: { type: string }
 ```
 
+The runtime checks every `ctx.emit` in a module action before dispatch. It
+refuses an event when the action does not list it in `emits`, when the payload
+fails the event's `payload_schema`, or when that schema cannot be evaluated. A
+refused event is not dispatched, so no reaction or notification runs for it. It
+does not fail the action: the action's writes may already be committed, so the
+action keeps its handler's outcome.
+
+`ctx.emit` returns normally either way, and its value says which happened:
+
+- `None`: the event was handed to the event bus.
+- A `ModuleEventRejection`: the event was refused. It carries the event id, the
+  event type, the category (`undeclared`, `value_invalid` or `schema_invalid`)
+  and the schema rule the event failed, never payload contents.
+
+Code that must know whether an event went out checks the value. An outbox that
+marks an event delivered, for example, must not do so for a rejection. Test for
+the rejection type, not for `None`: a test double such as `AsyncMock` returns a
+value that is not `None` even when nothing was refused.
+
+```python
+from mozaiksai.core.runtime.composition import ModuleEventRejection
+
+outcome = await ctx.emit("domain.my_module.item_created", payload)
+if isinstance(outcome, ModuleEventRejection):
+    ...  # not delivered: keep the outbox entry retryable
+```
+
+The rejection is also named on the dispatch result
+(`ModuleResult.rejected_events`) and on the dispatch audit. It is logged at ERROR
+as `MODULE_EVENT_REJECTED` and counted in `ModuleExecutor.health()`. The
+AppGenerator runtime smoke fails a generated bundle on any rejected event.
+
+These checks and this return value belong to the context `ModuleExecutor`
+builds for a dispatched action. In these cases `ctx.emit` returns `None`
+without them, so `None` does not prove the event was checked or delivered:
+
+- **No event bus wired.** Emitting does nothing.
+- **Caller-supplied context.** A context passed to `ModuleExecutor.execute`
+  keeps its own emitter.
+- **Reaction handlers.** A reaction handler's `ctx.emit` sends its event
+  straight to the bus. There the event router checks only the event's
+  `payload_schema`, and only when exactly one module declares a schema for that
+  event type, before running that event's reactions. It drops an invalid event.
+  It never checks a reaction-emitted event against any `emits` list.
+- **Contexts that code builds itself,** such as the stub context of the
+  generated cron script.
+
 ### `contracts/reactions.yaml`
 
 Declare reactions to events published by other modules. Each reaction routes an

@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 from uuid import uuid4
 
+from mozaiksai.core.runtime.composition.module_event_provenance import ModuleEventRejection
+
 ModuleDispatchAuthorityKind = Literal[
     "authenticated_user",
     "public_http",
@@ -241,6 +243,9 @@ class ModuleDispatchAudit:
     outcome: ModuleDispatchOutcome = "allowed"
     reason: str | None = None
     audit_tags: Mapping[str, str] = field(default_factory=dict)
+    # Events the action emitted that were not dispatched; they never change
+    # the outcome of an action whose handler completed.
+    rejected_events: tuple[ModuleEventRejection, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -272,4 +277,5 @@ class ModuleDispatchAudit:
             "outcome": self.outcome,
             "reason": self.reason,
             "audit_tags": dict(self.audit_tags),
+            "rejected_events": [rejection.to_dict() for rejection in self.rejected_events],
         }

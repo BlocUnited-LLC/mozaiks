@@ -617,6 +617,214 @@ class TestEventEmitterEnvelope:
 
 
 # ---------------------------------------------------------------------------
+# 6b. Emitted events that break their declared contract
+# ---------------------------------------------------------------------------
+
+_CHANGED_SCHEMA = {"type": "object", "required": ["item_id"], "properties": {"item_id": {"type": "string"}}}
+
+
+class _EmitsThenReturns:
+    """Emits each (event_type, payload) in order, keeping what emit returned, then completes or raises."""
+
+    def __init__(self, *events: tuple[str, dict], raise_after: bool = False) -> None:
+        self.events = events
+        self.raise_after = raise_after
+        self.outcomes: list = []
+
+    async def act(self, ctx) -> dict:
+        for event_type, payload in self.events:
+            self.outcomes.append(await ctx.emit(event_type, payload))
+        if self.raise_after:
+            raise RuntimeError("after its events")
+        return {"done": True}
+
+
+class _TwoRejectingActions:
+    async def act(self, ctx) -> dict:
+        await ctx.emit("domain.items.changed", {})
+        await ctx.emit("domain.items.changed", {"item_id": 1})
+        return {}
+
+    async def other(self, ctx) -> dict:
+        await ctx.emit("domain.items.archived", {"item_id": "i1"})
+        return {}
+
+
+class TestEmittedEventRejection:
+    @staticmethod
+    def _executor(
+        handler, emitted: list, *, emits: list[str], action_timeout: int | None = None,
+    ) -> ModuleExecutor:
+        async def emit(event_type: str, envelope: dict) -> None:
+            emitted.append((event_type, envelope))
+
+        ex = ModuleExecutor(event_emitter=emit)
+        ex.register(
+            "items", handler, action_method_map={"act": "act"}, action_emits={"act": emits},
+            action_timeouts={"act": action_timeout} if action_timeout is not None else None,
+            event_payload_schemas={"domain.items.changed": _CHANGED_SCHEMA},
+        )
+        return ex
+
+    @pytest.mark.asyncio
+    async def test_undeclared_event_is_rejected_and_the_action_succeeds(self):
+        emitted: list = []
+        ex = self._executor(_EmitsThenReturns(("domain.items.archived", {"item_id": "i1"})), emitted,
+                            emits=["domain.items.changed"])
+        result = await ex.execute(_request(module="items", action="act"))
+        assert (result.success, result.data) == (True, {"done": True})
+        assert emitted == []
+        [rejection] = result.rejected_events
+        assert (rejection.event_type, rejection.category, rejection.validator) == (
+            "domain.items.archived", "undeclared", "emits",
+        )
+        assert rejection.reason == "Action items.act does not declare this event in module.yaml emits."
+        health = await ex.health()
+        assert health["rejected_events"] == {"total": 1, "by_action": {"items.act": 1}}
+
+    @pytest.mark.asyncio
+    async def test_health_totals_every_rejection_across_actions(self):
+        emitted: list = []
+
+        async def emit(event_type: str, envelope: dict) -> None:
+            emitted.append(event_type)
+
+        ex = ModuleExecutor(event_emitter=emit)
+        ex.register(
+            "items", _TwoRejectingActions(), action_method_map={"act": "act", "other": "other"},
+            action_emits={"act": ["domain.items.changed"], "other": ["domain.items.changed"]},
+            event_payload_schemas={"domain.items.changed": _CHANGED_SCHEMA},
+        )
+        for action in ("act", "other", "act"):
+            assert (await ex.execute(_request(module="items", action=action))).success is True
+        assert emitted == []
+        # Five rejections over two actions: the total is their sum, not the number of actions.
+        assert (await ex.health())["rejected_events"] == {
+            "total": 5, "by_action": {"items.act": 4, "items.other": 1},
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("payload,schema_path", [
+        # The failing value sits under a key the payload chose: the instance
+        # path would name it, the schema path does not.
+        ({"item_id": "i1", "canary-key-9b1": 5}, "$.additionalProperties.type"),
+        ({"item_id": ["canary-value-9b1"]}, "$.properties.item_id.type"),
+    ])
+    async def test_rejection_names_the_schema_rule_never_payload_keys_or_values(self, payload, schema_path):
+        emitted: list = []
+        ex = self._executor(_EmitsThenReturns(("domain.items.changed", payload)), emitted, emits=["domain.items.changed"])
+        ex._event_payload_schemas["items"]["domain.items.changed"] = {
+            "type": "object", "additionalProperties": {"type": "string"},
+            "properties": {"item_id": {"type": "string"}},
+        }
+        result = await ex.execute(_request(module="items", action="act"))
+        assert result.success is True
+        [rejection] = result.rejected_events
+        assert (rejection.schema_path, rejection.reason) == (
+            schema_path, "Value does not satisfy the 'type' constraint.",
+        )
+        assert "canary" not in str(rejection.to_dict())
+
+    @pytest.mark.asyncio
+    async def test_a_valid_event_after_a_rejected_one_is_still_dispatched(self):
+        emitted: list = []
+        handler = _EmitsThenReturns(
+            ("domain.items.changed", {}), ("domain.items.changed", {"item_id": "i1"}),
+        )
+        ex = self._executor(handler, emitted, emits=["domain.items.changed"])
+        result = await ex.execute(_request(module="items", action="act"))
+        assert result.success is True
+        assert [envelope["payload"] for _type, envelope in emitted] == [{"item_id": "i1"}]
+        [rejection] = result.rejected_events
+        assert rejection.reason == "Missing required properties: 'item_id'."
+        assert rejection.event_id != emitted[0][1]["id"]
+        # emit hands the handler the same rejection, and None once its event is on the bus.
+        assert handler.outcomes[0] is rejection
+        assert handler.outcomes[1] is None
+
+    @pytest.mark.asyncio
+    async def test_emit_returns_none_for_every_dispatched_event(self):
+        emitted: list = []
+        handler = _EmitsThenReturns(("domain.items.changed", {"item_id": "i1"}), ("domain.items.changed", {"item_id": "i2"}))
+        ex = self._executor(handler, emitted, emits=["domain.items.changed"])
+        result = await ex.execute(_request(module="items", action="act"))
+        assert (result.success, result.rejected_events) == (True, ())
+        assert handler.outcomes == [None, None]
+        assert len(emitted) == 2
+
+    @pytest.mark.asyncio
+    async def test_emit_without_an_event_bus_does_nothing_and_returns_none(self):
+        handler = _EmitsThenReturns(("domain.items.archived", {}))
+        ex = ModuleExecutor()
+        ex.register("items", handler, action_method_map={"act": "act"}, action_emits={"act": []})
+        result = await ex.execute(_request(module="items", action="act"))
+        assert (result.success, result.rejected_events, handler.outcomes) == (True, (), [None])
+
+    @pytest.mark.asyncio
+    async def test_handler_that_raises_after_a_rejected_event_fails_and_audits_it(self, monkeypatch):
+        audits: list = []
+
+        async def capture(_self, audit, *, error=None):
+            audits.append((audit, error))
+
+        monkeypatch.setattr(ModuleExecutor, "_emit_dispatch_audit", capture)
+        emitted: list = []
+        handler = _EmitsThenReturns(("domain.items.changed", {}), raise_after=True)
+        ex = self._executor(handler, emitted, emits=["domain.items.changed"])
+        result = await ex.execute(_request(module="items", action="act"))
+        await asyncio.sleep(0)
+        assert (result.success, result.error_code) == (False, "EXECUTION_ERROR")
+        [rejection] = result.rejected_events
+        assert handler.outcomes == [rejection]
+        [(audit, error)] = audits
+        assert (audit.outcome, error) == ("failed", "RuntimeError")
+        assert audit.rejected_events == (rejection,)
+        assert audit.to_dict()["rejected_events"] == [rejection.to_dict()]
+
+    @pytest.mark.asyncio
+    async def test_rejected_event_survives_declared_action_timeout_in_result_and_audit(self, monkeypatch):
+        audits: list = []
+
+        async def capture(_self, audit, *, error=None):
+            audits.append((audit, error))
+
+        monkeypatch.setattr(ModuleExecutor, "_emit_dispatch_audit", capture)
+
+        class _RejectsThenWaits:
+            outcome = None
+
+            async def act(self, ctx):
+                self.outcome = await ctx.emit("domain.items.changed", {})
+                await asyncio.Event().wait()
+
+        emitted: list = []
+        handler = _RejectsThenWaits()
+        ex = self._executor(handler, emitted, emits=["domain.items.changed"], action_timeout=1)
+        result = await asyncio.wait_for(ex.execute(_request(module="items", action="act")), timeout=3)
+        await asyncio.sleep(0)
+
+        assert (result.success, result.error_code) == (False, "ACTION_TIMEOUT")
+        [rejection] = result.rejected_events
+        assert handler.outcome is rejection
+        [(audit, error)] = audits
+        assert (audit.outcome, audit.reason, error) == ("failed", "ACTION_TIMEOUT", "ACTION_TIMEOUT")
+        assert audit.rejected_events == (rejection,)
+        assert audit.to_dict()["rejected_events"] == [rejection.to_dict()]
+        assert emitted == []
+
+    @pytest.mark.asyncio
+    async def test_undeclared_event_type_is_bounded_before_it_is_recorded(self):
+        emitted: list = []
+        ex = self._executor(_EmitsThenReturns(("domain.items.\nforged " + "x" * 300, {})), emitted,
+                            emits=["domain.items.changed"])
+        result = await ex.execute(_request(module="items", action="act"))
+        [rejection] = result.rejected_events
+        assert rejection.event_type.startswith("domain.items.?forged?xxx")
+        assert len(rejection.event_type) == 128 + len("...")
+        assert "\n" not in rejection.event_type
+
+
+# ---------------------------------------------------------------------------
 # 7. Registry queries
 # ---------------------------------------------------------------------------
 

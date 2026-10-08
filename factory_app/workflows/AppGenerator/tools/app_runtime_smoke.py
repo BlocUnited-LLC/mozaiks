@@ -23,6 +23,12 @@ its own (empty) platform hook registry, an in-memory audit log, a local event
 recorder and no usage metering; module persistence, entitlement reads and
 migration history all use the disposable database. Startup services are not
 started: they run outside module dispatch with their own clients.
+
+An emitted event that breaks its declared contract does not fail the action
+that emitted it: the runtime reports the action as succeeded and names the
+rejected event on its dispatch result. The gate reads that result and records
+each distinct rejected event (per action, event type and reason) as its own
+failed check.
 """
 from __future__ import annotations
 
@@ -600,6 +606,9 @@ class _SmokeRun:
         self.workspace_claims = False
         self.last_exception_path: str | None = None
         self.permission_denials: set[tuple[str, str]] = set()
+        # (module, action, rejection) for every emitted event the runtime rejected.
+        self.rejected_events: list[tuple[str, str, Any]] = []
+        self.reported_rejections: set[tuple[str, str, str, str, str]] = set()
 
     @property
     def database(self) -> Any:
@@ -691,10 +700,40 @@ class _SmokeRun:
             status, body, summary = await self._request(method, module, action, self._with_scopes(principal, missing), params)
         return status, body, summary
 
+    def _record_rejected_event(self, module: str, action: str, principal: _Principal, rejection: Any) -> None:
+        """An emitted event the runtime rejected fails its own check, once per action, event and reason.
+
+        The action's response cannot show it: the runtime reports an action
+        whose handler completed as succeeded and only names the rejected event
+        on the dispatch result. No reaction or notification runs for it.
+        """
+        key = (module, action, rejection.event_type, rejection.category, rejection.reason)
+        if key in self.reported_rejections:
+            return
+        self.reported_rejections.add(key)
+        if rejection.category == "undeclared":
+            problem = f"which {module}.{action} does not declare in its module.yaml emits"
+            path = f"modules/{module}/module.yaml"
+        elif rejection.category == "schema_invalid":
+            problem = f"whose payload_schema in contracts/events.yaml cannot be evaluated ({rejection.reason})"
+            path = f"modules/{module}/contracts/events.yaml"
+        else:
+            problem = (f"whose payload does not satisfy the payload_schema contracts/events.yaml declares for it "
+                       f"(at {rejection.schema_path}: {rejection.reason})")
+            path = f"modules/{module}/backend/service.py"
+        self.record(
+            f"event.{module}.{action}.{rejection.event_type}", False,
+            f"{module}.{action} as user {principal.label} emitted {rejection.event_type} (event {rejection.event_id}) "
+            f"{problem}. The runtime did not dispatch it, so no reaction or notification ran for it, although the "
+            "action itself succeeded.",
+            path=path,
+        )
+
     async def _request(
         self, method: str, module: str, action: str, principal: _Principal, params: dict[str, Any],
     ) -> tuple[int, Any, str]:
         since = len(self.capture.records)
+        rejected_since = len(self.rejected_events)
         self.emit("calling", module=module, action=action, principal=principal.label)
         url = f"/api/modules/{module}/{action}"
         headers = {"Authorization": f"Bearer {principal.token}"}
@@ -706,6 +745,9 @@ class _SmokeRun:
             response = await asyncio.wait_for(request, timeout=_REQUEST_TIMEOUT_SECONDS)
         except TimeoutError:
             return 0, None, f"no response within {_REQUEST_TIMEOUT_SECONDS:.0f}s"
+        finally:
+            for rejected_module, rejected_action, rejection in self.rejected_events[rejected_since:]:
+                self._record_rejected_event(rejected_module, rejected_action, principal, rejection)
         try:
             body = response.json()
         except ValueError:
@@ -859,8 +901,16 @@ async def _boot(run: _SmokeRun, initial_environment: set[str]) -> bool:
     def alias_collection(alias: str) -> Any:
         return run.database[_alias_collection_name(alias, contract)]
 
+    class _ObservedModuleExecutor(ModuleExecutor):
+        """Keeps the events each dispatch rejected; the HTTP response carries only the action's data."""
+
+        async def execute(self, request: Any, context: Any = None) -> Any:
+            result = await super().execute(request, context)
+            run.rejected_events.extend((request.module, request.action, item) for item in result.rejected_events)
+            return result
+
     hooks = PlatformHookRegistry()
-    executor = ModuleExecutor(
+    executor = _ObservedModuleExecutor(
         event_emitter=run.record_event,
         entitlement_checker=(
             ConfiguredEntitlementAdapter(config=load.subscriptions_config, collection_resolver=alias_collection)

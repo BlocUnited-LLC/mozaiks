@@ -22,6 +22,7 @@ from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
+import yaml
 
 from factory_app.workflows.AppGenerator.tools import app_runtime_smoke
 from factory_app.workflows.AppGenerator.tools.app_runtime_smoke import (
@@ -38,6 +39,8 @@ from mozaiksai.control_plane.validation_evidence import normalize_validation_evi
 FIXTURES = Path(__file__).parent / "fixtures"
 SMOKE_PREFIX = "mozaiks_runtime_smoke_"
 SERVICE = "modules/task_management/backend/service.py"
+MODULE_YAML = "modules/task_management/module.yaml"
+EVENTS_YAML = "modules/task_management/contracts/events.yaml"
 HOST_SECRETS = {
     "OPENAI_API_KEY": "sk-host-secret",
     "MOZAIKS_CLOUD_API_KEY": "host-cloud-key",
@@ -681,6 +684,123 @@ async def test_an_entitlement_gate_without_subscriptions_yaml_is_allowed_like_pr
     checks = _by_check(result)
     assert checks["crud.task_management.tasks.a_update"]["status"] == "passed"
     assert not [check for check in checks if check.startswith(("entitlement.", "subscriptions.")) or check.endswith(".plan")]
+
+
+def _created_event_without_owner(files: dict[str, str]) -> dict[str, str]:
+    """The good bundle, emitting its created event without the user_id its events.yaml schema requires."""
+    emit = "await ctx.emit('domain.task.created', item)"
+    assert files[SERVICE].count(emit) == 1
+    files[SERVICE] = files[SERVICE].replace(
+        emit, "await ctx.emit('domain.task.created', {k: v for k, v in item.items() if k != 'user_id'})",
+    )
+    return files
+
+
+async def test_a_rejected_event_fails_its_own_check_while_the_write_behind_it_passes(mongo):
+    result = await _smoke(_created_event_without_owner(_good()), mongo.uri)
+
+    assert result["status"] == "failed"
+    checks = _by_check(result)
+    event_check = "event.task_management.create_task.domain.task.created"
+    assert {check for check, row in checks.items() if row["status"] == "failed"} == {event_check}
+    message = checks[event_check]["message"]
+    assert message.startswith("task_management.create_task as user A emitted domain.task.created (event evt_")
+    assert "(at $.required: Missing required properties: 'user_id'.)" in message
+    assert checks[event_check]["path"] == SERVICE
+    # The runtime reports the create as succeeded; only the event is refused.
+    assert checks["crud.task_management.tasks.a_create"]["status"] == "passed"
+    assert result["events_emitted"] == ["domain.task.deleted", "domain.task.updated"]
+    assert [item["check"] for item in result["failed_tests"]] == [event_check]
+
+
+def _events_rejected_four_ways(files: dict[str, str]) -> dict[str, str]:
+    """The good bundle with one event rejected per category, two of them in one action.
+
+    create_task emits its created event without user_id and an event it does
+    not declare, list_tasks emits an event it does not declare, and the
+    deleted event's declared schema cannot be evaluated.
+    """
+    service = files[SERVICE]
+    created = "    await ctx.emit('domain.task.created', item)\n"
+    listed = "    return {'items': items, 'total': result['total']}"
+    assert service.count(created) == 1 and service.count(listed) == 1
+    service = service.replace(created, (
+        "    await ctx.emit('domain.task.created', {k: v for k, v in item.items() if k != 'user_id'})\n"
+        "    await ctx.emit('domain.task.audited', {'task_id': item['task_id']})\n"
+    ))
+    files[SERVICE] = service.replace(listed, "    await ctx.emit('domain.task.listed', {'total': result['total']})\n" + listed)
+    events = yaml.safe_load(files[EVENTS_YAML])
+    [deleted] = [event for event in events["events"] if event["type"] == "domain.task.deleted"]
+    deleted["payload_schema"] = {"$ref": "#/definitions/missing"}
+    files[EVENTS_YAML] = yaml.safe_dump(events, sort_keys=False)
+    return files
+
+
+async def test_every_rejected_event_fails_its_own_check_pointing_at_the_file_to_fix(mongo):
+    result = await _smoke(_events_rejected_four_ways(_good()), mongo.uri)
+
+    assert result["status"] == "failed"
+    checks = _by_check(result)
+    failed = {check: row for check, row in checks.items() if row["status"] == "failed"}
+    expected = {
+        "event.task_management.create_task.domain.task.created": (
+            SERVICE, "(at $.required: Missing required properties: 'user_id'.)",
+        ),
+        "event.task_management.create_task.domain.task.audited": (
+            MODULE_YAML, "which task_management.create_task does not declare in its module.yaml emits",
+        ),
+        "event.task_management.list_tasks.domain.task.listed": (
+            MODULE_YAML, "which task_management.list_tasks does not declare in its module.yaml emits",
+        ),
+        "event.task_management.delete_task.domain.task.deleted": (
+            EVENTS_YAML, "whose payload_schema in contracts/events.yaml cannot be evaluated (Schema evaluation failed.)",
+        ),
+    }
+    assert set(failed) == set(expected)
+    for check, (path, fragment) in expected.items():
+        assert failed[check]["path"] == path, (check, failed[check]["path"])
+        assert fragment in failed[check]["message"], (check, failed[check]["message"])
+    # Every action behind a rejected event succeeded, so the CRUD checks all ran and passed.
+    assert all(row["status"] == "passed" for check, row in checks.items() if check.startswith("crud."))
+    assert result["events_emitted"] == ["domain.task.updated"]
+    assert sorted(item["check"] for item in result["failed_tests"]) == sorted(expected)
+
+
+async def test_one_event_rejected_for_two_reasons_reports_both(mongo):
+    files = _good()
+    created = "    await ctx.emit('domain.task.created', item)\n"
+    assert files[SERVICE].count(created) == 1
+    files[SERVICE] = files[SERVICE].replace(created, (
+        "    await ctx.emit('domain.task.created', {k: v for k, v in item.items() if k != 'user_id'})\n"
+        "    await ctx.emit('domain.task.created', {**item, 'status': 'archived'})\n"
+    ))
+
+    result = await _smoke(files, mongo.uri)
+
+    assert result["status"] == "failed"
+    check = "event.task_management.create_task.domain.task.created"
+    failed = [row for row in result["results"] if row["status"] == "failed"]
+    assert [row["check"] for row in failed] == [check, check]
+    assert all(row["path"] == SERVICE for row in failed)
+    messages = [row["message"] for row in failed]
+    assert any("(at $.required: Missing required properties: 'user_id'.)" in message for message in messages)
+    assert any("(at $.properties.status.enum: Value does not satisfy the 'enum' constraint.)" in message
+               for message in messages)
+    assert [item["check"] for item in result["failed_tests"]] == [check, check]
+    assert all(row["status"] == "passed" for check_id, row in _by_check(result).items() if check_id.startswith("crud."))
+    assert result["events_emitted"] == ["domain.task.deleted", "domain.task.updated"]
+
+
+async def test_acceptance_fails_a_bundle_whose_event_breaks_its_schema(mongo, monkeypatch):
+    monkeypatch.setattr(app_runtime_smoke, "resolve_smoke_mongo_uri", lambda: mongo.uri)
+
+    result = await run_app_bundle_acceptance_gate(files=_created_event_without_owner(_good()))
+
+    assert result["app_runtime_smoke"]["status"] == "failed"
+    assert "app_runtime_smoke" in result["validation_evidence"]["failed"]
+    smoke_errors = [error for error in result["bundle_repair"]["errors"] if error.startswith("app_runtime_smoke: ")]
+    assert len(smoke_errors) == 1
+    assert "emitted domain.task.created" in smoke_errors[0]
 
 
 async def test_recorded_dead_bundle_fails_for_its_known_runtime_reasons(mongo):
