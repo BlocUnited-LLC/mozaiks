@@ -127,6 +127,14 @@ Backends selected by `auto`:
 | `AZURE_KEY_VAULT_NAME` is set | `AzureKeyVaultConnectorVaultBackend` |
 | No Azure vault configured | `MongoConnectorVaultBackend` (default) |
 
+`get_secret` reports `status: found | not_found | error` alongside its existing
+`success` and `secret_value` fields. Only `found` carries a usable secret;
+`not_found` means the backend confirmed that the named secret is absent. Azure
+requires the Key Vault `SecretNotFound` error code; an unrelated 404, unavailable
+vault, authentication failure, transport failure, or unreadable encrypted value
+is `error`. Callers that create a new secret after a read must proceed only on
+`not_found` and must treat a missing status as an error.
+
 `MongoConnectorVaultBackend` stores Fernet-encrypted secrets in the `ConnectorSecrets`
 collection in the same MongoDB instance. Encryption key priority:
 

@@ -146,6 +146,7 @@ def test_mongo_backend_get_secret_decrypts_correctly() -> None:
     result = asyncio.run(backend.get_secret(scope_id="ws_1", service="anthropic"))
 
     assert result["success"] is True
+    assert result["status"] == "found"
     assert result["secret_value"] == secret
     assert result["provider"] == "mongo"
 
@@ -156,8 +157,35 @@ def test_mongo_backend_get_secret_not_found_returns_failure() -> None:
     result = asyncio.run(backend.get_secret(scope_id="ws_1", service="missing_service"))
 
     assert result["success"] is False
+    assert result["status"] == "not_found"
     assert result["secret_value"] is None
     assert result["provider"] == "mongo"
+
+
+def test_mongo_backend_get_secret_read_failure_is_not_absence() -> None:
+    backend, _ = _backend_with_collection()
+
+    async def failed_collection():
+        raise OSError("database temporarily unavailable")
+
+    backend._collection = failed_collection
+    result = asyncio.run(backend.get_secret(scope_id="ws_1", service="openai"))
+
+    assert result["success"] is False
+    assert result["status"] == "error"
+    assert result["secret_value"] is None
+    assert "database temporarily unavailable" not in str(result)
+
+
+def test_mongo_backend_corrupt_record_is_not_absence() -> None:
+    backend, coll = _backend_with_collection()
+    coll._docs[("ws_1", "openai")] = {}
+
+    result = asyncio.run(backend.get_secret(scope_id="ws_1", service="openai"))
+
+    assert result["success"] is False
+    assert result["status"] == "error"
+    assert result["secret_value"] is None
 
 
 def test_mongo_backend_get_secret_returns_expires_at() -> None:

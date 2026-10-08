@@ -596,6 +596,7 @@ async def get_secret(*, scope_id: str, service: str) -> dict[str, Any]:
     )
     return {
         "success": bool(result.get("success")),
+        "status": result.get("status"),
         "service": service,
         "secret_value": result.get("secret_value"),
         "provider": result.get("provider"),
