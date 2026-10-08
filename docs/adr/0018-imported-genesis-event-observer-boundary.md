@@ -8,7 +8,7 @@ Status: Proposed. No event-rejection observer is implemented by this ADR.
 
 The contained imported-app smoke has two processes with different authority.
 Container A runs imported Python alongside `ModuleExecutor`. Its
-`_ObservedModuleExecutor` collects `DispatchResult.rejected_events` in an
+`_ObservedModuleExecutor` collects `ModuleResult.rejected_events` in an
 in-memory `_SmokeRun` list. Container B has no imported Python mount; it drives
 the app over loopback HTTP and reads the disposable Mongo database. B can
 observe a successful write and response after `ctx.emit` was rejected, but it
