@@ -14,6 +14,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- An opt-in local Docker transport for approved repository patches through AG2
+  ACP and Codex or Claude Code. A separate, pinned model gateway holds the API
+  key, and the agent receives only scoped source on an isolated network. The
+  shipped ACP policy and default offline proof remain unchanged; live use still
+  requires a trusted worker and provider-side spending limits.
 - Internal offline sealed candidate boot over the existing preview session
   ledger: canonical archive and pinned Docker image identities, bounded
   root-owned staging, non-root runtime health, and confirmed cleanup without
@@ -78,7 +83,7 @@ This project follows a practical pre-1.0 changelog format:
   turn. A trusted worker pins a local image ID, supplies only selected files on
   stdin, verifies no-network/no-mount container settings, caps output, removes
   the container, and returns a proposal plus archive for host verification.
-  Live model access and source publication remain disabled.
+  Its default path has no model access or source publication.
 - Exact plan-bound create and delete grants for the offline repository patch
   bridge, with host-proven create absence at the immutable baseline, observed
   operation matching, and deletion-only transport.
