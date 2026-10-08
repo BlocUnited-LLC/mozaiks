@@ -2,7 +2,7 @@
 
 Date: 2026-10-07
 
-Status: proposed
+Status: accepted
 
 ## Decision
 
@@ -216,7 +216,6 @@ proxy deployment, repository access, validation policy, and PR publication.
 
 ## Validation
 
-This proposal requires link/source review and a docs build before merge. It
-claims no live acceptance. Implementation must pass every acceptance gate
-above and should be enabled only after a separate security and architecture
-review of the exact image, proxy, and credential path.
+This decision claims no live acceptance. Implementation must pass every
+acceptance gate above and may be enabled only after a separate security and
+architecture review of the exact image, proxy, and credential path.
