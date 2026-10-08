@@ -347,13 +347,13 @@ class ACPCodingProvider:
         provider_config: ControlPlaneACPProviderConfig,
         provider_id: str,
     ) -> StagedPatchProposal:
-        import os
-
         acp_config = self._acp_config_factory(
             adapter=provider_config.adapter,
             workspace_root=workspace.workspace_root,
             turn_timeout_seconds=provider_config.budget.max_wall_seconds,
-            env_source=self._env_source if self._env_source is not None else dict(os.environ),
+            # A caller must supply any agent credential explicitly. The host
+            # process environment is never a credential source for an ACP turn.
+            env_source=dict(self._env_source) if self._env_source is not None else {},
         )
 
         summary_text = ""
