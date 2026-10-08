@@ -947,19 +947,31 @@ class ModuleEventRouter:
             context = None
 
         audience = dict(rule.get("audience") if isinstance(rule.get("audience"), dict) else {})
-        user_id_field = str(audience.get("user_id_field") or "").strip()
-        if user_id_field and payload.get(user_id_field):
+        if "user_id_field" in audience:
+            raw_user_id_field = audience["user_id_field"]
+            user_id_field = raw_user_id_field.strip() if isinstance(raw_user_id_field, str) else ""
+            if not user_id_field:
+                logger.warning("NOTIFICATION_RECIPIENT_FIELD_INVALID: rule_id=%s", rule.get("id"))
+                return
             raw_user_ids = payload.get(user_id_field)
-            if isinstance(raw_user_ids, list):
-                target_user_ids = [str(user_id).strip() for user_id in raw_user_ids if str(user_id).strip()]
+            if isinstance(raw_user_ids, str):
+                target_user_ids = [raw_user_ids.strip()] if raw_user_ids.strip() else []
+            elif isinstance(raw_user_ids, list) and raw_user_ids and all(
+                isinstance(user_id, str) and user_id.strip() for user_id in raw_user_ids
+            ):
+                target_user_ids = [user_id.strip() for user_id in raw_user_ids]
             else:
-                target_user_id = str(raw_user_ids).strip()
-                target_user_ids = [target_user_id] if target_user_id else []
-            if target_user_ids:
-                existing_user_ids = audience.get("user_ids")
-                if not isinstance(existing_user_ids, list):
-                    existing_user_ids = []
-                audience["user_ids"] = list(dict.fromkeys([*existing_user_ids, *target_user_ids]))
+                target_user_ids = []
+            if not target_user_ids:
+                logger.warning(
+                    "NOTIFICATION_RECIPIENT_INVALID: rule_id=%s field=%s",
+                    rule.get("id"), user_id_field,
+                )
+                return
+            existing_user_ids = audience.get("user_ids")
+            if not isinstance(existing_user_ids, list):
+                existing_user_ids = []
+            audience["user_ids"] = list(dict.fromkeys([*existing_user_ids, *target_user_ids]))
 
         record = {
             "notification_id": f"ntf_{uuid4().hex}",

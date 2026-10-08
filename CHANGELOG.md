@@ -132,6 +132,9 @@ This project follows a practical pre-1.0 changelog format:
   alerts are hidden. All
   notification reads and mutations are limited to the app loaded by the host,
   including when a token has no app claim.
+- Direct-recipient notification rules now skip derivation when the field name
+  or its recipient value is missing, blank, or invalid, preventing an empty
+  target from becoming an app-wide alert.
 
 - Repository Docker coding turns now require a trusted local image ID, reject
   changed image tags before source transfer, verify the created container's

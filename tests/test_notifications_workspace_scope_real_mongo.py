@@ -111,10 +111,10 @@ def notification_http(monkeypatch):
 
     def token(
         workspace_id: str | None, *, tenant_id: str | None = None, app_id: str | None = APP_ID,
-        roles: list[str] | None = None,
+        roles: list[str] | None = None, user_id: str = USER_ID,
     ) -> dict[str, str]:
         claims = {
-            "sub": USER_ID, "iss": "https://auth.test", "aud": "notification-scope",
+            "sub": user_id, "iss": "https://auth.test", "aud": "notification-scope",
             "scp": "workspace_support.read", "exp": int(time.time()) + 300,
         }
         if app_id is not None:
@@ -342,6 +342,44 @@ def test_tenant_owned_role_alert_requires_verified_tenant(notification_http, mon
     }
     assert notification_http.client.post("/api/notifications/role-a/read", headers=a).json()["success"] is False
     assert notification_http.client.post("/api/notifications/role-workspace-a/read", headers=a).json()["success"] is True
+
+
+def test_direct_recipient_derivation_never_turns_missing_target_app_wide(notification_http):
+    async def store(record):
+        notification_http.collection.insert_one(record)
+
+    router = ModuleEventRouter([], notification_store=store)
+    rule = {
+        "id": "message_sent", "module_id": "messages",
+        "audience": {"user_id_field": "recipient_ids"},
+        "template": {"title": "New message", "body": "Message available"},
+    }
+
+    async def produce():
+        for probe_id, recipients in (
+            ("missing", None), ("empty", []), ("blank", [" "]),
+            ("valid", [USER_ID]),
+        ):
+            payload = {"probe_id": probe_id}
+            if recipients is not None:
+                payload["recipient_ids"] = recipients
+            await router._create_notification(rule, "domain.messages.message_sent", {
+                "id": f"event-{probe_id}",
+                "tenant": {"app_id": APP_ID},
+                "payload": payload,
+            })
+
+    asyncio.run(produce())
+    generated = list(notification_http.collection.find({"rule_id": "message_sent"}))
+    assert len(generated) == 1
+    assert generated[0]["audience"]["user_ids"] == [USER_ID]
+    assert "event-valid" == generated[0]["source_event_id"]
+    assert generated[0]["notification_id"] in _ids(notification_http.client.get(
+        "/api/notifications", headers=notification_http.token(None),
+    ))
+    assert generated[0]["notification_id"] not in _ids(notification_http.client.get(
+        "/api/notifications", headers=notification_http.token(None, user_id="another-user"),
+    ))
 
 
 def test_permission_audience_requires_verified_owner_for_reads_and_mutations(notification_http):

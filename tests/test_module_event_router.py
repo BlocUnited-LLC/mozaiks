@@ -1105,6 +1105,57 @@ class TestCreateNotification:
         assert stored[0]["audience"]["user_ids"] == ["user-2", "user-3"]
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {}, {"recipient_id": None}, {"recipient_id": ""}, {"recipient_id": "  "},
+            {"recipient_id": []}, {"recipient_id": ["  "]},
+            {"recipient_id": ["user-2", " "]}, {"recipient_id": 42},
+            {"recipient_id": {"id": "user-2"}},
+        ],
+    )
+    async def test_direct_recipient_rule_skips_invalid_payload(self, payload):
+        stored = []
+        emitted = []
+
+        async def notification_store(record):
+            stored.append(record)
+
+        async def event_emitter(event_type, event):
+            emitted.append((event_type, event))
+
+        router = _router(notification_store=notification_store, event_emitter=event_emitter)
+        await router._create_notification(
+            _notification_rule(
+                "ev.recipient", rule_id="direct-recipient", module_id="m1",
+                audience={"user_id_field": "recipient_id"},
+            ),
+            "ev.recipient",
+            _envelope(payload=payload),
+        )
+        assert stored == []
+        assert emitted == []
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("field", [None, "", "  ", 42])
+    async def test_direct_recipient_rule_skips_invalid_field_name(self, field):
+        stored = []
+
+        async def notification_store(record):
+            stored.append(record)
+
+        router = _router(notification_store=notification_store)
+        await router._create_notification(
+            _notification_rule(
+                "ev.recipient", rule_id="direct-recipient", module_id="m1",
+                audience={"user_id_field": field},
+            ),
+            "ev.recipient",
+            _envelope(payload={"recipient_id": "user-42"}),
+        )
+        assert stored == []
+
+    @pytest.mark.asyncio
     async def test_secret_keys_stripped_from_context_fields(self):
         stored = []
 

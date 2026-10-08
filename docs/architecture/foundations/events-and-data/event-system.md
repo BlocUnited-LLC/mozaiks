@@ -153,6 +153,10 @@ alerts with no owner or malformed ownership stay hidden, even when they also
 name the caller directly. Hosted customer alerts and app-wide announcements
 need trusted recipient IDs or a separately reviewed generic audience contract;
 a broad token role or permission cannot grant access to another workspace.
+Notification rules declaring `audience.user_id_field` create no record when
+the field name is invalid or the event lacks a nonempty string recipient or
+a list of nonempty string recipients; an unresolved direct target cannot
+become app-wide.
 
 ### Reaction target reference
 
