@@ -81,6 +81,7 @@ _RUNTIME_LOGGER = "mozaiks.workflow"
 # The child's environment: what a Python process needs to start on this OS. No
 # other host variable (secrets, provider keys, MONGO_URI, MOZAIKS_*) is passed.
 _CHILD_ENVIRONMENT = ("PATH", "PATHEXT", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "TEMP", "TMP", "TMPDIR",
+                      "APPDATA",  # Windows Python needs this to locate its installed user-site packages.
                       "LANG", "LC_ALL", "LC_CTYPE")
 
 _FIX_SUGGESTION = (

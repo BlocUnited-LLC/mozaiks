@@ -445,6 +445,9 @@ This project follows a practical pre-1.0 changelog format:
   longer fail as if the user tried to rewrite them, while live user context
   still cannot change those checks.
 
+- Generated-app runtime smoke now keeps the Windows Python user-site path in its
+  scrubbed child environment, so local builds with user-installed dependencies
+  reach the app checks instead of failing on an unrelated missing import.
 - Pin shared-shell text checkouts to LF so installed Android framework resources
   have identical provenance on Windows and Linux. Binary assets stay unchanged.
 
