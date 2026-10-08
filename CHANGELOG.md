@@ -80,6 +80,13 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
+- Imported app runtime smoke now obtains its externally visible checks from a
+  separate local Docker observer that has no app Python mount. The observer
+  checks the app over isolated loopback HTTP and MongoDB; app stdout cannot
+  author the trusted boot receipt or pass/fail checks. Rejected emitted events
+  remain outside the observer's verified scope and cannot authorize imported
+  Genesis acceptance yet.
+
 - Studio and refinement-harness source validation now skip repository-defined
   host commands in every auth mode until a trusted isolated runner is supplied.
   Static checks remain available but cannot certify command readiness.

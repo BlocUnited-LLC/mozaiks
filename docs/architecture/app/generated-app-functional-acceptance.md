@@ -225,26 +225,54 @@ remains on the host's Mongo.
 
 ### Imported-source runtime smoke
 
-An imported Genesis can contain arbitrary Python. Its acceptance path calls
+An imported Genesis can contain arbitrary Python. Its proposed acceptance path uses
 `run_contained_imported_app_runtime_smoke(app_root, expected_source_sha256=...)`
 on the exact staged app bytes. The caller supplies every verified source-file
 digest; the runner checks the copied mount bytes and rejects missing or extra
 files. This is a separate opt-in backend; ordinary generated-app acceptance
 continues to use the child-process smoke described above.
 
+Before staging imported source, a caller can use
+`preflight_contained_imported_smoke()` to require a reachable local Docker
+daemon and an exact pinned validator image. It raises on missing capability and
+returns the immutable image ID. The runner repeats the same preflight before
+copying source and runs both containers by that ID; a successful early check
+does not replace the execution-time check.
+
 The imported backend copies up to 4,096 regular files and 64 MB into a private
-temporary directory, rejecting links and special files. It mounts only that
-copy read-only into the local `mozaiks-sandbox:local` preview image. Docker
-registers the container before starting it so cancellation can remove its
-known name even during startup. The container uses `--network=none`, a read-only root, a non-root user, dropped capabilities,
-no new privileges, and CPU, memory, process, temporary storage and time limits.
-MongoDB starts inside that same disposable container on loopback. No host Mongo
-URI, application credential, provider key, source repository, Docker socket or
-host workspace is mounted or passed to imported code. The container is forcibly
-removed and its absence checked even after timeout or cancellation. A failed
-teardown is a failed acceptance check. Docker does not persist container logs;
-the parent retains at most 4 MB of result output and 256 KB of error output,
-and exceeding either bound fails acceptance.
+temporary directory, rejecting links and special files. It runs two disposable
+containers from the same pinned local image. Container A mounts the verified app
+copy read-only, starts MongoDB and the app on its isolated loopback interface,
+and has `--network=none`. Container B joins only A's network namespace. B mounts
+only a read-only projection of `app.json`, the data/auth/subscriptions contracts,
+and module manifests. It has no app Python, source repository, Docker socket, or
+shared writable mount, and uses its own process and mount namespaces. Both
+containers use a read-only root, a non-root user, dropped capabilities, no new
+privileges, and CPU, memory, process, temporary storage and time limits.
+
+The image-owned observer in B probes A over loopback HTTP and inspects the
+disposable MongoDB directly. It runs the two-user CRUD and entitlement checks
+from the declarative contracts. A's stdout is diagnostic only; the host parses
+result events only from B, validates a per-run nonce and one HTTP boot/completion
+receipt, and sets `observer_origin: trusted_external_probe_v1`, `observer_run_id`,
+and `observed_boot` only on a passing result. The host retains the verified
+source-content digest and exact validator image ID. Docker registers both names
+before starting each container so cancellation can remove them. Both are forcibly
+removed and their absence checked after success, failure, timeout, or cancellation.
+A failed teardown or bounded-output violation fails the smoke. No host Mongo URI,
+credential, provider key, source repository, Docker socket, or host workspace is
+mounted or passed to either container.
+
+The observer verifies externally visible HTTP and Mongo behavior. The runtime
+drops a rejected `ctx.emit` before dispatch while preserving the action's write
+and HTTP success; the rejection exists only in A's process. B therefore cannot
+distinguish a rejected emit from no emit. Contained results declare
+`observer_unverified_checks: [event_rejection]`, including when their observed
+checks pass. A's reported rejection list is not trusted evidence. The ordinary
+in-process smoke detects rejected events, but imported Genesis acceptance must
+stay closed until this invariant has a trusted check or an explicit acceptance
+contract excludes it. `observer_origin` attests the source of the bounded
+observations, not parity with every in-process smoke check.
 
 The preview image must be rebuilt after changing this smoke module:
 `docker build -f infra/docker/Dockerfile.preview -t mozaiks-sandbox:local .`.
@@ -253,15 +281,16 @@ An operator can select an equivalent trusted local image with
 Set `MOZAIKS_IMPORTED_SMOKE_IMAGE_ID` to the trusted local image ID returned by
 `docker image inspect --format '{{.Id}}' mozaiks-sandbox:local`. The gate checks
 that ID and runs by ID, so a later tag change cannot swap the validator between
-inspection and execution. It returns the image ID and copied-source digest for
-the Genesis acceptance evidence.
-Docker or image unavailability yields a skipped, blocking acceptance result.
+inspection and execution. It returns the image ID and copied-source digest as
+candidate Genesis evidence.
+Docker or image unavailability yields a skipped, blocking smoke result.
 The image is never pulled automatically during this gate. Docker Engine and the
 trusted preview image are local prerequisites; no paid service is required.
-The container boundary protects the host, but arbitrary app Python can still
-interfere with checks inside its own interpreter. Treat this runtime smoke as
-functional evidence, and retain exact-source review and independent promotion
-approval for adversarial code.
+The observer separates the evidence channel from imported app Python, including
+its stdout file descriptor and interpreter monkeypatches. A finite black-box
+test cannot prove every future behavior of adversarial code: an app can still
+choose behavior based on incoming requests. Retain exact-source review and
+independent promotion approval for adversarial code.
 
 **Results.** Each check passes, fails or did not run, with one message naming
 the action, the user, the expected response and the actual one. A 5xx carries
