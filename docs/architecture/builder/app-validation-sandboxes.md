@@ -59,6 +59,10 @@ explicit local validation; local validation requires installed shared shell depe
 Compilation does not bind or invent app identity before export. Static acceptance
 still checks schemas, references, module implementation, and runtime loading.
 Interactive runtime/browser acceptance is a separate step, not implied by a build.
+AppGenerator's runtime smoke seeds subscription assignments in its disposable
+database from the configured assignment store and the declared data-contract
+fields and unique indexes. This gives each synthetic user a distinct valid
+assignment without relaxing the app's index checks.
 Restore and activation read the owned artifact through the canonical content store,
 verify its archive identity and SHA-256, and consume those same verified bytes.
 Records without this identity must be validated and saved as a new canonical

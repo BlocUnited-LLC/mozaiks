@@ -17,6 +17,7 @@ import tempfile
 import threading
 import time
 from contextlib import suppress
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import UUID
@@ -62,6 +63,25 @@ def _good(extra_service: str = "") -> dict[str, str]:
     files = _bundle("runtime_smoke_good_bundle_fdfa818e.json")
     if extra_service:
         files[SERVICE] = files[SERVICE] + "\n\n" + extra_service
+    return files
+
+
+def _good_with_required_unique_assignment_fields() -> dict[str, str]:
+    files = _good()
+    contract = json.loads(files["data/contract.json"])
+    collection = contract["surfaces"][1]["collections"][0]
+    collection["fields"].extend([
+        {"name": "subscription_id", "type": "string", "required": True},
+        {"name": "plan_name", "type": "string", "required": True},
+        {"name": "created_at", "type": "string", "required": True},
+        {"name": "updated_at", "type": "string", "required": True},
+    ])
+    next(field for field in collection["fields"] if field["name"] == "granted_capabilities")["required"] = True
+    collection["indexes"].append({
+        "name": "subscription_id_unique", "unique": True,
+        "keys": [{"field": "subscription_id", "order": 1}],
+    })
+    files["data/contract.json"] = json.dumps(contract)
     return files
 
 
@@ -144,6 +164,50 @@ async def test_no_database_is_reported_as_skipped_never_as_a_pass():
         "message": "Runtime smoke skipped: no database configured. Boot, two-user CRUD and entitlement checks did not run.",
         "details": {"status": "skipped", "skipped_reason": "no database configured", "blocking": False},
     }]
+
+
+async def test_assignment_fixture_uses_declared_required_fields_and_unique_index_for_two_users():
+    from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
+
+    files = _good_with_required_unique_assignment_fields()
+    contract = json.loads(files["data/contract.json"])
+    collection = contract["surfaces"][1]["collections"][0]
+    config = SubscriptionsConfig.model_validate(yaml.safe_load(files["config/subscriptions.yaml"]))
+    item = app_runtime_smoke._plan_stores(config)[0]
+    plan = next(plan for plan in item.plans if plan.plan_id == "pro")
+
+    class AssignmentRows:
+        def __init__(self):
+            self.rows: list[dict] = []
+
+        async def insert_one(self, record):
+            required = {field["name"] for field in collection["fields"] if field.get("required")}
+            assert all(record.get(name) is not None for name in required)
+            assert record["subscription_id"] not in {row["subscription_id"] for row in self.rows}
+            self.rows.append(dict(record))
+
+    rows = AssignmentRows()
+    run = SimpleNamespace(
+        app_id="fixture-app", load=SimpleNamespace(data_contract=contract),
+        database={"billing_subscriptions": rows},
+    )
+    for user_id in ("user-a", "user-b"):
+        assert await app_runtime_smoke._seed_assignment(run, SimpleNamespace(user_id=user_id), item, plan)
+
+    assert [row["user_id"] for row in rows.rows] == ["user-a", "user-b"]
+    assert all(row["granted_capabilities"] == plan.capabilities for row in rows.rows)
+    assert all(row["plan_name"] == plan.label for row in rows.rows)
+    assert all(datetime.fromisoformat(row["created_at"]) for row in rows.rows)
+    assert all(datetime.fromisoformat(row["updated_at"]) for row in rows.rows)
+
+
+async def test_unique_assignment_store_passes_two_user_runtime_smoke(mongo):
+    result = await _smoke(_good_with_required_unique_assignment_fields(), mongo.uri)
+
+    assert result["status"] == "passed", json.dumps(result["failed_tests"], indent=1)
+    checks = _by_check(result)
+    assert checks["crud.task_management.tasks.b_list_isolated"]["status"] == "passed"
+    assert checks["entitlement.task_management.update_task.entitled_allowed"]["status"] == "passed"
 
 
 async def test_unreachable_database_is_skipped_with_the_driver_error():
