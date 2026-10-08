@@ -11,6 +11,7 @@ import {
   StatusPill,
 } from '../../ui/components/StudioShared.jsx'
 import CarryForwardReportSummary from './CarryForwardReportSummary.jsx'
+import GenesisImportReview from './GenesisImportReview.jsx'
 import AppStudioHero, { formatDateTimeLabel } from './AppStudioChrome.jsx'
 import { getAppStudioSnapshot } from './appStudioDataHelpers.js'
 import { studioFetch } from './studioApi.js'
@@ -100,7 +101,7 @@ function SavedArtifactWorkbench({ appId, buildRegistryId, artifactVersionId, dat
 
 export default function AppBuildReviewPage() {
   const { appId = 'workspace-app' } = useParams()
-  const { data, loading, error, dataMode } = useAppStudioData(appId)
+  const { data, loading, error, dataMode, refresh } = useAppStudioData(appId)
   const [selectedArtifactId, setSelectedArtifactId] = useState(null)
   const snapshot = useMemo(() => getAppStudioSnapshot(appId, data, dataMode), [appId, data, dataMode])
   const buildHistory = snapshot.buildHistory || []
@@ -143,12 +144,23 @@ export default function AppBuildReviewPage() {
               </select>
             </div>
 
-            <SavedArtifactWorkbench
-              appId={appId}
-              buildRegistryId={data.buildRegistryId}
-              artifactVersionId={activeArtifactId}
-              dataMode={dataMode}
-            />
+            {selectedArtifact?.commit_metadata?.metadata?.bundle_mode === 'brownfield_genesis_import' ? (
+              <GenesisImportReview
+                key={JSON.stringify([appId, data.buildRegistryId, activeArtifactId])}
+                artifactVersionId={activeArtifactId}
+                buildRegistryId={data.buildRegistryId}
+                targetAppId={selectedArtifact.app_id}
+                routeAppId={appId}
+                onAccepted={refresh}
+              />
+            ) : (
+              <SavedArtifactWorkbench
+                appId={appId}
+                buildRegistryId={data.buildRegistryId}
+                artifactVersionId={activeArtifactId}
+                dataMode={dataMode}
+              />
+            )}
 
             <details className="rounded-xl border border-border/42 bg-card/20 p-4">
               <summary className="cursor-pointer text-sm font-medium text-foreground">Build history and preservation reports</summary>

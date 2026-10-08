@@ -282,6 +282,7 @@ def test_factory_app_surface_routes_are_all_covered_by_smoke() -> None:
         # Sub-components used by route-backed pages (not directly route-backed)
         "CarryForwardReportSummary",
         "CarryForwardReportPanel",
+        "GenesisImportReview",
         "PricingHealthPanel",
         "MetricDetailPanel",
     }
@@ -314,6 +315,7 @@ def test_factory_app_react_files_are_classified() -> None:
         # Carry-forward display sub-components (used by route-backed pages)
         "factory_app/app/admin/pages/CarryForwardReportSummary.jsx",
         "factory_app/app/admin/pages/CarryForwardReportPanel.jsx",
+        "factory_app/app/admin/pages/GenesisImportReview.jsx",
         "factory_app/app/admin/pages/PricingHealthPanel.jsx",
         # Universal metric drill-down drawer, opened from analytics surfaces
         "factory_app/app/admin/pages/MetricDetailPanel.jsx",

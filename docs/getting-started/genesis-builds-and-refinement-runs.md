@@ -48,6 +48,16 @@ When you promote it, the Genesis Build's output becomes the **first
 authoritative version of your app**: the canonical state that every future
 change is measured against, and the start of your app's revision history.
 
+For an existing app, Studio can instead show an **imported Genesis source** in
+Build Review. Download its reserved archive and inspect the files. Studio shows
+the exact archive and file-manifest SHA-256 values and verifies the downloaded
+archive before enabling your acknowledgement. Accepting that source runs the
+app-bundle validation gate and records an initial brownfield baseline for later
+Refinement Runs. This source acceptance does not deploy or replace the running
+app. An unavailable or changed reservation must be reloaded and reviewed again;
+the ordinary generated-bundle accept and promote controls do not apply to an
+imported Genesis source.
+
 If you want to see the individual build workflows behind these stages, they are
 described in [The Build Sequence](../concepts.md#the-build-sequence).
 
