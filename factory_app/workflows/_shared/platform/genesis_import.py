@@ -81,6 +81,75 @@ def _canonical_digest(value: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+_REQUIRED_RUNTIME_CHECKS = frozenset({"app_runtime_load", "app_runtime_smoke"})
+_GENESIS_EVIDENCE_FIELDS = frozenset({
+    "contract", "bundle_sha256", "manifest_sha256", "source_content_sha256",
+    "validator_image_id", "snapshot_digest", "passed_checks", "runtime_boot", "sha256",
+})
+
+
+def _is_sha256(value: Any) -> bool:
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+
+
+def _passed_gate_checks(result: dict[str, Any]) -> list[str]:
+    checks = result.get("checks")
+    if not isinstance(checks, list) or not checks or any(
+        not isinstance(check, dict) or not isinstance(check.get("id"), str)
+        or not check["id"] or check.get("passed") is not True
+        for check in checks
+    ):
+        raise GenesisImportError("imported Genesis acceptance gate has incomplete passed checks")
+    names = [check["id"] for check in checks]
+    if len(names) != len(set(names)) or not _REQUIRED_RUNTIME_CHECKS.issubset(names):
+        raise GenesisImportError("imported Genesis acceptance gate lacks required runtime checks")
+    return names
+
+
+def _verified_runtime_boot(result: dict[str, Any], smoke: dict[str, Any]) -> dict[str, str]:
+    runtime_load = result.get("app_runtime_load")
+    outcomes = smoke.get("results")
+    smoke_checks = smoke.get("checks")
+    boot = [item for item in outcomes if isinstance(item, dict) and item.get("check") == "boot.app_load"] if isinstance(outcomes, list) else []
+    if (
+        smoke.get("status") != "passed" or smoke.get("passed") is not True
+        or not isinstance(runtime_load, dict)
+        or runtime_load.get("status") != "passed" or runtime_load.get("passed") is not True
+        or len(boot) != 1 or boot[0].get("status") != "passed"
+        or not isinstance(smoke_checks, list)
+        or not any(isinstance(check, dict) and check.get("id") == "app_runtime_smoke"
+                   and check.get("passed") is True and check.get("status") == "passed"
+                   for check in smoke_checks)
+    ):
+        raise GenesisImportError("imported Genesis runtime smoke lacks a passed boot check")
+    return {"check": "boot.app_load", "status": "passed"}
+
+
+def _validation_matches_receipt(
+    validation: Any, *, claim: GenesisImportClaim, receipt: GenesisAcceptanceReceipt,
+) -> bool:
+    if not isinstance(validation, dict) or set(validation) != _GENESIS_EVIDENCE_FIELDS:
+        return False
+    checks = validation.get("passed_checks")
+    if (
+        validation.get("contract") != receipt.validation_contract
+        or validation.get("bundle_sha256") != claim.bundle_sha256
+        or validation.get("manifest_sha256") != claim.manifest_sha256
+        or not _is_sha256(validation.get("source_content_sha256"))
+        or not isinstance(validation.get("validator_image_id"), str)
+        or re.fullmatch(r"sha256:[0-9a-f]{64}", validation["validator_image_id"]) is None
+        or not _is_sha256(validation.get("snapshot_digest"))
+        or not isinstance(checks, list) or not checks
+        or any(not isinstance(check, str) or not check for check in checks)
+        or len(checks) != len(set(checks))
+        or not _REQUIRED_RUNTIME_CHECKS.issubset(checks)
+        or validation.get("runtime_boot") != {"check": "boot.app_load", "status": "passed"}
+        or validation.get("sha256") != receipt.validation_sha256
+    ):
+        return False
+    return _canonical_digest({key: value for key, value in validation.items() if key != "sha256"}) == receipt.validation_sha256
+
+
 def _manifest_entries(*, files_manifest: Sequence[BuildRecordFileEntry | dict[str, Any]],
                       bundle_name: str, bundle_bytes: bytes) -> tuple[list[BuildRecordFileEntry], dict[str, BuildRecordFileEntry]]:
     try:
@@ -295,11 +364,7 @@ def _receipt_matches(
             execution_app_id=execution_app_id, build_registry_id=build_registry_id,
         )
         and receipt.accepted_by == owner_user_id
-        and isinstance(validation, dict)
-        and validation.get("contract") == receipt.validation_contract
-        and validation.get("sha256") == receipt.validation_sha256
-        and validation.get("bundle_sha256") == claim.bundle_sha256
-        and validation.get("manifest_sha256") == claim.manifest_sha256
+        and _validation_matches_receipt(validation, claim=claim, receipt=receipt)
         and record.validation_status == BuildRecordValidationStatus.PASSED
         and record.app_validation_status == "passed"
         and record.lifecycle_status not in {
@@ -394,6 +459,15 @@ async def accept_existing_app_genesis(
     if state["status"] == "accepted":
         if record.lifecycle_status == BuildRecordStatus.DRAFT:
             receipt = GenesisAcceptanceReceipt.model_validate(state.get("acceptance"))
+            if (
+                receipt.accepted_by != owner_user_id
+                or not _validation_matches_receipt(
+                    record.commit_metadata.metadata.get("genesis_validation"), claim=claim, receipt=receipt,
+                )
+                or record.validation_status != BuildRecordValidationStatus.PASSED
+                or record.app_validation_status != "passed"
+            ):
+                raise GenesisImportError("accepted Genesis validation evidence differs from review receipt")
             record = await store.accept_genesis_build_record(
                 app_id=record.app_id, build_record_id=record.id,
                 validation_sha256=receipt.validation_sha256,
@@ -420,15 +494,21 @@ async def accept_existing_app_genesis(
     if result.get("status") != "passed" or result.get("passed") is not True:
         raise GenesisImportError("imported Genesis source failed canonical app-bundle runtime validation")
     smoke = result.get("app_runtime_smoke")
+    snapshot_digest = result.get("snapshot_digest")
+    if not _is_sha256(snapshot_digest):
+        raise GenesisImportError("imported Genesis acceptance gate lacks a valid snapshot digest")
+    passed_checks = _passed_gate_checks(result)
+    if not isinstance(smoke, dict):
+        raise GenesisImportError("imported Genesis runtime smoke lacks a passed boot check")
+    runtime_boot = _verified_runtime_boot(result, smoke)
     source_digests = {
         path: hashlib.sha256(content.encode("utf-8") if isinstance(content, str) else content).hexdigest()
         for path, content in files.items()
     }
     source_content_sha256 = _canonical_digest(source_digests)
-    validator_image_id = smoke.get("validator_image_id") if isinstance(smoke, dict) else None
+    validator_image_id = smoke.get("validator_image_id")
     if (
-        not isinstance(smoke, dict)
-        or not isinstance(validator_image_id, str)
+        not isinstance(validator_image_id, str)
         or re.fullmatch(r"sha256:[0-9a-f]{64}", validator_image_id) is None
         or smoke.get("source_content_sha256") != source_content_sha256
     ):
@@ -439,8 +519,9 @@ async def accept_existing_app_genesis(
         "manifest_sha256": claim.manifest_sha256,
         "source_content_sha256": source_content_sha256,
         "validator_image_id": validator_image_id,
-        "snapshot_digest": result.get("snapshot_digest"),
-        "passed_checks": [check.get("id") for check in result.get("checks", []) if check.get("passed") is True],
+        "snapshot_digest": snapshot_digest,
+        "passed_checks": passed_checks,
+        "runtime_boot": runtime_boot,
     }
     validation_sha256 = _canonical_digest(evidence)
     evidence["sha256"] = validation_sha256

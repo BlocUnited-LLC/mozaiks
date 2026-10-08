@@ -54,6 +54,13 @@ pending result cannot become an accepted source. Validation evidence is tied
 to the exact archive and manifest digests on the `BuildRecord`. The first passed
 evidence wins an artifact-store compare and swap; concurrent validation with
 different evidence cannot overwrite the digest named by an accepted receipt.
+Before that write, the gate must report a valid snapshot digest, successful
+runtime-load and runtime-smoke checks, and one passed `boot.app_load` outcome.
+On every baseline read, OSS checks the required evidence fields and recomputes
+their canonical digest against the durable AppRegistry receipt. These are
+functional validation results from the contained smoke protocol, not a
+cryptographic attestation that untrusted app code could not forge a child
+outcome; the contained runner and its event provenance still require review.
 
 AppRegistry accepts the exact reserved claim with a single owner/host/target
 compare and swap. Its receipt records reviewer, time, validation contract,

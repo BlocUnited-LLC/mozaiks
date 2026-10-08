@@ -186,11 +186,10 @@ It binds its metadata to the registry reservation digest, and the refinement
 harness workspace readers retrieve its digest-backed archive through the
 canonical verified reader before considering any mutable workspace path. They
 do not add a second `content_ref` authority. The reservation is not Genesis
-acceptance: canonical app validation, explicit review and acceptance, and a
-Studio trigger gate that rejects unaccepted imported drafts remain required
-before a later request may enter Refinement. Existing Studio trigger and
-AppGenerator hydration still allow a selected draft baseline, so App Zero must
-keep workflow reentry disabled until that acceptance gate is implemented. App
+acceptance: canonical app validation and explicit owner review remain required
+before a later request may enter Refinement. Studio launch and retry plus
+AppGenerator hydration require the accepted receipt and verified source bytes
+for imported drafts. Ordinary revision drafts retain their existing path. App
 Intelligence's redacted source index is context evidence, not a substitute for
 the complete archive.
 
