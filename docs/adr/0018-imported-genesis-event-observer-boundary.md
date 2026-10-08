@@ -2,30 +2,28 @@
 
 Date: 2026-10-08
 
-Status: Proposed. No event-rejection observer is implemented by this ADR.
+Status: Proposed. A partial event observer is implemented; imported Genesis
+acceptance remains closed.
 
 ## Finding
 
-The contained imported-app smoke has two processes with different authority.
-Container A runs imported Python alongside `ModuleExecutor`. Its
-`_ObservedModuleExecutor` collects `ModuleResult.rejected_events` in an
-in-memory `_SmokeRun` list. Container B has no imported Python mount; it drives
-the app over loopback HTTP and reads the disposable Mongo database. B can
-observe a successful write and response after `ctx.emit` was rejected, but it
-cannot observe that rejection. See
+At the #890 baseline, the contained imported-app smoke had two processes with
+different authority. Container A ran imported Python alongside
+`ModuleExecutor`. Its `_ObservedModuleExecutor` collected
+`ModuleResult.rejected_events` in an in-memory `_SmokeRun` list. Container B
+had no imported Python mount; it drove the app over loopback HTTP and read the
+disposable Mongo database. B could observe a successful write and response
+after `ctx.emit` was rejected, but could not observe that rejection. See
 `factory_app/workflows/AppGenerator/tools/app_runtime_smoke.py`:
 `_boot`, `_SmokeRun._request`, `_serve_imported_app`, and `_probe_imported_app`.
 
-`test_contained_smoke_names_its_unverified_rejected_event_check` in
-`tests/test_app_runtime_smoke.py` exercises the negative case: an event omits a
-required `user_id`, while the write and HTTP response succeed. B reports a
-passing functional smoke and `observer_unverified_checks: ["event_rejection"]`.
-The in-process counterpart
+The prior contained negative fixture omitted a required `user_id` while the
+write and HTTP response succeeded; B reported a passing functional smoke and
+`observer_unverified_checks: ["event_rejection"]`. The in-process counterpart
 `test_a_rejected_event_fails_its_own_check_while_the_write_behind_it_passes`
 sees the rejection, but A's result is not independent evidence. The contained
-good-app case, `test_imported_smoke_isolated_docker_boot_and_cleanup`, also
-leaves event rejection unverified. It proves that B can observe boot and normal
-CRUD; it is not a positive event-rejection proof.
+good-app case left event rejection unverified. It proved that B could observe
+boot and normal CRUD, but not event rejection.
 
 ## Decision
 
@@ -46,13 +44,48 @@ gate in ADR 0017 still requires separate validation of workspace-root
 `workflows/`, including workflows preserved in an archive, before a full
 repository self-build claim.
 
-## Minimum Boundary for a Later Implementation
+## Partial Observer Seam
 
-The trusted action ingress and event validator must run outside the process
-that imports app Python, and that trusted process must have no path for loading
-the imported Python package. Imported handlers may run in a worker, with a
-bounded protocol to request runtime operations. The trusted side must own the
-event contract, validation, dispatch decision, and audit for each event request.
+The contained smoke now copies `contracts/events.yaml` into B's read-only
+declarative plan. B loads the canonical `ModuleExecutor` event validator
+without imported handlers, starts a bounded loopback event gateway, chooses a
+request ID for each probe action, and closes each action from the HTTP response
+it observes. A's smoke-only `ctx.emit` callback forwards typed BSON event
+payloads to B. B validates the declared event type and payload, records
+rejections and malformed, stale, duplicate, or late packets, and writes its
+own `trusted_event_audit_v1` outcome. The parent checks one matching B-owned
+audit and completion record before describing the functional smoke as passed.
+The gateway bounds each packet, and the ledger bounds action requests, unique
+event IDs, and retained protocol errors; exceeding any limit fails the run.
+
+The fresh-image contained valid fixture completes with zero rejected event
+requests. The invalid-event fixture produces an externally observed event
+failure even though its create write and HTTP response pass. Contained replay
+and stale-run packet fixtures also fail while their create actions pass.
+An adversarial fixture that replaces A's callback still passes B's zero-error
+audit, demonstrating why that result cannot clear acceptance.
+`tests/test_app_runtime_smoke.py` covers these cases and altered or missing
+audit records.
+
+This is a useful probe, but it does not establish the full boundary in the
+Decision above. Container A still owns the HTTP action router and runs imported
+Python in the same interpreter as the smoke-only forwarding callback. Imported
+code can suppress that callback; B cannot distinguish suppression from an
+action that emitted no event. B can attest to event requests it receives and
+validate them independently, but cannot prove every `ctx.emit` invocation
+reached it. `_imported_observer_scope` therefore still reports
+`observer_unverified_checks: ["event_rejection"]`, and
+`genesis_import._verified_observer_evidence` still rejects live acceptance.
+
+## Remaining Boundary for Acceptance
+
+The trusted action ingress and event channel must run outside the process that
+imports app Python, and that trusted process must have no path for loading the
+imported Python package. B now validates event packets, but A still owns the
+HTTP router and event forwarding callback. Imported handlers may run in a
+worker, with a bounded protocol to request runtime operations. The trusted
+side must own the event contract, validation, dispatch decision, and audit for
+each event request.
 It must associate every probe action with an observer-selected run ID and
 request ID, and return a final, monotonic completion record that includes its
 rejection count. Missing, duplicate, out-of-order, crashed, or timed-out

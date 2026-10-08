@@ -17,6 +17,7 @@ import tempfile
 import threading
 import time
 from contextlib import suppress
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import UUID
@@ -97,6 +98,145 @@ def _by_check(result: dict) -> dict[str, dict]:
     for row in result["results"]:
         rows.setdefault(row["check"], row)
     return rows
+
+
+def _event_audit_packet(request_id: str, *, event_id: str = "evt_" + "a" * 32,
+                        payload: dict | None = None) -> dict:
+    return {
+        "run_id": "b" * 32, "request_id": request_id, "event_id": event_id,
+        "module": "tasks", "action": "create", "event_type": "domain.task.created",
+        "payload_bson": app_runtime_smoke._encode_event_payload(
+            {"user_id": "owner"} if payload is None else payload,
+        ),
+    }
+
+
+def _trusted_event_audit():
+    module = SimpleNamespace(
+        name="tasks", action_method_map={"create": "create"},
+        action_emits_map={"create": ["domain.task.created"]},
+    )
+    schema = {"domain.task.created": {
+        "type": "object", "required": ["user_id"],
+        "properties": {"user_id": {"type": "string"}},
+    }}
+    return app_runtime_smoke._TrustedEventAudit("b" * 32, [module], {"tasks": schema})
+
+
+def test_trusted_event_audit_valid_event_and_observer_owned_completion():
+    audit = _trusted_event_audit()
+    request_id = audit.begin("tasks", "create", "owner")
+    assert audit.observe(_event_audit_packet(request_id)) == {"accepted": True}
+    audit.complete(request_id, received_response=True)
+    assert audit.result() == {
+        "contract": "trusted_event_audit_v1", "run_id": "b" * 32,
+        "request_count": 1, "completed_count": 1,
+        "accepted_event_count": 1, "rejected_event_count": 0,
+        "protocol_errors": [], "passed": True,
+    }
+
+
+def test_trusted_event_wire_preserves_datetime_value_type():
+    value = datetime(2026, 10, 8, 15, 0, tzinfo=UTC)
+    encoded = app_runtime_smoke._encode_event_payload({"occurred_at": value})
+    decoded = app_runtime_smoke._decode_event_payload(encoded)
+    assert isinstance(decoded["occurred_at"], datetime)
+    assert decoded["occurred_at"] == value
+
+
+def test_trusted_event_audit_catches_rejected_event_despite_completed_action():
+    audit = _trusted_event_audit()
+    request_id = audit.begin("tasks", "create", "owner")
+    decision = audit.observe(_event_audit_packet(request_id, payload={}))
+    assert decision["accepted"] is False
+    assert decision["rejection"]["category"] == "value_invalid"
+    audit.complete(request_id, received_response=True)
+    assert audit.result()["completed_count"] == 1
+    assert audit.result()["rejected_event_count"] == 1
+    assert audit.result()["passed"] is False
+
+
+def test_trusted_event_audit_bounds_malformed_packet_evidence():
+    audit = _trusted_event_audit()
+    for _ in range(100):
+        assert audit.observe({"unexpected": True}) == {"accepted": False}
+    assert len(audit.protocol_errors) == audit._MAX_PROTOCOL_ERRORS
+    assert audit.result()["passed"] is False
+
+
+def test_trusted_event_audit_bounds_unique_event_ids():
+    audit = _trusted_event_audit()
+    request_id = audit.begin("tasks", "create", "owner")
+    packet = _event_audit_packet(request_id)
+    for index in range(audit._MAX_EVENT_REQUESTS + 1):
+        packet["event_id"] = f"evt_{index:032x}"
+        decision = audit.observe(packet)
+        assert decision["accepted"] is (index < audit._MAX_EVENT_REQUESTS)
+    audit.complete(request_id, received_response=True)
+    assert len(audit.event_ids) == audit._MAX_EVENT_REQUESTS
+    assert audit.result()["accepted_event_count"] == audit._MAX_EVENT_REQUESTS
+    assert audit.result()["protocol_errors"] == ["event request limit exceeded"]
+    assert audit.result()["passed"] is False
+
+
+def test_trusted_event_audit_bounds_action_ledger(monkeypatch):
+    audit = _trusted_event_audit()
+    monkeypatch.setattr(audit, "_MAX_ACTION_REQUESTS", 2)
+    audit.begin("tasks", "create", "owner")
+    audit.begin("tasks", "create", "owner")
+    with pytest.raises(RuntimeError, match="action request limit exceeded"):
+        audit.begin("tasks", "create", "owner")
+    assert len(audit.requests) == 2
+    assert audit.result()["passed"] is False
+
+
+@pytest.mark.parametrize("tamper", ["absent", "stale_run", "missing_completion", "rejected",
+                                    "duplicate_check", "altered_check"])
+def test_parent_refuses_incomplete_or_altered_trusted_event_audit(tamper):
+    audit = _trusted_event_audit()
+    request_id = audit.begin("tasks", "create", "owner")
+    audit.complete(request_id, received_response=True)
+    result = audit.result()
+    checks = [{"event": "outcome", "check": "event.audit", "status": "passed",
+               "details": {key: value for key, value in result.items() if key != "passed"}}]
+    assert app_runtime_smoke._valid_trusted_event_audit(checks, result, "b" * 32)
+    if tamper == "absent":
+        result = None
+    elif tamper == "stale_run":
+        result = {**result, "run_id": "c" * 32}
+    elif tamper == "missing_completion":
+        result = {**result, "completed_count": 0}
+    elif tamper == "rejected":
+        result = {**result, "rejected_event_count": 1}
+    elif tamper == "duplicate_check":
+        checks.append(dict(checks[0]))
+    else:
+        checks[0]["details"] = {**checks[0]["details"], "request_count": 2}
+    assert not app_runtime_smoke._valid_trusted_event_audit(checks, result, "b" * 32)
+
+
+@pytest.mark.parametrize("tamper", ["wrong_run", "wrong_action", "replay", "late", "omitted_response"])
+def test_trusted_event_audit_fails_closed_on_tampered_or_incomplete_records(tamper):
+    audit = _trusted_event_audit()
+    request_id = audit.begin("tasks", "create", "owner")
+    packet = _event_audit_packet(request_id)
+    if tamper == "wrong_run":
+        packet["run_id"] = "c" * 32
+        assert audit.observe(packet) == {"accepted": False}
+    elif tamper == "wrong_action":
+        packet["action"] = "delete"
+        assert audit.observe(packet) == {"accepted": False}
+    elif tamper == "replay":
+        assert audit.observe(packet) == {"accepted": True}
+        assert audit.observe(packet) == {"accepted": False}
+    elif tamper == "late":
+        audit.complete(request_id, received_response=True)
+        assert audit.observe(packet) == {"accepted": False}
+    else:
+        audit.complete(request_id, received_response=False)
+    if tamper != "omitted_response" and tamper != "late":
+        audit.complete(request_id, received_response=True)
+    assert audit.result()["passed"] is False
 
 
 @pytest.fixture
@@ -433,6 +573,7 @@ async def test_imported_smoke_isolated_docker_boot_and_cleanup(monkeypatch, cras
         assert result["observer_origin"] == "trusted_external_probe_v1"
         assert result["observer_run_id"] == ("1" * 32)
         assert result["observed_boot"] == {"check": "boot.http_ready", "status": "passed"}
+        assert _by_check(result)["event.audit"]["status"] == "passed"
     assert "host-password" not in json.dumps(result)
     assert "sk-host-secret-must-not-enter-container" not in json.dumps(result)
     assert "smoke.cleanup" not in _by_check(result)
@@ -869,17 +1010,81 @@ def _created_event_without_owner(files: dict[str, str]) -> dict[str, str]:
     not os.getenv("MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE"),
     reason="set MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE to a freshly built local preview image",
 )
-async def test_contained_smoke_names_its_unverified_rejected_event_check():
+async def test_contained_smoke_observes_rejected_event_outside_imported_process():
     result = await _contained_smoke(
         _created_event_without_owner(_good()), image=os.environ["MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE"],
     )
 
-    # The write and HTTP response succeed although A drops the invalid event.
-    # B cannot see that rejection; its passing result must declare the gap.
-    assert result["status"] == "passed", result["results"]
-    assert result["observer_origin"] == "trusted_external_probe_v1"
+    # The write and HTTP response succeed, while B rejects the event request.
+    assert result["status"] == "failed", result["results"]
+    assert _by_check(result)["crud.task_management.tasks.a_create"]["status"] == "passed"
+    assert _by_check(result)["event.task_management.create_task.domain.task.created"]["status"] == "failed"
+    assert _by_check(result)["event.audit"]["status"] == "failed"
     assert result["observer_unverified_checks"] == ["event_rejection"]
-    assert not any(row["check"].startswith("event.") for row in result["results"])
+
+
+@pytest.mark.skipif(
+    not os.getenv("MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE"),
+    reason="set MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE to a freshly built local preview image",
+)
+@pytest.mark.parametrize("tamper", ["replay", "stale_run"])
+async def test_contained_observer_rejects_imported_event_packet_tampering(tamper):
+    hook = '''
+import base64, datetime, sys
+from uuid import uuid4
+from bson import BSON
+from httpx import AsyncClient
+
+async def before_create_task(ctx, values):
+    now = datetime.datetime.now(datetime.timezone.utc)
+    payload = {
+        "task_id": "forged", "title": values["title"], "status": values["status"],
+        "created_at": now, "updated_at": now, "user_id": ctx.user_id,
+    }
+    packet = {
+        "run_id": sys.argv[3], "request_id": ctx.auth_token,
+        "event_id": "evt_" + uuid4().hex, "module": "task_management",
+        "action": "create_task", "event_type": "domain.task.created",
+        "payload_bson": base64.b64encode(BSON.encode(payload)).decode("ascii"),
+    }
+    async with AsyncClient(base_url="http://127.0.0.1:8001", trust_env=False) as client:
+        if "TAMPER" == "stale_run":
+            packet["run_id"] = "0" * 32
+            await client.post("/__mozaiks_smoke_event", json=packet)
+        else:
+            await client.post("/__mozaiks_smoke_event", json=packet)
+            await client.post("/__mozaiks_smoke_event", json=packet)
+'''.replace("TAMPER", tamper)
+    result = await _contained_smoke(
+        _good(hook), image=os.environ["MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE"],
+    )
+
+    assert result["status"] == "failed", result["results"]
+    assert _by_check(result)["crud.task_management.tasks.a_create"]["status"] == "passed"
+    assert _by_check(result)["event.audit"]["status"] == "failed"
+    assert result["trusted_event_audit"]["protocol_errors"]
+    assert result["observer_unverified_checks"] == ["event_rejection"]
+
+
+@pytest.mark.skipif(
+    not os.getenv("MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE"),
+    reason="set MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE to a freshly built local preview image",
+)
+async def test_contained_observer_keeps_suppressed_emit_unverified():
+    files = _good('''
+async def before_create_task(ctx, values):
+    async def suppress_event(_event_type, _payload):
+        return None
+    ctx._emit = suppress_event
+''')
+    result = await _contained_smoke(files, image=os.environ["MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE"])
+
+    # Imported Python can bypass A's forwarding callback. B observes no
+    # rejection, but that absence is not evidence that ctx.emit was checked.
+    assert result["status"] == "passed", result["results"]
+    assert _by_check(result)["crud.task_management.tasks.a_create"]["status"] == "passed"
+    assert _by_check(result)["event.audit"]["status"] == "passed"
+    assert result["observer_unverified_checks"] == ["event_rejection"]
 
 
 async def test_a_rejected_event_fails_its_own_check_while_the_write_behind_it_passes(mongo):
