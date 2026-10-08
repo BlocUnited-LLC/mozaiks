@@ -74,6 +74,8 @@ This project follows a practical pre-1.0 changelog format:
   Review handoffs preserve the visible conversation and select the successor
   chat URL so further edits continue without a page reload. Reloading a saved
   draft waits for its checks before showing a review status.
+  New chat refinement ZIPs use the canonical bundle root required by saved
+  preview and revision validation; pre-fix local drafts need a new build.
   Reloading recovers existing previews and their Stop controls from owned build
   records, including when another edit finishes before recovery completes.
   A saved chat for another app can recover and release an older owned preview

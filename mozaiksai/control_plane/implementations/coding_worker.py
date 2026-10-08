@@ -448,7 +448,7 @@ class ScopedRefinementCodingWorker:
         try:
             with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
                 for rel_path in sorted(written_paths):
-                    zipf.write(workspace_dir / rel_path, arcname=rel_path)
+                    zipf.write(workspace_dir / rel_path, arcname=f"{bundle_name}/{rel_path}")
         except OSError as exc:
             raise RuntimeError(
                 f"ARTIFACT_ZIP_FAILED: could not create artifact bundle at {zip_path} — {exc}"

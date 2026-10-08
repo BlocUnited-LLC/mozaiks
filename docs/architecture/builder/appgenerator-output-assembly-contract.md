@@ -463,6 +463,9 @@ path collisions before materialization; foreign ownership, retired records,
 missing content, and incomplete loading fail rather than producing a partial
 baseline. Binary assets and SVGs remain in the immutable source archive,
 outside AG2 context.
+Coding-worker refinement archives use the same canonical top-level bundle folder
+recorded by `bundle_name`; the verifier does not reinterpret older rootless ZIPs.
+Pre-fix local drafts need a new canonical build before preview or revision.
 Security readiness may explicitly read SVG text for its secret scan. Assembly
 rechecks the baseline, then applies schema/task outputs, accumulated repairs,
 and explicit deletions in that order. Finalization rechecks the selected record,

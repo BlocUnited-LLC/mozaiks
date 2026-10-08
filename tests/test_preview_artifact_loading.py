@@ -45,6 +45,19 @@ async def test_preview_preserves_binary_assets_without_changing_scanner_input(bu
 
 
 @pytest.mark.asyncio
+async def test_preview_rejects_rootless_refinement_zip_even_with_a_matching_archive_digest(bundle):
+    artifact, archive = bundle
+    with zipfile.ZipFile(archive, "w") as output:
+        output.writestr("app.json", '{"appId":"tracker"}')
+    artifact.commit_metadata.metadata["bundle_mode"] = "staged_refinement_bundle"
+    artifact.files_manifest[0].sha256 = hashlib.sha256(archive.read_bytes()).hexdigest()
+
+    files, diagnostics = await read_artifact_bundle(artifact, include_binary=True)
+    assert files == {}
+    assert diagnostics == [{"path":"app.json", "code":"outside_bundle_root", "blocking":True}]
+
+
+@pytest.mark.asyncio
 async def test_preview_resolver_uses_owned_target_and_verified_archive(studio, monkeypatch, bundle):
     module, _ = studio
     artifact, archive = bundle

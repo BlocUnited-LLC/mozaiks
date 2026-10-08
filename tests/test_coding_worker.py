@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from factory_app.workflows._shared.artifact_bundle import read_artifact_bundle
 from mozaiksai.control_plane import (
     CodingWorkerPlan,
     CodingWorkerRequest,
@@ -64,8 +65,9 @@ async def test_refinement_preserves_unselected_files_and_bound_target(tmp_path):
     metadata = store.calls[0]["commit_metadata"]["metadata"]
     assert all(metadata[key] == value for key, value in binding.model_dump().items())
     with zipfile.ZipFile(metadata["artifact_path"]) as archive:
-        assert archive.read("app/app.json").decode() == unchanged
-        assert b"patched" in archive.read("app/ui/pages/Dashboard.jsx")
+        prefix = f"{metadata['bundle_name']}/"
+        assert archive.read(f"{prefix}app/app.json").decode() == unchanged
+        assert b"patched" in archive.read(f"{prefix}app/ui/pages/Dashboard.jsx")
 
 # ---------------------------------------------------------------------------
 # Fake AG2 agent infrastructure
@@ -724,7 +726,11 @@ async def test_candidate_archive_binds_validated_contents_lineage_and_both_gate_
     raw = await read_verified_artifact_bundle(record)
     assert hashlib.sha256(raw).hexdigest() == entry.sha256
     with zipfile.ZipFile(io.BytesIO(raw)) as archive:
-        assert {name: archive.read(name).decode() for name in archive.namelist()} == observed
+        prefix = f"{metadata['bundle_name']}/"
+        assert {name.removeprefix(prefix): archive.read(name).decode() for name in archive.namelist()} == observed
+        assert all(name.startswith(prefix) for name in archive.namelist())
+    files, diagnostics = await read_artifact_bundle(record, include_binary=True)
+    assert files == observed and diagnostics == []
     assert metadata["staged_file_sha256"] == {
         name: hashlib.sha256(content.encode()).hexdigest() for name, content in observed.items()
     }
