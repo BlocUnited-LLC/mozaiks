@@ -46,7 +46,10 @@ module executor without copying their implementation into each workspace.
 The platform-only host loads only its active app modules. Config, services,
 data contracts, and app identity continue to come from the active workspace;
 module defaults do not replace those app families or grant permissions.
-HTTP module execution uses the active bundle's `appId` as its execution app.
+HTTP module execution uses the active bundle's resolved app identity. The host
+uses its data contract or `appId`/`app_id`, then the established `default`
+identity when an unexported bundle omits them. Exported generated apps receive
+their target `appId` before deployment.
 A token app claim, query `app_id`, or explicit execution context must agree with
 that identity. A POST action may separately declare `app_id` as a business
 input for a target app; that input stays in action params and does not change
