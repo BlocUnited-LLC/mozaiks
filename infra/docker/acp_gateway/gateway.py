@@ -48,6 +48,15 @@ _CONTENT_TYPE_RE = re.compile(
 )
 
 
+def _strict_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON key")
+        result[key] = value
+    return result
+
+
 class ResponseLimitExceeded(Exception):
     """An upstream response exceeded the gateway's fixed byte budget."""
 
@@ -64,7 +73,7 @@ class StartupConfig:
         try:
             if not raw or len(raw) > MAX_STARTUP_BYTES or not raw.endswith(b"\n"):
                 raise ValueError
-            data = json.loads(raw)
+            data = json.loads(raw, object_pairs_hook=_strict_object)
             if not isinstance(data, dict) or set(data) != {
                 "adapter",
                 "upstream_api_key",
@@ -90,7 +99,7 @@ class StartupConfig:
                 raise ValueError
             if not re.fullmatch(r"[A-Za-z0-9_-]+", token):
                 raise ValueError
-            if not isinstance(model, str) or not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", model):
+            if not isinstance(model, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}", model):
                 raise ValueError
             return cls(adapter=adapter, upstream_api_key=key, job_token=token, model=model)
         except (UnicodeDecodeError, json.JSONDecodeError, TypeError, KeyError) as exc:
@@ -236,7 +245,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
 
     def _prepare_body(self, body: bytes) -> bytes | None:
         try:
-            data = json.loads(body)
+            data = json.loads(body, object_pairs_hook=_strict_object)
             if not isinstance(data, dict):
                 raise ValueError
         except (ValueError, UnicodeDecodeError, RecursionError):

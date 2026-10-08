@@ -181,9 +181,14 @@ never harvested or deleted by the harvester.
 ACP provider selection uses the approved artifact kind and file budget, not the
 number of files as a proxy for patch complexity. The shipped refinement policy
 keeps ACP disabled, and the default local ACP subprocess path refuses execution
-until an isolated worker is available. The repository Docker executor currently
-proves the scoped file boundary with an offline agent; it does not perform a
-live Codex or Claude turn.
+until an isolated worker is available. The repository Docker executor keeps its
+offline proof as the default and also offers a trusted-worker-only, opt-in live
+profile. That profile runs a one-shot Codex or Claude ACP worker on a private
+Docker network, with a separate credential-holding model gateway. The approved
+source snapshot and file scope are checked before the worker receives source;
+its archive still requires host staging and finalization. The live profile has
+been exercised only with a local fake gateway, so it is not yet an accepted
+production or default coding path.
 
 #### Current readiness and promotion boundaries
 
