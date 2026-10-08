@@ -1349,7 +1349,7 @@ def _assignment_store_defect(run: _SmokeRun, item: _PlanStore, plan: Any) -> tup
     return None
 
 
-def _assignment_collection(contract: Mapping[str, Any] | None, alias: str) -> Mapping[str, Any] | None:
+def _assignment_collection(contract: dict[str, Any] | None, alias: str) -> Mapping[str, Any] | None:
     """Find the declared collection behind an assignment alias, including alias-only mappings."""
     from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
 
@@ -1378,6 +1378,23 @@ def _unique_assignment_value(name: str, field: Mapping[str, Any]) -> Any:
     raise ValueError(f"Cannot seed a distinct value for unique assignment field {name!r} of type {kind!r}")
 
 
+def _required_assignment_value(name: str, field: Mapping[str, Any], store: Any, plan: Any) -> Any:
+    from mozaiksai.core.workflow.generator_support.data_contract_fields import parse_default
+
+    if name == store.capabilities_field:
+        return list(plan.capabilities or [])
+    if name == store.plan_snapshot_field:
+        return {"granted_capabilities": list(plan.capabilities or [])}
+    if name == "plan_name" and field.get("type") == "string":
+        return plan.label
+    if name in {"created_at", "updated_at"} and field.get("type") in {"string", "datetime"}:
+        return datetime.now(UTC).isoformat()
+    has_default, value = parse_default(field, f"assignment_store field {name!r}")
+    if has_default:
+        return value
+    raise ValueError(f"required assignment_store field {name!r} has no declared default or known fixture value")
+
+
 async def _seed_assignment(run: _SmokeRun, principal: _Principal, item: _PlanStore, plan: Any) -> bool:
     """Write one active assignment through the declared assignment_store data alias.
 
@@ -1402,34 +1419,33 @@ async def _seed_assignment(run: _SmokeRun, principal: _Principal, item: _PlanSto
         record[store.tenant_id_field] = None
     if store.workspace_id_field:
         record[store.workspace_id_field] = None
-    collection = _assignment_collection(run.load.data_contract, store.data_alias)
-    if collection is not None:
-        fields = {
-            str(entry.get("name")): entry
-            for entry in collection.get("fields") or []
-            if isinstance(entry, Mapping) and entry.get("name")
-        }
-        for index in collection.get("indexes") or []:
-            if not isinstance(index, Mapping) or index.get("unique") is not True:
-                continue
-            for key in index.get("keys") or []:
-                if not isinstance(key, Mapping):
+    try:
+        collection = _assignment_collection(run.load.data_contract, store.data_alias)
+        if collection is not None:
+            fields = {
+                str(entry.get("name")): entry
+                for entry in collection.get("fields") or []
+                if isinstance(entry, Mapping) and entry.get("name")
+            }
+            for index in collection.get("indexes") or []:
+                if not isinstance(index, Mapping) or index.get("unique") is not True:
                     continue
-                name = str(key.get("field") or "")
-                if name and name not in record:
-                    if name not in fields:
-                        raise ValueError(f"Unique assignment index field {name!r} is not declared in data/contract.json")
-                    record[name] = _unique_assignment_value(name, fields[name])
-        for name, field in fields.items():
-            if field.get("required") and name not in record:
-                record[name] = (
-                    list(plan.capabilities or []) if name == store.capabilities_field
-                    else {"granted_capabilities": list(plan.capabilities or [])} if name == store.plan_snapshot_field
-                    else plan.label if name == "plan_name" and field.get("type") == "string"
-                    else datetime.now(UTC).isoformat() if name in {"created_at", "updated_at"}
-                    and field.get("type") in {"string", "datetime"}
-                    else _synthetic_value(name, {}, field)
-                )
+                for key in index.get("keys") or []:
+                    if not isinstance(key, Mapping):
+                        continue
+                    name = str(key.get("field") or "")
+                    if name and name not in record:
+                        if name not in fields:
+                            raise ValueError(f"Unique assignment index field {name!r} is not declared")
+                        record[name] = _unique_assignment_value(name, fields[name])
+            for name, field in fields.items():
+                if field.get("required") and name not in record:
+                    record[name] = _required_assignment_value(name, field, store, plan)
+    except ValueError as exc:
+        message = f"Cannot seed assignment_store from data/contract.json: {exc}."
+        if not any(outcome.message == message for outcome in run.outcomes):
+            run.record("subscriptions.assignment_store", False, message, path="data/contract.json")
+        return False
     await run.database[_alias_collection_name(store.data_alias, run.load.data_contract)].insert_one(record)
     return True
 

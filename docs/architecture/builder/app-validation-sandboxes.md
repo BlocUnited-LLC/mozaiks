@@ -62,7 +62,8 @@ Interactive runtime/browser acceptance is a separate step, not implied by a buil
 AppGenerator's runtime smoke seeds subscription assignments in its disposable
 database from the configured assignment store and the declared data-contract
 fields and unique indexes. This gives each synthetic user a distinct valid
-assignment without relaxing the app's index checks.
+assignment without relaxing the app's index checks. Unknown required fields
+without declared defaults fail the smoke instead of receiving invented values.
 Restore and activation read the owned artifact through the canonical content store,
 verify its archive identity and SHA-256, and consume those same verified bytes.
 Records without this identity must be validated and saved as a new canonical

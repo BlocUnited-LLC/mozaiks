@@ -172,6 +172,9 @@ async def test_assignment_fixture_uses_declared_required_fields_and_unique_index
     files = _good_with_required_unique_assignment_fields()
     contract = json.loads(files["data/contract.json"])
     collection = contract["surfaces"][1]["collections"][0]
+    collection["fields"].append({
+        "name": "approval_granted", "type": "boolean", "required": True, "default": "false",
+    })
     config = SubscriptionsConfig.model_validate(yaml.safe_load(files["config/subscriptions.yaml"]))
     item = app_runtime_smoke._plan_stores(config)[0]
     plan = next(plan for plan in item.plans if plan.plan_id == "pro")
@@ -197,8 +200,40 @@ async def test_assignment_fixture_uses_declared_required_fields_and_unique_index
     assert [row["user_id"] for row in rows.rows] == ["user-a", "user-b"]
     assert all(row["granted_capabilities"] == plan.capabilities for row in rows.rows)
     assert all(row["plan_name"] == plan.label for row in rows.rows)
+    assert all(row["approval_granted"] is False for row in rows.rows)
     assert all(datetime.fromisoformat(row["created_at"]) for row in rows.rows)
     assert all(datetime.fromisoformat(row["updated_at"]) for row in rows.rows)
+
+
+async def test_assignment_fixture_fails_closed_for_unknown_required_field_without_default():
+    from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
+
+    files = _good_with_required_unique_assignment_fields()
+    contract = json.loads(files["data/contract.json"])
+    contract["surfaces"][1]["collections"][0]["fields"].append({
+        "name": "approval_granted", "type": "boolean", "required": True,
+    })
+    config = SubscriptionsConfig.model_validate(yaml.safe_load(files["config/subscriptions.yaml"]))
+    item = app_runtime_smoke._plan_stores(config)[0]
+    plan = next(plan for plan in item.plans if plan.plan_id == "pro")
+    outcomes = []
+
+    def record(check, passed, message, *, path):
+        outcomes.append(SimpleNamespace(check=check, passed=passed, message=message, path=path))
+
+    class NoWrites:
+        async def insert_one(self, _record):
+            pytest.fail("fixture inserted an assignment with an invented approval value")
+
+    run = SimpleNamespace(
+        app_id="fixture-app", load=SimpleNamespace(data_contract=contract),
+        database={"billing_subscriptions": NoWrites()}, outcomes=outcomes, record=record,
+    )
+    assert not await app_runtime_smoke._seed_assignment(run, SimpleNamespace(user_id="user-a"), item, plan)
+    assert [(outcome.check, outcome.passed, outcome.path) for outcome in outcomes] == [
+        ("subscriptions.assignment_store", False, "data/contract.json"),
+    ]
+    assert "approval_granted" in outcomes[0].message
 
 
 async def test_unique_assignment_store_passes_two_user_runtime_smoke(mongo):
