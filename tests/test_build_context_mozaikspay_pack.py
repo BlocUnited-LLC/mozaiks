@@ -459,6 +459,7 @@ def test_mozaikspay_client_reads_credentials_from_env_or_connector() -> None:
     assert "mzk_live_" not in client_text and "mzk_test_" not in client_text, (
         "mozaikspay_client.py must not hardcode any API key values"
     )
+    assert "scope=ConnectorStore.SCOPE_APP" in client_text
 
 
 # ---------------------------------------------------------------------------

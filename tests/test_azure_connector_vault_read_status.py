@@ -69,7 +69,7 @@ def _azure_error(code: str, azure_errors):
 def _read(client: _FakeClient):
     backend = AzureKeyVaultConnectorVaultBackend()
     backend._client = client
-    return asyncio.run(backend.get_secret(scope_id="app-1", service="mozaikspay"))
+    return asyncio.run(backend.get_secret(scope="app", scope_id="app-1", service="mozaikspay"))
 
 
 def test_azure_confirmed_secret_not_found(azure_errors) -> None:
@@ -100,7 +100,10 @@ def test_azure_transport_failure_is_not_absence(azure_errors) -> None:
 def test_azure_found_secret_keeps_existing_read_value(azure_errors) -> None:
     secret = SimpleNamespace(
         value="test-secret-value",
-        properties=SimpleNamespace(expires_on=None),
+        properties=SimpleNamespace(
+            expires_on=None,
+            tags={"managed_by": "mozaiks", "connector_prefix": "mozaiks-connector", "scope": "app", "scope_id": "app-1", "service": "mozaikspay"},
+        ),
     )
     result = _read(_FakeClient(secret=secret))
 
@@ -111,7 +114,7 @@ def test_azure_found_secret_keeps_existing_read_value(azure_errors) -> None:
 
 def test_disabled_backend_is_error_not_absence() -> None:
     result = asyncio.run(
-        NoopConnectorVaultBackend().get_secret(scope_id="app-1", service="mozaikspay")
+        NoopConnectorVaultBackend().get_secret(scope="app", scope_id="app-1", service="mozaikspay")
     )
 
     assert result["success"] is False
@@ -121,8 +124,8 @@ def test_disabled_backend_is_error_not_absence() -> None:
 
 def test_connector_service_preserves_backend_read_status(monkeypatch) -> None:
     class _Vault:
-        async def get_secret(self, *, scope_id: str, service: str):
-            assert (scope_id, service) == ("app-1", "mozaikspay")
+        async def get_secret(self, *, scope: str, scope_id: str, service: str):
+            assert (scope, scope_id, service) == ("app", "app-1", "mozaikspay")
             return {
                 "success": False,
                 "status": "not_found",
@@ -133,7 +136,7 @@ def test_connector_service_preserves_backend_read_status(monkeypatch) -> None:
             }
 
     monkeypatch.setattr(connector_service, "get_connector_vault_backend", lambda: _Vault())
-    result = asyncio.run(connector_service.get_secret(scope_id="app-1", service="mozaikspay"))
+    result = asyncio.run(connector_service.get_secret(scope="app", scope_id="app-1", service="mozaikspay"))
 
     assert result["status"] == "not_found"
     assert result["success"] is False

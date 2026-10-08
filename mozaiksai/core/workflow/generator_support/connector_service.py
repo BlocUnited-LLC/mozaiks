@@ -13,7 +13,14 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 from mozaiksai.core.data.persistence import ConnectorStore
+from mozaiksai.core.data.persistence.connector_store import normalize_connector_service
 from mozaiksai.core.secrets import describe_connector_vault_backend, get_connector_vault_backend
+from mozaiksai.core.secrets.connector_vault import (
+    AzureKeyVaultConnectorVaultBackend,
+    ConnectorScope,
+    MongoConnectorVaultBackend,
+    _secret_name,
+)
 from mozaiksai.core.workflow.generator_support.connector_health import (
     connector_health_check_supported,
 )
@@ -28,6 +35,7 @@ def _get_store(store: ConnectorStore | None = None) -> ConnectorStore:
 async def _vault_store_secret(
     backend: Any,
     *,
+    scope: str,
     scope_id: str,
     service: str,
     secret_value: str,
@@ -37,6 +45,7 @@ async def _vault_store_secret(
     return cast(
         dict[str, Any],
         await backend.store_secret(
+            scope=scope,
             scope_id=scope_id,
             service=service,
             secret_value=secret_value,
@@ -46,16 +55,39 @@ async def _vault_store_secret(
     )
 
 
-async def _vault_get_secret(backend: Any, *, scope_id: str, service: str) -> dict[str, Any]:
-    return cast(dict[str, Any], await backend.get_secret(scope_id=scope_id, service=service))
+async def _vault_get_secret(backend: Any, *, scope: str, scope_id: str, service: str) -> dict[str, Any]:
+    return cast(dict[str, Any], await backend.get_secret(scope=scope, scope_id=scope_id, service=service))
 
 
-async def _vault_delete_secret(backend: Any, *, scope_id: str, service: str) -> dict[str, Any]:
-    return cast(dict[str, Any], await backend.delete_secret(scope_id=scope_id, service=service))
+async def _vault_delete_secret(backend: Any, *, scope: str, scope_id: str, service: str) -> dict[str, Any]:
+    return cast(dict[str, Any], await backend.delete_secret(scope=scope, scope_id=scope_id, service=service))
 
 
 def _normalize_service(service: str) -> str:
-    return str(service or "").strip().lower().replace(" ", "_")
+    return normalize_connector_service(service)
+
+
+def _qualified_secret_metadata(record: dict[str, Any]) -> bool:
+    """Keep unqualified real-vault metadata out of passive readiness results."""
+    storage = record.get("secret_storage")
+    if storage not in {"mongo", "azure_key_vault"}:
+        return True
+    backend = get_connector_vault_backend()
+    if storage == "mongo" and not isinstance(backend, MongoConnectorVaultBackend):
+        return False
+    if storage == "azure_key_vault" and not isinstance(backend, AzureKeyVaultConnectorVaultBackend):
+        return False
+    scope = record.get("scope")
+    scope_id = record.get("scope_id")
+    service = record.get("service")
+    if scope not in {"app", "workspace"} or not isinstance(scope_id, str) or not isinstance(service, str):
+        return False
+    try:
+        return record.get("secret_name") == _secret_name(
+            cast(ConnectorScope, scope), scope_id, service
+        )
+    except ValueError:
+        return False
 
 
 def _connector_identity_fields(
@@ -139,7 +171,9 @@ def compute_connector_health(
     fields = _normalize_required_fields(required_fields or record.get("required_fields"))
     public_config = record.get("public_config") if isinstance(record.get("public_config"), dict) else {}
     missing_fields: list[str] = []
-    has_secret = bool(record.get("secret_available")) or int(record.get("key_length") or 0) > 0
+    has_secret = (
+        bool(record.get("secret_available")) or int(record.get("key_length") or 0) > 0
+    ) and _qualified_secret_metadata(record)
 
     for field in fields:
         if not bool(field.get("required", True)):
@@ -200,7 +234,11 @@ def _with_connector_health(
         required_fields=required_fields,
         checked_by=checked_by,
     )
-    configuration_complete = enriched["health"]["status"] != "not_configured" and not enriched["health"].get("missing_fields")
+    configuration_complete = (
+        enriched["health"]["status"] != "not_configured"
+        and not enriched["health"].get("missing_fields")
+        and _qualified_secret_metadata(enriched)
+    )
     classified = _classify_connector_status(enriched)
     lifecycle_status = classified.get("status")
     # Passive readiness (inventory) never runs live provider health checks.
@@ -294,7 +332,7 @@ def _summarize_connector_inventory(
     ready_services = sorted(ready_candidates)
     known_services = sorted({service for values in by_status.values() for service in values})
     missing_required_services = sorted(required_set - set(ready_services))
-    known_but_unready_required = sorted(required_set & (set(by_status.get("metadata_only", [])) | set(by_status.get("expired", [])) | set(by_status.get("revoked", []))))
+    known_but_unready_required = sorted((required_set & set(known_services)) - set(ready_services))
     entirely_missing_required = sorted(required_set - set(known_services))
 
     return {
@@ -392,6 +430,7 @@ async def save_connector(
     backend = get_connector_vault_backend()
     backend_result = await _vault_store_secret(
         backend,
+        scope=scope,
         scope_id=str(scope_id),
         service=normalized_service,
         secret_value=secret_value,
@@ -573,9 +612,18 @@ async def delete_connector(
     if existing and existing.get("secret_available"):
         secret_result = await _vault_delete_secret(
             get_connector_vault_backend(),
+            scope=scope,
             scope_id=str(scope_id),
             service=normalized_service,
         )
+
+    if secret_result and not secret_result.get("success"):
+        return {
+            "deleted": False,
+            "service": normalized_service,
+            "secret_deleted": False,
+            "error": secret_result.get("error") or "Connector secret could not be deleted.",
+        }
 
     metadata_deleted = await connector_store.delete(scope=scope, scope_id=str(scope_id), service=normalized_service)
     return {
@@ -586,11 +634,12 @@ async def delete_connector(
     }
 
 
-async def get_secret(*, scope_id: str, service: str) -> dict[str, Any]:
-    """Retrieve a vault secret by scope_id and service."""
+async def get_secret(*, scope: str, scope_id: str, service: str) -> dict[str, Any]:
+    """Retrieve a vault secret by its explicit connector identity."""
     backend = get_connector_vault_backend()
     result = await _vault_get_secret(
         backend,
+        scope=scope,
         scope_id=str(scope_id),
         service=_normalize_service(service),
     )

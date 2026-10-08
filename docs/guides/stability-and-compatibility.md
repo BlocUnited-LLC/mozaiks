@@ -40,7 +40,9 @@ surfaces are working but the interface shape may still move.
 - `mozaiks sync-agent-guidance` (contributor tooling; format may change)
 - `mozaiks migrations status` (diagnostic; schema may change)
 - `mozaiks quickstart` and `mozaiks onboard` (onboarding paths; UX still being refined)
-- `ConnectorVaultBackend` and all vault backend implementations (interface stable, adapters may add params)
+- `ConnectorVaultBackend` and all vault backend implementations (0.2.0 requires
+  explicit app/workspace scope for every secret operation; older vault records
+  need an operator-reviewed migration or credential re-entry)
 - Telemetry and observability hooks (`AG2_OTEL_*`, `INSIGHTS_*`)
 - `RUNTIME_PLATFORM_EXTENSIONS` injection mechanism (hook names stable; new hooks may be added)
 

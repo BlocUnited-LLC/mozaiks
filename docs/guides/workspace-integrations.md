@@ -60,6 +60,72 @@ Main actions:
 
 No action returns raw secret values.
 
+The connector vault uses the same explicit app or workspace scope as the
+metadata record. A workspace connector is never selected by an app ID alone.
+App-level overrides and workspace defaults remain distinct even when their
+identifiers and service names happen to match.
+
+### Existing vault records before 0.2.0
+
+The scoped vault contract does not read old unqualified secrets. From a
+private operator session with read access to the intended environment, run a
+dry-run inventory:
+
+```powershell
+python scripts/inventory_connector_vault.py --provider mongo --report <private-new-report-path>
+```
+
+For Azure Key Vault, use `--provider azure_key_vault`. The script projects
+only connector metadata and vault properties, including version properties;
+it never retrieves, decrypts, copies, or prints a credential. It writes
+counts, opaque record references, and a fingerprint to the private report.
+Azure inventory selects names in the configured connector prefix namespace;
+other platform secrets in a shared vault are outside this cleanup scope even
+when tagged `managed_by=mozaiks`. Never select cleanup targets by that tag
+alone. Azure connector writes and deletes require permission to inspect all
+version properties and refuse a name with any unowned or unknown version.
+Prevent other principals from writing connector names during inspection and
+mutation; Azure has no atomic version-history lock across those calls.
+Deployments sharing one Mongo instance must not rely on different secret
+prefixes for isolation: the connector collection uses a fixed system database
+and its key omits the prefix. Use separate Mongo instances.
+
+Re-run with
+`--expect-fingerprint <reviewed-fingerprint>` to detect changed metadata.
+There is no automatic apply operation. A report with unqualified, missing,
+duplicate, or mismatched entries blocks readiness. A single old record still
+needs operator review; a collision cannot establish which scope owns its
+remaining value.
+
+For each environment with existing connector secrets:
+
+1. Record the current vault provider and prefix, take a private backup under the
+   operator's normal secret-handling policy, and review the first inventory.
+   Freeze connector writes and connector-dependent operations for the cutover.
+2. Run the scoped runtime in a restricted maintenance window. Verify each
+   connector's app or workspace owner from independent account records.
+   Re-enter credentials through that owner's scoped Studio UI, including every
+   ambiguous connector. Do not copy one ambiguous old value into multiple
+   scopes. If duplicate old Mongo rows prevent creation of the scoped unique
+   index, stop. Keep operations frozen, resolve only the exact duplicate rows
+   through separately approved operator tooling and the protected backup, then
+   re-run inventory before retrying. Verify scoped reads and provider health
+   before enabling usage.
+3. Take a new inventory after re-entry. A retained unqualified record still produces
+   a finding and keeps `ready: false`, even if its scoped replacement is ready.
+   Keep it only for the reviewed rollback window. Before cleanup, freeze writes
+   again and re-run the reviewed snapshot with `--expect-fingerprint`.
+4. Separately approve and perform exact unqualified-record cleanup using the
+   operator's vault/database tooling and private metadata. Confirm the exact
+   connector name and owner for each target; exclude other platform secrets
+   in a shared vault. This inventory script cannot delete, decrypt, or migrate
+   a secret. If cleanup is deferred,
+   keep the connector-dependent release gate closed.
+5. Write a fresh final inventory to a new private path. Require `ready: true`
+   and repeat scoped read/provider checks before opening connector-dependent
+   traffic. After cleanup, rollback needs the protected backup or credential
+   re-entry; the old unqualified records are no longer a live fallback.
+
 ## Build Workflow
 
 AppGenerator owns the build-time flow:
