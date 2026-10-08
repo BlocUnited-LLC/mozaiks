@@ -225,7 +225,7 @@ remains on the host's Mongo.
 
 ### Imported-source runtime smoke
 
-An imported Genesis can contain arbitrary Python. Its acceptance path calls
+An imported Genesis can contain arbitrary Python. Its proposed acceptance path uses
 `run_contained_imported_app_runtime_smoke(app_root, expected_source_sha256=...)`
 on the exact staged app bytes. The caller supplies every verified source-file
 digest; the runner checks the copied mount bytes and rejects missing or extra
@@ -259,9 +259,20 @@ and `observed_boot` only on a passing result. The host retains the verified
 source-content digest and exact validator image ID. Docker registers both names
 before starting each container so cancellation can remove them. Both are forcibly
 removed and their absence checked after success, failure, timeout, or cancellation.
-A failed teardown or bounded-output violation fails acceptance. No host Mongo URI,
+A failed teardown or bounded-output violation fails the smoke. No host Mongo URI,
 credential, provider key, source repository, Docker socket, or host workspace is
 mounted or passed to either container.
+
+The observer verifies externally visible HTTP and Mongo behavior. The runtime
+drops a rejected `ctx.emit` before dispatch while preserving the action's write
+and HTTP success; the rejection exists only in A's process. B therefore cannot
+distinguish a rejected emit from no emit. Contained results declare
+`observer_unverified_checks: [event_rejection]`, including when their observed
+checks pass. A's reported rejection list is not trusted evidence. The ordinary
+in-process smoke detects rejected events, but imported Genesis acceptance must
+stay closed until this invariant has a trusted check or an explicit acceptance
+contract excludes it. `observer_origin` attests the source of the bounded
+observations, not parity with every in-process smoke check.
 
 The preview image must be rebuilt after changing this smoke module:
 `docker build -f infra/docker/Dockerfile.preview -t mozaiks-sandbox:local .`.
@@ -270,9 +281,9 @@ An operator can select an equivalent trusted local image with
 Set `MOZAIKS_IMPORTED_SMOKE_IMAGE_ID` to the trusted local image ID returned by
 `docker image inspect --format '{{.Id}}' mozaiks-sandbox:local`. The gate checks
 that ID and runs by ID, so a later tag change cannot swap the validator between
-inspection and execution. It returns the image ID and copied-source digest for
-the Genesis acceptance evidence.
-Docker or image unavailability yields a skipped, blocking acceptance result.
+inspection and execution. It returns the image ID and copied-source digest as
+candidate Genesis evidence.
+Docker or image unavailability yields a skipped, blocking smoke result.
 The image is never pulled automatically during this gate. Docker Engine and the
 trusted preview image are local prerequisites; no paid service is required.
 The observer separates the evidence channel from imported app Python, including

@@ -164,6 +164,7 @@ async def test_imported_smoke_without_docker_is_pending_not_a_pass(monkeypatch):
     assert result["passed"] is None
     assert result["skipped_reason"] == "contained Docker validation is unavailable"
     assert result["checks"][0]["details"]["blocking"] is True
+    assert result["observer_unverified_checks"] == ["event_rejection"]
 
 
 def test_imported_smoke_preflight_requires_docker_and_pinned_image(monkeypatch):
@@ -210,6 +211,7 @@ async def test_imported_smoke_requires_pinned_validator_image(monkeypatch, tmp_p
     assert result["status"] == "skipped"
     assert result["skipped_reason"] == "contained validator image identity is unconfigured"
     assert result["checks"][0]["details"]["blocking"] is True
+    assert result["observer_unverified_checks"] == ["event_rejection"]
 
 
 async def test_imported_smoke_rejects_changed_validator_tag_before_staging(monkeypatch, tmp_path):
@@ -424,6 +426,7 @@ async def test_imported_smoke_isolated_docker_boot_and_cleanup(monkeypatch, cras
     assert result["status"] == ("failed" if crash else "passed"), result["failed_tests"]
     assert result["validator_image_id"].startswith("sha256:")
     assert len(result["source_content_sha256"]) == 64
+    assert result["observer_unverified_checks"] == ["event_rejection"]
     if crash:
         assert "observer_origin" not in result
     else:
@@ -860,6 +863,23 @@ def _created_event_without_owner(files: dict[str, str]) -> dict[str, str]:
         emit, "await ctx.emit('domain.task.created', {k: v for k, v in item.items() if k != 'user_id'})",
     )
     return files
+
+
+@pytest.mark.skipif(
+    not os.getenv("MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE"),
+    reason="set MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE to a freshly built local preview image",
+)
+async def test_contained_smoke_names_its_unverified_rejected_event_check():
+    result = await _contained_smoke(
+        _created_event_without_owner(_good()), image=os.environ["MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE"],
+    )
+
+    # The write and HTTP response succeed although A drops the invalid event.
+    # B cannot see that rejection; its passing result must declare the gap.
+    assert result["status"] == "passed", result["results"]
+    assert result["observer_origin"] == "trusted_external_probe_v1"
+    assert result["observer_unverified_checks"] == ["event_rejection"]
+    assert not any(row["check"].startswith("event.") for row in result["results"])
 
 
 async def test_a_rejected_event_fails_its_own_check_while_the_write_behind_it_passes(mongo):

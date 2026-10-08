@@ -487,13 +487,15 @@ async def run_contained_imported_app_runtime_smoke(
     """Smoke verified imported bytes with a private MongoDB and no container egress."""
     started = time.monotonic()
     if not expected_source_sha256:
-        return _contained_unavailable("verified imported-source digests are unavailable", started=started)
+        return _imported_observer_scope(_contained_unavailable(
+            "verified imported-source digests are unavailable", started=started,
+        ))
     try:
         image_id = await asyncio.to_thread(
             preflight_contained_imported_smoke, image=image, expected_image_id=expected_image_id,
         )
     except RuntimeError as exc:
-        return _contained_unavailable(str(exc), started=started)
+        return _imported_observer_scope(_contained_unavailable(str(exc), started=started))
     with tempfile.TemporaryDirectory(prefix="mozaiks-imported-smoke-") as temporary:
         staged_root = Path(temporary) / "app"
         plan_root = Path(temporary) / "plan"
@@ -501,10 +503,10 @@ async def run_contained_imported_app_runtime_smoke(
             _copy_imported_app(app_root, staged_root, expected_sha256=expected_source_sha256)
             _copy_probe_plan(staged_root, plan_root)
         except (OSError, ValueError) as exc:
-            return _summary([{
+            return _imported_observer_scope(_summary([{
                 "check": "smoke.source", "status": "failed", "path": None,
                 "message": f"Imported app cannot be staged safely: {type(exc).__name__}: {exc}",
-            }], {}, started=started)
+            }], {}, started=started))
         child = _ContainedDockerProcess()
         observer_nonce = uuid4().hex
         try:
@@ -513,10 +515,10 @@ async def run_contained_imported_app_runtime_smoke(
         except Exception as exc:
             with CancelScope(shield=True):
                 await asyncio.to_thread(child.kill)
-            return _summary([{
+            return _imported_observer_scope(_summary([{
                 "check": "smoke.container", "status": "failed", "path": None,
                 "message": f"Contained runtime smoke could not complete: {type(exc).__name__}.",
-            }], {}, started=started)
+            }], {}, started=started))
         except BaseException:
             with CancelScope(shield=True):
                 await asyncio.to_thread(child.kill)
@@ -541,7 +543,7 @@ async def run_contained_imported_app_runtime_smoke(
             result["observer_origin"] = "trusted_external_probe_v1"
             result["observer_run_id"] = observer_nonce
             result["observed_boot"] = {"check": "boot.http_ready", "status": "passed"}
-        return result
+        return _imported_observer_scope(result)
 
 
 def _redact(text: str, mongo_uri: str) -> str:
@@ -694,6 +696,13 @@ def _skipped(reason: str, *, started: float) -> dict[str, Any]:
 def _contained_unavailable(reason: str, *, started: float) -> dict[str, Any]:
     result = _skipped(reason, started=started)
     result["checks"][0]["details"]["blocking"] = True
+    return result
+
+
+def _imported_observer_scope(result: dict[str, Any]) -> dict[str, Any]:
+    # A rejected ctx.emit leaves no HTTP or Mongo trace. A's in-process
+    # rejection list cannot be evidence for the separate trusted observer.
+    result["observer_unverified_checks"] = ["event_rejection"]
     return result
 
 
