@@ -39,6 +39,9 @@ class AppRegistryService:
             chat_app_id=chat_app_id, name=name,
         )
 
+    async def has_registered_target_app_id(self, *, app_ids: tuple[str, ...]) -> bool:
+        return await self.repo.has_registered_target_app_id(app_ids=app_ids)
+
     async def resolve_build_binding(
         self,
         *,
