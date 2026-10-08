@@ -60,6 +60,10 @@ class _Collection:
                 continue
             actual = doc.get(key)
             if isinstance(expected, dict):
+                if not any(operator.startswith("$") for operator in expected):
+                    if actual != expected:
+                        return False
+                    continue
                 for operator, operand in expected.items():
                     if operator == "$ne":
                         if isinstance(actual, list):

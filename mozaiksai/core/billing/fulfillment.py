@@ -698,6 +698,36 @@ class BillingFulfillmentCommandStore:
             )
         return released
 
+    @staticmethod
+    def pending_record_matches(
+        command: BillingFulfillmentCommand, record: Mapping[str, Any]
+    ) -> bool:
+        """Check the stored command and its denormalized identity before recovery."""
+        document = _command_document(command)
+        if (
+            record.get("_id") != command.command_id
+            or record.get("command_id") != command.command_id
+            or record.get("status") != "pending"
+            or record.get("result") is not None
+            or record.get("command_hash") != _command_hash(command)
+            or record.get("command") != document
+        ):
+            return False
+        for field in (
+            "source",
+            "event_type",
+            "app_id",
+            "user_id",
+            "tenant_id",
+            "workspace_id",
+            "plan_id",
+            "wallet_id",
+            "token_amount",
+        ):
+            if record.get(field) != getattr(command, field):
+                return False
+        return True
+
     async def finish(
         self,
         command: BillingFulfillmentCommand,
@@ -706,8 +736,23 @@ class BillingFulfillmentCommandStore:
         collection = await self._collection()
         now = _now()
         completed_result = result.model_copy(update={"command_log_id": command.command_id})
-        await collection.update_one(
-            {"_id": command.command_id},
+        completed = await collection.find_one_and_update(
+            {
+                "_id": command.command_id,
+                "command_id": command.command_id,
+                "status": "pending",
+                "command_hash": _command_hash(command),
+                "command": _command_document(command),
+                "source": command.source,
+                "event_type": command.event_type,
+                "app_id": command.app_id,
+                "user_id": command.user_id,
+                "tenant_id": command.tenant_id,
+                "workspace_id": command.workspace_id,
+                "plan_id": command.plan_id,
+                "wallet_id": command.wallet_id,
+                "token_amount": command.token_amount,
+            },
             {
                 "$set": {
                     "status": completed_result.status,
@@ -716,8 +761,14 @@ class BillingFulfillmentCommandStore:
                     "updated_at": now,
                 }
             },
+            return_document=ReturnDocument.AFTER,
         )
-        return completed_result
+        if completed is not None:
+            return completed_result
+        existing = await collection.find_one({"_id": command.command_id})
+        if existing is None or existing.get("command_hash") != _command_hash(command):
+            raise BillingFulfillmentConflictError(command_id=command.command_id)
+        return await self.replay_result(existing)
 
     async def replay_result(
         self,
@@ -809,6 +860,11 @@ class BillingFulfillmentService:
         if started.state == "conflict":
             raise BillingFulfillmentConflictError(command_id=resolved.command_id)
         if started.state == "pending":
+            if resolved.event_type == "token_top_up_paid" and started.record is not None:
+                recovered = await self._recover_paid_token_credit(resolved, started.record, store)
+                if recovered is not None:
+                    await self._emit_result(recovered)
+                    return recovered
             raise BillingFulfillmentPendingError(command_id=resolved.command_id)
         if started.state == "replay":
             replayed = await store.replay_result(started.record or {})
@@ -827,6 +883,50 @@ class BillingFulfillmentService:
         result = await store.finish(resolved, result)
         await self._emit_result(result)
         return result
+
+    async def _recover_paid_token_credit(
+        self,
+        command: BillingFulfillmentCommand,
+        record: Mapping[str, Any],
+        store: BillingFulfillmentCommandStore,
+    ) -> BillingFulfillmentResult | None:
+        """Acknowledge only a paid top-up whose exact credit already committed."""
+        if not store.pending_record_matches(command, record):
+            return None
+        amount = _positive_int(command.token_amount)
+        proof = await self._ledger.find_applied_credit(
+            app_id=command.app_id,
+            wallet_id=command.wallet_id,
+            amount=amount,
+            idempotency_key=(
+                f"billing_fulfillment:{command.command_id}:wallet_credit:{command.wallet_id}"
+            ),
+            user_id=command.user_id,
+            tenant_id=command.tenant_id,
+            preferred_scope=self._wallet_scope(command.wallet_id),
+            source="billing_fulfillment",
+            reason="Paid token credit",
+            metadata=self._wallet_metadata(command),
+        )
+        if proof is None:
+            return None
+        result = BillingFulfillmentResult.from_effects(
+            command,
+            [
+                BillingFulfillmentEffectResult(
+                    effect="wallet_credit",
+                    status="applied",
+                    details={
+                        "wallet_id": command.wallet_id,
+                        "amount": amount,
+                        "balance": proof.balance.get("balance"),
+                        "entry_id": proof.entry.get("entry_id"),
+                        "recovered_from_ledger": True,
+                    },
+                )
+            ],
+        )
+        return await store.finish(command, result)
 
     async def _apply_effects(self, resolved: BillingFulfillmentCommand) -> BillingFulfillmentResult:
         effects: list[BillingFulfillmentEffectResult] = []
