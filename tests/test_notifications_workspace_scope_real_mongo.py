@@ -344,6 +344,57 @@ def test_tenant_owned_role_alert_requires_verified_tenant(notification_http, mon
     assert notification_http.client.post("/api/notifications/role-workspace-a/read", headers=a).json()["success"] is True
 
 
+def test_permission_audience_requires_verified_owner_for_reads_and_mutations(notification_http):
+    def permission_record(notification_id, *, workspace_id=None, tenant_id=None, ownerless=False):
+        record = _record(
+            notification_id, module_id="infra_assurance",
+            event_type="hosted.ops.infra_assurance.issue.detected",
+            workspace_id=workspace_id, ownerless=ownerless,
+        )
+        record["audience"] = {"permissions": ["workspace_support.read"]}
+        if tenant_id is not None:
+            record["tenant_id"] = tenant_id
+        return record
+
+    notification_http.collection.insert_many([
+        permission_record("permission-a", workspace_id=WORKSPACE_A, tenant_id=TENANT_A),
+        permission_record("permission-b", workspace_id=WORKSPACE_B, tenant_id=TENANT_B),
+        permission_record("permission-tenant-b", ownerless=True, tenant_id=TENANT_B),
+        permission_record("permission-ownerless", ownerless=True),
+        permission_record("permission-mismatch", workspace_id=WORKSPACE_A, tenant_id=TENANT_B),
+        {
+            **permission_record("permission-and-recipient-b", workspace_id=WORKSPACE_B, tenant_id=TENANT_B),
+            "audience": {"permissions": ["workspace_support.read"], "user_ids": [USER_ID]},
+        },
+    ])
+    client = notification_http.client
+    a = notification_http.token(WORKSPACE_A)
+    b = notification_http.token(WORKSPACE_B)
+    unbound = notification_http.token(None)
+    assert _ids(client.get("/api/notifications", headers=a)) == {
+        "support-a", "reply-a", "direct-message", "app-wide", "permission-a",
+    }
+    assert _ids(client.get("/api/notifications", headers=b)) == {
+        "support-b", "reply-b", "direct-message", "app-wide", "permission-b",
+        "permission-tenant-b", "permission-and-recipient-b",
+    }
+    assert _ids(client.get("/api/notifications", headers=unbound)) == {"direct-message", "app-wide"}
+    assert client.get("/api/notifications/count", headers=a).json() == {"count": 5, "unread_count": 5}
+    assert client.get("/api/notifications/count", headers=b).json() == {"count": 7, "unread_count": 7}
+    for notification_id in (
+        "permission-b", "permission-tenant-b", "permission-ownerless", "permission-mismatch",
+        "permission-and-recipient-b",
+    ):
+        assert client.post(f"/api/notifications/{notification_id}/read", headers=a).json()["success"] is False
+        assert client.post(f"/api/notifications/{notification_id}/read", headers=unbound).json()["success"] is False
+    assert client.post("/api/notifications/permission-a/read", headers=a).json()["success"] is True
+    assert client.post("/api/notifications/mark-all-read", headers=a).json()["marked_count"] == 4
+    assert client.delete("/api/notifications", headers=a).json()["cleared_count"] == 5
+    assert notification_http.collection.count_documents({
+        "notification_id": {"$regex": "^permission-(?!a$)"}, "status": "unread",
+    }) == 5
+
+
 def test_same_user_workspace_switch_scopes_support_alerts(notification_http):
     client = notification_http.client
     a = notification_http.token(WORKSPACE_A)

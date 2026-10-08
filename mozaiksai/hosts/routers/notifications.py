@@ -86,14 +86,16 @@ def _notification_workspace_filter(workspace_id: str | None) -> dict[str, Any]:
     return {"$or": [app_wide, {"$expr": {"$eq": ["$workspace_id", workspace_id]}}]}
 
 
-def _notification_role_scope_filter(
+def _notification_broad_audience_scope_filter(
     tenant_id: str | None, workspace_id: str | None,
 ) -> dict[str, Any]:
-    # A token role alone is not authority over another tenant's alert. Older
-    # role alerts with no owner cannot be safely attributed to a membership.
+    # A token role or permission alone is not authority over another tenant's
+    # alert. Older broad-audience alerts without an owner stay hidden.
     visible: list[dict[str, Any]] = [
-        {"audience.roles": {"$exists": False}},
-        {"audience.roles": []},
+        {"$and": [
+            {"$or": [{"audience.roles": {"$exists": False}}, {"audience.roles": []}]},
+            {"$or": [{"audience.permissions": {"$exists": False}}, {"audience.permissions": []}]},
+        ]},
     ]
     if not workspace_id:
         return {"$or": visible}
@@ -127,7 +129,7 @@ def _notification_scope_filters(
 ) -> list[dict[str, Any]]:
     return [
         _notification_workspace_filter(workspace_id),
-        _notification_role_scope_filter(tenant_id, workspace_id),
+        _notification_broad_audience_scope_filter(tenant_id, workspace_id),
     ]
 
 
