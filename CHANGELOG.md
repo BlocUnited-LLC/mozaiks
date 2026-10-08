@@ -14,6 +14,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- An optional runtime-only Mozaiks Cloud usage API key for generated usage
+  reporters, leaving deployment and domain client credentials and ordinary
+  deployment secret manifests unchanged.
 - An in-process host integration for registering a loaded existing app as its
   own Factory build target without resetting its build lifecycle. It requires
   trusted app Python and an app-owned owner and scope check.
