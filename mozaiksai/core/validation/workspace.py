@@ -22,6 +22,13 @@ def _source_files(root: Path) -> dict[str, str]:
     }
 
 
+def registered_ui_components(root: Path) -> frozenset[str]:
+    """Return the UI registrations in a trusted inherited app composition."""
+    if not root.is_dir():
+        raise ValueError("Inherited UI root does not exist")
+    return frozenset(_registered_components(_source_files(root)))
+
+
 def validate_app_workspace(
     app_root: Path,
     *,
@@ -34,9 +41,23 @@ def validate_app_workspace(
     contract closure, not provider implementation completeness or deployment
     readiness. Generated output additionally uses validate_generated_app_bundle.
     """
+    files = _source_files(Path(app_root))
+    inherited: set[str] = set()
+    for root in inherited_ui_roots:
+        inherited.update(registered_ui_components(root))
+    return validate_authored_app_file_map(files, inherited_components=frozenset(inherited))
+
+
+def validate_authored_app_file_map(
+    files: dict[str, str], *, inherited_components: frozenset[str] = frozenset(),
+) -> list[FunctionalGeneratedAppDiagnostic]:
+    """Check verified authored app bytes without generated-output path policy.
+
+    This is the static app-root contract only. It does not validate workspace
+    root workflows, provider behavior, deployed runtime, or source secrets.
+    """
     from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import scan_app_contracts
 
-    files = _source_files(Path(app_root))
     diagnostics: list[FunctionalGeneratedAppDiagnostic] = []
     try:
         manifest = json.loads(files["app.json"])
@@ -47,16 +68,11 @@ def validate_app_workspace(
         diagnostics.append(FunctionalGeneratedAppDiagnostic(
             code="INVALID_APP_MANIFEST", message="app.json must declare a nonempty string appName", path="app.json",
         ))
-    inherited: set[str] = set()
-    for root in inherited_ui_roots:
-        if not root.is_dir():
-            raise ValueError("Inherited UI root does not exist")
-        inherited.update(_registered_components(_source_files(root)))
     diagnostics.extend(
         FunctionalGeneratedAppDiagnostic(code="APP_CONTRACT_INVALID", message=message)
         for message in scan_app_contracts(files)
     )
     diagnostics.extend(scan_functional_generated_app(
-        files, inherited_components=frozenset(inherited), check_placeholders=False,
+        files, inherited_components=inherited_components, check_placeholders=False,
     ))
     return diagnostics

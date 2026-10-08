@@ -38,8 +38,15 @@ authority supplied by the browser.
 Before recording acceptance, OSS reopens the persisted `content_digest` blob
 through the canonical verified artifact reader. It checks the canonical
 archive entry and every source member against the recorded file manifest,
-verifies the root `app.json` target ID, and runs the canonical app-bundle
-acceptance gate, including runtime contract checks. For imported source,
+verifies the root `app.json` target ID, and runs the named
+`authored_app_root_acceptance_v1` gate. Its static checks are the shared app
+declaration and functional reference checks used by authored workspaces, with
+route registrations resolved against the installed Factory UI composition.
+The evidence names `validation_scope: app_root_only`, hashes the inherited UI
+registry, and binds its snapshot digest to every verified source member,
+including binary assets. It does not claim generated-output policy,
+workspace-root `workflows/`, source-secret preflight, provider behavior, or a
+deployed runtime. For imported source,
 `AppLoader.load()` must run only in a contained imported-source smoke. The
 ordinary generated-app smoke is insufficient: its child inherits local
 filesystem/network access and receives the host's configured Mongo URI on
@@ -76,18 +83,16 @@ boundary must provide trustworthy event rejection evidence, or a separate
 explicit decision must narrow the public acceptance contract and disclose that
 reduced scope to downstream consumers.
 
-There is also a distinct static-validation gap. The current acceptance call
-reuses `run_app_bundle_acceptance_gate`, whose `scan_generated_bundle` check is
-defined for Factory-generated output. A read-only projection of App Zero's
-tracked `app/` source passes the import archive and manifest limits but fails
-that scanner on authored files and paths outside the generator's file contract.
-The separate workspace-root `workflows/` cannot be represented as members of
-that app bundle either. An improved runtime observer alone would therefore not
-make App Zero's imported source acceptable. Before a live brownfield baseline,
-the acceptance contract must explicitly validate canonical authored-app and
-workspace surfaces without claiming the source passed generated-output rules;
-its receipt must name that scope. This is an unresolved architecture decision,
-not a reason to suppress scanner errors or to mark the current gate passed.
+The authored app-root contract is distinct from the generated-output gate. A
+read-only projection of App Zero's tracked `app/` source passes the shared
+authored workspace validation while the generated-output scanner rejects its
+hand-authored paths. A source projection may include workspace-root
+`workflows/` as archive members, but this app-root contract does not validate
+their orchestration behavior. App Zero must bind and validate that surface
+separately before claiming its full repository is the accepted source for a
+private refinement PR. The external event-rejection
+observer gap above still closes live imported Genesis acceptance. No source
+record may become accepted on the static check alone.
 
 AppRegistry accepts the exact reserved claim with a single owner/host/target
 compare and swap. Its receipt records reviewer, time, validation contract,

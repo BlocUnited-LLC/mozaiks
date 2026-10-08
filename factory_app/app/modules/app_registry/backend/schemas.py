@@ -36,7 +36,7 @@ class GenesisAcceptanceReceipt(BaseModel):
 
     accepted_by: str = Field(min_length=1)
     accepted_at: datetime
-    validation_contract: Literal["app_bundle_acceptance_gate_v1"] = "app_bundle_acceptance_gate_v1"
+    validation_contract: Literal["authored_app_root_acceptance_v1"] = "authored_app_root_acceptance_v1"
     validation_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
