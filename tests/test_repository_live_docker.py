@@ -154,6 +154,22 @@ async def test_live_turn_rejects_wall_budget_beyond_gateway_lifetime() -> None:
 
 
 @pytest.mark.asyncio
+async def test_live_turn_rejects_combined_file_budget_before_docker() -> None:
+    request = _request().model_copy(update={
+        "files": {
+            f"app/ui/pages/Page{index}.jsx": _BEFORE for index in range(50)
+        },
+        "read_only_files": {"README.md": "# Read only\n"},
+    })
+    with pytest.raises(ValueError, match="REPOSITORY_LIVE_FILE_BUDGET"):
+        await execute_repository_docker_turn(
+            request, image=_WORKER_IMAGE, expected_image_id=_WORKER_IMAGE_ID,
+            approved_context=_context(), snapshot=_snapshot(),
+            validate_path=lambda _path: None, live_profile=_profile(),
+        )
+
+
+@pytest.mark.asyncio
 async def test_live_turn_delegates_only_verified_scope(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}
 
