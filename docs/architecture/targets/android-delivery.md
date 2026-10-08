@@ -68,8 +68,9 @@ the captured input.
 
 Recognizable credential literals in configuration and Python/JavaScript
 assignments are rejected, including hardcoded environment lookup defaults.
-The policy parses JSON, YAML and TOML values, including credential `defaultValue`
-fields inside `metadata`, inspects env-style text, and checks XML and
+The policy parses JSON, YAML and TOML values, carrying credential context
+through nested objects and lists to finite value fields such as `defaultValue`.
+It inspects env-style text and checks XML and
 property-list fields. Credential elements and elements identified by a
 credential `name` or `key` reject literal-bearing `content` and default/value
 attributes on themselves or nested elements. Credential query values in URLs

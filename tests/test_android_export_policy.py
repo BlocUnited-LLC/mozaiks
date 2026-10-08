@@ -150,7 +150,19 @@ def test_demonstrated_leaks_are_rejected_independently_before_either_archive(exp
     ("app/config/provider.json", lambda value: json.dumps({"access_token": {"default-value": value}}).encode()),
     ("app/config/provider.json", lambda value: json.dumps({"access_token": {"metadata": {"defaultValue": value}}}).encode()),
     ("app/config/provider.json", lambda value: json.dumps({"access_token": {"metadata": [{"defaultValue": value}]}}).encode()),
+    ("app/config/provider.json", lambda value: json.dumps({
+        "access_token": {"metadata": {"entries": [{"defaultValue": value}]}},
+    }).encode()),
+    ("app/config/provider.json", lambda value: json.dumps({
+        "access_token": {"metadata": {"collection": [{"settings": {"defaultValue": value}}]}},
+    }).encode()),
     ("app/config/provider.toml", lambda value: f'[access_token.metadata]\ndefaultValue = "{value}"\n'.encode()),
+    ("app/config/provider.toml", lambda value: (
+        f'[access_token.metadata]\nentries = [{{ defaultValue = "{value}" }}]\n'
+    ).encode()),
+    ("app/config/provider.yaml", lambda value: (
+        f'access_token:\n  metadata:\n    entries:\n      - defaultValue: "{value}"\n'
+    ).encode()),
     ("app/config/provider.xml", _xml_nested_meta),
     ("app/brand/assets/metadata.svg", _svg_nested_meta),
     ("app/brand/assets/xmp.png", _png_nested_xmp_meta),
@@ -173,7 +185,9 @@ def test_demonstrated_leaks_are_rejected_independently_before_either_archive(exp
     "xml-meta-content", "svg-meta-content", "png-xmp-meta-content",
     "toml-camel-default", "toml-snake-default", "toml-kebab-default",
     "json-camel-default", "json-snake-default", "json-kebab-default",
-    "json-nested-metadata-default", "json-metadata-list-default", "toml-nested-metadata-default",
+    "json-nested-metadata-default", "json-metadata-list-default",
+    "json-metadata-entries-default", "json-arbitrary-wrappers-default",
+    "toml-nested-metadata-default", "toml-metadata-entries-default", "yaml-metadata-entries-default",
     "xml-descendant-content", "svg-descendant-content", "png-xmp-descendant-content",
     "theme-json-query-token", "provider-json-query-key", "ui-js-query-key",
     "json-escaped-question-query-key", "json-encoded-equals-query-key", "xml-escaped-ampersand-query-key",
@@ -217,6 +231,7 @@ def test_ordinary_xml_content_metadata_is_public(export_input):
 @pytest.mark.parametrize("name,content", [
     ("app/config/provider.json", b'{"access_token":{"metadata":{"description":"Public description"}}}'),
     ("app/config/provider.json", b'{"access_token":{"metadata":["Public description",{"type":"string"}]}}'),
+    ("app/config/provider.json", b'{"access_token":{"metadata":{"entries":[{"description":"Public note"}]}}}'),
     ("app/config/provider.xml", b'<configuration><meta name="title"><item content="Public title"/></meta></configuration>'),
     ("app/config/provider.json", b'{"url":"https://api.example.invalid/lookup?view=public"}'),
 ])
@@ -642,6 +657,11 @@ def test_yaml_alias_reused_in_credential_context_does_not_inherit_a_safe_verdict
         "app/config/provider.json",
         json.dumps({"access_token": {"metadata": {"defaultValue": "${INTEGRATION_API_TOKEN}"}}}).encode(),
         json.dumps({"access_token": {"metadata": {"defaultValue": SYNTHETIC_TOKEN}}}).encode(),
+    ),
+    (
+        "app/config/provider.json",
+        json.dumps({"access_token": {"metadata": {"entries": [{"defaultValue": "${INTEGRATION_API_TOKEN}"}]}}}).encode(),
+        json.dumps({"access_token": {"metadata": {"entries": [{"defaultValue": SYNTHETIC_TOKEN}]}}}).encode(),
     ),
     (
         "app/brand/assets/xmp.png",

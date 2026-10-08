@@ -78,18 +78,18 @@ def _literal_secret(value: object) -> bool:
 
 
 def _structured_credentials(
-    value: object, *, credential: bool = False, metadata_container: bool = False,
+    value: object, *, credential: bool = False, value_payload: bool = False,
     ancestors: frozenset[int] = frozenset(), visited: set[tuple[int, bool, bool]] | None = None,
 ) -> bool:
     if not isinstance(value, (dict, list)):
         return (isinstance(value, str) and _uri_query_credentials(value)) or (
-            credential and not metadata_container and _literal_secret(value)
+            value_payload and _literal_secret(value)
         )
     if id(value) in ancestors:
         raise ValueError("Recursive configuration is not supported in Android delivery")
     if visited is None:
         visited = set()
-    identity = (id(value), credential, metadata_container)
+    identity = (id(value), credential, value_payload)
     if identity in visited:
         return False
     visited.add(identity)
@@ -97,19 +97,21 @@ def _structured_credentials(
     if isinstance(value, list):
         return any(
             _structured_credentials(
-                item, credential=credential, metadata_container=metadata_container,
+                item, credential=credential, value_payload=value_payload,
                 ancestors=ancestors, visited=visited,
             )
             for item in value
         )
     for key, item in value.items():
         normalized = _normalized_key(str(key))
-        nested_metadata = credential and normalized == "metadata" and isinstance(item, (dict, list))
-        sensitive = _credential_key(str(key)) or (
-            credential and normalized in _CREDENTIAL_VALUE_FIELDS
-        ) or nested_metadata
+        key_is_credential = _credential_key(str(key))
+        # Keep credential context through arbitrary containers; scalar values
+        # become sensitive only at a credential key or a finite value field.
+        sensitive = value_payload or (credential and normalized in _CREDENTIAL_VALUE_FIELDS) or (
+            key_is_credential and not isinstance(item, dict)
+        )
         if _structured_credentials(
-            item, credential=sensitive, metadata_container=nested_metadata,
+            item, credential=credential or key_is_credential, value_payload=sensitive,
             ancestors=ancestors, visited=visited,
         ):
             return True
