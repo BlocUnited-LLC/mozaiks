@@ -118,11 +118,13 @@ class _Vault:
     def __init__(self) -> None:
         self.scope_ids: list[str] = []
 
-    async def store_secret(self, *, scope_id, service, secret_value, display_name=None, ttl_days=30):
+    async def store_secret(self, *, scope, scope_id, service, secret_value, display_name=None, ttl_days=30):
+        assert scope == "workspace"
         self.scope_ids.append(scope_id)
         return {"success": True, "provider": "test-vault"}
 
-    async def delete_secret(self, *, scope_id, service):
+    async def delete_secret(self, *, scope, scope_id, service):
+        assert scope == "workspace"
         self.scope_ids.append(scope_id)
         return {"success": True}
 
