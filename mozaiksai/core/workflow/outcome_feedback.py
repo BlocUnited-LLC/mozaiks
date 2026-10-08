@@ -52,6 +52,23 @@ class WorkflowFeedbackEvidence(BaseModel):
     response: WorkflowFeedbackResponse
 
 
+class WorkflowFeedbackRenderReceipt(BaseModel):
+    """Server-attributed acknowledgement that a browser displayed the invitation."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+
+    schema_version: Literal["mozaiks.workflow_feedback_render.v1"] = "mozaiks.workflow_feedback_render.v1"
+    evidence_kind: Literal["client_visible_ack"] = "client_visible_ack"
+    app_id: _Identifier
+    chat_id: _Identifier
+    workflow_name: _Identifier
+    agent_name: _Identifier
+    outcome_id: _Identifier
+    user_id: _Identifier
+    ui_event_id: _Identifier
+    observed_at: str
+
+
 async def collect_workflow_feedback(
     context_variables: Any,
     *,
@@ -128,6 +145,7 @@ async def resolve_workflow_feedback(
 
 
 __all__ = [
-    "WorkflowFeedbackResponse", "WorkflowFeedbackEvidence", "collect_workflow_feedback",
+    "WorkflowFeedbackResponse", "WorkflowFeedbackEvidence", "WorkflowFeedbackRenderReceipt",
+    "collect_workflow_feedback",
     "resolve_workflow_feedback",
 ]

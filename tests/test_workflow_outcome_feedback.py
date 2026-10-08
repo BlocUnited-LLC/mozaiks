@@ -9,6 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 from pydantic import ValidationError
 
@@ -17,6 +18,7 @@ from factory_app.workflows.AgentGenerator.tools.workflow_quality_gate import (
 )
 from mozaiksai.core.workflow.outcome_feedback import (
     WorkflowFeedbackEvidence,
+    WorkflowFeedbackRenderReceipt,
     WorkflowFeedbackResponse,
 )
 from tests import test_ui_response_ownership as response_ownership
@@ -61,6 +63,80 @@ def _feedback_pending(harness):
     pm = harness.transport._get_or_create_persistence_manager()
     pm.save_workflow_feedback_receipt = AsyncMock(return_value=True)
     return pm
+
+
+def _render_pending(harness):
+    pm = _feedback_pending(harness)
+    pm.save_workflow_feedback_render_receipt = AsyncMock(return_value=True)
+    harness.app.post("/api/workflow-feedback/rendered")(harness.runtime.acknowledge_workflow_feedback_render)
+    return pm
+
+
+async def _render_http(harness, body=None):
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=harness.app), base_url="http://test") as client:
+        return await client.post("/api/workflow-feedback/rendered", json=body or {"event_id": "evt-owned"})
+
+
+async def test_visible_feedback_ack_is_attributed_and_does_not_answer(harness):
+    pm = _render_pending(harness)
+    first = await _render_http(harness)
+    assert first.status_code == 200
+    assert (await _render_http(harness)).status_code == 200
+    assert first.json() == {"status": "success"}
+    receipt = WorkflowFeedbackRenderReceipt.model_validate(
+        pm.save_workflow_feedback_render_receipt.await_args.args[0],
+    )
+    assert (
+        receipt.app_id, receipt.chat_id, receipt.user_id, receipt.workflow_name,
+        receipt.agent_name, receipt.outcome_id, receipt.ui_event_id,
+    ) == ("app-owner", "chat-owner", "owner", "AnswerFlow", "AnswerAgent", "result-1", "evt-owned")
+    assert pm.save_workflow_feedback_render_receipt.await_count == 2
+    assert not harness.transport.pending_tool_call_responses["evt-owned"].done()
+    assert harness.transport._buffered_tool_call_responses == {}
+    pm.save_workflow_feedback_receipt.assert_not_awaited()
+
+
+@pytest.mark.parametrize("fault", [
+    "foreign_user", "foreign_app", "foreign_chat", "missing_session", "missing_owner", "missing_app",
+    "wrong_primitive", "missing_outcome", "unknown_event", "rebound", "forged_identity",
+    "storage_failure",
+])
+async def test_visible_feedback_ack_fails_closed(harness, fault):
+    pm = _render_pending(harness)
+    body = {"event_id": "evt-owned"}
+    if fault == "foreign_user":
+        harness.principal = response_ownership._principal("other")
+    elif fault == "foreign_app":
+        harness.principal = response_ownership._principal(app_id="other")
+    elif fault == "foreign_chat":
+        harness.principal = response_ownership._principal(chat_id="other")
+    elif fault == "missing_session":
+        harness.lookup.return_value = None
+    elif fault == "missing_owner":
+        harness.session.pop("user_id")
+    elif fault == "missing_app":
+        harness.session.pop("app_id")
+    elif fault == "wrong_primitive":
+        harness.transport._ui_tool_metadata["evt-owned"]["workflow_primitive"] = "other"
+    elif fault == "missing_outcome":
+        harness.transport._ui_tool_metadata["evt-owned"].pop("outcome_id")
+    elif fault == "unknown_event":
+        body["event_id"] = "unknown"
+    elif fault == "rebound":
+        async def rebind(*args, **kwargs):
+            harness.transport._ui_tool_metadata["evt-owned"]["chat_id"] = "other"
+            return harness.session
+        harness.lookup.side_effect = rebind
+    elif fault == "forged_identity":
+        body["user_id"] = "owner"
+    else:
+        pm.save_workflow_feedback_render_receipt.side_effect = RuntimeError("storage unavailable")
+    response = await _render_http(harness, body)
+    assert response.status_code == (400 if fault == "forged_identity" else 404)
+    if fault != "storage_failure":
+        pm.save_workflow_feedback_render_receipt.assert_not_awaited()
+    assert not harness.transport.pending_tool_call_responses["evt-owned"].done()
+    pm.save_workflow_feedback_receipt.assert_not_awaited()
 
 
 async def test_feedback_http_persists_scope_and_response_before_releasing_waiter(harness):

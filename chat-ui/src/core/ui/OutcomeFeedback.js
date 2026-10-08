@@ -1,8 +1,14 @@
-import { useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
+import { acknowledgeFeedbackRender } from '../../adapters/uiToolResponse.js';
+import { useOptionalChatUI } from '../../context/ChatUIContext.jsx';
 import { Alert, Button, SurfaceCard } from '../../ui/primitives/index.js';
 
 /** Optional human feedback; attribution is bound by the server UI event. */
-export default function OutcomeFeedback({ onResponse }) {
+export default function OutcomeFeedback({ onResponse, toolCallId, onRendered }) {
+  const chatUI = useOptionalChatUI();
+  const root = useRef(null);
+  const acknowledgedEvent = useRef(null);
+  const acknowledgementInFlight = useRef(null);
   const ratingGroup = useId();
   const [rating, setRating] = useState(null);
   const [helpful, setHelpful] = useState(null);
@@ -13,6 +19,46 @@ export default function OutcomeFeedback({ onResponse }) {
   const inFlight = useRef(false);
   const answered = rating !== null || helpful !== null || outcome !== '';
   const disabled = submitting || submitted || typeof onResponse !== 'function';
+
+  useEffect(() => {
+    if (!toolCallId || (!onRendered && !chatUI) || typeof IntersectionObserver === 'undefined') return;
+    const target = root.current;
+    if (!target) return;
+    let visible = false;
+    let cancelled = false;
+    const reportVisible = async () => {
+      if (cancelled || !visible || document.visibilityState !== 'visible'
+        || acknowledgedEvent.current === toolCallId || acknowledgementInFlight.current === toolCallId) return;
+      acknowledgementInFlight.current = toolCallId;
+      try {
+        const accepted = onRendered
+          ? await onRendered(toolCallId)
+          : await acknowledgeFeedbackRender(toolCallId, {
+            baseUrl: chatUI.api?.getHttpBaseUrl?.(),
+            token: chatUI.auth?.getAccessToken?.(),
+          });
+        if (accepted !== false) acknowledgedEvent.current = toolCallId;
+      } catch {
+        // A lost acknowledgement is missing evidence, never a fabricated impression.
+      } finally {
+        if (acknowledgementInFlight.current === toolCallId) acknowledgementInFlight.current = null;
+      }
+    };
+    const observer = new IntersectionObserver((entries) => {
+      visible = entries.some((entry) => entry.isIntersecting && entry.intersectionRatio >= 0.5);
+      if (visible) void reportVisible();
+    }, { threshold: 0.5 });
+    observer.observe(target);
+    const retry = () => { if (visible) void reportVisible(); };
+    document.addEventListener('visibilitychange', retry);
+    window.addEventListener('online', retry);
+    return () => {
+      cancelled = true;
+      observer.disconnect();
+      document.removeEventListener('visibilitychange', retry);
+      window.removeEventListener('online', retry);
+    };
+  }, [toolCallId, onRendered, chatUI]);
 
   async function submit(skip) {
     if (disabled || inFlight.current || (!skip && !answered)) return;
@@ -34,7 +80,8 @@ export default function OutcomeFeedback({ onResponse }) {
   }
 
   return (
-    <SurfaceCard title="How was this result?" subtitle="Optional feedback about your experience.">
+    <div ref={root}>
+      <SurfaceCard title="How was this result?" subtitle="Optional feedback about your experience.">
       <div className="space-y-4">
         {error ? <Alert message={error} variant="warning" /> : null}
         {submitted ? <p role="status" className="text-sm text-muted-foreground">Response received.</p> : (
@@ -81,6 +128,7 @@ export default function OutcomeFeedback({ onResponse }) {
           </>
         )}
       </div>
-    </SurfaceCard>
+      </SurfaceCard>
+    </div>
   );
 }

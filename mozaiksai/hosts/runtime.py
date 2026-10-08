@@ -1321,6 +1321,28 @@ async def submit_tool_call_response(
     return {"status": "success"}
 
 
+@app.post("/api/workflow-feedback/rendered")
+async def acknowledge_workflow_feedback_render(
+    request: Request,
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    """Accept a client-visible feedback invitation in its authenticated session."""
+    if simple_transport is None:
+        raise HTTPException(status_code=503, detail="Transport service is not available")
+    try:
+        data = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload") from exc
+    if not isinstance(data, dict) or set(data) != {"event_id"}:
+        raise HTTPException(status_code=400, detail="Only event_id is accepted")
+    event_id = data["event_id"]
+    if not isinstance(event_id, str) or not event_id or len(event_id) > 256:
+        raise HTTPException(status_code=400, detail="Invalid event_id")
+    if not await simple_transport.acknowledge_workflow_feedback_render_for_user(event_id, principal=principal):
+        raise HTTPException(status_code=404, detail="Feedback invitation not found")
+    return {"status": "success"}
+
+
 @app.get("/api/workflows/{workflow_name}/transport")
 async def get_workflow_transport_info(
     workflow_name: str,

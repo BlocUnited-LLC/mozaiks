@@ -24,6 +24,8 @@ export const useChatUI = () => {
   return context;
 };
 
+export const useOptionalChatUI = () => useContext(ChatUIContext);
+
 export const ChatUIProvider = ({ 
   children,
   authAdapter = null,

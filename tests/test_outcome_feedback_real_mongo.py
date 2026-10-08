@@ -21,7 +21,7 @@ from mozaiksai.core.runtime.persistence import (
 )
 from mozaiksai.core.workflow.outcome_feedback import resolve_workflow_feedback
 from tests import test_ui_response_ownership as response_ownership
-from tests.test_workflow_outcome_feedback import _compile_feedback_app
+from tests.test_workflow_outcome_feedback import _compile_feedback_app, _render_http
 
 harness = response_ownership.harness
 
@@ -72,6 +72,26 @@ async def test_authenticated_receipt_survives_manager_restart_and_generated_stor
             workflow_primitive="outcome_feedback", workflow_name="AnswerFlow",
             feedback_agent_name="AnswerAgent", outcome_id="result-1",
         )
+        harness.app.post("/api/workflow-feedback/rendered")(harness.runtime.acknowledge_workflow_feedback_render)
+        acknowledgements = await asyncio.gather(*(_render_http(harness) for _ in range(8)))
+        assert all(result.status_code == 200 for result in acknowledgements)
+        render_receipt = await manager.get_workflow_feedback_render_receipt(
+            app_id="app-owner", chat_id="chat-owner", user_id="owner", ui_event_id="evt-owned",
+        )
+        assert render_receipt["evidence_kind"] == "client_visible_ack"
+        assert render_receipt["outcome_id"] == "result-1"
+        assert await manager.save_workflow_feedback_render_receipt({
+            **render_receipt, "observed_at": "2099-01-01T00:00:00+00:00",
+        })
+        assert not await manager.save_workflow_feedback_render_receipt({
+            **render_receipt, "outcome_id": "another-result",
+        })
+        assert await manager.get_workflow_feedback_render_receipt(
+            app_id="app-owner", chat_id="chat-owner", user_id="owner", ui_event_id="evt-owned",
+        ) == render_receipt
+        assert await manager.get_workflow_feedback_receipt(
+            app_id="app-owner", chat_id="chat-owner", user_id="owner", ui_event_id="evt-owned",
+        ) is None
         assert (await response_ownership._http(
             harness, response_data={"status": "submitted", "rating": 3, "helpful": False},
         )).status_code == 200
@@ -81,6 +101,12 @@ async def test_authenticated_receipt_survives_manager_restart_and_generated_stor
         restored = manager_type()
         monkeypatch.setattr(restored, "_coll", AsyncMock(return_value=sessions))
         monkeypatch.setattr(persistence, "AG2PersistenceManager", lambda: restored)
+        assert await restored.get_workflow_feedback_render_receipt(
+            app_id="app-owner", chat_id="chat-owner", user_id="owner", ui_event_id="evt-owned",
+        ) == render_receipt
+        assert await restored.get_workflow_feedback_render_receipt(
+            app_id="app-owner", chat_id="chat-owner", user_id="other", ui_event_id="evt-owned",
+        ) is None
         scope = dict(app_id="app-owner", chat_id="chat-owner", user_id="owner", ui_event_id="evt-owned", outcome_id="result-1")
         receipt = await resolve_workflow_feedback(**scope)
         assert receipt.response.helpful is False and receipt.response.outcome is None
