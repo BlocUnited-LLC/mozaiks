@@ -373,6 +373,10 @@ async def execute_repository_docker_turn(
         or not delete_paths <= selected_paths
     ):
         raise ValueError("REPOSITORY_DOCKER_FILE_BUDGET")
+    if live_profile is not None and (
+        len(selected_files) + len(inspection_files) + len(create_paths) > MAX_REPOSITORY_DOCKER_FILES
+    ):
+        raise ValueError("REPOSITORY_LIVE_FILE_BUDGET")
     if approved_context is None:
         if snapshot is not None or validate_path is not None or validate_create_absence is not None or (
             request.metadata.get("approved_create_paths") or request.metadata.get("approved_delete_paths")
