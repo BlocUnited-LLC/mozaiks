@@ -175,7 +175,7 @@ def test_mongo_backend_get_secret_read_failure_is_not_absence() -> None:
         raise OSError("database temporarily unavailable")
 
     backend._collection = failed_collection
-    result = asyncio.run(backend.get_secret(scope_id="ws_1", service="openai"))
+    result = asyncio.run(backend.get_secret(scope="workspace", scope_id="ws_1", service="openai"))
 
     assert result["success"] is False
     assert result["status"] == "error"
@@ -185,13 +185,17 @@ def test_mongo_backend_get_secret_read_failure_is_not_absence() -> None:
 
 def test_mongo_backend_corrupt_record_is_not_absence() -> None:
     backend, coll = _backend_with_collection()
-    coll._docs[("ws_1", "openai")] = {}
+    coll._docs[("workspace", "ws_1", "openai")] = {
+        "scope": "workspace", "scope_id": "ws_1", "service": "openai",
+        "secret_name": "wrong-owner-name",
+    }
 
-    result = asyncio.run(backend.get_secret(scope_id="ws_1", service="openai"))
+    result = asyncio.run(backend.get_secret(scope="workspace", scope_id="ws_1", service="openai"))
 
     assert result["success"] is False
     assert result["status"] == "error"
     assert result["secret_value"] is None
+    assert result["error"] == "Secret identity does not match connector."
 
 
 def test_mongo_backend_get_secret_returns_expires_at() -> None:

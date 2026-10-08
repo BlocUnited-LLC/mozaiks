@@ -153,6 +153,21 @@ class AzureKeyVaultConnectorVaultBackend:
         self._client = None
         self._client_error: str | None = None
 
+    @staticmethod
+    def _matches_identity_tags(
+        secret: Any, *, scope: ConnectorScope, scope_id: str, service: str
+    ) -> bool:
+        tags = getattr(getattr(secret, "properties", None), "tags", None)
+        return isinstance(tags, dict) and all(
+            tags.get(key) == expected
+            for key, expected in {
+                "managed_by": "mozaiks",
+                "scope": scope,
+                "scope_id": scope_id,
+                "service": service,
+            }.items()
+        )
+
     def _get_vault_url(self) -> str | None:
         name = _vault_name()
         if not name:
@@ -271,15 +286,8 @@ class AzureKeyVaultConnectorVaultBackend:
 
             secret = await asyncio.to_thread(client.get_secret, secret_name)
             props = getattr(secret, "properties", None)
-            tags = getattr(props, "tags", None)
-            if not isinstance(tags, dict) or any(
-                tags.get(key) != expected
-                for key, expected in {
-                    "managed_by": "mozaiks",
-                    "scope": scope,
-                    "scope_id": scope_id,
-                    "service": service,
-                }.items()
+            if not self._matches_identity_tags(
+                secret, scope=scope, scope_id=scope_id, service=service
             ):
                 return {
                     "success": False,
@@ -344,6 +352,16 @@ class AzureKeyVaultConnectorVaultBackend:
                 "error": self._client_error or "Azure Key Vault connector backend is unavailable.",
             }
         try:
+            secret = await asyncio.to_thread(client.get_secret, secret_name)
+            if not self._matches_identity_tags(
+                secret, scope=scope, scope_id=scope_id, service=service
+            ):
+                return {
+                    "success": False,
+                    "provider": "azure_key_vault",
+                    "secret_name": secret_name,
+                    "error": "Secret identity does not match connector.",
+                }
             await asyncio.to_thread(client.begin_delete_secret, secret_name)
             return {
                 "success": True,
@@ -564,7 +582,7 @@ class MongoConnectorVaultBackend:
             coll = await self._collection()
             await self._ensure_indexes(coll)
             doc = await coll.find_one(
-                {"scope": scope, "scope_id": scope_id, "service": service, "secret_name": secret_name}
+                {"scope": scope, "scope_id": scope_id, "service": service}
             )
         except Exception:
             logger.error("MongoConnectorVaultBackend.get_secret failed")
@@ -584,6 +602,15 @@ class MongoConnectorVaultBackend:
                 "secret_name": secret_name,
                 "secret_value": None,
                 "error": "Secret not found.",
+            }
+        if doc.get("secret_name") != secret_name:
+            return {
+                "success": False,
+                "status": "error",
+                "provider": "mongo",
+                "secret_name": secret_name,
+                "secret_value": None,
+                "error": "Secret identity does not match connector.",
             }
         decrypted = self._decrypt(doc.get("encrypted_value") or "")
         return {

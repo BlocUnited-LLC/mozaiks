@@ -47,6 +47,23 @@ def test_single_legacy_candidate_still_requires_operator_review() -> None:
     assert report["counts"]["legacy_review"] == 1
 
 
+def test_reentered_scoped_secret_does_not_hide_retained_legacy_cleanup_gate() -> None:
+    owner = _owner("app", "id", "billing")
+    qualified = {"scope": "app", "scope_id": "id", "service": "billing", "secret_name": owner["secret_name"]}
+    legacy = {"scope_id": "id", "service": "billing", "secret_name": "old-name"}
+
+    retained = build_inventory([owner], [qualified, legacy], provider="mongo")
+    assert retained["ready"] is False
+    assert retained["counts"]["qualified_ready"] == 1
+    assert retained["counts"]["legacy_review"] == 1
+
+    # The inventory never performs cleanup. A separately reviewed operator
+    # removal changes the next snapshot, which can then pass the release gate.
+    cleaned = build_inventory([owner], [qualified], provider="mongo")
+    assert cleaned["ready"] is True
+    assert cleaned["counts"]["qualified_ready"] == 1
+
+
 def test_qualified_scopes_and_service_aliases_are_independent() -> None:
     owners = [
         _owner("app", "same", "foo_bar"),

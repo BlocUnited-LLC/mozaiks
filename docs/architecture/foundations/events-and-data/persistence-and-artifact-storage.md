@@ -156,12 +156,15 @@ Rules:
   `(scope, scope_id, normalized_service)` where `scope` is `app` or `workspace`.
   These are framework-internal records, not app data.
 - Azure secret names include the scope kind and a digest of the complete connector
-  identity. Reads verify the returned identity tags before releasing a value.
+  identity. Reads and deletes verify the returned identity tags before using
+  the name.
 - The vault backend requires an explicit scope on every save, read, and delete.
   Unqualified older records are never used as a fallback.
 - Before upgrading an environment with saved connectors, run the private
   metadata-only inventory described in the workspace integration guide. Old
   records need operator review; ambiguous records need credential re-entry.
+  Retained legacy records keep the inventory unready until separately reviewed
+  cleanup, even after scoped credentials have been re-entered.
 - Azure Key Vault remains the recommended backend for production deployments that
   already operate Key Vault infrastructure.
 - A connector is `active` when `secret_available: true` (secret stored in vault).

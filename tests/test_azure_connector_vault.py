@@ -68,8 +68,31 @@ def test_azure_read_rejects_missing_or_mismatched_identity_tags() -> None:
             client.secrets[name].properties.tags = tags
             result = await backend.get_secret(scope="app", scope_id="id", service="billing")
             assert result["success"] is False
+            assert result["status"] == "error"
             assert result["secret_value"] is None
             assert result["error"] == "Secret identity does not match connector."
+
+    asyncio.run(exercise())
+
+
+def test_azure_delete_rejects_missing_or_mismatched_identity_tags() -> None:
+    backend, client = _backend()
+
+    async def exercise():
+        stored = await backend.store_secret(scope="app", scope_id="id", service="billing", secret_value="value")
+        name = stored["secret_name"]
+        for tags in ({}, {"scope": "workspace", "scope_id": "id", "service": "billing", "managed_by": "mozaiks"}):
+            client.secrets[name].properties.tags = tags
+            result = await backend.delete_secret(scope="app", scope_id="id", service="billing")
+            assert result["success"] is False
+            assert result["error"] == "Secret identity does not match connector."
+            assert name in client.secrets
+            assert client.deleted == []
+        client.secrets[name].properties.tags = {
+            "managed_by": "mozaiks", "scope": "app", "scope_id": "id", "service": "billing"
+        }
+        assert (await backend.delete_secret(scope="app", scope_id="id", service="billing"))["success"]
+        assert client.deleted == [name]
 
     asyncio.run(exercise())
 

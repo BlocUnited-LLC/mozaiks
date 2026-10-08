@@ -47,6 +47,13 @@ def test_real_mongo_scopes_and_service_aliases_never_share_a_secret() -> None:
             assert (await backend.get_secret(scope="app", scope_id="same", service="foo_bar"))["secret_value"] == "app-value"
             assert (await backend.get_secret(scope="workspace", scope_id="same", service="foo_bar"))["secret_value"] == "workspace-value"
             assert (await backend.get_secret(scope="app", scope_id="same", service="foo-bar"))["secret_value"] == "alias-value"
+            app_filter = {"scope": "app", "scope_id": "same", "service": "foo_bar"}
+            app_name = (await collection.find_one(app_filter))["secret_name"]
+            await collection.update_one(app_filter, {"$set": {"secret_name": "wrong-owner-name"}})
+            mismatched = await backend.get_secret(scope="app", scope_id="same", service="foo_bar")
+            assert mismatched["status"] == "error"
+            assert mismatched["secret_value"] is None
+            await collection.update_one(app_filter, {"$set": {"secret_name": app_name}})
             raced = await asyncio.gather(*(
                 backend.store_secret(scope="app", scope_id="same", service="foo_bar", secret_value=f"race-{number}")
                 for number in range(6)
