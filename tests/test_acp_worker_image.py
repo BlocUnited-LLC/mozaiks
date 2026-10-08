@@ -2,7 +2,9 @@
 
 Build Dockerfile.preview, Dockerfile.acp-proof, Dockerfile.acp-adapters, then
 Dockerfile.acp-worker as ``mozaiks-acp-worker:local``. Set
-``MOZAIKS_RUN_ACP_WORKER_IMAGE_PROOF=1``. No model key or network is required.
+``MOZAIKS_RUN_ACP_WORKER_IMAGE_PROOF=1`` and
+``MOZAIKS_ACP_WORKER_PROOF_IMAGE_ID`` to the built image's local ID. No model
+key or network is required.
 """
 
 from __future__ import annotations
@@ -105,6 +107,7 @@ async def test_combined_image_runs_bounded_fake_turn_without_host_secret(
     turn = await execute_repository_docker_turn(
         request,
         image=_IMAGE,
+        expected_image_id=os.environ["MOZAIKS_ACP_WORKER_PROOF_IMAGE_ID"],
         max_wall_seconds=75,
         max_archive_bytes=700_000,
     )

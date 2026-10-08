@@ -80,6 +80,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
+- Repository Docker coding turns now require a trusted local image ID, reject
+  changed image tags before source transfer, verify the created container's
+  image, and reject unrecognized baked environment keys.
+
 - Imported app runtime smoke now obtains its externally visible checks from a
   separate local Docker observer that has no app Python mount. The observer
   checks the app over isolated loopback HTTP and MongoDB; app stdout cannot

@@ -107,9 +107,20 @@ jobs:
           docker build -f infra/docker/Dockerfile.preview -t mozaiks-sandbox:local .
           docker build -f infra/docker/Dockerfile.acp-proof -t mozaiks-acp-proof:local .
 
+      - name: Capture built proof image ID
+        id: proof_image
+        run: |
+          image_id=$(docker image inspect --format '{{.Id}}' mozaiks-acp-proof:local)
+          if [[ ! "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo 'Offline ACP proof image did not resolve to a local sha256 ID' >&2
+            exit 1
+          fi
+          printf 'image_id=%s\n' "$image_id" >> "$GITHUB_OUTPUT"
+
       - name: Run real Docker isolation proof
         env:
           MOZAIKS_RUN_REPOSITORY_DOCKER_PROOF: '1'
+          MOZAIKS_REPOSITORY_DOCKER_PROOF_IMAGE_ID: ${{ steps.proof_image.outputs.image_id }}
         run: |
           python -m pytest -q --no-cov --reruns 0 \
             --junitxml=/tmp/acp-isolation-proof.xml \
