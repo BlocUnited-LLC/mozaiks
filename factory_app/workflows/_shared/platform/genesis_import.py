@@ -13,7 +13,7 @@ import zipfile
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 from pymongo.errors import DuplicateKeyError
@@ -151,14 +151,12 @@ def _verified_observer_evidence(result: dict[str, Any], smoke: dict[str, Any]) -
     }
 
 
-def _validation_matches_receipt(
-    validation: Any, *, claim: GenesisImportClaim, receipt: GenesisAcceptanceReceipt,
-) -> bool:
+def _validation_matches_claim(validation: Any, *, claim: GenesisImportClaim) -> bool:
     if not isinstance(validation, dict) or set(validation) != _GENESIS_EVIDENCE_FIELDS:
         return False
     checks = validation.get("passed_checks")
     if (
-        validation.get("contract") != receipt.validation_contract
+        validation.get("contract") != "app_bundle_acceptance_gate_v1"
         or validation.get("bundle_sha256") != claim.bundle_sha256
         or validation.get("manifest_sha256") != claim.manifest_sha256
         or not _is_sha256(validation.get("source_content_sha256"))
@@ -174,10 +172,43 @@ def _validation_matches_receipt(
         or re.fullmatch(r"[0-9a-f]{32}", validation["observer_run_id"]) is None
         or validation.get("observed_boot") != {"check": "boot.http_ready", "status": "passed"}
         or validation.get("observer_unverified_checks") != []
-        or validation.get("sha256") != receipt.validation_sha256
+        or not _is_sha256(validation.get("sha256"))
     ):
         return False
-    return _canonical_digest({key: value for key, value in validation.items() if key != "sha256"}) == receipt.validation_sha256
+    return _canonical_digest({key: value for key, value in validation.items() if key != "sha256"}) == str(validation["sha256"])
+
+
+def _validation_matches_receipt(
+    validation: Any, *, claim: GenesisImportClaim, receipt: GenesisAcceptanceReceipt,
+) -> bool:
+    return (
+        _validation_matches_claim(validation, claim=claim)
+        and validation["contract"] == receipt.validation_contract
+        and validation["sha256"] == receipt.validation_sha256
+    )
+
+
+def _saved_draft_validation(
+    record: BuildRecord, *, claim: GenesisImportClaim,
+    source_content_sha256: str, validator_image_id: str,
+) -> dict[str, Any] | None:
+    """Reuse only a complete first-writer validation after an interrupted accept."""
+    metadata = record.commit_metadata.metadata
+    if "genesis_validation" not in metadata:
+        if record.validation_status != BuildRecordValidationStatus.PENDING or record.app_validation_status == "passed":
+            raise GenesisImportError("Genesis draft has inconsistent validation state")
+        return None
+    validation = metadata["genesis_validation"]
+    if (
+        record.lifecycle_status != BuildRecordStatus.DRAFT
+        or record.validation_status != BuildRecordValidationStatus.PASSED
+        or record.app_validation_status != "passed"
+        or not _validation_matches_claim(validation, claim=claim)
+        or validation["source_content_sha256"] != source_content_sha256
+        or validation["validator_image_id"] != validator_image_id
+    ):
+        raise GenesisImportError("Genesis draft has inconsistent validation evidence")
+    return cast(dict[str, Any], validation)
 
 
 def _manifest_entries(*, files_manifest: Sequence[BuildRecordFileEntry | dict[str, Any]],
@@ -279,6 +310,51 @@ async def _verified_source_files(*, bundle_bytes: bytes, bundle_name: str,
         if entry.size_bytes != len(raw) or entry.sha256 != hashlib.sha256(raw).hexdigest():
             raise GenesisImportError("source file bytes do not match the declared manifest")
     return files
+
+
+async def _validate_imported_source(
+    files: dict[str, str | bytes], *, claim: GenesisImportClaim,
+    source_content_sha256: str, pinned_image_id: str,
+) -> dict[str, Any]:
+    from factory_app.workflows.AppGenerator.tools.app_validation import (
+        run_app_bundle_acceptance_gate,
+    )
+
+    result = await run_app_bundle_acceptance_gate(
+        files={path: content for path, content in files.items() if isinstance(content, str)},
+        contained_imported_source=True,
+        runtime_binary_assets={path: content for path, content in files.items() if isinstance(content, bytes)},
+    )
+    if result.get("status") != "passed" or result.get("passed") is not True:
+        raise GenesisImportError("imported Genesis source failed canonical app-bundle runtime validation")
+    smoke = result.get("app_runtime_smoke")
+    snapshot_digest = result.get("snapshot_digest")
+    if not _is_sha256(snapshot_digest):
+        raise GenesisImportError("imported Genesis acceptance gate lacks a valid snapshot digest")
+    passed_checks = _passed_gate_checks(result)
+    if not isinstance(smoke, dict):
+        raise GenesisImportError("imported Genesis runtime smoke lacks trusted observer boot evidence")
+    observer_evidence = _verified_observer_evidence(result, smoke)
+    validator_image_id = smoke.get("validator_image_id")
+    if (
+        not isinstance(validator_image_id, str)
+        or re.fullmatch(r"sha256:[0-9a-f]{64}", validator_image_id) is None
+        or validator_image_id != pinned_image_id
+        or smoke.get("source_content_sha256") != source_content_sha256
+    ):
+        raise GenesisImportError("imported Genesis runtime evidence lacks the verified source or validator identity")
+    evidence = {
+        "contract": "app_bundle_acceptance_gate_v1",
+        "bundle_sha256": claim.bundle_sha256,
+        "manifest_sha256": claim.manifest_sha256,
+        "source_content_sha256": source_content_sha256,
+        "validator_image_id": validator_image_id,
+        "snapshot_digest": snapshot_digest,
+        "passed_checks": passed_checks,
+        **observer_evidence,
+    }
+    evidence["sha256"] = _canonical_digest(evidence)
+    return evidence
 
 
 def _same_draft(record: BuildRecord, *, expected_id: str, target_app_id: str,
@@ -512,57 +588,32 @@ async def accept_existing_app_genesis(
     except (ValueError, OSError, zipfile.BadZipFile) as exc:
         raise GenesisImportError("persisted Genesis source failed complete-content verification") from exc
 
-    from factory_app.workflows.AppGenerator.tools.app_validation import (
-        run_app_bundle_acceptance_gate,
-    )
-
-    result = await run_app_bundle_acceptance_gate(
-        files={path: content for path, content in files.items() if isinstance(content, str)},
-        contained_imported_source=True,
-        runtime_binary_assets={path: content for path, content in files.items() if isinstance(content, bytes)},
-    )
-    if result.get("status") != "passed" or result.get("passed") is not True:
-        raise GenesisImportError("imported Genesis source failed canonical app-bundle runtime validation")
-    smoke = result.get("app_runtime_smoke")
-    snapshot_digest = result.get("snapshot_digest")
-    if not _is_sha256(snapshot_digest):
-        raise GenesisImportError("imported Genesis acceptance gate lacks a valid snapshot digest")
-    passed_checks = _passed_gate_checks(result)
-    if not isinstance(smoke, dict):
-        raise GenesisImportError("imported Genesis runtime smoke lacks trusted observer boot evidence")
-    observer_evidence = _verified_observer_evidence(result, smoke)
     source_digests = {
         path: hashlib.sha256(content.encode("utf-8") if isinstance(content, str) else content).hexdigest()
         for path, content in files.items()
     }
     source_content_sha256 = _canonical_digest(source_digests)
-    validator_image_id = smoke.get("validator_image_id")
-    if (
-        not isinstance(validator_image_id, str)
-        or re.fullmatch(r"sha256:[0-9a-f]{64}", validator_image_id) is None
-        or validator_image_id != pinned_image_id
-        or smoke.get("source_content_sha256") != source_content_sha256
-    ):
-        raise GenesisImportError("imported Genesis runtime evidence lacks the verified source or validator identity")
-    evidence = {
-        "contract": "app_bundle_acceptance_gate_v1",
-        "bundle_sha256": claim.bundle_sha256,
-        "manifest_sha256": claim.manifest_sha256,
-        "source_content_sha256": source_content_sha256,
-        "validator_image_id": validator_image_id,
-        "snapshot_digest": snapshot_digest,
-        "passed_checks": passed_checks,
-        **observer_evidence,
-    }
-    validation_sha256 = _canonical_digest(evidence)
-    evidence["sha256"] = validation_sha256
-    record = await store.mark_genesis_build_record_validated(
-        app_id=record.app_id, build_record_id=record.id, validation=evidence,
+    evidence = _saved_draft_validation(
+        record, claim=claim, source_content_sha256=source_content_sha256,
+        validator_image_id=pinned_image_id,
     )
-    if (record is None or record.lifecycle_status != BuildRecordStatus.DRAFT
-            or record.validation_status != BuildRecordValidationStatus.PASSED
-            or record.commit_metadata.metadata.get("genesis_validation") != evidence):
-        raise GenesisImportError("Genesis draft changed before validated review")
+    if evidence is None:
+        evidence = await _validate_imported_source(
+            files, claim=claim, source_content_sha256=source_content_sha256,
+            pinned_image_id=pinned_image_id,
+        )
+        record = await store.mark_genesis_build_record_validated(
+            app_id=record.app_id, build_record_id=record.id, validation=evidence,
+        )
+        if record is None:
+            raise GenesisImportError("Genesis draft changed before validated review")
+        evidence = _saved_draft_validation(
+            record, claim=claim, source_content_sha256=source_content_sha256,
+            validator_image_id=pinned_image_id,
+        )
+        if evidence is None:
+            raise GenesisImportError("Genesis draft changed before validated review")
+    validation_sha256 = evidence["sha256"]
     receipt = GenesisAcceptanceReceipt(
         accepted_by=owner_user_id, accepted_at=datetime.now(UTC),
         validation_sha256=validation_sha256,

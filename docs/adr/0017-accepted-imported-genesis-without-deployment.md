@@ -96,6 +96,12 @@ validated draft to `CURRENT`. If the process stops between these writes,
 launch and hydration remain closed until an exact owner retry finishes the
 projection. A competing source, reviewer, digest, or changed target cannot
 reuse the receipt.
+If the process stops earlier, after validation evidence was saved but before
+the AppRegistry receipt, the same owner may retry the exact source review. The
+retry rechecks the persisted archive and every member, source and manifest
+digests, current pinned validator image, passed checks, and evidence hash. It
+uses the first saved observer run rather than replacing that evidence with a
+new run ID. Invalid or changed evidence leaves the reservation closed.
 
 Generic artifact accept, reject, and promote routes cannot mutate this
 imported Genesis record. Core generic status and metadata mutators also exclude

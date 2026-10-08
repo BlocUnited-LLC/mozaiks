@@ -708,6 +708,61 @@ async def test_genesis_baseline_rejects_changed_evidence_with_original_receipt(
 
 
 @pytest.mark.asyncio
+async def test_genesis_acceptance_recovers_validation_before_registry_receipt(
+    import_state, monkeypatch, trusted_observer_test_override,
+):
+    from factory_app.workflows.AppGenerator.tools import app_validation
+
+    monkeypatch.setattr(app_validation.app_runtime_smoke, "run_contained_imported_app_runtime_smoke", AsyncMock(), raising=False)
+    raw, manifest = _source()
+    draft = await _import(import_state, raw, manifest)
+    gate = AsyncMock(return_value=_successful_gate_result(manifest))
+    monkeypatch.setattr(app_validation, "run_app_bundle_acceptance_gate", gate)
+    registry = import_state[1]
+    accept_claim = registry.accept_genesis_import.side_effect
+    registry.accept_genesis_import.side_effect = AsyncMock(return_value=None)
+    with pytest.raises(GenesisImportError, match="Factory target changed"):
+        await _accept(import_state, draft)
+    assert import_state[0]["genesis_import"]["status"] == "reserved"
+    assert draft.validation_status == BuildRecordValidationStatus.PASSED
+    saved = copy.deepcopy(draft.commit_metadata.metadata["genesis_validation"])
+    registry.accept_genesis_import.side_effect = accept_claim
+    accepted = await _accept(import_state, draft)
+    assert accepted.lifecycle_status == BuildRecordStatus.CURRENT
+    assert accepted.commit_metadata.metadata["genesis_validation"] == saved
+    assert import_state[0]["genesis_import"]["acceptance"]["validation_sha256"] == saved["sha256"]
+    gate.assert_awaited_once()
+    assert trusted_observer_test_override.await_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mismatch", ["evidence", "image"])
+async def test_genesis_acceptance_rejects_changed_saved_validation_before_receipt(
+    import_state, monkeypatch, trusted_observer_test_override, mismatch,
+):
+    from factory_app.workflows._shared.platform import genesis_import
+    from factory_app.workflows.AppGenerator.tools import app_validation
+
+    monkeypatch.setattr(app_validation.app_runtime_smoke, "run_contained_imported_app_runtime_smoke", AsyncMock(), raising=False)
+    raw, manifest = _source()
+    draft = await _import(import_state, raw, manifest)
+    gate = AsyncMock(return_value=_successful_gate_result(manifest))
+    monkeypatch.setattr(app_validation, "run_app_bundle_acceptance_gate", gate)
+    registry = import_state[1]
+    registry.accept_genesis_import.side_effect = AsyncMock(return_value=None)
+    with pytest.raises(GenesisImportError, match="Factory target changed"):
+        await _accept(import_state, draft)
+    if mismatch == "evidence":
+        draft.commit_metadata.metadata["genesis_validation"]["observer_unverified_checks"] = ["event_rejection"]
+    else:
+        monkeypatch.setattr(genesis_import, "_preflight_imported_smoke", AsyncMock(return_value="sha256:" + "f" * 64))
+    with pytest.raises(GenesisImportError, match="inconsistent validation evidence"):
+        await _accept(import_state, draft)
+    assert import_state[0]["genesis_import"]["status"] == "reserved"
+    gate.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_genesis_acceptance_recovers_receipt_before_artifact_status(
     import_state, monkeypatch, trusted_observer_test_override,
 ):
