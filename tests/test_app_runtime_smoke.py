@@ -136,6 +136,14 @@ def test_trusted_event_audit_valid_event_and_observer_owned_completion():
     }
 
 
+def test_declared_emits_does_not_require_an_event():
+    audit = _trusted_event_audit()
+    request_id = audit.begin("tasks", "create", "owner")
+    audit.complete(request_id, received_response=True)
+    assert audit.result()["accepted_event_count"] == 0
+    assert audit.result()["passed"] is True
+
+
 def test_trusted_event_wire_preserves_datetime_value_type():
     value = datetime(2026, 10, 8, 15, 0, tzinfo=UTC)
     encoded = app_runtime_smoke._encode_event_payload({"occurred_at": value})
@@ -1084,6 +1092,32 @@ async def before_create_task(ctx, values):
     assert result["status"] == "passed", result["results"]
     assert _by_check(result)["crud.task_management.tasks.a_create"]["status"] == "passed"
     assert _by_check(result)["event.audit"]["status"] == "passed"
+    assert result["observer_unverified_checks"] == ["event_rejection"]
+
+
+@pytest.mark.skipif(
+    not os.getenv("MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE"),
+    reason="set MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE to a freshly built local preview image",
+)
+async def test_contained_observer_cannot_infer_completeness_from_a_valid_event():
+    files = _good()
+    emitted = "    await ctx.emit('domain.task.created', item)\n"
+    assert files[SERVICE].count(emitted) == 1
+    files[SERVICE] = files[SERVICE].replace(emitted, emitted + '''
+    async def suppress_event(_event_type, _payload):
+        return None
+    ctx._emit = suppress_event
+    await ctx.emit('domain.task.created', {})
+''')
+    result = await _contained_smoke(files, image=os.environ["MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE"])
+
+    # One valid event reaches B. The later invalid call is suppressed in A,
+    # so a minimum event-count rule would still miss it.
+    assert result["status"] == "passed", result["results"]
+    assert _by_check(result)["crud.task_management.tasks.a_create"]["status"] == "passed"
+    assert _by_check(result)["event.audit"]["status"] == "passed"
+    assert result["trusted_event_audit"]["accepted_event_count"] >= 1
+    assert result["trusted_event_audit"]["rejected_event_count"] == 0
     assert result["observer_unverified_checks"] == ["event_rejection"]
 
 
