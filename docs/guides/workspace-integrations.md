@@ -95,7 +95,11 @@ For each environment with existing connector secrets:
    connector's app or workspace owner from independent account records.
    Re-enter credentials through that owner's scoped Studio UI, including every
    ambiguous connector. Do not copy one ambiguous old value into multiple
-   scopes. Verify scoped reads and provider health before enabling usage.
+   scopes. If duplicate old Mongo rows prevent creation of the scoped unique
+   index, stop. Keep operations frozen, resolve only the exact duplicate rows
+   through separately approved operator tooling and the protected backup, then
+   re-run inventory before retrying. Verify scoped reads and provider health
+   before enabling usage.
 3. Take a new inventory after re-entry. A retained unqualified record still produces
    a finding and keeps `ready: false`, even if its scoped replacement is ready.
    Keep it only for the reviewed rollback window. Before cleanup, freeze writes
