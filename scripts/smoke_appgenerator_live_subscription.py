@@ -27,6 +27,9 @@ from factory_app.workflows._shared.subscription_contract_context import (
 from factory_app.workflows.AppGenerator.tools.app_build_plan import app_build_plan
 from factory_app.workflows.AppGenerator.tools.app_validation import validate_app_bundle_from_request
 from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
+from factory_app.workflows.AppGenerator.tools.code_file_utils import (
+    extract_code_file_map_from_payload,
+)
 from factory_app.workflows.AppGenerator.tools.export_app_code import resolve_export_gate
 from factory_app.workflows.AppGenerator.tools.materialize_app_config_contracts import (
     materialize_app_config_contracts,
@@ -39,6 +42,7 @@ from mozaiksai.core.runtime.app.loader import AppLoader
 from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.generator_support.module_policy import materialize_module_policies
+from mozaiksai.core.workflow.generator_support.page_data_bindings import schema_at_path
 from scripts.appgenerator_fixture_replay import execute_file_replay
 
 DEFAULT_APP_ID = "subscription-reporting-live-smoke"
@@ -67,9 +71,10 @@ _FORBIDDEN_PROVIDER_TERMS = (
 def _configure_event_loop_policy() -> None:
     if os.name != "nt":
         return
-    selector_policy = getattr(asyncio, "WindowsSelectorEventLoopPolicy", None)
-    if selector_policy is not None:
-        asyncio.set_event_loop_policy(selector_policy())
+    # Local app validation launches the Vite build through an asyncio subprocess.
+    proactor_policy = getattr(asyncio, "WindowsProactorEventLoopPolicy", None)
+    if proactor_policy is not None:
+        asyncio.set_event_loop_policy(proactor_policy())
 
 
 def _json_safe(value: Any) -> Any:
@@ -204,9 +209,9 @@ def _module_contract_task() -> dict[str, Any]:
             Module id: reports.
             Module handler: backend.handler:ReportsModule.
             Actions:
-            - list_reports: handler_method list_reports, explicit permissions [], api_surface null, canonical items/total output.
+            - list_reports: handler_method list_reports, explicit permissions [], api_surface null. Declare output_schema properties named items (array, items_type object) and total (integer); mark both required. Do not declare nested item properties.
             - get_reports: handler_method get_reports, explicit permissions [], api_surface null, input id, output item.
-            - generate_report: handler_method generate_report, input topic string, output report_id and topic strings.
+            - generate_report: handler_method generate_report, input_schema property topic (required string), output_schema properties report_id and topic (strings).
             Capabilities:
             - reports.view grants list_reports.
             - reports.generate grants generate_report.
@@ -434,18 +439,6 @@ def validate_assembled_subscription_yaml(content: str | None, contract: dict[str
     return errors
 
 
-def _module_yaml_from_output(output: dict[str, Any], files: dict[str, str]) -> str | None:
-    if files.get(MODULE_PATH):
-        return files[MODULE_PATH]
-    module_contract = output.get("module_contract")
-    if not isinstance(module_contract, dict):
-        return None
-    module_yaml = module_contract.get("module_yaml")
-    if not isinstance(module_yaml, dict):
-        return None
-    return _yaml_text(module_yaml)
-
-
 def validate_module_contract_output(output: dict[str, Any]) -> tuple[str | None, list[str]]:
     errors: list[str] = _structured_output_errors(output, mode_label="module_contract_bundle")
     if output.get("mode") != "module_contract_bundle":
@@ -459,7 +452,11 @@ def validate_module_contract_output(output: dict[str, Any]) -> tuple[str | None,
     if backend_files:
         errors.append(f"module_contract task emitted backend Python files: {backend_files}.")
 
-    content = _module_yaml_from_output(output, files)
+    try:
+        content = extract_code_file_map_from_payload(output).get(MODULE_PATH)
+    except ValueError as exc:
+        errors.append(f"{MODULE_PATH} could not be materialized: {exc}")
+        return None, errors
     if not content:
         errors.append(f"Missing {MODULE_PATH}.")
         return None, errors
@@ -497,14 +494,33 @@ def validate_module_contract_output(output: dict[str, Any]) -> tuple[str | None,
     generate = by_id.get("generate_report")
     if not isinstance(generate, dict):
         errors.append("reports module must declare generate_report.")
-    elif generate.get("entitlement_gate") != REPORT_GATE_ID:
-        errors.append(f"The derived gate compiler must set generate_report to {REPORT_GATE_ID}.")
+    else:
+        if generate.get("entitlement_gate") != REPORT_GATE_ID:
+            errors.append(f"The derived gate compiler must set generate_report to {REPORT_GATE_ID}.")
+        generate_input = generate.get("input_schema")
+        topic = schema_at_path(generate_input, "topic")
+        required = generate_input.get("required", []) if isinstance(generate_input, dict) else []
+        if topic is None or topic.get("type") != "string" or "topic" not in required:
+            errors.append("generate_report input_schema must declare a required topic string for the Reports form.")
 
     list_reports = by_id.get("list_reports")
     if not isinstance(list_reports, dict):
         errors.append("reports module must declare list_reports.")
-    elif list_reports.get("entitlement_gate") not in (None, ""):
-        errors.append("list_reports must not inherit the generate_report entitlement gate.")
+    else:
+        if list_reports.get("entitlement_gate") not in (None, ""):
+            errors.append("list_reports must not inherit the generate_report entitlement gate.")
+        output_schema = list_reports.get("output_schema")
+        items = schema_at_path(output_schema, "items")
+        total = schema_at_path(output_schema, "total")
+        required = output_schema.get("required", []) if isinstance(output_schema, dict) else []
+        item_schema = items.get("items") if isinstance(items, dict) else None
+        if items is None or items.get("type") != "array" or not isinstance(item_schema, dict) or item_schema.get("type") != "object":
+            errors.append("list_reports output_schema must declare items as an array of report objects.")
+        if total is None or total.get("type") != "integer":
+            errors.append("list_reports output_schema must declare total as an integer.")
+        for name in ("items", "total"):
+            if name not in required:
+                errors.append(f"list_reports output_schema must require {name}.")
 
     for action_id, action in by_id.items():
         handler_method = str(action.get("handler_method") or "").strip()
@@ -545,18 +561,14 @@ def deterministic_module_contract_output() -> dict[str, Any]:
               properties: {}
             output_schema:
               type: object
+              required: [items, total]
               properties:
-                reports:
+                items:
                   type: array
                   items:
                     type: object
-                    properties:
-                      report_id:
-                        type: string
-                      topic:
-                        type: string
-                      status:
-                        type: string
+                total:
+                  type: integer
           - id: generate_report
             description: Generate an AI report.
             handler_method: generate_report
@@ -674,7 +686,8 @@ def _backend_files(module_yaml: str) -> dict[str, str]:
 
 
             async def list_reports(ctx, **params):
-                return {"reports": await repo.list_report_records(ctx)}
+                items = await repo.list_report_records(ctx)
+                return {"items": items, "total": len(items)}
 
 
             async def get_reports(ctx, **params):
@@ -684,7 +697,7 @@ def _backend_files(module_yaml: str) -> dict[str, str]:
             async def generate_report(ctx, **params):
                 report = report_document(topic=params.get("topic"))
                 saved = await repo.save_report(ctx, report)
-                return {"report_id": saved["report_id"], "topic": saved["topic"], "report": saved}
+                return {"report_id": saved["report_id"], "topic": saved["topic"]}
             """
         ).strip() + "\n",
         "modules/reports/backend/repo.py": textwrap.dedent(
@@ -819,23 +832,21 @@ def build_acceptance_files(subscription_yaml: str, module_yaml: str) -> dict[str
             name: Reports
             route: /reports
             title: Reports
-            page_type: record_list
+            page_type: analytics_dashboard
             layout: full-width
             sections:
-              - id: report-list
-                primitive: DataTable
+              - id: report-count
+                primitive: Metric
                 config:
-                  columns:
-                    - key: report_id
-                      label: Report
+                  label: Reports
                   api_endpoint: /api/modules/reports/list_reports
-                  data_key: reports
+                  value_key: total
               - id: report-generate
                 primitive: Form
                 config:
                   fields:
-                    - name: report_name
-                      label: Report Name
+                    - name: topic
+                      label: Report Topic
                       type: text
                   submit_action:
                     label: Generate Report
@@ -1227,6 +1238,7 @@ async def _run_config_task(
         "ConfigMiddlewareAgent",
         prompt=system_prompt,
         config=llm_config_to_ag2_config(llm_config),
+        response_schema=configured_agent.response_schema,
         # Meter this one-shot call in the runtime usage ledger so live smoke
         # builds produce real per-build token/cost numbers.
         middleware=[
@@ -1257,8 +1269,8 @@ async def _run_config_task(
         structured_output = _coerce_structured_output(content, response_schema)
         if not structured_output:
             raise ValueError(f"Unable to parse structured output from {type(content).__name__}: {content!r}")
-        success = True
-        error = None
+        error = structured_output.get("_schema_validation_error")
+        success = error is None
     except Exception as exc:
         structured_output = {}
         success = False
