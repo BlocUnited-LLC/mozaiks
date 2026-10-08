@@ -202,14 +202,19 @@ inspection hashes before starting Docker. Only the selected file contents and
 exact operation paths enter the container; the full snapshot and host callback
 stay with the trusted worker. A separate trusted worker process or service with
 local Docker socket access must call it; the App Zero web host and the agent
-container must never mount or receive that socket. The caller supplies a fixed,
-prebuilt image reference outside the request. The transport resolves its local
-image ID before creation, uses an empty Docker CLI config and minimal CLI
-environment, passes only the task and selected editable/read-only files on
+container must never mount or receive that socket. The trusted caller supplies
+a prebuilt image reference and its separately approved immutable local image ID
+outside the request. The transport resolves the reference locally and rejects a
+different ID before creating a container or passing source. It creates by that
+ID and verifies the created container's image before start. The approved ID
+must come from trusted build or image-manifest evidence; resolving the tag during
+the request cannot establish approval. The transport uses an empty Docker CLI
+config and minimal CLI environment, passes only the task and selected
+editable/read-only files on
 stdin, and checks the created container before starting it. The container has
 no network, bind or volume mounts, Docker log retention, or forwarded host
-credentials; known model and GitHub credential names baked into the image are
-rejected before start. The container runs as a nonroot user with a read-only
+credentials; image environment keys outside the finite offline image contract
+are rejected before start. The container runs as a nonroot user with a read-only
 root, limited tmpfs, CPU, memory,
 processes and wall time. Output is byte-capped before strict JSON parsing.
 The worker archive must match the selected file set adjusted only for approved
@@ -255,6 +260,7 @@ separate credential-free checks. Build those two parent images first, then run:
 
 ```powershell
 docker build -f infra/docker/Dockerfile.acp-worker -t mozaiks-acp-worker:local .
+$env:MOZAIKS_ACP_WORKER_PROOF_IMAGE_ID = (docker image inspect --format '{{.Id}}' mozaiks-acp-worker:local).Trim()
 $env:MOZAIKS_RUN_ACP_WORKER_IMAGE_PROOF = '1'
 python -m pytest -q --no-cov tests/test_acp_worker_image.py
 ```
@@ -264,6 +270,12 @@ one disposable image. It does not exercise model-backed coding or authorize
 network access, a credential, or PR publication. The image inherits the proof
 base's Factory and synthetic-agent files; a live worker needs a separate minimal
 image after its isolation decision and acceptance gates are satisfied.
+
+The image ID lookup above is test setup for this offline proof. A trusted
+production caller must use an independently approved ID, not accept whichever
+ID a mutable tag resolves to when the request arrives. The separate opt-in
+repository proof test uses `MOZAIKS_REPOSITORY_DOCKER_PROOF_IMAGE_ID` for the
+approved local ID of `mozaiks-acp-proof:local`.
 
 The offline ACP proof image consumes the host's exact `create_paths` and
 `delete_paths` alongside selected files. Its coding provider remains

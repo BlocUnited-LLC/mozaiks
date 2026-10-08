@@ -53,6 +53,13 @@ _CONTAINER_ID = re.compile(r"[0-9a-f]{64}\Z")
 _IMAGE_REFERENCE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_./:@-]{0,255}\Z")
 _CLI_STDERR_BYTES = 65_536
 _CLI_STDOUT_BYTES = 1_048_576
+_ALLOWED_IMAGE_ENV_NAMES = frozenset({
+    "PATH", "HOME", "LANG", "NODE_VERSION", "YARN_VERSION",
+    "GPG_KEY", "PYTHON_VERSION", "PYTHON_SHA256",
+    "PYTHONDONTWRITEBYTECODE", "PYTHONUNBUFFERED", "PYTHONPATH",
+    "PIP_DISABLE_PIP_VERSION_CHECK", "MOZAIKS_WEB_SHELL_PATH",
+    "MOZAIKS_CHAT_UI_PATH", "MOZAIKS_FACTORY_APP_PATH", "LOGS_BASE_DIR",
+})
 
 
 class RepositoryDockerExecutionError(RuntimeError):
@@ -189,7 +196,7 @@ def _strict_json(raw: bytes) -> Any:
     )
 
 
-def _verify_container(config: Any) -> None:
+def _verify_container(config: Any, *, expected_image_id: str) -> None:
     if not isinstance(config, list) or len(config) != 1 or not isinstance(config[0], dict):
         raise RepositoryDockerExecutionError("REPOSITORY_DOCKER_INSPECT_FORMAT")
     container = config[0]
@@ -201,12 +208,9 @@ def _verify_container(config: Any) -> None:
     tmpfs = host.get("Tmpfs")
     image_env = image_config.get("Env") or []
     labels = image_config.get("Labels") or {}
-    forbidden_env = {
-        "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "CODEX_API_KEY",
-        "GH_TOKEN", "GITHUB_TOKEN", "MOZAIKS_ACP_HOST_SECRET",
-    }
     if (
-        host.get("NetworkMode") != "none"
+        container.get("Image") != expected_image_id
+        or host.get("NetworkMode") != "none"
         or host.get("ReadonlyRootfs") is not True
         or host.get("Binds") not in (None, [])
         or not isinstance(mounts, list)
@@ -224,7 +228,9 @@ def _verify_container(config: Any) -> None:
         or labels.get("mozaiks.refinement.repository_turn") != "offline"
         or not isinstance(image_env, list)
         or any(
-            not isinstance(entry, str) or entry.partition("=")[0] in forbidden_env
+            not isinstance(entry, str)
+            or entry.partition("=")[1] != "="
+            or entry.partition("=")[0] not in _ALLOWED_IMAGE_ENV_NAMES
             for entry in image_env
         )
         or not isinstance(tmpfs, dict)
@@ -303,7 +309,8 @@ def _parse_turn_output(
 
 
 async def execute_repository_docker_turn(
-    request: CodingWorkerRequest, *, image: str, max_wall_seconds: int = 90,
+    request: CodingWorkerRequest, *, image: str, expected_image_id: str,
+    max_wall_seconds: int = 90,
     max_archive_bytes: int = MAX_REPOSITORY_DOCKER_ARCHIVE_BYTES,
     approved_context: ApprovedExecutionContext | None = None,
     snapshot: RepositorySnapshotEvidence | None = None,
@@ -312,12 +319,17 @@ async def execute_repository_docker_turn(
 ) -> RepositoryDockerTurn:
     """Execute one already-approved file set; only a local, prebuilt image runs.
 
-    ``image`` is trusted host configuration, never a request field. The host
-    must verify the approved snapshot and path policy before calling this, then
-    stage/finalize the returned archive against those same immutable inputs.
+    ``image`` and ``expected_image_id`` are trusted host configuration, never
+    request fields. The expected ID must come from an operator-approved image
+    build or equivalent trusted image manifest, not this request or a fresh
+    resolution of the tag. The host must verify the approved snapshot and path
+    policy before calling this, then stage/finalize the returned archive
+    against those same immutable inputs.
     """
     if not _IMAGE_REFERENCE.fullmatch(image) or (":" not in image and "@" not in image):
         raise ValueError("REPOSITORY_DOCKER_IMAGE: invalid fixed image reference")
+    if not _IMAGE_ID.fullmatch(expected_image_id):
+        raise ValueError("REPOSITORY_DOCKER_EXPECTED_IMAGE_ID")
     if not 1 <= max_wall_seconds <= 3600:
         raise ValueError("REPOSITORY_DOCKER_WALL_BUDGET")
     if not 1 <= max_archive_bytes <= MAX_REPOSITORY_DOCKER_ARCHIVE_BYTES:
@@ -391,9 +403,14 @@ async def execute_repository_docker_turn(
             ["image", "inspect", "--format", "{{.Id}}", image],
             config_dir=config_dir, stdin_bytes=None, timeout_seconds=20, stdout_limit=128,
         )
-        image_id = image_id_raw.decode("ascii", errors="ignore").strip()
+        try:
+            image_id = image_id_raw.decode("ascii", errors="strict").strip()
+        except UnicodeDecodeError:
+            raise RepositoryDockerExecutionError("REPOSITORY_DOCKER_IMAGE_ID") from None
         if not _IMAGE_ID.fullmatch(image_id):
             raise RepositoryDockerExecutionError("REPOSITORY_DOCKER_IMAGE_ID")
+        if image_id != expected_image_id:
+            raise RepositoryDockerExecutionError("REPOSITORY_DOCKER_IMAGE_ID_MISMATCH")
 
         # A generated name lets us remove the container even if Docker created
         # it but the create response timed out or was malformed.
@@ -423,7 +440,7 @@ async def execute_repository_docker_turn(
                 timeout_seconds=20, stdout_limit=_CLI_STDOUT_BYTES,
             )
             try:
-                _verify_container(_strict_json(inspected))
+                _verify_container(_strict_json(inspected), expected_image_id=expected_image_id)
             except (UnicodeError, ValueError, TypeError):
                 raise RepositoryDockerExecutionError("REPOSITORY_DOCKER_INSPECT_FORMAT") from None
             raw_output = await _docker(
