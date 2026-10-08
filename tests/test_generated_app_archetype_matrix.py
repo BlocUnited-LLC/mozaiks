@@ -58,8 +58,10 @@ WORKFLOWS_ROOT = ROOT / "factory_app" / "workflows"
 
 class _MatrixAuthAdapter(BaseAuthAdapter):
     name = "matrix"
+    app_id: str | None = None
 
     async def validate_token(self, token: str) -> UserClaims:  # noqa: ARG002
+        assert self.app_id is not None, "Matrix auth adapter needs the generated app identity"
         return UserClaims(
             user_id="matrix-user",
             email="matrix-user@example.test",
@@ -68,7 +70,7 @@ class _MatrixAuthAdapter(BaseAuthAdapter):
             scopes=["access_as_user"],
             raw_claims={},
             provider=self.name,
-            app_id="matrix",
+            app_id=self.app_id,
         )
 
     def is_enabled(self) -> bool:
@@ -805,6 +807,7 @@ async def _materialize_spec(spec: _ArchetypeSpec, tmp_path: Path) -> tuple[dict[
 
     assembled = await assemble_app_tasks(context_variables=ctx)
     files = _file_map(assembled)
+    assert json.loads(files["app.json"])["appId"] == spec.app_id
     if spec.auth_enabled:
         auth_scaffold = await save_auth_scaffold(
             context_variables=ctx,
@@ -884,6 +887,7 @@ def _configure_platform(
     monkeypatch.setattr(module_executor_mod, "MongoPersistenceContext", _PersistenceContext)
     reset_auth_adapter()
     if spec.auth_enabled:
+        monkeypatch.setattr(_MatrixAuthAdapter, "app_id", spec.app_id)
         register_adapter("matrix", _MatrixAuthAdapter)
 
     # Monetized archetypes get the REAL entitlement chain, not a no-op: the
@@ -949,6 +953,8 @@ def _configure_platform(
     registry = ExecutorRegistry()
     registry.register(executor)
     platform.app.state.executor_registry = registry
+    assert loaded.definition.config["appId"] == spec.app_id
+    platform.app.state.loaded_app_id = spec.app_id
     platform.app.state.subscriptions_config = loaded.subscriptions_config
     platform.app.state.failed_module_names = []
     platform.app.state.startup_degraded = False
@@ -1076,7 +1082,7 @@ def _crud_checks(client: TestClient, _files: dict[str, str], _loaded: Any) -> No
     assert list_projects.json()["items"][0]["name"] == "Matrix Project"
 
 
-def _saas_checks(client: TestClient, _files: dict[str, str], _loaded: Any) -> None:
+def _saas_checks(client: TestClient, _files: dict[str, str], loaded: Any) -> None:
     """Prove the subscription → entitlement → gate chain, not just page serving.
 
     The gated action must be DENIED on the free default plan, GRANTED after a
@@ -1110,7 +1116,7 @@ def _saas_checks(client: TestClient, _files: dict[str, str], _loaded: Any) -> No
                 "command_id": command_id,
                 "event_type": event_type,
                 "source": "mozaikspay",
-                "app_id": "matrix",
+                "app_id": loaded.definition.config["appId"],
                 "user_id": "matrix-user",
                 "plan_id": "pro",
                 "occurred_at": "2026-08-01T00:00:00+00:00",
@@ -1387,6 +1393,7 @@ async def test_appbuildplan_archetype_matrix_materializes_deterministically_and_
 ) -> None:
     previous_state = {
         "executor_registry": getattr(platform.app.state, "executor_registry", None),
+        "loaded_app_id": getattr(platform.app.state, "loaded_app_id", None),
         "subscriptions_config": getattr(platform.app.state, "subscriptions_config", None),
         "failed_module_names": list(getattr(platform.app.state, "failed_module_names", [])),
         "startup_degraded": getattr(platform.app.state, "startup_degraded", False),
@@ -1424,6 +1431,7 @@ async def test_appbuildplan_archetype_matrix_materializes_deterministically_and_
 
         initialize_workflows(str(WORKFLOWS_ROOT))
         platform.app.state.executor_registry = previous_state["executor_registry"]
+        platform.app.state.loaded_app_id = previous_state["loaded_app_id"]
         platform.app.state.subscriptions_config = previous_state["subscriptions_config"]
         platform.app.state.failed_module_names = previous_state["failed_module_names"]
         platform.app.state.startup_degraded = previous_state["startup_degraded"]

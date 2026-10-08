@@ -282,6 +282,13 @@ def _apply_app_config_contracts(
     context_variables: Any,
 ) -> list[dict[str, str]]:
     file_map = {str(f["filename"]): str(f["content"]) for f in code_files if f.get("filename")}
+    if "app.json" in file_map:
+        app_manifest = json.loads(file_map["app.json"])
+        if not isinstance(app_manifest, dict):
+            raise ValueError("app.json must be a JSON object")
+        if app_manifest.get("appId") != app_id:
+            app_manifest["appId"] = app_id
+            file_map["app.json"] = json.dumps(app_manifest, indent=2, ensure_ascii=False) + "\n"
     captured_theme = (
         context_variables.get("captured_theme_config") if context_variables is not None else None
     )

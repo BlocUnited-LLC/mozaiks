@@ -120,7 +120,8 @@ This project follows a practical pre-1.0 changelog format:
 
 - HTTP module actions now bind execution and emitted events to the loaded app
   bundle. Claimless tokens cannot choose another execution app through request
-  parameters, and declared target-app inputs remain business data.
+  parameters, and declared target-app inputs remain business data. AppGenerator
+  now writes the target app ID into assembled bundles before validation and preview.
 
 - Repository Docker coding turns now require a trusted local image ID, reject
   changed image tags before source transfer, verify the created container's
