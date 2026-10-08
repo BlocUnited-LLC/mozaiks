@@ -11,9 +11,9 @@ v1 policy:
   request.
 - The ACP provider is selected only when all of these hold: it is enabled in
   ``refinement_policy.yaml``, the ``ag2[acp]`` extra is importable, the
-  artifact kind is ``app_bundle`` or ``theme_capture``, and the scope spans
-  more than one file while staying inside the ACP file budget. Single-file
-  patches stay on the cheaper deterministic provider.
+  artifact kind is ``app_bundle`` or ``theme_capture``, and the explicit
+  file scope is within the ACP budget. A one-file patch is still a coding
+  task; file count does not determine the execution provider.
 
 Fallback ladder (applied by the worker): an ACP attempt that ends
 ``unavailable``, ``failed``, ``empty``, ``timeout``, or ``budget_exceeded``
@@ -72,11 +72,6 @@ def select_coding_provider(
             provider="structured_output",
             reason=f"artifact_kind_not_acp_eligible:{request.build_family}",
         )
-    if file_count <= 1:
-        return CodingProviderSelection(
-            provider="structured_output",
-            reason="single_file_scope",
-        )
     if file_count > acp.budget.max_files:
         return CodingProviderSelection(
             provider="structured_output",
@@ -84,7 +79,7 @@ def select_coding_provider(
         )
     return CodingProviderSelection(
         provider="acp",
-        reason=f"multi_file_scope_within_budget:{file_count}",
+        reason=f"scoped_patch_within_budget:{file_count}",
     )
 
 
