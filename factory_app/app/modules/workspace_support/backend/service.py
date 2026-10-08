@@ -139,6 +139,7 @@ class WorkspaceSupportService:
             subject_app_id=subject_app_id,
             related_type="workspace_support.request",
             related_id=request_id,
+            allow_support_thread=True,
             metadata={
                 "request_id": request_id,
                 "subject_app_id": subject_app_id,
@@ -165,6 +166,7 @@ class WorkspaceSupportService:
                 thread_id=thread_id,
                 body=transcript_message["content"],
                 sender_role=transcript_message["role"],
+                allow_support_thread=True,
                 metadata={
                     "request_id": request_id,
                     "source": "support_escalation_transcript",
@@ -179,6 +181,7 @@ class WorkspaceSupportService:
                 thread_id=thread_id,
                 body=message,
                 sender_role="user",
+                allow_support_thread=True,
                 metadata={"request_id": request_id},
             )
         logger.info(
@@ -219,6 +222,7 @@ class WorkspaceSupportService:
             subject_app_id=subject_app_id,
             related_type="workspace_support.request",
             related_id=request_id,
+            allow_support_thread=True,
             metadata={
                 "request_id": request_id,
                 "subject_app_id": subject_app_id,
@@ -431,6 +435,7 @@ class WorkspaceSupportService:
                     thread_id=str(thread_id),
                     message_limit=100,
                     allow_nonparticipant_reader=True,
+                    allow_support_thread=True,
                 )
                 if thread_result.get("error") or not thread_result.get("thread"):
                     req["messages"] = []
@@ -549,6 +554,7 @@ class WorkspaceSupportService:
             recipient_ids=recipient_ids,
             metadata={"request_id": request_id},
             allow_nonparticipant_sender=sender_role == "operator",
+            allow_support_thread=True,
         )
         if not result.get("success"):
             logger.warning(

@@ -103,8 +103,11 @@ async def test_messages_create_thread_and_send_message_emit_domain_events():
         thread_type="support",
         related_type="workspace_support.request",
         related_id="sr_1",
+        allow_support_thread=True,
     )
-    sent = await service.send_message(ctx, thread_id=created["thread"]["thread_id"], body="Hello")
+    sent = await service.send_message(
+        ctx, thread_id=created["thread"]["thread_id"], body="Hello", allow_support_thread=True
+    )
 
     assert created["thread"]["participant_ids"] == ["user_1", "user_2"]
     assert sent["success"] is True
@@ -204,5 +207,9 @@ def test_active_messages_module_contract_loads():
     loaded = ModuleLoader("factory_app/app").load("messages")
 
     assert loaded.name == "messages"
+    schemas = loaded.action_schemas_map
+    assert "support" not in schemas["create_thread"]["input"]["properties"]["thread_type"]["enum"]
+    assert "support" not in schemas["list_threads"]["input"]["properties"]["thread_type"]["enum"]
+    assert "allow_support_thread" not in schemas["get_thread"]["input"].get("properties", {})
     assert "domain.messages.message_sent" in loaded.manifests.events.event_types
     assert loaded.manifests.notifications.notifications[0].audience.user_id_field == "recipient_ids"

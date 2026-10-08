@@ -31,11 +31,11 @@ factory_app/app/modules/workspace_support/
 
 | Action | Purpose |
 | --- | --- |
-| `create_thread` | Create a `group`, `direct`, or `support` thread. |
-| `list_threads` | List threads for the current participant. |
-| `get_thread` | Fetch a thread and messages. |
-| `send_message` | Persist a message and emit recipient notification facts. |
-| `mark_thread_read` | Store read state for the current user. |
+| `create_thread` | Create a `group` or `direct` thread. |
+| `list_threads` | List direct and group threads for the current participant. |
+| `get_thread` | Fetch a direct or group thread and its messages. |
+| `send_message` | Persist a direct or group message and emit recipient notification facts. |
+| `mark_thread_read` | Store read state for a direct or group thread. |
 
 Message threads carry:
 
@@ -50,6 +50,11 @@ is submitted. Operator replies call `MessageService.send_message()` with the
 ticket owner as the recipient. The support module still emits
 `domain.workspace_support.message_added` for audit and support-specific
 automation, but user notification is owned by `domain.messages.message_sent`.
+The public Studio `messages` actions exclude threads linked to
+`workspace_support.request`, including older app-scoped threads. The support
+module reads and writes those conversations only after the request lookup is
+scoped to the verified persistence workspace. Requests without verified
+ownership remain inaccessible; old `workspace_id` metadata is not proof.
 
 Generated apps selecting the `support` pack also select `messaging`. Their
 `support.create_support_request` action creates the ticket's messages thread
@@ -171,7 +176,10 @@ provider-specific chat stores.
   pack. They can reference `messages` for deliberation threads, but they should
   not be generated as default social or support behavior.
 
-Support is app-scoped. Social graph and DMs are not automatically app-scoped:
+Generated support conversations are app-scoped. Studio support requests are
+owned by the verified persistence workspace, while their linked thread records
+may retain app scope and are accessible only through the request action.
+Social graph and DMs are not automatically app-scoped:
 apps that need workspace-level social behavior should use `scope_type=workspace`
 for message threads and keep social graph ownership in the `social` pack.
 
