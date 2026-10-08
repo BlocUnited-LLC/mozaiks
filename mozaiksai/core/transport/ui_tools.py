@@ -383,6 +383,55 @@ class UIToolsMixin:
         chat_id = next(iter(chat_ids))
         return chat_id if isinstance(chat_id, str) and chat_id else None
 
+    async def acknowledge_workflow_feedback_render_for_user(
+        self, event_id: str, *, principal: UserPrincipal,
+    ) -> bool:
+        """Record a client's visible-render report without answering the tool."""
+        if not isinstance(event_id, str) or not event_id or not isinstance(principal, UserPrincipal):
+            return False
+        metadata = self._ui_tool_metadata.get(event_id) or {}
+        if metadata.get("workflow_primitive") != "outcome_feedback":
+            return False
+        chat_id = self._tool_call_chat_id(event_id)
+        if not chat_id or metadata.get("chat_id") != chat_id:
+            return False
+        try:
+            pm = self._get_or_create_persistence_manager()
+            collection = await pm._coll()
+            session = await collection.find_one(
+                {"_id": chat_id}, {"user_id": 1, "app_id": 1},
+            )
+        except Exception as exc:
+            logger.warning("[UI_TOOL] Feedback render ownership lookup failed: %s", type(exc).__name__)
+            return False
+        if not session or not session.get("user_id") or not session.get("app_id"):
+            return False
+        if not verify_user_owns_resource(principal.user_id, session["user_id"]):
+            if not is_shared_development_identity(principal):
+                return False
+        if not principal.validate_app_id(session["app_id"]) or not principal.validate_chat_id(chat_id):
+            return False
+        if self._tool_call_chat_id(event_id) != chat_id or self._ui_tool_metadata.get(event_id) != metadata:
+            return False
+        from pydantic import ValidationError
+
+        from mozaiksai.core.workflow.outcome_feedback import WorkflowFeedbackRenderReceipt
+
+        try:
+            receipt = WorkflowFeedbackRenderReceipt(
+                app_id=session["app_id"], chat_id=chat_id, user_id=session["user_id"],
+                workflow_name=metadata.get("workflow_name"),
+                agent_name=metadata.get("feedback_agent_name"),
+                outcome_id=metadata.get("outcome_id"), ui_event_id=event_id,
+                observed_at=datetime.now(UTC).isoformat(),
+            )
+            return await pm.save_workflow_feedback_render_receipt(receipt.model_dump(mode="json"))
+        except ValidationError:
+            return False
+        except Exception as exc:
+            logger.warning("[UI_TOOL] Feedback render receipt not persisted: %s", type(exc).__name__)
+            return False
+
     async def submit_tool_call_response_for_user(
         self,
         event_id: str,

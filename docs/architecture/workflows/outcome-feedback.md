@@ -41,6 +41,19 @@ metadata. Save failure leaves the interaction pending. Internal responses that
 bypass the owner-checked entry point cannot create a human-feedback receipt.
 An accepted retry retains the original response and observation timestamp.
 
+The shipped browser component separately reports that an invitation was visible after at
+least half of its prompt heading intersects the viewport in a visible document. The
+`/api/workflow-feedback/rendered` endpoint accepts only the UI event ID. It
+checks the authenticated session owner and the server's pending
+`outcome_feedback` event, then stores one immutable
+`mozaiks.workflow_feedback_render.v1` receipt in
+`ChatSessions.workflow_ui_state.feedback_render_receipts`. Client fields cannot
+choose app, chat, user, workflow, producer agent, or outcome attribution. A
+retry preserves the first server observation time. Storage or authorization
+failure leaves no render receipt and never answers the tool. The transport can
+offer an invitation that is buffered, dropped, offscreen, or rendered in a
+hidden tab; none of those offers becomes a render receipt.
+
 The resolver is an internal runtime primitive, not an authorization boundary for
 arbitrary browser fields. The consuming module must require workflow authority
 and `workflow_tool` provenance, derive app/user from `ModuleContext` and chat
@@ -103,9 +116,23 @@ Generated apps do not inherit a host operator's private analytics receiver.
 Human feedback describes the respondent's experience. It does not prove task
 correctness, runtime reliability, commercial success, or future performance.
 Report rating count, helpfulness count, and outcome count separately. Report
-eligible outcomes and invitations alongside answers, and treat skipped and
+eligible outcomes and invitations alongside answers when those cohorts are
+measured, and treat skipped and
 unanswered invitations as missing feedback. Simulated personas, model judges,
 test fixtures, and operator reviews must never enter the human-feedback series.
+
+These are different facts: an eligible outcome can cause a server offer; a
+visible browser can report rendering; a user may submit, skip, or leave
+the invitation unanswered. A render receipt is an authenticated client report
+of visibility, not proof that a person read the prompt. Old clients, offline
+acknowledgements, and process loss can undercount rendered prompts; a response
+may therefore exist without a render receipt. The framework does not yet
+persist a complete eligible-outcome or offered-invitation series, nor copy
+unanswered invitations into app-owned records. Do not publish an invitation
+rate, response rate, or investor-facing satisfaction measure from these receipts
+alone. A consuming app must instrument the full eligible/offered/rendered/
+responded/skipped cohort, exclude local development and synthetic traffic, and
+verify missing-ack coverage before calculating a rate.
 
 The generic framework telemetry emitter continues to exclude satisfaction and
 production outcome data. AG2 owns execution and semantic evaluation primitives;
@@ -124,7 +151,7 @@ attribution.
 ## Verification
 
 Focused tests cover strict answers, forged attribution, owner checks,
-persistence failure, replay, cross-manager receipt resolution, generated tool
+persistence failure, replay, scoped visible-render acknowledgements, cross-manager receipt resolution, generated tool
 validation, and app storage. An opt-in real Mongo test verifies authenticated
 HTTP submission through generated module persistence, concurrent deduplication,
 and foreign-owner rejection. The generated fixture uses production assembly and

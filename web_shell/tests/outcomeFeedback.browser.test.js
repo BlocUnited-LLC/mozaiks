@@ -83,3 +83,78 @@ test('human feedback awaits authenticated acceptance, retries failures, and perm
   assert.deepEqual(await page.evaluate(() => window.fixture.requests.at(-1).body.response_data), {status: 'skipped'});
   assert.deepEqual(errors, []);
 });
+
+test('feedback acknowledges visibility after mount, not a buffered or offscreen offer', async (t) => {
+  const entry = `
+    import React from 'react'; import {createRoot} from 'react-dom/client';
+    import OutcomeFeedback from ${JSON.stringify(path.resolve(shell, '../chat-ui/src/core/ui/OutcomeFeedback.js'))};
+    window.acks = [];
+    window.fetch = async (url, options) => {
+      window.acks.push({url, headers: options.headers, body: JSON.parse(options.body)});
+      return Response.json({status: 'success'});
+    };
+    const root = createRoot(document.getElementById('root'));
+    window.mount = (key, eventId) => root.render(
+      <div style={{marginTop: '1400px'}}>
+        <OutcomeFeedback key={key} toolCallId={eventId} onResponse={async () => true} />
+      </div>
+    );
+    window.mount('first', 'server-event');
+  `;
+  const bundle = await build({
+    stdin: { contents: entry, resolveDir: shell, loader: 'jsx' }, bundle: true, write: false,
+    jsx: 'automatic', loader: { '.js': 'jsx', '.png': 'dataurl' }, nodePaths: [path.join(shell, 'node_modules')],
+    alias: { react: path.join(shell, 'node_modules/react'), 'react-dom': path.join(shell, 'node_modules/react-dom') },
+    define: { 'process.env.NODE_ENV': '"test"' },
+    plugins: [{
+      name: 'authenticated-shell-context',
+      setup(buildContext) {
+        buildContext.onResolve({ filter: /ChatUIContext\.jsx$/ }, () => ({
+          path: 'feedback-test-context', namespace: 'feedback-test-context',
+        }));
+        buildContext.onLoad({ filter: /.*/, namespace: 'feedback-test-context' }, () => ({
+          contents: 'export const useOptionalChatUI = () => ({api: {getHttpBaseUrl: () => ""}, auth: {getAccessToken: () => "signed-user-token"}});',
+          loader: 'js',
+        }));
+      },
+    }],
+  });
+  const server = http.createServer((req, res) => {
+    const script = req.url === '/fixture.js';
+    res.setHeader('Content-Type', script ? 'text/javascript' : 'text/html');
+    res.end(script ? bundle.outputFiles[0].text : '<html><body><div id="root"></div><script src="/fixture.js"></script></body></html>');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 390, height: 600 } });
+  await page.addInitScript(() => {
+    window.feedbackHidden = true;
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true, get: () => window.feedbackHidden ? 'hidden' : 'visible',
+    });
+  });
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto(`http://127.0.0.1:${server.address().port}`);
+  await page.addStyleTag({ content: 'section { min-height: 1600px; }' });
+  await page.getByText('How was this result?').waitFor({ state: 'attached' });
+  assert.ok(await page.locator('section').evaluate((element) => element.getBoundingClientRect().height > window.innerHeight));
+  assert.deepEqual(await page.evaluate(() => window.acks), []);
+  await page.getByText('How was this result?').scrollIntoViewIfNeeded();
+  assert.deepEqual(await page.evaluate(() => window.acks), []);
+  await page.evaluate(() => {
+    window.feedbackHidden = false;
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await page.waitForFunction(() => window.acks.length === 1);
+  assert.deepEqual(await page.evaluate(() => window.acks), [{
+    url: '/api/workflow-feedback/rendered',
+    headers: {'Content-Type': 'application/json', Authorization: 'Bearer signed-user-token'},
+    body: {event_id: 'server-event'},
+  }]);
+  await page.evaluate(() => window.mount('first', 'server-event'));
+  assert.equal(await page.evaluate(() => window.acks.length), 1);
+  assert.deepEqual(errors, []);
+});

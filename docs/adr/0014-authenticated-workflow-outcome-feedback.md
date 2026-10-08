@@ -35,6 +35,12 @@ of copied records. Optional ratings and missing responses remain distinct.
 General telemetry excludes these answers. No feedback engine, simulation
 runner, cross-app analysis, investment policy, or commercial scoring is added.
 
+The follow-on render acknowledgement records an authenticated, server-attributed
+client visibility report separately from the response. The transport's offer
+is not an impression. This primitive alone does not establish eligible
+invitations or a response-rate denominator; consumer instrumentation and
+coverage validation are required before such a rate can be reported.
+
 ## Reversibility
 
 Medium risk: receipt fields and generated code adopt a versioned public
