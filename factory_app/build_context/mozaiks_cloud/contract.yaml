@@ -124,10 +124,11 @@ runtime_boundaries:
       Generated code contains only environment variable names
       (MOZAIKS_CLOUD_API_KEY, MOZAIKS_CLOUD_USAGE_API_KEY,
       MOZAIKS_CLOUD_API_BASE). The optional usage key is read only by the
-      usage-report client; operators supply it at runtime when reporting is
-      enabled, rather than declaring it in the pack's deployment manifest.
-      Credential values are resolved at runtime through ConnectorStore or env fallback.
-      No API key values appear in generated source.
+      usage-report client and requires an explicit MOZAIKS_CLOUD_API_BASE;
+      operators supply both at runtime when reporting is enabled, rather
+      than declaring the usage key in the pack's deployment manifest.
+      The general credential resolves at runtime through ConnectorStore or
+      the environment. No API key values appear in generated source.
   - id: no_provision_on_import
     rule: >
       Importing or constructing any MozaiksCloud sub-client must not provision,
