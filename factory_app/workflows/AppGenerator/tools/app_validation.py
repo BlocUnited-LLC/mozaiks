@@ -2106,6 +2106,70 @@ def _assembly_failure(context_variables: Any | None, *, prepare_recovery: bool =
     return result
 
 
+async def run_authored_app_source_acceptance_gate(
+    *,
+    files: dict[str, str],
+    inherited_ui_root: Path,
+    runtime_binary_assets: dict[str, bytes] | None = None,
+) -> dict[str, Any]:
+    """Validate an imported app root under an explicit authored-source contract.
+
+    The source is parsed here but executed only by the contained runtime smoke.
+    This contract does not claim generated-output policy, workspace-root
+    workflows, provider readiness, or deployed behavior.
+    """
+    from mozaiksai.core.validation.workspace import (
+        registered_ui_components,
+        validate_authored_app_file_map,
+    )
+
+    binary_assets = runtime_binary_assets or {}
+    if not files or not isinstance(files.get("app.json"), str) or set(files) & set(binary_assets):
+        raise ValueError("Authored app root is missing app.json or has overlapping source paths")
+    inherited = registered_ui_components(inherited_ui_root)
+    diagnostics = validate_authored_app_file_map(files, inherited_components=inherited)
+    errors = [item for item in diagnostics if item.severity == "error"]
+    source_digests = {
+        path: hashlib.sha256(content.encode("utf-8") if isinstance(content, str) else content).hexdigest()
+        for path, content in {**files, **binary_assets}.items()
+    }
+    snapshot_digest = hashlib.sha256(json.dumps(
+        source_digests, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+    inherited_ui_registry_sha256 = hashlib.sha256(json.dumps(
+        sorted(inherited), separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+    static_check = {
+        "id": "authored_app_contracts", "passed": not errors,
+        "diagnostics": [
+            {"code": item.code, "path": item.path, "message": item.message, "severity": item.severity}
+            for item in diagnostics
+        ],
+    }
+    result: dict[str, Any] = {
+        "validation_contract": "authored_app_root_acceptance_v1",
+        "validation_scope": "app_root_only",
+        "inherited_ui_registry_sha256": inherited_ui_registry_sha256,
+        "snapshot_digest": snapshot_digest,
+        "checks": [static_check],
+    }
+    if errors:
+        return {**result, "status": "failed", "passed": False}
+
+    smoke = await _app_runtime_smoke_result(
+        files, binary_assets=binary_assets, contained_imported_source=True,
+    )
+    runtime_load = _runtime_load_from_observer_smoke(smoke)
+    result["app_runtime_load"] = runtime_load
+    result["app_runtime_smoke"] = smoke
+    result["checks"].extend([
+        {"id": "app_runtime_load", "passed": runtime_load.get("passed") is True},
+        {"id": "app_runtime_smoke", "passed": smoke.get("passed") is True},
+    ])
+    passed = all(check["passed"] for check in result["checks"])
+    return {**result, "status": "passed" if passed else "failed", "passed": passed}
+
+
 async def run_app_bundle_acceptance_gate(
     *,
     files: dict[str, str] | None = None,

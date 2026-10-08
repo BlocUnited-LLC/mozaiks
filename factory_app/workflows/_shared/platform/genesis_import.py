@@ -94,9 +94,12 @@ def _canonical_digest(value: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-_REQUIRED_RUNTIME_CHECKS = frozenset({"app_runtime_load", "app_runtime_smoke"})
+_REQUIRED_GENESIS_CHECKS = frozenset({
+    "authored_app_contracts", "app_runtime_load", "app_runtime_smoke",
+})
 _GENESIS_EVIDENCE_FIELDS = frozenset({
-    "contract", "bundle_sha256", "manifest_sha256", "source_content_sha256",
+    "contract", "validation_scope", "inherited_ui_registry_sha256",
+    "bundle_sha256", "manifest_sha256", "source_content_sha256",
     "validator_image_id", "snapshot_digest", "passed_checks", "observer_origin",
     "observer_run_id", "observed_boot", "observer_unverified_checks", "sha256",
 })
@@ -115,8 +118,8 @@ def _passed_gate_checks(result: dict[str, Any]) -> list[str]:
     ):
         raise GenesisImportError("imported Genesis acceptance gate has incomplete passed checks")
     names = [check["id"] for check in checks]
-    if len(names) != len(set(names)) or not _REQUIRED_RUNTIME_CHECKS.issubset(names):
-        raise GenesisImportError("imported Genesis acceptance gate lacks required runtime checks")
+    if len(names) != len(set(names)) or set(names) != _REQUIRED_GENESIS_CHECKS:
+        raise GenesisImportError("imported Genesis acceptance gate lacks required authored-source checks")
     return names
 
 
@@ -156,7 +159,9 @@ def _validation_matches_claim(validation: Any, *, claim: GenesisImportClaim) -> 
         return False
     checks = validation.get("passed_checks")
     if (
-        validation.get("contract") != "app_bundle_acceptance_gate_v1"
+        validation.get("contract") != "authored_app_root_acceptance_v1"
+        or validation.get("validation_scope") != "app_root_only"
+        or not _is_sha256(validation.get("inherited_ui_registry_sha256"))
         or validation.get("bundle_sha256") != claim.bundle_sha256
         or validation.get("manifest_sha256") != claim.manifest_sha256
         or not _is_sha256(validation.get("source_content_sha256"))
@@ -166,7 +171,7 @@ def _validation_matches_claim(validation: Any, *, claim: GenesisImportClaim) -> 
         or not isinstance(checks, list) or not checks
         or any(not isinstance(check, str) or not check for check in checks)
         or len(checks) != len(set(checks))
-        or not _REQUIRED_RUNTIME_CHECKS.issubset(checks)
+        or set(checks) != _REQUIRED_GENESIS_CHECKS
         or validation.get("observer_origin") != "trusted_external_probe_v1"
         or not isinstance(validation.get("observer_run_id"), str)
         or re.fullmatch(r"[0-9a-f]{32}", validation["observer_run_id"]) is None
@@ -316,21 +321,29 @@ async def _validate_imported_source(
     files: dict[str, str | bytes], *, claim: GenesisImportClaim,
     source_content_sha256: str, pinned_image_id: str,
 ) -> dict[str, Any]:
+    import factory_app
     from factory_app.workflows.AppGenerator.tools.app_validation import (
-        run_app_bundle_acceptance_gate,
+        run_authored_app_source_acceptance_gate,
     )
 
-    result = await run_app_bundle_acceptance_gate(
+    result = await run_authored_app_source_acceptance_gate(
         files={path: content for path, content in files.items() if isinstance(content, str)},
-        contained_imported_source=True,
+        inherited_ui_root=Path(factory_app.__file__).resolve().parent / "app",
         runtime_binary_assets={path: content for path, content in files.items() if isinstance(content, bytes)},
     )
-    if result.get("status") != "passed" or result.get("passed") is not True:
-        raise GenesisImportError("imported Genesis source failed canonical app-bundle runtime validation")
+    if (
+        result.get("validation_contract") != "authored_app_root_acceptance_v1"
+        or result.get("validation_scope") != "app_root_only"
+        or result.get("status") != "passed" or result.get("passed") is not True
+    ):
+        raise GenesisImportError("imported Genesis source failed authored app-root validation")
     smoke = result.get("app_runtime_smoke")
     snapshot_digest = result.get("snapshot_digest")
-    if not _is_sha256(snapshot_digest):
-        raise GenesisImportError("imported Genesis acceptance gate lacks a valid snapshot digest")
+    if snapshot_digest != source_content_sha256:
+        raise GenesisImportError("imported Genesis validation covers different source bytes")
+    inherited_ui_registry_sha256 = result.get("inherited_ui_registry_sha256")
+    if not _is_sha256(inherited_ui_registry_sha256):
+        raise GenesisImportError("imported Genesis validation lacks inherited UI registry identity")
     passed_checks = _passed_gate_checks(result)
     if not isinstance(smoke, dict):
         raise GenesisImportError("imported Genesis runtime smoke lacks trusted observer boot evidence")
@@ -344,7 +357,9 @@ async def _validate_imported_source(
     ):
         raise GenesisImportError("imported Genesis runtime evidence lacks the verified source or validator identity")
     evidence = {
-        "contract": "app_bundle_acceptance_gate_v1",
+        "contract": "authored_app_root_acceptance_v1",
+        "validation_scope": "app_root_only",
+        "inherited_ui_registry_sha256": inherited_ui_registry_sha256,
         "bundle_sha256": claim.bundle_sha256,
         "manifest_sha256": claim.manifest_sha256,
         "source_content_sha256": source_content_sha256,
