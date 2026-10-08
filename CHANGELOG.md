@@ -102,6 +102,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
+- Android source export and delivery verification now reject literal values
+  under credential objects even when nested payload fields use unfamiliar names.
+  Descriptive metadata and names-only references remain exportable.
+
 - Repository Docker coding turns now require a trusted local image ID, reject
   changed image tags before source transfer, verify the created container's
   image, and reject unrecognized baked environment keys.

@@ -43,6 +43,11 @@ _UNQUOTED_CONFIG = {".ini", ".conf", ".cfg", ".toml", ".properties", ".txt"}
 _PNG_TEXT_LIMIT = 1024 * 1024
 _PNG_TOTAL_TEXT_LIMIT = 2 * _PNG_TEXT_LIMIT
 _CREDENTIAL_VALUE_FIELDS = frozenset({"value", "default", "default_value", "secret_value", "data", "content"})
+_PUBLIC_CREDENTIAL_METADATA_FIELDS = frozenset({
+    "description", "title", "label", "help", "type", "format", "required", "optional",
+    "name", "env", "env_name", "secret_name", "secret_ref", "ref",
+})
+_PUBLIC_CREDENTIAL_LIST_CONTAINERS = frozenset({"metadata"})
 
 
 def _normalized_key(value: str) -> str:
@@ -78,8 +83,8 @@ def _literal_secret(value: object) -> bool:
 
 
 def _structured_credentials(
-    value: object, *, credential: bool = False, value_payload: bool = False,
-    ancestors: frozenset[int] = frozenset(), visited: set[tuple[int, bool, bool]] | None = None,
+    value: object, *, credential: bool = False, value_payload: bool = False, list_payload: bool = False,
+    ancestors: frozenset[int] = frozenset(), visited: set[tuple[int, bool, bool, bool]] | None = None,
 ) -> bool:
     if not isinstance(value, (dict, list)):
         return (isinstance(value, str) and _uri_query_credentials(value)) or (
@@ -89,7 +94,7 @@ def _structured_credentials(
         raise ValueError("Recursive configuration is not supported in Android delivery")
     if visited is None:
         visited = set()
-    identity = (id(value), credential, value_payload)
+    identity = (id(value), credential, value_payload, list_payload)
     if identity in visited:
         return False
     visited.add(identity)
@@ -97,7 +102,9 @@ def _structured_credentials(
     if isinstance(value, list):
         return any(
             _structured_credentials(
-                item, credential=credential, value_payload=value_payload,
+                item, credential=credential,
+                value_payload=value_payload or (list_payload and not isinstance(item, (dict, list))),
+                list_payload=list_payload if isinstance(item, list) else False,
                 ancestors=ancestors, visited=visited,
             )
             for item in value
@@ -105,13 +112,16 @@ def _structured_credentials(
     for key, item in value.items():
         normalized = _normalized_key(str(key))
         key_is_credential = _credential_key(str(key))
-        # Keep credential context through arbitrary containers; scalar values
-        # become sensitive only at a credential key or a finite value field.
+        # Keep credential context through arbitrary containers. Only declared
+        # descriptive fields and names-only references are public beneath it;
+        # an unknown scalar label is not evidence that its value is harmless.
         sensitive = value_payload or (credential and normalized in _CREDENTIAL_VALUE_FIELDS) or (
-            key_is_credential and not isinstance(item, dict)
+            (credential and normalized not in _PUBLIC_CREDENTIAL_METADATA_FIELDS or key_is_credential)
+            and not isinstance(item, (dict, list))
         )
         if _structured_credentials(
             item, credential=credential or key_is_credential, value_payload=sensitive,
+            list_payload=(credential or key_is_credential) and normalized not in _PUBLIC_CREDENTIAL_LIST_CONTAINERS,
             ancestors=ancestors, visited=visited,
         ):
             return True
