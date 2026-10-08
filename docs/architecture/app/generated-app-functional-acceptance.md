@@ -233,18 +233,28 @@ files. This is a separate opt-in backend; ordinary generated-app acceptance
 continues to use the child-process smoke described above.
 
 The imported backend copies up to 4,096 regular files and 64 MB into a private
-temporary directory, rejecting links and special files. It mounts only that
-copy read-only into the local `mozaiks-sandbox:local` preview image. Docker
-registers the container before starting it so cancellation can remove its
-known name even during startup. The container uses `--network=none`, a read-only root, a non-root user, dropped capabilities,
-no new privileges, and CPU, memory, process, temporary storage and time limits.
-MongoDB starts inside that same disposable container on loopback. No host Mongo
-URI, application credential, provider key, source repository, Docker socket or
-host workspace is mounted or passed to imported code. The container is forcibly
-removed and its absence checked even after timeout or cancellation. A failed
-teardown is a failed acceptance check. Docker does not persist container logs;
-the parent retains at most 4 MB of result output and 256 KB of error output,
-and exceeding either bound fails acceptance.
+temporary directory, rejecting links and special files. It runs two disposable
+containers from the same pinned local image. Container A mounts the verified app
+copy read-only, starts MongoDB and the app on its isolated loopback interface,
+and has `--network=none`. Container B joins only A's network namespace. B mounts
+only a read-only projection of `app.json`, the data/auth/subscriptions contracts,
+and module manifests. It has no app Python, source repository, Docker socket, or
+shared writable mount, and uses its own process and mount namespaces. Both
+containers use a read-only root, a non-root user, dropped capabilities, no new
+privileges, and CPU, memory, process, temporary storage and time limits.
+
+The image-owned observer in B probes A over loopback HTTP and inspects the
+disposable MongoDB directly. It runs the two-user CRUD and entitlement checks
+from the declarative contracts. A's stdout is diagnostic only; the host parses
+result events only from B, validates a per-run nonce and one HTTP boot/completion
+receipt, and sets `observer_origin: trusted_external_probe_v1`, `observer_run_id`,
+and `observed_boot` only on a passing result. The host retains the verified
+source-content digest and exact validator image ID. Docker registers both names
+before starting each container so cancellation can remove them. Both are forcibly
+removed and their absence checked after success, failure, timeout, or cancellation.
+A failed teardown or bounded-output violation fails acceptance. No host Mongo URI,
+credential, provider key, source repository, Docker socket, or host workspace is
+mounted or passed to either container.
 
 The preview image must be rebuilt after changing this smoke module:
 `docker build -f infra/docker/Dockerfile.preview -t mozaiks-sandbox:local .`.
@@ -258,10 +268,11 @@ the Genesis acceptance evidence.
 Docker or image unavailability yields a skipped, blocking acceptance result.
 The image is never pulled automatically during this gate. Docker Engine and the
 trusted preview image are local prerequisites; no paid service is required.
-The container boundary protects the host, but arbitrary app Python can still
-interfere with checks inside its own interpreter. Treat this runtime smoke as
-functional evidence, and retain exact-source review and independent promotion
-approval for adversarial code.
+The observer separates the evidence channel from imported app Python, including
+its stdout file descriptor and interpreter monkeypatches. A finite black-box
+test cannot prove every future behavior of adversarial code: an app can still
+choose behavior based on incoming requests. Retain exact-source review and
+independent promotion approval for adversarial code.
 
 **Results.** Each check passes, fails or did not run, with one message naming
 the action, the user, the expected response and the actual one. A 5xx carries

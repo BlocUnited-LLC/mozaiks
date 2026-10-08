@@ -33,10 +33,12 @@ failed check.
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import json
 import logging
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -47,11 +49,13 @@ import traceback
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
+from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
 
 from anyio import CancelScope
 from fastapi import FastAPI, Request
+from httpx import TimeoutException
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +65,7 @@ _CHILD_MODULE = "factory_app.workflows.AppGenerator.tools.app_runtime_smoke"
 _EVENT_PREFIX = "@@mozaiks-runtime-smoke@@ "
 _SMOKE_DATABASE_PREFIX = "mozaiks_runtime_smoke_"
 _CONTAINED_APP_ROOT = PurePosixPath("/workspace/app")
+_CONTAINED_PLAN_ROOT = PurePosixPath("/workspace/plan")
 _CONTAINED_IMAGE = "mozaiks-sandbox:local"
 _MAX_IMPORTED_SOURCE_BYTES = 64_000_000
 _MAX_IMPORTED_SOURCE_FILES = 4096
@@ -127,6 +132,7 @@ class _ChildRun:
     cleanup_failed: bool = False
     output_truncated: bool = False
     contained: bool = False
+    app_exited: bool = False
 
 
 class _ChildProcess:
@@ -263,6 +269,23 @@ def _copy_imported_app(
         raise ValueError("imported app has no app.json")
 
 
+def _copy_probe_plan(staged_root: Path, plan_root: Path) -> None:
+    """Give the observer declarative contracts only; app Python stays in the other container."""
+    paths = [Path("app.json"), Path("data/contract.json"), Path("config/auth.yaml"),
+             Path("config/subscriptions.yaml")]
+    modules_root = staged_root / "modules"
+    if modules_root.is_dir():
+        paths.extend(Path("modules") / module.name / "module.yaml"
+                     for module in modules_root.iterdir() if module.is_dir())
+    plan_root.mkdir()
+    for relative in paths:
+        source = staged_root / relative
+        if source.is_file():
+            target = plan_root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, target)
+
+
 def _container_removed(name: str) -> bool:
     """Force removal and verify that Docker no longer knows the container."""
     try:
@@ -277,17 +300,21 @@ def _container_removed(name: str) -> bool:
 
 
 class _ContainedDockerProcess:
-    """Register a container before start so cancellation can remove its exact name."""
+    """Run untrusted app and image-owned observer in separate container processes."""
 
     def __init__(self) -> None:
         self.name = f"mozaiks-imported-smoke-{uuid4().hex[:20]}"
-        self.process: subprocess.Popen[bytes] | None = None
+        self.probe_name = f"{self.name}-observer"
+        self.app_process: subprocess.Popen[bytes] | None = None
+        self.probe_process: subprocess.Popen[bytes] | None = None
         self.cancelled = False
         self.run_started = threading.Event()
         self.registration_done = threading.Event()
 
-    def run(self, app_root: Path, image: str, timeout_seconds: float) -> _ChildRun:
-        command = [
+    def run(self, app_root: Path, plan_root: Path, image: str, timeout_seconds: float,
+            observer_nonce: str) -> _ChildRun:
+        database_name = f"{_SMOKE_DATABASE_PREFIX}{observer_nonce[:20]}"
+        app_command = [
             "docker", "create", "--log-driver=none", "--name", self.name,
             "--network=none", "--read-only", "--init", "--cap-drop=ALL",
             "--security-opt=no-new-privileges", "--pids-limit=128",
@@ -298,17 +325,30 @@ class _ContainedDockerProcess:
             f"--mount=type=bind,source={app_root},target={_CONTAINED_APP_ROOT},readonly",
             "--env=PYTHON_DOTENV_DISABLED=1", "--env=PYTHONDONTWRITEBYTECODE=1",
             "--env=PYTHONUNBUFFERED=1", "--env=MONGO_URI=",
-            image, "python", "-m", _CHILD_MODULE, "--contained",
+            image, "python", "-m", _CHILD_MODULE, "--contained-serve", database_name, observer_nonce,
+        ]
+        probe_command = [
+            "docker", "create", "--log-driver=none", "--name", self.probe_name,
+            f"--network=container:{self.name}", "--read-only", "--init", "--cap-drop=ALL",
+            "--security-opt=no-new-privileges", "--pids-limit=128",
+            "--memory=1g", "--memory-swap=1g", "--cpus=1",
+            "--user=10001:10001",
+            "--tmpfs=/tmp:rw,nosuid,nodev,size=64m",
+            "--tmpfs=/workspace/logs:rw,nosuid,nodev,size=16m",
+            f"--mount=type=bind,source={plan_root},target={_CONTAINED_PLAN_ROOT},readonly",
+            "--env=PYTHON_DOTENV_DISABLED=1", "--env=PYTHONDONTWRITEBYTECODE=1",
+            "--env=PYTHONUNBUFFERED=1", "--env=MONGO_URI=",
+            image, "python", "-m", _CHILD_MODULE, "--trusted-probe", database_name, observer_nonce,
         ]
         timed_out = False
-        output = [bytearray(), bytearray()]
-        truncated = [False, False]
+        output = [bytearray() for _ in range(4)]
+        truncated = [False] * 4
         returncode: int | None = None
         creation_error = ""
+        readers: list[threading.Thread] = []
 
-        def drain(index: int, limit: int) -> None:
-            assert self.process is not None
-            stream = self.process.stdout if index == 0 else self.process.stderr
+        def drain(process: subprocess.Popen[bytes], index: int, limit: int) -> None:
+            stream = process.stdout if index % 2 == 0 else process.stderr
             assert stream is not None
             try:
                 while chunk := os.read(stream.fileno(), 8192):
@@ -319,63 +359,98 @@ class _ContainedDockerProcess:
             except OSError:
                 truncated[index] = True
 
+        def attach(process: subprocess.Popen[bytes], stdout_index: int) -> None:
+            for index, limit in ((stdout_index, _CONTAINER_STDOUT_LIMIT_BYTES),
+                                 (stdout_index + 1, _CONTAINER_STDERR_LIMIT_BYTES)):
+                reader = threading.Thread(target=drain, args=(process, index, limit), daemon=True)
+                reader.start()
+                readers.append(reader)
+
+        def register(command: list[str]) -> bool:
+            nonlocal creation_error
+            try:
+                created = subprocess.run(
+                    command, stdin=subprocess.DEVNULL, capture_output=True,
+                    timeout=_CONTAINER_STARTUP_SECONDS, check=False,
+                )
+                if created.returncode == 0:
+                    return True
+                creation_error = "Docker could not register the contained smoke"
+            except (OSError, subprocess.TimeoutExpired):
+                creation_error = "Docker container registration did not complete"
+            return False
+
         self.run_started.set()
         if self.cancelled:
             self.registration_done.set()
             return _ChildRun("", "contained smoke was cancelled before registration", None, False, contained=True)
         try:
-            created = subprocess.run(
-                command, stdin=subprocess.DEVNULL, capture_output=True,
-                timeout=_CONTAINER_STARTUP_SECONDS, check=False,
-            )
-            if created.returncode != 0:
-                creation_error = "Docker could not register the contained smoke"
-        except (OSError, subprocess.TimeoutExpired):
-            creation_error = "Docker container registration did not complete"
-        finally:
-            self.registration_done.set()
-        try:
-            if not creation_error and not self.cancelled:
-                self.process = subprocess.Popen(
+            if register(app_command) and not self.cancelled:
+                self.app_process = subprocess.Popen(
                     ["docker", "start", "--attach", self.name],
                     stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 )
-                stdout_reader = threading.Thread(target=drain, args=(0, _CONTAINER_STDOUT_LIMIT_BYTES), daemon=True)
-                stderr_reader = threading.Thread(target=drain, args=(1, _CONTAINER_STDERR_LIMIT_BYTES), daemon=True)
-                stdout_reader.start()
-                stderr_reader.start()
-                if self.cancelled:
-                    self.process.kill()
+                attach(self.app_process, 0)
+                # Docker needs the app container running before a second container
+                # can join its isolated loopback namespace.
+                deadline = time.monotonic() + _CONTAINER_STARTUP_SECONDS
+                while time.monotonic() < deadline and not self.cancelled:
+                    inspected = subprocess.run(
+                        ["docker", "inspect", "--format", "{{.State.Running}}", self.name],
+                        capture_output=True, text=True, timeout=5, check=False,
+                    )
+                    if inspected.returncode == 0 and inspected.stdout.strip() == "true":
+                        break
+                    if self.app_process.poll() is not None:
+                        break
+                    time.sleep(0.1)
+                else:
+                    creation_error = "Contained app did not start"
+                if not creation_error and not self.cancelled and register(probe_command):
+                    self.probe_process = subprocess.Popen(
+                        ["docker", "start", "--attach", self.probe_name],
+                        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    )
+                    attach(self.probe_process, 2)
+            self.registration_done.set()
+            if self.probe_process is not None:
                 try:
-                    self.process.wait(timeout=timeout_seconds + _CONTAINER_STARTUP_SECONDS)
-                    returncode = self.process.returncode
+                    self.probe_process.wait(timeout=timeout_seconds)
+                    returncode = self.probe_process.returncode
                 except subprocess.TimeoutExpired:
                     timed_out = True
-                    self.process.kill()
-                    self.process.wait(timeout=5)
-                stdout_reader.join(timeout=5)
-                stderr_reader.join(timeout=5)
-                if stdout_reader.is_alive() or stderr_reader.is_alive():
-                    truncated[0] = True
+                    self.probe_process.kill()
+                    self.probe_process.wait(timeout=5)
         finally:
-            cleanup_failed = not _container_removed(self.name)
+            self.registration_done.set()
+            app_exited = self.app_process is not None and self.app_process.poll() is not None
+            cleanup_failed = not _container_removed(self.probe_name)
+            cleanup_failed = not _container_removed(self.name) or cleanup_failed
+            for reader in readers:
+                reader.join(timeout=5)
+            if any(reader.is_alive() for reader in readers):
+                truncated[2] = True
         return _ChildRun(
-            output[0].decode("utf-8", errors="replace"),
-            creation_error or output[1].decode("utf-8", errors="replace"),
-            returncode, timed_out, cleanup_failed=cleanup_failed, output_truncated=any(truncated), contained=True,
+            output[2].decode("utf-8", errors="replace"),
+            creation_error or output[3].decode("utf-8", errors="replace")
+            or output[1].decode("utf-8", errors="replace"),
+            returncode, timed_out, cleanup_failed=cleanup_failed,
+            output_truncated=any(truncated), contained=True, app_exited=app_exited,
         )
 
     def kill(self) -> None:
         self.cancelled = True
         if not self.run_started.is_set():
             return
-        if not self.registration_done.wait(timeout=_CONTAINER_STARTUP_SECONDS + 5):
+        if not self.registration_done.wait(timeout=2 * _CONTAINER_STARTUP_SECONDS + 5):
             raise RuntimeError("Docker container registration could not be confirmed during cancellation")
         try:
-            if self.process is not None and self.process.poll() is None:
-                self.process.kill()
-                self.process.wait(timeout=5)
+            for process in (self.probe_process, self.app_process):
+                if process is not None and process.poll() is None:
+                    process.kill()
+                    process.wait(timeout=5)
         finally:
+            _container_removed(self.probe_name)
             _container_removed(self.name)
 
 
@@ -408,16 +483,20 @@ async def run_contained_imported_app_runtime_smoke(
         return _contained_unavailable("contained Docker image is unavailable", started=started)
     with tempfile.TemporaryDirectory(prefix="mozaiks-imported-smoke-") as temporary:
         staged_root = Path(temporary) / "app"
+        plan_root = Path(temporary) / "plan"
         try:
             _copy_imported_app(app_root, staged_root, expected_sha256=expected_source_sha256)
+            _copy_probe_plan(staged_root, plan_root)
         except (OSError, ValueError) as exc:
             return _summary([{
                 "check": "smoke.source", "status": "failed", "path": None,
                 "message": f"Imported app cannot be staged safely: {type(exc).__name__}: {exc}",
             }], {}, started=started)
         child = _ContainedDockerProcess()
+        observer_nonce = uuid4().hex
         try:
-            run = await asyncio.to_thread(child.run, staged_root, image_id, timeout_seconds)
+            run = await asyncio.to_thread(child.run, staged_root, plan_root, image_id, timeout_seconds,
+                                          observer_nonce)
         except Exception as exc:
             with CancelScope(shield=True):
                 await asyncio.to_thread(child.kill)
@@ -430,10 +509,25 @@ async def run_contained_imported_app_runtime_smoke(
                 await asyncio.to_thread(child.kill)
             raise
         result = _child_result(run, mongo_uri="", timeout_seconds=timeout_seconds, started=started)
+        events = _events(run.stdout)
+        boot = [event for event in events if event.get("event") == "outcome"
+                and event.get("check") == "boot.http_ready" and event.get("status") == "passed"]
+        done = [event for event in events if event.get("event") == "done"]
+        valid_receipt = (bool(events) and len(boot) == 1 and len(done) == 1
+                         and all(event.get("observer_nonce") == observer_nonce for event in events))
+        if result["status"] == "passed" and not valid_receipt:
+            result = _summary([*result["results"], {
+                "check": "smoke.observer", "status": "failed", "path": None,
+                "message": "The external observer did not return one matching boot and completion receipt.",
+            }], result, started=started)
         result["validator_image_id"] = image_id
         result["source_content_sha256"] = hashlib.sha256(json.dumps(
             expected_source_sha256, sort_keys=True, separators=(",", ":"),
         ).encode("utf-8")).hexdigest()
+        if result["status"] == "passed" and valid_receipt:
+            result["observer_origin"] = "trusted_external_probe_v1"
+            result["observer_run_id"] = observer_nonce
+            result["observed_boot"] = {"check": "boot.http_ready", "status": "passed"}
         return result
 
 
@@ -457,7 +551,7 @@ def _events(stdout: str) -> list[dict[str, Any]]:
 
 def _child_result(run: _ChildRun, *, mongo_uri: str, timeout_seconds: float, started: float) -> dict[str, Any]:
     events = _events(run.stdout)
-    outcomes = [{key: value for key, value in event.items() if key != "event"} for event in events
+    outcomes = [{key: value for key, value in event.items() if key not in {"event", "observer_nonce"}} for event in events
                 if event.get("event") == "outcome"]
     done = next((event for event in reversed(events) if event.get("event") == "done"), None)
     activity = next((event for event in reversed(events) if event.get("event") in {"calling", "step"}), None)
@@ -480,6 +574,11 @@ def _child_result(run: _ChildRun, *, mongo_uri: str, timeout_seconds: float, sta
             "check": "smoke.process", "status": "failed", "path": path,
             "message": f"The runtime smoke process exited with code {run.returncode}{where} {phase}: "
                        f"{tail or 'no output'}",
+        })
+    if run.app_exited:
+        outcomes.append({
+            "check": "smoke.process", "status": "failed", "path": None,
+            "message": "The imported app container exited before the external observer finished.",
         })
     if run.cleanup_failed:
         outcomes.append({
@@ -609,6 +708,9 @@ class _SmokeRun:
         # (module, action, rejection) for every emitted event the runtime rejected.
         self.rejected_events: list[tuple[str, str, Any]] = []
         self.reported_rejections: set[tuple[str, str, str, str, str]] = set()
+        self.external_server = False
+        self.external_probe = False
+        self.probe_nonce = ""
 
     @property
     def database(self) -> Any:
@@ -737,13 +839,22 @@ class _SmokeRun:
         self.emit("calling", module=module, action=action, principal=principal.label)
         url = f"/api/modules/{module}/{action}"
         headers = {"Authorization": f"Bearer {principal.token}"}
+        if self.external_probe:
+            assertion = {
+                "nonce": self.probe_nonce, "user_id": principal.user_id,
+                "workspace_id": principal.workspace_id, "label": principal.label,
+                "extra_scopes": list(principal.extra_scopes),
+            }
+            headers["X-Mozaiks-Smoke-Principal"] = base64.urlsafe_b64encode(
+                json.dumps(assertion, separators=(",", ":")).encode("utf-8")
+            ).decode("ascii")
         try:
             if method == "GET":
                 request = self.http.get(url, params={key: str(value) for key, value in params.items()}, headers=headers)
             else:
                 request = self.http.post(url, json=params, headers=headers)
             response = await asyncio.wait_for(request, timeout=_REQUEST_TIMEOUT_SECONDS)
-        except TimeoutError:
+        except (TimeoutError, TimeoutException):
             return 0, None, f"no response within {_REQUEST_TIMEOUT_SECONDS:.0f}s"
         finally:
             for rejected_module, rejected_action, rejection in self.rejected_events[rejected_since:]:
@@ -939,9 +1050,28 @@ async def _boot(run: _SmokeRun, initial_environment: set[str]) -> bool:
     ))
 
     async def resolve_principal(request: Request) -> UserPrincipal | None:
-        header = request.headers.get("authorization") or ""
-        token = header[7:].strip() if header.lower().startswith("bearer ") else ""
-        principal = next((item for item in run.principals.values() if item.token == token), None)
+        if run.external_server:
+            encoded = request.headers.get("x-mozaiks-smoke-principal") or ""
+            if not encoded or len(encoded) > 4096:
+                return None
+            try:
+                data = json.loads(base64.urlsafe_b64decode(encoded).decode("utf-8"))
+                if (not isinstance(data, dict) or data.get("nonce") != run.probe_nonce
+                        or not isinstance(data.get("user_id"), str)
+                        or not isinstance(data.get("label"), str)
+                        or not isinstance(data.get("extra_scopes"), list)
+                        or not all(isinstance(scope, str) for scope in data["extra_scopes"])
+                        or data.get("workspace_id") is not None
+                        and not isinstance(data["workspace_id"], str)):
+                    return None
+                principal = _Principal(data["label"], data["user_id"], "",
+                                       data.get("workspace_id"), tuple(data["extra_scopes"]))
+            except (ValueError, UnicodeError):
+                return None
+        else:
+            header = request.headers.get("authorization") or ""
+            token = header[7:].strip() if header.lower().startswith("bearer ") else ""
+            principal = next((item for item in run.principals.values() if item.token == token), None)
         if principal is None:
             return None
         return UserPrincipal(
@@ -964,6 +1094,14 @@ async def _boot(run: _SmokeRun, initial_environment: set[str]) -> bool:
     )
     app.dependency_overrides[optional_user] = resolve_principal
     app.dependency_overrides[module_router.module_dispatch_environment] = lambda: environment
+    if run.external_server:
+        @app.get("/__mozaiks_smoke_ready")
+        async def smoke_ready() -> dict[str, Any]:
+            return {
+                "app_id": run.app_id,
+                "modules": sorted(module.name for module in load.modules),
+                "failed_modules": sorted(load.failed_module_names),
+            }
 
     declared_routers = _declared_extensions(load.modules, "api_router")
     if declared_routers:
@@ -1695,8 +1833,140 @@ def _child_main(request: Mapping[str, Any] | None = None) -> int:
     return 0
 
 
-def _contained_main() -> int:
-    """Start a disposable MongoDB on container loopback before loading imported code."""
+async def _serve_imported_app(database_name: str, observer_nonce: str, mongo_uri: str) -> int:
+    """A serves untrusted app behavior; its stdout is never a result channel."""
+    import uvicorn
+    from motor.motor_asyncio import AsyncIOMotorClient
+
+    client: Any = AsyncIOMotorClient(mongo_uri, serverSelectionTimeoutMS=2000)
+    run = _SmokeRun(Path(_CONTAINED_APP_ROOT), client, database_name, lambda *_args, **_kwargs: None)
+    run.external_server = True
+    run.probe_nonce = observer_nonce
+    try:
+        if not await _boot(run, set(os.environ)):
+            return 1
+        await run.http.aclose()
+        run.http = None
+        server = uvicorn.Server(uvicorn.Config(run.app, host="127.0.0.1", port=8000,
+                                               access_log=False, log_level="warning"))
+        await server.serve()
+        return 0
+    finally:
+        if run.http is not None:
+            await run.http.aclose()
+        client.close()
+
+
+def _probe_contracts(run: _SmokeRun) -> None:
+    """Load only copied declarative files; B has no imported Python mount."""
+    import yaml
+
+    from mozaiksai.core.runtime.app.module_loader import ModuleDefinition
+    from mozaiksai.core.runtime.app.subscriptions_loader import load_subscriptions_config
+    from mozaiksai.core.runtime.persistence.intent_loader import (
+        iter_data_contract_collections,
+        load_data_contract,
+    )
+    from mozaiksai.core.workflow.generator_support.module_write_actions import auth_contract_scopes
+
+    root = run.app_root
+    modules_root = root / "modules"
+    modules = []
+    if modules_root.is_dir():
+        for directory in sorted(modules_root.iterdir()):
+            manifest = directory / "module.yaml"
+            if directory.is_dir() and manifest.is_file():
+                modules.append(ModuleDefinition.model_validate(yaml.safe_load(
+                    manifest.read_text(encoding="utf-8"))))
+    app_config = json.loads((root / "app.json").read_text(encoding="utf-8"))
+    contract = load_data_contract(root)
+    run.load = SimpleNamespace(
+        modules=modules, data_contract=contract,
+        subscriptions_config=load_subscriptions_config(root),
+        definition=SimpleNamespace(config=app_config),
+    )
+    run.app_id = _app_id(run.load)
+    auth_yaml = root / "config" / "auth.yaml"
+    run.scopes = sorted(auth_contract_scopes(
+        {"config/auth.yaml": auth_yaml.read_text(encoding="utf-8")} if auth_yaml.is_file() else {}
+    ))
+    run.workspace_claims = any(
+        collection.get("tenancy") == "per_workspace"
+        for _owner, _kind, collection in iter_data_contract_collections(contract, require_complete_ownership=False)
+    )
+
+
+async def _probe_imported_app(database_name: str, observer_nonce: str,
+                              emit: Callable[..., None]) -> None:
+    """B checks loopback HTTP and Mongo from a process without imported source."""
+    from httpx import AsyncClient, HTTPError
+    from motor.motor_asyncio import AsyncIOMotorClient
+
+    mongo_uri = "mongodb://127.0.0.1:27017/?directConnection=true"
+    client: Any = AsyncIOMotorClient(mongo_uri, serverSelectionTimeoutMS=2000)
+    run = _SmokeRun(Path(_CONTAINED_PLAN_ROOT), client, database_name, emit)
+    run.external_probe = True
+    run.probe_nonce = observer_nonce
+    run.http = AsyncClient(base_url="http://127.0.0.1:8000", timeout=_REQUEST_TIMEOUT_SECONDS,
+                           trust_env=False)
+    try:
+        _probe_contracts(run)
+        expected_modules = sorted(module.name for module in run.load.modules)
+        deadline = time.monotonic() + _CONTAINER_STARTUP_SECONDS
+        response: Any = None
+        while time.monotonic() < deadline:
+            try:
+                response = await run.http.get("/__mozaiks_smoke_ready", timeout=1.0)
+                if response.status_code == 200:
+                    break
+            except (HTTPError, OSError, TimeoutError):
+                pass
+            await asyncio.sleep(0.2)
+        try:
+            observed = response.json() if response is not None and response.status_code == 200 else {}
+        except ValueError:
+            observed = {}
+        ready = (isinstance(observed, dict) and bool(expected_modules)
+                 and observed.get("app_id") == run.app_id
+                 and observed.get("modules") == expected_modules
+                 and observed.get("failed_modules") == [])
+        run.record("boot.http_ready", ready,
+                   f"Loopback app endpoint {'reported the expected app and modules' if ready else 'did not report the expected app and modules'}.")
+        if ready:
+            await client.admin.command("ping")
+            entities = _contract_entities(run)
+            for entity in entities:
+                await _crud(run, entity)
+            await _entitlements(run, entities)
+    except Exception as exc:
+        run.record("smoke.error", False,
+                   f"The external observer could not complete: {type(exc).__name__}: {exc}")
+    finally:
+        await run.http.aclose()
+        client.close()
+    emit(
+        "done", app_id=run.app_id,
+        principals={
+            label: {"user_id": principal.user_id, "workspace_id": principal.workspace_id,
+                    "scopes": [*run.scopes, *principal.extra_scopes]}
+            for label, principal in run.principals.items()
+        },
+        events_emitted=[],
+    )
+
+
+def _trusted_probe_main(database_name: str, observer_nonce: str) -> int:
+    def emit(kind: str, **data: Any) -> None:
+        print(_EVENT_PREFIX + json.dumps(
+            {"event": kind, "observer_nonce": observer_nonce, **data}, default=str,
+        ), flush=True)
+
+    asyncio.run(_probe_imported_app(database_name, observer_nonce, emit))
+    return 0
+
+
+def _contained_main(database_name: str, observer_nonce: str) -> int:
+    """Start disposable MongoDB and the imported app server on isolated loopback."""
     from pymongo import MongoClient
 
     database_dir = Path(tempfile.mkdtemp(prefix="mozaiks-smoke-mongo-", dir="/tmp"))
@@ -1720,11 +1990,7 @@ def _contained_main() -> int:
         else:
             print("Contained smoke MongoDB did not start", file=sys.stderr)
             return 1
-        return _child_main({
-            "app_root": str(_CONTAINED_APP_ROOT),
-            "mongo_uri": mongo_uri,
-            "database_name": f"{_SMOKE_DATABASE_PREFIX}{uuid4().hex[:20]}",
-        })
+        return asyncio.run(_serve_imported_app(database_name, observer_nonce, mongo_uri))
     finally:
         client.close()
         if mongod.poll() is None:
@@ -1737,4 +2003,8 @@ def _contained_main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(_contained_main() if sys.argv[1:] == ["--contained"] else _child_main())
+    if len(sys.argv) == 4 and sys.argv[1] == "--contained-serve":
+        raise SystemExit(_contained_main(sys.argv[2], sys.argv[3]))
+    if len(sys.argv) == 4 and sys.argv[1] == "--trusted-probe":
+        raise SystemExit(_trusted_probe_main(sys.argv[2], sys.argv[3]))
+    raise SystemExit(_child_main())

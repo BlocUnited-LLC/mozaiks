@@ -80,6 +80,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
+- Imported app runtime acceptance now obtains its functional result from a
+  separate local Docker observer that has no app Python mount. The observer
+  checks the app over isolated loopback HTTP and MongoDB; app stdout cannot
+  author the trusted boot receipt or pass/fail checks.
+
 - Studio and refinement-harness source validation now skip repository-defined
   host commands in every auth mode until a trusted isolated runner is supplied.
   Static checks remain available but cannot certify command readiness.

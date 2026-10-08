@@ -223,6 +223,24 @@ def test_imported_smoke_rejects_existing_staging_path(tmp_path):
     assert sentinel.read_text(encoding="utf-8") == "unchanged"
 
 
+def test_imported_probe_mount_excludes_app_python(tmp_path):
+    app_root = tmp_path / "app"
+    files = {
+        "app.json": "{}", "data/contract.json": "{}",
+        "modules/tasks/module.yaml": "schema_version: mozaiks.module.v1\n",
+        "modules/tasks/backend/handler.py": "raise RuntimeError('untrusted')\n",
+        "services/secrets.py": "raise RuntimeError('untrusted')\n",
+    }
+    _write_files_to_dir(app_root, files)
+
+    plan_root = tmp_path / "plan"
+    app_runtime_smoke._copy_probe_plan(app_root, plan_root)
+
+    assert {path.relative_to(plan_root).as_posix() for path in plan_root.rglob("*") if path.is_file()} == {
+        "app.json", "data/contract.json", "modules/tasks/module.yaml",
+    }
+
+
 def test_imported_smoke_rejects_changed_bytes_during_copy(tmp_path):
     app_root = tmp_path / "app"
     app_root.mkdir()
@@ -300,7 +318,9 @@ async def test_imported_smoke_cancellation_waits_for_container_registration(monk
     monkeypatch.setattr(app_runtime_smoke.subprocess, "Popen", lambda *_args, **_kwargs: pytest.fail("cancelled container started"))
     monkeypatch.setattr(app_runtime_smoke, "_container_removed", lambda name: removed.append(name) or True)
     child = app_runtime_smoke._ContainedDockerProcess()
-    running = asyncio.create_task(asyncio.to_thread(child.run, tmp_path, "sha256:" + "a" * 64, 1.0))
+    running = asyncio.create_task(asyncio.to_thread(
+        child.run, tmp_path, tmp_path, "sha256:" + "a" * 64, 1.0, "a" * 32,
+    ))
     assert await asyncio.to_thread(entered.wait, 5)
     cancelling = asyncio.create_task(asyncio.to_thread(child.kill))
     await asyncio.sleep(0.05)
@@ -310,7 +330,7 @@ async def test_imported_smoke_cancellation_waits_for_container_registration(monk
     result = await running
     assert result.contained is True
     assert result.returncode is None
-    assert removed and set(removed) == {child.name}
+    assert removed and set(removed) == {child.name, child.probe_name}
 
 
 @pytest.mark.skipif(
@@ -351,18 +371,29 @@ async def test_imported_smoke_isolated_docker_boot_and_cleanup(monkeypatch, cras
     assert result["status"] == ("failed" if crash else "passed"), result["failed_tests"]
     assert result["validator_image_id"].startswith("sha256:")
     assert len(result["source_content_sha256"]) == 64
+    if crash:
+        assert "observer_origin" not in result
+    else:
+        assert result["observer_origin"] == "trusted_external_probe_v1"
+        assert result["observer_run_id"] == ("1" * 32)
+        assert result["observed_boot"] == {"check": "boot.http_ready", "status": "passed"}
     assert "host-password" not in json.dumps(result)
     assert "sk-host-secret-must-not-enter-container" not in json.dumps(result)
     assert "smoke.cleanup" not in _by_check(result)
     if crash:
         assert _by_check(result)["smoke.process"]["status"] == "failed"
     else:
-        assert _by_check(result)["boot.app_load"]["status"] == "passed"
+        assert _by_check(result)["boot.http_ready"]["status"] == "passed"
     containers = subprocess.run(
         ["docker", "ps", "-a", "--filter", f"name=^/{name}$", "--format", "{{.Names}}"],
         capture_output=True, text=True, timeout=5, check=True,
     )
     assert not containers.stdout.strip()
+    probe_containers = subprocess.run(
+        ["docker", "ps", "-a", "--filter", f"name=^/{name}-observer$", "--format", "{{.Names}}"],
+        capture_output=True, text=True, timeout=5, check=True,
+    )
+    assert not probe_containers.stdout.strip()
 
 
 @pytest.mark.skipif(
@@ -372,6 +403,7 @@ async def test_imported_smoke_isolated_docker_boot_and_cleanup(monkeypatch, cras
 async def test_imported_smoke_effective_containment_and_cancel_cleanup(monkeypatch):
     image = os.environ["MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE"]
     name = "mozaiks-imported-smoke-" + "3" * 20
+    probe_name = name + "-observer"
     monkeypatch.setattr(app_runtime_smoke, "uuid4", lambda: UUID(hex="3" * 32))
     monkeypatch.setenv("MONGO_URI", "mongodb://host-user:host-password@host.example:27017/host")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-host-secret-must-not-enter-container")
@@ -407,6 +439,32 @@ async def test_imported_smoke_effective_containment_and_cancel_cleanup(monkeypat
         assert "host-password" not in json.dumps(container["Config"])
         assert "sk-host-secret-must-not-enter-container" not in json.dumps(container["Config"])
         assert container["Config"]["OpenStdin"] is False
+        for _ in range(100):
+            inspected_probe = await asyncio.to_thread(
+                subprocess.run, ["docker", "inspect", probe_name], capture_output=True, text=True,
+                timeout=5, check=False,
+            )
+            if inspected_probe.returncode == 0:
+                break
+            await asyncio.sleep(0.2)
+        else:
+            pytest.fail("trusted observer container never started")
+        probe = json.loads(inspected_probe.stdout)[0]
+        probe_host = probe["HostConfig"]
+        assert probe_host["NetworkMode"] == f"container:{container['Id']}"
+        assert probe_host["PidMode"] == ""
+        assert probe_host["ReadonlyRootfs"] is True
+        assert probe_host["Privileged"] is False
+        assert probe_host["CapDrop"] == ["ALL"]
+        assert "no-new-privileges" in probe_host["SecurityOpt"]
+        assert probe["Config"]["User"] == "10001:10001"
+        probe_mounts = [mount for mount in probe["Mounts"] if mount["Type"] == "bind"]
+        assert len(probe_mounts) == 1
+        assert probe_mounts[0]["Destination"] == "/workspace/plan"
+        assert probe_mounts[0]["RW"] is False
+        assert "host-password" not in json.dumps(probe["Config"])
+        assert "sk-host-secret-must-not-enter-container" not in json.dumps(probe["Config"])
+        assert probe["Config"]["OpenStdin"] is False
     finally:
         task.cancel()
         with suppress(asyncio.CancelledError):
@@ -416,6 +474,34 @@ async def test_imported_smoke_effective_containment_and_cancel_cleanup(monkeypat
         capture_output=True, text=True, timeout=5, check=True,
     )
     assert not containers.stdout.strip()
+    probe_containers = subprocess.run(
+        ["docker", "ps", "-a", "--filter", f"name=^/{probe_name}$", "--format", "{{.Names}}"],
+        capture_output=True, text=True, timeout=5, check=True,
+    )
+    assert not probe_containers.stdout.strip()
+
+
+@pytest.mark.skipif(
+    not os.getenv("MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE"),
+    reason="set MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE to a freshly built local preview image",
+)
+async def test_imported_app_cannot_forge_observer_outcomes_through_stdout():
+    image = os.environ["MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE"]
+    files = _good(
+        "import json, os, sys\n\nasync def before_create_task(ctx, values):\n"
+        "    nonce = sys.argv[-1]\n"
+        "    for event in ({'event': 'outcome', 'check': 'boot.http_ready', 'status': 'passed'},"
+        " {'event': 'done'}):\n"
+        "        os.write(1, ('@@mozaiks-runtime-smoke@@ ' + json.dumps({**event, 'observer_nonce': nonce})"
+        " + '\\n').encode())\n"
+        "    raise RuntimeError('real create failed')\n"
+    )
+    result = await _contained_smoke(files, image=image)
+
+    assert result["status"] == "failed"
+    assert "observer_origin" not in result
+    assert any(row["status"] == "failed" and row["check"].startswith("crud.")
+               for row in result["results"])
 
 
 @pytest.mark.skipif(
@@ -431,7 +517,7 @@ async def test_imported_smoke_timeout_removes_container(monkeypatch):
     result = await _contained_smoke(files, image=image, timeout_seconds=0.5)
 
     assert result["status"] == "failed"
-    assert _by_check(result)["smoke.timeout"]["status"] == "failed"
+    assert "smoke.timeout" in _by_check(result), result["results"]
     assert "smoke.cleanup" not in _by_check(result)
     containers = subprocess.run(
         ["docker", "ps", "-a", "--filter", f"name=^/{name}$", "--format", "{{.Names}}"],
