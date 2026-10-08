@@ -225,7 +225,12 @@ test('review workspace previews owned snapshots and keeps revision evidence sepa
   t.after(()=>browser.close());
   const page=await browser.newPage();
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
+  delayed.set('parent',null);
   await page.goto(origin);
+  await expect.poll(()=>typeof delayed.get('parent')).toBe('function');
+  await expect(page.getByText('Loading saved draft…')).toBeVisible();
+  await expect(page.getByRole('heading',{name:'This draft needs attention',exact:true})).toHaveCount(0);
+  delayed.get('parent')();
   const patch=async value=>page.evaluate(next=>window.patchReview(next),value);
   const result=(id,status='validated')=>({execution_mode:'coding_worker',coding_worker:{status,metadata:id?{build_record_id:id}:{},
     validation_result:{validation_status:status==='validated'?'passed':'failed'},applied_files:{'app.json':'untrusted inline files'}}});
@@ -302,7 +307,7 @@ test('review workspace previews owned snapshots and keeps revision evidence sepa
   await expect(page.getByRole('button',{name:'Activate this version',exact:true})).toBeEnabled();
   // No saved result must never restore the parent's passed evidence.
   await patch({refinement_result:result(null,'failed')});
-  await expect(page.getByRole('button',{name:'Activate this version',exact:true})).toBeDisabled();
+  await expect(page.getByRole('button',{name:'Activate this version',exact:true})).toHaveCount(0);
   await expect(page.getByText('Preview based on version child')).toBeVisible();
   // A successful-looking surface response cannot supply missing saved checks.
   const unproven=saved('unproven');
@@ -327,7 +332,7 @@ test('review workspace previews owned snapshots and keeps revision evidence sepa
     const id='bad-'+name;const body=saved(id);change(body);bodies.set(id,body);
     await patch({refinement_result:result(id)});
     await expect(page.getByRole('alert')).toContainText('does not match');
-    await expect(page.getByRole('button',{name:'Activate this version',exact:true})).toBeDisabled();
+    await expect(page.getByRole('button',{name:'Activate this version',exact:true})).toHaveCount(0);
     await expect(page.getByText('Preview based on version child')).toBeVisible();
   }
   // A late GET for the old candidate cannot replace the selected snapshot.

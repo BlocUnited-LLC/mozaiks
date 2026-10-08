@@ -72,7 +72,8 @@ This project follows a practical pre-1.0 changelog format:
   The saved-build page can reopen the current draft in chat without allocating
   another build; ongoing edits show progress instead of a failed-check heading.
   Review handoffs preserve the visible conversation and select the successor
-  chat URL so further edits continue without a page reload.
+  chat URL so further edits continue without a page reload. Reloading a saved
+  draft waits for its checks before showing a review status.
   Reloading recovers existing previews and their Stop controls from owned build
   records, including when another edit finishes before recovery completes.
   A saved chat for another app can recover and release an older owned preview

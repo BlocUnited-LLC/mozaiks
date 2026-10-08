@@ -114,7 +114,7 @@ export default function AppReviewWorkspace({ payload = {} }) {
           {accepting ? 'Accepting draft…' : 'Accept this draft'}
         </Button>
       )}
-      <AppReviewSummary key={`${identity}/${refresh}`} payload={reviewPayload} />
+      {body && <AppReviewSummary key={`${identity}/${refresh}`} payload={reviewPayload} />}
     </div>
   );
 }
