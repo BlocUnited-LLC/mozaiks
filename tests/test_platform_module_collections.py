@@ -336,7 +336,7 @@ def test_factory_declares_each_studio_collection_with_complete_ownership():
         ("user_onboarding", "status"): ("platform", "per_user", "user_id"),
         ("workspace_integrations", "integration_notes"): ("platform", "app_wide", None),
         ("workspace_support", "feedback"): ("platform", "app_wide", None),
-        ("workspace_support", "requests"): ("platform", "app_wide", None),
+        ("workspace_support", "requests"): ("platform", "per_workspace", "owner_workspace_id"),
     }
     # Indexes stay with the factory migrations; mounting a module creates none in a workspace.
     assert all(row["indexes"] == [] for surface in contract["surfaces"] for row in surface["collections"])
@@ -656,6 +656,74 @@ async def test_studio_pages_load_in_a_fresh_scaffold_and_keep_users_apart(tmp_pa
     assert other_app["requests"] == []
     assert ok(await run("tasks", "own"))
     assert (await run("tasks", "support")).error_code == "PERMISSION_DENIED"
+
+
+async def test_support_queue_uses_verified_workspace_and_excludes_legacy_requests(tmp_path, monkeypatch, mongo):
+    active = app_root(tmp_path, "my-app", SCAFFOLD_CONTRACT)
+    loaded = await AppLoader.load(str(active), module_defaults_path=str(FACTORY))
+    executor = executor_for(loaded, monkeypatch, client=mongo.client, database=mongo.database)
+
+    async def run(action, params, *, user, workspace):
+        return await executor.execute(ModuleRequest(
+            module="workspace_support", action=action, params=params, app_id="my-app", user_id=user,
+            authority=authority(user, "workspace_support.read", "workspace_support.manage"),
+            persistence_principal=PersistencePrincipal(user, workspace) if workspace else None,
+        ))
+
+    created = await run("create_support_request", {"message": "help"}, user="requester-a", workspace="ws-a")
+    assert created.success, (created.error_code, created.error)
+    request_id = created.data["request_id"]
+    thread_id = created.data["message_thread_id"]
+    collection_name = executor._build_persistence_context(ModuleRequest(
+        module="workspace_support", action="list_support_requests", app_id="my-app", authority=authority(),
+    )).collection_name("workspace_support", "requests")
+    raw = mongo.client[mongo.database][collection_name]
+    stored = await raw.find_one({"request_id": request_id})
+    assert stored["owner_workspace_id"] == "ws-a"
+    assert stored["workspace_id"] == "ws-a"
+
+    await raw.insert_many([
+        {"app_id": "my-app", "request_id": "legacy-unbound", "user_id": "requester-a", "status": "open"},
+        {"app_id": "my-app", "request_id": "legacy-requested", "workspace_id": "ws-a",
+         "user_id": "requester-a", "status": "open"},
+    ])
+    for scope in ("user", "app", "workspace"):
+        own = await run("list_support_requests", {"scope": scope}, user="requester-a", workspace="ws-a")
+        assert own.success and [row["request_id"] for row in own.data["requests"]] == [request_id]
+        other = await run("list_support_requests", {"scope": scope}, user="requester-a", workspace="ws-b")
+        assert other.success and other.data["requests"] == []
+
+    for target in (request_id, "legacy-unbound", "legacy-requested"):
+        for action, params in (
+            ("add_support_message", {"request_id": target, "message": "reply", "sender_role": "operator"}),
+            ("update_support_request_status", {"request_id": target, "status": "resolved"}),
+            ("delete_support_request", {"request_id": target}),
+        ):
+            denied = await run(action, params, user="operator-b", workspace="ws-b")
+            assert denied.success and denied.data["success"] is False
+            if target != request_id:
+                legacy_denied = await run(action, params, user="operator-a", workspace="ws-a")
+                assert legacy_denied.success and legacy_denied.data["success"] is False
+
+    for action, params in (
+        ("create_support_request", {"message": "unbound"}),
+        ("list_support_requests", {"scope": "workspace"}),
+    ):
+        unbound = await run(action, params, user="operator-unbound", workspace=None)
+        assert unbound.error_code == "PERMISSION_DENIED"
+
+    assert (await raw.find_one({"request_id": request_id}))["status"] == "open"
+    assert await raw.count_documents({"request_id": {"$in": ["legacy-unbound", "legacy-requested"]}}) == 2
+    replied = await run("add_support_message", {"request_id": request_id, "message": "reply", "sender_role": "operator"},
+                        user="operator-a", workspace="ws-a")
+    assert replied.success and replied.data["success"] is True
+    resolved = await run("update_support_request_status", {"request_id": request_id, "status": "resolved"},
+                         user="operator-a", workspace="ws-a")
+    assert resolved.success and resolved.data["success"] is True
+    deleted = await run("delete_support_request", {"request_id": request_id}, user="operator-a", workspace="ws-a")
+    assert deleted.success and deleted.data["success"] is True
+    assert deleted.data["message_thread_id"] == thread_id
+    assert await raw.find_one({"request_id": request_id}) is None
 
 
 async def test_owned_upsert_with_the_owner_in_its_filter_succeeds_on_mongo(mongo):
