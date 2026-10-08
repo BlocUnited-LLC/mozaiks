@@ -32,7 +32,9 @@ async def test_scope_dogfood_stages_patch_without_claiming_app_validation(tmp_pa
     assert worker["applied_paths"] == ["support.py"]
     assert worker["build_record_id"]
     with zipfile.ZipFile(worker["artifact_path"]) as archive:
-        saved = archive.read("support.py").decode("utf-8")
+        [saved_path] = archive.namelist()
+        assert saved_path.startswith("refinement_") and saved_path.endswith("/support.py")
+        saved = archive.read(saved_path).decode("utf-8")
     assert saved.startswith(original.rstrip())
     assert "staged patch only" in saved
     assert source.read_text(encoding="utf-8") == original

@@ -797,11 +797,13 @@ async def test_surface_finalization_reuses_validation_and_saves_complete_target_
     metadata = store.calls[0]["commit_metadata"]["metadata"]
     assert all(metadata[key] == value for key, value in binding.model_dump().items())
     with zipfile.ZipFile(metadata["artifact_path"]) as archive:
-        assert {name: archive.read(name).decode() for name in archive.namelist()} == {
+        prefix = f"{metadata['bundle_name']}/"
+        assert {name.removeprefix(prefix): archive.read(name).decode() for name in archive.namelist()} == {
             "app.json": '{"appId":"tracker"}',
             "modules/x/backend/service.py": "VALUE = 2\n",
             "brand/theme_config.json": '{"accent":"coral"}',
         }
+        assert all(name.startswith(prefix) for name in archive.namelist())
 
 
 @pytest.mark.asyncio
