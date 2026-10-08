@@ -27,11 +27,15 @@ started: they run outside module dispatch with their own clients.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
+import stat
 import subprocess
 import sys
+import tempfile
+import threading
 import time
 import traceback
 from collections.abc import Callable, Mapping
@@ -50,6 +54,13 @@ SMOKE_TIMEOUT_SECONDS = 60.0
 _CHILD_MODULE = "factory_app.workflows.AppGenerator.tools.app_runtime_smoke"
 _EVENT_PREFIX = "@@mozaiks-runtime-smoke@@ "
 _SMOKE_DATABASE_PREFIX = "mozaiks_runtime_smoke_"
+_CONTAINED_APP_ROOT = PurePosixPath("/workspace/app")
+_CONTAINED_IMAGE = "mozaiks-sandbox:local"
+_MAX_IMPORTED_SOURCE_BYTES = 64_000_000
+_MAX_IMPORTED_SOURCE_FILES = 4096
+_CONTAINER_STARTUP_SECONDS = 20.0
+_CONTAINER_STDOUT_LIMIT_BYTES = 4_000_000
+_CONTAINER_STDERR_LIMIT_BYTES = 256_000
 _PING_TIMEOUT_SECONDS = 5.0
 _STEP_TIMEOUT_SECONDS = 20.0
 _REQUEST_TIMEOUT_SECONDS = 10.0
@@ -107,6 +118,9 @@ class _ChildRun:
     stderr: str
     returncode: int | None
     timed_out: bool
+    cleanup_failed: bool = False
+    output_truncated: bool = False
+    contained: bool = False
 
 
 class _ChildProcess:
@@ -179,6 +193,244 @@ async def run_app_runtime_smoke(
         client.close()
 
 
+def _is_link_or_reparse(metadata: os.stat_result) -> bool:
+    return stat.S_ISLNK(metadata.st_mode) or bool(
+        getattr(metadata, "st_file_attributes", 0)
+        & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    )
+
+
+def _copy_imported_app(
+    app_root: Path, destination: Path, *, expected_sha256: Mapping[str, str] | None = None,
+) -> None:
+    """Copy only regular staged app files into the sole host path mounted by Docker."""
+    root_stat = app_root.lstat()
+    if _is_link_or_reparse(root_stat) or not stat.S_ISDIR(root_stat.st_mode):
+        raise ValueError("imported app root must be a directory, not a symlink")
+    destination.mkdir()
+    total_bytes = 0
+    file_count = 0
+    copied_paths: set[str] = set()
+    def fail_walk(error: OSError) -> None:
+        raise error
+
+    for root, directories, files in os.walk(app_root, followlinks=False, onerror=fail_walk):
+        source_dir = Path(root)
+        relative_dir = source_dir.relative_to(app_root)
+        for name in directories:
+            source = source_dir / name
+            source_stat = source.lstat()
+            if _is_link_or_reparse(source_stat) or not stat.S_ISDIR(source_stat.st_mode):
+                raise ValueError("imported app contains a directory link")
+            (destination / relative_dir / name).mkdir()
+        for name in files:
+            source = source_dir / name
+            relative_path = (relative_dir / name).as_posix()
+            if expected_sha256 is not None and relative_path not in expected_sha256:
+                raise ValueError("imported app contains a file outside the verified source")
+            source_stat = source.lstat()
+            if (_is_link_or_reparse(source_stat) or not stat.S_ISREG(source_stat.st_mode)
+                    or source_stat.st_nlink != 1):
+                raise ValueError("imported app contains a link or special file")
+            file_count += 1
+            total_bytes += source_stat.st_size
+            if file_count > _MAX_IMPORTED_SOURCE_FILES or total_bytes > _MAX_IMPORTED_SOURCE_BYTES:
+                raise ValueError("imported app exceeds the source smoke limit")
+            target = destination / relative_dir / name
+            digest = hashlib.sha256()
+            with source.open("rb") as reader, target.open("xb") as writer:
+                copied = 0
+                while chunk := reader.read(1024 * 1024):
+                    copied += len(chunk)
+                    if copied > source_stat.st_size:
+                        raise ValueError("imported app changed while staging")
+                    digest.update(chunk)
+                    writer.write(chunk)
+                if copied != source_stat.st_size:
+                    raise ValueError("imported app changed while staging")
+            if expected_sha256 is not None and digest.hexdigest() != expected_sha256[relative_path]:
+                raise ValueError("imported app bytes differ from the verified source")
+            copied_paths.add(relative_path)
+    if expected_sha256 is not None and copied_paths != set(expected_sha256):
+        raise ValueError("imported app is missing a verified source file")
+    if not (destination / "app.json").is_file():
+        raise ValueError("imported app has no app.json")
+
+
+def _container_removed(name: str) -> bool:
+    """Force removal and verify that Docker no longer knows the container."""
+    try:
+        subprocess.run(["docker", "rm", "-f", name], capture_output=True, timeout=10, check=False)
+        remaining = subprocess.run(
+            ["docker", "ps", "-a", "--filter", f"name=^/{name}$", "--format", "{{.Names}}"],
+            capture_output=True, text=True, timeout=5, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return remaining.returncode == 0 and name not in remaining.stdout.splitlines()
+
+
+class _ContainedDockerProcess:
+    """Register a container before start so cancellation can remove its exact name."""
+
+    def __init__(self) -> None:
+        self.name = f"mozaiks-imported-smoke-{uuid4().hex[:20]}"
+        self.process: subprocess.Popen[bytes] | None = None
+        self.cancelled = False
+        self.run_started = threading.Event()
+        self.registration_done = threading.Event()
+
+    def run(self, app_root: Path, image: str, timeout_seconds: float) -> _ChildRun:
+        command = [
+            "docker", "create", "--log-driver=none", "--name", self.name,
+            "--network=none", "--read-only", "--init", "--cap-drop=ALL",
+            "--security-opt=no-new-privileges", "--pids-limit=128",
+            "--memory=1g", "--memory-swap=1g", "--cpus=1",
+            "--user=10001:10001",
+            "--tmpfs=/tmp:rw,nosuid,nodev,size=512m",
+            "--tmpfs=/workspace/logs:rw,nosuid,nodev,size=16m",
+            f"--mount=type=bind,source={app_root},target={_CONTAINED_APP_ROOT},readonly",
+            "--env=PYTHON_DOTENV_DISABLED=1", "--env=PYTHONDONTWRITEBYTECODE=1",
+            "--env=PYTHONUNBUFFERED=1", "--env=MONGO_URI=",
+            image, "python", "-m", _CHILD_MODULE, "--contained",
+        ]
+        timed_out = False
+        output = [bytearray(), bytearray()]
+        truncated = [False, False]
+        returncode: int | None = None
+        creation_error = ""
+
+        def drain(index: int, limit: int) -> None:
+            assert self.process is not None
+            stream = self.process.stdout if index == 0 else self.process.stderr
+            assert stream is not None
+            try:
+                while chunk := os.read(stream.fileno(), 8192):
+                    remaining = max(0, limit - len(output[index]))
+                    output[index].extend(chunk[:remaining])
+                    if len(chunk) > remaining:
+                        truncated[index] = True
+            except OSError:
+                truncated[index] = True
+
+        self.run_started.set()
+        if self.cancelled:
+            self.registration_done.set()
+            return _ChildRun("", "contained smoke was cancelled before registration", None, False, contained=True)
+        try:
+            created = subprocess.run(
+                command, stdin=subprocess.DEVNULL, capture_output=True,
+                timeout=_CONTAINER_STARTUP_SECONDS, check=False,
+            )
+            if created.returncode != 0:
+                creation_error = "Docker could not register the contained smoke"
+        except (OSError, subprocess.TimeoutExpired):
+            creation_error = "Docker container registration did not complete"
+        finally:
+            self.registration_done.set()
+        try:
+            if not creation_error and not self.cancelled:
+                self.process = subprocess.Popen(
+                    ["docker", "start", "--attach", self.name],
+                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                )
+                stdout_reader = threading.Thread(target=drain, args=(0, _CONTAINER_STDOUT_LIMIT_BYTES), daemon=True)
+                stderr_reader = threading.Thread(target=drain, args=(1, _CONTAINER_STDERR_LIMIT_BYTES), daemon=True)
+                stdout_reader.start()
+                stderr_reader.start()
+                if self.cancelled:
+                    self.process.kill()
+                try:
+                    self.process.wait(timeout=timeout_seconds + _CONTAINER_STARTUP_SECONDS)
+                    returncode = self.process.returncode
+                except subprocess.TimeoutExpired:
+                    timed_out = True
+                    self.process.kill()
+                    self.process.wait(timeout=5)
+                stdout_reader.join(timeout=5)
+                stderr_reader.join(timeout=5)
+                if stdout_reader.is_alive() or stderr_reader.is_alive():
+                    truncated[0] = True
+        finally:
+            cleanup_failed = not _container_removed(self.name)
+        return _ChildRun(
+            output[0].decode("utf-8", errors="replace"),
+            creation_error or output[1].decode("utf-8", errors="replace"),
+            returncode, timed_out, cleanup_failed=cleanup_failed, output_truncated=any(truncated), contained=True,
+        )
+
+    def kill(self) -> None:
+        self.cancelled = True
+        if not self.run_started.is_set():
+            return
+        if not self.registration_done.wait(timeout=_CONTAINER_STARTUP_SECONDS + 5):
+            raise RuntimeError("Docker container registration could not be confirmed during cancellation")
+        try:
+            if self.process is not None and self.process.poll() is None:
+                self.process.kill()
+                self.process.wait(timeout=5)
+        finally:
+            _container_removed(self.name)
+
+
+async def run_contained_imported_app_runtime_smoke(
+    app_root: Path, *, timeout_seconds: float = SMOKE_TIMEOUT_SECONDS, image: str | None = None,
+    expected_source_sha256: Mapping[str, str] | None = None,
+    expected_image_id: str | None = None,
+) -> dict[str, Any]:
+    """Smoke verified imported bytes with a private MongoDB and no container egress."""
+    from mozaiksai.core.adapters.docker_sandbox import docker_available
+
+    started = time.monotonic()
+    if not docker_available():
+        return _contained_unavailable("contained Docker validation is unavailable", started=started)
+    if not expected_source_sha256:
+        return _contained_unavailable("verified imported-source digests are unavailable", started=started)
+    pinned_image_id = expected_image_id or os.environ.get("MOZAIKS_IMPORTED_SMOKE_IMAGE_ID")
+    if not pinned_image_id:
+        return _contained_unavailable("contained validator image identity is unconfigured", started=started)
+    selected_image = image or os.environ.get("DOCKER_SANDBOX_IMAGE") or _CONTAINED_IMAGE
+    try:
+        inspected = await asyncio.to_thread(
+            subprocess.run, ["docker", "image", "inspect", "--format", "{{.Id}}", selected_image],
+            capture_output=True, text=True, timeout=5, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return _contained_unavailable("contained Docker image is unavailable", started=started)
+    image_id = inspected.stdout.strip() if inspected.returncode == 0 else ""
+    if image_id != pinned_image_id or not image_id.startswith("sha256:") or len(image_id) != 71:
+        return _contained_unavailable("contained Docker image is unavailable", started=started)
+    with tempfile.TemporaryDirectory(prefix="mozaiks-imported-smoke-") as temporary:
+        staged_root = Path(temporary) / "app"
+        try:
+            _copy_imported_app(app_root, staged_root, expected_sha256=expected_source_sha256)
+        except (OSError, ValueError) as exc:
+            return _summary([{
+                "check": "smoke.source", "status": "failed", "path": None,
+                "message": f"Imported app cannot be staged safely: {type(exc).__name__}: {exc}",
+            }], {}, started=started)
+        child = _ContainedDockerProcess()
+        try:
+            run = await asyncio.to_thread(child.run, staged_root, image_id, timeout_seconds)
+        except Exception as exc:
+            with CancelScope(shield=True):
+                await asyncio.to_thread(child.kill)
+            return _summary([{
+                "check": "smoke.container", "status": "failed", "path": None,
+                "message": f"Contained runtime smoke could not complete: {type(exc).__name__}.",
+            }], {}, started=started)
+        except BaseException:
+            with CancelScope(shield=True):
+                await asyncio.to_thread(child.kill)
+            raise
+        result = _child_result(run, mongo_uri="", timeout_seconds=timeout_seconds, started=started)
+        result["validator_image_id"] = image_id
+        result["source_content_sha256"] = hashlib.sha256(json.dumps(
+            expected_source_sha256, sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")).hexdigest()
+        return result
+
+
 def _redact(text: str, mongo_uri: str) -> str:
     return text.replace(mongo_uri, "<database uri>") if mongo_uri else text
 
@@ -215,12 +467,23 @@ def _child_result(run: _ChildRun, *, mongo_uri: str, timeout_seconds: float, sta
             "message": f"The runtime smoke was stopped at its {timeout_seconds:.0f}s limit{where}. Generated code "
                        "must not block or wait on unreachable services when its actions are called.",
         })
-    elif done is None:
+    elif done is None or (run.contained and run.returncode != 0):
         tail = " ".join(run.stderr.strip().splitlines()[-3:])[-600:]
+        phase = "before finishing" if done is None else "after reporting completion"
         outcomes.append({
             "check": "smoke.process", "status": "failed", "path": path,
-            "message": f"The runtime smoke process exited with code {run.returncode}{where} before finishing: "
+            "message": f"The runtime smoke process exited with code {run.returncode}{where} {phase}: "
                        f"{tail or 'no output'}",
+        })
+    if run.cleanup_failed:
+        outcomes.append({
+            "check": "smoke.cleanup", "status": "failed", "path": None,
+            "message": "The contained runtime smoke could not confirm Docker container removal.",
+        })
+    if run.output_truncated:
+        outcomes.append({
+            "check": "smoke.output", "status": "failed", "path": None,
+            "message": "The contained runtime smoke exceeded its bounded output limit.",
         })
     for outcome in outcomes:
         outcome["message"] = _redact(str(outcome.get("message") or ""), mongo_uri)
@@ -308,6 +571,12 @@ def _skipped(reason: str, *, started: float) -> dict[str, Any]:
         "failed_tests": [],
         "warnings": [message],
     }
+
+
+def _contained_unavailable(reason: str, *, started: float) -> dict[str, Any]:
+    result = _skipped(reason, started=started)
+    result["checks"][0]["details"]["blocking"] = True
+    return result
 
 
 # --------------------------------------------------------------------------- the run
@@ -1320,6 +1589,7 @@ __all__ = [
     "child_environment",
     "resolve_smoke_mongo_uri",
     "run_app_runtime_smoke",
+    "run_contained_imported_app_runtime_smoke",
 ]
 
 
@@ -1358,10 +1628,11 @@ async def _child_run(request: Mapping[str, Any], emit: Callable[..., None], init
     )
 
 
-def _child_main() -> int:
+def _child_main(request: Mapping[str, Any] | None = None) -> int:
     """Entry point of ``python -m`` this module: one smoke run, results as JSON lines on stdout."""
     initial_environment = set(os.environ)
-    request = json.loads(sys.stdin.read() or "{}")
+    if request is None:
+        request = json.loads(sys.stdin.read() or "{}")
     channel = os.fdopen(os.dup(sys.stdout.fileno()), "w", encoding="utf-8")
     sys.stdout = sys.stderr  # generated code's prints never reach the result channel
 
@@ -1374,5 +1645,46 @@ def _child_main() -> int:
     return 0
 
 
+def _contained_main() -> int:
+    """Start a disposable MongoDB on container loopback before loading imported code."""
+    from pymongo import MongoClient
+
+    database_dir = Path(tempfile.mkdtemp(prefix="mozaiks-smoke-mongo-", dir="/tmp"))
+    mongod = subprocess.Popen(
+        ["mongod", "--dbpath", str(database_dir), "--bind_ip", "127.0.0.1", "--port", "27017",
+         "--nounixsocket", "--quiet"],
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    mongo_uri = "mongodb://127.0.0.1:27017/?directConnection=true"
+    client: MongoClient[dict[str, Any]] = MongoClient(
+        mongo_uri, serverSelectionTimeoutMS=500, connectTimeoutMS=500,
+    )
+    try:
+        deadline = time.monotonic() + _CONTAINER_STARTUP_SECONDS
+        while time.monotonic() < deadline and mongod.poll() is None:
+            try:
+                client.admin.command("ping")
+                break
+            except Exception:
+                time.sleep(0.2)
+        else:
+            print("Contained smoke MongoDB did not start", file=sys.stderr)
+            return 1
+        return _child_main({
+            "app_root": str(_CONTAINED_APP_ROOT),
+            "mongo_uri": mongo_uri,
+            "database_name": f"{_SMOKE_DATABASE_PREFIX}{uuid4().hex[:20]}",
+        })
+    finally:
+        client.close()
+        if mongod.poll() is None:
+            mongod.terminate()
+            try:
+                mongod.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                mongod.kill()
+                mongod.wait(timeout=5)
+
+
 if __name__ == "__main__":
-    raise SystemExit(_child_main())
+    raise SystemExit(_contained_main() if sys.argv[1:] == ["--contained"] else _child_main())
