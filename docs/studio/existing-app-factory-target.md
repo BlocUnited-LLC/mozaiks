@@ -59,7 +59,7 @@ preflight guard, not a migration or a substitute for the app-owned scoped
 record check. It deliberately blocks while the historical row exists,
 including when its lifecycle is `archived`: archival alone does not make that
 lineage read-only for every Factory entry path. The existence check and new
-target insert are separate operations, so the operator must also stop legacy
+target insert are separate operations, so the operator must also stop historical
 target creation during reconciliation. Never fill this argument from a
 browser request.
 
