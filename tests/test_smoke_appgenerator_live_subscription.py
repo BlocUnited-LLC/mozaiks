@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from unittest.mock import AsyncMock
 
 import pytest
@@ -10,6 +13,7 @@ from factory_app.workflows._shared.subscription_contract_context import (
     subscription_assignment_store,
 )
 from factory_app.workflows.AppGenerator.tools import app_runtime_smoke, app_validation
+from mozaiksai.core.workflow.generator_support.code_files import extract_code_file_map_from_payload
 from scripts.smoke_appgenerator_live_subscription import (
     REPORT_GATE_ID,
     WORKFLOWS_ROOT,
@@ -74,6 +78,71 @@ def test_module_contract_validator_rejects_structured_output_schema_drift() -> N
     assert any("agent_message" in error for error in errors)
 
 
+@pytest.mark.parametrize("missing_field", ["items", "total"])
+def test_module_contract_validator_rejects_missing_list_response_fields(missing_field: str) -> None:
+    output = deterministic_module_contract_output()
+    manifest = yaml.safe_load(output["code_files"][0]["content"])
+    list_action = next(action for action in manifest["actions"] if action["id"] == "list_reports")
+    list_action["output_schema"]["properties"].pop(missing_field)
+    output["code_files"][0]["content"] = yaml.safe_dump(manifest)
+
+    _content, errors = validate_module_contract_output(output)
+
+    assert any(f"list_reports output_schema must declare {missing_field}" in error for error in errors)
+
+
+def test_module_contract_validator_rejects_missing_form_input() -> None:
+    output = deterministic_module_contract_output()
+    manifest = yaml.safe_load(output["code_files"][0]["content"])
+    generate = next(action for action in manifest["actions"] if action["id"] == "generate_report")
+    generate["input_schema"]["properties"] = {}
+    output["code_files"][0]["content"] = yaml.safe_dump(manifest)
+
+    _content, errors = validate_module_contract_output(output)
+
+    assert "generate_report input_schema must declare a required topic string for the Reports form." in errors
+
+
+def test_model_schema_compiles_to_the_report_metric_binding() -> None:
+    output = deterministic_module_contract_output()
+    action = output["module_contract"]["module_yaml"]["actions"][0]
+    action["output_schema"] = {
+        "type": "object", "description": None, "items_type": None,
+        "properties": [
+            {"name": "items", "type": "array", "required": True, "items_type": "object", "description": None, "enum_values": None},
+            {"name": "total", "type": "integer", "required": True, "items_type": None, "description": None, "enum_values": None},
+        ],
+    }
+    rendered = extract_code_file_map_from_payload(output)["modules/reports/module.yaml"]
+    output["code_files"][0]["content"] = rendered
+
+    content, errors = validate_module_contract_output(output)
+
+    assert not errors
+    assert yaml.safe_load(content)["actions"][0]["output_schema"]["properties"] == {
+        "items": {"type": "array", "items": {"type": "object"}}, "total": {"type": "integer"},
+    }
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows event loop policy only")
+def test_live_smoke_event_loop_supports_local_build_subprocess() -> None:
+    code = """
+import asyncio
+import sys
+from scripts.smoke_appgenerator_live_subscription import _configure_event_loop_policy
+
+_configure_event_loop_policy()
+
+async def check():
+    process = await asyncio.create_subprocess_exec(sys.executable, "-c", "pass")
+    assert await process.wait() == 0
+
+asyncio.run(check())
+"""
+    child = subprocess.run([sys.executable, "-B", "-c", code], capture_output=True, text=True, check=False)
+    assert child.returncode == 0, child.stderr
+
+
 def test_config_middleware_schema_defaults_omitted_deleted_files() -> None:
     registry = _load_appgenerator_structured_registry()
     output = {
@@ -115,10 +184,10 @@ def test_config_middleware_schema_defaults_omitted_module_optional_fields() -> N
     }
     actions[0]["output_schema"] = {
         "type": "object",
-        "description": "Response containing reports.",
+        "description": "Response containing report items.",
         "properties": [
             {
-                "name": "reports",
+                "name": "items",
                 "type": "array",
                 "description": "Report ids.",
                 "required": True,
@@ -226,6 +295,11 @@ async def test_deterministic_subscription_smoke_keeps_unavailable_runtime_checks
 
     generated = acceptance["context"]["generated_files"]
     assert acceptance["context"]["app_assembly_status"] == "passed"
+    report_page = yaml.safe_load(generated["ui/pages/reports.yaml"])
+    assert report_page["sections"][0]["config"]["value_key"] == "total"
+    assert report_page["sections"][0]["primitive"] == "Metric"
+    assert report_page["sections"][1]["config"]["fields"][0]["name"] == "topic"
+    assert 'return {"items": items, "total": len(items)}' in generated["modules/reports/backend/service.py"]
     subscriptions = yaml.safe_load(generated["config/subscriptions.yaml"])
     assert subscriptions["assignment_store"] == subscription_assignment_store()
     plans = subscriptions["plans"]
