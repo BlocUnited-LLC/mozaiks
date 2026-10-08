@@ -394,17 +394,25 @@ async def read_verified_artifact_bundle(
     """
     entry = resolve_canonical_bundle_entry(artifact)
     metadata = artifact.commit_metadata.metadata
-    if metadata.get("content_ref"):
+    if metadata.get("content_digest"):
+        if metadata.get("content_ref"):
+            raise ContentIntegrityError("artifact_bundle_content_authority_ambiguous")
+        content_store = get_artifact_content_store()
+        if metadata.get("content_backend") != content_store.backend_name:
+            raise ContentIntegrityError("artifact_bundle_content_backend_mismatch")
+        raw = await content_store.get_verified_blob(metadata["content_digest"])
+    elif metadata.get("content_ref"):
         content_store = get_artifact_content_store()
         if metadata.get("content_backend") != content_store.backend_name:
             raise ContentIntegrityError("artifact_bundle_content_backend_mismatch")
         reference = metadata["content_ref"]
+        raw = await content_store.get_bundle(reference)
     else:
         content_store = LocalArtifactContentStore()
         reference = metadata.get("artifact_path")
-    if not reference:
-        raise ContentNotFoundError("artifact_bundle_content_missing")
-    raw = await content_store.get_bundle(reference)
+        if not reference:
+            raise ContentNotFoundError("artifact_bundle_content_missing")
+        raw = await content_store.get_bundle(reference)
     if len(raw) > max_bytes:
         raise ContentIntegrityError("artifact_bundle_archive_too_large")
     try:

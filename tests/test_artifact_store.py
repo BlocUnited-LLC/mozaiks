@@ -68,6 +68,7 @@ async def test_create_build_record_persists_manifest_and_lineage() -> None:
         app_id="app-1",
         build_family="app_bundle",
         build_key="primary",
+        build_record_id="av_" + "1" * 24,
         files_manifest=[{"path": "src/App.tsx", "sha256": "abc", "size_bytes": 42}],
         source_workflow="AppGenerator",
         source_chat_id="chat-1",
@@ -76,6 +77,7 @@ async def test_create_build_record_persists_manifest_and_lineage() -> None:
         commit_metadata={"message": "Initial compile", "author_user_id": "user-1"},
     )
 
+    assert doc.id == "av_" + "1" * 24
     assert doc.version_number == 3
     assert doc.lineage_root_id == doc.id
     assert doc.files_manifest[0].path == "src/App.tsx"

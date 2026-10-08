@@ -158,6 +158,45 @@ ownership boundaries and review state.
 Staged patches are proposals. They do not become owned app facts until accepted
 or promoted through the artifact lifecycle.
 
+### Exact Genesis draft import
+
+`import_existing_app_genesis_draft` is the trusted Factory entry point for an
+existing app's first exact app-bundle snapshot. Its caller supplies a pinned,
+authorized source revision, projects the workspace's `app/` contents to bundle
+root and keeps workspace `workflows/` at bundle root, and declares every ZIP
+member's path, byte count, and SHA-256 digest. The source provenance contains
+an opaque source ID plus immutable revision and tree IDs; it carries no
+credential or mutable checkout path.
+
+The importer resolves the owner-scoped Factory target through its registry ID,
+checks the execution host, requires an unstarted draft target, verifies the
+canonical ZIP and complete file manifest, and requires root `app.json` to have
+the registered target app ID. It uses the shared bundle reader in binary mode,
+so unsupported, missing, oversized, or unsafe content fails before a
+`BuildRecord` is inserted. Before writing the immutable blob or BuildRecord,
+it atomically reserves one exact source on the same Factory AppRegistry row:
+record ID, archive and manifest digests, content backend, bundle name, and
+pinned source revision/tree. The row stays `draft` without a build run or
+current artifact. Generic registry status updates and normal Genesis or
+Refinement launches cannot advance a reserved target. A repeated exact import
+can finish after a partial failure; changed source facts conflict.
+
+The resulting app-bundle `BuildRecord` is `draft` with validation `pending`.
+It binds its metadata to the registry reservation digest, and the refinement
+harness workspace readers retrieve its digest-backed archive through the
+canonical verified reader before considering any mutable workspace path. They
+do not add a second `content_ref` authority. The reservation is not Genesis
+acceptance: canonical app validation and explicit owner review remain required
+before a later request may enter Refinement. Studio launch and retry plus
+AppGenerator hydration require the accepted receipt and verified source bytes
+for imported drafts. The contained external probe verifies HTTP readiness, but
+cannot observe the runtime's rejected-event audit. Imported acceptance stays
+closed while its machine-readable result lists `event_rejection` as unverified;
+accepted-receipt replay is bound to the complete validation evidence. Ordinary
+revision drafts retain their existing path. App
+Intelligence's redacted source index is context evidence, not a substitute for
+the complete archive.
+
 Graph backend mirrors are never source of truth. FalkorDB may mirror graph and
 intelligence artifacts for production-scale querying, but `AppContextVersion`
 and artifact storage remain canonical.

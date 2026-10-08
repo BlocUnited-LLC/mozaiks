@@ -1730,6 +1730,7 @@ def test_direct_studio_routes_classify_app_ownership_authority() -> None:
         "GET /api/studio/build/history": "_resolve_studio_artifact_scope",
         "GET /api/studio/build/artifacts/{artifact_version_id}/bundle": "_resolve_studio_artifact_scope",
         "GET /api/studio/build/artifacts/{artifact_version_id}/review": "_resolve_studio_artifact_scope",
+        "POST /api/studio/build/artifacts/{artifact_version_id}/accept-genesis": "_resolve_studio_artifact_scope",
         "POST /api/studio/build/artifacts/{artifact_version_id}/accept": "_resolve_studio_artifact_scope",
         "POST /api/studio/build/artifacts/{artifact_version_id}/reject": "_resolve_studio_artifact_scope",
         "POST /api/studio/build/artifacts/{artifact_version_id}/promote": "_resolve_studio_artifact_scope",
@@ -1764,7 +1765,7 @@ def test_direct_studio_routes_classify_app_ownership_authority() -> None:
         | execution_host_routes.keys()
         | routes_without_app_scope
     )
-    assert len(direct_route_list) == len(direct_routes) == 36
+    assert len(direct_route_list) == len(direct_routes) == 37
     assert direct_routes.keys() == classified
     assert len(owned_app_routes) == 17
     for key in owned_app_routes:

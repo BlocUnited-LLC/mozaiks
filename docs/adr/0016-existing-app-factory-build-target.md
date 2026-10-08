@@ -97,6 +97,9 @@ accept an intact brownfield app without replacing its live repository, that
 acceptance contract needs its own explicit decision; a draft-to-refinement
 shortcut is not an acceptable default.
 
+[ADR 0017](0017-accepted-imported-genesis-without-deployment.md) proposes the
+dedicated, no-deployment acceptance and durable Factory receipt for this gate.
+
 An approved nonpatch request keeps the effective refinement-harness route:
 `build_family`, change class, `workflow_sequence`, first workflow, and affected
 families. App Zero verifies approval and its pinned repository snapshot against
@@ -124,7 +127,11 @@ approved deletion. Source import, hydration, assembly, and validation must
 agree on the manifest and byte digests. An importer must preserve every
 unmodified asset byte or fail before creating a usable baseline. Raising one
 limit alone does not solve binary retention through revision and materialization.
-The 32 MiB total and 4,096-file limits also remain explicit admission checks.
+The total-source and 4,096-file limits also remain explicit admission checks.
+The later binary-asset preservation change in #869 deliberately raised the
+canonical app-bundle reader's total limit from 32,000,000 to 64,000,000 bytes.
+Imported Genesis uses that same 64,000,000-byte limit for both the archive and
+its uncompressed source. The 8,000,000-byte per-file reader limit remains.
 
 ## Alternatives Considered
 

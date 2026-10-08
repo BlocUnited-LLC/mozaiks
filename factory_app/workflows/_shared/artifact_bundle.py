@@ -14,8 +14,8 @@ from mozaiksai.core.artifacts.models import BuildRecord
 
 _BINARY_ASSET_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".ico", ".svg", ".woff", ".woff2", ".ttf", ".otf", ".eot", ".pdf", ".mp3", ".mp4"}
 _MAX_FILE_BYTES = 8_000_000
-_MAX_TOTAL_BYTES = 64_000_000
-_MAX_FILES = 4096
+APP_BUNDLE_MAX_TOTAL_BYTES = 64_000_000
+APP_BUNDLE_MAX_FILES = 4096
 
 
 @overload
@@ -40,7 +40,7 @@ async def read_artifact_bundle(
     artifact: BuildRecord, *, include_binary: bool = False, retain_svg_text: bool = False,
 ) -> tuple[dict[str, str], list[dict[str, Any]]] | tuple[dict[str, str | bytes], list[dict[str, Any]]]:
     metadata = artifact.commit_metadata.metadata
-    raw = await read_verified_artifact_bundle(artifact, max_bytes=_MAX_TOTAL_BYTES)
+    raw = await read_verified_artifact_bundle(artifact, max_bytes=APP_BUNDLE_MAX_TOTAL_BYTES)
     prefix = f"{metadata['bundle_name']}/"
     files: dict[str, str | bytes] = {}
     diagnostics: list[dict[str, Any]] = []
@@ -65,11 +65,11 @@ async def read_artifact_bundle(
                 path = path[len(prefix):]
                 if path.casefold() in seen:
                     reason = "duplicate_path"
-                elif len(seen) >= _MAX_FILES:
+                elif len(seen) >= APP_BUNDLE_MAX_FILES:
                     reason = "file_limit"
                 elif info.file_size > _MAX_FILE_BYTES:
                     reason = "file_too_large"
-                elif total_bytes + info.file_size > _MAX_TOTAL_BYTES:
+                elif total_bytes + info.file_size > APP_BUNDLE_MAX_TOTAL_BYTES:
                     reason = "total_size_limit"
             if reason:
                 diagnostics.append({"path": info.filename, "code": reason, "blocking": True})
