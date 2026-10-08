@@ -41,7 +41,7 @@ WORKSPACE_B = "workspace-b"
 def _record(
     notification_id: str, *, module_id: str, event_type: str,
     workspace_id: str | list[str] | None = None,
-    related_type: str | None = None, legacy: bool = False,
+    related_type: str | None = None, ownerless: bool = False,
 ) -> dict:
     audience = {"permissions": ["workspace_support.read"]} if module_id == "workspace_support" else (
         {"user_ids": [USER_ID]} if module_id == "messages" else {}
@@ -57,7 +57,7 @@ def _record(
         "body": f"secret body {notification_id}",
         "created_at": "2026-10-08T00:00:00+00:00",
     }
-    if not legacy:
+    if not ownerless:
         record["workspace_id"] = workspace_id
     if related_type:
         record["context"] = {"related_type": related_type}
@@ -137,24 +137,24 @@ def notification_http(monkeypatch):
                 workspace_id=WORKSPACE_A),
         _record("support-b", module_id="workspace_support", event_type="domain.workspace_support.request_created",
                 workspace_id=WORKSPACE_B),
-        _record("support-legacy", module_id="workspace_support", event_type="domain.workspace_support.request_created",
-                legacy=True),
+        _record("support-ownerless", module_id="workspace_support", event_type="domain.workspace_support.request_created",
+                ownerless=True),
         _record("support-array", module_id="workspace_support", event_type="domain.workspace_support.request_created",
                 workspace_id=[WORKSPACE_A, WORKSPACE_B]),
         _record("reply-a", module_id="messages", event_type="domain.messages.message_sent",
                 workspace_id=WORKSPACE_A, related_type="workspace_support.request"),
         _record("reply-b", module_id="messages", event_type="domain.messages.message_sent",
                 workspace_id=WORKSPACE_B, related_type="workspace_support.request"),
-        _record("reply-legacy", module_id="messages", event_type="domain.messages.message_sent",
-                related_type="workspace_support.request", legacy=True),
+        _record("reply-ownerless", module_id="messages", event_type="domain.messages.message_sent",
+                related_type="workspace_support.request", ownerless=True),
         {
-            **_record("reply-source-legacy", module_id="messages",
-                      event_type="domain.messages.message_sent", legacy=True),
+            **_record("reply-source-ownerless", module_id="messages",
+                      event_type="domain.messages.message_sent", ownerless=True),
             "source_event": {"payload": {"related_type": "workspace_support.request"}},
         },
         _record("direct-message", module_id="messages", event_type="domain.messages.message_sent",
                 workspace_id=WORKSPACE_B),
-        _record("app-wide", module_id="billing", event_type="domain.billing.updated", legacy=True),
+        _record("app-wide", module_id="billing", event_type="domain.billing.updated", ownerless=True),
     ])
 
     mongo = AsyncIOMotorClient(uri, serverSelectionTimeoutMS=3000)
@@ -212,7 +212,7 @@ def test_support_notification_mutations_require_verified_workspace(notification_
     a = notification_http.token(WORKSPACE_A)
     b = notification_http.token(WORKSPACE_B)
     for foreign_id in (
-        "support-b", "reply-b", "support-legacy", "support-array", "reply-legacy", "reply-source-legacy",
+        "support-b", "reply-b", "support-ownerless", "support-array", "reply-ownerless", "reply-source-ownerless",
     ):
         response = client.post(f"/api/notifications/{foreign_id}/read", headers=a)
         assert response.status_code == 200, response.text
@@ -223,14 +223,14 @@ def test_support_notification_mutations_require_verified_workspace(notification_
     assert notification_http.collection.count_documents({"status": "unread"}) == 6
     assert client.delete("/api/notifications", headers=a).json()["cleared_count"] == 4
     assert {row["notification_id"] for row in notification_http.collection.find({})} == {
-        "support-b", "reply-b", "support-legacy", "support-array", "reply-legacy", "reply-source-legacy",
+        "support-b", "reply-b", "support-ownerless", "support-array", "reply-ownerless", "reply-source-ownerless",
     }
 
     assert client.post("/api/notifications/support-b/read", headers=b).json()["success"] is True
     assert client.post("/api/notifications/mark-all-read", headers=b).json()["marked_count"] == 1
     assert client.delete("/api/notifications", headers=b).json()["cleared_count"] == 2
     assert {row["notification_id"] for row in notification_http.collection.find({})} == {
-        "support-legacy", "support-array", "reply-legacy", "reply-source-legacy",
+        "support-ownerless", "support-array", "reply-ownerless", "reply-source-ownerless",
     }
 
 
@@ -238,16 +238,16 @@ def test_unbound_token_cannot_mutate_support_alerts(notification_http):
     client = notification_http.client
     unbound = notification_http.token(None)
     for notification_id in (
-        "support-a", "support-b", "reply-a", "reply-b", "support-legacy", "support-array",
-        "reply-legacy", "reply-source-legacy",
+        "support-a", "support-b", "reply-a", "reply-b", "support-ownerless", "support-array",
+        "reply-ownerless", "reply-source-ownerless",
     ):
         assert client.post(f"/api/notifications/{notification_id}/read", headers=unbound).json()["success"] is False
     assert client.get("/api/notifications/count", headers=unbound).json() == {"count": 2, "unread_count": 2}
     assert client.post("/api/notifications/mark-all-read", headers=unbound).json()["marked_count"] == 2
     assert client.delete("/api/notifications", headers=unbound).json()["cleared_count"] == 2
     assert {row["notification_id"] for row in notification_http.collection.find({})} == {
-        "support-a", "support-b", "reply-a", "reply-b", "support-legacy", "support-array",
-        "reply-legacy", "reply-source-legacy",
+        "support-a", "support-b", "reply-a", "reply-b", "support-ownerless", "support-array",
+        "reply-ownerless", "reply-source-ownerless",
     }
 
 
@@ -297,10 +297,10 @@ def test_claimless_token_is_confined_to_loaded_app_for_reads_and_mutations(notif
                    event_type="domain.workspace_support.request_created", workspace_id=WORKSPACE_A),
          "app_id": "other-app"},
         {**_record("foreign-message", module_id="messages",
-                   event_type="domain.messages.message_sent", legacy=True),
+                   event_type="domain.messages.message_sent", ownerless=True),
          "app_id": "other-app"},
         {**_record("foreign-global", module_id="billing",
-                   event_type="domain.billing.updated", legacy=True),
+                   event_type="domain.billing.updated", ownerless=True),
          "app_id": "other-app"},
     ]
     notification_http.collection.insert_many(foreign)
