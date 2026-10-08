@@ -804,6 +804,7 @@ async def test_signed_http_support_threads_require_scoped_ticket_actions(tmp_pat
     loaded = await AppLoader.load(str(active), module_defaults_path=str(FACTORY))
     executor = executor_for(loaded, monkeypatch, client=mongo.client, database=mongo.database)
     app = FastAPI()
+    app.state.loaded_app_id = "my-app"
     app.state.executor_registry = SimpleNamespace(module_executor=executor)
     app.state.module_action_surfaces = {item.name: item.action_api_surface_map for item in loaded.modules}
     app.include_router(module_router.router)
