@@ -519,6 +519,7 @@ async def _run_ag2_network_phase(
     context_authority_policy: Any = None,
     resume_existing_only: bool = False,
     resume_context_updates: Mapping[str, Any] | None = None,
+    persisted_replay_context: Mapping[str, Any] | None = None,
     agent_output_handler: Callable | None = None,
     idle_timeout_seconds: float = DEFAULT_IDLE_TIMEOUT_SECONDS,
     failure_message_key: str | None = None,
@@ -542,6 +543,7 @@ async def _run_ag2_network_phase(
             context_authority_policy=context_authority_policy,
             resume_existing_only=resume_existing_only,
             resume_context_updates=dict(resume_context_updates or {}),
+            persisted_replay_context=dict(persisted_replay_context or {}),
             failure_message_key=failure_message_key,
         )
     )
@@ -1146,7 +1148,10 @@ async def run_workflow_orchestration(
             knowledge_store=knowledge_store,
             context_authority_policy=context_authority_policy,
             resume_existing_only=resume_existing_only,
-            resume_context_updates=persisted_extra_ctx if resume_existing_only else None,
+            persisted_replay_context=(
+                {key: value for key, value in persisted_extra_ctx.items() if key not in SERVER_OWNED_SESSION_FIELDS}
+                if resume_existing_only else None
+            ),
             failure_message_key=config.get("failure_message_key"),
         )
 

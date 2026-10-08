@@ -440,6 +440,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Resuming an AppReview chat now restores scoped persisted workflow state to the
+  durable AG2 channel under replay validation. Router-owned build checks no
+  longer fail as if the user tried to rewrite them, while live user context
+  still cannot change those checks.
+
 - Pin shared-shell text checkouts to LF so installed Android framework resources
   have identical provenance on Windows and Linux. Binary assets stay unchanged.
 

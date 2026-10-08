@@ -106,6 +106,9 @@ orchestration path.
 ## Decisions
 
 - Keep Mozaiks journey routing above AG2 workflow execution.
+- On cold resume, replay scoped persisted context into the durable AG2 channel
+  only after validating its replay contract. Keep live user context updates on
+  their separate writer authority.
 - Use AG2 Harness and Middleware within their documented agent-turn scope.
 - Use ACP as a provider boundary for controlled coding sessions.
 - Keep refinement classification, artifact scope, staging, validation, and

@@ -1254,6 +1254,81 @@ async def test_ag2_network_runner_hydrates_and_continues_same_channel_after_rest
 
 
 @pytest.mark.anyio
+async def test_cold_resume_replays_stored_quality_and_user_choice_without_user_write_authority() -> None:
+    policy = build_context_authority_policy(
+        workflow_name="ReplayAuthoritySmoke",
+        definitions={
+            "app_validation_status": {
+                "type": "string",
+                "source": {"type": "state", "default": None},
+                "writer_ids": ["transition_router"],
+            },
+            "revision_approved": {
+                "type": "boolean",
+                "source": {"type": "state", "default": False},
+                "writer_ids": ["user_text_trigger"],
+            },
+        },
+        transition_rules=[],
+    )
+    store = MemoryKnowledgeStore()
+    transitions = [
+        {"source_agent": "Worker", "target_agent": "user", "transition_type": "after_turn"},
+        {"source_agent": "user", "target_agent": "terminate", "transition_type": "after_turn"},
+    ]
+
+    def request(
+        message: str | None,
+        *,
+        persisted: dict[str, Any] | None = None,
+        live: dict[str, Any] | None = None,
+        authority_policy: Any = policy,
+    ) -> AG2NetworkRunnerRequest:
+        return AG2NetworkRunnerRequest(
+            workflow_name="ReplayAuthoritySmoke",
+            chat_id="chat-replay-authority",
+            app_id="app-replay-authority",
+            agents={"Worker": _DeterministicAgent("Worker", "Review")},
+            transition_rules=transitions,
+            initial_agent_name="Worker",
+            initial_message=message,
+            context_variables={"app_validation_status": "passed", "revision_approved": False},
+            knowledge_store=store,
+            idle_timeout_seconds=3.0,
+            resume_existing_only=message is None,
+            context_authority_policy=authority_policy,
+            persisted_replay_context=persisted or {},
+            resume_context_updates=live or {},
+        )
+
+    first = await AG2NetworkRunner().run(request("Start"))
+    assert first.status is RunStatus.PAUSED
+    assert first.live_run is not None
+    await first.live_run.close()
+
+    replayed = await AG2NetworkRunner().run(request(
+        None,
+        persisted={"app_validation_status": "passed", "revision_approved": True},
+    ))
+    assert replayed.status is RunStatus.PAUSED
+    assert replayed.channel_id == first.channel_id
+    assert replayed.context_variables["app_validation_status"] == "passed"
+    assert replayed.context_variables["revision_approved"] is True
+    assert replayed.live_run is not None
+    await replayed.live_run.close()
+
+    for rejected in (
+        request(None, live={"app_validation_status": "failed"}),
+        request(None, persisted={"app_validation_status": ["invalid"]}),
+        request(None, persisted={"app_validation_status": "passed"}, authority_policy=None),
+    ):
+        result = await AG2NetworkRunner().run(rejected)
+        assert result.status is RunStatus.FAILED
+        assert result.live_run is None
+        assert result.context_variables.get("app_validation_status") != "failed"
+
+
+@pytest.mark.anyio
 async def test_ag2_network_runner_commits_multiple_context_updates_and_deletes() -> None:
     context: dict[str, Any] = {"obsolete": "old", "route": "draft"}
     planner_agent = _ContextOperationAgent(
@@ -1789,14 +1864,14 @@ async def test_run_workflow_orchestration_resolves_user_reentry_to_next_agent(
     monkeypatch.setattr(task_batches_module, "load_task_batches_config", lambda workflow_name: None)
     monkeypatch.setattr(structured_outputs_module, "load_workflow_structured_outputs", lambda workflow_name: ({}, {}))
 
-    result = await run_workflow_orchestration(
-        workflow_name="AgentGenerator",
-        app_id="app-1",
-        chat_id="chat-reentry",
-        user_id="user-1",
-        initial_agent_name_override="user",
-        agents_factory=_agents_factory,
-        context_factory=lambda: create_context_container(
+    run_kwargs = {
+        "workflow_name": "AgentGenerator",
+        "app_id": "app-1",
+        "chat_id": "chat-reentry",
+        "user_id": "user-1",
+        "initial_agent_name_override": "user",
+        "agents_factory": _agents_factory,
+        "context_factory": lambda: create_context_container(
             initial={
                 "interview_complete": False,
                 "workflow_review_approved": False,
@@ -1818,7 +1893,8 @@ async def test_run_workflow_orchestration_resolves_user_reentry_to_next_agent(
                 transition_rules=[],
             ),
         ),
-    )
+    }
+    result = await run_workflow_orchestration(**run_kwargs)
 
     assert result is not None
     assert result["run_completed"] is True
@@ -1826,6 +1902,15 @@ async def test_run_workflow_orchestration_resolves_user_reentry_to_next_agent(
     assert captured["initial_message"] == "Approved, proceed."
     assert captured["idle_timeout_seconds"] == idle_timeout_seconds
     assert persistence.completed == [("chat-reentry", "app-1")]
+
+    captured.clear()
+    await run_workflow_orchestration(**run_kwargs, resume_existing_only=True)
+    assert captured.get("resume_context_updates") is None
+    assert captured["persisted_replay_context"] == {
+        "interview_complete": True,
+        "workflow_review_approved": True,
+        "workflow_review_revision_requested": False,
+    }
 
 
 @pytest.mark.anyio
