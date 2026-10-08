@@ -512,11 +512,15 @@ def validate_module_contract_output(output: dict[str, Any]) -> tuple[str | None,
         output_schema = list_reports.get("output_schema")
         items = schema_at_path(output_schema, "items")
         total = schema_at_path(output_schema, "total")
+        required = output_schema.get("required", []) if isinstance(output_schema, dict) else []
         item_schema = items.get("items") if isinstance(items, dict) else None
         if items is None or items.get("type") != "array" or not isinstance(item_schema, dict) or item_schema.get("type") != "object":
             errors.append("list_reports output_schema must declare items as an array of report objects.")
         if total is None or total.get("type") != "integer":
             errors.append("list_reports output_schema must declare total as an integer.")
+        for name in ("items", "total"):
+            if name not in required:
+                errors.append(f"list_reports output_schema must require {name}.")
 
     for action_id, action in by_id.items():
         handler_method = str(action.get("handler_method") or "").strip()

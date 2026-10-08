@@ -98,6 +98,17 @@ def test_module_contract_validator_rejects_missing_form_input() -> None:
     assert "generate_report input_schema must declare a required topic string for the Reports form." in errors
 
 
+@pytest.mark.parametrize("optional_field", ["items", "total"])
+def test_module_contract_validator_rejects_optional_list_response_fields(optional_field: str) -> None:
+    output = deterministic_module_contract_output()
+    list_action = output["module_contract"]["module_yaml"]["actions"][0]
+    list_action["output_schema"]["required"].remove(optional_field)
+
+    _content, errors = validate_module_contract_output(output)
+
+    assert f"list_reports output_schema must require {optional_field}." in errors
+
+
 def test_model_schema_compiles_to_the_report_metric_binding() -> None:
     output = deterministic_module_contract_output()
     output["code_files"] = []
@@ -123,6 +134,7 @@ def test_model_schema_compiles_to_the_report_metric_binding() -> None:
     assert yaml.safe_load(content)["actions"][0]["output_schema"]["properties"] == {
         "items": {"type": "array", "items": {"type": "object"}}, "total": {"type": "integer"},
     }
+    assert yaml.safe_load(content)["actions"][0]["output_schema"]["required"] == ["items", "total"]
     assert yaml.safe_load(content)["actions"][1]["input_schema"]["required"] == ["topic"]
 
 
