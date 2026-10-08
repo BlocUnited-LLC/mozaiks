@@ -1050,6 +1050,7 @@ async def _boot(run: _SmokeRun, initial_environment: set[str]) -> bool:
     ))
 
     async def resolve_principal(request: Request) -> UserPrincipal | None:
+        principal: _Principal | None
         if run.external_server:
             encoded = request.headers.get("x-mozaiks-smoke-principal") or ""
             if not encoded or len(encoded) > 4096:
