@@ -241,6 +241,25 @@ def test_imported_probe_mount_excludes_app_python(tmp_path):
     }
 
 
+async def test_contained_server_refuses_recorded_boot_failure(monkeypatch):
+    import motor.motor_asyncio
+    import uvicorn
+
+    class Client:
+        def close(self):
+            pass
+
+    async def failed_boot(run, _initial_environment):
+        run.record("boot.migrations", False, "migration failed")
+        return True
+
+    monkeypatch.setattr(motor.motor_asyncio, "AsyncIOMotorClient", lambda *_args, **_kwargs: Client())
+    monkeypatch.setattr(app_runtime_smoke, "_boot", failed_boot)
+    monkeypatch.setattr(uvicorn, "Server", lambda *_args: pytest.fail("failed boot was served"))
+
+    assert await app_runtime_smoke._serve_imported_app("smoke-db", "a" * 32, "mongodb://localhost") == 1
+
+
 def test_imported_smoke_rejects_changed_bytes_during_copy(tmp_path):
     app_root = tmp_path / "app"
     app_root.mkdir()
@@ -502,6 +521,33 @@ async def test_imported_app_cannot_forge_observer_outcomes_through_stdout():
     assert "observer_origin" not in result
     assert any(row["status"] == "failed" and row["check"].startswith("crud.")
                for row in result["results"])
+
+
+@pytest.mark.skipif(
+    not os.getenv("MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE"),
+    reason="set MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE to a freshly built local preview image",
+)
+@pytest.mark.parametrize("fault", ["migration", "router"])
+async def test_imported_boot_failure_cannot_receive_observer_receipt(fault):
+    image = os.environ["MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE"]
+    files = _good()
+    if fault == "migration":
+        files["data/migrations/001_broken.json"] = "{invalid json"
+    else:
+        files["modules/task_management/runtime_extensions.yaml"] = (
+            "schema_version: mozaiks.runtime_extensions.v1\nextensions:\n"
+            "  - kind: api_router\n    entrypoint: backend.missing:router\n"
+        )
+
+    result = await _contained_smoke(files, image=image)
+
+    assert result["status"] == "failed", result["results"]
+    assert "observer_origin" not in result
+    assert "observer_run_id" not in result
+    assert "observed_boot" not in result
+    checks = _by_check(result)
+    assert any(checks.get(name, {}).get("status") == "failed"
+               for name in ("boot.http_ready", "smoke.process"))
 
 
 @pytest.mark.skipif(

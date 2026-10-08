@@ -1844,7 +1844,8 @@ async def _serve_imported_app(database_name: str, observer_nonce: str, mongo_uri
     run.external_server = True
     run.probe_nonce = observer_nonce
     try:
-        if not await _boot(run, set(os.environ)):
+        booted = await _boot(run, set(os.environ))
+        if not booted or any(outcome.passed is False for outcome in run.outcomes):
             return 1
         await run.http.aclose()
         run.http = None
