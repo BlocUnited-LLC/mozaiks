@@ -969,6 +969,7 @@ class ModuleEventRouter:
             "source_event_id": envelope.get("id"),
             "app_id": tenant.get("app_id"),
             "tenant_id": tenant.get("tenant_id"),
+            "workspace_id": normalize_module_event_provenance(event_type, envelope).workspace_id,
             "actor": envelope.get("actor") if isinstance(envelope.get("actor"), dict) else None,
             "audience": audience,
             "channels": rule.get("channels") if isinstance(rule.get("channels"), list) else ["in_app"],
