@@ -163,7 +163,7 @@ Rules:
 - Before upgrading an environment with saved connectors, run the private
   metadata-only inventory described in the workspace integration guide. Old
   records need operator review; ambiguous records need credential re-entry.
-  Retained legacy records keep the inventory unready until separately reviewed
+  Retained unqualified records keep the inventory unready until separately reviewed
   cleanup, even after scoped credentials have been re-entered.
 - Azure Key Vault remains the recommended backend for production deployments that
   already operate Key Vault infrastructure.

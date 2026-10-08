@@ -50,9 +50,9 @@ def test_single_legacy_candidate_still_requires_operator_review() -> None:
 def test_reentered_scoped_secret_does_not_hide_retained_legacy_cleanup_gate() -> None:
     owner = _owner("app", "id", "billing")
     qualified = {"scope": "app", "scope_id": "id", "service": "billing", "secret_name": owner["secret_name"]}
-    legacy = {"scope_id": "id", "service": "billing", "secret_name": "old-name"}
+    old_record = {"scope_id": "id", "service": "billing", "secret_name": "old-name"}
 
-    retained = build_inventory([owner], [qualified, legacy], provider="mongo")
+    retained = build_inventory([owner], [qualified, old_record], provider="mongo")
     assert retained["ready"] is False
     assert retained["counts"]["qualified_ready"] == 1
     assert retained["counts"]["legacy_review"] == 1

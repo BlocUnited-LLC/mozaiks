@@ -94,13 +94,13 @@ For each environment with existing connector secrets:
 2. Run the scoped runtime in a restricted maintenance window. Verify each
    connector's app or workspace owner from independent account records.
    Re-enter credentials through that owner's scoped Studio UI, including every
-   ambiguous connector. Do not copy one ambiguous legacy value into multiple
+   ambiguous connector. Do not copy one ambiguous old value into multiple
    scopes. Verify scoped reads and provider health before enabling usage.
-3. Take a new inventory after re-entry. A retained legacy record still produces
+3. Take a new inventory after re-entry. A retained unqualified record still produces
    a finding and keeps `ready: false`, even if its scoped replacement is ready.
    Keep it only for the reviewed rollback window. Before cleanup, freeze writes
    again and re-run the reviewed snapshot with `--expect-fingerprint`.
-4. Separately approve and perform exact legacy-record cleanup using the
+4. Separately approve and perform exact unqualified-record cleanup using the
    operator's vault/database tooling and private metadata. This inventory
    script cannot delete, decrypt, or migrate a secret. If cleanup is deferred,
    keep the connector-dependent release gate closed.
