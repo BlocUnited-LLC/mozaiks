@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { acknowledgeFeedbackRender } from '../../adapters/uiToolResponse.js';
+import { acknowledgeFeedbackRender } from '../../adapters/feedbackRenderAck.js';
 import { useOptionalChatUI } from '../../context/ChatUIContext.jsx';
 import { Alert, Button, SurfaceCard } from '../../ui/primitives/index.js';
 
