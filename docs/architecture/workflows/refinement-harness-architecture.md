@@ -891,14 +891,20 @@ AG2 at all — they derive results from typed inputs and routing tables.
 
 ### LLM Config Resolution
 
-LLM config flows from the declarative pack, not from workflow-local AG2 config:
+LLM config for structured-output checkpoint calls comes from the app policy:
 
 1. `app/config/refinement_policy.yaml` declares `llm_profiles` keyed by
-   capability name, each with `model` and `temperature`.
+   profile id, each with an AG2 `llm_config` such as `api_type` and `model`.
 2. `ControlPlaneConfig.resolve_capability_llm_config(capability)` returns a flat
-   `{"model": ..., "temperature": ...}` dict for the resolved profile.
-3. The dict maps directly to `OpenAIConfig(model=..., temperature=...)` inside
-   each handler's `_make_agent()`.
+   config dict for the profile named by that capability.
+3. The checkpoint handler passes that dict to the AG2 structured agent runner.
+
+The first-party policy uses `impact_analyzer` for file-scope and
+contract-surface selection. Its `coding.llm_profile` and
+`contract_surface.regeneration_llm_profile` independently select `codegen`
+for structured patches and contract-surface file generation. Regeneration
+requires an explicit model even if the coding capability is disabled. ACP coding is a separate execution provider:
+its adapter does not consume `llm_profiles.codegen.llm_config.model`.
 
 Capability-level `llm_config` values in `app/config/refinement_policy.yaml`
 take precedence only when that capability does not reference an `llm_profile`.

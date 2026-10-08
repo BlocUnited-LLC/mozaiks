@@ -131,8 +131,8 @@ class SurfaceRegenerationWorker:
                 },
             )
 
+        llm_config = self._load_config().resolve_contract_surface_regeneration_llm_config()
         system_prompt = self._load_system_prompt()
-        llm_config = self._load_config().resolve_capability_llm_config("contract_surface")
 
         accumulated: dict[str, str] = {}
         records: list[SurfaceExecutionRecord] = []

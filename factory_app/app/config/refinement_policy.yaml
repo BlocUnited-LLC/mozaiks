@@ -4,7 +4,9 @@ enabled: true
 # ---------------------------------------------------------------------------
 # LLM Profiles
 #
-# Each profile maps to an AG2 ModelConfig via the api_type + model fields.
+# These profiles configure AG2 structured-output checkpoint calls. They do not
+# select the ACP coding adapter or its model. Each profile maps to an AG2
+# ModelConfig via the api_type + model fields.
 # Supported api_type values: openai | google | anthropic | ollama
 #
 # Operators can replace these provider/model pairs with their own supported
@@ -18,35 +20,23 @@ llm_profiles:
       api_type: openai
       model: gpt-4.1-2025-04-14
   impact_analyzer:
-    purpose: Support artifact impact analysis and refinement routing decisions.
-    expected_behavior: deterministic structured impact analysis
+    purpose: Select scoped files and contract surfaces for a refinement.
+    expected_behavior: deterministic structured planning
     llm_config:
       api_type: openai
       model: gpt-4.1-2025-04-14
+  # Advisory workflow-context name; the workflow runner does not yet resolve
+  # its model from this refinement policy.
   architecture:
-    purpose: Concept-level planning for conceptual_replan and full_rebuild sequences - pivots, full rebuilds, and high-level design revisions.
-    expected_behavior: deep structured reasoning for architecture-level tasks; planning-only, no code generation or shell tools
-    llm_config:
-      api_type: openai
-      model: gpt-4.1-2025-04-14
-      temperature: 0.1
-  planner_replanner:
-    purpose: Plan or replan higher-scope refinement work after routing.
-    expected_behavior: structured planning and replanning
+    purpose: Concept-level planning for conceptual_replan and full_rebuild sequences.
+    expected_behavior: deep structured architecture reasoning without code generation
     llm_config:
       api_type: openai
       model: gpt-4.1-2025-04-14
       temperature: 0.1
   codegen:
-    purpose: Generate scoped code or artifact patches.
-    expected_behavior: deterministic code and artifact generation
-    llm_config:
-      api_type: openai
-      model: gpt-4.1-2025-04-14
-      temperature: 0.1
-  reviewer_validator:
-    purpose: Review generated changes and validate contract conformance.
-    expected_behavior: strict structured review and validation
+    purpose: Generate structured-output patches and regenerate selected contract surfaces.
+    expected_behavior: deterministic structured file generation
     llm_config:
       api_type: openai
       model: gpt-4.1-2025-04-14
@@ -56,19 +46,23 @@ classifier:
   llm_profile: classifier
 coding:
   enabled: true
+  # Used by structured-output coding. ACP runs a separate coding agent and
+  # does not consume this model profile.
   llm_profile: codegen
-  # Coding execution providers. The structured-output provider is always
-  # available when coding is enabled; the ACP-backed CLI coding provider is
-  # opt-in and disabled by default. Budgets are
-  # hard ceilings enforced outside the model. No credentials or adapter
-  # connection details belong in this file.
+  # ACP execution is disabled until an isolated worker is connected to this
+  # route. The structured-output provider uses the codegen profile above.
+  # Budgets are hard ceilings enforced outside the model. No credentials or
+  # adapter connection details belong in this file.
   providers:
     acp:
       enabled: false
       adapter: claude_code
 contract_surface:
   enabled: true
-  llm_profile: codegen
+  # Planning selects surfaces; regeneration writes files with its own
+  # explicit profile. Both may point at shared profiles above.
+  llm_profile: impact_analyzer
+  regeneration_llm_profile: codegen
 scope:
   enabled: true
-  llm_profile: codegen
+  llm_profile: impact_analyzer

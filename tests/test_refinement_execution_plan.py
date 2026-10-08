@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 
 from mozaiksai.control_plane import dry_run
-from mozaiksai.control_plane.config import load_control_plane_config
+from mozaiksai.control_plane.config import ControlPlaneConfig, load_control_plane_config
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 APP_ROOT = REPO_ROOT / "factory_app" / "app"
@@ -127,9 +127,50 @@ def test_execution_plan_profiles_resolve_through_named_registry() -> None:
     plan = _run_execution_plan("Add an archive_project action to the projects module API.", "feature")
 
     assert plan.profiles.classifier == "classifier"
-    assert plan.profiles.planner_replanner == "planner_replanner"
-    assert plan.profiles.codegen == "codegen"
-    assert plan.profiles.reviewer_validator == "reviewer_validator"
+    assert plan.profiles.planner_replanner == "impact_analyzer"
+    assert plan.profiles.codegen is None
+    assert plan.profiles.surface_regeneration == "codegen"
+    assert plan.profiles.reviewer_validator is None
+
+
+def test_execution_plan_reports_planning_profile_for_route_class() -> None:
+    config = load_control_plane_config(APP_ROOT)
+
+    patch = dry_run.resolve_execution_profiles(config=config, requires_replanning=False, change_class="patch")
+    feature = dry_run.resolve_execution_profiles(config=config, requires_replanning=True, change_class="feature")
+    core = dry_run.resolve_execution_profiles(config=config, requires_replanning=True, change_class="core")
+
+    assert patch.planner_replanner == config.scope.llm_profile
+    assert patch.codegen == config.coding.llm_profile
+    assert patch.surface_regeneration is None
+    assert feature.planner_replanner == config.contract_surface.llm_profile
+    assert feature.codegen is None
+    assert feature.surface_regeneration == config.contract_surface.regeneration_llm_profile
+    assert core.planner_replanner is None
+    assert core.codegen is None
+    assert core.surface_regeneration is None
+
+
+def test_surface_profile_reporting_is_independent_of_coding_capability() -> None:
+    config = ControlPlaneConfig.model_validate({
+        "llm_profiles": {
+            "impact_analyzer": {"llm_config": {"model": "planning-model"}},
+            "surface_regeneration": {"llm_config": {"model": "surface-model"}},
+            "codegen": {"llm_config": {"model": "patch-model"}},
+        },
+        "contract_surface": {
+            "enabled": True,
+            "llm_profile": "impact_analyzer",
+            "regeneration_llm_profile": "surface_regeneration",
+        },
+        "coding": {"enabled": False, "llm_profile": "codegen"},
+    })
+
+    feature = dry_run.resolve_execution_profiles(config=config, requires_replanning=True, change_class="feature")
+
+    assert feature.planner_replanner == "impact_analyzer"
+    assert feature.codegen is None
+    assert feature.surface_regeneration == "surface_regeneration"
 
 
 def test_live_classifier_fixture_cases_convert_to_execution_plans() -> None:

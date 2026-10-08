@@ -363,9 +363,9 @@ definitions:
     description: >
       Advisory LLM profile name injected by the refinement engine when the
       active workflow_sequence requires stronger reasoning (conceptual_replan
-      or full_rebuild). Maps to a named profile in ai.json llm_profiles.
-      Null for patch, design, and feature routes. Advisory only — the
-      workflow runner consumes this when a consumer is wired up.
+      or full_rebuild). The corresponding profile is declared in
+      app/config/refinement_policy.yaml. Null for patch, design, and feature
+      routes. The workflow runner does not currently resolve this name to a model.
     source:
       type: state
       default: null

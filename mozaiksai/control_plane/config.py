@@ -19,6 +19,7 @@ ControlPlaneLLMProfileId = Literal[
     "architecture",
     "planner_replanner",
     "codegen",
+    "surface_regeneration",
     "reviewer_validator",
 ]
 
@@ -28,6 +29,7 @@ ALLOWED_CONTROL_PLANE_LLM_PROFILE_IDS: tuple[str, ...] = (
     "architecture",
     "planner_replanner",
     "codegen",
+    "surface_regeneration",
     "reviewer_validator",
 )
 
@@ -90,6 +92,12 @@ class ControlPlaneCodingCapabilityConfig(ControlPlaneCapabilityConfig):
     providers: ControlPlaneCodingProvidersConfig = Field(default_factory=ControlPlaneCodingProvidersConfig)
 
 
+class ControlPlaneContractSurfaceCapabilityConfig(ControlPlaneCapabilityConfig):
+    """Separate models for contract-surface selection and file regeneration."""
+
+    regeneration_llm_profile: ControlPlaneLLMProfileId | None = None
+
+
 class ControlPlaneConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -99,7 +107,9 @@ class ControlPlaneConfig(BaseModel):
     llm_profiles: dict[ControlPlaneLLMProfileId, ControlPlaneLLMProfileConfig] = Field(default_factory=dict)
     classifier: ControlPlaneCapabilityConfig = Field(default_factory=ControlPlaneCapabilityConfig)
     coding: ControlPlaneCodingCapabilityConfig = Field(default_factory=ControlPlaneCodingCapabilityConfig)
-    contract_surface: ControlPlaneCapabilityConfig = Field(default_factory=ControlPlaneCapabilityConfig)
+    contract_surface: ControlPlaneContractSurfaceCapabilityConfig = Field(
+        default_factory=ControlPlaneContractSurfaceCapabilityConfig
+    )
     scope: ControlPlaneCapabilityConfig = Field(default_factory=ControlPlaneCapabilityConfig)
 
     @field_validator("llm_profiles", mode="before")
@@ -142,6 +152,22 @@ class ControlPlaneConfig(BaseModel):
         if capability_config.llm_config is not None:
             return dict(capability_config.llm_config)
         return None
+
+    def resolve_contract_surface_regeneration_llm_config(self) -> dict[str, Any]:
+        """Resolve the declared generation model before any surface call starts."""
+        profile_id = self.contract_surface.regeneration_llm_profile
+        if profile_id is None:
+            raise ValueError("contract_surface.regeneration_llm_profile is required for surface regeneration")
+        profile = self.llm_profiles.get(profile_id)
+        if profile is None:
+            raise ValueError(f"Surface regeneration references unknown LLM profile '{profile_id}'")
+        llm_config = profile.llm_config
+        if llm_config is None:
+            raise ValueError(f"Surface regeneration LLM profile '{profile_id}' requires a non-empty model")
+        model = llm_config.get("model")
+        if not isinstance(model, str) or not model.strip():
+            raise ValueError(f"Surface regeneration LLM profile '{profile_id}' requires a non-empty model")
+        return dict(llm_config)
 
 
 def resolve_ai_config_path(app_root: Path | None = None) -> Path:

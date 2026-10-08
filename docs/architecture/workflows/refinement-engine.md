@@ -360,12 +360,31 @@ Allowed profile ids:
 | Profile | Purpose |
 |---|---|
 | `classifier` | Classify refinement requests into stable `patch`, `design`, `feature`, or `core` classes |
-| `impact_analyzer` | Support artifact impact and routing analysis |
-| `planner_replanner` | Plan or replan higher-scope refinement work after routing |
-| `codegen` | Generate scoped code or artifact patches |
-| `reviewer_validator` | Review generated changes and validate contract conformance |
+| `impact_analyzer` | Select bounded file scope and contract surfaces |
+| `architecture` | Advisory context for conceptual replans and full rebuilds; the workflow runner does not yet resolve this model |
+| `planner_replanner` | Optional dry-run plan role; no separate live model call |
+| `codegen` | Generate structured-output patches and regenerate selected contract surfaces |
+| `surface_regeneration` | Optional separate model for contract-surface file generation |
+| `reviewer_validator` | Optional dry-run plan role; no separate live model call |
 
-Capabilities reference profiles by id:
+The first-party policy maps these settings to actual work:
+
+| Policy field | Used for | First-party profile |
+|---|---|---|
+| `classifier.llm_profile` | Classifying the request | `classifier` |
+| `scope.llm_profile` | Selecting files for a bounded patch | `impact_analyzer` |
+| `contract_surface.llm_profile` | Selecting surfaces for a feature or design change | `impact_analyzer` |
+| `contract_surface.regeneration_llm_profile` | Regenerating files in selected surfaces | `codegen` |
+| `coding.llm_profile` | Generating a structured-output patch | `codegen` |
+| `coding.providers.acp.adapter` | Selecting a separate ACP coding agent | `claude_code` when ACP is enabled |
+
+The ACP adapter does not consume the `codegen` profile's model. Surface
+regeneration requires its own declared profile with a non-empty model before
+the first AG2 call, even when `coding.enabled` is false. The first-party
+policy shares `codegen` across both generation steps. To tune them separately,
+declare `surface_regeneration` and point
+`contract_surface.regeneration_llm_profile` at it. The first-party policy
+does not declare the optional dry-run-only profiles.
 
 ```yaml
 schema_version: mozaiks.refinement.policy.v1
@@ -392,6 +411,7 @@ Rules:
 
 - unknown profile ids fail configuration validation
 - capability references to undeclared profiles fail resolution clearly
+- `contract_surface.regeneration_llm_profile` must resolve to a profile with an explicit model before surface file generation
 - no per-agent hidden model overrides should be added for Refinement Engine or
   refinement lanes
 - raw provider/model config may live inside the central profile registry, but

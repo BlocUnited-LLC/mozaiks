@@ -310,6 +310,13 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Changed
 
+- Refinement scope and contract-surface selection now use the planning model
+  profile. Contract-surface regeneration has its own explicit generation
+  profile and fails before the agent call if no model is configured; structured
+  patches continue to use the coding profile. Dry-run plans report the surface
+  generation profile separately from the structured patch profile.
+  Generated policies omit model entries that only named optional dry-run roles.
+
 - Workflow context declarations reject keys that start with `ag:` or `a2a:`:
   `context_variables.yaml` definitions and agent views, and `tools.yaml`
   outcome keys. AG2 reserves those prefixes and drops such keys from A2A,

@@ -19,7 +19,10 @@ def test_factory_app_refinement_policy_enables_refinement_engine() -> None:
     config = load_control_plane_config(app_root)
 
     assert config.enabled is True
-    assert tuple(config.llm_profiles.keys()) == ALLOWED_CONTROL_PLANE_LLM_PROFILE_IDS
+    assert set(config.llm_profiles) == {
+        "classifier", "impact_analyzer", "architecture", "codegen",
+    }
+    assert set(config.llm_profiles) <= set(ALLOWED_CONTROL_PLANE_LLM_PROFILE_IDS)
     assert config.classifier.enabled is True
     assert config.classifier.llm_profile == "classifier"
     classifier_cfg = config.resolve_capability_llm_config("classifier")
@@ -30,6 +33,12 @@ def test_factory_app_refinement_policy_enables_refinement_engine() -> None:
     coding_cfg = config.resolve_capability_llm_config("coding")
     assert coding_cfg is not None
     assert coding_cfg["model"]  # any non-empty model is valid
+    assert config.scope.llm_profile == "impact_analyzer"
+    assert config.contract_surface.llm_profile == "impact_analyzer"
+    assert config.contract_surface.regeneration_llm_profile == "codegen"
+    assert config.resolve_capability_llm_config("scope") == config.llm_profiles["impact_analyzer"].llm_config
+    assert config.resolve_capability_llm_config("contract_surface") == config.llm_profiles["impact_analyzer"].llm_config
+    assert config.resolve_contract_surface_regeneration_llm_config() == config.llm_profiles["codegen"].llm_config
 
 
 def test_factory_refinement_policy_config_is_staged_under_app_config() -> None:
@@ -41,6 +50,7 @@ def test_factory_refinement_policy_config_is_staged_under_app_config() -> None:
     assert "profile" not in data
     assert data["classifier"]["llm_profile"] == "classifier"
     assert data["coding"]["llm_profile"] == "codegen"
+    assert data["contract_surface"]["regeneration_llm_profile"] == "codegen"
 
 
 def test_refinement_policy_rejects_unknown_llm_profile_id() -> None:
@@ -152,8 +162,10 @@ def test_factory_workflows_do_not_reference_undeclared_llm_profiles() -> None:
         (repo_root / "factory_app" / "app" / "config" / "refinement_policy.yaml").read_text(encoding="utf-8")
     )
     for value in control_plane.values():
-        if isinstance(value, dict) and isinstance(value.get("llm_profile"), str):
-            references.append(value["llm_profile"])
+        if isinstance(value, dict):
+            for field in ("llm_profile", "regeneration_llm_profile"):
+                if isinstance(value.get(field), str):
+                    references.append(value[field])
 
     for path in (repo_root / "factory_app" / "workflows").rglob("*.yaml"):
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
