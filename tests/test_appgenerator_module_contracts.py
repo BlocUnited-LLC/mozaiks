@@ -460,6 +460,12 @@ def test_refinement_harness_codegen_seeds_refinement_policy_yaml() -> None:
     runtime_yaml = yaml.safe_load(file_map["config/refinement_policy.yaml"])
     assert runtime_yaml["schema_version"] == "mozaiks.refinement.policy.v1"
     assert runtime_yaml["classifier"]["llm_profile"] == "classifier"
+    assert runtime_yaml["scope"]["llm_profile"] == "impact_analyzer"
+    assert runtime_yaml["contract_surface"]["llm_profile"] == "impact_analyzer"
+    assert runtime_yaml["contract_surface"]["regeneration_llm_profile"] == "codegen"
+    assert runtime_yaml["coding"]["llm_profile"] == "codegen"
+    assert "planner_replanner" not in runtime_yaml["llm_profiles"]
+    assert "reviewer_validator" not in runtime_yaml["llm_profiles"]
 
 
 def test_appgenerator_download_tool_does_not_inject_removed_admin_surfaces() -> None:

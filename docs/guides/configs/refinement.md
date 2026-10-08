@@ -51,9 +51,51 @@ support temperature, use `llm_config.temperature`. Profile fields are strict:
 `purpose`, `expected_behavior`, and `llm_config`. The unused
 `default_temperature` field is rejected.
 
+### Model profiles and coding agents
+
+`llm_profiles` configures AG2 structured-output calls. A profile name describes
+the work; its `llm_config.model` selects the model for that call. The first-party
+policy uses these profiles:
+
+| Refinement step | Profile | What it does |
+| --- | --- | --- |
+| Classify request | `classifier` | Chooses the refinement change class. |
+| Select file scope and contract surfaces | `impact_analyzer` | Plans the bounded work. |
+| Write a structured patch | `codegen` | Produces proposed patch content through AG2. |
+| Regenerate a selected contract surface | `codegen` by default | Produces proposed surface files through AG2. |
+
+The policy names the two contract-surface steps separately:
+
+```yaml
+contract_surface:
+  enabled: true
+  llm_profile: impact_analyzer
+  regeneration_llm_profile: codegen
+```
+
+`llm_profile` selects affected surfaces. `regeneration_llm_profile` selects
+the file-generation model and must resolve to a declared profile with a
+non-empty model before regeneration starts. To tune generation independently,
+declare a `surface_regeneration` profile and reference it here. This works
+even when structured patch coding is disabled.
+
+`coding.providers.acp.adapter` is a separate execution choice. For example,
+`adapter: claude_code` starts the Claude Code ACP agent when ACP is enabled and
+eligible; it does not turn `llm_profiles.codegen.llm_config.model` into a Claude
+model. That model is used for structured-output patch coding and for a permitted
+fallback after an ACP attempt. The current app-bundle ACP adapter uses its
+coding CLI's default model; ACP model selection is independent of this profile.
+
+The `architecture` profile is currently an advisory workflow-context label;
+workflow execution does not resolve its model from this policy yet.
+`planner_replanner` and `reviewer_validator` currently describe optional
+dry-run plan roles, rather than separate live model calls. The first-party
+policy leaves them undeclared.
+
 ### Optional ACP coding provider
 
-The external coding provider is disabled by default. Its
+The ACP coding provider remains disabled until an isolated worker is connected
+to the refinement route. Its
 `coding.providers.acp.budget` accepts only `max_files`, `max_diff_bytes`, and
 `max_wall_seconds`. These limit one provider attempt. The unused `max_retries`
 setting is rejected; it never controlled provider retries. This does not

@@ -82,8 +82,9 @@ routes and checkpoint overrides under `refinement_harness/`.
 
 ## `app/config/refinement_policy.yaml` — Minimal Starter
 
-Declares LLM profiles for each capability. The classifier and codegen profiles
-are the two required for refinement-capable apps.
+Declares LLM profiles for structured-output refinement calls. The classifier
+and codegen profiles are the two needed by this minimal starter. An ACP coding
+agent uses a separate adapter and does not read the codegen model setting.
 
 ```yaml
 schema_version: mozaiks.refinement.policy.v1
@@ -114,12 +115,25 @@ coding:
   llm_profile: codegen
 ```
 
-Add `contract_surface` when `contract_surface_requested` is included:
+Add `contract_surface` when `contract_surface_requested` is included. Merge
+`impact_analyzer` into the existing `llm_profiles` map, then add the capability
+entry below. Its `llm_profile` selects affected surfaces;
+`regeneration_llm_profile` supplies the model for structured surface
+regeneration. The two fields may reference the same or different named
+profiles; regeneration requires an explicit model:
 
 ```yaml
-  contract_surface:
-    enabled: true
-    llm_profile: codegen
+llm_profiles:
+  impact_analyzer:
+    purpose: Select affected contract surfaces.
+    expected_behavior: deterministic structured planning
+    llm_config:
+      model: gpt-5-nano
+
+contract_surface:
+  enabled: true
+  llm_profile: impact_analyzer
+  regeneration_llm_profile: codegen
 ```
 
 ---

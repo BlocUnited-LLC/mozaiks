@@ -18,7 +18,10 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from mozaiksai.control_plane.config import ControlPlaneCapabilityConfig, ControlPlaneConfig
+from mozaiksai.control_plane.config import (
+    ControlPlaneConfig,
+    ControlPlaneContractSurfaceCapabilityConfig,
+)
 from mozaiksai.control_plane.contracts import (
     CONTRACT_SURFACE_CANONICAL_PATHS,
     CONTRACT_SURFACE_DEPENDENCY_ORDER,
@@ -191,7 +194,7 @@ class _FakeAgentRunner:
 def _enabled_contract_surface_config() -> ControlPlaneConfig:
     return ControlPlaneConfig(
         enabled=True,
-        contract_surface=ControlPlaneCapabilityConfig(
+        contract_surface=ControlPlaneContractSurfaceCapabilityConfig(
             enabled=True,
             llm_config={"model": "gpt-5.2-codex", "temperature": 0.1},
         ),

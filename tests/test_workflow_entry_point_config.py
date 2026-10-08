@@ -41,8 +41,6 @@ def test_factory_app_refinement_policy_defaults_are_declared() -> None:
         "classifier",
         "codegen",
         "impact_analyzer",
-        "planner_replanner",
-        "reviewer_validator",
     ]
     assert data["classifier"]["enabled"] is True
     assert data["classifier"]["llm_profile"] == "classifier"

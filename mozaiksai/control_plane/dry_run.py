@@ -54,7 +54,14 @@ class RefinementDryRunProfiles(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     classifier: str
-    planner_or_codegen: str | None = None
+    planner_or_codegen: str | None = Field(
+        default=None,
+        description="Configured inline planning profile, or structured generation profile if no inline planner applies; no model call runs in a dry run.",
+    )
+    surface_regeneration: str | None = Field(
+        default=None,
+        description="Configured file-generation profile for a contract-surface route; no model call runs in a dry run.",
+    )
     reviewer_validator: str | None = None
 
 
@@ -62,8 +69,15 @@ class RefinementExecutionProfiles(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     classifier: str
-    planner_replanner: str | None = None
-    codegen: str | None = None
+    planner_replanner: str | None = Field(
+        default=None,
+        description="Configured file-scope or contract-surface planning profile for this route, when applicable.",
+    )
+    codegen: str | None = Field(default=None, description="Configured structured-output patch profile for a patch route.")
+    surface_regeneration: str | None = Field(
+        default=None,
+        description="Configured file-generation profile for a contract-surface route.",
+    )
     reviewer_validator: str | None = None
 
 
@@ -469,17 +483,44 @@ def resolve_execution_profiles(
     *,
     config: ControlPlaneConfig,
     requires_replanning: bool,
+    change_class: str | None = None,
 ) -> RefinementExecutionProfiles:
     classifier = str(config.classifier.llm_profile or "raw_llm_config")
+    if change_class == ChangeClass.PATCH.value:
+        planning_capability = config.scope
+    elif change_class in {ChangeClass.DESIGN.value, ChangeClass.FEATURE.value}:
+        planning_capability = config.contract_surface
+    elif change_class == ChangeClass.CORE.value:
+        planning_capability = None
+    else:
+        planning_capability = config.contract_surface if requires_replanning else config.scope
     planner_replanner = (
-        "planner_replanner" if requires_replanning and "planner_replanner" in config.llm_profiles else None
+        str(planning_capability.llm_profile or "raw_llm_config")
+        if planning_capability is not None
+        and planning_capability.enabled
+        and (planning_capability.llm_profile or planning_capability.llm_config is not None)
+        else None
     )
-    codegen = str(config.coding.llm_profile or "raw_llm_config") if config.coding.enabled else None
+    is_patch = change_class == ChangeClass.PATCH.value or (change_class is None and not requires_replanning)
+    is_surface = change_class in {ChangeClass.DESIGN.value, ChangeClass.FEATURE.value} or (
+        change_class is None and requires_replanning
+    )
+    codegen = (
+        str(config.coding.llm_profile or "raw_llm_config")
+        if is_patch and config.coding.enabled
+        else None
+    )
+    surface_regeneration = (
+        str(config.contract_surface.regeneration_llm_profile)
+        if is_surface and config.contract_surface.enabled and config.contract_surface.regeneration_llm_profile
+        else None
+    )
     reviewer_validator = "reviewer_validator" if "reviewer_validator" in config.llm_profiles else None
     return RefinementExecutionProfiles(
         classifier=classifier,
         planner_replanner=planner_replanner,
         codegen=codegen,
+        surface_regeneration=surface_regeneration,
         reviewer_validator=reviewer_validator,
     )
 
@@ -488,11 +529,17 @@ def resolve_dry_run_profiles(
     *,
     config: ControlPlaneConfig,
     requires_replanning: bool,
+    change_class: str | None = None,
 ) -> RefinementDryRunProfiles:
-    profiles = resolve_execution_profiles(config=config, requires_replanning=requires_replanning)
+    profiles = resolve_execution_profiles(
+        config=config,
+        requires_replanning=requires_replanning,
+        change_class=change_class,
+    )
     return RefinementDryRunProfiles(
         classifier=profiles.classifier,
         planner_or_codegen=profiles.planner_replanner or profiles.codegen,
+        surface_regeneration=profiles.surface_regeneration,
         reviewer_validator=profiles.reviewer_validator,
     )
 
@@ -584,6 +631,7 @@ def build_refinement_execution_plan_from_route(
         resolved_profiles = resolve_execution_profiles(
             config=config or ControlPlaneConfig(),
             requires_replanning=requires_replanning,
+            change_class=normalized_change_class,
         )
     validation_plan = build_validation_plan(
         request=request,
@@ -824,6 +872,7 @@ async def build_refinement_dry_run_plan(
         profiles=RefinementDryRunProfiles(
             classifier=execution_plan.profiles.classifier,
             planner_or_codegen=execution_plan.profiles.planner_replanner or execution_plan.profiles.codegen,
+            surface_regeneration=execution_plan.profiles.surface_regeneration,
             reviewer_validator=execution_plan.profiles.reviewer_validator,
         ),
         next_step=execution_plan.next_step,

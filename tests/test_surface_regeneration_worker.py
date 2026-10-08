@@ -122,11 +122,18 @@ class _FakeAgentRunner:
         return kwargs["response_schema"].model_validate(payload)
 
 
+def _surface_config() -> ControlPlaneConfig:
+    return ControlPlaneConfig.model_validate({
+        "llm_profiles": {"codegen": {"llm_config": {"model": "test-generation-model"}}},
+        "contract_surface": {"regeneration_llm_profile": "codegen"},
+    })
+
+
 def _make_worker_with_mock_llm(llm_responses: list[dict[str, Any]]) -> SurfaceRegenerationWorker:
     """Return a worker whose LLM returns the given responses in sequence."""
     return SurfaceRegenerationWorker(
         agent_runner=_FakeAgentRunner(llm_responses),
-        config_loader=ControlPlaneConfig,  # callable that returns ControlPlaneConfig()
+        config_loader=_surface_config,
         pack_loader=_make_mock_pack,
     )
 
@@ -324,6 +331,82 @@ async def test_execute_plan_success_two_surfaces():
 
 
 @pytest.mark.asyncio
+async def test_surface_regeneration_uses_explicit_generation_model_after_surface_selection():
+    plan = ContractSurfacePlan(
+        surfaces=[_make_surface("module_action", "projects", ["modules/projects/module.yaml"])],
+        summary="Update projects",
+        change_class="feature",
+        artifact_kind="app_bundle",
+        confidence=0.9,
+        fallback_to_workflow=False,
+    )
+    config = ControlPlaneConfig.model_validate({
+        "llm_profiles": {
+            "impact_analyzer": {"llm_config": {"model": "planning-model"}},
+            "codegen": {"llm_config": {"model": "generation-model"}},
+        },
+        "contract_surface": {
+            "enabled": True,
+            "llm_profile": "impact_analyzer",
+            "regeneration_llm_profile": "codegen",
+        },
+        "coding": {"enabled": False, "llm_profile": "impact_analyzer"},
+    })
+    agent_runner = _FakeAgentRunner([{
+        "updated_files": [{"path": "modules/projects/module.yaml", "content": "id: projects"}],
+        "summary": "updated projects",
+        "rationale": "requested change",
+    }])
+    worker = SurfaceRegenerationWorker(
+        agent_runner=agent_runner,
+        config_loader=lambda: config,
+        pack_loader=_make_mock_pack,
+    )
+
+    result = await worker.execute_plan(
+        plan=plan,
+        refinement_request=_make_refinement_request(),
+        routing_decision=_make_routing_decision(),
+        workspace_files=_module_workspace("projects"),
+    )
+
+    assert result.status == "success"
+    assert agent_runner.calls[0]["llm_config"] == {"model": "generation-model"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("config_data", "error"),
+    [
+        ({}, "regeneration_llm_profile is required"),
+        ({"contract_surface": {"regeneration_llm_profile": "codegen"}}, "unknown LLM profile"),
+        ({
+            "contract_surface": {"regeneration_llm_profile": "codegen"},
+            "llm_profiles": {"codegen": {"llm_config": {}}},
+        }, "requires a non-empty model"),
+    ],
+)
+async def test_surface_regeneration_rejects_missing_generation_model_before_agent_call(
+    config_data: dict[str, Any], error: str,
+) -> None:
+    runner = _FakeAgentRunner()
+    config = ControlPlaneConfig.model_validate(config_data)
+    worker = SurfaceRegenerationWorker(
+        agent_runner=runner, config_loader=lambda: config, pack_loader=_make_mock_pack,
+    )
+
+    with pytest.raises(ValueError, match=error):
+        await worker.execute_plan(
+            plan=_plan_for(_make_surface("module_action", "projects", ["modules/projects/module.yaml"])),
+            refinement_request=_make_refinement_request(),
+            routing_decision=_make_routing_decision(),
+            workspace_files=_module_workspace("projects"),
+        )
+
+    assert runner.calls == []
+
+
+@pytest.mark.asyncio
 async def test_execute_plan_later_surface_sees_earlier_file():
     """Accumulated files from surface 1 are visible to surface 2."""
     schema_surface = _make_surface(
@@ -368,7 +451,7 @@ async def test_execute_plan_later_surface_sees_earlier_file():
 
     worker = SurfaceRegenerationWorker(
         agent_runner=agent_runner,
-        config_loader=ControlPlaneConfig,
+        config_loader=_surface_config,
         pack_loader=lambda: mock_pack,
     )
 
@@ -428,7 +511,7 @@ async def test_execute_plan_partial_failure():
                 },
             ]
         ),
-        config_loader=ControlPlaneConfig,
+        config_loader=_surface_config,
         pack_loader=_make_mock_pack,
     )
 
@@ -460,7 +543,7 @@ async def test_execute_plan_all_failed():
 
     worker = SurfaceRegenerationWorker(
         agent_runner=_FakeAgentRunner(error=RuntimeError("LLM unavailable")),
-        config_loader=ControlPlaneConfig,
+        config_loader=_surface_config,
         pack_loader=_make_mock_pack,
     )
 
@@ -574,7 +657,7 @@ async def test_execute_plan_admits_saved_schema_custom_and_workflow_sources(surf
         "updated_files": [{"path": path, "content": updated}],
     }])
     worker = SurfaceRegenerationWorker(
-        agent_runner=runner, config_loader=ControlPlaneConfig, pack_loader=_make_mock_pack,
+        agent_runner=runner, config_loader=_surface_config, pack_loader=_make_mock_pack,
     )
 
     result = await worker.execute_plan(
@@ -690,7 +773,7 @@ async def test_execute_plan_rejects_model_write_to_read_only_page_binding(read_o
         ],
     }])
     worker = SurfaceRegenerationWorker(
-        agent_runner=runner, config_loader=ControlPlaneConfig, pack_loader=_make_mock_pack,
+        agent_runner=runner, config_loader=_surface_config, pack_loader=_make_mock_pack,
     )
     result = await worker.execute_plan(
         plan=_plan_for(_make_surface("page_binding", "Focus", [path], target_kind="page")),
@@ -806,7 +889,7 @@ async def test_surface_finalization_reuses_validation_and_saves_complete_target_
 
 @pytest.mark.asyncio
 async def test_harness_execute_surface_plan_delegates_to_worker():
-    from mozaiksai.control_plane.config import ControlPlaneCapabilityConfig
+    from mozaiksai.control_plane.config import ControlPlaneContractSurfaceCapabilityConfig
     from mozaiksai.control_plane.implementations.orchestration_control import (
         OrchestrationControlHarness,
     )
@@ -823,7 +906,7 @@ async def test_harness_execute_surface_plan_delegates_to_worker():
 
     enabled_config = ControlPlaneConfig(
         enabled=True,
-        contract_surface=ControlPlaneCapabilityConfig(enabled=True),
+        contract_surface=ControlPlaneContractSurfaceCapabilityConfig(enabled=True),
     )
 
     harness = OrchestrationControlHarness(
@@ -862,14 +945,14 @@ async def test_harness_execute_surface_plan_delegates_to_worker():
 
 @pytest.mark.asyncio
 async def test_harness_execute_surface_plan_raises_when_disabled():
-    from mozaiksai.control_plane.config import ControlPlaneCapabilityConfig
+    from mozaiksai.control_plane.config import ControlPlaneContractSurfaceCapabilityConfig
     from mozaiksai.control_plane.implementations.orchestration_control import (
         OrchestrationControlHarness,
     )
 
     disabled_config = ControlPlaneConfig(
         enabled=True,
-        contract_surface=ControlPlaneCapabilityConfig(enabled=False),
+        contract_surface=ControlPlaneContractSurfaceCapabilityConfig(enabled=False),
     )
 
     harness = OrchestrationControlHarness(config_loader=lambda: disabled_config)
