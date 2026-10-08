@@ -945,6 +945,25 @@ class TestHandleEventNotificationTarget:
 
 class TestCreateNotification:
     @pytest.mark.asyncio
+    async def test_notification_stores_workspace_from_event_provenance(self):
+        stored = []
+
+        async def notification_store(record):
+            stored.append(record)
+
+        mod = _loaded_module(
+            "support",
+            notifications=[_notification_rule("support.created", rule_id="alert", module_id="support")],
+        )
+        router = _router([mod], notification_store=notification_store)
+        envelope = _envelope()
+        envelope["tenant"]["workspace_id"] = "workspace-a"
+        envelope["payload"]["workspace_id"] = "forged-workspace"
+        await router.handle_event("support.created", envelope)
+
+        assert stored[0]["workspace_id"] == "workspace-a"
+
+    @pytest.mark.asyncio
     async def test_structured_envelope_uses_payload_for_template(self):
         stored = []
 

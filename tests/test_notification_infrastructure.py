@@ -274,7 +274,7 @@ class TestVisibilityFilterHelper:
 
     def test_visibility_filter_checks_roles(self):
         source = _NOTIFICATIONS_ROUTER_PY.read_text(encoding="utf-8")
-        idx = source.index("_notification_visibility_filter")
+        idx = source.index("def _notification_visibility_filter")
         block = source[idx: idx + 600]
         assert "audience.roles" in block, (
             "_notification_visibility_filter must filter by audience.roles"

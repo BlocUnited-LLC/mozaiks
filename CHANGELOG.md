@@ -123,6 +123,13 @@ This project follows a practical pre-1.0 changelog format:
   parameters, and declared target-app inputs remain business data. AppGenerator
   now writes the target app ID into assembled bundles before validation and preview.
 
+- Workspace support alerts and messages linked to support requests now require
+  the caller's token-bound workspace to match a host-verified membership.
+  Earlier support alerts without a workspace owner are hidden from notification
+  reads and bulk actions; app-wide alerts and ordinary direct messages remain
+  available. All notification reads and mutations are limited to the app loaded
+  by the host, including when a token has no app claim.
+
 - Repository Docker coding turns now require a trusted local image ID, reject
   changed image tags before source transfer, verify the created container's
   image, and reject unrecognized baked environment keys.

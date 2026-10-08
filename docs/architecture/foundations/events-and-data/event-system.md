@@ -137,6 +137,17 @@ Current implementation:
 - `contracts/subscriptions.yaml` is not supported. Runtime rejects it so
   modules have one reaction-routing source of truth.
 
+Platform notification records retain the workspace ID from their module event
+provenance. Every notification HTTP query uses the app ID loaded by the host;
+token and optional request app IDs must match it. The routes require a
+token-bound workspace and matching host-verified membership before showing or
+changing first-party workspace support alerts, including messages linked to
+support requests. Older
+support alerts without a workspace owner stay hidden. App-wide alerts and
+ordinary direct messages retain their existing audience visibility. A token
+without a workspace binding sees those app-wide notifications but no support
+alerts; the shared shell does not currently select a workspace for its bell.
+
 ### Reaction target reference
 
 ```yaml
