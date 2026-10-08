@@ -658,7 +658,7 @@ async def test_studio_pages_load_in_a_fresh_scaffold_and_keep_users_apart(tmp_pa
     assert (await run("tasks", "support")).error_code == "PERMISSION_DENIED"
 
 
-async def test_support_queue_uses_verified_workspace_and_excludes_legacy_requests(tmp_path, monkeypatch, mongo):
+async def test_support_queue_uses_verified_workspace_and_excludes_older_requests(tmp_path, monkeypatch, mongo):
     active = app_root(tmp_path, "my-app", SCAFFOLD_CONTRACT)
     loaded = await AppLoader.load(str(active), module_defaults_path=str(FACTORY))
     executor = executor_for(loaded, monkeypatch, client=mongo.client, database=mongo.database)
@@ -683,8 +683,8 @@ async def test_support_queue_uses_verified_workspace_and_excludes_legacy_request
     assert stored["workspace_id"] == "ws-a"
 
     await raw.insert_many([
-        {"app_id": "my-app", "request_id": "legacy-unbound", "user_id": "requester-a", "status": "open"},
-        {"app_id": "my-app", "request_id": "legacy-requested", "workspace_id": "ws-a",
+        {"app_id": "my-app", "request_id": "older-unbound", "user_id": "requester-a", "status": "open"},
+        {"app_id": "my-app", "request_id": "older-requested", "workspace_id": "ws-a",
          "user_id": "requester-a", "status": "open"},
     ])
     for scope in ("user", "app", "workspace"):
@@ -693,7 +693,7 @@ async def test_support_queue_uses_verified_workspace_and_excludes_legacy_request
         other = await run("list_support_requests", {"scope": scope}, user="requester-a", workspace="ws-b")
         assert other.success and other.data["requests"] == []
 
-    for target in (request_id, "legacy-unbound", "legacy-requested"):
+    for target in (request_id, "older-unbound", "older-requested"):
         for action, params in (
             ("add_support_message", {"request_id": target, "message": "reply", "sender_role": "operator"}),
             ("update_support_request_status", {"request_id": target, "status": "resolved"}),
@@ -702,8 +702,8 @@ async def test_support_queue_uses_verified_workspace_and_excludes_legacy_request
             denied = await run(action, params, user="operator-b", workspace="ws-b")
             assert denied.success and denied.data["success"] is False
             if target != request_id:
-                legacy_denied = await run(action, params, user="operator-a", workspace="ws-a")
-                assert legacy_denied.success and legacy_denied.data["success"] is False
+                older_denied = await run(action, params, user="operator-a", workspace="ws-a")
+                assert older_denied.success and older_denied.data["success"] is False
 
     for action, params in (
         ("create_support_request", {"message": "unbound"}),
@@ -713,7 +713,7 @@ async def test_support_queue_uses_verified_workspace_and_excludes_legacy_request
         assert unbound.error_code == "PERMISSION_DENIED"
 
     assert (await raw.find_one({"request_id": request_id}))["status"] == "open"
-    assert await raw.count_documents({"request_id": {"$in": ["legacy-unbound", "legacy-requested"]}}) == 2
+    assert await raw.count_documents({"request_id": {"$in": ["older-unbound", "older-requested"]}}) == 2
     replied = await run("add_support_message", {"request_id": request_id, "message": "reply", "sender_role": "operator"},
                         user="operator-a", workspace="ws-a")
     assert replied.success and replied.data["success"] is True
