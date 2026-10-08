@@ -275,7 +275,10 @@ The image ID lookup above is test setup for this offline proof. A trusted
 production caller must use an independently approved ID, not accept whichever
 ID a mutable tag resolves to when the request arrives. The separate opt-in
 repository proof test uses `MOZAIKS_REPOSITORY_DOCKER_PROOF_IMAGE_ID` for the
-approved local ID of `mozaiks-acp-proof:local`.
+approved local ID of `mozaiks-acp-proof:local`. The required CI isolation job
+binds that variable to the ID of the proof image it just built and checks that
+all three offline Docker cases ran. This CI test setup grants no production
+image approval.
 
 The offline ACP proof image consumes the host's exact `create_paths` and
 `delete_paths` alongside selected files. Its coding provider remains
