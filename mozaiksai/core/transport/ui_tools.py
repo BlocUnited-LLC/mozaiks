@@ -386,7 +386,7 @@ class UIToolsMixin:
     async def acknowledge_workflow_feedback_render_for_user(
         self, event_id: str, *, principal: UserPrincipal,
     ) -> bool:
-        """Record a visible client render without answering the workflow tool."""
+        """Record a client's visible-render report without answering the tool."""
         if not isinstance(event_id, str) or not event_id or not isinstance(principal, UserPrincipal):
             return False
         metadata = self._ui_tool_metadata.get(event_id) or {}

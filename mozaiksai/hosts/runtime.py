@@ -1326,7 +1326,7 @@ async def acknowledge_workflow_feedback_render(
     request: Request,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
-    """Accept a client-visible feedback invitation in its authenticated session."""
+    """Accept a client's visibility report in its authenticated session."""
     if simple_transport is None:
         raise HTTPException(status_code=503, detail="Transport service is not available")
     try:

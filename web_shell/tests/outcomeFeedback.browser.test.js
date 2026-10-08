@@ -88,7 +88,6 @@ test('feedback acknowledges visibility after mount, not a buffered or offscreen 
   const entry = `
     import React from 'react'; import {createRoot} from 'react-dom/client';
     import OutcomeFeedback from ${JSON.stringify(path.resolve(shell, '../chat-ui/src/core/ui/OutcomeFeedback.js'))};
-    import {acknowledgeFeedbackRender} from ${JSON.stringify(path.resolve(shell, '../chat-ui/src/adapters/uiToolResponse.js'))};
     window.acks = [];
     window.fetch = async (url, options) => {
       window.acks.push({url, headers: options.headers, body: JSON.parse(options.body)});
@@ -97,8 +96,7 @@ test('feedback acknowledges visibility after mount, not a buffered or offscreen 
     const root = createRoot(document.getElementById('root'));
     window.mount = (key, eventId) => root.render(
       <div style={{marginTop: '1400px'}}>
-        <OutcomeFeedback key={key} toolCallId={eventId} onResponse={async () => true}
-          onRendered={(id) => acknowledgeFeedbackRender(id, {token: 'signed-user-token'})} />
+        <OutcomeFeedback key={key} toolCallId={eventId} onResponse={async () => true} />
       </div>
     );
     window.mount('first', 'server-event');
@@ -108,6 +106,18 @@ test('feedback acknowledges visibility after mount, not a buffered or offscreen 
     jsx: 'automatic', loader: { '.js': 'jsx', '.png': 'dataurl' }, nodePaths: [path.join(shell, 'node_modules')],
     alias: { react: path.join(shell, 'node_modules/react'), 'react-dom': path.join(shell, 'node_modules/react-dom') },
     define: { 'process.env.NODE_ENV': '"test"' },
+    plugins: [{
+      name: 'authenticated-shell-context',
+      setup(buildContext) {
+        buildContext.onResolve({ filter: /ChatUIContext\.jsx$/ }, () => ({
+          path: 'feedback-test-context', namespace: 'feedback-test-context',
+        }));
+        buildContext.onLoad({ filter: /.*/, namespace: 'feedback-test-context' }, () => ({
+          contents: 'export const useOptionalChatUI = () => ({api: {getHttpBaseUrl: () => ""}, auth: {getAccessToken: () => "signed-user-token"}});',
+          loader: 'js',
+        }));
+      },
+    }],
   });
   const server = http.createServer((req, res) => {
     const script = req.url === '/fixture.js';

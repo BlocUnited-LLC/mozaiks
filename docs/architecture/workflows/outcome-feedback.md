@@ -41,7 +41,7 @@ metadata. Save failure leaves the interaction pending. Internal responses that
 bypass the owner-checked entry point cannot create a human-feedback receipt.
 An accepted retry retains the original response and observation timestamp.
 
-The shipped browser component separately acknowledges an invitation after at
+The shipped browser component separately reports that an invitation was visible after at
 least half of it intersects the viewport in a visible document. The
 `/api/workflow-feedback/rendered` endpoint accepts only the UI event ID. It
 checks the authenticated session owner and the server's pending
@@ -122,7 +122,7 @@ unanswered invitations as missing feedback. Simulated personas, model judges,
 test fixtures, and operator reviews must never enter the human-feedback series.
 
 These are different facts: an eligible outcome can cause a server offer; a
-visible browser can acknowledge rendering; a user may submit, skip, or leave
+visible browser can report rendering; a user may submit, skip, or leave
 the invitation unanswered. A render receipt is an authenticated client report
 of visibility, not proof that a person read the prompt. Old clients, offline
 acknowledgements, and process loss can undercount rendered prompts; a response

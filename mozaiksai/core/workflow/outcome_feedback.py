@@ -53,7 +53,7 @@ class WorkflowFeedbackEvidence(BaseModel):
 
 
 class WorkflowFeedbackRenderReceipt(BaseModel):
-    """Server-attributed acknowledgement that a browser displayed the invitation."""
+    """Server-attributed client report that the invitation was visible."""
 
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
 
