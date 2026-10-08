@@ -81,6 +81,7 @@ class _FakeConfigFactory:
                 "adapter": adapter,
                 "workspace_root": workspace_root,
                 "turn_timeout_seconds": turn_timeout_seconds,
+                "env_source": dict(env_source),
             }
         )
         config = fake_acp_config(
@@ -144,6 +145,22 @@ async def test_happy_path_harvests_modified_file(tmp_path: Path) -> None:
     staging = tmp_path / "acp_staging"
     leftovers = [p for p in staging.rglob("*") if p.is_file()] if staging.exists() else []
     assert leftovers == []
+
+
+@pytest.mark.asyncio
+async def test_host_credentials_are_not_an_implicit_acp_env_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "host-only-test-token")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "host-only-test-token")
+    factory = _FakeConfigFactory(ACPTurn())
+    provider = ACPCodingProvider(
+        config_loader=_policy(), staging_root=tmp_path / "acp_staging",
+        acp_config_factory=factory,
+    )
+
+    assert (await provider.execute(_request())).status == "empty"
+    assert factory.calls[0]["env_source"] == {}
 
 
 @pytest.mark.asyncio

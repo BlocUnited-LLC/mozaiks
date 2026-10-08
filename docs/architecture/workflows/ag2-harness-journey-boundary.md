@@ -61,10 +61,13 @@ process from host files or disk-based agent logins. AG2 1.1.2 also services a
 direct ACP terminal request despite ``allow_terminal=False`` and would give
 that child the host environment. The shipped provider therefore refuses its
 default local execution path even if ACP is enabled in policy. An isolated
-execution provider must replace that path before live use. In controlled
-in-process tests, Mozaiks forwards only the selected adapter's API
-credential: Anthropic for Claude Code, Codex or OpenAI for Codex, and none for
-OpenCode.
+execution provider must replace that path before live use. The in-process
+adapter never selects credentials from the host process environment; a caller
+must supply an explicit environment source. In controlled tests, Mozaiks
+forwards only the selected adapter's credential from that source: Anthropic for
+Claude Code, Codex or OpenAI for Codex, and none for OpenCode. This explicit
+source rule does not make a local subprocess safe: the isolated worker must
+also control the environment inherited by the agent process.
 
 ## Context authority
 
