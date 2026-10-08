@@ -37,6 +37,7 @@ from mozaiksai.core.runtime.composition.module_event_router import (
     ModuleEventRouter,
     _is_secret_context_key,
     _render_template,
+    is_router_reaction_context,
 )
 from mozaiksai.core.runtime.composition.platform_hooks import (
     PlatformExtensionBundle,
@@ -490,6 +491,124 @@ class TestHandleEventHandlerTarget:
         await router.handle_event("order.created", envelope)
         assert len(called) == 1
         assert called[0]["order_id"] == "o-1"
+
+    @pytest.mark.asyncio
+    async def test_legacy_flat_webhook_payload_reaches_handler_with_reaction_identity(self):
+        received = []
+        reaction_id = "promoter_commissions.reconcile_payment_succeeded"
+        event_type = "hosted.mozaikspay.payment.succeeded"
+
+        def matches(ctx):
+            return is_router_reaction_context(
+                ctx,
+                event_type=event_type,
+                reaction_id=reaction_id,
+                source_module_id="promoter_commissions",
+                target_kind="handler",
+                target_ref="on_event",
+            )
+
+        class Handler:
+            async def on_event(
+                self, ctx, *, session_id, payment_id, app_id, tenant_id, environment
+            ):
+                received.append({
+                    "session_id": session_id,
+                    "payment_id": payment_id,
+                    "app_id": app_id,
+                    "tenant_id": tenant_id,
+                    "environment": environment,
+                    "ctx_app_id": ctx.app_id,
+                    "ctx_tenant_id": ctx.tenant_id,
+                    "event_type": ctx.event_provenance.event_type,
+                    "event_shape": ctx.event_provenance.envelope_shape,
+                    "reaction_id": ctx.reaction_provenance.reaction_id,
+                    "reaction_module": ctx.reaction_provenance.source_module_id,
+                    "reaction_target": ctx.reaction_provenance.target_ref,
+                    "dispatch_authority": getattr(ctx, "dispatch_authority", None),
+                    "router_context_valid": matches(ctx),
+                    "forged_context_valid": matches(SimpleNamespace(
+                        event_provenance=ctx.event_provenance,
+                        reaction_provenance=ctx.reaction_provenance,
+                    )),
+                })
+
+        reaction = _handler_target_reaction(
+            event_type,
+            handler_method="on_event",
+            reaction_id=reaction_id,
+        )
+        producer = _with_event_schema(
+            _loaded_module("mozaikspay"),
+            event_type=event_type,
+            payload_schema={
+                "type": "object",
+                "required": ["session_id", "payment_id", "app_id", "tenant_id", "environment"],
+                "properties": {
+                    field: {"type": "string"}
+                    for field in ("session_id", "payment_id", "app_id", "tenant_id", "environment")
+                },
+                "additionalProperties": False,
+            },
+        )
+        consumer = _loaded_module(
+            "promoter_commissions", reactions=[reaction], handler=Handler()
+        )
+        router = _router([producer, consumer])
+        flat_event = {
+            "session_id": "session-1",
+            "payment_id": "payment-1",
+            "app_id": "customer-app",
+            "tenant_id": "tenant-1",
+            "environment": "production",
+        }
+        await router.handle_event(event_type, flat_event)
+
+        with pytest.raises(ModuleEventPayloadValidationError):
+            await router.handle_event(
+                event_type, {key: value for key, value in flat_event.items() if key != "payment_id"}
+            )
+
+        assert received == [{
+            "session_id": "session-1",
+            "payment_id": "payment-1",
+            "app_id": "customer-app",
+            "tenant_id": "tenant-1",
+            "environment": "production",
+            "ctx_app_id": "customer-app",
+            "ctx_tenant_id": "tenant-1",
+            "event_type": event_type,
+            "event_shape": "legacy_flat",
+            "reaction_id": "promoter_commissions.reconcile_payment_succeeded",
+            "reaction_module": "promoter_commissions",
+            "reaction_target": "on_event",
+            "dispatch_authority": None,
+            "router_context_valid": True,
+            "forged_context_valid": False,
+        }]
+
+    @pytest.mark.asyncio
+    async def test_malformed_structured_payload_does_not_pass_envelope_metadata_to_handler(self):
+        received = []
+
+        class Handler:
+            async def on_event(self, ctx, **kwargs):
+                received.append(kwargs)
+
+        event_type = "domain.orders.created"
+        reaction = _handler_target_reaction(event_type)
+        router = _router([_loaded_module("orders", reactions=[reaction], handler=Handler())])
+        await router.handle_event(
+            event_type,
+            {
+                "type": event_type,
+                "source": {"layer": "module", "module_id": "orders"},
+                "tenant": {"app_id": "app-1", "tenant_id": "tenant-1"},
+                "payload": None,
+            },
+        )
+
+        assert received == [{}]
 
     @pytest.mark.asyncio
     async def test_skips_when_handler_method_missing_from_target(self):
