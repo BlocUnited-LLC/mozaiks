@@ -759,6 +759,10 @@ def _decode_event_payload(encoded: Any) -> dict[str, Any]:
 class _TrustedEventAudit:
     """B-owned action ledger and canonical event validator; never imports app Python."""
 
+    _MAX_ACTION_REQUESTS = 5000
+    _MAX_EVENT_REQUESTS = 1000
+    _MAX_PROTOCOL_ERRORS = 32
+
     def __init__(self, run_id: str, modules: list[Any], event_schemas: Mapping[str, Mapping[str, Any]]) -> None:
         from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor
 
@@ -777,11 +781,18 @@ class _TrustedEventAudit:
         self.accepted_events = 0
 
     def begin(self, module: str, action: str, principal_label: str) -> str:
+        if len(self.requests) >= self._MAX_ACTION_REQUESTS:
+            self._protocol_error("action request limit exceeded")
+            raise RuntimeError("trusted observer action request limit exceeded")
         request_id = uuid4().hex
         self.requests[request_id] = {
             "module": module, "action": action, "principal_label": principal_label, "completed": False,
         }
         return request_id
+
+    def _protocol_error(self, message: str) -> None:
+        if len(self.protocol_errors) < self._MAX_PROTOCOL_ERRORS:
+            self.protocol_errors.append(message)
 
     def observe(self, packet: Any) -> dict[str, Any]:
         """Count every message, including malformed/replayed ones, as evidence of failure."""
@@ -793,30 +804,30 @@ class _TrustedEventAudit:
         if not isinstance(packet, dict) or set(packet) != {
             "run_id", "request_id", "event_id", "module", "action", "event_type", "payload_bson",
         }:
-            self.protocol_errors.append("malformed event request")
+            self._protocol_error("malformed event request")
             return {"accepted": False}
         request_id = packet["request_id"]
         row = self.requests.get(request_id) if isinstance(request_id, str) else None
         if (packet["run_id"] != self.run_id or row is None or row["completed"]
                 or packet["module"] != row["module"] or packet["action"] != row["action"]):
-            self.protocol_errors.append("event request is outside its active action")
+            self._protocol_error("event request is outside its active action")
             return {"accepted": False}
         event_id = packet["event_id"]
         event_type = packet["event_type"]
         if (not isinstance(event_id, str) or not event_id.startswith("evt_")
                 or len(event_id) != 36 or event_id in self.event_ids
                 or not isinstance(event_type, str)):
-            self.protocol_errors.append("event request has invalid or replayed content")
+            self._protocol_error("event request has invalid or replayed content")
             return {"accepted": False}
         try:
             payload = _decode_event_payload(packet["payload_bson"])
         except (TypeError, ValueError, InvalidBSON):
-            self.protocol_errors.append("event payload cannot be decoded")
+            self._protocol_error("event payload cannot be decoded")
+            return {"accepted": False}
+        if len(self.event_ids) >= self._MAX_EVENT_REQUESTS:
+            self._protocol_error("event request limit exceeded")
             return {"accepted": False}
         self.event_ids.add(event_id)
-        if len(self.event_ids) > 1000:
-            self.protocol_errors.append("event request limit exceeded")
-            return {"accepted": False}
         request = ModuleRequest(
             module=row["module"], action=row["action"], app_id="runtime-smoke-observer",
             authority=ModuleDispatchAuthority(
@@ -833,10 +844,10 @@ class _TrustedEventAudit:
     def complete(self, request_id: str, *, received_response: bool) -> None:
         row = self.requests.get(request_id)
         if row is None or row["completed"]:
-            self.protocol_errors.append("action completion is absent or duplicated")
+            self._protocol_error("action completion is absent or duplicated")
             return
         if not received_response:
-            self.protocol_errors.append("action response is absent")
+            self._protocol_error("action response is absent")
             return
         row["completed"] = True
 
@@ -2127,14 +2138,14 @@ def _trusted_event_gateway(audit: _TrustedEventAudit) -> FastAPI:
     async def observe_event(request: Request) -> dict[str, Any]:
         content = bytearray()
         async for chunk in request.stream():
-            content.extend(chunk)
-            if len(content) > 1_000_000:
-                audit.protocol_errors.append("event request exceeds size limit")
+            if len(content) + len(chunk) > 1_000_000:
+                audit._protocol_error("event request exceeds size limit")
                 return {"accepted": False}
+            content.extend(chunk)
         try:
             packet = json.loads(content)
         except (ValueError, UnicodeError):
-            audit.protocol_errors.append("event request is not JSON")
+            audit._protocol_error("event request is not JSON")
             return {"accepted": False}
         return audit.observe(packet)
 

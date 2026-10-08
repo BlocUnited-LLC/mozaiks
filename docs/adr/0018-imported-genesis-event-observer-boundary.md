@@ -55,6 +55,8 @@ payloads to B. B validates the declared event type and payload, records
 rejections and malformed, stale, duplicate, or late packets, and writes its
 own `trusted_event_audit_v1` outcome. The parent checks one matching B-owned
 audit and completion record before describing the functional smoke as passed.
+The gateway bounds each packet, and the ledger bounds action requests, unique
+event IDs, and retained protocol errors; exceeding any limit fails the run.
 
 The fresh-image contained valid fixture completes with zero rejected event
 requests. The invalid-event fixture produces an externally observed event

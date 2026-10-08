@@ -156,6 +156,40 @@ def test_trusted_event_audit_catches_rejected_event_despite_completed_action():
     assert audit.result()["passed"] is False
 
 
+def test_trusted_event_audit_bounds_malformed_packet_evidence():
+    audit = _trusted_event_audit()
+    for _ in range(100):
+        assert audit.observe({"unexpected": True}) == {"accepted": False}
+    assert len(audit.protocol_errors) == audit._MAX_PROTOCOL_ERRORS
+    assert audit.result()["passed"] is False
+
+
+def test_trusted_event_audit_bounds_unique_event_ids():
+    audit = _trusted_event_audit()
+    request_id = audit.begin("tasks", "create", "owner")
+    packet = _event_audit_packet(request_id)
+    for index in range(audit._MAX_EVENT_REQUESTS + 1):
+        packet["event_id"] = f"evt_{index:032x}"
+        decision = audit.observe(packet)
+        assert decision["accepted"] is (index < audit._MAX_EVENT_REQUESTS)
+    audit.complete(request_id, received_response=True)
+    assert len(audit.event_ids) == audit._MAX_EVENT_REQUESTS
+    assert audit.result()["accepted_event_count"] == audit._MAX_EVENT_REQUESTS
+    assert audit.result()["protocol_errors"] == ["event request limit exceeded"]
+    assert audit.result()["passed"] is False
+
+
+def test_trusted_event_audit_bounds_action_ledger(monkeypatch):
+    audit = _trusted_event_audit()
+    monkeypatch.setattr(audit, "_MAX_ACTION_REQUESTS", 2)
+    audit.begin("tasks", "create", "owner")
+    audit.begin("tasks", "create", "owner")
+    with pytest.raises(RuntimeError, match="action request limit exceeded"):
+        audit.begin("tasks", "create", "owner")
+    assert len(audit.requests) == 2
+    assert audit.result()["passed"] is False
+
+
 @pytest.mark.parametrize("tamper", ["absent", "stale_run", "missing_completion", "rejected",
                                     "duplicate_check", "altered_check"])
 def test_parent_refuses_incomplete_or_altered_trusted_event_audit(tamper):
