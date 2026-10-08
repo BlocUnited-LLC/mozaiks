@@ -58,6 +58,32 @@ def _png_xmp_meta(value: str) -> bytes:
     )
 
 
+def _xml_nested_meta(value: str) -> bytes:
+    return (
+        f'<configuration><meta name="access_token">'
+        f'<item content="{value}"/></meta></configuration>'
+    ).encode()
+
+
+def _svg_nested_meta(value: str) -> bytes:
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg"><metadata>'
+        f'<meta name="access_token"><item content="{value}"/></meta>'
+        f'</metadata></svg>'
+    ).encode()
+
+
+def _png_nested_xmp_meta(value: str) -> bytes:
+    return _png_with_text(
+        b"iTXt", b"XML:com.adobe.xmp\0\x00\0\0\0" +
+        f'<metadata><meta name="access_token"><item content="{value}"/></meta></metadata>'.encode(),
+    )
+
+
+def _query_url(value: str, key: str) -> str:
+    return f"https://api.example.invalid/lookup?view=public&{key}={value}"
+
+
 @pytest.fixture
 def export_input(tmp_path, monkeypatch):
     workspace = tmp_path / "source"
@@ -122,10 +148,35 @@ def test_demonstrated_leaks_are_rejected_independently_before_either_archive(exp
     ("app/config/provider.json", lambda value: json.dumps({"access_token": {"defaultValue": value}}).encode()),
     ("app/config/provider.json", lambda value: json.dumps({"access_token": {"default_value": value}}).encode()),
     ("app/config/provider.json", lambda value: json.dumps({"access_token": {"default-value": value}}).encode()),
+    ("app/config/provider.json", lambda value: json.dumps({"access_token": {"metadata": {"defaultValue": value}}}).encode()),
+    ("app/config/provider.json", lambda value: json.dumps({"access_token": {"metadata": [{"defaultValue": value}]}}).encode()),
+    ("app/config/provider.toml", lambda value: f'[access_token.metadata]\ndefaultValue = "{value}"\n'.encode()),
+    ("app/config/provider.xml", _xml_nested_meta),
+    ("app/brand/assets/metadata.svg", _svg_nested_meta),
+    ("app/brand/assets/xmp.png", _png_nested_xmp_meta),
+    ("app/brand/theme_config.json", lambda value: json.dumps({
+        "identity": {"name": "Source export"}, "url": _query_url(value, "access_token"),
+    }).encode()),
+    ("app/config/provider.json", lambda value: json.dumps({
+        "url": _query_url(value, "api_key"),
+    }).encode()),
+    ("app/ui/provider.js", lambda value: f'export const providerUrl = "{_query_url(value, "api_key")}";\n'.encode()),
+    ("app/config/provider.json", lambda value: f'{{"url":"https://api.example.invalid/lookup\\u003fapi_key={value}"}}'.encode()),
+    ("app/config/provider.json", lambda value: json.dumps({
+        "url": f"https://api.example.invalid/lookup?api_key%3D{value}",
+    }).encode()),
+    ("app/config/provider.xml", lambda value: (
+        f'<configuration><entry url="https://api.example.invalid/lookup?view=public&amp;api_key={value}"/>'
+        f'</configuration>'
+    ).encode()),
 ], ids=[
     "xml-meta-content", "svg-meta-content", "png-xmp-meta-content",
     "toml-camel-default", "toml-snake-default", "toml-kebab-default",
     "json-camel-default", "json-snake-default", "json-kebab-default",
+    "json-nested-metadata-default", "json-metadata-list-default", "toml-nested-metadata-default",
+    "xml-descendant-content", "svg-descendant-content", "png-xmp-descendant-content",
+    "theme-json-query-token", "provider-json-query-key", "ui-js-query-key",
+    "json-escaped-question-query-key", "json-encoded-equals-query-key", "xml-escaped-ampersand-query-key",
 ])
 def test_credential_metadata_literals_fail_but_runtime_references_remain_portable(
     export_input, name, make_content,
@@ -154,6 +205,23 @@ def test_ordinary_xml_content_metadata_is_public(export_input):
     workspace, spec, output = export_input
     name = "app/config/provider.xml"
     content = b'<configuration><meta name="title" content="Public title"/></configuration>'
+    _write(workspace, name, content)
+
+    result = delivery.materialize_android_workspace(workspace, spec, output)
+    delivery.verify_android_delivery(Path(result["mobile_dir"]))
+    for field in ("source_archive", "archive_path"):
+        with ZipFile(result[field]) as archive:
+            assert archive.read(name) == content
+
+
+@pytest.mark.parametrize("name,content", [
+    ("app/config/provider.json", b'{"access_token":{"metadata":{"description":"Public description"}}}'),
+    ("app/config/provider.json", b'{"access_token":{"metadata":["Public description",{"type":"string"}]}}'),
+    ("app/config/provider.xml", b'<configuration><meta name="title"><item content="Public title"/></meta></configuration>'),
+    ("app/config/provider.json", b'{"url":"https://api.example.invalid/lookup?view=public"}'),
+])
+def test_public_nested_metadata_and_noncredential_queries_remain_portable(export_input, name, content):
+    workspace, spec, output = export_input
     _write(workspace, name, content)
 
     result = delivery.materialize_android_workspace(workspace, spec, output)
@@ -569,6 +637,38 @@ def test_yaml_alias_reused_in_credential_context_does_not_inherit_a_safe_verdict
         "app/config/provider.json",
         b'{"access_token":{"defaultValue":"${INTEGRATION_API_TOKEN}"}}',
         json.dumps({"access_token": {"defaultValue": SYNTHETIC_TOKEN}}).encode(),
+    ),
+    (
+        "app/config/provider.json",
+        json.dumps({"access_token": {"metadata": {"defaultValue": "${INTEGRATION_API_TOKEN}"}}}).encode(),
+        json.dumps({"access_token": {"metadata": {"defaultValue": SYNTHETIC_TOKEN}}}).encode(),
+    ),
+    (
+        "app/brand/assets/xmp.png",
+        _png_nested_xmp_meta("${INTEGRATION_API_TOKEN}"),
+        _png_nested_xmp_meta(SYNTHETIC_TOKEN),
+    ),
+    (
+        "app/config/provider.xml",
+        _xml_nested_meta("${INTEGRATION_API_TOKEN}"),
+        _xml_nested_meta(SYNTHETIC_TOKEN),
+    ),
+    (
+        "app/brand/theme_config.json",
+        json.dumps({"identity": {"name": "Source export"},
+                    "url": _query_url("${INTEGRATION_API_TOKEN}", "access_token")}).encode(),
+        json.dumps({"identity": {"name": "Source export"},
+                    "url": _query_url(SYNTHETIC_TOKEN, "access_token")}).encode(),
+    ),
+    (
+        "app/ui/provider.js",
+        f'export const providerUrl = "{_query_url("${INTEGRATION_API_TOKEN}", "api_key")}";\n'.encode(),
+        f'export const providerUrl = "{_query_url(SYNTHETIC_TOKEN, "api_key")}";\n'.encode(),
+    ),
+    (
+        "app/config/provider.json",
+        json.dumps({"url": _query_url("${INTEGRATION_API_TOKEN}", "api_key")}).encode(),
+        json.dumps({"url": _query_url(SYNTHETIC_TOKEN, "api_key")}).encode(),
     ),
 ])
 def test_delivery_verification_rejects_secret_source_even_with_matching_inventory_hashes(

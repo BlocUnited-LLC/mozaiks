@@ -68,11 +68,13 @@ the captured input.
 
 Recognizable credential literals in configuration and Python/JavaScript
 assignments are rejected, including hardcoded environment lookup defaults.
-The policy parses JSON, YAML and TOML values, including nested credential
-`defaultValue` fields, inspects env-style text, and checks XML and property-list
-fields. Credential elements and elements identified by a credential `name` or
-`key` reject literal-bearing `content` and default/value attributes. Statically
-joined Python credential assignments are checked too.
+The policy parses JSON, YAML and TOML values, including credential `defaultValue`
+fields inside `metadata`, inspects env-style text, and checks XML and
+property-list fields. Credential elements and elements identified by a
+credential `name` or `key` reject literal-bearing `content` and default/value
+attributes on themselves or nested elements. Credential query values in URLs
+are checked in text and parsed configuration, including encoded query syntax.
+Statically joined Python credential assignments are checked too.
 A documented `postgresql://user:pass@host:port/dbname` placeholder is permitted.
 Declare runtime secret names in the canonical `app/security/secrets.yaml`
 contract and resolve them through the configured secret backend. Environment

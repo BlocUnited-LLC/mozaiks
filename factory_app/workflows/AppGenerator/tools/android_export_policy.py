@@ -14,7 +14,9 @@ import re
 import tomllib
 import xml.etree.ElementTree as ET
 import zlib
+from html import unescape
 from pathlib import PurePosixPath
+from urllib.parse import parse_qsl, unquote
 from xml.parsers.expat import ExpatError
 
 import yaml
@@ -35,6 +37,7 @@ _ASSIGNMENT = re.compile(r'''(?<![\w$-])["']?(?P<key>[A-Za-z_$][\w$-]*)["']?\s*\
 _QUOTED = re.compile(r'''^(?P<prefix>[rubfRUBF]{0,2})(?P<quote>["'`])(?P<value>(?:\\.|(?!\2).)*?)\2''', re.DOTALL)
 _MARKERS = re.compile(r"-----BEGIN (?:[A-Z ]*PRIVATE KEY|OPENSSH PRIVATE KEY)-----|\bghp_[A-Za-z0-9]{30,}|\bgithub_pat_[A-Za-z0-9_]{30,}|\bAKIA[0-9A-Z]{16}\b")
 _URI_USERINFO = re.compile(r'''\b[a-z][a-z0-9+.-]*://(?P<userinfo>[^\s/'"<>@?#]+)@''', re.IGNORECASE)
+_URI_QUERY = re.compile(r'''\b[a-z][a-z0-9+.-]*://[^\s'"`<>?#]*\?(?P<query>[^\s'"`<>#]*)''', re.IGNORECASE)
 _DOCUMENTATION_URI = "postgresql://user:pass@host:port/dbname"
 _UNQUOTED_CONFIG = {".ini", ".conf", ".cfg", ".toml", ".properties", ".txt"}
 _PNG_TEXT_LIMIT = 1024 * 1024
@@ -75,25 +78,40 @@ def _literal_secret(value: object) -> bool:
 
 
 def _structured_credentials(
-    value: object, *, credential: bool = False, ancestors: frozenset[int] = frozenset(),
-    visited: set[tuple[int, bool]] | None = None,
+    value: object, *, credential: bool = False, metadata_container: bool = False,
+    ancestors: frozenset[int] = frozenset(), visited: set[tuple[int, bool, bool]] | None = None,
 ) -> bool:
     if not isinstance(value, (dict, list)):
-        return credential and _literal_secret(value)
+        return (isinstance(value, str) and _uri_query_credentials(value)) or (
+            credential and not metadata_container and _literal_secret(value)
+        )
     if id(value) in ancestors:
         raise ValueError("Recursive configuration is not supported in Android delivery")
     if visited is None:
         visited = set()
-    identity = (id(value), credential)
+    identity = (id(value), credential, metadata_container)
     if identity in visited:
         return False
     visited.add(identity)
     ancestors = ancestors | {id(value)}
     if isinstance(value, list):
-        return any(_structured_credentials(item, credential=credential, ancestors=ancestors, visited=visited) for item in value)
+        return any(
+            _structured_credentials(
+                item, credential=credential, metadata_container=metadata_container,
+                ancestors=ancestors, visited=visited,
+            )
+            for item in value
+        )
     for key, item in value.items():
-        sensitive = _credential_key(str(key)) or (credential and _normalized_key(str(key)) in _CREDENTIAL_VALUE_FIELDS)
-        if _structured_credentials(item, credential=sensitive, ancestors=ancestors, visited=visited):
+        normalized = _normalized_key(str(key))
+        nested_metadata = credential and normalized == "metadata" and isinstance(item, (dict, list))
+        sensitive = _credential_key(str(key)) or (
+            credential and normalized in _CREDENTIAL_VALUE_FIELDS
+        ) or nested_metadata
+        if _structured_credentials(
+            item, credential=sensitive, metadata_container=nested_metadata,
+            ancestors=ancestors, visited=visited,
+        ):
             return True
     return False
 
@@ -165,7 +183,7 @@ def _python_credentials(text: str) -> bool:
 
 
 def _text_credentials(text: str, *, unquoted_config: bool = False) -> bool:
-    if _MARKERS.search(text):
+    if _MARKERS.search(text) or _uri_query_credentials(text):
         return True
     for match in _URI_USERINFO.finditer(text):
         # URL userinfo is a credential even when its enclosing key is just "url".
@@ -199,6 +217,17 @@ def _text_credentials(text: str, *, unquoted_config: bool = False) -> bool:
             literal = _QUOTED.match(expression[fallback.end():])
             if literal and _quoted_secret(literal):
                 return True
+    return False
+
+
+def _uri_query_credentials(text: str) -> bool:
+    for match in _URI_QUERY.finditer(text):
+        try:
+            params = parse_qsl(unquote(unescape(match["query"])), keep_blank_values=True, max_num_fields=1024)
+        except ValueError:
+            return True
+        if any(_credential_key(key) and _literal_secret(value) for key, value in params):
+            return True
     return False
 
 
@@ -310,7 +339,9 @@ def _xml_credentials(text: str, *, require_svg: bool = False, nested_depth: int 
     root = ET.fromstring(text)
     if require_svg and root.tag not in {"svg", "{http://www.w3.org/2000/svg}svg"}:
         raise ValueError("Not an SVG root")
-    for element in root.iter():
+    elements = [(root, False)]
+    while elements:
+        element, inherited_credential = elements.pop()
         children = list(element)
         for index, child in enumerate(children[:-1]):
             if child.tag.rpartition("}")[2].lower() in {"key", "name"} and _credential_key(
@@ -332,18 +363,19 @@ def _xml_credentials(text: str, *, require_svg: bool = False, nested_depth: int 
         credential_field = _credential_key(element.tag.rpartition("}")[2]) or bool(
             declared_key and _credential_key(declared_key)
         )
-        if credential_field and (
+        if (credential_field or inherited_credential) and (
             any(
                 _literal_secret(attributes.get(key))
                 for key in _CREDENTIAL_VALUE_FIELDS
             )
-            or _literal_secret("".join(element.itertext()).strip())
+            or (credential_field and _literal_secret("".join(element.itertext()).strip()))
         ):
             return True
         fragment = (element.text or "").strip()
         if nested_depth < 2 and fragment.startswith("<") and ("</" in fragment or fragment.endswith("/>")):
             if _xml_credentials(fragment, nested_depth=nested_depth + 1):
                 return True
+        elements.extend((child, inherited_credential or credential_field) for child in reversed(children))
     return False
 
 
