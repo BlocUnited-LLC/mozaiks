@@ -123,6 +123,20 @@ repeated create calls can return the cached active state. An authorized caller
 must use `status()` and account for its ten-second health-check interval before
 reporting a session as currently live.
 
+The E2B adapter also recognizes the internal sealed candidate purpose. It
+requires a specific `template:build_id` reference and rejects guest environment
+values at creation and command execution,
+requests denied internet egress, token-gated port access, and kill-on-timeout,
+confirms those settings through E2B's session information, and withholds the
+provider URL. After a worker restart, every sealed session is refused on
+reconnect because E2B's connect operation may resume it after inspection.
+Teardown kills by ID without resuming the sandbox. Missing provider purpose
+metadata also fails closed. A future owner proxy must keep
+E2B's traffic token server-side. The manager remains Docker-only until E2B has equivalent
+immutable staging, product-host boot, private owner-authorized proxying, and
+live acceptance evidence. Ordinary E2B artifact previews retain their existing
+interactive behavior and must not be used for private repository candidates.
+
 Beyond one-shot validation, the Studio host mounts an artifact preview session
 API so the AppWorkbench can boot and restart a saved generated bundle on demand.
 A refinement selects a new artifact version and clears the old preview; the
