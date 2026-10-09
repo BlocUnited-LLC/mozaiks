@@ -88,7 +88,8 @@ an iframe. No DOM reparenting or second hidden preview is used.
 On small screens the artifact appears in a drawer over the conversation.
 Opening the drawer moves keyboard focus to its visible Collapse control;
 closing it restores the prior trigger or composer after the conversation is
-interactive again. If that control disappeared, focus returns to the conversation.
+interactive again. If that control is disabled or hidden, focus moves to the
+visible conversation pane or its desktop Expand control after a resize.
 Collapsing it preserves the preview while removing its controls from pointer,
 keyboard and accessibility navigation. Returning to the conversation preserves
 an unsent message. Changing or removing the actual artifact may replace its

@@ -53,10 +53,11 @@ test('ChatPage retains one live artifact and conversation across responsive layo
       };
       function Conversation() {
         const [draft,setDraft] = useState('');
-        useEffect(() => { window.lifecycle.chatMounts += 1; }, []);
+        const [composerDisabled,setComposerDisabled] = useState(false);
+        useEffect(() => { window.lifecycle.chatMounts += 1; window.setComposerDisabled = setComposerDisabled; }, []);
         return <section aria-label="Conversation" style={{display:'flex',flexDirection:'column',height:'100%',padding:16,background:'#17263a'}}>
           <h1>Build conversation</h1><p style={{flex:1}}>Review your draft app.</p>
-          <label>Message<textarea aria-label="Message" value={draft} onChange={event => setDraft(event.target.value)} /></label>
+          <label>Message<textarea aria-label="Message" disabled={composerDisabled} value={draft} onChange={event => setDraft(event.target.value)} /></label>
           <button>Send message</button>
         </section>;
       }
@@ -268,6 +269,33 @@ test('ChatPage retains one live artifact and conversation across responsive layo
     await expectState({layoutMode:'full',mobileDrawerState:'peek'});
     await expect(trigger).toBeFocused();
     assert.equal(await page.evaluate(()=>Boolean(document.activeElement?.closest('[inert]'))),false);
+    await expect(composer).toHaveValue('Keep this unsent draft');
+    await expect(frame.getByLabel('Preview note')).toHaveValue('Keep this app state');
+  });
+
+  await t.test('disabled composer and desktop minimized layout receive visible fallback focus',async()=>{
+    await resize({width:390,height:844});
+    await setLayout('full');
+    const composer = page.getByLabel('Message',{exact:true});
+    const collapse = page.getByRole('button',{name:'Collapse artifact workspace',exact:true});
+    await composer.focus();
+    await page.evaluate(()=>window.setTestLayout('split'));
+    await expect(collapse).toBeFocused();
+    await page.evaluate(()=>window.setComposerDisabled(true));
+    await expect(composer).toBeDisabled();
+    await collapse.press('Enter');
+    await expectState({layoutMode:'full',mobileDrawerState:'peek'});
+    await expect(page.locator('.chat-pane-transition')).toBeFocused();
+    assert.equal(await page.evaluate(()=>Boolean(document.activeElement?.closest('[hidden], [inert]'))),false);
+    await page.evaluate(()=>window.setComposerDisabled(false));
+
+    await composer.focus();
+    await page.evaluate(()=>window.setTestLayout('minimized'));
+    await expectState({layoutMode:'minimized',mobileDrawerState:'expanded'});
+    await expect(collapse).toBeFocused();
+    await resize({width:1280,height:844});
+    await expect(page.getByRole('button',{name:'Expand conversation',exact:true})).toBeFocused();
+    assert.equal(await page.evaluate(()=>Boolean(document.activeElement?.closest('[hidden], [inert]'))),false);
     await expect(composer).toHaveValue('Keep this unsent draft');
     await expect(frame.getByLabel('Preview note')).toHaveValue('Keep this app state');
   });

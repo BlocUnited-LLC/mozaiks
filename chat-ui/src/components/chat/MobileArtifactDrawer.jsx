@@ -7,6 +7,7 @@ const MobileArtifactDrawer = ({
   artifactContent = null,
   isMobile = true,
   collapseButtonRef = null,
+  artifactPaneRef = null,
   desktopWidth = '100%',
   hasUnseenChat = false,
   hasUnseenArtifact = false,
@@ -38,6 +39,8 @@ const MobileArtifactDrawer = ({
 
   return (
     <div
+      ref={artifactPaneRef}
+      tabIndex={-1}
       className={isMobile
         ? 'absolute inset-0 z-40 min-h-0 pointer-events-none'
         : 'relative flex flex-col min-w-0 min-h-0 h-full self-stretch transition-all duration-500 ease-in-out pt-0'}

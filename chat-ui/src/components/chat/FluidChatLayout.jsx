@@ -83,19 +83,35 @@ const FluidChatLayout = ({
   const returnFocus = useRef(null);
   const chatPaneRef = useRef(null);
   const collapseButtonRef = useRef(null);
+  const expandButtonRef = useRef(null);
+  const artifactPaneRef = useRef(null);
 
   useLayoutEffect(() => {
+    const focusVisible = (...candidates) => {
+      for (const candidate of candidates) {
+        if (!candidate?.isConnected || typeof candidate.focus !== 'function'
+          || candidate === document.body
+          || candidate.matches(':disabled')
+          || candidate.closest('[inert], [hidden], [aria-hidden="true"], [aria-disabled="true"]')
+          || candidate.getClientRects().length === 0
+          || window.getComputedStyle(candidate).visibility === 'hidden') continue;
+        candidate.focus({ preventScroll: true });
+        if (document.activeElement === candidate) return;
+      }
+    };
+
     if (mobileDrawerOpen && !wasMobileDrawerOpen.current) {
       returnFocus.current = document.activeElement;
-      collapseButtonRef.current?.focus();
+      focusVisible(collapseButtonRef.current, artifactPaneRef.current);
     } else if (!mobileDrawerOpen && wasMobileDrawerOpen.current) {
-      const previous = returnFocus.current;
-      const usable = previous?.isConnected
-        && previous !== document.body
-        && !previous.closest('[inert], [hidden]');
       const conversation = chatPaneRef.current;
-      const fallback = conversation?.querySelector('textarea, [role="textbox"]') || conversation;
-      (usable ? previous : fallback)?.focus();
+      focusVisible(
+        returnFocus.current,
+        conversation?.querySelector('textarea, [role="textbox"]'),
+        expandButtonRef.current,
+        conversation,
+        artifactPaneRef.current,
+      );
       returnFocus.current = null;
     }
     wasMobileDrawerOpen.current = mobileDrawerOpen;
@@ -132,6 +148,7 @@ const FluidChatLayout = ({
         {/* Minimized Chat - Show vertical text */}
         {!isMobile && layoutMode === 'minimized' && (
           <button
+            ref={expandButtonRef}
             type="button"
             aria-label="Expand conversation"
             onClick={() => onLayoutChange('split')}
@@ -164,6 +181,7 @@ const FluidChatLayout = ({
       <MobileArtifactDrawer
         isMobile={isMobile}
         collapseButtonRef={collapseButtonRef}
+        artifactPaneRef={artifactPaneRef}
         state={isMobile ? mobileDrawerState : (layout.artifactVisible ? 'expanded' : 'peek')}
         desktopWidth={layout.artifactWidth}
         onStateChange={onMobileDrawerStateChange}
