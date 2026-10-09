@@ -479,6 +479,9 @@ This project follows a practical pre-1.0 changelog format:
 - Zero-second OIDC discovery and JWKS cache TTLs now always refetch, including
   when consecutive checks observe the same clock tick.
 
+- The 0.2.0 publication gate now requires a release-note bullet in its dated
+  changelog section and a strict documentation build before upload.
+
 - Handler reactions now receive the fields of flat events,
   including host webhook events, instead of an empty payload.
 

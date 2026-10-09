@@ -26,14 +26,18 @@ dispatch:
    CI run succeeded. The Release workflow checks both again before upload.
 4. Run the local release-candidate audit against a throwaway MongoDB server on
    a non-default port. It covers governance, wheel and sdist build, package
-   content, metadata, clean-wheel install, packaged resources, installed first
-   run, and offline functional acceptance. Do not point it at the development
+   content, metadata, strict documentation, clean-wheel install, packaged
+   resources, installed first run, and offline functional acceptance. Install
+   local audit dependencies with `pip install -e ".[dev,docs]" build twine`.
+   Do not point it at the development
    MongoDB server: the runtime uses fixed database names regardless of the URI
    database segment.
 5. Move every release entry from `CHANGELOG.md`'s `## Unreleased` section into
    a dated `## 0.2.0 - YYYY-MM-DD` section immediately below it. Leave
    `## Unreleased` empty, with no headings or entries between those two
-   sections. Confirm `mozaiksai/version.py` is `0.2.0` and any existing
+   sections. The dated section needs at least one release-note bullet, and the
+   release workflow repeats the audit's strict documentation build. Confirm
+   `mozaiksai/version.py` is `0.2.0` and any existing
    `v0.2.0` tag resolves to the same candidate commit.
 6. Recheck `factory_app/app/brand/realm-export.json` for production values.
 7. Have the repository operator configure the GitHub `pypi` environment
@@ -52,7 +56,7 @@ dispatch:
 
 The tag trigger remains disabled. A manual workflow dispatch is the only
 entrypoint. It requires a full candidate SHA, a target-specific confirmation,
-the exact current `main` checkout, a successful CI push run for that SHA, a
+the exact current `main` checkout, a successful CI push run for that SHA, an
 empty `Unreleased` section followed immediately by the dated candidate
 changelog section, and a matching existing tag if one exists. It does
 not validate hosted acceptance; the operator must verify item 2 before use.
@@ -125,7 +129,6 @@ the accepted App Zero SHA with the live evidence.
 
 ## Later 1.0 work
 
-- Keep the documentation site current and run `mkdocs build --strict`.
 - Obtain a second-engineer review of ADR 0002's AppGenerator baseline strategy.
 
 These do not relax any `0.2.0` release gate above.
