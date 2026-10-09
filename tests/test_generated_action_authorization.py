@@ -124,6 +124,15 @@ def test_known_custom_permission_is_preserved():
     assert _permissions(candidate) == ["tasks.view"]
 
 
+def test_permission_free_public_read_action_remains_admissible():
+    candidate = _payload()
+    candidate["module_contract"]["module_yaml"]["actions"][0]["api_surface"] = "public_readonly"
+    closed = close_module_actions(candidate, app_build_plan=_plan())
+    action = next(item for item in closed["module_contract"]["module_yaml"]["actions"] if item["id"] == ACTION)
+    assert action["api_surface"] == "public_readonly"
+    assert action["permissions"] == []
+
+
 @pytest.mark.parametrize("action_id", ["create_task", "update_task", "delete_task", "get_tasks", "list_tasks"])
 def test_canonical_looking_name_without_owned_collection_cannot_bypass_validation(action_id):
     candidate = _payload("tasks.veiw")
