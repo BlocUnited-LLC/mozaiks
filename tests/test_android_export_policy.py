@@ -142,6 +142,8 @@ def test_demonstrated_leaks_are_rejected_independently_before_either_archive(exp
     ("app/config/provider.xml", _xml_meta),
     ("app/brand/assets/metadata.svg", _svg_meta),
     ("app/brand/assets/xmp.png", _png_xmp_meta),
+    ("app/config/provider.toml", lambda value: f'API_TOKEN = """{value}"""\n'.encode()),
+    ("app/config/runtime.txt", lambda value: f'export API_TOKEN={value}\n'.encode()),
     ("app/config/provider.toml", lambda value: f'[access_token]\ndefaultValue = "{value}"\n'.encode()),
     ("app/config/provider.toml", lambda value: f'[access_token]\ndefault_value = "{value}"\n'.encode()),
     ("app/config/provider.toml", lambda value: f'[access_token]\n"default-value" = "{value}"\n'.encode()),
@@ -201,6 +203,7 @@ def test_demonstrated_leaks_are_rejected_independently_before_either_archive(exp
     ).encode()),
 ], ids=[
     "xml-meta-content", "svg-meta-content", "png-xmp-meta-content",
+    "toml-triple-double", "env-style-text",
     "toml-camel-default", "toml-snake-default", "toml-kebab-default",
     "json-camel-default", "json-snake-default", "json-kebab-default",
     "json-nested-metadata-default", "json-metadata-list-default",
@@ -236,6 +239,31 @@ def test_credential_metadata_literals_fail_but_runtime_references_remain_portabl
             assert archive.read(name) == safe
 
 
+@pytest.mark.parametrize("name,safe", [
+    ("app/config/provider.xml", (
+        b'<configuration><meta name="access_token" '
+        b'content="&lt;INTEGRATION_API_TOKEN&gt;"/></configuration>'
+    )),
+    ("app/brand/assets/metadata.svg", (
+        b'<svg xmlns="http://www.w3.org/2000/svg"><metadata>'
+        b'<meta name="access_token" content="&lt;INTEGRATION_API_TOKEN&gt;"/>'
+        b'</metadata></svg>'
+    )),
+    ("app/brand/assets/xmp.png", _png_xmp_meta("&lt;INTEGRATION_API_TOKEN&gt;")),
+    ("app/config/provider.toml", b'[access_token]\ndefaultValue = "<INTEGRATION_API_TOKEN>"\n'),
+    ("app/config/provider.json", b'{"access_token":{"defaultValue":"<INTEGRATION_API_TOKEN>"}}'),
+])
+def test_documented_placeholders_keep_exact_source_bytes_in_both_archives(export_input, name, safe):
+    workspace, spec, output = export_input
+    _write(workspace, name, safe)
+
+    result = delivery.materialize_android_workspace(workspace, spec, output)
+    delivery.verify_android_delivery(Path(result["mobile_dir"]))
+    for field in ("source_archive", "archive_path"):
+        with ZipFile(result[field]) as archive:
+            assert archive.read(name) == safe
+
+
 def test_ordinary_xml_content_metadata_is_public(export_input):
     workspace, spec, output = export_input
     name = "app/config/provider.xml"
@@ -256,6 +284,10 @@ def test_ordinary_xml_content_metadata_is_public(export_input):
     ("app/config/provider.json", b'{"access_token":{"metadata":{"entries":[{"description":"Public note","type":"string","required":true,"env_name":"INTEGRATION_API_TOKEN"}]}}}'),
     ("app/config/provider.json", b'{"access_token":[{"metadata":{"description":"Public description"}}]}'),
     ("app/config/provider.xml", b'<configuration><meta name="title"><item content="Public title"/></meta></configuration>'),
+    ("app/config/provider.xml", (
+        b'<configuration><access_token><description>Public description</description>'
+        b'<env_name>INTEGRATION_API_TOKEN</env_name></access_token></configuration>'
+    )),
     ("app/config/provider.json", b'{"url":"https://api.example.invalid/lookup?view=public"}'),
 ])
 def test_public_nested_metadata_and_noncredential_queries_remain_portable(export_input, name, content):
@@ -321,6 +353,10 @@ def test_known_private_paths_are_rejected_even_without_a_recognizable_token(expo
     ("app/config/provider.xml", f'<configuration><access_token value="{SYNTHETIC_TOKEN}"/></configuration>'),
     ("app/config/provider.xml", f'<configuration><access_token default="{SYNTHETIC_TOKEN}"/></configuration>'),
     ("app/config/provider.xml", f'<configuration><access_token defaultValue="{SYNTHETIC_TOKEN}"/></configuration>'),
+    ("app/config/provider.xml", (
+        '<configuration><access_token><description>Public description</description>'
+        + SYNTHETIC_TOKEN + '</access_token></configuration>'
+    )),
     ("app/config/provider.xml", f'<configuration><access_token data="{SYNTHETIC_TOKEN}"/></configuration>'),
     ("app/config/provider.xml", f'<configuration><access_token secretValue="{SYNTHETIC_TOKEN}"/></configuration>'),
     ("app/config/provider.xml", f'<configuration><entry name="access_token" value="{SYNTHETIC_TOKEN}"/></configuration>'),
@@ -641,6 +677,31 @@ def test_yaml_alias_reused_in_credential_context_does_not_inherit_a_safe_verdict
         "workflows/Fixture/tools/integration.py",
         b'import os\nAPI_TOKEN = os.environ["INTEGRATION_API_TOKEN"]\n',
         f'API_TOKEN = "{SYNTHETIC_TOKEN}"\n'.encode(),
+    ),
+    (
+        "app/config/runtime.txt",
+        b'export API_TOKEN=${INTEGRATION_API_TOKEN}\n',
+        f'export API_TOKEN={SYNTHETIC_TOKEN}\n'.encode(),
+    ),
+    (
+        "app/config/provider.toml",
+        b'API_TOKEN = """${INTEGRATION_API_TOKEN}"""\n',
+        f'API_TOKEN = """{SYNTHETIC_TOKEN}"""\n'.encode(),
+    ),
+    (
+        "app/config/provider.xml",
+        _xml_meta("${INTEGRATION_API_TOKEN}"),
+        _xml_meta(SYNTHETIC_TOKEN),
+    ),
+    (
+        "app/brand/assets/metadata.svg",
+        _svg_meta("${INTEGRATION_API_TOKEN}"),
+        _svg_meta(SYNTHETIC_TOKEN),
+    ),
+    (
+        "app/brand/assets/xmp.png",
+        _png_xmp_meta("${INTEGRATION_API_TOKEN}"),
+        _png_xmp_meta(SYNTHETIC_TOKEN),
     ),
     (
         "app/config/provider.xml",

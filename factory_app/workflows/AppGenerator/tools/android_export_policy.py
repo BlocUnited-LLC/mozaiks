@@ -372,15 +372,20 @@ def _xml_credentials(text: str, *, require_svg: bool = False, nested_depth: int 
             return True
         attributes = {_normalized_key(key.rpartition("}")[2]): value for key, value in element.attrib.items()}
         declared_key = attributes.get("name") or attributes.get("key")
-        credential_field = _credential_key(element.tag.rpartition("}")[2]) or bool(
+        element_name = _normalized_key(element.tag.rpartition("}")[2])
+        credential_field = _credential_key(element_name) or bool(
             declared_key and _credential_key(declared_key)
         )
-        if (credential_field or inherited_credential) and (
+        public_field = element_name in _PUBLIC_CREDENTIAL_METADATA_FIELDS or bool(
+            declared_key and _normalized_key(declared_key) in _PUBLIC_CREDENTIAL_METADATA_FIELDS
+        )
+        direct_text = (element.text or "") + "".join(child.tail or "" for child in children)
+        if (credential_field or (inherited_credential and not public_field)) and (
             any(
                 _literal_secret(attributes.get(key))
                 for key in _CREDENTIAL_VALUE_FIELDS
             )
-            or (credential_field and _literal_secret("".join(element.itertext()).strip()))
+            or _literal_secret(direct_text.strip())
         ):
             return True
         fragment = (element.text or "").strip()

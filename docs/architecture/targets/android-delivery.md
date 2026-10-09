@@ -77,7 +77,8 @@ scalar entries are refused.
 It inspects env-style text and checks XML and
 property-list fields. Credential elements and elements identified by a
 credential `name` or `key` reject literal-bearing `content` and default/value
-attributes on themselves or nested elements. Credential query values in URLs
+attributes on themselves or nested payload elements. Descriptive XML child
+fields and names-only references remain portable. Credential query values in URLs
 are checked in text and parsed configuration, including encoded query syntax.
 Statically joined Python credential assignments are checked too.
 A documented `postgresql://user:pass@host:port/dbname` placeholder is permitted.
