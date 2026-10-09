@@ -18,10 +18,11 @@ isolated repository worker can supply exact host-approved paths for one turn.
 The local subprocess can still access host files and disk-based login state;
 this provider is not a security sandbox.
 
-This provider is dark by default: ``refinement_policy.yaml``'s
-``coding.providers.acp.enabled`` is ``false``, the ``ag2[acp]`` extra is
-optional, and the default local process path refuses execution until an
-isolated execution provider replaces it.
+The normal refinement route keeps this provider dark by default:
+``refinement_policy.yaml``'s ``coding.providers.acp.enabled`` is ``false``, the
+``ag2[acp]`` extra is optional, and the default local process path refuses
+execution until an isolated execution provider replaces it. A trusted isolated
+worker may supply its approved ACP adapter and budget directly.
 """
 
 from __future__ import annotations
@@ -242,7 +243,8 @@ class ACPCodingProvider:
     def __init__(
         self,
         *,
-        config_loader: Any = load_control_plane_config,
+        config_loader: Any | None = None,
+        provider_config: ControlPlaneACPProviderConfig | None = None,
         staging_root: Path | None = None,
         acp_config_factory: Callable[..., Any] | None = None,
         env_source: dict[str, str] | None = None,
@@ -250,7 +252,12 @@ class ACPCodingProvider:
         create_paths: Sequence[str] = (),
         delete_paths: Sequence[str] = (),
     ) -> None:
-        self._config_loader = config_loader
+        if config_loader is not None and provider_config is not None:
+            raise ValueError("ACP provider accepts either a policy loader or an approved provider config")
+        if provider_config is not None and not isinstance(provider_config, ControlPlaneACPProviderConfig):
+            raise TypeError("provider_config must be a ControlPlaneACPProviderConfig")
+        self._config_loader = config_loader if config_loader is not None else load_control_plane_config
+        self._provider_config_override = provider_config
         self._staging_root = Path(staging_root) if staging_root is not None else DEFAULT_ACP_STAGING_ROOT
         self._acp_config_factory = acp_config_factory or build_acp_agent_config
         self._env_source = env_source
@@ -267,6 +274,8 @@ class ACPCodingProvider:
         return config if isinstance(config, ControlPlaneConfig) else ControlPlaneConfig.model_validate(config)
 
     def _provider_config(self) -> ControlPlaneACPProviderConfig:
+        if self._provider_config_override is not None:
+            return self._provider_config_override
         return self._load_config().coding.providers.acp
 
     def _proposal(self, *, status: str, provider_id: str, **fields: Any) -> StagedPatchProposal:
@@ -285,7 +294,7 @@ class ACPCodingProvider:
             return self._proposal(
                 status="unavailable",
                 provider_id=provider_id,
-                error="ACP coding provider is disabled in refinement policy (coding.providers.acp.enabled).",
+                error="ACP coding provider is disabled by its approved configuration.",
             )
         if not acp_available():
             return self._proposal(
