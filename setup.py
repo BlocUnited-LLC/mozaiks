@@ -56,14 +56,47 @@ def _revision_bytes(root: Path) -> bytes | None:
     }, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
 
 
+def _verify_packaged_git_sources(root: Path, staged_root: Path, *, wheel: bool) -> None:
+    if not (root / ".git").exists():
+        return
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "--cached", "--full-name", "-z"],
+            check=True, capture_output=True, timeout=20,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError("Cannot verify the exact Mozaiks package source files") from exc
+    tracked = set(result.stdout.decode("utf-8", "surrogateescape").split("\0"))
+    for staged in staged_root.rglob("*"):
+        if not staged.is_file():
+            continue
+        name = staged.relative_to(staged_root).as_posix()
+        if name == _REVISION_PATH.as_posix():
+            continue  # This file is generated from the verified commit below.
+        if not wheel and name == "PKG-INFO" and not (root / name).exists():
+            continue  # Setuptools creates this when no source PKG-INFO exists.
+        if not wheel and name.startswith("mozaiks.egg-info/"):
+            continue  # Setuptools writes distribution metadata into the sdist tree.
+        if not wheel and name == "setup.cfg" and not (root / "setup.cfg").exists():
+            continue  # Setuptools creates this in the release tree when no source config exists.
+        source_name = name.replace("mozaiks_chat_ui/", "chat-ui/", 1) if wheel else name
+        source = root / source_name
+        if source_name not in tracked or source.is_symlink() or not source.is_file():
+            raise RuntimeError(f"Package input is not part of the exact Git commit: {source_name}")
+        if staged.read_bytes() != source.read_bytes():
+            raise RuntimeError(f"Packaged source differs from the exact Git checkout: {source_name}")
+
+
 class BuildPyWithRevision(build_py):
     def run(self) -> None:
         super().run()
         target = Path(self.build_lib) / _REVISION_PATH
-        revision = _revision_bytes(Path(__file__).resolve().parent)
+        root = Path(__file__).resolve().parent
+        revision = _revision_bytes(root)
         if revision is None:
             target.unlink(missing_ok=True)
             return
+        _verify_packaged_git_sources(root, Path(self.build_lib), wheel=True)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(revision)
 
@@ -71,9 +104,11 @@ class BuildPyWithRevision(build_py):
 class SdistWithRevision(sdist):
     def make_release_tree(self, base_dir: str, files: list[str]) -> None:
         super().make_release_tree(base_dir, files)
-        revision = _revision_bytes(Path(__file__).resolve().parent)
+        root = Path(__file__).resolve().parent
+        revision = _revision_bytes(root)
         if revision is None:
             raise RuntimeError("Source distribution requires an exact Mozaiks source revision")
+        _verify_packaged_git_sources(root, Path(base_dir), wheel=False)
         target = Path(base_dir) / _REVISION_PATH
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(revision)
