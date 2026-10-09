@@ -118,7 +118,10 @@ platform host; authenticated apps need a future preview-scoped OIDC setup, and
 hosted product entrypoints need a trusted fixed host selection before their
 behavior can be claimed. A trusted caller must verify the owner and build
 identity before stopping the session through the existing manager. Generic
-preview routes hide sealed sessions.
+preview routes hide sealed sessions. Boot health is a point-in-time result:
+repeated create calls can return the cached active state. An authorized caller
+must use `status()` and account for its ten-second health-check interval before
+reporting a session as currently live.
 
 Beyond one-shot validation, the Studio host mounts an artifact preview session
 API so the AppWorkbench can boot and restart a saved generated bundle on demand.
