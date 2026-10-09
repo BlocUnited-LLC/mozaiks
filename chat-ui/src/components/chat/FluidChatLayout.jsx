@@ -118,7 +118,8 @@ const FluidChatLayout = ({
         // layout effect runs. Restore focus once the desktop rail is painted.
         focusFrame = window.requestAnimationFrame(() => {
           const active = document.activeElement;
-          if (active === document.body || !active?.isConnected
+          if (active === document.body || active === chatPaneRef.current
+            || active === artifactPaneRef.current || !active?.isConnected
             || active?.closest('[inert], [hidden], [aria-hidden="true"]')) {
             focusVisible(expandButtonRef.current, artifactPaneRef.current);
           }

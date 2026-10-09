@@ -294,7 +294,23 @@ test('ChatPage retains one live artifact and conversation across responsive layo
     await expectState({layoutMode:'minimized',mobileDrawerState:'expanded'});
     await expect(collapse).toBeFocused();
     await resize({width:1280,height:844});
-    await expect(page.getByRole('button',{name:'Expand conversation',exact:true})).toBeFocused();
+    const expand = page.getByRole('button',{name:'Expand conversation',exact:true});
+    try {
+      await expect(expand).toBeFocused();
+    } catch (error) {
+      const focusState = await page.evaluate(() => {
+        const rail = document.querySelector('[aria-label="Expand conversation"]');
+        const active = document.activeElement;
+        return {
+          active: active?.outerHTML.slice(0, 300),
+          railRects: rail?.getClientRects().length,
+          railVisibility: rail && window.getComputedStyle(rail).visibility,
+          railHiddenAncestor: rail?.closest('[inert], [hidden], [aria-hidden="true"]')?.outerHTML.slice(0, 300),
+          state: window.testState,
+        };
+      });
+      throw new Error(`${error.message}\nFocus state: ${JSON.stringify(focusState)}`);
+    }
     assert.equal(await page.evaluate(()=>Boolean(document.activeElement?.closest('[hidden], [inert]'))),false);
     await expect(composer).toHaveValue('Keep this unsent draft');
     await expect(frame.getByLabel('Preview note')).toHaveValue('Keep this app state');
