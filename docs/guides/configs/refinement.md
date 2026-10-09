@@ -88,10 +88,12 @@ even when structured patch coding is disabled.
 
 `coding.providers.acp.adapter` is a separate execution choice. For example,
 `adapter: claude_code` starts the Claude Code ACP agent when ACP is enabled and
-eligible; it does not turn `llm_profiles.codegen.llm_config.model` into a Claude
-model. That model is used for structured-output patch coding and for a permitted
-fallback after an ACP attempt. The current app-bundle ACP adapter uses its
-coding CLI's default model; ACP model selection is independent of this profile.
+an isolated coding provider is ready for an eligible bounded patch; it does not
+turn `llm_profiles.codegen.llm_config.model` into a Claude model. That profile
+is used for structured-output patch coding while ACP is disabled, and for
+contract-surface regeneration where configured. ACP model selection is
+independent of this profile. An ACP failure does not start a structured-output
+patch attempt.
 
 The `architecture` profile is currently an advisory workflow-context label;
 workflow execution does not resolve its model from this policy yet.
@@ -102,7 +104,19 @@ policy leaves them undeclared.
 ### Optional ACP coding provider
 
 The ACP coding provider remains disabled until an isolated worker is connected
-to the refinement route. Its
+to the refinement route. Turning on `coding.providers.acp.enabled` or installing
+`ag2[acp]` alone does not assert worker readiness: the shipped local provider
+reports unready because its subprocess has no OS isolation. A trusted host must
+inject a provider that attests its isolated runtime is ready **and** a candidate
+validator that attests isolated validation is ready. The default generated-app
+acceptance gate imports candidate Python in the host process before the selected
+Docker/E2B/local build strategy runs, so selecting Docker or E2B alone does not
+isolate that gate. No shipped validator claims ACP-safe isolation. When both
+trusted runtimes are ready, ACP handles a bounded app-bundle or theme patch
+even if only one file is selected.
+An unsupported artifact kind or scope above the ACP file budget is blocked
+without trying structured-output coding; the upstream scope checkpoint owns
+the normal decision to use a workflow for broader changes. Its
 `coding.providers.acp.budget` accepts only `max_files`, `max_diff_bytes`, and
 `max_wall_seconds`. These limit one provider attempt. The unused `max_retries`
 setting is rejected; it never controlled provider retries. This does not
@@ -111,9 +125,14 @@ change provider-specific retry parameters inside `llm_config`.
 A trusted ACP-only worker can pass an approved `ControlPlaneACPProviderConfig`
 directly to `ACPCodingProvider(provider_config=...)`. That worker does not make
 structured-output calls, so it does not need a synthetic `codegen` model
-profile. Normal refinement routing still loads the full policy and requires a
-named model profile for enabled coding and its structured fallback. The direct
-provider configuration does not authorize a worker launch or relax isolation.
+profile. Normal refinement policy validation still requires a named model
+profile for enabled coding, even when ACP is enabled; that profile is not an
+ACP model or an operational fallback. Direct provider configuration does not
+authorize a worker launch or relax isolation.
+
+This selector governs staged generated-app refinement. App Zero repository
+edits use the separate approved repository execution boundary and require their
+own trusted worker, source binding, and credential path before activation.
 
 ## Minimal Harness
 

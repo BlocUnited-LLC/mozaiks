@@ -385,8 +385,17 @@ policy shares `codegen` across both generation steps. To tune them separately,
 declare `surface_regeneration` and point
 `contract_surface.regeneration_llm_profile` at it. The first-party policy
 does not declare the optional dry-run-only profiles.
-`coding.llm_profile` remains required when ACP is enabled because the current
-provider selection can fall back to structured-output coding.
+`coding.llm_profile` remains required by enabled coding policy validation even
+when ACP is enabled. It is not passed to the ACP agent and is not an operational
+fallback. The normal route uses structured-output coding only while ACP is
+disabled. With ACP enabled, both a trusted isolated coding provider and an
+isolated candidate validator must report ready before one or more scoped
+app-bundle or theme files can be edited. The default validator imports
+candidate Python into the host before Docker/E2B build validation, so its
+strategy setting is not an isolation guarantee for ACP output. Unsupported or
+over-budget scopes fail closed; the upstream scope checkpoint owns routing
+broader requests through declared workflow sequences. An ACP failure never
+switches coding provider.
 
 ```yaml
 schema_version: mozaiks.refinement.policy.v1

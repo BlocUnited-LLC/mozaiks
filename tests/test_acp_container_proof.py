@@ -50,6 +50,7 @@ class DockerACPProofProvider:
     """Test-only CodingExecutionProvider; Docker receives scoped JSON on stdin."""
 
     provider_id = "acp_claude_code"
+    isolated_runtime_ready = True
 
     def __init__(self) -> None:
         self.container_config: dict[str, Any] = {}
@@ -158,6 +159,15 @@ async def _validate_candidate(**kwargs: Any) -> dict[str, Any]:
     }
 
 
+class _InertProofValidator:
+    """Test-only validator; asserts file bytes without executing generated code."""
+
+    isolated_validation_ready = True
+
+    async def __call__(self, **kwargs: Any) -> dict[str, Any]:
+        return await _validate_candidate(**kwargs)
+
+
 @pytest.mark.asyncio
 async def test_acp_client_adapter_and_terminal_are_confined_to_disposable_container(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
@@ -176,7 +186,7 @@ async def test_acp_client_adapter_and_terminal_are_confined_to_disposable_contai
     worker = ScopedRefinementCodingWorker(
         acp_provider=provider,
         config_loader=lambda: policy,
-        candidate_validation_runner=_validate_candidate,
+        candidate_validation_runner=_InertProofValidator(),
         artifact_store=store,
         output_root=tmp_path / "artifacts",
     )

@@ -43,6 +43,17 @@ class CodingExecutionProvider(Protocol):
     async def execute(self, request: CodingWorkerRequest) -> StagedPatchProposal: ...
 
 
+class IsolatedCodingExecutionProvider(CodingExecutionProvider, Protocol):
+    """Host-injected coding provider with a verified isolated execution path.
+
+    Readiness is asserted by trusted host composition, never by a refinement
+    request, policy YAML, or the presence of an ACP package in the host process.
+    """
+
+    @property
+    def isolated_runtime_ready(self) -> bool: ...
+
+
 class ScopeProposalPort(Protocol):
     async def propose(self, **kwargs: Any) -> ScopeProposal: ...
 

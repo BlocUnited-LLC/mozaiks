@@ -240,6 +240,11 @@ def _validate_operation_grants(
 class ACPCodingProvider:
     """One bounded CLI-agent execution per request, harvest-verified."""
 
+    @property
+    def isolated_runtime_ready(self) -> bool:
+        """The local ACP subprocess cannot attest the required OS isolation."""
+        return False
+
     def __init__(
         self,
         *,
