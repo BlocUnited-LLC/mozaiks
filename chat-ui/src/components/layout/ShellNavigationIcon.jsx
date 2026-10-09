@@ -1,12 +1,15 @@
 import React from 'react';
 import {
+  RiAddCircleLine,
   RiAppsFill,
   RiBarChart2Line,
   RiCustomerServiceFill,
   RiDashboardFill,
   RiFileList3Fill,
   RiHistoryFill,
+  RiHome4Line,
   RiMoneyDollarCircleFill,
+  RiNotification3Line,
   RiPlugLine,
   RiPulseLine,
   RiServerFill,
@@ -19,6 +22,13 @@ import {
 const ICONS = {
   analytics: RiBarChart2Line,
   apps: RiAppsFill,
+  workspace: RiAppsFill,
+  home: RiHome4Line,
+  create: RiAddCircleLine,
+  'create-app': RiAddCircleLine,
+  notifications: RiNotification3Line,
+  profile: RiUser3Fill,
+  account: RiUser3Fill,
   billing: RiMoneyDollarCircleFill,
   chart: RiFileList3Fill,
   dashboard: RiDashboardFill,
@@ -39,7 +49,7 @@ export default function ShellNavigationIcon({ icon, fallback }) {
   const NamedIcon = typeof icon === 'string' && Object.prototype.hasOwnProperty.call(ICONS, icon)
     ? ICONS[icon]
     : null;
-  if (NamedIcon) return <NamedIcon aria-hidden="true" size="1.25em" />;
+  if (NamedIcon) return <NamedIcon aria-hidden="true" className="shell-mobile-bottom-icon" />;
 
   const source = typeof icon === 'string' && icon
     ? icon.startsWith('/') || icon.startsWith('http')
@@ -50,7 +60,7 @@ export default function ShellNavigationIcon({ icon, fallback }) {
     return (
       <span
         aria-hidden="true"
-        className="inline-block h-5 w-5 bg-current"
+        className="shell-mobile-bottom-icon bg-current"
         style={{
           mask: `url(${source}) center / contain no-repeat`,
           WebkitMask: `url(${source}) center / contain no-repeat`,

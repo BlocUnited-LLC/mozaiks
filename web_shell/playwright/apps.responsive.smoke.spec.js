@@ -1247,6 +1247,57 @@ test.beforeEach(async ({ page }) => {
   await mockStudioApis(page);
 });
 
+test('mobile shell navigation uses icons and keeps readable action labels', async ({ page }, testInfo) => {
+  await page.goto('/apps');
+  await page.getByRole('dialog', { name: /Onboarding step 1 of 3/i })
+    .getByRole('button', { name: 'Skip tour' }).click();
+  const navigation = page.getByRole('navigation', { name: 'Mobile app navigation' });
+
+  if (page.viewportSize().width >= 768) {
+    await expect(navigation).toBeHidden();
+  } else {
+    await expect(navigation).toBeVisible();
+    for (const label of ['Create App', 'Alerts', 'Account']) {
+      const button = navigation.getByRole('button', { name: label });
+      await expect(button).toBeVisible();
+      await expect(button.locator('svg.shell-mobile-bottom-icon')).toHaveCount(1);
+      await expect(button.locator('.shell-mobile-bottom-glyph')).toHaveAttribute('aria-hidden', 'true');
+    }
+    await expectNoHorizontalOverflow(page);
+  }
+
+  if (process.env.MOBILE_NAV_QA_DIR) {
+    fs.mkdirSync(process.env.MOBILE_NAV_QA_DIR, { recursive: true });
+    await page.screenshot({
+      path: path.join(process.env.MOBILE_NAV_QA_DIR, `${testInfo.project.name}-studio-navigation.png`),
+    });
+  }
+});
+
+test('mobile shell navigation keeps an app configured icon and label', async ({ page }) => {
+  await page.route('**/api/shell-config', async (route) => {
+    await route.fulfill({
+      json: {
+        ...composedShellConfig,
+        mobile: {
+          bottomBar: {
+            items: [{ id: 'create', label: 'My workspace', action: 'navigate', path: '/apps', icon: 'settings.svg' }],
+          },
+        },
+      },
+    });
+  });
+  await page.goto('/apps');
+  const navigation = page.getByRole('navigation', { name: 'Mobile app navigation' });
+
+  if (page.viewportSize().width < 768) {
+    const button = navigation.getByRole('button', { name: 'My workspace' });
+    await expect(button).toBeVisible();
+    await expect(button.locator('.shell-mobile-bottom-icon')).toHaveCSS('mask-image', /settings\.svg/);
+    await expect(navigation.getByRole('button')).toHaveCount(1);
+  }
+});
+
 test('apps route stays responsive across desktop and mobile widths', async ({ page }) => {
   await page.goto('/apps');
   const main = page.locator('main');
