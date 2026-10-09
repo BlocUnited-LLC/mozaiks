@@ -103,9 +103,19 @@ test('AppsDirectory accepts server pages, controlled search/filters, retry and b
   await page.getByText('Temporary outage', { exact: true }).waitFor();
   await page.getByRole('button', { name: 'Try again', exact: true }).click();
   await page.getByText('Second app', { exact: true }).filter({ visible: true }).waitFor();
-  await page.setViewportSize({ width: 390, height: 844 });
+  await page.setViewportSize({ width: 390, height: 664 });
+  await expect(page.getByText(/^On this page:\s*1$/)).toBeVisible();
+  await expect(page.getByLabel('Summary metrics')).toBeHidden();
+  if (process.env.MOZAIKS_TEST_SCREENSHOTS) {
+    await fs.mkdir(process.env.MOZAIKS_TEST_SCREENSHOTS, { recursive: true });
+    await page.screenshot({
+      path: path.join(process.env.MOZAIKS_TEST_SCREENSHOTS, 'paginated-apps-390x664.png'),
+      fullPage: false,
+    });
+  }
   await page.getByRole('button', { name: 'Previous', exact: true }).click();
   await page.getByText('First app', { exact: true }).filter({ visible: true }).waitFor();
+  await expect(page.getByText(/^On this page:\s*1$/)).toBeVisible();
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   await page.getByRole('button', { name: 'Dashboard', exact: true }).filter({ visible: true }).click();
   assert.ok(page.url().endsWith('/apps/first/overview'));

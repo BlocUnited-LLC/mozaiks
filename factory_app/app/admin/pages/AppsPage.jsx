@@ -288,9 +288,15 @@ export function AppsDirectory({
           title="Apps"
           subtitle={pagination ? 'Manage your apps. Search and filters include all your apps.' : 'Manage your apps, continue builds, and open app Studio.'}
           summaryItems={pagination ? summaryItems.slice(0, 1) : summaryItems}
+          summaryClassName="hidden md:block"
         />
 
         <section className="space-y-4">
+          {pagination && (
+            <p className="px-1 text-xs text-muted-foreground md:hidden" aria-live="polite">
+              On this page: <span className="font-semibold text-foreground">{summaryItems[0].value}</span>
+            </p>
+          )}
           <CollectionToolbar
             searchValue={searchValue}
             onSearchChange={onSearchChange ?? setLocalSearch}
