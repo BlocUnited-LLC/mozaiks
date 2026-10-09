@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # Local, disposable app previews. This image is not a deployment artifact.
 FROM node:24-bookworm-slim
 

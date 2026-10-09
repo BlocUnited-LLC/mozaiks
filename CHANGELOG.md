@@ -25,6 +25,8 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- CI and operator reference container builds resolve public base images from a
+  public mirror, avoiding anonymous Docker Hub pull limits during release checks.
 - Restored the assistant launcher on declared app home pages and other custom
   routes, while keeping it hidden on full chat pages, declared chat aliases and
   sign-in surfaces. The widget uses the app's name and offers workflow access

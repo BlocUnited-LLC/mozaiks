@@ -11,7 +11,8 @@ if [[ $1 == pull ]]; then
   exit 0
 fi
 
-docker run --detach --rm --name mozaiks-ci-mongodb --publish 27017:27017 \
+docker run --detach --rm --name mozaiks-ci-mongodb \
+  --publish "${CI_MONGO_BIND_ADDRESS:-127.0.0.1}:27017:27017" \
   --health-cmd="mongosh --quiet --eval 'db.runCommand({ ping: 1 })'" \
   --health-interval=10s --health-timeout=5s --health-retries=5 \
   mongo:7

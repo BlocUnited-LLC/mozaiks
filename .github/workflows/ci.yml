@@ -619,6 +619,10 @@ jobs:
           persist-credentials: false
 
       - name: Start MongoDB from public mirror
+        # The generated-app container reaches this service through the host
+        # gateway; other jobs keep their disposable MongoDB port on loopback.
+        env:
+          CI_MONGO_BIND_ADDRESS: 0.0.0.0
         run: bash scripts/ci/mongo_service.sh start
 
       - name: Setup Python

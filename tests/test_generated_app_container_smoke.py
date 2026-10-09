@@ -131,6 +131,8 @@ async def test_materialized_generated_app_image_boots_and_serves_runtime(
                 "docker",
                 "build",
                 "--add-host=host.docker.internal:host-gateway",
+                "--build-context",
+                "python:3.13-slim=docker-image://public.ecr.aws/docker/library/python:3.13-slim",
                 "--tag",
                 image,
                 str(app_root),
