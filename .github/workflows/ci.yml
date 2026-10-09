@@ -554,6 +554,21 @@ jobs:
           print("Packaged resources resolved from site-packages")
           PY
 
+      - name: Verify installed Android export provenance
+        run: |
+          . .pkg-venv/bin/activate
+          cd /tmp/mozaiks-package-smoke
+          python - <<'PY'
+          import os
+          from factory_app.workflows.AppGenerator.tools.android_delivery import _framework_snapshot
+
+          files, framework = _framework_snapshot()
+          assert framework["commit"] == os.environ["GITHUB_SHA"]
+          assert "web_shell/vite.config.js" in files
+          assert "chat-ui/src/auth/authAdapter.js" in files
+          print("Installed Android exporter is bound to the wheel's exact source revision")
+          PY
+
       - name: Verify standalone workspace composition
         run: |
           . .pkg-venv/bin/activate

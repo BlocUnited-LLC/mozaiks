@@ -256,6 +256,41 @@ def _git(repo: Path, *args: str) -> bytes:
     return result.stdout
 
 
+def _verified_distribution_bytes(distribution: importlib.metadata.Distribution, entry: Any, expected: Path) -> bytes:
+    actual = Path(str(distribution.locate_file(entry))).resolve()
+    if actual != expected or not entry.hash or entry.hash.mode != "sha256":
+        raise AndroidDeliveryError("Installed resource provenance is missing or mismatched")
+    _check_ancestors(actual)
+    raw = actual.read_bytes()
+    digest = base64.urlsafe_b64encode(hashlib.sha256(raw).digest()).decode().rstrip("=")
+    if digest != entry.hash.value:
+        raise AndroidDeliveryError("Installed shared-shell resources differ from their distribution")
+    return raw
+
+
+def _installed_source_commit(distribution: importlib.metadata.Distribution, root: Path) -> str:
+    revision_path = "mozaiksai/_build_revision.json"
+    entries = [
+        entry for entry in distribution.files or []
+        if str(entry).replace("\\", "/") == revision_path
+    ]
+    if len(entries) != 1:
+        raise AndroidDeliveryError("Installed OSS distribution has no exact source revision")
+    raw = _verified_distribution_bytes(distribution, entries[0], root / revision_path)
+    try:
+        revision = json.loads(raw) if len(raw) <= 512 else None
+        commit = revision["commit"] if isinstance(revision, dict) and revision.get("schema_version") == "mozaiks.source_revision.v1" else None
+        direct = json.loads(distribution.read_text("direct_url.json") or "{}")
+        installed_commit = direct.get("vcs_info", {}).get("commit_id")
+    except (TypeError, ValueError, KeyError, AttributeError):
+        raise AndroidDeliveryError("Installed OSS source revision is invalid") from None
+    if not isinstance(commit, str) or not _COMMIT.fullmatch(commit):
+        raise AndroidDeliveryError("Installed OSS source revision is invalid")
+    if installed_commit and installed_commit != commit:
+        raise AndroidDeliveryError("Installed OSS revision differs from its VCS installation")
+    return commit
+
+
 def _framework_snapshot() -> tuple[dict[str, bytes], dict[str, Any]]:
     shell, ui = resources.resolve_web_shell_root(), resources.resolve_chat_ui_root()
     if shell is None or ui is None:
@@ -286,25 +321,18 @@ def _framework_snapshot() -> tuple[dict[str, bytes], dict[str, Any]]:
     else:
         try:
             distribution = importlib.metadata.distribution("mozaiks")
-            direct = json.loads(distribution.read_text("direct_url.json") or "{}")
-            commit = direct.get("vcs_info", {}).get("commit_id", "")
+            commit = _installed_source_commit(distribution, repo)
             for distribution_entry in distribution.files or []:
                 name = str(distribution_entry).replace("\\", "/")
                 mapped = name.replace("mozaiks_chat_ui/", "chat-ui/", 1)
                 if not _resource_selected(mapped):
                     continue
-                actual = Path(str(distribution.locate_file(distribution_entry))).resolve()
                 expected = (shell if mapped.startswith("web_shell/") else ui) / mapped.split("/", 1)[1]
-                if actual != expected or not distribution_entry.hash or distribution_entry.hash.mode != "sha256":
-                    raise AndroidDeliveryError("Installed resource provenance is missing or mismatched")
-                _check_ancestors(actual)
-                raw = actual.read_bytes()
-                digest = base64.urlsafe_b64encode(hashlib.sha256(raw).digest()).decode().rstrip("=")
-                if digest != distribution_entry.hash.value:
-                    raise AndroidDeliveryError("Installed shared-shell resources differ from their distribution")
-                files[mapped] = raw
+                files[mapped] = _verified_distribution_bytes(distribution, distribution_entry, expected)
+        except AndroidDeliveryError:
+            raise
         except (importlib.metadata.PackageNotFoundError, ValueError, OSError) as exc:
-            raise AndroidDeliveryError("Install Mozaiks from an exact Git commit to establish resource provenance") from exc
+            raise AndroidDeliveryError("Installed OSS distribution resource provenance is unavailable") from exc
     if not isinstance(commit, str) or not _COMMIT.fullmatch(commit):
         raise AndroidDeliveryError("The OSS installation must identify an exact Git commit")
     required = {"web_shell/package.json", "web_shell/package-lock.json", "web_shell/vite.config.js", "chat-ui/package.json", "chat-ui/package-lock.json", "chat-ui/src/auth/authAdapter.js"}

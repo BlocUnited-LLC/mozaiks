@@ -258,6 +258,63 @@ def test_git_resource_snapshot_is_pinned_and_rejects_drift(tmp_path, monkeypatch
         delivery._framework_snapshot()
 
 
+@pytest.mark.parametrize("mutation", ["none", "missing", "tampered", "invalid", "wrong_vcs"])
+def test_installed_wheel_android_resources_require_recorded_revision(tmp_path, monkeypatch, mutation):
+    commit = "a" * 40
+    root = tmp_path / "site-packages"
+    files = {
+        "web_shell/package.json": b"{}",
+        "web_shell/package-lock.json": b"{}",
+        "web_shell/vite.config.js": b"export default {};\n",
+        "mozaiks_chat_ui/package.json": b"{}",
+        "mozaiks_chat_ui/package-lock.json": b"{}",
+        "mozaiks_chat_ui/src/auth/authAdapter.js": b"export function createAuthAdapter() {}\n",
+        "mozaiksai/_build_revision.json": json.dumps({
+            "schema_version": "mozaiks.source_revision.v1",
+            "commit": "invalid" if mutation == "invalid" else commit,
+        }).encode(),
+    }
+    delivery._write_files(root, files)
+
+    class Entry(str):
+        def __new__(cls, name, raw):
+            entry = str.__new__(cls, name)
+            entry.hash = SimpleNamespace(
+                mode="sha256",
+                value=base64.urlsafe_b64encode(hashlib.sha256(raw).digest()).decode().rstrip("="),
+            )
+            return entry
+
+    class Distribution:
+        def __init__(self):
+            self.files = [
+                Entry(name, raw) for name, raw in files.items()
+                if mutation != "missing" or name != "mozaiksai/_build_revision.json"
+            ]
+
+        def locate_file(self, entry):
+            return root / str(entry)
+
+        def read_text(self, name):
+            assert name == "direct_url.json"
+            vcs_commit = "b" * 40 if mutation == "wrong_vcs" else commit
+            return json.dumps({"vcs_info": {"commit_id": vcs_commit}})
+
+    monkeypatch.setattr(delivery.resources, "resolve_web_shell_root", lambda: root / "web_shell")
+    monkeypatch.setattr(delivery.resources, "resolve_chat_ui_root", lambda: root / "mozaiks_chat_ui")
+    monkeypatch.setattr(delivery.importlib.metadata, "distribution", lambda _: Distribution())
+    if mutation == "tampered":
+        (root / "mozaiksai/_build_revision.json").write_bytes(b"{}")
+
+    if mutation == "none":
+        captured, provenance = delivery._framework_snapshot()
+        assert provenance["commit"] == commit
+        assert captured["chat-ui/src/auth/authAdapter.js"] == files["mozaiks_chat_ui/src/auth/authAdapter.js"]
+    else:
+        with pytest.raises(delivery.AndroidDeliveryError):
+            delivery._framework_snapshot()
+
+
 def test_capture_rejects_portable_path_collisions_before_writing(tmp_path):
     if os.name == "nt":
         pytest.skip("Windows filesystem already disallows this case-only collision")

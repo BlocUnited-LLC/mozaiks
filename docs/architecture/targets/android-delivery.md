@@ -133,6 +133,24 @@ An extracted portable workspace can restore those resources from the matching
 installed Mozaiks revision when `node mobile/build.mjs` runs; set
 `MOZAIKS_PYTHON` if that installation uses a specific Python executable.
 
+A Git checkout reads its revision from Git, refuses changed tracked source, and
+requires every staged package input to belong to that commit.
+Wheel and source-distribution builds embed that exact commit as package data;
+an installed wheel verifies the embedded file and shared-shell resources against
+its distribution record before export. The record detects installed-file drift;
+it does not authenticate an independently modified source distribution. The
+release workflow's exact-main checkout and controlled artifact handoff remain
+the source of release authority. The release build refuses to create a
+source distribution without that revision. A wheel without it can run generic
+hosts but cannot export Android. Package CI installs the built wheel and checks
+that the exporter resolves the checked-out commit. This makes normal wheel
+installs usable without requiring their `direct_url.json` to name a Git clone.
+
+Repo-local Docker builds exclude `.git` from their build context. They can
+install a generic host wheel without revision metadata; Android export in that
+image remains unavailable. A release wheel or source distribution built from
+a clean, exact Git checkout carries the revision needed for mobile delivery.
+
 Shared-shell resources use LF text checkouts through the repository's
 `.gitattributes`; binary resources retain their bytes. This keeps Windows Git
 installs and Linux compiler installs identical for the recorded resource digest.
