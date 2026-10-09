@@ -38,6 +38,12 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
+- Bounded each E2B worker's cached SDK handles and pruned expired entries on
+  subsequent adapter activity. Ordinary handles may be reconnected after eviction;
+  sealed handles cannot, and a full sealed cache rejects allocation before
+  contacting E2B. A bounded, read-only provider probe reclaims confirmed
+  cross-worker teardown without resuming a sandbox.
+
 - Studio workspace connector actions (list, save, health check and delete) and
   workspace-scoped message threads act only on the caller's verified
   workspace: the workspace the validated token is bound to, or a membership a
