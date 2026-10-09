@@ -51,6 +51,24 @@ transition components, or generated UI quality checks.
 | [UI System Quality Gates](ui-system/ui-system-quality-gates.md) | AG2 and browser acceptance gates for generated UI |
 | [Event System](../foundations/events-and-data/event-system.md) | How domain, runtime, `chat.*`, `chat.tool_call`, and `ui.*` events stay separate |
 
+## Code editor dependencies
+
+AppGenerator's `CodeEditorPane` loads its local Monaco ESM bundle and workers
+when the editor mounts. `monacoEditor.js` configures the React loader before
+mounting it, so opening code does not fetch Monaco from a CDN.
+
+Monaco also ships a copied DOMPurify implementation that npm overrides cannot
+replace. The shell's Vite resolver redirects only the copied sanitizer import
+from Monaco's `domSanitize.js` to `chat-ui/src/utils/monacoDomPurify.js`. This uses the
+locked DOMPurify dependency with its own instance, keeping Monaco's temporary
+hooks separate from chat sanitization. Monaco is excluded from dependency
+prebundling so the same resolver runs in dev and production. Any Monaco upgrade
+must pass `tests/monacoEditor.browser.test.js`, including local worker execution,
+actual sanitizer version, hook isolation, and absence of CDN requests.
+
+The adapter ships with the shared UI sources, including Android's existing
+`chat-ui/src/**` framework snapshot selection.
+
 ## Key Files
 
 | File | Role |
