@@ -35,6 +35,7 @@ logger = get_core_logger("docker_sandbox")
 _DEFAULT_IMAGE = os.getenv("DOCKER_SANDBOX_IMAGE", "mozaiks-sandbox:local")
 _DEFAULT_WORKDIR = "/workspace"
 _DEFAULT_TIMEOUT_SECONDS = int(os.getenv("DOCKER_SANDBOX_TIMEOUT") or "300")
+_IMAGE_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 def _preview_ports() -> list[int]:
@@ -129,7 +130,15 @@ class DockerSandboxAdapter:
         # get_preview_url's `docker port` lookup can resolve a URL. Without
         # -p at create time no binding ever exists and docker previews are
         # structurally dead.
-        offline_validation = bool(metadata and metadata.get("purpose") == "app_validation")
+        sealed_candidate = bool(metadata and metadata.get("purpose") == "sealed_candidate_preview")
+        offline_validation = bool(metadata and metadata.get("purpose") == "app_validation") or sealed_candidate
+        if sealed_candidate:
+            if not _IMAGE_ID_RE.fullmatch(image) or envs:
+                raise ValueError("Sealed preview requires a pinned local image ID and no environment overrides")
+            inspected, _, _ = await self._run(["docker", "image", "inspect", image], timeout=10)
+            if inspected != 0:
+                raise RuntimeError("Pinned sealed preview image is unavailable locally")
+            label_args += ["--label", "mozaiks.preview.sealed=true"]
         port_args: list[str] = []
         if not offline_validation:
             for container_port in _preview_ports():
@@ -140,6 +149,14 @@ class DockerSandboxAdapter:
             "docker", "run", "-d", "--rm",
             "--init", "--cap-drop=ALL", "--security-opt=no-new-privileges",
             "--pids-limit=512", "--memory=2g", "--cpus=2",
+            *(["--pull=never", "--read-only", "--user=10001:10001",
+               "--memory-swap=2g", "--log-driver=none",
+               "--tmpfs", "/workspace:rw,nosuid,nodev,size=128m,uid=0,gid=10001,mode=0750",
+               "--tmpfs", "/workspace/logs:rw,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=0700",
+               "--tmpfs", "/tmp:rw,nosuid,nodev,size=256m,uid=10001,gid=10001,mode=0700",
+               "--tmpfs", "/opt/mozaiks/web_shell/node_modules/.vite-temp:rw,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=0700",
+               "--tmpfs", "/opt/mozaiks/web_shell/node_modules/.vite:rw,nosuid,nodev,size=64m,uid=10001,gid=10001,mode=0700"]
+              if sealed_candidate else []),
             *(["--network", "none"] if offline_validation else []),
             "-w", _DEFAULT_WORKDIR,
             *label_args,
@@ -157,6 +174,39 @@ class DockerSandboxAdapter:
             provider="docker",
             metadata={**(metadata or {}), "image": image},
         )
+
+    async def stage_sealed_files(
+        self, *, session_id: str, files: dict[str, bytes],
+    ) -> None:
+        """Stage verified files as root; the preview app UID can read but not edit them."""
+        rc, marker, _ = await self._run(
+            ["docker", "inspect", "--format", "{{index .Config.Labels \"mozaiks.preview.sealed\"}}", session_id],
+            timeout=10,
+        )
+        if rc != 0 or marker.strip() != "true":
+            raise RuntimeError("Target is not a sealed preview session")
+        archive_bytes = io.BytesIO()
+        with tarfile.open(fileobj=archive_bytes, mode="w") as archive:
+            for rel_path, content in files.items():
+                if _safe_relpath(rel_path) != rel_path or (
+                    rel_path != "requirements.txt" and not rel_path.startswith(("app/", "workflows/"))
+                ):
+                    raise ValueError("Invalid sealed preview file path")
+                member = tarfile.TarInfo(rel_path)
+                member.size = len(content)
+                member.mode = 0o444
+                archive.addfile(member, io.BytesIO(content))
+        chmod_args = ["docker", "exec", "-u", "0", session_id, "chmod", "-R", "a-w", "/workspace/app", "/workspace/workflows"]
+        if "requirements.txt" in files:
+            chmod_args.append("/workspace/requirements.txt")
+        for args, input_data in (
+            (["docker", "exec", "-u", "0", session_id, "mkdir", "-p", "/workspace/app", "/workspace/workflows"], None),
+            (["docker", "exec", "-u", "0", "-i", session_id, "tar", "--no-same-owner", "-xf", "-", "-C", "/workspace"], archive_bytes.getvalue()),
+            (chmod_args, None),
+        ):
+            rc, _, _ = await self._run(args, input_data=input_data, timeout=30)
+            if rc != 0:
+                raise RuntimeError("Sealed preview source staging failed")
 
     async def connect(
         self,
@@ -330,12 +380,23 @@ class DockerSandboxAdapter:
         return SandboxSessionInfo(session_id=session_id, provider="docker")
 
     async def terminate_session(self, *, session_id: str) -> bool:
-        rc, _, _ = await self._run(
+        stop_rc, _, _ = await self._run(
             ["docker", "stop", session_id],
             timeout=15.0,
         )
-        if rc == 0:
-            return True
+        attempts = 3 if stop_rc == 0 else 1
+        for attempt in range(attempts):
+            rc, stdout, _ = await self._run(
+                ["docker", "ps", "--all", "--quiet", "--no-trunc", "--filter", f"id={session_id}"],
+                timeout=15.0,
+            )
+            if rc != 0:
+                return False
+            if not stdout.strip():
+                return True
+            if attempt < attempts - 1:
+                await asyncio.sleep(0.1)
+        await self._run(["docker", "rm", "-f", session_id], timeout=15.0)
         rc, stdout, _ = await self._run(
             ["docker", "ps", "--all", "--quiet", "--no-trunc", "--filter", f"id={session_id}"],
             timeout=15.0,

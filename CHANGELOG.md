@@ -12,6 +12,13 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Added
+
+- Internal offline sealed candidate boot over the existing preview session
+  ledger: canonical archive and pinned Docker image identities, bounded
+  root-owned staging, non-root runtime health, and confirmed cleanup without
+  a public preview URL or mutable sync.
+
 ## 0.2.0 - 2026-10-09
 
 ### Added

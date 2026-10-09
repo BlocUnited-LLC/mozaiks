@@ -29,6 +29,11 @@ from mozaiksai.core.sandbox.preview_store import (
     PreviewOperationBusy,
     PreviewRecoveryRequired,
 )
+from mozaiksai.core.semantics.archive import (
+    ArchiveEntry,
+    archive_digest,
+    build_deterministic_archive,
+)
 from mozaiksai.hosts.routers.sandbox import create_sandbox_router
 from tests.helpers.preview_mongo import FakePreviewDatabase
 
@@ -673,6 +678,28 @@ def api_client(monkeypatch):
 
 CREATE_URL = "/api/artifacts/artifact-a/sandbox?build_registry_id=appreg-a"
 RECOVER_URL = "/api/sandbox?build_registry_id=appreg-a"
+
+
+@pytest.mark.asyncio
+async def test_generic_router_hides_sealed_sessions_even_from_same_owner(api_client):
+    client, adapter, _ = api_client
+    manager = preview_sessions._manager
+    adapter.stage_sealed_files = AsyncMock()
+    archive = build_deterministic_archive([
+        ArchiveEntry(path="app/app.json", content=MANIFEST.encode()),
+        ArchiveEntry(path="requirements.txt", content=b"mozaiksai==0.2.0\n"),
+    ])
+    state = await manager.create_sealed_candidate(
+        "candidate-a", app_id="factory", user_id="tester", target_app_id="preview-app",
+        build_registry_id="appreg-a", archive_bytes=archive,
+        archive_sha256=archive_digest(archive), image_id="sha256:" + "a" * 64,
+    )
+    assert client.get(RECOVER_URL).json() == {"sessions": []}
+    assert client.get(f"/api/sandbox/{state.sandbox_id}/status").status_code == 404
+    assert client.post(f"/api/sandbox/{state.sandbox_id}/sync", json={"files": [], "deleted": []}).status_code == 404
+    assert client.post(f"/api/sandbox/{state.sandbox_id}/start").status_code == 404
+    assert client.post(f"/api/sandbox/{state.sandbox_id}/stop").status_code == 404
+    await manager.stop(state.sandbox_id)
 
 
 def test_router_recovers_actual_identity_and_safe_dto_without_provider_calls(api_client):

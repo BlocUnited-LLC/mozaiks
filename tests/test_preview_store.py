@@ -149,6 +149,28 @@ async def test_cross_worker_deduplication_and_immutable_identity(storage):
         )
 
 
+async def test_sealed_reservation_binds_digest_and_image_without_changing_legacy_identity(storage):
+    store = _store(storage)
+    old = await _reserve(store, "ordinary")
+    assert "sealed_archive_sha256" not in old
+    identity = {
+        "app_id": "host", "user_id": "owner", "artifact_id": "candidate",
+        "target_app_id": "target", "build_registry_id": "build", "provider": "docker",
+        "sealed_archive_sha256": "sha256:" + "a" * 64,
+        "sealed_image_id": "sha256:" + "b" * 64,
+    }
+    limits = dict(max_sessions=2, max_owner_sessions=1, max_pending=20, queue_seconds=15, ttl_seconds=300)
+    reservation = await store.reserve(identity, **limits)
+    assert reservation["sealed_archive_sha256"] == identity["sealed_archive_sha256"]
+    assert (await store.reserve(identity, **limits))["sandbox_id"] == reservation["sandbox_id"]
+    with pytest.raises(ValueError, match="identity changed"):
+        await store.reserve({**identity, "sealed_image_id": "sha256:" + "c" * 64}, **limits)
+    with pytest.raises(ValueError, match="identity changed"):
+        await store.reserve({key: value for key, value in identity.items() if not key.startswith("sealed_")}, **limits)
+    with pytest.raises(ValueError, match="exact archive/image"):
+        await store.reserve({**identity, "sealed_archive_sha256": "bad"}, **limits)
+
+
 async def test_atomic_queue_bound_and_configuration_agreement(storage):
     results = await asyncio.gather(*(_reserve(_store(storage), f"artifact-{index}") for index in range(30)), return_exceptions=True)
     assert sum(isinstance(result, dict) for result in results) == 20
