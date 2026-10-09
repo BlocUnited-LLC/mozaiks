@@ -150,8 +150,11 @@ cannot be promoted to an owner-visible App Zero preview.
 ## Provider routes
 
 **Local Docker first.** A browser-capable sealed session retains read-only
-source, a non-root app process, private writable state, no host mounts or Docker
-socket, and a pinned image. It replaces the offline session's `--network none`
+source, non-root app and web-server processes, a read-only root filesystem with
+explicit private writable state, no host mounts or Docker socket, and a pinned
+image. Trusted staging must finish and seal candidate source before the
+unprivileged browser session starts. It replaces the offline session's
+`--network none`
 only with an isolated internal network reachable by the trusted gateway. It
 publishes no app port on the host and has no route to the product network or
 internet. The gateway reaches only the registered container and port. The
