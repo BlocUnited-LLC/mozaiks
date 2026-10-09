@@ -233,7 +233,17 @@ def test_token_top_up_product_price_currency_must_be_three_letter_code() -> None
         )
 
 
-def test_depleted_balance_routes_must_be_app_local() -> None:
+@pytest.mark.parametrize(
+    ("route_field", "route"),
+    [
+        ("billing_route", "https://provider.example/billing"),
+        ("billing_route", "//provider.example/billing"),
+        ("top_up_route", "///provider.example/top-up"),
+        ("upgrade_route", "//provider.example/upgrade?next=/app"),
+        ("contact_route", "//provider.example/contact"),
+    ],
+)
+def test_depleted_balance_routes_must_be_app_local(route_field: str, route: str) -> None:
     with pytest.raises(ValidationError, match="app-local path"):
         SubscriptionsConfig.model_validate(
             {
@@ -245,7 +255,7 @@ def test_depleted_balance_routes_must_be_app_local() -> None:
                         "wallet_id": "ai_tokens",
                         "depleted_balance": {
                             "recovery_action": "top_up",
-                            "billing_route": "https://provider.example/billing",
+                            route_field: route,
                         },
                     }
                 ],
