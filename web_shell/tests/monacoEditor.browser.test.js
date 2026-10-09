@@ -10,12 +10,12 @@ import configureShell from '../vite.config.js';
 const shell = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repo = path.dirname(shell);
 const normalize = (value) => value.replaceAll('\\', '/');
-const pane = normalize(path.join(repo, 'factory_app/workflows/AppGenerator/ui/CodeEditorPane.js'));
+const workbench = normalize(path.join(repo, 'factory_app/workflows/AppGenerator/ui/AppWorkbench.js'));
 const sanitizer = normalize(path.join(repo, 'chat-ui/src/utils/monacoDomPurify.js'));
 const setup = normalize(path.join(repo, 'factory_app/workflows/AppGenerator/ui/monacoEditor.js'));
 const copiedSanitizer = '/monaco-editor/esm/vs/base/browser/dompurify/dompurify.js';
 
-test('Monaco uses the locked sanitizer and local workers in dev and production', { timeout: 180_000 }, async (t) => {
+test('AppWorkbench Code and Split use local Monaco with the locked sanitizer in dev and production', { timeout: 180_000 }, async (t) => {
   const temporaryRoot = path.join(shell, '.local');
   fs.mkdirSync(temporaryRoot, { recursive: true });
   const fixture = fs.mkdtempSync(path.join(temporaryRoot, 'monaco-'));
@@ -31,22 +31,20 @@ test('Monaco uses the locked sanitizer and local workers in dev and production',
   write('index.html', '<style>[class="h-[520px]"]{height:520px}</style><div id="root"></div><script type="module" src="/entry.jsx"></script>');
   write('unrelated/dompurify/dompurify.js', 'export default "unrelated sanitizer";');
   write('unrelated/domSanitize.js', 'export { default } from "./dompurify/dompurify.js";');
+  write('stubs/workflowStart.js', 'export const useWorkflowStart = () => ({ startWorkflow: async () => {}, starting: false, error: null });');
   write('entry.jsx', `
-    import React, { useState } from 'react';
+    import React from 'react';
     import { createRoot } from 'react-dom/client';
     import DOMPurify from 'dompurify';
-    import CodeEditorPane from ${JSON.stringify(pane)};
+    import AppWorkbench from ${JSON.stringify(workbench)};
     import unrelated from './unrelated/domSanitize.js';
     window.unrelated = unrelated;
     window.chatPurifier = DOMPurify;
     window.chatHookCalls = 0;
     DOMPurify.addHook('afterSanitizeAttributes', () => window.chatHookCalls++);
     function Fixture() {
-      const [open, setOpen] = useState(false);
-      const [content, setContent] = useState('const answer = 42;');
-      return <main><button onClick={() => setOpen(true)}>Open code</button>
-        {open && <CodeEditorPane filePath="example.js" content={content} onChange={setContent} />}
-        <output aria-label="Saved code">{content}</output></main>;
+      return <AppWorkbench payload={{generated_files: {'example.js': 'const answer = 42;'}}}
+        showExportActions={false} />;
     }
     window.getEditor = async () => {
       const { loader } = await import('@monaco-editor/react');
@@ -64,7 +62,24 @@ test('Monaco uses the locked sanitizer and local workers in dev and production',
   for (const mode of ['dev', 'production']) {
     await t.test(mode, { timeout: 85_000 }, async (t) => {
       const config = await configureShell({ command: mode === 'dev' ? 'serve' : 'build', mode: 'test' });
+      config.resolve.alias = {
+        '@mozaiks/chat-ui/hooks/useWorkflowStart.js': path.join(fixture, 'stubs/workflowStart.js'),
+        ...config.resolve.alias,
+      };
       const moduleIds = new Set();
+      config.plugins.unshift({
+        name: 'fixture-workbench-boundaries',
+        enforce: 'pre',
+        resolveId(source, importer) {
+          if (normalize(importer || '') !== workbench) return;
+          if (source === '../../_shared/ui/app_preview/useSandbox') return '\0fixture-sandbox';
+          if (source === '../../../app/admin/pages/studioApi.js') return '\0fixture-studio-api';
+        },
+        load(id) {
+          if (id === '\0fixture-sandbox') return 'export const useSandbox = () => ({ syncAndRestart() {}, stopPreview() {} });';
+          if (id === '\0fixture-studio-api') return 'export const studioFetch = () => { throw new Error("Unexpected Studio request"); };';
+        },
+      });
       config.plugins.push({
         name: 'observe-real-monaco-sanitizer',
         transform(code, id) {
@@ -131,18 +146,23 @@ test('Monaco uses the locked sanitizer and local workers in dev and production',
         return route.abort();
       });
       await page.goto(origin);
-      await expect(page.getByRole('button', { name: 'Open code' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Code' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Split' })).toBeVisible();
       assert.equal(await page.evaluate(() => Boolean(window.monacoPurifier)), false, 'editor remains lazy before code is opened');
       assert.equal(requests.some((url) => url.includes('/monaco-editor/')), false);
-      await page.getByRole('button', { name: 'Open code' }).click();
+      const firstView = mode === 'dev' ? 'Code' : 'Split';
+      const secondView = mode === 'dev' ? 'Split' : 'Code';
+      await page.getByRole('button', { name: firstView }).click();
       await expect(page.locator('.monaco-editor').first()).toBeVisible({ timeout: 30_000 });
+      await page.getByRole('button', { name: secondView }).click();
+      await expect(page.locator('.monaco-editor').first()).toBeVisible();
       assert.equal(await page.evaluate(() => window.monacoPurifier.version), lockedVersion);
       assert.equal(await page.evaluate(() => window.monacoPurifier === window.chatPurifier), false);
       assert.equal(await page.evaluate(() => window.unrelated), 'unrelated sanitizer');
       await page.locator('.monaco-editor .view-lines').click();
       await page.keyboard.press('ControlOrMeta+A');
       await page.keyboard.insertText('const edited = 7;');
-      await expect(page.getByLabel('Saved code')).toContainText('const edited = 7;');
+      await expect.poll(() => page.evaluate(async () => (await window.getEditor()).editor.getValue())).toBe('const edited = 7;');
 
       await page.evaluate(async () => {
         const { monaco, editor } = await window.getEditor();
