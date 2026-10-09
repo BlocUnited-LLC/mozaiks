@@ -19,6 +19,26 @@ This project follows a practical pre-1.0 changelog format:
   root-owned staging, non-root runtime health, and confirmed cleanup without
   a public preview URL or mutable sync.
 
+### Security
+
+- Studio workspace connector actions (list, save, health check and delete) and
+  workspace-scoped message threads act only on the caller's verified
+  workspace: the workspace the validated token is bound to, or a membership a
+  host scope hook verified (`verified_workspace_id`). A workspace or tenant
+  named by the request no longer selects one, a request naming another
+  workspace is refused, and a signed-in caller with no verified workspace is
+  refused instead of falling back to its tenant or a shared demo workspace.
+  The per-app integrations view overlays connector status only from that
+  workspace. Local runs with `AUTH_ENABLED=false` keep their existing
+  workspace selection. Deployments whose tokens carry no workspace claim need
+  `AUTH_WORKSPACE_ID_CLAIM` or a host membership hook to use these actions.
+
+- Studio refuses workspace connector, app-catalog, declaration, and message
+  actions when a selected dispatch workspace or tenant conflicts with verified
+  membership, preventing misleading workspace event provenance. App integration
+  declarations now require an app registry record owned by the caller, and
+  catalog usage counts include only that caller's registered apps.
+
 ## 0.2.0 - 2026-10-09
 
 ### Added
@@ -366,24 +386,6 @@ This project follows a practical pre-1.0 changelog format:
   bound to. Dispatch without a verified identity holds only app-wide grants.
   Apps that sell tenant- or workspace-scoped plans need tokens that carry the
   tenant (`AUTH_TENANT_ID_CLAIM`) or workspace (`AUTH_WORKSPACE_ID_CLAIM`) claim.
-
-- Studio workspace connector actions (list, save, health check and delete) and
-  workspace-scoped message threads act only on the caller's verified
-  workspace: the workspace the validated token is bound to, or a membership a
-  host scope hook verified (`verified_workspace_id`). A workspace or tenant
-  named by the request no longer selects one, a request naming another
-  workspace is refused, and a signed-in caller with no verified workspace is
-  refused instead of falling back to its tenant or a shared demo workspace.
-  The per-app integrations view overlays connector status only from that
-  workspace. Local runs with `AUTH_ENABLED=false` keep their existing
-  workspace selection. Deployments whose tokens carry no workspace claim need
-  `AUTH_WORKSPACE_ID_CLAIM` or a host membership hook to use these actions.
-
-- Studio refuses workspace connector, app-catalog, declaration, and message
-  actions when a selected dispatch workspace or tenant conflicts with verified
-  membership, preventing misleading workspace event provenance. App integration declarations now
-  require an app registry record owned by the caller, and catalog usage counts
-  include only that caller's registered apps.
 
 ### Changed
 
