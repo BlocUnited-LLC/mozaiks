@@ -80,11 +80,11 @@ def test_shell_header_and_widget_stay_mobile_tolerant() -> None:
     # non-chat route, so it must stay high-contrast against the page: an opaque
     # card surface with a solid primary edge, never a faint translucent tab.
     assert 'rounded-l-2xl border-2 border-r-0 border-primary/70 bg-card' in widget_source
-    # The mark scales at the same 768px boundary the responsive smoke asserts
-    # against (<=52px wide under it, <=64px at or above), so the desktop toggle
-    # stays prominent without crowding a phone's screen edge.
-    assert 'h-7 w-7 transition-transform group-hover:scale-110 md:h-9 md:w-9' in widget_source
-    assert 'px-2 py-5' in widget_source and 'md:px-2.5' in widget_source
+    # The compact mobile tab retains a 44px-wide touch target. The desktop
+    # toggle keeps its larger mark and padding at the same 768px boundary.
+    assert 'min-w-11' in widget_source
+    assert 'h-5 w-5 transition-transform group-hover:scale-110 md:h-9 md:w-9' in widget_source
+    assert 'px-2 py-2' in widget_source and 'md:px-2.5 md:py-5' in widget_source
     assert 'w-[26rem] max-w-[calc(100vw-2.5rem)] h-[50vh] md:h-[70vh] min-h-[360px]' in widget_source
 
 

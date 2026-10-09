@@ -6,6 +6,7 @@ import { deriveShellActionContext, isShellItemVisible, resolveShellActions } fro
 import { useChatUI } from "../../context/ChatUIContext";
 import { useAppEventBus } from "../../ui/hooks/useAppEventBus.js";
 import { fetchNotificationCount } from "./notificationApi.js";
+import ShellNavigationIcon from "./ShellNavigationIcon.jsx";
 import "./header-styles.css";
 
 const buildAutoItems = ({ headerPages, header, notifications, profile, actionContext }) => {
@@ -19,6 +20,7 @@ const buildAutoItems = ({ headerPages, header, notifications, profile, actionCon
         items.push({
           id: item.id || item.path,
           label: item.label || item.id || "Page",
+          icon: item.icon,
           action: "navigate",
           path: item.path,
         });
@@ -34,6 +36,7 @@ const buildAutoItems = ({ headerPages, header, notifications, profile, actionCon
     items.push({
       id: primaryAction.id || primaryAction.path || primaryAction.href,
       label: primaryAction.label || "Action",
+      icon: primaryAction.icon,
       action: "navigate",
       path: primaryAction.path,
       href: primaryAction.href,
@@ -162,7 +165,10 @@ const MobileBottomBar = ({ route = null, shellMode = null }) => {
             className={`shell-mobile-bottom-item${active ? " is-active" : ""}`}
           >
             <span className="shell-mobile-bottom-glyph" aria-hidden="true">
-              {(item.iconLabel || item.label || item.id || "?").slice(0, 1).toUpperCase()}
+              <ShellNavigationIcon
+                icon={item.icon}
+                fallback={(item.iconLabel || item.label || item.id || "?").slice(0, 1).toUpperCase()}
+              />
               {showBadge && <span className="shell-mobile-bottom-badge">{notificationCount > 9 ? "9+" : notificationCount}</span>}
             </span>
             <span className="shell-mobile-bottom-label">{item.label || item.id}</span>
