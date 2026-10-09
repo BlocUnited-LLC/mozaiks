@@ -127,8 +127,12 @@ runtime_boundaries:
       usage-report client and requires an explicit MOZAIKS_CLOUD_API_BASE;
       operators supply both at runtime when reporting is enabled, rather
       than declaring the usage key in the pack's deployment manifest.
-      The general credential resolves at runtime through ConnectorStore or
-      the environment. No API key values appear in generated source.
+      The general credential resolves at runtime through the app-scoped
+      ConnectorStore record and its scoped vault secret. The environment is
+      a setup fallback only when no connector record exists; an unreadable or
+      incomplete saved connector fails closed. Never combine its provider
+      endpoint with an environment credential. No API key values appear in
+      generated source.
   - id: no_provision_on_import
     rule: >
       Importing or constructing any MozaiksCloud sub-client must not provision,

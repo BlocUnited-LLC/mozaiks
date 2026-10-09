@@ -83,8 +83,10 @@ async def _load_connector_settings(app_id: str | None = None) -> MozaiksCloudCon
             scope_id=str(app_id),
             service=_CONNECTOR_SERVICE,
         )
-        if not isinstance(record, dict):
+        if record is None:
             return None
+        if not isinstance(record, dict):
+            raise MozaiksCloudConfigurationError("The saved Mozaiks Cloud connector is invalid. Reconnect it.")
         public_config = record.get("public_config") if isinstance(record.get("public_config"), dict) else {}
         secret_result = await get_connector_vault_backend().get_secret(
             scope=ConnectorStore.SCOPE_APP,
@@ -94,16 +96,22 @@ async def _load_connector_settings(app_id: str | None = None) -> MozaiksCloudCon
         credential = _clean(secret_result.get("secret_value")) if isinstance(secret_result, dict) else ""
         api_base = _clean(public_config.get("api_base")) or None
         cloud_app_id = _clean(public_config.get("app_id")) or None
-        if not api_base and not credential:
-            return None
+        if not api_base or not credential or secret_result.get("success") is not True or secret_result.get("status") != "found":
+            raise MozaiksCloudConfigurationError(
+                "The saved Mozaiks Cloud connector is incomplete or its scoped secret is unavailable. Reconnect it."
+            )
         return MozaiksCloudConnectorSettings(
             api_base=api_base,
             api_key=credential or None,
             app_id=cloud_app_id,
             source="connector",
         )
+    except MozaiksCloudConfigurationError:
+        raise
     except Exception:
-        return None
+        raise MozaiksCloudConfigurationError(
+            "The app-scoped Mozaiks Cloud connector could not be loaded. Check its configuration and secret backend."
+        ) from None
 
 
 def _authorization_header(value: str) -> str:
@@ -154,12 +162,12 @@ class MozaiksCloudTransport:
         if self._settings_cache is not None:
             return self._settings_cache
         connector = await self._connector_settings_loader(self._app_id)
-        env = _env_settings()
+        selected = connector if connector is not None else _env_settings()
         resolved = MozaiksCloudConnectorSettings(
-            api_base=self._api_base or (connector.api_base if connector else None) or env.api_base,
-            api_key=self._api_key or (connector.api_key if connector else None) or env.api_key,
-            app_id=self._app_id or (connector.app_id if connector else None) or env.app_id,
-            source="explicit" if (self._api_base or self._api_key) else (connector.source if connector else env.source),
+            api_base=self._api_base or selected.api_base,
+            api_key=self._api_key or selected.api_key,
+            app_id=self._app_id or selected.app_id,
+            source="explicit" if (self._api_base or self._api_key) else selected.source,
         )
         if not resolved.api_base:
             raise MozaiksCloudConfigurationError(

@@ -200,6 +200,20 @@ SERVICE_API_KEY=
 
 They must not include real values.
 
+The generated Mozaiks Cloud and MozaiksPay clients treat an app's saved connector
+and its scoped vault secret as one provider configuration. Missing or unreadable
+secrets, incomplete saved configuration, and connector lookup failures stop the
+request with a configuration error. A process environment key cannot complete a
+saved connector, including one left without a readable secret after a vault
+scope migration. Reconnect that app's connector through the authorized setup
+flow. Environment configuration remains available for the documented local or
+self-hosted setup when no app connector record exists.
+
+Factory template updates apply to newly materialized bundles. Operators must
+also inventory and update existing generated copies of these clients before
+enabling connector-dependent traffic; rebuilding the OSS package alone does not
+replace those app-owned files or migrate their credentials.
+
 ## Runtime Effects
 
 If a managed service changes runtime state, the effect must cross the boundary

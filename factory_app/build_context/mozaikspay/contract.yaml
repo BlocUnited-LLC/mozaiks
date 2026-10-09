@@ -198,7 +198,13 @@ runtime_boundaries:
   - id: managed_internals
     rule: Do not generate managed service internals, checkout, wallet, settlement logic, private APIs, or provider credentials.
   - id: connector_boundary
-    rule: Generated apps must configure MozaiksPay through the app-scoped connector named mozaikspay or the MOZAIKSPAY_* env fallback; never commit provider credentials.
+    rule: >
+      Generated apps must configure MozaiksPay through the app-scoped connector
+      named mozaikspay and its scoped vault secret. MOZAIKSPAY_* environment
+      configuration is a setup fallback only when no connector record exists.
+      Unreadable or incomplete saved connectors fail closed; never combine
+      their provider endpoint with environment credentials. Never commit
+      provider credentials.
   - id: page_bindings
     rule: Generated pages must call app-owned billing_portal actions, not managed backing modules directly.
 

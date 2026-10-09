@@ -78,8 +78,12 @@ wallet, payout, settlement, merchant, or hosted billing operations.
 
 ## Configuration
 
-The generated client resolves configuration from the `mozaikspay` connector when
-available, with environment variable fallback for self-hosted/local operation.
+The generated client resolves provider configuration from the app-scoped
+`mozaikspay` connector and its scoped vault secret. Environment variable fallback
+for self-hosted/local operation applies only when no connector record exists.
+An incomplete saved connector, an unreadable secret, or a failed connector
+lookup raises a configuration error before a provider request. Reconnect the
+app's connector; process-wide credentials never fill its missing fields.
 
 Public/app-facing handles:
 

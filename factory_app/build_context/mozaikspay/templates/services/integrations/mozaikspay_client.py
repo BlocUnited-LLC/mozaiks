@@ -85,8 +85,9 @@ async def _load_connector_settings(app_id: str | None) -> MozaiksPayConnectorSet
     """Load app-scoped MozaiksPay connector config when Studio stored it.
 
     The connector record stores only frontend-safe config. The client secret is
-    fetched from the configured connector vault. Missing or unavailable vault
-    state falls back to environment variables in the caller.
+    fetched from the configured connector vault. Only an absent connector record
+    permits environment configuration; unreadable or incomplete saved connectors
+    fail closed.
     """
 
     if not app_id:
@@ -96,8 +97,10 @@ async def _load_connector_settings(app_id: str | None) -> MozaiksPayConnectorSet
         from mozaiksai.core.secrets import get_connector_vault_backend
 
         record = await ConnectorStore().get(scope=ConnectorStore.SCOPE_APP, scope_id=str(app_id), service=_CONNECTOR_SERVICE)
-        if not isinstance(record, dict):
+        if record is None:
             return None
+        if not isinstance(record, dict):
+            raise MozaiksPayConfigurationError("The saved MozaiksPay connector is invalid. Reconnect it.")
         raw_public_config = record.get("public_config")
         public_config: dict[str, Any] = raw_public_config if isinstance(raw_public_config, dict) else {}
         secret_result = await get_connector_vault_backend().get_secret(
@@ -111,8 +114,10 @@ async def _load_connector_settings(app_id: str | None) -> MozaiksPayConnectorSet
         runtime_base = _clean(public_config.get("runtime_base")) or _clean(os.getenv("MOZAIKS_APP_URL")) or None
         api_key = credential if not client_id else ""
         client_secret = credential if client_id else ""
-        if not any([api_base, api_key, client_id, client_secret]):
-            return None
+        if not api_base or not credential or secret_result.get("success") is not True or secret_result.get("status") != "found":
+            raise MozaiksPayConfigurationError(
+                "The saved MozaiksPay connector is incomplete or its scoped secret is unavailable. Reconnect it."
+            )
         return MozaiksPayConnectorSettings(
             api_base=api_base,
             api_key=api_key or None,
@@ -121,8 +126,12 @@ async def _load_connector_settings(app_id: str | None) -> MozaiksPayConnectorSet
             runtime_base=runtime_base,
             source="connector",
         )
+    except MozaiksPayConfigurationError:
+        raise
     except Exception:
-        return None
+        raise MozaiksPayConfigurationError(
+            "The app-scoped MozaiksPay connector could not be loaded. Check its configuration and secret backend."
+        ) from None
 
 
 def _authorization_header(value: str) -> str:
@@ -316,14 +325,16 @@ class MozaiksPayClient:
             return self._settings_cache
 
         connector = await self._connector_settings_loader(self._app_id)
-        env = _env_settings()
+        if connector is not None and not connector.has_provider_credentials:
+            raise MozaiksPayConfigurationError("The saved MozaiksPay connector is incomplete. Reconnect it.")
+        selected = connector if connector is not None else _env_settings()
         settings = MozaiksPayConnectorSettings(
-            api_base=self._api_base or (connector.api_base if connector else None) or env.api_base,
-            api_key=self._api_key or (connector.api_key if connector else None) or env.api_key,
-            client_id=self._client_id or (connector.client_id if connector else None) or env.client_id,
-            client_secret=self._client_secret or (connector.client_secret if connector else None) or env.client_secret,
-            runtime_base=self._runtime_base or (connector.runtime_base if connector else None) or env.runtime_base,
-            source="explicit" if self._api_base or self._api_key or self._client_id or self._client_secret else (connector.source if connector else env.source),
+            api_base=self._api_base or selected.api_base,
+            api_key=self._api_key or selected.api_key,
+            client_id=self._client_id or selected.client_id,
+            client_secret=self._client_secret or selected.client_secret,
+            runtime_base=self._runtime_base or selected.runtime_base,
+            source="explicit" if self._api_base or self._api_key or self._client_id or self._client_secret else selected.source,
         )
         if not settings.api_base:
             raise MozaiksPayConfigurationError(
