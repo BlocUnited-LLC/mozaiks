@@ -258,7 +258,9 @@ def test_git_resource_snapshot_is_pinned_and_rejects_drift(tmp_path, monkeypatch
         delivery._framework_snapshot()
 
 
-@pytest.mark.parametrize("mutation", ["none", "missing", "tampered", "invalid", "wrong_vcs"])
+@pytest.mark.parametrize("mutation", [
+    "none", "windows_crlf", "missing", "tampered", "tampered_text", "invalid", "wrong_vcs",
+])
 def test_installed_wheel_android_resources_require_recorded_revision(tmp_path, monkeypatch, mutation):
     commit = "a" * 40
     root = tmp_path / "site-packages"
@@ -269,11 +271,20 @@ def test_installed_wheel_android_resources_require_recorded_revision(tmp_path, m
         "mozaiks_chat_ui/package.json": b"{}",
         "mozaiks_chat_ui/package-lock.json": b"{}",
         "mozaiks_chat_ui/src/auth/authAdapter.js": b"export function createAuthAdapter() {}\n",
+        "mozaiks_chat_ui/src/assets/icon.png": b"\x89PNG\r\n\x1a\n",
         "mozaiksai/_build_revision.json": json.dumps({
             "schema_version": "mozaiks.source_revision.v1",
             "commit": "invalid" if mutation == "invalid" else commit,
         }).encode(),
     }
+    canonical_resources = {
+        name.replace("mozaiks_chat_ui/", "chat-ui/", 1): raw
+        for name, raw in files.items() if name != "mozaiksai/_build_revision.json"
+    }
+    if mutation == "windows_crlf":
+        for name, raw in list(files.items()):
+            if name.endswith((".js", ".json")) and name != "mozaiksai/_build_revision.json":
+                files[name] = raw.replace(b"\n", b"\r\n")
     delivery._write_files(root, files)
 
     class Entry(str):
@@ -305,11 +316,13 @@ def test_installed_wheel_android_resources_require_recorded_revision(tmp_path, m
     monkeypatch.setattr(delivery.importlib.metadata, "distribution", lambda _: Distribution())
     if mutation == "tampered":
         (root / "mozaiksai/_build_revision.json").write_bytes(b"{}")
+    elif mutation == "tampered_text":
+        (root / "mozaiks_chat_ui/src/auth/authAdapter.js").write_bytes(b"changed\r\n")
 
-    if mutation == "none":
+    if mutation in {"none", "windows_crlf"}:
         captured, provenance = delivery._framework_snapshot()
         assert provenance["commit"] == commit
-        assert captured["chat-ui/src/auth/authAdapter.js"] == files["mozaiks_chat_ui/src/auth/authAdapter.js"]
+        assert captured == canonical_resources
     else:
         with pytest.raises(delivery.AndroidDeliveryError):
             delivery._framework_snapshot()

@@ -526,8 +526,9 @@ This project follows a practical pre-1.0 changelog format:
   Ordinary delivery manifests also reject local/internal backend destinations;
   deliberate local test origins remain confined to explicit acceptance tooling.
 
-- Pin shared-shell text checkouts to LF so installed Android framework resources
-  have identical provenance on Windows and Linux. Binary assets stay unchanged.
+- Normalize verified installed shared-shell text to the committed LF form so
+  Windows VCS wheels and Linux Android builders use the same framework digest.
+  Binary assets stay unchanged.
 
 - Android apps can use a separately registered public sign-in client on the
   same backend as the browser app. Native sign-in requires the configured
