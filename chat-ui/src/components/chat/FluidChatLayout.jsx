@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useLayoutEffect, useRef } from 'react';
 import MobileArtifactDrawer from './MobileArtifactDrawer';
 import '../../styles/mobile.css';
 
@@ -78,6 +78,29 @@ const FluidChatLayout = ({
   const layout = getLayoutStyles();
   const drawerVisible = mobileDrawerState !== 'hidden'
     && (mobileDrawerState === 'expanded' || layoutMode === 'view');
+  const mobileDrawerOpen = isMobile && drawerVisible;
+  const wasMobileDrawerOpen = useRef(false);
+  const returnFocus = useRef(null);
+  const chatPaneRef = useRef(null);
+  const collapseButtonRef = useRef(null);
+
+  useLayoutEffect(() => {
+    if (mobileDrawerOpen && !wasMobileDrawerOpen.current) {
+      returnFocus.current = document.activeElement;
+      collapseButtonRef.current?.focus();
+    } else if (!mobileDrawerOpen && wasMobileDrawerOpen.current) {
+      const previous = returnFocus.current;
+      const usable = previous?.isConnected
+        && previous !== document.body
+        && !previous.closest('[inert], [hidden]');
+      const conversation = chatPaneRef.current;
+      const fallback = conversation?.querySelector('textarea, [role="textbox"]') || conversation;
+      (usable ? previous : fallback)?.focus();
+      returnFocus.current = null;
+    }
+    wasMobileDrawerOpen.current = mobileDrawerOpen;
+  }, [mobileDrawerOpen]);
+
   const chatVisible = isMobile ? !drawerVisible : layout.chatVisible;
   const composerVisible = chatVisible && (isMobile || layoutMode !== 'minimized');
   const panelContainer =
@@ -87,6 +110,8 @@ const FluidChatLayout = ({
     <div className={`flex h-full min-h-0 relative overflow-hidden ${isMobile || layoutMode === 'view' || layoutMode === 'full' ? 'gap-0 p-0' : 'gap-2 p-2'} items-stretch`}>
       {/* Retain the conversation while its presentation is hidden or minimized. */}
       <div
+        ref={chatPaneRef}
+        tabIndex={-1}
         className={`${panelContainer} chat-pane-transition`}
         hidden={!isMobile && !layout.chatVisible}
         inert={!chatVisible}
@@ -138,6 +163,7 @@ const FluidChatLayout = ({
       {/* Artifact Panel - relies on ArtifactPanel component for styling */}
       <MobileArtifactDrawer
         isMobile={isMobile}
+        collapseButtonRef={collapseButtonRef}
         state={isMobile ? mobileDrawerState : (layout.artifactVisible ? 'expanded' : 'peek')}
         desktopWidth={layout.artifactWidth}
         onStateChange={onMobileDrawerStateChange}

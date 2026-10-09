@@ -6,6 +6,7 @@ const MobileArtifactDrawer = ({
   onClose = () => {},
   artifactContent = null,
   isMobile = true,
+  collapseButtonRef = null,
   desktopWidth = '100%',
   hasUnseenChat = false,
   hasUnseenArtifact = false,
@@ -55,6 +56,7 @@ const MobileArtifactDrawer = ({
       >
         {/* Drag handle / collapse tap target */}
         {isMobile && <button
+          ref={collapseButtonRef}
           type="button"
           onClick={handleCollapse}
           className="flex items-center justify-center pt-3 pb-2 w-full flex-shrink-0"

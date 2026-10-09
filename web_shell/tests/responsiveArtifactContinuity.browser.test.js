@@ -243,6 +243,35 @@ test('ChatPage retains one live artifact and conversation across responsive layo
     assert.equal(previewRequests,1);
   });
 
+  await t.test('mobile drawer moves keyboard focus out of inert content and returns it on close',async()=>{
+    await resize({width:390,height:844});
+    await setLayout('full');
+    const composer = page.getByLabel('Message',{exact:true});
+    const collapse = page.getByRole('button',{name:'Collapse artifact workspace',exact:true});
+    await composer.focus();
+    await page.evaluate(()=>window.setTestLayout('split'));
+    await expectState({layoutMode:'split',mobileDrawerState:'expanded'});
+    await expect(collapse).toBeFocused();
+    assert.equal(await page.evaluate(()=>Boolean(document.activeElement?.closest('[inert]'))),false);
+    assert.equal(await composer.evaluate(element=>Boolean(element.closest('[inert]'))),true);
+    await collapse.press('Enter');
+    await expectState({layoutMode:'full',mobileDrawerState:'peek'});
+    await expect(composer).toBeFocused();
+    assert.equal(await page.evaluate(()=>Boolean(document.activeElement?.closest('[inert]'))),false);
+
+    const trigger = page.getByRole('button',{name:'Open artifact',exact:true});
+    await trigger.focus();
+    await trigger.press('Enter');
+    await expectState({layoutMode:'split',mobileDrawerState:'expanded'});
+    await expect(collapse).toBeFocused();
+    await collapse.press('Enter');
+    await expectState({layoutMode:'full',mobileDrawerState:'peek'});
+    await expect(trigger).toBeFocused();
+    assert.equal(await page.evaluate(()=>Boolean(document.activeElement?.closest('[inert]'))),false);
+    await expect(composer).toHaveValue('Keep this unsent draft');
+    await expect(frame.getByLabel('Preview note')).toHaveValue('Keep this app state');
+  });
+
   await t.test('view and minimized layouts retain their state across narrow and short viewports',async()=>{
     for (const mode of ['view','minimized']) {
       await setLayout(mode);

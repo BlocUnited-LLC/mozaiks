@@ -45,6 +45,8 @@ This project follows a practical pre-1.0 changelog format:
 - App shells load their configured brand before rendering, without briefly
   showing another theme. Chat drafts and live artifact iframes now survive
   resizing between desktop and mobile layouts and reopening the artifact panel.
+  Mobile drawer transitions move keyboard focus into the visible artifact and
+  return it to the prior conversation control on close.
 
 ### Security
 
