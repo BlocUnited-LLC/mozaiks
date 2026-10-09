@@ -1263,6 +1263,7 @@ test('mobile shell navigation uses icons and keeps readable action labels', asyn
       await expect(button.locator('svg.shell-mobile-bottom-icon')).toHaveCount(1);
       await expect(button.locator('.shell-mobile-bottom-glyph')).toHaveAttribute('aria-hidden', 'true');
     }
+    await expect(navigation.getByRole('button', { name: 'Open assistant' })).toBeVisible();
     await expectNoHorizontalOverflow(page);
   }
 
@@ -1288,13 +1289,147 @@ test('mobile shell navigation keeps an app configured icon and label', async ({ 
     });
   });
   await page.goto('/apps');
+  await page.getByRole('dialog', { name: /Onboarding step 1 of 3/i })
+    .getByRole('button', { name: 'Skip tour' }).click();
   const navigation = page.getByRole('navigation', { name: 'Mobile app navigation' });
 
   if (page.viewportSize().width < 768) {
     const button = navigation.getByRole('button', { name: 'My workspace' });
     await expect(button).toBeVisible();
     await expect(button.locator('.shell-mobile-bottom-icon')).toHaveCSS('mask-image', /settings\.svg/);
-    await expect(navigation.getByRole('button')).toHaveCount(1);
+    await expect(navigation.getByRole('button')).toHaveCount(2);
+  }
+});
+
+test('assistant bottom action leaves mobile controls tappable and opens the chat panel', async ({ page }, testInfo) => {
+  await page.goto('/apps');
+  await page.getByRole('dialog', { name: /Onboarding step 1 of 3/i })
+    .getByRole('button', { name: 'Skip tour' }).click();
+  const navigation = page.getByRole('navigation', { name: 'Mobile app navigation' });
+  const launcher = page.locator('.widget-floating-launcher');
+
+  if (page.viewportSize().width >= 768) {
+    await expect(navigation).toBeHidden();
+    await expect(launcher.getByRole('button', { name: 'Open assistant' })).toBeVisible();
+    await launcher.getByRole('button', { name: 'Open assistant' }).click();
+    await expect(page.locator('#mozaiks-assistant-panel')).toBeVisible();
+    await page.getByRole('button', { name: 'Minimize' }).click();
+    await expect(launcher.getByRole('button', { name: 'Open assistant' })).toBeVisible();
+  } else {
+    await expect(navigation).toBeVisible();
+    await expect(launcher).toBeHidden();
+    const assistant = navigation.getByRole('button', { name: 'Open assistant' });
+    await expect(assistant).toHaveAttribute('aria-expanded', 'false');
+
+    const search = page.getByPlaceholder('Search apps...');
+    const searchBox = await search.boundingBox();
+    await page.mouse.click(searchBox.x + searchBox.width - 10, searchBox.y + searchBox.height - 10);
+    await expect(search).toBeFocused();
+    await search.fill('member growth');
+    await expect(page.getByText('Member Growth Studio').first()).toBeVisible();
+    await search.fill('');
+
+    const live = page.locator('main').getByRole('button', { name: /^Live/ });
+    await live.click();
+    await expect(live).toHaveClass(/bg-primary\/10/);
+    await expect(page.getByText('Member Growth Studio').first()).toBeVisible();
+    await expect(assistant).toHaveAttribute('aria-expanded', 'false');
+
+    const navButtons = navigation.getByRole('button');
+    for (let index = 0; index < await navButtons.count(); index += 1) {
+      const button = navButtons.nth(index);
+      const bounds = await button.boundingBox();
+      const topmost = await page.evaluate(({ x, y }) => {
+        const target = document.elementFromPoint(x, y);
+        return target?.closest('button')?.classList.contains('shell-mobile-bottom-item') || false;
+      }, { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 });
+      expect(topmost).toBe(true);
+    }
+
+    await assistant.focus();
+    await expect(assistant).toBeFocused();
+    await page.keyboard.press('Enter');
+    const closeAssistant = navigation.getByRole('button', { name: 'Close assistant' });
+    await expect(closeAssistant).toHaveAttribute('aria-expanded', 'true');
+    await expect(closeAssistant).toHaveAttribute('aria-controls', 'mozaiks-assistant-panel');
+    await expect(page.locator('#mozaiks-assistant-panel')).toBeVisible();
+    if (process.env.MOBILE_NAV_QA_DIR) {
+      fs.mkdirSync(process.env.MOBILE_NAV_QA_DIR, { recursive: true });
+      await page.screenshot({
+        path: path.join(process.env.MOBILE_NAV_QA_DIR, `${testInfo.project.name}-assistant-open.png`),
+      });
+    }
+    await closeAssistant.click();
+    await expect(assistant).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.locator('#mozaiks-assistant-panel')).toHaveCount(0);
+    await expect(launcher).toBeHidden();
+    if (process.env.MOBILE_NAV_QA_DIR) {
+      fs.mkdirSync(process.env.MOBILE_NAV_QA_DIR, { recursive: true });
+      await page.screenshot({
+        path: path.join(process.env.MOBILE_NAV_QA_DIR, `${testInfo.project.name}-assistant-bottom-action.png`),
+      });
+    }
+
+    for (const label of ['Create App', 'Alerts', 'Account']) {
+      await navigation.getByRole('button', { name: label }).click();
+      await expect(page).not.toHaveURL(/\/apps$/);
+      await expect(page.locator('#mozaiks-assistant-panel')).toHaveCount(0);
+      await page.goto('/apps');
+    }
+  }
+
+  if (process.env.MOBILE_NAV_QA_DIR && page.viewportSize().width >= 768) {
+    fs.mkdirSync(process.env.MOBILE_NAV_QA_DIR, { recursive: true });
+    await page.screenshot({
+      path: path.join(process.env.MOBILE_NAV_QA_DIR, `${testInfo.project.name}-assistant-bottom-action.png`),
+    });
+  }
+});
+
+test('assistant launcher remains on mobile shells without a bottom bar', async ({ page, isMobile }) => {
+  test.skip(!isMobile, 'Mobile shell fallback only');
+  await page.route('**/api/shell-config', async (route) => {
+    await route.fulfill({ json: {
+      ...composedShellConfig,
+      mobile: { bottomBar: { visible: false } },
+    } });
+  });
+  await page.goto('/apps');
+  await expect(page.getByRole('navigation', { name: 'Mobile app navigation' })).toHaveCount(0);
+  await expect(page.locator('.widget-floating-launcher').getByRole('button', { name: 'Open assistant' })).toBeVisible();
+});
+
+test('five configured mobile tabs retain their labels beside Assistant', async ({ page, isMobile }, testInfo) => {
+  test.skip(!isMobile, 'Mobile bottom bar only');
+  const configured = [
+    { id: 'home', label: 'Home', path: '/apps' },
+    { id: 'projects', label: 'Projects', path: '/usage', iconLabel: 'P' },
+    { id: 'alerts', label: 'Alerts', path: '/notifications' },
+    { id: 'profile', label: 'Account', path: '/me' },
+    { id: 'create', label: 'Create', path: '/create' },
+  ];
+  await page.route('**/api/shell-config', async (route) => {
+    await route.fulfill({ json: {
+      ...composedShellConfig,
+      mobile: { bottomBar: { items: configured } },
+    } });
+  });
+  await page.goto('/apps');
+  await page.getByRole('dialog', { name: /Onboarding step 1 of 3/i })
+    .getByRole('button', { name: 'Skip tour' }).click();
+  const navigation = page.getByRole('navigation', { name: 'Mobile app navigation' });
+  await expect(navigation.getByRole('button')).toHaveCount(6);
+  for (const { label } of configured) {
+    await expect(navigation.getByRole('button', { name: label })).toBeVisible();
+  }
+  await expect(navigation.getByRole('button', { name: 'Projects' }).locator('.shell-mobile-bottom-glyph')).toHaveText('P');
+  await expect(navigation.getByRole('button', { name: 'Open assistant' })).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+  if (process.env.MOBILE_NAV_QA_DIR) {
+    fs.mkdirSync(process.env.MOBILE_NAV_QA_DIR, { recursive: true });
+    await page.screenshot({
+      path: path.join(process.env.MOBILE_NAV_QA_DIR, `${testInfo.project.name}-six-tabs.png`),
+    });
   }
 });
 
@@ -1318,11 +1453,9 @@ test('apps route stays responsive across desktop and mobile widths', async ({ pa
     await expect(main.getByRole('button', { name: 'Continue Build' }).first()).toBeVisible();
     await expect(main.getByRole('button', { name: 'Dashboard' }).first()).toBeVisible();
 
-    const widgetButton = page.locator('.widget-safe-bottom button').first();
-    await expect(widgetButton).toBeVisible();
-    const widgetBox = await widgetButton.boundingBox();
-    expect(widgetBox).not.toBeNull();
-    expect(widgetBox.width).toBeLessThanOrEqual(52);
+    await expect(page.locator('.widget-floating-launcher')).toBeHidden();
+    await expect(page.getByRole('navigation', { name: 'Mobile app navigation' })
+      .getByRole('button', { name: 'Open assistant' })).toBeVisible();
   } else {
     await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeHidden();
     await expect(page.getByRole('columnheader', { name: 'Updated' })).toBeVisible();

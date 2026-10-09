@@ -46,6 +46,8 @@ const GlobalChatWidgetWrapper = () => {
     setIsInWidgetMode,
     isWidgetVisible,
     setIsWidgetVisible,
+    isChatOverlayOpen,
+    setIsChatOverlayOpen,
     activeWorkflowName,
   } = useChatUI();
 
@@ -88,14 +90,19 @@ const GlobalChatWidgetWrapper = () => {
   // This keeps the persistent widget available across module/admin/discovery pages
   // without requiring each page to call useWidgetMode().
   useEffect(() => {
-    if (!isAppRoute) return;
+    if (!isAppRoute) {
+      if (isWidgetVisible) setIsWidgetVisible(false);
+      if (isChatOverlayOpen) setIsChatOverlayOpen(false);
+      return;
+    }
     if (!isInWidgetMode) {
       setIsInWidgetMode(true);
     }
     if (!isWidgetVisible) {
       setIsWidgetVisible(true);
     }
-  }, [isAppRoute, isInWidgetMode, isWidgetVisible, setIsInWidgetMode, setIsWidgetVisible]);
+  }, [isAppRoute, isInWidgetMode, isWidgetVisible, isChatOverlayOpen,
+    setIsInWidgetMode, setIsWidgetVisible, setIsChatOverlayOpen]);
 
   // Chat and unresolved/redirecting routes have no app-page widget owner.
   if (!isAppRoute) {

@@ -76,9 +76,7 @@ def test_shell_header_and_widget_stay_mobile_tolerant() -> None:
     assert "top-24 w-[min" not in layout_source
 
     assert 'fixed right-0 bottom-6 z-50 widget-safe-bottom' in widget_source
-    # The collapsed toggle is the only entry point to the assistant on a
-    # non-chat route, so it must stay high-contrast against the page: an opaque
-    # card surface with a solid primary edge, never a faint translucent tab.
+    # Routes without a mobile bottom bar keep the high-contrast floating toggle.
     assert 'rounded-l-2xl border-2 border-r-0 border-primary/70 bg-card' in widget_source
     # The compact mobile tab retains a 44px-wide touch target. The desktop
     # toggle keeps its larger mark and padding at the same 768px boundary.
