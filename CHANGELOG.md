@@ -472,6 +472,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Handler reactions now receive the fields of flat events,
+  including host webhook events, instead of an empty payload.
+
 - Resuming an AppReview chat now restores scoped persisted workflow state to the
   durable AG2 channel under replay validation. Router-owned build checks no
   longer fail as if the user tried to rewrite them, while live user context

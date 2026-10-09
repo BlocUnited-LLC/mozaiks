@@ -189,6 +189,13 @@ reactions:
 - Use `target.kind: handler` with `target.handler_method`.
 - `target.handler_method` names a method on this module's `backend/handler.py` class.
 - The event payload is unpacked as keyword arguments into the handler method.
+- Canonical envelopes pass their nested `payload` object. Flat events
+  pass their top-level fields. A declared event payload schema is checked
+  before dispatch. New event producers should emit canonical envelopes.
+- `is_router_reaction_context(...)` can check that a handler received the
+  selected router reaction. It does not authenticate the event producer;
+  consumers changing financial or other sensitive state must verify their
+  canonical server-owned records.
 - The receiving method must be declared as an action in its `module.yaml` or be
   a documented reaction handler on the handler class.
 - Handler targets are for deterministic module-to-module reactions. For

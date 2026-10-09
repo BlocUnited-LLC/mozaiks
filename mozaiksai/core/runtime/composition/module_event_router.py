@@ -78,6 +78,36 @@ class _ReactionCtx:
             await ModuleEventRouter._maybe_await(self._event_emitter(event_type, payload))
 
 
+def is_router_reaction_context(
+    ctx: Any,
+    *,
+    event_type: str,
+    reaction_id: str,
+    source_module_id: str,
+    target_kind: str,
+    target_ref: str,
+) -> bool:
+    """Identify an exact handler reaction issued by this router.
+
+    This identifies the dispatch path and selected reaction, not the origin or
+    authenticity of the event. Financial consumers must verify their own
+    canonical records before changing state.
+    """
+    if type(ctx) is not _ReactionCtx:
+        return False
+    event = ctx.event_provenance
+    reaction = ctx.reaction_provenance
+    return (
+        isinstance(event, ModuleEventProvenance)
+        and isinstance(reaction, ModuleReactionProvenance)
+        and event.event_type == event_type
+        and reaction.reaction_id == reaction_id
+        and reaction.source_module_id == source_module_id
+        and reaction.target_kind == target_kind
+        and reaction.target_ref == target_ref
+    )
+
+
 class ModuleEventPayloadValidationError(ValueError):
     """Raised when a routed event violates its declared payload schema."""
 
@@ -831,7 +861,17 @@ class ModuleEventRouter:
             reaction_provenance=reaction_provenance,
             permissions=permissions,
         )
-        payload = envelope.get("payload") if isinstance(envelope.get("payload"), dict) else {}
+        # ModuleExecutor emits structured envelopes, while some host-owned
+        # webhook adapters still emit flat event payloads. Any declared
+        # payload schema is checked above; forward the same data to handlers.
+        # Do not forward structured envelope metadata when its payload is
+        # absent or malformed.
+        if isinstance(envelope.get("payload"), dict):
+            payload = envelope["payload"]
+        elif event_provenance.envelope_shape == "legacy_flat":
+            payload = envelope
+        else:
+            payload = {}
         try:
             await self._maybe_await(method(ctx, **payload))
         except Exception as exc:
