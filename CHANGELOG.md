@@ -351,6 +351,10 @@ This project follows a practical pre-1.0 changelog format:
 ### Changed
 
 - Enabled refinement checkpoints now require named profiles with non-empty models; inline capability model settings and unknown capability fields are rejected.
+- Manual release runs now require the exact current main SHA and its successful
+  CI run, support a separate TestPyPI rehearsal, and publish to PyPI before
+  creating the matching GitHub release.
+
 - Refinement scope and contract-surface selection now use the planning model
   profile. Contract-surface regeneration has its own explicit generation
   profile and fails before the agent call if no model is configured; structured

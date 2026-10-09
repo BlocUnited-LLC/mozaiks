@@ -1,110 +1,62 @@
-# Releasing
+# Releasing Mozaiks
 
-> **RELEASES ARE CURRENTLY DISABLED.**
->
-> GitHub Releases and PyPI publication have been intentionally paused pending
-> completion of the pre-release checklist below.  Do not push a version tag
-> until every P0 item is verified.
->
-> **Release gate status (verified August 2026): NOT PROTECTED.**
-> The `release` GitHub environment has `protection_rules: []` — no required
-> reviewers.  Any tag push would have proceeded to publication automatically.
-> As a code-level guard, the tag trigger in `.github/workflows/release.yml`
-> has been disabled.  Only a manual `workflow_dispatch` with
-> `confirm_release: "release-confirmed"` can proceed.  This guard remains
-> active until required reviewers are configured and the tag trigger is
-> re-enabled.
->
-> To check the current gate status:
-> ```bash
-> gh api repos/BlocUnited-LLC/mozaiks/environments/release
-> # Must show protection_rules with at least one reviewer before re-enabling.
-> ```
+> **Public release hold:** Do not tag, dispatch the Release workflow, publish to
+> PyPI or TestPyPI, or create a GitHub release until the operator explicitly
+> authorizes the exact OSS/App Zero commit pair after matching live acceptance.
+> The workflow and this page prepare that decision; neither grants release
+> approval.
 
-Mozaiks has a tag-driven release workflow (currently disabled — see above).
+Mozaiks remains pre-1.0. Version `0.2.0` is planned as the first **currently
+installable** PyPI release. The PyPI project presently lists no distribution
+files. Earlier `0.1.x` filenames cannot be reused, and restoring them is not
+needed for `0.2.0`.
 
-Keep versions pre-`1.0.0` until the repo contracts, CLI UX, and Studio-first
-builder flow settle. A `0.x` release is the honest signal to users that
-breaking changes can still happen.
+## Release gates
 
----
+Complete every item for the **exact** release candidate commit before a public
+dispatch:
 
-## Pre-Release Checklist
+1. Merge release-impacting OSS work through reviewed PRs with required CI and
+   DCO checks. Record each PR number and final merge SHA. Never push directly
+   to `main`.
+2. Pin App Zero to the exact OSS git SHA, run live acceptance against that pair,
+   and retain evidence identifying both commits. A version requirement can be
+   considered after publication; it does not replace the acceptance pin.
+3. Confirm the candidate is the current `origin/main` commit and its **push**
+   CI run succeeded. The Release workflow checks both again before upload.
+4. Run the local release-candidate audit against a throwaway MongoDB server on
+   a non-default port. It covers governance, wheel and sdist build, package
+   content, metadata, clean-wheel install, packaged resources, installed first
+   run, and offline functional acceptance. Do not point it at the development
+   MongoDB server: the runtime uses fixed database names regardless of the URI
+   database segment.
+5. Ensure `CHANGELOG.md` has a dated `## 0.2.0 - YYYY-MM-DD` section and a
+   fresh `## Unreleased` header. Confirm `mozaiksai/version.py` is `0.2.0`
+   and any existing `v0.2.0` tag resolves to the same candidate commit.
+6. Recheck `factory_app/app/brand/realm-export.json` for production values.
+7. Have the repository operator configure the GitHub `release` environment
+   with at least one required reviewer and **admin bypass disabled**. Verify
+   the live result before dispatch. As checked on 2026-10-08, it had
+   `protection_rules: []` and `can_admins_bypass: true`. The workflow now
+   fails if those conditions remain.
+8. Have the PyPI project owner verify that `mozaiks` trusts
+   `BlocUnited-LLC/mozaiks`, `.github/workflows/release.yml`, and the
+   `pypi` GitHub environment for OIDC publication. PyPI account settings
+   cannot be proven by the public package index. Trusted publisher setup is a
+   **0.2.0 publication prerequisite**, not a later 1.0 task.
+9. Review the exact final PR head, release diff, package contents, unresolved
+   security issues, and the OSS/App Zero acceptance evidence. Obtain explicit
+   operator authorization for the selected candidate and target.
 
-Complete every **P0** item before pushing a release tag.  P1 items should be
-resolved before a stable 1.0 release.
+The tag trigger remains disabled. A manual workflow dispatch is the only
+entrypoint. It requires a full candidate SHA, a target-specific confirmation,
+the exact current `main` checkout, a successful CI push run for that SHA, a
+dated changelog section, and a matching existing tag if one exists. It does
+not validate hosted acceptance; the operator must verify item 2 before use.
 
-### P0 — Must Be Done Before ANY Release
+### Local candidate audit
 
-- [ ] **GitHub environment `release` has required reviewers configured.**
-  **Current status: NOT PROTECTED** (`protection_rules: []`, verified August 2026).
-  The release workflow gate (`environment: name: release` in
-  `.github/workflows/release.yml`) blocks publication only when GitHub
-  Settings → Environments → `release` → Required reviewers lists at least
-  one human reviewer.  The tag trigger is currently disabled as a code-level
-  guard.  Before re-enabling it:
-  1. Add reviewers: GitHub Settings → Environments → release → Required reviewers.
-  2. Verify: `gh api repos/BlocUnited-LLC/mozaiks/environments/release`
-     — `protection_rules` must be non-empty.
-  3. Uncomment the `push.tags` trigger in `.github/workflows/release.yml`.
-
-- [ ] **Run the local release-candidate audit.**
-  Execute the pre-release audit script (see [Release-Candidate Audit Command](#release-candidate-audit-command) below)
-  and confirm it exits 0. Give it a throwaway MongoDB server on a non-default
-  port, never the server you develop against:
-  ```bash
-  docker run --rm -d --name mozaiks-release-audit-mongo -p 127.0.0.1:27018:27017 mongo:7
-  python scripts/run_release_audit.py --mongo-uri mongodb://127.0.0.1:27018
-  docker stop mozaiks-release-audit-mongo
-  ```
-
-- [ ] **Governance guardrails pass on main.**
-  ```bash
-  python scripts/governance_guardrails.py --all --errors-only
-  ```
-
-- [ ] **Package content guard passes on built artifacts.**
-  ```bash
-  python -m build
-  python scripts/package_content_guard.py dist/*.whl dist/*.tar.gz
-  ```
-
-- [ ] **CHANGELOG.md has a dated release entry** (not just `## Unreleased`).
-  Move all `Unreleased` entries to a new `## <version> - YYYY-MM-DD` section
-  and leave a fresh empty `## Unreleased` header.
-
-- [ ] **`mozaiksai/version.py` matches the planned Git tag.**
-  The release workflow validates this and fails if they disagree.
-
-- [ ] **`factory_app/app/brand/realm-export.json` contains no production values.**
-  Verified clean (August 2026): contains only `realm`, `enabled`, `displayName`,
-  and generic Keycloak settings.  Re-verify if the file changes before release.
-
-- [ ] **All CI checks pass on main.**
-  Confirm the test, lint, secret-scan, dependency-audit, governance, and
-  frontend jobs are green.
-
-### P1 — Resolve Before 1.0
-
-- [ ] **PyPI trusted publishing is configured.**
-  The `mozaiks` PyPI project must trust this GitHub repository and the
-  `release.yml` workflow file.  Without this, the `publish-pypi` job fails
-  after the GitHub Release is created.
-
-- [ ] **Documentation site is up to date.**
-  Confirm `mkdocs build --strict` passes with no warnings.
-
-- [ ] **ADR 0002 has been reviewed by a second engineer.**
-  `docs/adr/0002-appgenerator-baseline-strategy-oss.md` records the intentional
-  OSS publication of the AppGenerator baseline strategy.
-
----
-
-## Release-Candidate Audit Command
-
-Run this locally before tagging any release.  It chains governance, build,
-package inspection, smoke install, resource verification, and a first run of
-the installed package:
+Run this from a clean checkout of the final candidate:
 
 ```bash
 docker run --rm -d --name mozaiks-release-audit-mongo -p 127.0.0.1:27018:27017 mongo:7
@@ -112,86 +64,64 @@ python scripts/run_release_audit.py --mongo-uri mongodb://127.0.0.1:27018
 docker stop mozaiks-release-audit-mongo
 ```
 
-The script lives at `scripts/run_release_audit.py` (see source for details).
-It builds a wheel into a temp directory, runs the content guard, smoke-installs
-into a clean venv, and verifies that Factory resources resolve from the install.
-It then runs `scripts/smoke_installed_first_run.py` with the installed Python,
-outside the checkout and with a scrubbed environment: `mozaiks init` →
-`mozaiks serve` (platform and studio hosts) → `/api/health/ready` →
-`/api/shell-config` must return the scaffold's `appId` and an anonymous local
-user with the `admin` role, and `mozaiks serve` against an unreachable
-`MONGO_URI` must stop within seconds. The CI `package` job and the release
-workflow run the same smoke.
+The audit script is `scripts/run_release_audit.py`. Its first-run smoke starts
+both platform and Studio hosts and checks readiness and shell configuration
+from the installed wheel. A passing audit on a different SHA is not release
+evidence for the selected candidate.
 
-Point `--mongo-uri` (or `MOZAIKS_RELEASE_AUDIT_MONGO_URI`) at a throwaway
-MongoDB **server** on a non-default port, as above. A database name in the URI
-does not isolate anything: the runtime ignores it and uses fixed database
-names, `mozaiksai` and `mozaiks_apps`, on whatever server the URI points to.
-Module actions, such as those a Studio session runs, also write audit records
-to a third database, `mozaiks_audit`.
-Against the default `localhost:27017` the smoke would write into the databases
-your local development stack uses.
+## Optional TestPyPI rehearsal
 
----
+Only after the release hold is lifted for this candidate, configure a separate
+TestPyPI trusted publisher for the same repository and workflow with GitHub
+environment `testpypi`. Protect that environment with required reviewers and
+admin bypass disabled. TestPyPI and PyPI have separate accounts, projects, and
+trusted-publisher settings; production credentials are not used for rehearsal.
 
-## Release Steps
-
-The release entrypoint is:
-
-1. bump `mozaiksai/version.py`
-2. commit the version change
-3. push a matching Git tag
-
-Example:
+After the owner verifies those settings, dispatch from `main` with the exact
+candidate SHA:
 
 ```bash
-git checkout main
-git pull
-# edit mozaiksai/version.py -> __version__ = "<version>"
-git add mozaiksai/version.py
-git commit -m "Release <version>"
-git tag v<version>
-git push origin main --tags
+gh workflow run release.yml --ref main \
+  -f release_target=testpypi \
+  -f candidate_sha=<40-character-main-sha> \
+  -f confirm_release=testpypi-confirmed
 ```
 
-## What The Future Release Workflow Does
+This uploads the candidate wheel and sdist only to TestPyPI. It does not create
+a GitHub release or upload to PyPI. Download the exact `mozaiks==0.2.0`
+artifact from TestPyPI into a clean environment, compare its checksum with the
+workflow artifact, and repeat the installed CLI/first-run smoke. The same
+filename cannot be uploaded twice to TestPyPI; a failed or partial upload
+requires inspection before another attempt.
 
-The GitHub Actions workflow at `.github/workflows/release.yml` runs when a tag
-matching `v*` is pushed.
+## Public publication
 
-It:
+After all release gates and any rehearsal are accepted, the operator may
+dispatch the workflow from `main`:
 
-1. verifies the Git tag matches `mozaiksai.version.__version__`
-2. builds the shared Studio frontend shell
-3. builds the Python sdist and wheel
-4. runs `twine check`
-5. installs the built wheel into a clean virtualenv
-6. smoke-tests the installed CLI and packaged resources
-7. creates a GitHub release with attached artifacts when releases are enabled
-8. publishes the distributions to PyPI when the public package is released
+```bash
+gh workflow run release.yml --ref main \
+  -f release_target=pypi \
+  -f candidate_sha=<40-character-main-sha> \
+  -f confirm_release=release-confirmed
+```
 
-## Future PyPI Setup Requirement
+The workflow builds and tests the candidate, waits on the protected `release`
+environment, rechecks that the candidate is still current `main`, publishes
+the built distributions to PyPI, then creates the GitHub release and tag at
+that exact candidate SHA. The GitHub release body comes from the dated
+changelog section. PyPI upload precedes GitHub release, so an upload failure
+cannot leave a release announcement for an unavailable package. If PyPI
+succeeds but GitHub release fails, inspect the immutable PyPI files and rerun
+only the failed GitHub release job after correcting the cause.
 
-The workflow is configured for GitHub-to-PyPI trusted publishing when public
-release publishing is enabled.
+Verify the final PyPI files, installed version and CLI, GitHub tag target,
+release checksums, and release notes. Record the final OSS release SHA and
+the accepted App Zero SHA with the live evidence.
 
-The `mozaiks` PyPI project must trust this GitHub repository and the
-`release.yml` workflow before public publishing can turn on.
+## Later 1.0 work
 
-Until that is configured on the PyPI side, the `publish-pypi` job should stay
-disabled even if the build and GitHub release steps succeed.
+- Keep the documentation site current and run `mkdocs build --strict`.
+- Obtain a second-engineer review of ADR 0002's AppGenerator baseline strategy.
 
-## Documentation Impact
-
-Public install docs should present a local source checkout with
-`python -m pip install -e ".[dev]"` followed by `python -m mozaiks ...` so
-PATH mechanics stay out of the main onboarding flow. The `mozaiks` command can
-be mentioned as an optional shortcut only. Keep source-checkout setup separate
-as the framework/developer mode until public packaging is actually released.
-
-## Notes
-
-- The package version is now sourced from `mozaiksai/version.py`.
-- `pyproject.toml` reads that value dynamically during builds.
-- The CLI `--version` output and FastAPI host version metadata now use the same
-  version source.
+These do not relax any `0.2.0` release gate above.

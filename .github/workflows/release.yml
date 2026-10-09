@@ -1,39 +1,34 @@
 name: Release
 
-# RELEASES ARE CURRENTLY DISABLED.
-#
-# Tag-triggered publication has been turned off because the 'release' GitHub
-# environment does NOT have required reviewers configured (protection_rules=[]).
-# Without reviewers, any v* tag push would proceed through the approval gate
-# automatically and publish to PyPI.
-#
-# To re-enable:
-#   1. Configure required reviewers:
-#      GitHub Settings → Environments → release → Required reviewers
-#   2. Verify: gh api repos/BlocUnited-LLC/mozaiks/environments/release
-#      The response must show protection_rules with at least one reviewer.
-#   3. Complete all P0 items in docs/releasing.md.
-#   4. Uncomment the push/tags trigger below.
-#   5. Remove or keep the workflow_dispatch trigger as a second entry point.
-#
-# Only a manual workflow_dispatch with the confirmation string proceeds.
-# This provides defense-in-depth against accidental tag-triggered publication.
+# PUBLIC RELEASES REMAIN ON HOLD. See docs/releasing.md.
+# A manual dispatch is reserved for an explicitly authorized, exact main
+# candidate after the OSS/App Zero commit pair and live acceptance match.
+# Tag-triggered publication stays disabled.
 
 on:
   workflow_dispatch:
     inputs:
+      release_target:
+        description: "TestPyPI rehearsal or public PyPI release"
+        required: true
+        type: choice
+        options:
+          - testpypi
+          - pypi
+        default: testpypi
+      candidate_sha:
+        description: "Full 40-character SHA of the approved current main commit"
+        required: true
+        type: string
       confirm_release:
         description: >
-          Safety gate — type "release-confirmed" to proceed.
-          All P0 items in docs/releasing.md must be verified before running.
-          The 'release' GitHub environment must have required reviewers set.
+          Type "testpypi-confirmed" for rehearsal or "release-confirmed"
+          for public PyPI. The release hold and docs/releasing.md still apply.
         required: true
         type: string
   # push:
   #   tags:
   #     - "v*"
-  # NOTE: Uncomment only after the 'release' environment has required reviewers.
-  # See docs/releasing.md and the comment block at the top of this file.
 
 permissions:
   contents: read
@@ -45,6 +40,9 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     services:
       mongodb:
         image: mongo:7
@@ -59,17 +57,64 @@ jobs:
       version: ${{ steps.meta.outputs.version }}
       tag: ${{ steps.meta.outputs.tag }}
     steps:
+      - name: Checkout exact dispatch commit
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
       - name: Verify release gate
+        shell: bash
+        env:
+          RELEASE_TARGET: ${{ inputs.release_target }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          CONFIRM_RELEASE: ${{ inputs.confirm_release }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [ "${{ inputs.confirm_release }}" != "release-confirmed" ]; then
-            echo "::error::Release gate: confirm_release must be exactly 'release-confirmed' to proceed." >&2
-            echo "::error::See docs/releasing.md for the full pre-release checklist." >&2
+          set -euo pipefail
+          case "$RELEASE_TARGET" in
+            testpypi) expected_confirmation=testpypi-confirmed ;;
+            pypi) expected_confirmation=release-confirmed ;;
+            *) echo "::error::Unknown release target" >&2; exit 1 ;;
+          esac
+          if [[ "$CONFIRM_RELEASE" != "$expected_confirmation" ]]; then
+            echo "::error::Confirmation does not match release target." >&2
             exit 1
           fi
-          echo "Release gate confirmed — proceeding with build."
+          if [[ ! "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::candidate_sha must be a full lowercase commit SHA." >&2
+            exit 1
+          fi
+          if [[ "$GITHUB_REF" != refs/heads/main ]]; then
+            echo "::error::Release dispatch must run from main." >&2
+            exit 1
+          fi
+          checked_out_sha="$(git rev-parse HEAD)"
+          main_sha="$(git ls-remote origin refs/heads/main | cut -f1)"
+          if [[ "$CANDIDATE_SHA" != "$GITHUB_SHA" || "$CANDIDATE_SHA" != "$checked_out_sha" || "$CANDIDATE_SHA" != "$main_sha" ]]; then
+            echo "::error::Candidate SHA differs from dispatch, checkout, or current main." >&2
+            exit 1
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$CANDIDATE_SHA&branch=main&event=push&per_page=20" > "$RUNNER_TEMP/candidate-ci.json"
+          python - "$CANDIDATE_SHA" "$RUNNER_TEMP/candidate-ci.json" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
 
-      - name: Checkout
-        uses: actions/checkout@v7
+          sha, path = sys.argv[1:]
+          runs = json.loads(Path(path).read_text(encoding="utf-8")).get("workflow_runs", [])
+          matches = [
+              run for run in runs
+              if run.get("head_sha") == sha
+              and run.get("head_branch") == "main"
+              and run.get("event") == "push"
+          ]
+          if not matches:
+              raise SystemExit("No CI push run found for candidate main SHA")
+          latest = max(matches, key=lambda run: (run.get("created_at", ""), run.get("id", 0)))
+          if latest.get("status") != "completed" or latest.get("conclusion") != "success":
+              raise SystemExit(f"Candidate CI run {latest.get('id')} is not successful")
+          print(f"Candidate CI run {latest['id']} succeeded for {sha}")
+          PY
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -106,19 +151,42 @@ jobs:
           raise SystemExit("__version__ not found in mozaiksai/version.py")
           PY
           )"
-          # For tag-triggered runs, validate the tag matches the package version.
-          # For workflow_dispatch runs, synthesise the tag from the package version.
-          if [ "${GITHUB_EVENT_NAME}" == "push" ]; then
-            TAG="${GITHUB_REF_NAME#v}"
-            if [ "$VERSION" != "$TAG" ]; then
-              echo "Tag version $TAG does not match package version $VERSION" >&2
+          echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Verify dated release notes and tag identity
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.meta.outputs.version }}
+          RELEASE_TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          import re
+          from datetime import date
+          from pathlib import Path
+
+          text = Path("CHANGELOG.md").read_text(encoding="utf-8")
+          version = re.escape(os.environ["RELEASE_VERSION"])
+          match = re.search(rf"(?m)^## {version} - (\d{{4}}-\d{{2}}-\d{{2}})$", text)
+          if match is None:
+              raise SystemExit("CHANGELOG.md needs a dated section for the release version")
+          date.fromisoformat(match.group(1))
+          if re.search(r"(?m)^## Unreleased$", text) is None:
+              raise SystemExit("CHANGELOG.md needs an Unreleased header")
+          PY
+          tag_lines="$(git ls-remote --tags origin "refs/tags/$RELEASE_TAG" "refs/tags/$RELEASE_TAG^{}")"
+          if [[ -n "$tag_lines" ]]; then
+            tag_sha="$(printf '%s\n' "$tag_lines" | awk '$2 ~ /\^\{\}$/ { print $1 }')"
+            if [[ -z "$tag_sha" ]]; then
+              tag_sha="$(printf '%s\n' "$tag_lines" | awk 'NR == 1 { print $1 }')"
+            fi
+            if [[ "$tag_sha" != "$GITHUB_SHA" ]]; then
+              echo "::error::Existing release tag points to a different commit." >&2
               exit 1
             fi
-            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
           fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Install release dependencies
         run: |
@@ -257,28 +325,164 @@ jobs:
           name: python-dist
           path: dist/*
 
-  # ── Manual approval gate ─────────────────────────────────────────────────────
-  # Both github-release and publish-pypi wait for this job.
-  # Configure required reviewers on the "release-approval" GitHub environment
-  # (Settings → Environments → release-approval → Required reviewers) to make
-  # this gate block until a human explicitly approves the release.
-  # Without required reviewers set, this job passes immediately — set them up
-  # in GitHub Settings before the repo is production-ready.
+  # Public publication waits for a protected human approval on the release
+  # environment. This job also checks the live environment configuration, so
+  # an accidentally unprotected environment fails before upload.
   approve-release:
+    if: inputs.release_target == 'pypi'
     runs-on: ubuntu-latest
     needs: build
     environment:
       name: release
     steps:
-      - name: Release approved
-        run: echo "Release ${{ needs.build.outputs.tag }} approved for publishing."
+      - name: Verify release environment protection
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from urllib.request import Request, urlopen
 
-  github-release:
+          url = f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/environments/release"
+          request = Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": "mozaiks-release"})
+          with urlopen(request, timeout=15) as response:
+              environment = json.load(response)
+          reviewers = [
+              rule for rule in environment.get("protection_rules", [])
+              if rule.get("type") == "required_reviewers" and rule.get("reviewers")
+          ]
+          if not reviewers or environment.get("can_admins_bypass") is not False:
+              raise SystemExit("Release environment needs required reviewers and admin bypass disabled")
+          print("Release environment protection is active")
+          PY
+
+  publish-testpypi:
+    if: inputs.release_target == 'testpypi'
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/mozaiks
+    steps:
+      - name: Verify TestPyPI environment protection
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from urllib.request import Request, urlopen
+
+          url = f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/environments/testpypi"
+          request = Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": "mozaiks-release"})
+          with urlopen(request, timeout=15) as response:
+              environment = json.load(response)
+          reviewers = [
+              rule for rule in environment.get("protection_rules", [])
+              if rule.get("type") == "required_reviewers" and rule.get("reviewers")
+          ]
+          if not reviewers or environment.get("can_admins_bypass") is not False:
+              raise SystemExit("TestPyPI environment needs required reviewers and admin bypass disabled")
+          print("TestPyPI environment protection is active")
+          PY
+
+      - name: Verify candidate still matches main
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          main_sha="$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq '.commit.sha')"
+          test "$main_sha" = "$CANDIDATE_SHA"
+
+      - name: Download distributions
+        uses: actions/download-artifact@v8
+        with:
+          name: python-dist
+          path: dist
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  publish-pypi:
+    if: inputs.release_target == 'pypi'
     runs-on: ubuntu-latest
     needs: [build, approve-release]
     permissions:
+      contents: read
+      actions: read
+      id-token: write
+    environment:
+      name: pypi
+      url: https://pypi.org/p/mozaiks
+    steps:
+      - name: Verify candidate still matches main
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          main_sha="$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq '.commit.sha')"
+          test "$main_sha" = "$CANDIDATE_SHA"
+
+      - name: Download distributions
+        uses: actions/download-artifact@v8
+        with:
+          name: python-dist
+          path: dist
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    if: inputs.release_target == 'pypi'
+    runs-on: ubuntu-latest
+    needs: [build, publish-pypi]
+    permissions:
       contents: write
     steps:
+      - name: Checkout exact published candidate
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          persist-credentials: false
+
+      - name: Extract dated changelog section
+        env:
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          text = Path("CHANGELOG.md").read_text(encoding="utf-8")
+          version = re.escape(os.environ["RELEASE_VERSION"])
+          match = re.search(rf"(?m)^## {version} - \d{{4}}-\d{{2}}-\d{{2}}$", text)
+          if match is None:
+              raise SystemExit("Dated release notes disappeared from candidate")
+          next_section = re.search(r"(?m)^## ", text[match.end():])
+          end = match.end() + next_section.start() if next_section else len(text)
+          notes = text[match.start():end].strip() + "\n"
+          Path("release-notes.md").write_text(notes, encoding="utf-8")
+          PY
+
+      - name: Verify existing tag identity
+        env:
+          RELEASE_TAG: ${{ needs.build.outputs.tag }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          tag_lines="$(git ls-remote --tags origin "refs/tags/$RELEASE_TAG" "refs/tags/$RELEASE_TAG^{}")"
+          if [[ -n "$tag_lines" ]]; then
+            tag_sha="$(printf '%s\n' "$tag_lines" | awk '$2 ~ /\^\{\}$/ { print $1 }')"
+            if [[ -z "$tag_sha" ]]; then
+              tag_sha="$(printf '%s\n' "$tag_lines" | awk 'NR == 1 { print $1 }')"
+            fi
+            test "$tag_sha" = "$CANDIDATE_SHA"
+          fi
+
       - name: Download distributions
         uses: actions/download-artifact@v8
         with:
@@ -293,25 +497,8 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.build.outputs.tag }}
+          target_commitish: ${{ inputs.candidate_sha }}
           name: ${{ needs.build.outputs.tag }}
-          generate_release_notes: true
+          body_path: release-notes.md
           files: |
             dist/*
-
-  publish-pypi:
-    runs-on: ubuntu-latest
-    needs: [build, approve-release]
-    permissions:
-      id-token: write
-    environment:
-      name: pypi
-      url: https://pypi.org/p/mozaiks
-    steps:
-      - name: Download distributions
-        uses: actions/download-artifact@v8
-        with:
-          name: python-dist
-          path: dist
-
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
