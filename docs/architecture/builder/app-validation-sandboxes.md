@@ -128,7 +128,8 @@ requires a specific `template:build_id` reference and rejects guest environment
 values at creation and command execution,
 requests denied internet egress, token-gated port access, and kill-on-timeout,
 confirms those settings through E2B's session information, and withholds the
-provider URL even after a worker reconnects. A future owner proxy must keep
+provider URL even after a worker reconnects. A paused sealed session is refused
+on reconnect; teardown kills by ID without resuming it. A future owner proxy must keep
 E2B's traffic token server-side. The manager remains Docker-only until E2B has equivalent
 immutable staging, product-host boot, private owner-authorized proxying, and
 live acceptance evidence. Ordinary E2B artifact previews retain their existing

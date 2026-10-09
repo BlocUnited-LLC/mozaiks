@@ -53,6 +53,7 @@ class _FakeSandbox:
         self.timeout = None
         self.killed = False
         self.details = SimpleNamespace(
+            state="running",
             allow_internet_access=True,
             network={"allow_public_traffic": True},
             lifecycle={"on_timeout": "kill", "auto_resume": False},
@@ -92,6 +93,12 @@ async def test_e2b_adapter_uses_real_sdk_shape(monkeypatch) -> None:
             connected.connected_session_id = session_id
             connected.timeout = timeout
             return connected
+
+        @staticmethod
+        def kill(session_id):  # noqa: ANN001
+            assert session_id == created.sandbox_id
+            created.kill()
+            return True
 
     monkeypatch.setattr(_sandbox_mod, "Sandbox", _SandboxFactory)
 
@@ -163,7 +170,9 @@ async def test_reconnect_preserves_the_remaining_provider_deadline(monkeypatch):
     from unittest.mock import Mock
 
     factory = Mock()
-    factory.get_info.return_value = SimpleNamespace(end_at=datetime.now(UTC) + timedelta(seconds=45))
+    factory.get_info.return_value = SimpleNamespace(
+        end_at=datetime.now(UTC) + timedelta(seconds=45), metadata={},
+    )
     factory.connect.return_value = _FakeSandbox()
     monkeypatch.setattr(_sandbox_mod, "Sandbox", factory)
     adapter = E2BSandboxAdapter()
@@ -226,6 +235,8 @@ async def test_sealed_e2b_session_confirms_network_isolation_and_hides_provider_
 
     sandbox = _FakeSandbox()
     sandbox.details = SimpleNamespace(
+        state="running",
+        end_at=datetime.now(UTC) + timedelta(seconds=45),
         allow_internet_access=False,
         network={"allow_public_traffic": False},
         lifecycle={"on_timeout": "kill", "auto_resume": False},
@@ -248,7 +259,7 @@ async def test_sealed_e2b_session_confirms_network_isolation_and_hides_provider_
     assert adapter._sessions[session.session_id] is sandbox
 
     reconnected = E2BSandboxAdapter()
-    factory.get_info.return_value = SimpleNamespace(end_at=datetime.now(UTC) + timedelta(seconds=45))
+    factory.get_info.return_value = sandbox.details
     factory.connect.return_value = sandbox
     assert await reconnected.get_preview_url(session_id=session.session_id, port=3000) is None
     assert "sandbox_domain" not in (await reconnected.connect(session_id=session.session_id)).metadata
@@ -256,6 +267,42 @@ async def test_sealed_e2b_session_confirms_network_isolation_and_hides_provider_
     with pytest.raises(ValueError, match="command environment"):
         await reconnected.run_command(session_id=session.session_id, command="true", envs={"TOKEN": "secret"})
     sandbox.commands.run.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kill_result", [True, False])
+async def test_paused_sealed_session_never_reconnects_and_teardown_kills_by_id(monkeypatch, kill_result):
+    from unittest.mock import Mock
+
+    factory = Mock()
+    factory.get_info.return_value = SimpleNamespace(
+        state="paused", metadata={"purpose": "sealed_candidate_preview"},
+        end_at=datetime.now(UTC) + timedelta(seconds=45),
+    )
+    factory.kill.return_value = kill_result
+    monkeypatch.setattr(_sandbox_mod, "Sandbox", factory)
+    adapter = E2BSandboxAdapter()
+    with pytest.raises(RuntimeError, match="not running"):
+        await adapter.connect(session_id="sbx_paused")
+    factory.connect.assert_not_called()
+    assert await adapter.terminate_session(session_id="sbx_paused") is True
+    factory.kill.assert_called_once_with("sbx_paused")
+    factory.connect.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sealed_teardown_keeps_cleanup_handle_when_provider_kill_fails(monkeypatch):
+    from unittest.mock import Mock
+
+    factory = Mock()
+    factory.kill.side_effect = RuntimeError("provider unavailable")
+    monkeypatch.setattr(_sandbox_mod, "Sandbox", factory)
+    adapter = E2BSandboxAdapter()
+    adapter._sessions["sbx_123"] = _FakeSandbox()
+    with pytest.raises(RuntimeError, match="provider unavailable"):
+        await adapter.terminate_session(session_id="sbx_123")
+    assert "sbx_123" in adapter._sessions
+    factory.connect.assert_not_called()
 
 
 @pytest.mark.asyncio

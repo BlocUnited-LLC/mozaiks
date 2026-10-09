@@ -23,6 +23,25 @@ def _public_traffic_allowed(network: Any) -> bool | None:
         return network.get("allow_public_traffic")
     return None
 
+
+def _require_running_sealed_session(details: Any) -> None:
+    metadata = getattr(details, "metadata", None)
+    if isinstance(metadata, dict) and metadata.get("purpose") != _SEALED_PURPOSE:
+        return
+    if getattr(details, "state", None) != "running":
+        raise RuntimeError("Sealed E2B session is not running; refusing to resume it")
+    if (
+        not isinstance(metadata, dict)
+        or metadata.get("purpose") != _SEALED_PURPOSE
+        or getattr(details, "allow_internet_access", None) is not False
+        or _public_traffic_allowed(getattr(details, "network", None)) is not False
+        or not isinstance(getattr(details, "lifecycle", None), dict)
+        or details.lifecycle.get("on_timeout") != "kill"
+        or details.lifecycle.get("auto_resume") is not False
+    ):
+        raise RuntimeError("E2B did not confirm sealed preview isolation")
+
+
 try:
     from e2b.exceptions import NotFoundException
     from e2b_code_interpreter import Sandbox
@@ -84,11 +103,15 @@ class E2BSandboxAdapter:
                 await asyncio.to_thread(sandbox.set_timeout, timeout_seconds)
             return sandbox
         sandbox_cls = self._require_sdk()
+        info = await asyncio.to_thread(sandbox_cls.get_info, session_id)
+        _require_running_sealed_session(info)
         if timeout_seconds is None:
             # SDK connect renews the lifetime; preserve the provider's deadline.
-            info = await asyncio.to_thread(sandbox_cls.get_info, session_id)
             timeout_seconds = max(1, int((info.end_at - datetime.now(UTC)).total_seconds()))
         sandbox = await asyncio.to_thread(sandbox_cls.connect, session_id, timeout=timeout_seconds)
+        metadata = getattr(info, "metadata", None)
+        if not isinstance(metadata, dict) or metadata.get("purpose") == _SEALED_PURPOSE:
+            _require_running_sealed_session(await asyncio.to_thread(sandbox.get_info))
         self._sessions[session_id] = sandbox
         return sandbox
 
@@ -282,9 +305,8 @@ class E2BSandboxAdapter:
 
     async def terminate_session(self, *, session_id: str) -> bool:
         try:
-            sandbox = await self._connect_sandbox(session_id)
-            # E2B kill() returns False only for HTTP 404; other API failures raise.
-            await asyncio.to_thread(sandbox.kill)
+            # Reconnecting can resume a paused sandbox; teardown must kill by ID.
+            await asyncio.to_thread(self._require_sdk().kill, session_id)
         except _NOT_FOUND_ERRORS:
             pass
         self._sessions.pop(session_id, None)
