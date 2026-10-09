@@ -49,6 +49,7 @@ from mozaiksai.core.workflow.generator_support.code_files import (
     _page_file_stem,
     auth_required_from_strategy,
     data_contract_requires_auth,
+    safe_relpath,
     validate_custom_page_files,
 )
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
@@ -226,6 +227,17 @@ def _write_yaml(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
         yaml.dump(data, fh, allow_unicode=True, sort_keys=False, default_flow_style=False)
+
+
+def _app_artifact_target(root: Path, relative: str) -> Path:
+    safe = safe_relpath(relative)
+    if safe != relative or safe == "." or ":" in relative or "\x00" in relative:
+        raise ValueError(f"App schema artifact path must be app-relative and canonical: {relative!r}")
+    resolved_root = root.resolve()
+    target = (resolved_root / safe).resolve()
+    if not target.is_relative_to(resolved_root):
+        raise ValueError(f"App schema artifact path escapes the app root: {relative!r}")
+    return target
 
 
 VALID_ACTION_TYPES = {"navigate", "event", "workflow", "submit", "delete"}
@@ -1164,16 +1176,15 @@ def _persist_to_filesystem(
     written.append("config/ai.json")
 
     # ui/pages/{name}.yaml — one file per page
-    pages_dir = output_dir / "ui" / "pages"
     for page in page_list:
         name = page["name"]
-        page_path = pages_dir / f"{name}.yaml"
+        page_path = _app_artifact_target(output_dir, f"ui/pages/{name}.yaml")
         _write_yaml(page_path, page)
         written.append(f"ui/pages/{name}.yaml")
 
     if custom_route_bundle and isinstance(custom_route_bundle, dict):
         for entry in _custom_route_bundle_code_files(custom_route_bundle):
-            file_path = output_dir / entry["filename"]
+            file_path = _app_artifact_target(output_dir, entry["filename"])
             file_path.parent.mkdir(parents=True, exist_ok=True)
             file_path.write_text(str(entry["content"]), encoding="utf-8")
             written.append(entry["filename"])
@@ -1556,7 +1567,7 @@ def save_app_schema(
                 return f"App schema repair rejected: {exc}"
             raise
         rendered_files = {
-            path: (staging / path).read_text(encoding="utf-8") for path in rendered_paths
+            path: _app_artifact_target(staging, path).read_text(encoding="utf-8") for path in rendered_paths
         }
 
     active_repair = (detach(_context_get(context_variables, "bundle_repair_result")) or {}).get("active")
@@ -1589,7 +1600,7 @@ def save_app_schema(
     written = sorted(rendered_files)
     try:
         for path, content in rendered_files.items():
-            target = output_dir / path
+            target = _app_artifact_target(output_dir, path)
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(content, encoding="utf-8")
         _logger.info(
