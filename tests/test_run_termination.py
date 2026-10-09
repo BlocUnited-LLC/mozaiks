@@ -881,7 +881,6 @@ async def test_design_docs_exhausted_save_reports_its_last_rejection() -> None:
 
 @pytest.mark.asyncio
 async def test_owned_build_failure_routes_to_approved_agent_then_stops_identical_failed_repair(monkeypatch):
-    from factory_app.workflows.AppGenerator.tools import app_validation
     from mozaiksai.core import adapters
     from mozaiksai.core.workflow.context.frozen import detach
 
@@ -896,8 +895,13 @@ async def test_owned_build_failure_routes_to_approved_agent_then_stops_identical
     )}
     acceptance.update(status="passed", passed=True, skipped_checks=[],
                       bundle_repair={"status": "passed", "target_agent": None})
-    monkeypatch.setattr(app_validation, "save_auth_scaffold", AsyncMock())
-    monkeypatch.setattr(app_validation, "run_app_bundle_acceptance_gate", AsyncMock(return_value=acceptance))
+    # The runner below calls the function imported at collection time. Workflow
+    # reloads may replace the package module before this test starts.
+    validation_globals = validate_app_bundle_from_request.__globals__
+    monkeypatch.setitem(validation_globals, "save_auth_scaffold", AsyncMock())
+    monkeypatch.setitem(
+        validation_globals, "run_app_bundle_acceptance_gate", AsyncMock(return_value=acceptance),
+    )
 
     class Sandbox(_FailingBuildSandbox):
         async def run_command(self, **kwargs):
