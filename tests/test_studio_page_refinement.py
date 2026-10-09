@@ -70,8 +70,11 @@ def page_refinement(monkeypatch, tmp_path, request):
     monkeypatch.setattr(studio, "get_artifact_store", Store)
     harness = studio.get_orchestration_control_harness()
     monkeypatch.setattr(harness, "_config_loader", lambda: ControlPlaneConfig(
-        enabled=True, classifier={"enabled": True}, coding={"enabled": True},
-        contract_surface={"enabled": True},
+        enabled=True,
+        llm_profiles={"codegen": {"llm_config": {"model": "test-model"}}},
+        classifier={"enabled": True, "llm_profile": "codegen"},
+        coding={"enabled": True, "llm_profile": "codegen"},
+        contract_surface={"enabled": True, "llm_profile": "codegen", "regeneration_llm_profile": "codegen"},
     ))
     classifier = AsyncMock(side_effect=_async_classifier(
         change_class="design", rationale="Improve the existing page layout", confidence=0.95, signals=[],

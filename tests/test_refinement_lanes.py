@@ -96,7 +96,11 @@ def test_policy_consumers_reference_only_canonical_lanes() -> None:
 
 
 def test_coding_providers_default_to_acp_disabled() -> None:
-    config = ControlPlaneConfig(enabled=True, coding={"enabled": True})
+    config = ControlPlaneConfig(
+        enabled=True,
+        llm_profiles={"codegen": {"llm_config": {"model": "test-model"}}},
+        coding={"enabled": True, "llm_profile": "codegen"},
+    )
 
     assert isinstance(config.coding, ControlPlaneCodingCapabilityConfig)
     assert config.coding.providers.acp.enabled is False
@@ -108,8 +112,10 @@ def test_coding_provider_block_parses_with_budget_overrides() -> None:
     config = ControlPlaneConfig.model_validate(
         {
             "enabled": True,
+            "llm_profiles": {"codegen": {"llm_config": {"model": "test-model"}}},
             "coding": {
                 "enabled": True,
+                "llm_profile": "codegen",
                 "providers": {
                     "acp": {
                         "enabled": True,

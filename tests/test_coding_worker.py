@@ -188,10 +188,8 @@ class _FakeArtifactStore:
 def _enabled_control_plane() -> ControlPlaneConfig:
     return ControlPlaneConfig(
         enabled=True,
-        coding=ControlPlaneCodingCapabilityConfig(
-            enabled=True,
-            llm_config={"model": "gpt-5.2-codex", "temperature": 0.1},
-        ),
+        llm_profiles={"codegen": {"llm_config": {"model": "gpt-5.2-codex", "temperature": 0.1}}},
+        coding=ControlPlaneCodingCapabilityConfig(enabled=True, llm_profile="codegen"),
     )
 
 

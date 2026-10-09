@@ -385,6 +385,8 @@ policy shares `codegen` across both generation steps. To tune them separately,
 declare `surface_regeneration` and point
 `contract_surface.regeneration_llm_profile` at it. The first-party policy
 does not declare the optional dry-run-only profiles.
+`coding.llm_profile` remains required when ACP is enabled because the current
+provider selection can fall back to structured-output coding.
 
 ```yaml
 schema_version: mozaiks.refinement.policy.v1
@@ -402,16 +404,15 @@ classifier:
 ```
 
 This is an indirection layer only. It does not tune models, change AG2
-execution semantics, or introduce a new workflow. Existing raw
-`classifier.llm_config` and `coding.llm_config` fallback remains valid for
-workspaces that have not moved to profile references, but new Refinement Engine
-configuration should prefer `llm_profile`.
+execution semantics, or introduce a new workflow. Each enabled refinement
+capability must name a declared profile with a non-empty model. Inline
+capability `llm_config` is rejected; model settings live only in `llm_profiles`.
 
 Rules:
 
 - unknown profile ids fail configuration validation
-- capability references to undeclared profiles fail resolution clearly
-- `contract_surface.regeneration_llm_profile` must resolve to a profile with an explicit model before surface file generation
+- enabled capability references to missing profiles or models fail when policy loads
+- `contract_surface.regeneration_llm_profile` must resolve to a profile with an explicit model when the surface capability is enabled
 - no per-agent hidden model overrides should be added for Refinement Engine or
   refinement lanes
 - raw provider/model config may live inside the central profile registry, but

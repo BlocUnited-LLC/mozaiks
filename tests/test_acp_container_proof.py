@@ -157,8 +157,9 @@ async def test_acp_client_adapter_and_terminal_are_confined_to_disposable_contai
     store = _ArtifactStore()
     policy = ControlPlaneConfig(
         enabled=True,
+        llm_profiles={"codegen": {"llm_config": {"model": "test-model"}}},
         coding=ControlPlaneCodingCapabilityConfig.model_validate(
-            {"enabled": True, "providers": {"acp": {"enabled": True}}}
+            {"enabled": True, "llm_profile": "codegen", "providers": {"acp": {"enabled": True}}}
         ),
     )
     worker = ScopedRefinementCodingWorker(

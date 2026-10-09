@@ -57,7 +57,7 @@ class StructuredOutputCodingProvider:
     async def execute(self, request: CodingWorkerRequest) -> StagedPatchProposal:
         tool_context_loaded = False
         try:
-            llm_config = self._load_config().resolve_capability_llm_config("coding") or {}
+            llm_config = self._load_config().resolve_capability_llm_config("coding")
             system_prompt = self._load_system_prompt()
             control_plane_context = await self._load_control_plane_context(request)
             tool_context_loaded = bool(control_plane_context)

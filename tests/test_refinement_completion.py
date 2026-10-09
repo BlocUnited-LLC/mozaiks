@@ -58,7 +58,11 @@ def _artifact_store(create):
 
 
 def _config():
-    return ControlPlaneConfig(enabled=True, coding={"enabled": True})
+    return ControlPlaneConfig(
+        enabled=True,
+        llm_profiles={"codegen": {"llm_config": {"model": "test-model"}}},
+        coding={"enabled": True, "llm_profile": "codegen"},
+    )
 
 
 def _request(**updates):
@@ -431,7 +435,15 @@ async def test_surface_interruption_writes_terminal_event_and_propagates(monkeyp
     harness = orchestration_control.OrchestrationControlHarness(
         coding_worker=SimpleNamespace(finalize_proposal=AsyncMock(side_effect=error)),
         surface_regeneration_worker=SimpleNamespace(execute_plan=AsyncMock(side_effect=error)),
-        config_loader=lambda: ControlPlaneConfig(enabled=True, contract_surface={"enabled": True}),
+        config_loader=lambda: ControlPlaneConfig(
+            enabled=True,
+            llm_profiles={"codegen": {"llm_config": {"model": "test-model"}}},
+            contract_surface={
+                "enabled": True,
+                "llm_profile": "codegen",
+                "regeneration_llm_profile": "codegen",
+            },
+        ),
     )
     with pytest.raises(type(error)):
         if stage == "generation":

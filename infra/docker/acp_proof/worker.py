@@ -84,8 +84,13 @@ async def _execute() -> str:
     request = _ProofWorkerRequest.model_validate_json(sys.stdin.buffer.read())
     policy = ControlPlaneConfig(
         enabled=True,
+        llm_profiles={"codegen": {"llm_config": {"model": "proof-model"}}},
         coding=ControlPlaneCodingCapabilityConfig.model_validate(
-            {"enabled": True, "providers": {"acp": {"enabled": True, "budget": {"max_wall_seconds": 30}}}}
+            {
+                "enabled": True,
+                "llm_profile": "codegen",
+                "providers": {"acp": {"enabled": True, "budget": {"max_wall_seconds": 30}}},
+            }
         ),
     )
     observed_archive: bytes | None = None

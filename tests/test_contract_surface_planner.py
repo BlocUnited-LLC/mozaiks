@@ -194,9 +194,14 @@ class _FakeAgentRunner:
 def _enabled_contract_surface_config() -> ControlPlaneConfig:
     return ControlPlaneConfig(
         enabled=True,
+        llm_profiles={
+            "impact_analyzer": {"llm_config": {"model": "gpt-5.2-codex", "temperature": 0.1}},
+            "codegen": {"llm_config": {"model": "gpt-5.2-codex", "temperature": 0.1}},
+        },
         contract_surface=ControlPlaneContractSurfaceCapabilityConfig(
             enabled=True,
-            llm_config={"model": "gpt-5.2-codex", "temperature": 0.1},
+            llm_profile="impact_analyzer",
+            regeneration_llm_profile="codegen",
         ),
     )
 

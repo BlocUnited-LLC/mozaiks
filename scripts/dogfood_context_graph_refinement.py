@@ -490,10 +490,12 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
 def _enabled_control_plane() -> ControlPlaneConfig:
     return ControlPlaneConfig(
         enabled=True,
-        coding=ControlPlaneCodingCapabilityConfig(
-            enabled=True,
-            llm_config={"model": "deterministic-dogfood-smoke", "temperature": 0.0},
-        ),
+        llm_profiles={
+            "impact_analyzer": {"llm_config": {"model": "deterministic-dogfood-smoke", "temperature": 0.0}},
+            "codegen": {"llm_config": {"model": "deterministic-dogfood-smoke", "temperature": 0.0}},
+        },
+        scope={"enabled": True, "llm_profile": "impact_analyzer"},
+        coding=ControlPlaneCodingCapabilityConfig(enabled=True, llm_profile="codegen"),
     )
 
 

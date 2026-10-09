@@ -31,10 +31,11 @@ _FILE_B = "ui/pages/custom/Sidebar.jsx"
 def _config(acp_enabled: bool = True, max_files: int = 3) -> ControlPlaneConfig:
     return ControlPlaneConfig(
         enabled=True,
+        llm_profiles={"codegen": {"llm_config": {"model": "gpt-5.2-codex"}}},
         coding=ControlPlaneCodingCapabilityConfig.model_validate(
             {
                 "enabled": True,
-                "llm_config": {"model": "gpt-5.2-codex"},
+                "llm_profile": "codegen",
                 "providers": {"acp": {"enabled": acp_enabled, "budget": {"max_files": max_files}}},
             }
         ),

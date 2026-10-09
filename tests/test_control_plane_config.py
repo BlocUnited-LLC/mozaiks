@@ -85,36 +85,82 @@ def test_control_plane_accepts_runtime_profile_metadata() -> None:
 
 
 def test_control_plane_rejects_unknown_capability_profile_reference() -> None:
-    config = ControlPlaneConfig.model_validate(
-        {
-            "enabled": True,
-            "classifier": {"enabled": True, "llm_profile": "classifier"},
-        }
-    )
-
-    try:
-        config.resolve_capability_llm_config("classifier")
-    except ValueError as exc:
-        assert "references unknown LLM profile 'classifier'" in str(exc)
-    else:
-        raise AssertionError("undeclared profile reference should fail resolution")
-
-
-def test_control_plane_capability_llm_config_fallback_remains_supported() -> None:
-    config = ControlPlaneConfig.model_validate(
-        {
-            "enabled": True,
-            "classifier": {
+    with pytest.raises(ValidationError, match="references unknown LLM profile 'classifier'"):
+        ControlPlaneConfig.model_validate(
+            {
                 "enabled": True,
-                "llm_config": {"model": "gpt-5-nano", "temperature": 0.0},
-            },
-        }
-    )
+                "classifier": {"enabled": True, "llm_profile": "classifier"},
+            }
+        )
 
-    assert config.resolve_capability_llm_config("classifier") == {
-        "model": "gpt-5-nano",
-        "temperature": 0.0,
+
+@pytest.mark.parametrize("capability", ["classifier", "scope", "coding", "contract_surface"])
+def test_enabled_capability_requires_named_profile_with_model(capability: str) -> None:
+    with pytest.raises(ValidationError, match=f"Refinement capability '{capability}' requires llm_profile"):
+        ControlPlaneConfig.model_validate({"enabled": True, capability: {"enabled": True}})
+
+    with pytest.raises(ValidationError, match="requires a non-empty model"):
+        ControlPlaneConfig.model_validate({
+            "enabled": True,
+            "llm_profiles": {"codegen": {"llm_config": {"model": "  "}}},
+            capability: {"enabled": True, "llm_profile": "codegen"},
+        })
+
+
+def test_enabled_surface_requires_separate_regeneration_profile() -> None:
+    policy = {
+        "enabled": True,
+        "llm_profiles": {"impact_analyzer": {"llm_config": {"model": "planning-model"}}},
+        "contract_surface": {"enabled": True, "llm_profile": "impact_analyzer"},
     }
+    with pytest.raises(ValidationError, match="contract_surface.regeneration_llm_profile requires llm_profile"):
+        ControlPlaneConfig.model_validate(policy)
+
+
+@pytest.mark.parametrize("capability", ["classifier", "scope", "coding", "contract_surface"])
+def test_enabled_capability_rejects_config_list_model_override(capability: str) -> None:
+    with pytest.raises(ValidationError, match="config_list is not supported"):
+        ControlPlaneConfig.model_validate({
+            "enabled": True,
+            "llm_profiles": {"codegen": {"llm_config": {
+                "model": "declared-model",
+                "config_list": [{"model": "different-runtime-model"}],
+            }}},
+            capability: {"enabled": True, "llm_profile": "codegen"},
+        })
+
+
+def test_enabled_surface_rejects_regeneration_config_list_model_override() -> None:
+    with pytest.raises(ValidationError, match="contract_surface.regeneration_llm_profile.*config_list is not supported"):
+        ControlPlaneConfig.model_validate({
+            "enabled": True,
+            "llm_profiles": {
+                "impact_analyzer": {"llm_config": {"model": "planning-model"}},
+                "codegen": {"llm_config": {
+                    "model": "declared-model",
+                    "config_list": [{"model": "different-runtime-model"}],
+                }},
+            },
+            "contract_surface": {
+                "enabled": True,
+                "llm_profile": "impact_analyzer",
+                "regeneration_llm_profile": "codegen",
+            },
+        })
+
+
+def test_capability_rejects_inline_model_and_unknown_fields() -> None:
+    with pytest.raises(ValidationError, match="llm_config"):
+        ControlPlaneConfig.model_validate({
+            "enabled": True,
+            "classifier": {"enabled": True, "llm_config": {"model": "model"}},
+        })
+    with pytest.raises(ValidationError, match="surprise"):
+        ControlPlaneConfig.model_validate({"scope": {"surprise": True}})
+
+
+def test_disabled_capability_needs_no_model_profile() -> None:
+    assert ControlPlaneConfig.model_validate({"enabled": True, "coding": {"enabled": False}}).coding.enabled is False
 
 
 def test_refinement_policy_rejects_unused_profile_temperature(tmp_path: Path) -> None:

@@ -67,13 +67,8 @@ class _FakeToolExecutor:
 def _enabled_refinement_policy() -> ControlPlaneConfig:
     return ControlPlaneConfig(
         enabled=True,
-        classifier=ControlPlaneCapabilityConfig(
-            enabled=True,
-            llm_config={
-                "model": "gpt-5-nano",
-                "temperature": 0.0,
-            },
-        ),
+        llm_profiles={"classifier": {"llm_config": {"model": "gpt-5-nano", "temperature": 0.0}}},
+        classifier=ControlPlaneCapabilityConfig(enabled=True, llm_profile="classifier"),
     )
 
 
