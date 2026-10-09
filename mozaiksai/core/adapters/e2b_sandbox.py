@@ -25,24 +25,6 @@ def _public_traffic_allowed(network: Any) -> bool | None:
     return None
 
 
-def _require_running_sealed_session(details: Any) -> None:
-    metadata = getattr(details, "metadata", None)
-    if isinstance(metadata, dict) and metadata.get("purpose") in _ORDINARY_PURPOSES:
-        return
-    if getattr(details, "state", None) != "running":
-        raise RuntimeError("Sealed E2B session is not running; refusing to resume it")
-    if (
-        not isinstance(metadata, dict)
-        or metadata.get("purpose") != _SEALED_PURPOSE
-        or getattr(details, "allow_internet_access", None) is not False
-        or _public_traffic_allowed(getattr(details, "network", None)) is not False
-        or not isinstance(getattr(details, "lifecycle", None), dict)
-        or details.lifecycle.get("on_timeout") != "kill"
-        or details.lifecycle.get("auto_resume") is not False
-    ):
-        raise RuntimeError("E2B did not confirm sealed preview isolation")
-
-
 try:
     from e2b.exceptions import NotFoundException
     from e2b_code_interpreter import Sandbox
@@ -107,14 +89,15 @@ class E2BSandboxAdapter:
             return sandbox
         sandbox_cls = self._require_sdk()
         info = await asyncio.to_thread(sandbox_cls.get_info, session_id)
-        _require_running_sealed_session(info)
+        metadata = getattr(info, "metadata", None)
+        if not isinstance(metadata, dict) or metadata.get("purpose") not in _ORDINARY_PURPOSES:
+            # The SDK's connect() can resume a paused sandbox between inspection
+            # and connection. Sealed sessions must be killed and recreated.
+            raise RuntimeError("Sealed or unclassified E2B session cannot reconnect")
         if timeout_seconds is None:
             # SDK connect renews the lifetime; preserve the provider's deadline.
             timeout_seconds = max(1, int((info.end_at - datetime.now(UTC)).total_seconds()))
         sandbox = await asyncio.to_thread(sandbox_cls.connect, session_id, timeout=timeout_seconds)
-        metadata = getattr(info, "metadata", None)
-        if not isinstance(metadata, dict) or metadata.get("purpose") not in _ORDINARY_PURPOSES:
-            _require_running_sealed_session(await asyncio.to_thread(sandbox.get_info))
         self._sessions[session_id] = sandbox
         return sandbox
 

@@ -275,12 +275,14 @@ async def test_sealed_e2b_session_confirms_network_isolation_and_hides_provider_
 
     reconnected = E2BSandboxAdapter()
     factory.get_info.return_value = sandbox.details
-    factory.connect.return_value = sandbox
-    assert await reconnected.get_preview_url(session_id=session.session_id, port=3000) is None
-    assert "sandbox_domain" not in (await reconnected.connect(session_id=session.session_id)).metadata
+    with pytest.raises(RuntimeError, match="cannot reconnect"):
+        await reconnected.get_preview_url(session_id=session.session_id, port=3000)
+    with pytest.raises(RuntimeError, match="cannot reconnect"):
+        await reconnected.connect(session_id=session.session_id)
     sandbox.commands.run = Mock(wraps=sandbox.commands.run)
-    with pytest.raises(ValueError, match="command environment"):
+    with pytest.raises(RuntimeError, match="cannot reconnect"):
         await reconnected.run_command(session_id=session.session_id, command="true", envs={"TOKEN": "secret"})
+    factory.connect.assert_not_called()
     sandbox.commands.run.assert_not_called()
 
 
@@ -302,7 +304,7 @@ async def test_paused_sealed_session_never_reconnects_and_teardown_kills_by_id(
     factory.kill.return_value = kill_result
     monkeypatch.setattr(_sandbox_mod, "Sandbox", factory)
     adapter = E2BSandboxAdapter()
-    with pytest.raises(RuntimeError, match="not running"):
+    with pytest.raises(RuntimeError, match="cannot reconnect"):
         await adapter.connect(session_id="sbx_paused")
     factory.connect.assert_not_called()
     assert await adapter.terminate_session(session_id="sbx_paused") is True
