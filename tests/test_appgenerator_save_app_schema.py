@@ -122,6 +122,39 @@ def _base_page():
     }
 
 
+@pytest.mark.parametrize("source", ["typed_output", "merged_baseline"])
+def test_page_name_cannot_overwrite_admitted_auth(tmp_path, monkeypatch, source):
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path))
+    approved_auth = "approved auth bytes remain unchanged\n"
+    escaped = {**_base_page(), "name": "../../config/auth", "route": "/escaped"}
+    generated_files = {"config/auth.yaml": approved_auth}
+    if source == "merged_baseline":
+        generated_files["ui/pages/escaped.yaml"] = yaml.safe_dump(escaped)
+        pages = [_base_page()]
+        manifest = {**_base_manifest(), "pages": ["Dashboard", escaped["name"]]}
+    else:
+        pages = [escaped]
+        manifest = {**_base_manifest(), "pages": [escaped["name"]]}
+    context = _Context({"generated_files": generated_files})
+    output_dir = save_app_schema_module._resolve_output_dir(context_variables=context, manifest_dict=manifest)
+    auth_file = output_dir / "config" / "auth.yaml"
+    auth_file.parent.mkdir(parents=True)
+    auth_file.write_text(approved_auth, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="page filename"):
+        save_app_schema_module.save_app_schema(manifest=manifest, pages=pages, context_variables=context)
+
+    assert auth_file.read_text(encoding="utf-8") == approved_auth
+    assert context.get("generated_files") == generated_files
+    assert context.get("app_schema_ready") is not True
+
+
+@pytest.mark.parametrize("relative", ["ui/pages/../../config/auth.yaml", "./ui/pages/home.yaml", "C:/auth.yaml"])
+def test_schema_artifact_target_rejects_noncanonical_or_escaping_paths(tmp_path, relative):
+    with pytest.raises(ValueError, match="App schema artifact path"):
+        save_app_schema_module._app_artifact_target(tmp_path, relative)
+
+
 def test_partial_schema_repair_preserves_pages_and_updates_validation_bundle(tmp_path, monkeypatch):
     monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path))
     dashboard = _base_page()

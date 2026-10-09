@@ -573,6 +573,16 @@ This project follows a practical pre-1.0 changelog format:
 - Android export from an installed distribution now reads an embedded exact
   source revision verified against wheel metadata; ordinary wheel installs no
   longer fail because they have no VCS `direct_url.json`.
+- AppGenerator rejects generated action permissions that do not resolve against
+  the approved auth contract during task admission, repair, and assembly.
+  A model-authored module contract remains subject to this check even if its
+  plan mislabels the module as a framework or operator pack.
+  Diagnostics identify the action and declared scope choices; valid restrictions
+  remain intact. Authenticated generation resolves early defaults from the
+  canonical auth scaffold instead of waiting for its file to be materialized.
+  Generated tasks cannot own or emit auth edits to approve their own permissions.
+  Typed page names cannot traverse into app config, and schema persistence
+  confines every rendered artifact to the generated app root.
 
 - Resuming an AppReview chat now restores scoped persisted workflow state to the
   durable AG2 channel under replay validation. Router-owned build checks no
