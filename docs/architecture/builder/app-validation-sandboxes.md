@@ -129,7 +129,8 @@ values at creation and command execution,
 requests denied internet egress, token-gated port access, and kill-on-timeout,
 confirms those settings through E2B's session information, and withholds the
 provider URL even after a worker reconnects. A paused sealed session is refused
-on reconnect; teardown kills by ID without resuming it. A future owner proxy must keep
+on reconnect; missing provider purpose metadata also fails closed. Teardown
+kills by ID without resuming the sandbox. A future owner proxy must keep
 E2B's traffic token server-side. The manager remains Docker-only until E2B has equivalent
 immutable staging, product-host boot, private owner-authorized proxying, and
 live acceptance evidence. Ordinary E2B artifact previews retain their existing

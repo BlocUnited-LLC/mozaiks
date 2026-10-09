@@ -12,6 +12,7 @@ from mozaiksai.core.ports.sandbox import SandboxRunResult, SandboxSessionInfo
 
 logger = get_core_logger("e2b_sandbox")
 _SEALED_PURPOSE = "sealed_candidate_preview"
+_ORDINARY_PURPOSES = frozenset({"artifact_preview", "app_validation"})
 _PINNED_BUILD_REF = re.compile(
     r"^(?:[A-Za-z0-9][A-Za-z0-9._-]*/)?[A-Za-z0-9][A-Za-z0-9._-]*:"
     r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
@@ -26,7 +27,7 @@ def _public_traffic_allowed(network: Any) -> bool | None:
 
 def _require_running_sealed_session(details: Any) -> None:
     metadata = getattr(details, "metadata", None)
-    if isinstance(metadata, dict) and metadata.get("purpose") != _SEALED_PURPOSE:
+    if isinstance(metadata, dict) and metadata.get("purpose") in _ORDINARY_PURPOSES:
         return
     if getattr(details, "state", None) != "running":
         raise RuntimeError("Sealed E2B session is not running; refusing to resume it")
@@ -93,8 +94,10 @@ class E2BSandboxAdapter:
         details = await asyncio.to_thread(sandbox.get_info)
         metadata = getattr(details, "metadata", None)
         # Unknown provider metadata must not reveal a sealed session host.
-        purpose = metadata.get("purpose") if isinstance(metadata, dict) else _SEALED_PURPOSE
-        return self._session_info(sandbox, metadata={"purpose": _SEALED_PURPOSE} if purpose == _SEALED_PURPOSE else None)
+        purpose = metadata.get("purpose") if isinstance(metadata, dict) else None
+        return self._session_info(
+            sandbox, metadata=None if purpose in _ORDINARY_PURPOSES else {"purpose": _SEALED_PURPOSE},
+        )
 
     async def _connect_sandbox(self, session_id: str, timeout_seconds: int | None = None):
         if session_id in self._sessions:
@@ -110,7 +113,7 @@ class E2BSandboxAdapter:
             timeout_seconds = max(1, int((info.end_at - datetime.now(UTC)).total_seconds()))
         sandbox = await asyncio.to_thread(sandbox_cls.connect, session_id, timeout=timeout_seconds)
         metadata = getattr(info, "metadata", None)
-        if not isinstance(metadata, dict) or metadata.get("purpose") == _SEALED_PURPOSE:
+        if not isinstance(metadata, dict) or metadata.get("purpose") not in _ORDINARY_PURPOSES:
             _require_running_sealed_session(await asyncio.to_thread(sandbox.get_info))
         self._sessions[session_id] = sandbox
         return sandbox
@@ -208,6 +211,9 @@ class E2BSandboxAdapter:
         cwd: str | None = None,
     ) -> dict[str, Any]:
         sandbox = await self._connect_sandbox(session_id)
+        metadata = getattr(await asyncio.to_thread(sandbox.get_info), "metadata", None)
+        if not isinstance(metadata, dict) or metadata.get("purpose") not in _ORDINARY_PURPOSES:
+            raise ValueError("Sealed E2B preview does not accept mutable file writes")
         written = []
         for path, content in files.items():
             resolved = self._resolve_path(path, cwd)
@@ -241,7 +247,7 @@ class E2BSandboxAdapter:
         if envs:
             details = await asyncio.to_thread(sandbox.get_info)
             metadata = getattr(details, "metadata", None)
-            if not isinstance(metadata, dict) or metadata.get("purpose") == _SEALED_PURPOSE:
+            if not isinstance(metadata, dict) or metadata.get("purpose") not in _ORDINARY_PURPOSES:
                 raise ValueError("Sealed E2B preview cannot receive command environment values")
         try:
             result = await asyncio.to_thread(
@@ -283,7 +289,7 @@ class E2BSandboxAdapter:
         details = await asyncio.to_thread(sandbox.get_info)
         metadata = getattr(details, "metadata", None)
         network = getattr(details, "network", None)
-        if not isinstance(metadata, dict) or metadata.get("purpose") == _SEALED_PURPOSE or (
+        if not isinstance(metadata, dict) or metadata.get("purpose") not in _ORDINARY_PURPOSES or (
             network is not None and _public_traffic_allowed(network) is False
         ):
             return None

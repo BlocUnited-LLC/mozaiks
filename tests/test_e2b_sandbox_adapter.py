@@ -85,6 +85,7 @@ async def test_e2b_adapter_uses_real_sdk_shape(monkeypatch) -> None:
             created.template = template
             created.timeout = timeout
             created.metadata = metadata
+            created.details.metadata = metadata or {}
             created.envs = envs
             return created
 
@@ -104,7 +105,7 @@ async def test_e2b_adapter_uses_real_sdk_shape(monkeypatch) -> None:
 
     adapter = E2BSandboxAdapter(default_template="mozaiks-runtime-v1", default_timeout_seconds=120)
 
-    session = await adapter.create_session(metadata={"app_id": "app-1"}, envs={"A": "1"})
+    session = await adapter.create_session(metadata={"purpose": "artifact_preview", "app_id": "app-1"}, envs={"A": "1"})
     assert session.session_id == "sbx_123"
     assert session.provider == "e2b"
 
@@ -171,7 +172,7 @@ async def test_reconnect_preserves_the_remaining_provider_deadline(monkeypatch):
 
     factory = Mock()
     factory.get_info.return_value = SimpleNamespace(
-        end_at=datetime.now(UTC) + timedelta(seconds=45), metadata={},
+        end_at=datetime.now(UTC) + timedelta(seconds=45), metadata={"purpose": "artifact_preview"},
     )
     factory.connect.return_value = _FakeSandbox()
     monkeypatch.setattr(_sandbox_mod, "Sandbox", factory)
@@ -256,6 +257,8 @@ async def test_sealed_e2b_session_confirms_network_isolation_and_hides_provider_
     assert factory.create.call_args.kwargs["lifecycle"] == {"on_timeout": "kill", "auto_resume": False}
     sandbox.get_host = Mock(side_effect=AssertionError("sealed host must remain private"))
     assert await adapter.get_preview_url(session_id=session.session_id, port=3000) is None
+    with pytest.raises(ValueError, match="mutable file writes"):
+        await adapter.write_files(session_id=session.session_id, files={"app/app.json": b"changed"})
     assert adapter._sessions[session.session_id] is sandbox
 
     reconnected = E2BSandboxAdapter()
@@ -271,12 +274,17 @@ async def test_sealed_e2b_session_confirms_network_isolation_and_hides_provider_
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kill_result", [True, False])
-async def test_paused_sealed_session_never_reconnects_and_teardown_kills_by_id(monkeypatch, kill_result):
+@pytest.mark.parametrize("metadata", [
+    {"purpose": "sealed_candidate_preview"}, {}, {"purpose": "unknown"}, None,
+])
+async def test_paused_sealed_session_never_reconnects_and_teardown_kills_by_id(
+    monkeypatch, kill_result, metadata,
+):
     from unittest.mock import Mock
 
     factory = Mock()
     factory.get_info.return_value = SimpleNamespace(
-        state="paused", metadata={"purpose": "sealed_candidate_preview"},
+        state="paused", metadata=metadata,
         end_at=datetime.now(UTC) + timedelta(seconds=45),
     )
     factory.kill.return_value = kill_result
