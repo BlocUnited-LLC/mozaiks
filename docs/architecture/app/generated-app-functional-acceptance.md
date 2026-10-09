@@ -147,8 +147,23 @@ enabled, crashed on every write and denied paying users. `app_runtime_smoke`
 (`factory_app/workflows/AppGenerator/tools/app_runtime_smoke.py`) runs the
 bundle instead.
 
-**Process boundary.** Generated code never runs in the factory process.
-Acceptance writes the bundle to a temporary `app/` root and the gate starts
+**Deployed execution hold.** In production, staging, and any other explicitly
+deployed environment, the Factory acceptance gate reports `app_runtime_load`
+and `app_runtime_smoke` as blocking `pending` checks. It does not import or boot
+generated Python on the host, and this acceptance result cannot authorize
+export or promotion. Static checks still report their own findings. Local and
+test environments retain the development checks described below. Their result
+is not production acceptance evidence. `SandboxPort` is the existing interface
+for a future isolated runner. Docker's `app_validation` session has no network
+or published ports, but still uses a writable workspace and does not require a
+pinned image. E2B's ordinary `app_validation` session does not attest sealed
+network and lifecycle policy. Neither adapter currently provides a sealed
+dynamic acceptance implementation.
+
+**Local smoke process.** The local/test acceptance gate first calls
+`AppLoader.load()` in the Factory process for `app_runtime_load`; that call
+imports generated module handlers. For `app_runtime_smoke`, acceptance writes
+the bundle to a temporary `app/` root and starts
 `python -m factory_app.workflows.AppGenerator.tools.app_runtime_smoke`:
 
 - The child's environment holds only what a Python process needs to start on
