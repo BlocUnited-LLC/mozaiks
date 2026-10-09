@@ -6,6 +6,7 @@ import pytest
 
 from factory_app.app.modules.messages.backend.service import MessageService
 from mozaiksai.core.runtime.app.module_loader import ModuleLoader
+from mozaiksai.core.runtime.persistence.adapter import PersistencePrincipal
 
 
 class _FakeCollection:
@@ -71,7 +72,8 @@ class _FakeCollection:
 
 
 class _FakePersistence:
-    def __init__(self):
+    def __init__(self, principal=None):
+        self.principal = principal
         self.collections = {
             ("messages", "threads"): _FakeCollection(),
             ("messages", "messages"): _FakeCollection(),
@@ -154,7 +156,7 @@ async def test_message_thread_lookup_requires_authorized_scope():
 @pytest.mark.asyncio
 async def test_workspace_scope_thread_can_be_messaged_from_current_workspace():
     emitted = []
-    persistence = _FakePersistence()
+    persistence = _FakePersistence(PersistencePrincipal("user_1", "workspace_1"))
     ctx = SimpleNamespace(
         app_id="app_1",
         workspace_id="workspace_1",
@@ -184,7 +186,12 @@ async def test_workspace_scope_thread_can_be_messaged_from_current_workspace():
 
 @pytest.mark.asyncio
 async def test_create_thread_rejects_scope_id_outside_current_context():
-    ctx = SimpleNamespace(app_id="app_1", workspace_id="workspace_1", user_id="user_1", persistence=_FakePersistence())
+    ctx = SimpleNamespace(
+        app_id="app_1",
+        workspace_id="workspace_1",
+        user_id="user_1",
+        persistence=_FakePersistence(PersistencePrincipal("user_1", "workspace_1")),
+    )
 
     with pytest.raises(PermissionError, match="app message scope"):
         await MessageService().create_thread(ctx, scope_type="app", scope_id="other_app")

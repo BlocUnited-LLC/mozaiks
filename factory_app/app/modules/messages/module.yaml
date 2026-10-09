@@ -38,7 +38,7 @@ actions:
           description: Whether the conversation belongs to one app or to workspace-level social context.
         scope_id:
           type: string
-          description: Optional explicit scope id. Defaults to ctx.app_id for app scope or ctx.workspace_id for workspace scope.
+          description: Optional explicit scope id. Defaults to ctx.app_id for app scope or the caller's verified workspace for workspace scope; any other id is refused.
         subject_app_id:
           type: string
           description: The app this conversation is about. Support threads should set this to the supported app id.

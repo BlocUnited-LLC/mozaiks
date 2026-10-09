@@ -146,10 +146,16 @@ class IntegrationDeclarationsRepo:
         docs = await coll.find({"app_id": app_id}).sort("service", 1).to_list(length=200)
         return [self._strip_mongo_id(d) for d in docs if isinstance(d, dict)]
 
-    async def get_catalog_usage_counts(self, *, catalog_ids: list[str] | None = None) -> dict[str, int]:
-        """Return {catalog_id: distinct_app_count} for the given catalog IDs (or all)."""
+    async def get_catalog_usage_counts(
+        self, *, app_ids: list[str], catalog_ids: list[str] | None = None,
+    ) -> dict[str, int]:
+        """Return usage counts only for the caller's registry-owned app IDs."""
+        if not app_ids:
+            return {}
         coll = await self._collection()
-        match_filter: dict[str, Any] = {"catalog_id": {"$ne": None}, "removed": {"$ne": True}}
+        match_filter: dict[str, Any] = {
+            "app_id": {"$in": app_ids}, "catalog_id": {"$ne": None}, "removed": {"$ne": True},
+        }
         if catalog_ids:
             match_filter["catalog_id"] = {"$in": catalog_ids}
         pipeline = [

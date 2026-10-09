@@ -111,6 +111,14 @@ Generic message lookups and mutations resolve `thread_id` inside the caller's
 current app or workspace scope before loading messages, updating the thread, or
 writing read state. A matching participant id alone is not enough to read or
 mutate a conversation from another app/workspace scope.
+The workspace scope is the caller's verified workspace: the workspace the
+validated token is bound to, or a membership a host scope hook verified
+(`verified_workspace_id`). A workspace named by the request (`scope_id`, the
+dispatch context or the query string) never selects it, and a signed-in caller
+with no verified workspace cannot create, list or open workspace threads. Local
+development (authentication off, development access) keeps using the dispatch
+workspace. A dispatch workspace or tenant that conflicts with the verified
+principal is refused before a thread read, write, or event emission.
 The profile support panel groups tickets by `subject_app_id`, keeping the
 authenticated runtime `app_id` separate from the app the ticket concerns. If a
 listed ticket has no accessible linked message thread, its `error` field tells
