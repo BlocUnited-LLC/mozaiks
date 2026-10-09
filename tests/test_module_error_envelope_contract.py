@@ -116,7 +116,12 @@ TEMPLATE = REPO_ROOT / "factory_app" / "workflows" / "AppGenerator" / "tools" / 
 # Functions whose behavior the browser tests depend on. Compared body-for-body
 # rather than whole-file, because the fixture legitimately omits helpers the
 # fixture app does not use.
-SHARED_FUNCTIONS = ("parseErrorPayload", "isEntitlementRequiredError", "moduleAction")
+SHARED_FUNCTIONS = (
+    "parseErrorPayload",
+    "isInsufficientTokensError",
+    "isEntitlementRequiredError",
+    "moduleAction",
+)
 
 
 def _js_function_body(source: str, name: str) -> str:
