@@ -13,6 +13,6 @@ _RUNTIME_REFS = {
 }
 
 
-def is_sealed_runtime_ref(provider: str, runtime_ref: str) -> bool:
+def is_sealed_runtime_ref(provider: str, runtime_ref: str | None) -> bool:
     pattern = _RUNTIME_REFS.get(provider)
     return isinstance(runtime_ref, str) and pattern is not None and pattern.fullmatch(runtime_ref) is not None

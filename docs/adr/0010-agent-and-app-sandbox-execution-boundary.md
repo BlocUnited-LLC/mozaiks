@@ -107,14 +107,15 @@ The first repository candidate preview step uses the existing
 `ArtifactPreviewSessionManager` admission, owner/build identity, TTL, and
 confirmed teardown. Its internal `create_sealed_candidate` method requires a
 canonical app archive, its exact SHA-256 digest, and a trusted local Docker
-image ID. The admission record binds both digests immutably. Existing mutable
+image ID or exact E2B template build reference. The admission record binds the
+archive digest and provider runtime reference immutably. Existing mutable
 artifact preview records keep their current identity shape.
-The trusted caller must also attest that the image build source and installed
+The trusted caller must also attest that the selected image or template build source and installed
 framework/dependencies match the candidate's `requirements.txt` and provenance
 before describing the result as an exact candidate preview. A syntactically
-valid local image ID alone does not establish that correspondence.
+valid runtime reference alone does not establish that correspondence.
 
-Before Docker allocation, the manager bounds and verifies the archive, rejects
+Before provider allocation, the manager bounds and verifies the archive, rejects
 paths outside `app/`, `workflows/`, and root `requirements.txt`, and matches `app/app.json` `appId`
 to the owned target. The Docker adapter runs the pinned local image without
 network, published ports, forwarded environment, runtime dependency install,
@@ -123,6 +124,14 @@ limits writable temporary state with tmpfs. The app runs as a non-root UID.
 Only a successful internal backend/frontend health check is returned; no raw
 preview URL or public route is created. The existing sync and start operations
 reject sealed sessions. Cleanup uses the same durable preview ledger.
+
+For E2B, the selected adapter stages the bounded source through a root-only
+upload and committed verifier, then locks the workspace against the runtime UID
+before boot. It confirms provider isolation and returns no URL. Stage failure
+kills by provider ID; a restarted worker cannot reconnect a sealed instance
+because E2B connect may resume it. This adds an offline framework boot path,
+not a browser route or hosted product acceptance. Live E2B provider proof and
+an owner-authorized token-holding gateway remain separate rollout gates.
 
 This is a closed boot check, not a browser preview or functional acceptance.
 It currently boots the framework platform host. Authenticated apps fail closed

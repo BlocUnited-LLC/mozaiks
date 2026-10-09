@@ -101,14 +101,15 @@ decision and configuration matrix is [ADR 0010](../../adr/0010-agent-and-app-san
 
 The internal sealed candidate path is an offline boot check before an
 interactive review surface exists. A trusted host passes a canonical archive,
-its exact digest, owner/build identity, and a local `sha256:` preview image ID
+its exact digest, owner/build identity, and a provider-specific exact runtime
+reference (local Docker `sha256:` image ID or E2B `template:build_id`)
 to `ArtifactPreviewSessionManager.create_sealed_candidate`. The archive accepts
 only `app/`, `workflows/`, and root `requirements.txt` files. The input ZIP is
 limited to 80,000,000 bytes; its files are limited to 2,000 entries,
 64,000,000 total bytes, and 8,000,000 bytes each, matching App Zero's
-candidate preparation limits. It is validated before Docker allocation.
+candidate preparation limits. It is validated before provider allocation.
 `requirements.txt` is staged as identity-bound read-only source and is never
-installed at runtime. The trusted caller must attest the local image's build
+installed at runtime. The trusted caller must attest the selected runtime build's
 source and installed dependencies against the candidate's framework pin and
 provenance before claiming exact candidate behavior. Source is staged once,
 read-only to the app UID. Docker has no network or published ports, and the
@@ -123,19 +124,69 @@ repeated create calls can return the cached active state. An authorized caller
 must use `status()` and account for its ten-second health-check interval before
 reporting a session as currently live.
 
-The E2B adapter also recognizes the internal sealed candidate purpose. It
-requires a specific `template:build_id` reference and rejects guest environment
-values at creation and command execution,
-requests denied internet egress, token-gated port access, and kill-on-timeout,
-confirms those settings through E2B's session information, and withholds the
-provider URL. After a worker restart, every sealed session is refused on
-reconnect because E2B's connect operation may resume it after inspection.
-Teardown kills by ID without resuming the sandbox. Missing provider purpose
-metadata also fails closed. A future owner proxy must keep
-E2B's traffic token server-side. The manager remains Docker-only until E2B has equivalent
-immutable staging, product-host boot, private owner-authorized proxying, and
-live acceptance evidence. Ordinary E2B artifact previews retain their existing
-interactive behavior and must not be used for private repository candidates.
+The E2B adapter accepts the same internal sealed purpose with an exact
+`template:build_id` reference. It requests denied internet egress, token-gated
+port access, and kill-on-timeout, confirms those settings from provider session
+information, and rejects forwarded guest environment values. E2B's returned
+`template_id` confirms a template identity but does not prove the selected
+build UUID; the exact create argument and committed template receipt provide
+that binding until live provider acceptance checks it. The manager stages
+the same verified archive through the adapter in one bounded private allocation.
+The adapter uploads a regular-file tar and per-file SHA-256 manifest as root;
+trusted code in the committed preview template rejects links, collisions,
+preexisting candidate paths, and mismatched content before exclusive extraction.
+It then verifies final hashes and root ownership and makes `/workspace`,
+`app/`, and `workflows/` nonwritable to UID 10001. Runtime commands execute as
+that UID. Mutable file writes, file reads, provider lifetime extension, and a
+public preview URL are unavailable for sealed sessions. Failed staging kills
+the provider session by ID and retains cleanup debt if the provider is down.
+After a worker restart, sealed sessions cannot reconnect because E2B's connect
+operation may resume a paused instance; cleanup still kills by ID. Ordinary E2B
+artifact previews keep their separate interactive behavior.
+
+This offline E2B path still boots the framework platform host, not a hosted
+product entrypoint, and has no owner-authorized browser proxy or live provider
+acceptance. A future browser gateway cannot recover E2B's traffic access token
+from process-local adapter sessions after a controller restart. It must own a
+trusted secret-backed token lifecycle or fail closed and tear down the session;
+the token, provider host, and candidate bytes must not enter the preview ledger.
+
+### Operator-only sealed E2B acceptance
+
+This sequence spends E2B credits only after the operator chooses to run it.
+First, use a clean committed OSS checkout whose source and dependencies match
+the intended candidate framework pin. Run
+`python scripts/build_e2b_preview_template.py --name mozaiks-preview` for a
+local dry run. With `E2B_API_KEY` supplied only to the operator's runtime, run
+the same command with `--confirm-paid-build`; record its `source_sha`,
+`context_sha256`, `template_id`, and `build_id`. Use the exact
+`mozaiks-preview:<build_id>` as `sealed_runtime_ref`, not an alias alone.
+
+With an isolated test ledger and the operator's API key available only to this
+process, the exact opt-in provider smoke is:
+
+```bash
+MOZAIKS_RUN_SEALED_E2B_SMOKE=1 \
+MOZAIKS_SEALED_E2B_BUILD_REF="mozaiks-preview:<build_id>" \
+python -m pytest tests/test_sealed_candidate_preview.py::test_real_e2b_sealed_public_app_boots_and_tears_down -q -s --no-cov
+```
+
+The smoke uses an in-process test ledger and allocates a real paid E2B sandbox.
+The durable Mongo ledger and hosted product entrypoint still need separate
+deployment acceptance before user traffic is enabled.
+
+In a private test environment, set `MOZAIKS_PREVIEW_PROVIDER=e2b` and call the
+trusted internal `create_sealed_candidate` method with an authorized owner/build,
+the canonical archive bytes, and its exact SHA-256. Verify the returned state
+has the expected provider and runtime reference, a successful health check,
+and `preview_url=None`; provider session metadata must confirm denied internet
+egress, no public traffic, kill-on-timeout, and no auto-resume. Check that the
+runtime UID cannot create or rename under `/workspace` or alter staged source,
+that no provider host or traffic token appears in the ledger or response, and
+that `stop()` kills the provider session by ID without reconnect. Recreate a
+separate session to verify worker-restart cleanup and provider-switch cleanup.
+Keep the session private throughout. Fake SDK and local Docker tests validate
+the code path but do not substitute for this live provider acceptance.
 
 Beyond one-shot validation, the Studio host mounts an artifact preview session
 API so the AppWorkbench can boot and restart a saved generated bundle on demand.
@@ -448,7 +499,7 @@ artifact storage, provider limits, and expected traffic before broad rollout.
 | `SANDBOX_OPERATION_LEASE_SECONDS` | `60` | renewed mutation lease; expired operations require teardown |
 | `SANDBOX_TEMPLATE` | provider default | artifact preview-session e2b template |
 | `MOZAIKS_PREVIEW_PROVIDER` | auto | `docker` (default) or explicit `e2b`; a key alone never selects E2B |
-| `SANDBOX_WORKDIR` | `/home/user/app` | e2b workspace root; Docker uses `/workspace` |
+| `SANDBOX_WORKDIR` | `/home/user/app` | ordinary e2b workspace root; sealed previews and Docker use `/workspace` |
 | `MOZAIKS_PREVIEW_ENV_<NAME>` | unset | explicit preview-only environment, never implicit host inheritance |
 | `APP_VALIDATION_BUILD_OUTPUT_MAX_CHARS` | `20000` | persisted build-output trim |
 

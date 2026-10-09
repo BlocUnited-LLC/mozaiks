@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import os
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
 from mozaiksai.core.adapters.docker_sandbox import DockerSandboxAdapter
+from mozaiksai.core.adapters.e2b_sandbox import E2BSandboxAdapter
+from mozaiksai.core.sandbox import preview_sessions
 from mozaiksai.core.sandbox.preview_sessions import ArtifactPreviewSessionManager
 from mozaiksai.core.semantics.archive import (
     ArchiveEntry,
@@ -96,6 +99,7 @@ async def test_legacy_sealed_image_record_fails_new_admission_but_still_cleans_u
 async def test_sealed_e2b_boot_uses_exact_runtime_ref_without_url_or_mutable_write():
     adapter = _SealedAdapter(provider="e2b")
     manager = _manager(adapter, provider="e2b")
+    manager._queue_seconds = 5
     data = _archive(**{"app/app.json": APP_JSON})
     state = await manager.create_sealed_candidate(
         **IDENTITY, archive_bytes=data, archive_sha256=archive_digest(data), sealed_runtime_ref=E2B_BUILD_REF,
@@ -106,8 +110,58 @@ async def test_sealed_e2b_boot_uses_exact_runtime_ref_without_url_or_mutable_wri
     assert len(creates) == 1 and creates[0]["template"] == E2B_BUILD_REF
     assert creates[0]["envs"] == {}
     assert not any(name in {"get_preview_url", "write_files"} for name, _ in adapter.calls)
+    manager._health_interval_seconds = 0
+    before = len(adapter.calls)
+    refreshed = await manager.status(state.sandbox_id)
+    assert refreshed.status == "running" and refreshed.preview_url is None
+    checks = [kwargs["command"] for name, kwargs in adapter.calls[before:] if name == "run_command"]
+    assert checks == ["python -m mozaiksai.core.sandbox.preview_runtime check --app-root /workspace/app"]
+    with pytest.raises(ValueError, match="cannot be synchronized"):
+        await manager.sync(state.sandbox_id, [{"path": "app.json", "content": "{}"}], [])
+    with pytest.raises(ValueError, match="cannot be restarted"):
+        await manager.start(state.sandbox_id)
     await manager.stop(state.sandbox_id)
     assert await manager._store.get(state.sandbox_id) is None
+
+
+@pytest.mark.asyncio
+async def test_ordinary_e2b_status_keeps_provider_workspace():
+    adapter = FakeSandboxAdapter(provider="e2b")
+    manager = _manager(adapter, provider="e2b")
+    manager._queue_seconds = 5
+    state = await manager.create_or_reuse("ordinary-a", **{key: IDENTITY[key] for key in ("app_id", "user_id", "target_app_id", "build_registry_id")})
+    await manager.sync(state.sandbox_id, [{"path": "app.json", "content": APP_JSON.decode()}], [])
+    await manager.start(state.sandbox_id)
+    manager._health_interval_seconds = 0
+    before = len(adapter.calls)
+    assert (await manager.status(state.sandbox_id)).status == "running"
+    checks = [kwargs["command"] for name, kwargs in adapter.calls[before:] if name == "run_command"]
+    assert checks == ["python -m mozaiksai.core.sandbox.preview_runtime check --app-root /home/user/app/app"]
+    await manager.stop(state.sandbox_id)
+
+
+@pytest.mark.asyncio
+async def test_sealed_e2b_expired_provider_lifetime_kills_before_attach(monkeypatch):
+    clock = [0.0]
+    monkeypatch.setattr(preview_sessions, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+
+    class ExpiringDuringHealth(_SealedAdapter):
+        async def run_command(self, **kwargs):
+            result = await super().run_command(**kwargs)
+            if " check --app-root " in kwargs["command"]:
+                clock[0] = 2_000.0
+            return result
+
+    adapter = ExpiringDuringHealth(provider="e2b")
+    manager = _manager(adapter, provider="e2b")
+    manager._queue_seconds = 5
+    data = _archive(**{"app/app.json": APP_JSON})
+    with pytest.raises(TimeoutError, match="expired before admission"):
+        await manager.create_sealed_candidate(
+            **IDENTITY, archive_bytes=data, archive_sha256=archive_digest(data), sealed_runtime_ref=E2B_BUILD_REF,
+        )
+    assert [name for name, _ in adapter.calls].count("terminate_session") == 1
+    assert await manager._store.list() == []
 
 
 @pytest.mark.asyncio
@@ -376,5 +430,37 @@ async def test_real_docker_sealed_public_app_boots_and_tears_down():
             command="printf tamper >> /workspace/app/app.json",
         )
         assert not immutable.success
+    finally:
+        await manager.stop(state.sandbox_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(os.getenv("MOZAIKS_RUN_SEALED_E2B_SMOKE") != "1", reason="opt-in paid E2B smoke")
+async def test_real_e2b_sealed_public_app_boots_and_tears_down():
+    pytest.importorskip("e2b_code_interpreter")
+    if not os.getenv("E2B_API_KEY") or not os.getenv("MOZAIKS_SEALED_E2B_BUILD_REF"):
+        pytest.fail("Live sealed E2B smoke requires E2B_API_KEY and MOZAIKS_SEALED_E2B_BUILD_REF")
+    adapter = E2BSandboxAdapter()
+    manager = _manager(adapter, provider="e2b")
+    manager._queue_seconds = 30
+    manager._startup_timeout_seconds = 120
+    data = _archive(**{"app/app.json": APP_JSON})
+    state = await manager.create_sealed_candidate(
+        **IDENTITY, archive_bytes=data, archive_sha256=archive_digest(data),
+        sealed_runtime_ref=os.environ["MOZAIKS_SEALED_E2B_BUILD_REF"],
+    )
+    try:
+        assert state.provider == "e2b" and state.status == "running" and state.preview_url is None
+        assert (await manager.status(state.sandbox_id)).status == "running"
+        assert await adapter.get_preview_url(session_id=state.session_id, port=3000) is None
+        runtime_uid = await adapter.run_command(session_id=state.session_id, command="id -u")
+        assert runtime_uid.success and runtime_uid.stdout.strip() == "10001"
+        immutable = await adapter.run_command(
+            session_id=state.session_id,
+            command="touch /workspace/new || mv /workspace/app /workspace/renamed",
+        )
+        assert not immutable.success
+        with pytest.raises(ValueError, match="lifetime"):
+            await adapter.extend_session(session_id=state.session_id, timeout_seconds=900)
     finally:
         await manager.stop(state.sandbox_id)
