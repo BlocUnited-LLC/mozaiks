@@ -4,6 +4,9 @@ import asyncio
 import os
 import posixpath
 import re
+import time
+from collections import OrderedDict
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -13,10 +16,19 @@ from mozaiksai.core.ports.sandbox import SandboxRunResult, SandboxSessionInfo
 logger = get_core_logger("e2b_sandbox")
 _SEALED_PURPOSE = "sealed_candidate_preview"
 _ORDINARY_PURPOSES = frozenset({"artifact_preview", "app_validation"})
+_MAX_CACHED_SESSIONS = 128
+_CACHE_REAP_PROBES = 4
 _PINNED_BUILD_REF = re.compile(
     r"^(?:[A-Za-z0-9][A-Za-z0-9._-]*/)?[A-Za-z0-9][A-Za-z0-9._-]*:"
     r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 )
+
+
+@dataclass
+class _CachedSession:
+    sandbox: Any
+    purpose: str
+    expires_at: float
 
 
 def _public_traffic_allowed(network: Any) -> bool | None:
@@ -47,7 +59,52 @@ class E2BSandboxAdapter:
         self._default_template = default_template or os.getenv("E2B_TEMPLATE") or None
         raw_timeout = default_timeout_seconds if default_timeout_seconds is not None else os.getenv("E2B_TIMEOUT")
         self._default_timeout_seconds = int(raw_timeout) if raw_timeout else 300
-        self._sessions: dict[str, Any] = {}
+        self._sessions: OrderedDict[str, _CachedSession] = OrderedDict()
+        self._pending_sessions = 0
+
+    def _prune_expired_sessions(self) -> None:
+        now = time.monotonic()
+        for session_id, entry in list(self._sessions.items()):
+            if entry.expires_at <= now:
+                self._sessions.pop(session_id, None)
+
+    async def _reserve_cache_slot(self) -> None:
+        self._prune_expired_sessions()
+        while len(self._sessions) + self._pending_sessions >= _MAX_CACHED_SESSIONS:
+            ordinary_id = next(
+                (session_id for session_id, entry in self._sessions.items() if entry.purpose in _ORDINARY_PURPOSES),
+                None,
+            )
+            if ordinary_id is None:
+                break
+            self._sessions.pop(ordinary_id)
+        if len(self._sessions) + self._pending_sessions >= _MAX_CACHED_SESSIONS:
+            # Another worker may have killed a sealed sandbox. A bounded,
+            # read-only probe can reclaim confirmed absence without connect().
+            for session_id, entry in list(self._sessions.items())[:_CACHE_REAP_PROBES]:
+                try:
+                    await asyncio.to_thread(self._require_sdk().get_info, session_id, request_timeout=5)
+                except _NOT_FOUND_ERRORS:
+                    if self._sessions.get(session_id) is entry:
+                        self._sessions.pop(session_id)
+                except Exception:
+                    pass  # Provider uncertainty keeps the sealed handle reserved.
+                else:
+                    if self._sessions.get(session_id) is entry:
+                        self._sessions.move_to_end(session_id)
+                self._prune_expired_sessions()
+                if len(self._sessions) + self._pending_sessions < _MAX_CACHED_SESSIONS:
+                    break
+        if len(self._sessions) + self._pending_sessions >= _MAX_CACHED_SESSIONS:
+            raise RuntimeError("E2B session cache is full; retry after a sealed session ends")
+        self._pending_sessions += 1
+
+    def _remember_session(self, session_id: str, sandbox: Any, purpose: str, timeout_seconds: int) -> None:
+        self._sessions[session_id] = _CachedSession(
+            sandbox=sandbox, purpose=purpose,
+            expires_at=time.monotonic() + timeout_seconds,
+        )
+        self._sessions.move_to_end(session_id)
 
     def _require_sdk(self):
         if Sandbox is None:
@@ -82,10 +139,16 @@ class E2BSandboxAdapter:
         )
 
     async def _connect_sandbox(self, session_id: str, timeout_seconds: int | None = None):
-        if session_id in self._sessions:
-            sandbox = self._sessions[session_id]
+        self._prune_expired_sessions()
+        entry = self._sessions.get(session_id)
+        if entry is not None:
+            self._sessions.move_to_end(session_id)
+            sandbox = entry.sandbox
             if timeout_seconds is not None:
+                if entry.purpose == _SEALED_PURPOSE:
+                    raise ValueError("Sealed E2B session lifetime cannot be extended")
                 await asyncio.to_thread(sandbox.set_timeout, timeout_seconds)
+                entry.expires_at = time.monotonic() + timeout_seconds
             return sandbox
         sandbox_cls = self._require_sdk()
         info = await asyncio.to_thread(sandbox_cls.get_info, session_id)
@@ -97,8 +160,12 @@ class E2BSandboxAdapter:
         if timeout_seconds is None:
             # SDK connect renews the lifetime; preserve the provider's deadline.
             timeout_seconds = max(1, int((info.end_at - datetime.now(UTC)).total_seconds()))
-        sandbox = await asyncio.to_thread(sandbox_cls.connect, session_id, timeout=timeout_seconds)
-        self._sessions[session_id] = sandbox
+        await self._reserve_cache_slot()
+        try:
+            sandbox = await asyncio.to_thread(sandbox_cls.connect, session_id, timeout=timeout_seconds)
+            self._remember_session(session_id, sandbox, metadata["purpose"], timeout_seconds)
+        finally:
+            self._pending_sessions -= 1
         return sandbox
 
     @staticmethod
@@ -137,49 +204,53 @@ class E2BSandboxAdapter:
             }
             if sealed else {}
         )
-        creation = asyncio.create_task(asyncio.to_thread(
-            sandbox_cls.create,
-            template=template or self._default_template,
-            timeout=timeout,
-            metadata=request_metadata,
-            envs=envs,
-            **isolation,
-        ))
+        await self._reserve_cache_slot()
         try:
-            sandbox = await asyncio.shield(creation)
-        except asyncio.CancelledError:
+            creation = asyncio.create_task(asyncio.to_thread(
+                sandbox_cls.create,
+                template=template or self._default_template,
+                timeout=timeout,
+                metadata=request_metadata,
+                envs=envs,
+                **isolation,
+            ))
             try:
-                sandbox = await creation
-                await asyncio.to_thread(sandbox.kill)
-            except Exception as exc:
-                logger.error("cancelled_sandbox_cleanup_failed exception=%s", type(exc).__name__)
-            raise
-        if sealed:
-            try:
-                details = await asyncio.to_thread(sandbox.get_info)
-                network = getattr(details, "network", None)
-                lifecycle = getattr(details, "lifecycle", None)
-                if (
-                    getattr(details, "allow_internet_access", None) is not False
-                    or _public_traffic_allowed(network) is not False
-                    or not isinstance(lifecycle, dict)
-                    or lifecycle.get("on_timeout") != "kill"
-                    or lifecycle.get("auto_resume") is not False
-                    or getattr(details, "metadata", {}).get("purpose") != _SEALED_PURPOSE
-                    or not getattr(details, "template_id", None)
-                ):
-                    raise RuntimeError("E2B did not confirm sealed preview isolation")
-            except (Exception, asyncio.CancelledError):
-                await asyncio.to_thread(sandbox.kill)
+                sandbox = await asyncio.shield(creation)
+            except asyncio.CancelledError:
+                try:
+                    sandbox = await creation
+                    await asyncio.to_thread(sandbox.kill)
+                except Exception as exc:
+                    logger.error("cancelled_sandbox_cleanup_failed exception=%s", type(exc).__name__)
                 raise
-            session_metadata = {"purpose": _SEALED_PURPOSE, "template_id": details.template_id}
-        else:
-            session_metadata = {}
-        self._sessions[sandbox.sandbox_id] = sandbox
-        return self._session_info(sandbox, metadata={
-            "template": template or self._default_template or "default",
-            **session_metadata,
-        })
+            if sealed:
+                try:
+                    details = await asyncio.to_thread(sandbox.get_info)
+                    network = getattr(details, "network", None)
+                    lifecycle = getattr(details, "lifecycle", None)
+                    if (
+                        getattr(details, "allow_internet_access", None) is not False
+                        or _public_traffic_allowed(network) is not False
+                        or not isinstance(lifecycle, dict)
+                        or lifecycle.get("on_timeout") != "kill"
+                        or lifecycle.get("auto_resume") is not False
+                        or getattr(details, "metadata", {}).get("purpose") != _SEALED_PURPOSE
+                        or not getattr(details, "template_id", None)
+                    ):
+                        raise RuntimeError("E2B did not confirm sealed preview isolation")
+                except (Exception, asyncio.CancelledError):
+                    await asyncio.to_thread(sandbox.kill)
+                    raise
+                session_metadata = {"purpose": _SEALED_PURPOSE, "template_id": details.template_id}
+            else:
+                session_metadata = {}
+            self._remember_session(sandbox.sandbox_id, sandbox, purpose, timeout)
+            return self._session_info(sandbox, metadata={
+                "template": template or self._default_template or "default",
+                **session_metadata,
+            })
+        finally:
+            self._pending_sessions -= 1
 
     async def connect(
         self,
@@ -292,8 +363,7 @@ class E2BSandboxAdapter:
         session_id: str,
         timeout_seconds: int,
     ) -> SandboxSessionInfo:
-        sandbox = await self._connect_sandbox(session_id)
-        await asyncio.to_thread(sandbox.set_timeout, timeout_seconds)
+        sandbox = await self._connect_sandbox(session_id, timeout_seconds=timeout_seconds)
         return await self._connected_session_info(sandbox)
 
     async def terminate_session(self, *, session_id: str) -> bool:

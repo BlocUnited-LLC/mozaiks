@@ -271,7 +271,7 @@ async def test_sealed_e2b_session_confirms_network_isolation_and_hides_provider_
     assert await adapter.get_preview_url(session_id=session.session_id, port=3000) is None
     with pytest.raises(ValueError, match="mutable file writes"):
         await adapter.write_files(session_id=session.session_id, files={"app/app.json": b"changed"})
-    assert adapter._sessions[session.session_id] is sandbox
+    assert adapter._sessions[session.session_id].sandbox is sandbox
 
     reconnected = E2BSandboxAdapter()
     factory.get_info.return_value = sandbox.details

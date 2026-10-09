@@ -131,7 +131,14 @@ confirms those settings through E2B's session information, and withholds the
 provider URL. After a worker restart, every sealed session is refused on
 reconnect because E2B's connect operation may resume it after inspection.
 Teardown kills by ID without resuming the sandbox. Missing provider purpose
-metadata also fails closed. A future owner proxy must keep
+metadata also fails closed. Each worker keeps at most 128 SDK handles: ordinary
+handles may be evicted and reconnected, while live sealed handles remain until
+their provider timeout. Expired handles are removed on the next adapter
+operation. When full, a few read-only provider probes may reclaim sessions
+confirmed absent after cross-worker teardown; otherwise the cache rejects
+another allocation before calling E2B's create operation. Expired sealed
+handles are never reconnected.
+A future owner proxy must keep
 E2B's traffic token server-side. The manager remains Docker-only until E2B has equivalent
 immutable staging, product-host boot, private owner-authorized proxying, and
 live acceptance evidence. Ordinary E2B artifact previews retain their existing
