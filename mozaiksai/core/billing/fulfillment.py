@@ -1091,6 +1091,34 @@ class BillingFulfillmentService:
             )
             return effects
 
+        if target.product_id is not None and target.assignment_store is not None:
+            status = command.status or "active"
+            if status not in target.assignment_store.active_statuses:
+                effects.append(
+                    BillingFulfillmentEffectResult(
+                        effect="plan_allowances",
+                        status="skipped",
+                        reason="inactive_subscription",
+                    )
+                )
+                return effects
+            if command.expires_at is not None:
+                expiry = command.expires_at
+                expiry = (
+                    expiry.replace(tzinfo=UTC)
+                    if expiry.tzinfo is None
+                    else expiry.astimezone(UTC)
+                )
+                if expiry <= _now():
+                    effects.append(
+                        BillingFulfillmentEffectResult(
+                            effect="plan_allowances",
+                            status="skipped",
+                            reason="expired",
+                        )
+                    )
+                    return effects
+
         effects.append(await self._apply_plan_allowances(command, target=target, plan=plan))
         return effects
 

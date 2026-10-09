@@ -238,7 +238,7 @@ def _v2_subscriptions_config(
             "label": "Multi-product SaaS",
             # A v2 subscription must never fall back to this root store.
             "assignment_store": {
-                "data_alias": "legacy.assignments",
+                "data_alias": "root.assignments",
                 "user_id_field": "user_id",
             },
             "token_wallets": [
@@ -258,6 +258,7 @@ def _v2_subscriptions_config(
                     "assignment_store": None if missing_store else {
                         "data_alias": "ai.assignments",
                         "user_id_field": "user_id",
+                        "active_statuses": ["active"],
                     },
                     "plans": [
                         {"plan_id": "ai_free", "label": "Free", "capabilities": []},
@@ -594,6 +595,53 @@ async def test_v2_explicit_empty_paid_snapshot_does_not_grant_catalog_allowance(
     assignment = await _assignment(assignments)
     assert assignment["token_allowances"] == []
     assert assignment["plan_snapshot"]["token_allowances"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "expires_at", "expected_reason", "expected_calls"),
+    [
+        ("pending", None, "inactive_subscription", 0),
+        ("active", datetime(2020, 1, 1, tzinfo=UTC), "expired", 0),
+        ("active", datetime(2099, 1, 1, tzinfo=UTC), None, 1),
+    ],
+)
+async def test_v2_allowance_requires_active_unexpired_assignment(
+    status: str,
+    expires_at: datetime | None,
+    expected_reason: str | None,
+    expected_calls: int,
+) -> None:
+    assignments = _Collection()
+    ledger = _AllowancePeriodLedger()
+    service = BillingFulfillmentService(
+        config=_v2_subscriptions_config(),
+        ledger=ledger,  # type: ignore[arg-type]
+        collection_resolver=lambda _alias: assignments,
+    )
+
+    result = await service.apply(
+        BillingFulfillmentCommand(
+            command_id=f"cmd_v2_{status}_{expected_reason or 'eligible'}",
+            event_type="subscription_activated",
+            source="test",
+            app_id="app_1",
+            user_id="user_1",
+            product_id="ai",
+            plan_id="ai_pro",
+            status=status,
+            expires_at=expires_at,
+            token_allowances=[
+                {"wallet_id": "ai_tokens", "amount": 350, "cadence": "monthly"}
+            ],
+        )
+    )
+
+    assignment = await _assignment(assignments)
+    assert assignment["status"] == status
+    assert result.effects[0].status == "applied"
+    assert result.effects[1].reason == expected_reason
+    assert len(ledger.calls) == expected_calls
 
 
 @pytest.mark.asyncio
