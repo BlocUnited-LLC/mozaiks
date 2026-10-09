@@ -23,7 +23,12 @@ dispatch:
    and retain evidence identifying both commits. A version requirement can be
    considered after publication; it does not replace the acceptance pin.
 3. Confirm the candidate is the current `origin/main` commit and its **push**
-   CI run succeeded. The Release workflow checks both again before upload.
+   CI run succeeded. The `package` CI job installs the built wheel's
+   `[acp-coding,e2b]` extras in its clean environment and verifies imports and
+   dependencies without contacting either provider. It also runs the E2B
+   adapter and teardown contract tests with the optional SDK installed, so
+   missing-SDK skips cannot hide provider API drift. The Release workflow
+   checks the candidate commit and push CI again before upload.
 4. Run the local release-candidate audit against a throwaway MongoDB server on
    a non-default port. It covers governance, wheel and sdist build, package
    content, metadata, strict documentation, clean-wheel install, packaged
@@ -78,6 +83,14 @@ The audit script is `scripts/run_release_audit.py`. Its first-run smoke starts
 both platform and Studio hosts and checks readiness and shell configuration
 from the installed wheel. A passing audit on a different SHA is not release
 evidence for the selected candidate.
+
+The PyPI wheel and sdist contain the Python ACP and E2B adapters, but not the
+repo-local `infra/docker/` image recipes or
+`scripts/build_e2b_preview_template.py`. Operators enabling live ACP or hosted
+E2B must build their runtime images/templates from the exact clean OSS source
+commit and retain the source SHA and immutable image/template build identity.
+Installing either Python extra does not provide a sandbox image or activate a
+paid provider.
 
 ## Optional TestPyPI rehearsal
 

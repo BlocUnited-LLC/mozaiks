@@ -502,6 +502,57 @@ jobs:
           . .pkg-venv/bin/activate
           pip install dist/*.whl
 
+      - name: Verify optional ACP and E2B wheel extras
+        run: |
+          . .pkg-venv/bin/activate
+          wheel_path="$(realpath dist/*.whl)"
+          python -m pip install "${wheel_path}[acp-coding,e2b]"
+          python -m pip check
+          cd /tmp
+          python -I - <<'PY'
+          from importlib import import_module
+          from importlib.metadata import metadata, version
+          from pathlib import Path
+          import sysconfig
+
+          extras = set(metadata("mozaiks").get_all("Provides-Extra") or ())
+          required = {"acp-coding", "e2b"}
+          if not required.issubset(extras):
+              raise SystemExit(f"Wheel missing optional extras: {sorted(required - extras)}")
+
+          site_packages = Path(sysconfig.get_paths()["purelib"]).resolve()
+          for name in (
+              "acp",
+              "ag2.acp",
+              "e2b_code_interpreter",
+              "mozaiksai.control_plane.implementations.acp_coding_provider",
+              "mozaiksai.core.adapters.e2b_sandbox",
+          ):
+              module = import_module(name)
+              module_path = Path(module.__file__).resolve()
+              if not module_path.is_relative_to(site_packages):
+                  raise SystemExit(f"Optional module imported outside installed wheel: {module_path}")
+
+          from mozaiksai.core.adapters.e2b_sandbox import Sandbox
+
+          if Sandbox is None:
+              raise SystemExit("Installed E2B adapter could not import its optional SDK")
+          print(
+              "Optional wheel extras import offline:",
+              f"ag2={version('ag2')}",
+              f"agent-client-protocol={version('agent-client-protocol')}",
+              f"e2b-code-interpreter={version('e2b-code-interpreter')}",
+          )
+          PY
+
+      - name: Verify E2B adapter tests with optional SDK installed
+        run: |
+          . .pkg-venv/bin/activate
+          python -m pip install pytest pytest-asyncio
+          python -m pytest -q -o addopts= \
+            tests/test_e2b_sandbox_adapter.py \
+            tests/test_e2b_sandbox_teardown.py
+
       - name: Smoke installed CLI
         run: |
           . .pkg-venv/bin/activate
