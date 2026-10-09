@@ -39,6 +39,12 @@ This project follows a practical pre-1.0 changelog format:
   declarations now require an app registry record owned by the caller, and
   catalog usage counts include only that caller's registered apps.
 
+### Fixed
+
+- Existing previews continue to use their recorded Docker or E2B provider
+  after the configured provider changes, so a restarted worker can stop them
+  and release capacity without routing cleanup to the wrong sandbox.
+
 ## 0.2.0 - 2026-10-09
 
 ### Added
