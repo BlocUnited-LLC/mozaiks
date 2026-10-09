@@ -254,6 +254,7 @@ jobs:
           python - <<'PY'
           from importlib.util import find_spec
 
+          from mozaiksai.core.metrics.d30_cohort import calculate_d30_action_cohort
           from mozaiksai.core.runtime import persistence
           from mozaiksai.core.runtime.app.module_loader import ActionDef
 
@@ -273,6 +274,8 @@ jobs:
 
           if find_spec("mozaiksai.core.runtime.app.subscriptions_loader") is None:
               raise SystemExit("Installed wheel missing subscriptions_loader runtime module")
+          if not callable(calculate_d30_action_cohort):
+              raise SystemExit("Installed wheel missing D30 cohort calculator")
 
           print("Installed wheel runtime contracts are present")
           PY

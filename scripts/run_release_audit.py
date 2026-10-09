@@ -107,6 +107,11 @@ def step_smoke_install(wheels: list[Path]) -> Path:
 
     # CLI sanity check.
     _run([str(python), "-m", "mozaiks", "--version"], cwd=venv_dir)
+    # Verify the generic cohort primitive is present in the installed wheel.
+    _run(
+        [str(python), "-c", "from mozaiksai.core.metrics.d30_cohort import calculate_d30_action_cohort"],
+        cwd=venv_dir,
+    )
 
     return python
 

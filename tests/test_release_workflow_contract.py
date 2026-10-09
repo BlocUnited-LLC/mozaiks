@@ -67,6 +67,14 @@ def test_publication_requires_dated_notes_and_protected_pypi_environment() -> No
     assert 'branch_policy.get("custom_branch_policies") is not False' in protection
 
 
+def test_release_audits_installed_d30_calculator() -> None:
+    cohort_import = (
+        "from mozaiksai.core.metrics.d30_cohort import calculate_d30_action_cohort"
+    )
+    assert cohort_import in _step("build", "Verify installed wheel runtime contracts")["run"]
+    assert cohort_import in (ROOT / "scripts/run_release_audit.py").read_text(encoding="utf-8")
+
+
 @pytest.mark.parametrize(
     ("changelog", "error"),
     [
