@@ -154,13 +154,14 @@ name the caller directly. Hosted customer alerts and app-wide announcements
 need trusted recipient IDs or a separately reviewed generic audience contract;
 a broad token role or permission cannot grant access to another workspace.
 New notifications omit absent tenant/workspace owners and skip creation when
-an explicitly supplied owner has an invalid type. Older records with present
+an explicitly supplied owner has an invalid type or conflicts across nested
+and top-level event fields. Older records with present
 null or malformed owners remain hidden.
 Notification rules declaring `audience.user_id_field` create no record when
 the field name is invalid or the event lacks a nonempty string recipient or
 a list of nonempty string recipients; an unresolved direct target cannot
 become app-wide. A list-valued recipient field must be in a structured event
-`payload`; the legacy flat-event projection carries scalar fields only.
+`payload`; flat event projections carry scalar fields only.
 
 ### Reaction target reference
 

@@ -129,7 +129,8 @@ This project follows a practical pre-1.0 changelog format:
   reads and bulk actions; app-wide alerts and ordinary direct messages remain
   available. Role- or permission-targeted alerts with tenant or workspace
   ownership require the matching verified scope, and ownerless broad-audience
-  alerts are hidden. All
+  alerts are hidden. New alerts use the event's normalized owner and reject
+  malformed or conflicting owner fields. All
   notification reads and mutations are limited to the app loaded by the host,
   including when a token has no app claim.
 - Direct-recipient notification rules now skip derivation when the field name

@@ -428,6 +428,79 @@ def test_malformed_generated_owner_never_broadens_role_alert(
     }) == 0
 
 
+@pytest.mark.parametrize("nested_owner", ["", None])
+@pytest.mark.parametrize("owner_key", ["tenant_id", "workspace_id"])
+def test_generated_owner_fallback_matches_provenance_and_member_scope(
+    notification_http, owner_key, nested_owner,
+):
+    event_type = "hosted.hosting.app.deployed"
+    notification_id = f"fallback-{owner_key}-{nested_owner!r}"
+    tenant = {"tenant_id": TENANT_A, "workspace_id": WORKSPACE_A}
+    tenant[owner_key] = nested_owner
+    top_owner = TENANT_B if owner_key == "tenant_id" else WORKSPACE_A
+    envelope = {
+        "id": f"event-{notification_id}", "type": event_type,
+        "tenant": tenant, "app_id": APP_ID, owner_key: top_owner,
+        "payload": {"hosting_url": "https://example.invalid"},
+    }
+    emitted = []
+
+    async def store(record):
+        record["notification_id"] = notification_id
+        notification_http.collection.insert_one(record)
+
+    async def emit(_event_type, event):
+        emitted.append(event)
+
+    asyncio.run(ModuleEventRouter(
+        [], notification_store=store, event_emitter=emit,
+    )._create_notification({
+        "id": "hosting_deployed.user", "module_id": "hosting",
+        "audience": {"roles": ["owner"]},
+        "template": {"title": "App deployed", "body": "Deployment complete"},
+    }, event_type, envelope))
+    record = notification_http.collection.find_one({"notification_id": notification_id})
+    assert record is not None
+    expected = {
+        "app_id": APP_ID,
+        "tenant_id": TENANT_B if owner_key == "tenant_id" else TENANT_A,
+        "workspace_id": WORKSPACE_A,
+    }
+    assert {key: record[key] for key in expected} == expected
+    assert [event["tenant"] for event in emitted] == [expected, expected]
+
+    member_a = notification_http.token(WORKSPACE_A, roles=["owner"])
+    member_b = notification_http.token(WORKSPACE_B, roles=["owner"])
+    assert (notification_id in _ids(notification_http.client.get(
+        "/api/notifications", headers=member_a,
+    ))) is (owner_key == "workspace_id")
+    assert notification_id not in _ids(notification_http.client.get(
+        "/api/notifications", headers=member_b,
+    ))
+
+
+@pytest.mark.parametrize("owner_key", ["tenant_id", "workspace_id"])
+def test_conflicting_generated_owner_fields_create_no_role_alert(notification_http, owner_key):
+    event_type = "hosted.hosting.app.deployed"
+    tenant = {"app_id": APP_ID, "tenant_id": TENANT_A, "workspace_id": WORKSPACE_A}
+    envelope = {
+        "id": f"event-conflict-{owner_key}", "type": event_type,
+        "tenant": tenant,
+        owner_key: TENANT_B if owner_key == "tenant_id" else WORKSPACE_B,
+        "payload": {"hosting_url": "https://example.invalid"},
+    }
+
+    async def store(record):
+        notification_http.collection.insert_one(record)
+
+    asyncio.run(ModuleEventRouter([], notification_store=store)._create_notification({
+        "id": "hosting_deployed.user", "module_id": "hosting",
+        "audience": {"roles": ["owner"]},
+        "template": {"title": "App deployed", "body": "Deployment complete"},
+    }, event_type, envelope))
+    assert notification_http.collection.count_documents({"source_event_id": envelope["id"]}) == 0
+
+
 def test_present_null_owners_do_not_authorize_a_broad_alert(notification_http):
     record = _role_record("malformed-null-owners", workspace_id=None)
     record["tenant_id"] = None

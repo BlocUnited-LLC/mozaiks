@@ -925,6 +925,7 @@ class ModuleEventRouter:
                 "app_id": str(envelope.get("app_id") or ""),
                 "tenant_id": str(envelope.get("tenant_id") or ""),
             }
+        event_provenance = normalize_module_event_provenance(event_type, envelope)
 
         template = rule.get("template") if isinstance(rule.get("template"), dict) else {}
         if not template and (rule.get("title") or rule.get("body")):
@@ -979,7 +980,7 @@ class ModuleEventRouter:
             "module_id": rule.get("module_id"),
             "event_type": event_type,
             "source_event_id": envelope.get("id"),
-            "app_id": tenant.get("app_id"),
+            "app_id": event_provenance.app_id,
             "actor": envelope.get("actor") if isinstance(envelope.get("actor"), dict) else None,
             "audience": audience,
             "channels": rule.get("channels") if isinstance(rule.get("channels"), list) else ["in_app"],
@@ -989,28 +990,42 @@ class ModuleEventRouter:
             "created_at": _utc_now(),
             "source_event": envelope,
         }
-        # Do not turn a malformed present owner into an absent owner: the
-        # normalized provenance can discard invalid values such as [].
+        # Store the same owner chosen by event provenance. A malformed or
+        # contradictory supplied owner must never become an unowned alert.
         for owner_key in ("tenant_id", "workspace_id"):
-            if isinstance(raw_tenant, dict) and owner_key in raw_tenant:
-                raw_owner = raw_tenant[owner_key]
-            else:
-                raw_owner = envelope.get(owner_key)
-            if raw_owner is None:
-                continue
-            if not isinstance(raw_owner, str):
+            raw_owners = [
+                source[owner_key]
+                for source in (raw_tenant if isinstance(raw_tenant, dict) else {}, envelope)
+                if owner_key in source
+            ]
+            supplied_owners = {
+                owner.strip() for owner in raw_owners
+                if isinstance(owner, str) and owner.strip()
+            }
+            if any(owner is not None and not isinstance(owner, str) for owner in raw_owners) or (
+                len(supplied_owners) > 1
+            ):
                 logger.warning(
                     "NOTIFICATION_OWNER_INVALID: rule_id=%s field=%s",
                     rule.get("id"), owner_key,
                 )
                 return
-            if raw_owner.strip():
-                record[owner_key] = raw_owner.strip()
+            normalized_owner = getattr(event_provenance, owner_key)
+            if normalized_owner:
+                record[owner_key] = normalized_owner
         if context is not None:
             record["context"] = context
 
         await self._store_notification(record)
         if self._event_emitter is not None:
+            notification_tenant = {
+                **tenant,
+                "app_id": record["app_id"],
+            }
+            for owner_key in ("tenant_id", "workspace_id"):
+                notification_tenant.pop(owner_key, None)
+                if owner_key in record:
+                    notification_tenant[owner_key] = record[owner_key]
             notification_event = {
                 "id": f"evt_{uuid4().hex}",
                 "type": "notification.created",
@@ -1021,7 +1036,7 @@ class ModuleEventRouter:
                     "module_id": rule.get("module_id"),
                     "notification_id": record["notification_id"],
                 },
-                "tenant": tenant,
+                "tenant": notification_tenant,
                 "correlation": envelope.get("correlation") if isinstance(envelope.get("correlation"), dict) else {},
                 "payload": record,
                 "visibility": "internal",
@@ -1036,10 +1051,10 @@ class ModuleEventRouter:
                     "layer": "platform",
                     "module_id": rule.get("module_id"),
                 },
-                "tenant": tenant,
+                "tenant": notification_tenant,
                 "correlation": envelope.get("correlation") if isinstance(envelope.get("correlation"), dict) else {},
                 "payload": {
-                    "app_id": tenant.get("app_id"),
+                    "app_id": record["app_id"],
                     "module_id": rule.get("module_id"),
                 },
                 "visibility": "internal",
