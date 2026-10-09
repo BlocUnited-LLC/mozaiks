@@ -1287,6 +1287,33 @@ test('apps route stays responsive across desktop and mobile widths', async ({ pa
   }
 });
 
+test('Apps offers a clear recovery when its directory request fails', async ({ page }, testInfo) => {
+  let attempts = 0;
+  await page.route('**/api/studio/apps', async (route) => {
+    attempts += 1;
+    await route.fulfill(attempts === 1
+      ? { status: 503, json: { detail: 'Temporary service issue' } }
+      : { status: 200, json: appsPayload });
+  });
+
+  await page.goto('/apps');
+  const alert = page.getByRole('alert').filter({ hasText: 'Could not load apps' });
+  await expect(alert).toBeVisible();
+  await expect(alert).toContainText('The app list is temporarily unavailable.');
+  await expect(alert).not.toContainText('503');
+  if (process.env.UI_QA_SCREENSHOT_DIR) {
+    fs.mkdirSync(process.env.UI_QA_SCREENSHOT_DIR, { recursive: true });
+    await page.screenshot({
+      path: path.join(process.env.UI_QA_SCREENSHOT_DIR, `${testInfo.project.name}-apps-error.png`),
+    });
+  }
+
+  await alert.getByRole('button', { name: 'Try again' }).click();
+  await expect(page.getByRole('heading', { name: 'Apps' })).toBeVisible();
+  await expect(page.getByText('Campaign Revision Workbench').filter({ visible: true }).first()).toBeVisible();
+  expect(attempts).toBe(2);
+});
+
 test('create app transition overlay can return to Apps', async ({ page, isMobile }) => {
   // Mobile CI: touch-emulated click on Create App intermittently fails to trigger
   // React Router navigation in time on slow runners. The overlay itself renders

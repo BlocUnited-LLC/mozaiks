@@ -415,9 +415,9 @@ export function ErrorState({ title = 'Unavailable', message, action = null, clas
       role="alert"
       aria-live="assertive"
     >
-      <div className="max-w-xl rounded-lg border border-destructive/35 bg-destructive/10 p-5 shadow-sm">
-        <div className="text-xs font-semibold text-destructive">{title}</div>
-        {message ? <p className="mt-3 text-sm leading-6 text-foreground">{message}</p> : null}
+      <div className="w-full max-w-xl rounded-lg border border-border/80 border-l-4 border-l-destructive bg-card p-6 shadow-lg shadow-black/10">
+        <div className="text-lg font-semibold leading-7 text-foreground">{title}</div>
+        {message ? <p className="mt-2 text-sm leading-6 text-muted-foreground">{message}</p> : null}
         {action ? <div className="mt-5"><PrimitiveAction action={action} /></div> : null}
       </div>
     </div>

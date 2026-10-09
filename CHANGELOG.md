@@ -21,6 +21,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Studio Apps now explains temporary load failures in plain language and offers
+  a working retry, with a clearer error card on desktop and mobile.
+
 - Restored the assistant launcher on declared app home pages and other custom
   routes, while keeping it hidden on full chat pages, declared chat aliases and
   sign-in surfaces. The widget uses the app's name and offers workflow access
