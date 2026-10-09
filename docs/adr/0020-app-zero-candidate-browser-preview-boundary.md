@@ -75,13 +75,17 @@ record can substitute for that durable identity.
 ## Browser delivery and identity
 
 - App Zero issues a short-lived, single-use launch ticket bound to owner,
-  candidate, archive digest, build, and preview session. The gateway redeems it
-  server-side, checks the current owner and preview state, and uses a host-only,
-  `Secure`, `HttpOnly` browser session with revocation. Provider credentials and
-  product bearer tokens are never placed in browser storage, query strings,
-  `postMessage` payloads, or candidate requests. A new tab on the dedicated
-  preview origin is the initial UX; embedding needs a later explicit frame and
-  cookie policy decision.
+  candidate, archive digest, build, and preview session. A deliberate owner
+  action submits it in a top-level, cross-origin form `POST` to the gateway.
+  The gateway requires the exact product `Origin`, redeems the ticket once
+  server-side before loading any candidate content, checks current owner and
+  preview state, then redirects to a clean preview URL with a host-only,
+  `Secure`, `HttpOnly` browser session with revocation. The ticket never appears
+  in a URL, fragment, referrer, browser storage, or candidate response. The
+  launch response is not cached. Provider credentials and product bearer tokens
+  are never placed in browser storage, query strings, `postMessage` payloads,
+  or candidate requests. A new tab on the dedicated preview origin is the
+  initial UX; embedding needs a later explicit frame and cookie policy decision.
 - Each preview gets a unique origin that is never reassigned to another
   candidate or owner; this isolates browser storage and service workers across
   sessions. Hosted deployment must use a domain boundary that cannot receive
