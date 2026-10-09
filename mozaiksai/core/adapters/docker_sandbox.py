@@ -130,8 +130,10 @@ class DockerSandboxAdapter:
         # get_preview_url's `docker port` lookup can resolve a URL. Without
         # -p at create time no binding ever exists and docker previews are
         # structurally dead.
-        sealed_candidate = bool(metadata and metadata.get("purpose") == "sealed_candidate_preview")
-        offline_validation = bool(metadata and metadata.get("purpose") == "app_validation") or sealed_candidate
+        purpose = (metadata or {}).get("purpose")
+        sealed_candidate = purpose == "sealed_candidate_preview"
+        diagnostic_worker = purpose == "app_runtime_diagnostic"
+        offline_validation = purpose in {"app_validation", "app_runtime_diagnostic", "sealed_candidate_preview"}
         if sealed_candidate:
             if not _IMAGE_ID_RE.fullmatch(image) or envs:
                 raise ValueError("Sealed preview requires a pinned local image ID and no environment overrides")
@@ -145,6 +147,15 @@ class DockerSandboxAdapter:
                 port_args += ["-p", f"127.0.0.1:0:{container_port}"]
 
         # Run a long-lived idle container so we can exec into it
+        # Generated app Python used for repair diagnostics gets only bounded,
+        # disposable writable space. The image filesystem stays read-only.
+        diagnostic_args = ([
+            "--read-only", "--user", "10001:10001", "--memory-swap=2g",
+            "--log-driver=none",
+            "--tmpfs", "/workspace:rw,nosuid,nodev,size=128m,uid=10001,gid=10001,mode=0750",
+            "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m,mode=1777",
+            "--tmpfs", "/home/sandbox:rw,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=0750",
+        ] if diagnostic_worker else [])
         rc, stdout, stderr = await self._run([
             "docker", "run", "-d", "--rm",
             "--init", "--cap-drop=ALL", "--security-opt=no-new-privileges",
@@ -157,6 +168,7 @@ class DockerSandboxAdapter:
                "--tmpfs", "/opt/mozaiks/web_shell/node_modules/.vite-temp:rw,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=0700",
                "--tmpfs", "/opt/mozaiks/web_shell/node_modules/.vite:rw,nosuid,nodev,size=64m,uid=10001,gid=10001,mode=0700"]
               if sealed_candidate else []),
+            *diagnostic_args,
             *(["--network", "none"] if offline_validation else []),
             "-w", _DEFAULT_WORKDIR,
             *label_args,
@@ -384,6 +396,8 @@ class DockerSandboxAdapter:
             ["docker", "stop", session_id],
             timeout=15.0,
         )
+        # A successful stop is not evidence that an --rm container is gone.
+        # Acceptance must confirm absence before recording worker cleanup.
         attempts = 3 if stop_rc == 0 else 1
         for attempt in range(attempts):
             rc, stdout, _ = await self._run(
@@ -396,6 +410,8 @@ class DockerSandboxAdapter:
                 return True
             if attempt < attempts - 1:
                 await asyncio.sleep(0.1)
+        # A stopped container can linger despite --rm. Force removal and
+        # require one final host-side absence check before returning success.
         await self._run(["docker", "rm", "-f", session_id], timeout=15.0)
         rc, stdout, _ = await self._run(
             ["docker", "ps", "--all", "--quiet", "--no-trunc", "--filter", f"id={session_id}"],

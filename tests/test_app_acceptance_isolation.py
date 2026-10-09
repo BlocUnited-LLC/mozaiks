@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from factory_app.workflows.AppGenerator.tools import app_runtime_smoke, app_validation
+from tests.test_generated_app_functional_acceptance import _basic_crud_files
 
 
 def _files() -> dict[str, str]:
@@ -61,6 +62,7 @@ async def test_generated_load_uses_only_contained_diagnostic_worker(monkeypatch)
     calls: list[tuple[str, object]] = []
     result_json = json.dumps({
         "contract_version": "1.0", "passed": True,
+        "worker_containment_verified": False,
         "checks": [{"id": "app_runtime_load", "passed": True}],
         "failed_tests": [], "warnings": [], "details": {"app_name": "Fixture"},
     })
@@ -88,10 +90,11 @@ async def test_generated_load_uses_only_contained_diagnostic_worker(monkeypatch)
     result = await app_validation._app_runtime_load_result(_files())
 
     assert result["passed"] is True
+    assert result["worker_containment_verified"] is True
     assert result["validator_image_id"] == image_id
     assert [kind for kind, _ in calls] == ["adapter", "create", "write", "run", "run", "remove"]
     assert calls[0][1]["image"] == image_id
-    assert calls[1][1]["metadata"] == {"purpose": "app_validation"}
+    assert calls[1][1]["metadata"] == {"purpose": "app_runtime_diagnostic"}
     assert calls[2][1]["files"] == _files()
     assert "app_runtime_load_probe" in calls[3][1]["command"]
 
@@ -116,6 +119,7 @@ async def test_generated_load_requires_confirmed_container_removal(monkeypatch):
             if kwargs["command"].startswith("head "):
                 return SimpleNamespace(success=True, stdout=json.dumps({
                     "contract_version": "1.0", "passed": True, "checks": [],
+                    "worker_containment_verified": True,
                     "failed_tests": [], "details": {},
                 }))
             return SimpleNamespace(success=True, stdout="")
@@ -128,6 +132,7 @@ async def test_generated_load_requires_confirmed_container_removal(monkeypatch):
 
     assert result["status"] == "skipped"
     assert result["passed"] is None
+    assert result.get("worker_containment_verified") is not True
     assert "removal" in result["skipped_reason"]
 
 
@@ -234,3 +239,97 @@ async def test_generated_acceptance_uses_local_docker_with_poisoned_client_setti
     assert smoked["observed_boot"] == {"check": "boot.http_ready", "status": "passed"}
     assert smoked["status"] == "pending"
     assert smoked["observer_unverified_checks"] == ["event_rejection"]
+
+
+@pytest.mark.asyncio
+async def test_loader_diagnostic_cannot_authorize_or_block_promotion(monkeypatch):
+    async def loader(_files):
+        return {
+            "contract_version": "1.0", "passed": False,
+            "worker_containment_verified": True,
+            "checks": [{"id": "app_runtime_load", "passed": False, "message": "Candidate diagnostic failed."}],
+            "failed_tests": [{"test": "app_runtime_load", "error": "Candidate diagnostic failed."}],
+            "warnings": [], "details": {},
+        }
+
+    async def smoke(_files):
+        return {
+            "contract_version": "1.0", "status": "passed", "passed": True,
+            "checks": [{"id": "app_runtime_smoke", "status": "passed", "passed": True}],
+            "failed_tests": [], "warnings": [],
+        }
+
+    monkeypatch.setattr(app_validation, "_app_runtime_load_result", loader)
+    monkeypatch.setattr(app_validation, "_app_runtime_smoke_result", smoke)
+    result = await app_validation.run_app_bundle_acceptance_gate(files=_basic_crud_files())
+
+    assert result["status"] == "passed", result["validation_evidence"]
+    assert "snapshot_digest" in result
+    assert "app_runtime_load" not in result["validation_evidence"]["completed"]
+    assert "app_runtime_load" not in result["validation_evidence"]["failed"]
+    assert "app_runtime_load_worker" in result["validation_evidence"]["completed"]
+    assert result["app_runtime_load"]["passed"] is False
+    assert result["bundle_repair"]["target_agent"] is None
+    check = next(item for item in result["checks"] if item["id"] == "app_runtime_load")
+    assert check["details"]["blocking"] is False
+
+
+@pytest.mark.asyncio
+async def test_loader_success_cannot_override_failed_external_smoke(monkeypatch):
+    async def loader(_files):
+        return {
+            "contract_version": "1.0", "passed": True,
+            "worker_containment_verified": True,
+            "checks": [{"id": "app_runtime_load", "passed": True}],
+            "failed_tests": [], "warnings": [], "details": {},
+        }
+
+    async def smoke(_files):
+        return {
+            "contract_version": "1.0", "status": "failed", "passed": False,
+            "checks": [{"id": "app_runtime_smoke", "status": "failed", "passed": False}],
+            "failed_tests": [{"test": "app_runtime_smoke", "check": "boot.http_ready", "error": "No app boot."}],
+            "warnings": [],
+        }
+
+    monkeypatch.setattr(app_validation, "_app_runtime_load_result", loader)
+    monkeypatch.setattr(app_validation, "_app_runtime_smoke_result", smoke)
+    result = await app_validation.run_app_bundle_acceptance_gate(files=_basic_crud_files())
+
+    assert result["status"] == "failed", result
+    assert "snapshot_digest" not in result
+    assert "app_runtime_smoke" in result["validation_evidence"]["failed"]
+    assert "app_runtime_load" not in result["validation_evidence"]["completed"]
+
+
+@pytest.mark.asyncio
+async def test_loader_worker_cleanup_must_be_host_verified_even_if_smoke_passes(monkeypatch):
+    async def loader(_files):
+        return {
+            "contract_version": "1.0", "passed": True,
+            "worker_containment_verified": False,
+            "skipped_reason": "contained AppLoader worker removal could not be confirmed",
+            "checks": [{"id": "app_runtime_load", "passed": True}],
+            "failed_tests": [], "warnings": [], "details": {},
+        }
+
+    async def smoke(_files):
+        return {
+            "contract_version": "1.0", "status": "passed", "passed": True,
+            "checks": [{"id": "app_runtime_smoke", "status": "passed", "passed": True}],
+            "failed_tests": [], "warnings": [],
+        }
+
+    monkeypatch.setattr(app_validation, "_app_runtime_load_result", loader)
+    monkeypatch.setattr(app_validation, "_app_runtime_smoke_result", smoke)
+    result = await app_validation.run_app_bundle_acceptance_gate(files=_basic_crud_files())
+
+    assert result["status"] == "pending", result["validation_evidence"]
+    assert "snapshot_digest" not in result
+    assert result["validation_evidence"]["skipped"] == ["app_runtime_load_worker"]
+    assert result["skipped_checks"] == [{
+        "id": "app_runtime_load_worker",
+        "reason": "contained AppLoader worker removal could not be confirmed",
+    }]
+    check = next(item for item in result["checks"] if item["id"] == "app_runtime_load_worker")
+    assert check["details"]["blocking"] is True

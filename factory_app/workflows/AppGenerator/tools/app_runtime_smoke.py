@@ -653,7 +653,7 @@ async def run_contained_generated_app_runtime_load(files: dict[str, str]) -> dic
     try:
         creation = asyncio.create_task(adapter.create_session(
             timeout_seconds=_GENERATED_LOAD_TIMEOUT_SECONDS + 30,
-            metadata={"purpose": "app_validation"},
+            metadata={"purpose": "app_runtime_diagnostic"},
             envs={"PYTHON_DOTENV_DISABLED": "1"},
         ))
         try:
@@ -668,7 +668,8 @@ async def run_contained_generated_app_runtime_load(files: dict[str, str]) -> dic
                     await adapter.terminate_session(session_id=created.session_id)
             raise
         session_id = session.session_id
-        await adapter.write_files(session_id=session_id, files=files, cwd="/workspace/app")
+        staged_files: dict[str, str | bytes] = dict(files)
+        await adapter.write_files(session_id=session_id, files=staged_files, cwd="/workspace/app")
         execution = await adapter.run_command(
             session_id=session_id,
             command=(
@@ -712,6 +713,9 @@ async def run_contained_generated_app_runtime_load(files: dict[str, str]) -> dic
                 failure = "contained AppLoader worker removal could not be confirmed"
     if failure or result is None:
         return _generated_load_unavailable(failure or "contained AppLoader worker returned no result")
+    # This flag is host-owned: candidate Python can forge the diagnostic JSON,
+    # but it cannot attest that the host removed its worker afterward.
+    result["worker_containment_verified"] = True
     result["validator_image_id"] = image_id
     result["source_content_sha256"] = hashlib.sha256(json.dumps(
         digests, sort_keys=True, separators=(",", ":"),

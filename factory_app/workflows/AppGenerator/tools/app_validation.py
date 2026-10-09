@@ -2064,6 +2064,27 @@ async def run_app_bundle_acceptance_gate(
     )
     app_runtime_load_result = await _app_runtime_load_result(generated_files)
     runtime_smoke_result = await _app_runtime_smoke_result(generated_files)
+    load_worker_verified = app_runtime_load_result.get("worker_containment_verified") is True
+    load_worker_result = {
+        "contract_version": "1.0",
+        "status": "passed" if load_worker_verified else "skipped",
+        "passed": load_worker_verified if load_worker_verified else None,
+        "skipped_reason": (
+            None if load_worker_verified else
+            app_runtime_load_result.get("skipped_reason") or "contained AppLoader worker cleanup was not verified"
+        ),
+        "checks": [{
+            "id": "app_runtime_load_worker",
+            "status": "passed" if load_worker_verified else "skipped",
+            "passed": load_worker_verified if load_worker_verified else None,
+            "message": (
+                "Contained AppLoader worker completed and was removed."
+                if load_worker_verified else "Contained AppLoader worker could not be verified."
+            ),
+            "details": {"blocking": not load_worker_verified},
+        }],
+        "failed_tests": [],
+    }
 
     completeness_result = {
         "passed": not planned_diagnostics,
@@ -2096,12 +2117,16 @@ async def run_app_bundle_acceptance_gate(
         "functional_completeness": functional_result,
         "workflow_integration": workflow_integration_result,
         "app_runtime_load": app_runtime_load_result,
+        "app_runtime_load_worker": load_worker_result,
         "app_runtime_smoke": runtime_smoke_result,
     }
-    acceptance_status, validation_evidence = _acceptance_readiness(subresults)
+    # Candidate Python executes in the loader worker and can forge its JSON.
+    # Only the host-confirmed worker boundary and external smoke are evidence.
+    required_subresults = {name: value for name, value in subresults.items() if name != "app_runtime_load"}
+    acceptance_status, validation_evidence = _acceptance_readiness(required_subresults)
     skipped = validation_evidence["skipped"]
     skipped_checks = [
-        {"id": name, "reason": subresults[name].get("skipped_reason") or "skipped"} for name in skipped
+        {"id": name, "reason": required_subresults[name].get("skipped_reason") or "skipped"} for name in skipped
     ]
     acceptance_passed = acceptance_status == "passed"
 
@@ -2127,6 +2152,13 @@ async def run_app_bundle_acceptance_gate(
                     }
                 )
 
+    loader_diagnostic_check = _result_check(
+        app_runtime_load_result, default_id="app_runtime_load",
+        default_message="AppLoader repair diagnostic completed.",
+    )
+    loader_diagnostic_check["details"] = {
+        **loader_diagnostic_check.get("details", {}), "blocking": False,
+    }
     result = {
         "contract_version": "1.0",
         "status": acceptance_status,
@@ -2141,7 +2173,8 @@ async def run_app_bundle_acceptance_gate(
             _result_check(runtime_quality_result, default_id="module_runtime_quality", default_message="Module runtime quality check completed."),
             _result_check(functional_result, default_id="functional_completeness", default_message="Functional completeness check completed."),
             _result_check(workflow_integration_result, default_id="workflow_integration", default_message="Workflow integration check completed."),
-            _result_check(app_runtime_load_result, default_id="app_runtime_load", default_message="App runtime load check completed."),
+            loader_diagnostic_check,
+            _result_check(load_worker_result, default_id="app_runtime_load_worker", default_message="Contained AppLoader worker checked."),
             _result_check(runtime_smoke_result, default_id="app_runtime_smoke", default_message="App runtime smoke completed."),
         ],
         "validation_evidence": validation_evidence,
@@ -2169,7 +2202,7 @@ async def run_app_bundle_acceptance_gate(
     recovery_request = prepare_task_recovery(context_variables)
     bundle_repair = _prepare_bundle_repair(
         {"passed": acceptance_passed, "diagnostics": repair_diagnostics},
-        context_variables, select_repairs=recovery_request is None,
+        context_variables, select_repairs=recovery_request is None and not acceptance_passed,
     )
     result["bundle_repair"] = bundle_repair
     result["task_recovery_request"] = recovery_request
@@ -2567,6 +2600,7 @@ async def validate_app_bundle_from_request(
         "functional_completeness": functional_result,
         "workflow_integration": workflow_integration_result,
         "app_runtime_load": app_runtime_load_result,
+        "app_runtime_load_worker": acceptance_result["app_runtime_load_worker"],
         "app_runtime_smoke": runtime_smoke_result,
         "bundle_repair": bundle_repair,
         "skipped_checks": acceptance_result["skipped_checks"],
@@ -2594,6 +2628,7 @@ async def validate_app_bundle_from_request(
         "generated_app_functional_completeness_result": functional_result,
         "workflow_integration_validation_result": workflow_integration_result,
         "app_runtime_load_result": app_runtime_load_result,
+        "app_runtime_load_worker_result": acceptance_result["app_runtime_load_worker"],
         "app_runtime_smoke_result": runtime_smoke_result,
         "bundle_repair": bundle_repair,
         "integration_tests_passed": combined_passed,

@@ -661,7 +661,7 @@ async def test_offline_generated_build_acceptance_blocks_unwired_page_endpoint()
 
 
 @pytest.mark.asyncio
-async def test_offline_generated_build_acceptance_blocks_runtime_loader_failure() -> None:
+async def test_offline_generated_build_acceptance_reports_runtime_loader_diagnostic() -> None:
     files = _generated_build_files()
     files["modules/orders/backend/service.py"] = """
 from services.integrations.missing_orders_client import MissingOrdersClient
@@ -698,8 +698,10 @@ class OrdersService:
     )
     gate = resolve_export_gate(context)
 
-    assert acceptance["status"] == "failed"
-    assert "app_runtime_load" in acceptance["validation_evidence"]["failed"]
+    assert acceptance["status"] == "pending"
+    assert "app_runtime_load" not in acceptance["validation_evidence"]["failed"]
+    assert "app_runtime_load_worker" in acceptance["validation_evidence"]["completed"]
+    assert acceptance["validation_evidence"]["skipped"] == ["app_runtime_smoke"]
     assert context.get("app_runtime_load_passed") is False
     assert context.get("app_runtime_load_result")["passed"] is False
     assert gate["allow_export"] is False

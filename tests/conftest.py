@@ -103,7 +103,11 @@ def _trusted_generated_app_fixture_probe(monkeypatch, request):
             with tempfile.TemporaryDirectory(prefix="mozaiks-test-runtime-load-") as temporary:
                 app_root = Path(temporary) / "app"
                 _globals["_write_files_to_dir"](app_root, generated_files)
-                return await probe_app_root(app_root)
+                result = await probe_app_root(app_root)
+                # This fixture runs repository-authored source directly and has
+                # no disposable Docker worker to remove.
+                result["worker_containment_verified"] = True
+                return result
 
         async def trusted_fixture_smoke(generated_files, *, _globals=globals_dict, _smoke=smoke_module):
             with tempfile.TemporaryDirectory(prefix="mozaiks-test-runtime-smoke-") as temporary:

@@ -90,6 +90,57 @@ async def test_docker_validation_session_has_no_network_or_published_ports(monke
 
 
 @pytest.mark.asyncio
+async def test_app_runtime_diagnostic_has_bounded_writable_space(monkeypatch):
+    monkeypatch.setenv("SANDBOX_PREVIEW_PORT", "invalid-preview-port")
+    adapter = DockerSandboxAdapter()
+    captured: dict[str, list[str]] = {}
+
+    async def fake_run(args, timeout: float = 60.0):
+        captured["args"] = list(args)
+        return 0, "diagnostic-container\n", ""
+
+    with patch.object(adapter, "_run", side_effect=fake_run):
+        session = await adapter.create_session(metadata={"purpose": "app_runtime_diagnostic"})
+
+    args = captured["args"]
+    assert session.session_id == "diagnostic-container"
+    assert args[args.index("--network") + 1] == "none"
+    assert "-p" not in args
+    assert "--read-only" in args
+    assert "--log-driver=none" in args
+    assert args[args.index("--user") + 1] == "10001:10001"
+    assert "--memory-swap=2g" in args
+    tmpfs = [args[i + 1] for i, arg in enumerate(args) if arg == "--tmpfs"]
+    assert any(mount.startswith("/workspace:") and "size=128m" in mount for mount in tmpfs)
+    assert any(mount.startswith("/tmp:") and "size=64m" in mount for mount in tmpfs)
+    assert any(mount.startswith("/home/sandbox:") and "size=16m" in mount for mount in tmpfs)
+
+
+@pytest.mark.asyncio
+async def test_docker_termination_requires_confirmed_absence():
+    adapter = DockerSandboxAdapter()
+    responses = [(0, "container-id\n", ""), (0, "container-id\n", ""),
+                 (0, "container-id\n", ""), (0, "container-id\n", ""),
+                 (0, "container-id\n", ""), (0, "container-id\n", "")]
+
+    async def fake_run(args, timeout: float = 60.0):
+        return responses.pop(0)
+
+    with patch.object(adapter, "_run", side_effect=fake_run):
+        assert await adapter.terminate_session(session_id="container-id") is False
+
+    responses = [(0, "container-id\n", ""), (0, "container-id\n", ""), (0, "", "")]
+    with patch.object(adapter, "_run", side_effect=fake_run):
+        assert await adapter.terminate_session(session_id="container-id") is True
+
+    responses = [(0, "container-id\n", ""), (0, "container-id\n", ""),
+                 (0, "container-id\n", ""), (0, "container-id\n", ""),
+                 (0, "container-id\n", ""), (0, "", "")]
+    with patch.object(adapter, "_run", side_effect=fake_run):
+        assert await adapter.terminate_session(session_id="container-id") is True
+
+
+@pytest.mark.asyncio
 async def test_docker_commands_ignore_remote_context_and_host_credentials(monkeypatch):
     monkeypatch.setenv("DOCKER_CONTEXT", "remote")
     monkeypatch.setenv("DOCKER_HOST", "tcp://remote.example:2375")

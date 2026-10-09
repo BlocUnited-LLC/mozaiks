@@ -151,11 +151,20 @@ bundle instead.
 never in Studio or a host Python child. Before staging any generated source,
 the gate checks that local Docker can inspect the exact image ID in
 `MOZAIKS_APP_RUNTIME_IMAGE_ID`. A missing or mismatched ID makes acceptance
-`skipped` and blocks export. The AppLoader diagnostic probe runs in a container
-with no network or published ports. The separate runtime smoke uses a private
-MongoDB container and a source-free observer; its result is the acceptance
-authority. The loader probe only supplies repair diagnostics. Both paths remove
-their containers and treat unconfirmed cleanup as a blocking result.
+`skipped` and blocks export. The AppLoader diagnostic probe runs as a non-root
+user in a read-only container with no network, published ports, or Docker log
+stream. Its only writable locations are size-limited temporary filesystems. Candidate Python can
+write the probe's JSON, so `app_runtime_load_passed` and the loader check supply
+repair diagnostics only; neither is promotion evidence. The host sets the
+separate `app_runtime_load_worker` check only after the bounded worker returns
+and its removal is confirmed. The runtime smoke uses a private MongoDB container
+and a source-free observer; that smoke and the host-owned worker check govern
+acceptance. Unconfirmed container cleanup blocks export.
+Build the local validator with
+`docker build -f infra/docker/Dockerfile.preview -t mozaiks-sandbox:local .`,
+then set `MOZAIKS_APP_RUNTIME_IMAGE_ID` to the full value from
+`docker image inspect --format '{{.Id}}' mozaiks-sandbox:local`. The gate never
+pulls an image automatically.
 
 **Boot.** The contained app loads the bundle with `AppLoader.load()` and applies the
 declared indexes and data migrations to its private disposable database. It registers modules
@@ -296,8 +305,9 @@ the file each one names:
 | Index or alias defect | `data/contract.json` |
 | Plan or assignment defect | `config/subscriptions.yaml` |
 
-With no configured database, or an unreachable one, the check reports
-`skipped` with the reason (`passed: null`, `status: "skipped"`). Acceptance
+When Docker or the pinned image is unavailable, the check reports `skipped`
+with the reason (`passed: null`, `status: "skipped"`). The generated smoke
+starts its own disposable MongoDB; host `MONGO_URI` is not a prerequisite. Acceptance
 lists it in `validation_evidence.skipped` and `skipped_checks` with that reason.
 It is neither completed nor failed. The aggregate acceptance remains `pending`
 with `passed: false` until required checks complete; an actual contract failure

@@ -93,6 +93,12 @@ This project follows a practical pre-1.0 changelog format:
   after the configured provider changes, so a restarted worker can stop them
   and release capacity without routing cleanup to the wrong sandbox.
 
+### Security
+
+- Contain generated AppLoader repair diagnostics in a read-only, offline Docker
+  worker with bounded writable space. The host confirms worker removal and
+  excludes candidate-written diagnostic JSON from promotion evidence.
+
 ## 0.2.0 - 2026-10-09
 
 ### Added
