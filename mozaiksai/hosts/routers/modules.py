@@ -547,6 +547,10 @@ async def _execute_module_action(
         status_code = 403
     elif result.error_code == "ENTITLEMENT_REQUIRED":
         status_code = 402
+    elif result.error_code == "INSUFFICIENT_TOKENS":
+        status_code = 402
+    elif result.error_code in {"TOKEN_USAGE_SCOPE_MISSING", "TOKEN_USAGE_DENIED"}:
+        status_code = 403
     elif result.error_code == "INVALID_PARAMS":
         status_code = 400
     else:
@@ -563,15 +567,19 @@ async def _execute_module_action(
             result.error,
         )
 
-    raise HTTPException(
-        status_code=status_code,
-        detail={
-            "error": result.error or "Module action failed",
-            "error_code": result.error_code or "EXECUTION_ERROR",
-            "module": module_name,
-            "action": action_name,
-        },
-    )
+    detail: dict[str, Any] = {
+        "error": result.error or "Module action failed",
+        "error_code": result.error_code or "EXECUTION_ERROR",
+        "module": module_name,
+        "action": action_name,
+    }
+    if (
+        result.error_code in {"INSUFFICIENT_TOKENS", "TOKEN_USAGE_SCOPE_MISSING", "TOKEN_USAGE_DENIED"}
+        and isinstance(result.data, dict)
+        and isinstance(result.data.get("extra_data"), dict)
+    ):
+        detail["extra_data"] = result.data["extra_data"]
+    raise HTTPException(status_code=status_code, detail=detail)
 
 
 # ---------------------------------------------------------------------------
