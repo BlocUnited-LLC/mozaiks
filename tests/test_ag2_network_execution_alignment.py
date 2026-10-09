@@ -176,6 +176,7 @@ async def test_live_resume_rejects_build_context_changed_while_paused(tmp_path, 
         resumed = await result.live_run.continue_with_user_message("Approved")
         assert resumed.status is RunStatus.FAILED
         assert resumed.error == "ag2_network_stale_build_context"
+        assert resumed.input_accepted is False
         assert not worker.ask_calls
     finally:
         await result.live_run.close()
@@ -1159,6 +1160,7 @@ async def test_continuation_timeout_fails_and_closes_live_run(timeout: float) ->
             await asyncio.wait_for(cancelled.wait(), timeout=1.0)
         rejected = await live_run.continue_with_user_message("Try again.")
         assert rejected.error == "live_ag2_channel_closed"
+        assert rejected.input_accepted is False
     finally:
         await live_run.close()
 

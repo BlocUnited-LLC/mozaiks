@@ -216,11 +216,17 @@ ended. It must not report success after only saving the text to history.
 
 After a process restart, the bridge first restores the existing AG2 channel and
 settles pending turns through the existing resume path. Only a restored,
-human-waiting channel may receive the incoming reply. The live continuation path
-then persists, echoes, and delivers that reply once. Failed or terminal recovery,
-or a missing channel handle, refuses the reply with a transport error; it does
-not start a replacement run. The HTTP input route returns a non-2xx response
-with that refusal result; WebSocket callers receive the error event. Recovery
+human-waiting channel may receive the incoming reply. On an accepted turn, the
+live continuation persists, echoes, and delivers that reply once. Failed or
+terminal recovery, or a missing channel handle, refuses the reply with a
+transport error; it does not start a replacement run. The HTTP input route
+returns a conflict for a
+known refusal, but reports an accepted live-channel reply as delivered even if
+the workflow subsequently fails. An uncertain admission returns an error with
+unknown delivery state; the UI tells the user to inspect the chat before retrying.
+If the native channel refuses after the bridge echoed text, that text can remain
+in history; the transport still reports that AG2 did not accept it.
+WebSocket callers receive the error event. Recovery
 without new text remains recovery-only.
 Opening a saved chat without user text is passive observation; it does not
 submit a callback resume. A declared agent continuation can still resume

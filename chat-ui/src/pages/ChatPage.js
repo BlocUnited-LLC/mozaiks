@@ -5488,19 +5488,35 @@ const ChatPage = () => {
         if (pendingWorkflowReply) {
           setPendingWorkflowReply(null);
         }
-        setLoading(true);
+        const runFailed = success?.result?.run_status === 'failed';
+        setLoading(!runFailed);
+        if (runFailed) {
+          setMessagesWithLogging(prev => [
+            ...prev.filter(message => !message.isThinking),
+            {
+              id: `run-failed-${userMessage.id}`,
+              sender: 'system',
+              content: 'Your message reached the workflow, but the run failed. Review the chat before trying again.',
+              timestamp: Date.now(),
+            },
+          ]);
+        }
       } else {
-        throw new Error('Workflow connection is unavailable');
+        const error = new Error('Workflow connection is unavailable');
+        error.deliveryState = success === false ? 'refused' : success?.delivery_state;
+        throw error;
       }
     } catch (error) {
-      console.error('❌ [SEND] Failed to send message via WebSocket:', error);
+      console.error('❌ [SEND] Failed to send message to workflow:', error);
       setLoading(false);
       setMessagesWithLogging(prev => [
         ...prev.filter(message => !message.isThinking),
         {
           id: `send-failed-${userMessage.id}`,
           sender: 'system',
-          content: 'Your message was not sent. Reconnect and try again.',
+          content: error?.deliveryState === 'refused'
+            ? 'Your message was not sent. Reconnect and try again.'
+            : 'Could not confirm whether your message was delivered. Check this chat before trying again.',
           timestamp: Date.now(),
         },
       ]);

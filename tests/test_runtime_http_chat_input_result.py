@@ -8,10 +8,11 @@ from mozaiksai.hosts import runtime
 
 
 @pytest.mark.parametrize(
-    ("result", "expected_status"),
+    ("result", "expected_status", "delivery_state"),
     [
-        ({"status": "success", "route": "persisted_reply"}, 200),
-        ({"status": "busy", "route": "chat_lock_busy"}, 409),
+        ({"status": "success", "route": "persisted_reply"}, 200, "accepted"),
+        ({"status": "success", "input_accepted": False}, 409, "refused"),
+        ({"status": "busy", "route": "chat_lock_busy"}, 409, "refused"),
         (
             {
                 "status": "error",
@@ -19,11 +20,40 @@ from mozaiksai.hosts import runtime
                 "error_code": "WORKFLOW_SESSION_TERMINAL",
             },
             409,
+            "refused",
         ),
+        (
+            {"status": "error", "route": "live_ag2_network", "input_accepted": False},
+            409,
+            "refused",
+        ),
+        (
+            {
+                "status": "error",
+                "route": "workflow_resume",
+                "error_code": "WORKFLOW_EXECUTION_FAILED",
+            },
+            409,
+            "refused",
+        ),
+        (
+            {
+                "status": "error",
+                "route": "live_ag2_network",
+                "run_status": "failed",
+                "input_accepted": True,
+            },
+            200,
+            "accepted",
+        ),
+        ({"status": "error", "message": "Workflow execution failed"}, 503, "unknown"),
     ],
 )
 def test_http_chat_input_reports_bridge_refusal(
-    monkeypatch: pytest.MonkeyPatch, result: dict[str, str], expected_status: int
+    monkeypatch: pytest.MonkeyPatch,
+    result: dict[str, str | bool],
+    expected_status: int,
+    delivery_state: str,
 ) -> None:
     class Chats:
         async def find_one(self, query, projection):
@@ -67,5 +97,8 @@ def test_http_chat_input_reports_bridge_refusal(
 
     assert response.status_code == expected_status, response.text
     assert response.json()["result"] == result
-    if expected_status != 200:
+    assert response.json()["delivery_state"] == delivery_state
+    if delivery_state == "refused":
         assert response.json()["status"] == "Message was not accepted."
+    elif result.get("run_status") == "failed":
+        assert response.json()["status"] == "Message reached the workflow, but the run failed."

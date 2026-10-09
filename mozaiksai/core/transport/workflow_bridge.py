@@ -884,7 +884,10 @@ class WorkflowBridgeMixin:
                 message,
                 context_updates=context_updates,
             )
-        input_refused = runner_result.error == CHANNEL_TERMINAL_ERROR
+        input_refused = (
+            runner_result.error == CHANNEL_TERMINAL_ERROR
+            and getattr(runner_result, "input_accepted", None) is not True
+        )
         if runner_result.status is RunStatus.FAILED:
             await pm.mark_chat_failed(chat_id, app_id=app_id)
         manager = getattr(self, "_derived_context_managers", {}).get(chat_id)
@@ -997,6 +1000,7 @@ class WorkflowBridgeMixin:
             return {
                 "status": "error", "chat_id": chat_id, "route": "terminal_session",
                 "run_status": "failed", "error_code": "WORKFLOW_SESSION_TERMINAL",
+                "input_accepted": False,
                 "outcome_announced": True,
                 **({"reason": reason} if reason else {}),
             }
@@ -1011,6 +1015,7 @@ class WorkflowBridgeMixin:
                 else "Live AG2 workflow channel failed."
             ),
             "route": "live_ag2_network",
+            "input_accepted": getattr(runner_result, "input_accepted", None),
             "run_status": (
                 "failed"
                 if run_failed
