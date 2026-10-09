@@ -111,7 +111,11 @@ record can substitute for that durable identity.
   browser and by backend JWKS validation through narrowly routed gateway or
   private-network endpoints; this does not grant general network egress. The
   frontend's API, WebSocket, callback, and CORS settings resolve to the preview
-  origin. Disabling auth or setting `VITE_MOCK_MODE` is not an acceptable
+  origin. The existing shell auth projection reads the host's runtime
+  `VITE_OIDC_*` values, so the trusted launcher can bind a unique callback
+  origin without rebuilding the frontend for each candidate. The disposable
+  issuer must register that exact callback; a wildcard callback is not a
+  substitute. Disabling auth or setting `VITE_MOCK_MODE` is not an acceptable
   shortcut. The candidate may compromise this disposable persona; the persona
   must have no authority outside its preview.
 - The trusted supervisor selects a fixed, attested App Zero preview product-host
@@ -155,8 +159,13 @@ after the provider adapter can guarantee a private or traffic-token-protected
 ingress and exact template build identity. The gateway alone holds the E2B
 traffic token and attaches it on server-side upstream requests, including
 WebSocket upgrades. It must never forward that token to candidate code or
-return a provider URL to the browser. If the provider cannot enforce this
-boundary, E2B browser preview stays disabled. Provider cost requires a separate
+return a provider URL to the browser. The E2B SDK exposes the traffic token on
+the live sandbox object; a controller restart cannot recover it by reading the
+session ledger, and reconnect may resume a paused sandbox. Browser activation
+therefore needs a trusted, revocable secret-backed token lifecycle, or must
+close access and kill the session by ID when that token is lost. If the
+provider cannot enforce this boundary, E2B browser preview stays disabled.
+Provider cost requires a separate
 operator decision; this ADR does not authorize paid allocation.
 
 ## Review, publication, and lifecycle
@@ -247,8 +256,9 @@ the candidate input.
    interrupted provider teardown. Confirm access closes while uncertain cleanup
    retains its reservation.
 5. Use fake E2B adapter tests for ingress-token handling and durable provider
-   routing. Any live E2B build or session needs operator cost approval and the
-   same browser/security evidence before that provider is enabled.
+   routing, including controller restart with a lost traffic token. Any live
+   E2B build or session needs operator cost approval and the same
+   browser/security evidence before that provider is enabled.
 
 This ADR is a proposal only. It creates no route, image, provider allocation,
 or activation by itself.
