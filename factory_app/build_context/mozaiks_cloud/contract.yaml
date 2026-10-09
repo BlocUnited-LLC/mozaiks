@@ -133,6 +133,15 @@ runtime_boundaries:
       incomplete saved connector fails closed. Never combine its provider
       endpoint with an environment credential. No API key values appear in
       generated source.
+  - id: facade_connector_scope
+    rule: >
+      Deployment and domain facade actions must resolve connector credentials
+      using the runtime-injected ctx.app_id, and fail when that identity is
+      missing. A request's app_id is provider operation data only; omitting or
+      changing it must not select another app's connector or skip its lookup.
+      Usage status uses ctx.app_id; the background reporter uses the configured
+      MOZAIKS_APP_ID and refuses to run without it. Normal usage reporting keeps
+      this app scope; the explicit dedicated usage key remains separate.
   - id: no_provision_on_import
     rule: >
       Importing or constructing any MozaiksCloud sub-client must not provision,

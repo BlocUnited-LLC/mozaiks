@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, call
 
@@ -10,6 +11,9 @@ import pytest
 
 from factory_app.build_context.mozaiks_cloud.templates.services.integrations import (
     mozaiks_cloud_client as cloud,
+)
+from factory_app.build_context.mozaiks_cloud.templates.services.integrations import (
+    mozaiks_cloud_usage_client as usage,
 )
 from factory_app.build_context.mozaikspay.templates.services.integrations import (
     mozaikspay_client as pay,
@@ -265,3 +269,89 @@ async def test_explicit_overrides_cannot_rescue_unreadable_saved_connector(
             app_id="app-a", api_base="https://explicit.example.test", api_key="explicit-test-key",
         ))
     assert captured_requests == []
+
+
+@pytest.fixture(params=["status", "report_once"])
+def usage_caller(request, monkeypatch):
+    from factory_app.build_context.mozaiks_cloud.templates.modules.cloud_usage_reporter.backend.handler import (
+        CloudUsageReporterHandler,
+    )
+    from factory_app.build_context.mozaiks_cloud.templates.modules.cloud_usage_reporter.backend.reporter import (
+        UsageReporterService,
+    )
+    from mozaiksai.core.metrics import app_metrics
+
+    monkeypatch.delenv("MOZAIKS_CLOUD_USAGE_API_KEY", raising=False)
+    monkeypatch.setenv("MOZAIKS_CLOUD_USAGE_REPORTING", "1")
+    monkeypatch.setenv("MOZAIKS_APP_ID", "app-a")
+    monkeypatch.setitem(sys.modules, "app.services.integrations.mozaiks_cloud_usage_client", usage)
+    metrics = Mock(return_value=SimpleNamespace(usage_rollup=AsyncMock(return_value=[{"page_views": 2}])))
+    monkeypatch.setattr(app_metrics, "AppMetrics", metrics)
+
+    async def invoke(*, app_id="app-a"):
+        if request.param == "status":
+            return await CloudUsageReporterHandler().get_reporter_status(SimpleNamespace(app_id=app_id))
+        monkeypatch.setenv("MOZAIKS_APP_ID", app_id or "")
+        return await UsageReporterService().report_once()
+
+    return SimpleNamespace(invoke=invoke, kind=request.param, metrics=metrics)
+
+
+@pytest.mark.parametrize("connector_state", ["found", "missing-secret", "absent"])
+async def test_usage_callers_keep_app_identity(
+    usage_caller, connector_backend, captured_requests, connector_state,
+):
+    if connector_state == "missing-secret":
+        connector_backend.secret.return_value = {"success": True, "status": "not_found"}
+    elif connector_state == "absent":
+        connector_backend.lookup.return_value = None
+    result = await usage_caller.invoke()
+    connector_backend.lookup.assert_awaited_once_with(scope="app", scope_id="app-a", service="mozaiks_cloud")
+    if connector_state == "absent":
+        connector_backend.secret.assert_not_awaited()
+    else:
+        connector_backend.secret.assert_awaited_once_with(scope="app", scope_id="app-a", service="mozaiks_cloud")
+    if connector_state == "missing-secret":
+        assert captured_requests == []
+        usage_caller.metrics.assert_not_called()
+        assert result == ({"sent": 0, "reason": "unconfigured"} if usage_caller.kind == "report_once"
+                          else {"enabled": True, "configured": False, "reporting": False})
+    elif usage_caller.kind == "report_once":
+        assert result["sent"] == 1
+        assert usage_caller.metrics.call_args.args[0].app_id == "app-a"
+        host = "process.example.test" if connector_state == "absent" else "scoped.example.test"
+        key = "process-cloud-test-key" if connector_state == "absent" else "scoped-test-key"
+        assert [(r.url.host, r.headers["Authorization"]) for r in captured_requests] == [(host, f"Bearer {key}")]
+    else:
+        assert result == {"enabled": True, "configured": True, "reporting": True}
+        assert captured_requests == []
+
+
+@pytest.mark.parametrize("app_id", [None, "", " \t "])
+async def test_usage_callers_without_identity_refuse_environment_fallback(
+    usage_caller, connector_backend, captured_requests, app_id,
+):
+    with pytest.raises(ValueError, match="is required"):
+        await usage_caller.invoke(app_id=app_id)
+    connector_backend.lookup.assert_not_awaited()
+    connector_backend.secret.assert_not_awaited()
+    usage_caller.metrics.assert_not_called()
+    assert captured_requests == []
+
+
+async def test_dedicated_usage_configuration_stays_explicit_with_app_context(
+    usage_caller, connector_backend, captured_requests, monkeypatch,
+):
+    monkeypatch.setenv("MOZAIKS_CLOUD_USAGE_API_KEY", "usage-test-key")
+    connector_backend.secret.return_value = {"success": True, "status": "not_found"}
+    result = await usage_caller.invoke()
+    connector_backend.lookup.assert_not_awaited()
+    connector_backend.secret.assert_not_awaited()
+    if usage_caller.kind == "report_once":
+        assert result["sent"] == 1
+        assert [(r.url.host, r.headers["Authorization"]) for r in captured_requests] == [
+            ("process.example.test", "Bearer usage-test-key"),
+        ]
+    else:
+        assert result["configured"] is True
+        assert captured_requests == []

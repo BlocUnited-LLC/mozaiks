@@ -33,7 +33,9 @@ async def _no_connector_settings(_app_id: str | None) -> None:
 
 
 class MozaiksCloudUsageClient:
-    def __init__(self, transport: MozaiksCloudTransport | None = None) -> None:
+    def __init__(
+        self, transport: MozaiksCloudTransport | None = None, *, app_id: str | None = None,
+    ) -> None:
         if transport is not None:
             self._transport = transport
         else:
@@ -46,7 +48,7 @@ class MozaiksCloudUsageClient:
                     connector_settings_loader=_no_connector_settings,
                 )
             else:
-                self._transport = MozaiksCloudTransport()
+                self._transport = MozaiksCloudTransport(app_id=app_id)
 
     async def is_configured(self) -> bool:
         try:

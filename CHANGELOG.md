@@ -112,8 +112,10 @@ This project follows a practical pre-1.0 changelog format:
 
 - Generated Mozaiks Cloud and MozaiksPay clients fail closed when an app's saved
   connector or scoped secret is unavailable, preventing substitution of a
-  process-wide provider credential. Environment setup remains supported when no
-  connector record exists. Existing generated client copies need updating;
+  process-wide provider credential. Cloud facade actions bind credential lookup
+  to the runtime app context, independently of request parameters. Environment
+  setup remains supported when no connector record exists. Existing generated
+  clients, Cloud facades, and usage reporters need updating;
   affected connectors require owner-verified credential re-entry.
 
 - Repository Docker coding turns now require a trusted local image ID, reject
