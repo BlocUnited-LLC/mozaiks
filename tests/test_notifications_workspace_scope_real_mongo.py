@@ -396,6 +396,38 @@ def test_generated_tenant_alert_without_workspace_requires_verified_tenant(
     ))
 
 
+@pytest.mark.parametrize("event_shape", ["structured", "flat"])
+@pytest.mark.parametrize("invalid_owner", ["tenant_id", "workspace_id"])
+def test_malformed_generated_owner_never_broadens_role_alert(
+    notification_http, event_shape, invalid_owner,
+):
+    event_type = "hosted.hosting.app.deployed"
+    owner = {"app_id": APP_ID, "tenant_id": TENANT_A, "workspace_id": WORKSPACE_A}
+    owner[invalid_owner] = []
+    envelope = {"id": f"event-invalid-{event_shape}-{invalid_owner}", "type": event_type}
+    if event_shape == "structured":
+        envelope["tenant"] = owner
+        envelope["payload"] = {"hosting_url": "https://example.invalid"}
+    else:
+        envelope.update(owner)
+
+    async def store(record):
+        notification_http.collection.insert_one(record)
+
+    asyncio.run(ModuleEventRouter([], notification_store=store)._create_notification(
+        {
+            "id": "hosting_deployed.user", "module_id": "hosting",
+            "audience": {"roles": ["owner"]},
+            "template": {"title": "App deployed", "body": "Deployment complete"},
+        },
+        event_type,
+        envelope,
+    ))
+    assert notification_http.collection.count_documents({
+        "source_event_id": envelope["id"],
+    }) == 0
+
+
 def test_present_null_owners_do_not_authorize_a_broad_alert(notification_http):
     record = _role_record("malformed-null-owners", workspace_id=None)
     record["tenant_id"] = None

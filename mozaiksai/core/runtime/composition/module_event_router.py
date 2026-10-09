@@ -989,16 +989,23 @@ class ModuleEventRouter:
             "created_at": _utc_now(),
             "source_event": envelope,
         }
-        # An absent owner is not a present, mismatched owner. Preserve invalid
-        # nonblank values so broad-audience reads still fail closed on them.
-        tenant_id = tenant.get("tenant_id")
-        if tenant_id is not None and not (isinstance(tenant_id, str) and not tenant_id.strip()):
-            record["tenant_id"] = tenant_id
-        workspace_id = normalize_module_event_provenance(event_type, envelope).workspace_id
-        if workspace_id is not None and not (
-            isinstance(workspace_id, str) and not workspace_id.strip()
-        ):
-            record["workspace_id"] = workspace_id
+        # Do not turn a malformed present owner into an absent owner: the
+        # normalized provenance can discard invalid values such as [].
+        for owner_key in ("tenant_id", "workspace_id"):
+            if isinstance(raw_tenant, dict) and owner_key in raw_tenant:
+                raw_owner = raw_tenant[owner_key]
+            else:
+                raw_owner = envelope.get(owner_key)
+            if raw_owner is None:
+                continue
+            if not isinstance(raw_owner, str):
+                logger.warning(
+                    "NOTIFICATION_OWNER_INVALID: rule_id=%s field=%s",
+                    rule.get("id"), owner_key,
+                )
+                return
+            if raw_owner.strip():
+                record[owner_key] = raw_owner.strip()
         if context is not None:
             record["context"] = context
 
