@@ -1449,8 +1449,93 @@ def _merge_closes_cycle(
     return cyclic(keeper_id)
 
 
+_UI_ONLY_HINT_GUIDANCE = (
+    "source_capability_packs are descriptive hints, not selected provider registrations. "
+    "Use capability_packs=[] when no backend/provider capability is approved, "
+    "and preserve the approved pages and their behavior in page_bundle tasks."
+)
+
+
+def _validate_ui_only_surface_claims(plan: dict[str, Any], context: Any) -> None:
+    """Check raw UI-only claims before a repair can remove or relabel them."""
+    design = detach(context.get("design_surface_map")) or {}
+    ui_surfaces = {
+        surface["surface_id"]: surface for surface in design.get("surfaces") or []
+        if surface.get("surface_id") and surface.get("surface_kind") == "ui_only"
+    }
+    if not ui_surfaces:
+        return
+    selected_packs = {
+        _pack_id_from_descriptor(pack): pack
+        for pack in detach(context.get("capability_packs")) or []
+    }
+    approved_pages = _approved_page_inventory(context)
+    page_paths = {
+        path.lower() for path in _required_page_paths({"pages": approved_pages})
+    } | {
+        "brand/theme_config.json", "config/shell.json", "config/asset_manifest.json",
+    }
+    errors: list[str] = []
+    for pack in plan.get("capability_packs") or []:
+        surface_id = str(pack.get("surface_id") or "")
+        if surface_id not in ui_surfaces:
+            continue
+        pack_id = _pack_id_from_descriptor(pack)
+        selected = selected_packs.get(pack_id)
+        if pack.get("surface_kind") != "ui_only" or pack.get("capability_source") == "generated_module":
+            errors.append(
+                f"{pack_id}: surface {surface_id!r} is approved ui_only; it grants no "
+                "generated_module capability or backend module ownership. " + _UI_ONLY_HINT_GUIDANCE
+            )
+        elif not selected or any(
+            selected.get(key) != pack.get(key)
+            for key in ("surface_id", "surface_kind", "capability_source")
+        ):
+            errors.append(
+                f"{pack_id}: approved ui_only surface {surface_id!r} does not select "
+                f"provider {pack_id!r} with that source and surface. " + _UI_ONLY_HINT_GUIDANCE
+            )
+    for task in plan.get("build_tasks") or []:
+        surface_id = str(task.get("surface_id") or "")
+        if surface_id not in ui_surfaces:
+            continue
+        task_id = task.get("task_id")
+        if task.get("surface_kind") != "ui_only" or task.get("task_type") != "page_bundle":
+            errors.append(
+                f"{task_id}: surface {surface_id!r} is approved ui_only; preserve its kind "
+                "and page_bundle behavior. It grants no module ownership (including modules/ paths). "
+                + _UI_ONLY_HINT_GUIDANCE
+            )
+        claimed_pack = task.get("capability_pack_id")
+        if claimed_pack is not None:
+            selected = selected_packs.get(str(claimed_pack))
+            if (
+                not selected
+                or selected.get("surface_id") != surface_id
+                or selected.get("surface_kind") != "ui_only"
+                or selected.get("capability_source") == "generated_module"
+            ):
+                errors.append(
+                    f"{task_id}: approved ui_only surface {surface_id!r} does not select "
+                    f"task capability {claimed_pack!r}. " + _UI_ONLY_HINT_GUIDANCE
+                )
+        invalid_paths = [
+            path for path in task.get("owned_paths") or []
+            if not isinstance(path, str) or path.lower() not in page_paths
+        ]
+        if not approved_pages or invalid_paths:
+            errors.append(
+                f"{task_id}: approved ui_only surface {surface_id!r} owns only approved "
+                f"page_bundle artifacts {sorted(page_paths)}; remove backend or unapproved paths "
+                f"{invalid_paths!r} (including modules/ and services/). " + _UI_ONLY_HINT_GUIDANCE
+            )
+    if errors:
+        raise ValueError("Plan surface inventory errors:\n- " + "\n- ".join(errors))
+
+
 def _validate_plan_surface_inventory(plan: dict[str, Any], context: Any) -> None:
     """Reject invented scope before repairs or identity advice can obscure it."""
+    _validate_ui_only_surface_claims(plan, context)
     _validate_page_realizations(plan, context)
     validate_surface_ownership(
         detach(context.get("design_surface_map")) or {},
@@ -1466,14 +1551,6 @@ def _validate_plan_surface_inventory(plan: dict[str, Any], context: Any) -> None
         hint for surface in ui_surfaces.values()
         for hint in surface.get("source_capability_packs") or []
     }
-    selected_packs = {
-        _pack_id_from_descriptor(pack) for pack in detach(context.get("capability_packs")) or []
-    }
-    hint_guidance = (
-        "source_capability_packs are descriptive hints, not selected provider registrations. "
-        "Use capability_packs=[] when no backend/provider capability is approved, "
-        "and preserve the approved pages and their behavior in page_bundle tasks."
-    )
     errors: list[str] = []
     unapproved: set[str] = set()
     for entries, is_task in (
@@ -1482,30 +1559,6 @@ def _validate_plan_surface_inventory(plan: dict[str, Any], context: Any) -> None
     ):
         for entry in entries:
             surface_id = str(entry.get("surface_id") or "")
-            if surface_id in ui_surfaces:
-                identity = entry.get("task_id") if is_task else _pack_id_from_descriptor(entry)
-                if (
-                    entry.get("surface_kind") != "ui_only"
-                    or (is_task and (
-                        entry.get("task_type") != "page_bundle"
-                        or any(path.startswith("modules/") for path in _normalized_owned_paths(entry))
-                    ))
-                    or (not is_task and entry.get("capability_source") == "generated_module")
-                ):
-                    errors.append(
-                        f"{identity}: surface {surface_id!r} is approved ui_only; preserve its kind "
-                        "and page_bundle behavior. It grants no module ownership (including modules/ "
-                        "paths) or generated_module capability. " + hint_guidance
-                    )
-                elif (
-                    not is_task
-                    and entry.get("capability_source") in {"managed_capability", "framework_pack", "operator_pack"}
-                    and _pack_id_from_descriptor(entry) not in selected_packs
-                ):
-                    errors.append(
-                        f"{identity}: approved ui_only surface {surface_id!r} does not select "
-                        f"provider {identity!r}. " + hint_guidance
-                    )
             if surface_id in approved:
                 continue
             if (
@@ -1532,7 +1585,7 @@ def _validate_plan_surface_inventory(plan: dict[str, Any], context: Any) -> None
             if re.search(r"(?:^|[_-])(?:auth|authentication|login|signin)(?:$|[_-])", surface_id.lower()):
                 message += " Authentication is platform-provided and needs no generated module."
             if surface_id in ui_hints:
-                message += " " + hint_guidance
+                message += " " + _UI_ONLY_HINT_GUIDANCE
             errors.append(message)
     if errors:
         raise ValueError("Plan surface inventory errors:\n- " + "\n- ".join(errors))
@@ -1793,6 +1846,7 @@ def review_app_build_plan(
     try:
         models, _ = load_workflow_structured_outputs("AppGenerator")
         plan = models["AppBuildPlan"].model_validate(detach(AppBuildPlan)).model_dump(mode="json")
+        _validate_ui_only_surface_claims(plan, context_variables)
         for repair in (
             *_apply_dispatch_path_rules(plan),
             *_label_persistence_tasks(plan, context_variables),

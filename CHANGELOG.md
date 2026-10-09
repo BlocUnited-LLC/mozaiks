@@ -843,10 +843,10 @@ This project follows a practical pre-1.0 changelog format:
 - AgentGenerator interview questions and confirmations now appear in chat.
   Its startup guidance consistently uses typed readiness instead of routing
   markers or instructions that contradict the required structured output.
-- App planning rejects backend module work attached to an approved UI-only
-  surface before scheduling it. Planning guidance allows browser-only apps
-  without capability packs and distinguishes category hints from registered
-  providers while preserving the requested page behavior.
+- App planning rejects backend paths, module work, and unselected providers
+  attached to an approved UI-only surface before repair or scheduling. Planning
+  guidance allows browser-only apps without capability packs and distinguishes
+  category hints from registered providers while preserving requested page behavior.
 
 - Chat replies arriving together or immediately after a server restart now
   reach the existing workflow channel instead of being saved without delivery.

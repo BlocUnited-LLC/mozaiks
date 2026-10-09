@@ -94,6 +94,53 @@ def test_module_paths_cannot_hide_under_ui_only_page_task_labels():
     assert "modules/" in result["error"]
 
 
+@pytest.mark.parametrize("extra_path", [
+    "modules/reports/backend/*.py",
+    "modules/reports/backend/service.py",
+    "services/adapters/evil.py",
+    "data/migrations/001.json",
+])
+def test_ui_only_page_scope_rejects_backend_paths_before_dispatch_repairs(extra_path):
+    plan = _page_plan()
+    plan["build_tasks"][0]["surface_id"] = "reports"
+    plan["build_tasks"][0]["owned_paths"].append(extra_path)
+    original = deepcopy(plan)
+    context = _ui_context()
+
+    result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+
+    _assert_not_queued(context, result)
+    assert "approved ui_only" in result["error"]
+    assert extra_path in result["error"]
+    assert plan == original
+
+
+def test_ui_only_page_task_cannot_bind_an_unselected_pack_hint():
+    plan = _page_plan()
+    plan["build_tasks"][0].update(surface_id="reports", capability_pack_id="ui_pack")
+    context = _ui_context()
+
+    result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+
+    _assert_not_queued(context, result)
+    assert "does not select task capability 'ui_pack'" in result["error"]
+
+
+def test_ui_only_page_task_cannot_bind_selected_generated_module_pack():
+    context = _ui_context()
+    context.set("capability_packs", [{
+        "id": "ui_pack", "surface_id": "reports", "surface_kind": "ui_only",
+        "capability_source": "generated_module",
+    }])
+    plan = _page_plan()
+    plan["build_tasks"][0].update(surface_id="reports", capability_pack_id="ui_pack")
+
+    result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+
+    _assert_not_queued(context, result)
+    assert "does not select task capability 'ui_pack'" in result["error"]
+
+
 def test_ui_only_capability_cannot_claim_generated_module_source():
     plan = _page_plan()
     capability = _plan()["capability_packs"][0]
@@ -143,8 +190,27 @@ def test_selected_registered_ui_provider_remains_valid(source):
     assert plan == original
 
 
+def test_ui_only_page_task_may_bind_a_selected_provider_on_the_same_surface():
+    context = _ui_context()
+    context.set("capability_packs", [{
+        "id": "ui_pack", "surface_id": "reports", "surface_kind": "ui_only",
+        "capability_source": "framework_pack",
+    }])
+    plan = _page_plan()
+    plan["capability_packs"] = [{
+        "capability_pack_id": "ui_pack", "surface_id": "reports",
+        "surface_kind": "ui_only", "capability_source": "framework_pack",
+    }]
+    plan["build_tasks"][0].update(surface_id="reports", capability_pack_id="ui_pack")
+
+    validate_plan_origins(plan, context)
+
+
 @pytest.mark.parametrize("surface_id", ["reports", "ui_pack"])
-@pytest.mark.parametrize("source", ["operator_pack", "managed_capability"])
+@pytest.mark.parametrize("source", [
+    "operator_pack", "managed_capability", "external_adapter",
+    "config_file", "host_universal", "operator_extension",
+])
 @pytest.mark.parametrize("catalog_available", [False, True])
 def test_source_capability_hint_does_not_register_a_provider(surface_id, source, catalog_available):
     plan = _page_plan()
