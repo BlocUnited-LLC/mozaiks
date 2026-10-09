@@ -160,6 +160,8 @@ def test_generated_token_recovery_honors_administrator_contact_without_inventing
         {"recovery_action": "contact_admin", "contact_route": "//outside.example/help"},
         {"recovery_action": "contact_admin", "contact_route": "/\\outside.example/help"},
         {"recovery_action": "top_up", "top_up_route": "/token-packs"},
+        {"recovery_action": "top_up", "top_up_route": "//outside.example/help"},
+        {"recovery_action": "top_up", "top_up_route": "/\\outside.example/help"},
         {"recovery_action": "upgrade"},
     ]
     errors = [{"data": {"extra_data": item}} for item in metadata]
@@ -174,8 +176,31 @@ def test_generated_token_recovery_honors_administrator_contact_without_inventing
     )
     assert completed.returncode == 0, completed.stderr
     assert json.loads(completed.stdout) == [
-        None, None, "/help", None, None, None, "/token-packs", "/billing"
+        None, None, "/help", None, None, None, "/token-packs", "/billing",
+        "/billing", "/billing",
     ]
+
+
+def test_generated_entitlement_recovery_stays_inside_the_app():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required to execute the generated browser helper")
+    errors = [
+        {"data": {"upgrade_route": "/plans/pro"}},
+        {"data": {"upgrade_route": "//outside.example/plans"}},
+        {"data": {"billing_route": "https://outside.example/billing"}},
+    ]
+    script = (
+        _template_js()
+        + "\nconsole.log(JSON.stringify("
+        + json.dumps(errors)
+        + ".map(err => entitlementUpgradePath(err))))\n"
+    )
+    completed = subprocess.run(
+        [node, "--input-type=module"], input=script, capture_output=True, text=True, timeout=15
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout) == ["/plans/pro", "/pricing", "/pricing"]
 
 
 # ---------------------------------------------------------------------------

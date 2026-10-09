@@ -85,11 +85,11 @@ export function insufficientTokensRecoveryPath(err, fallback = '/billing') {
     return appLocalRoute(metadata.contact_route)
   }
   return (
-    metadata.top_up_route ||
-    metadata.billing_route ||
-    metadata.upgrade_route ||
-    metadata.contact_route ||
-    fallback
+    appLocalRoute(metadata.top_up_route) ||
+    appLocalRoute(metadata.billing_route) ||
+    appLocalRoute(metadata.upgrade_route) ||
+    appLocalRoute(metadata.contact_route) ||
+    appLocalRoute(fallback)
   )
 }
 
@@ -109,10 +109,10 @@ export function isEntitlementRequiredError(err) {
 export function entitlementUpgradePath(err, fallback = '/pricing') {
   const metadata = tokenRecoveryMetadata(err)
   return (
-    metadata.upgrade_route ||
-    metadata.billing_route ||
-    metadata.pricing_route ||
-    fallback
+    appLocalRoute(metadata.upgrade_route) ||
+    appLocalRoute(metadata.billing_route) ||
+    appLocalRoute(metadata.pricing_route) ||
+    appLocalRoute(fallback)
   )
 }
 
