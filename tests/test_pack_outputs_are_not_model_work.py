@@ -167,7 +167,7 @@ def _assembly_plan() -> dict:
 async def test_assembly_takes_pack_owned_files_only_from_the_templates(caplog):
     templates = _templates()
     placeholder_module = yaml.safe_dump({"schema_version": "mozaiks.module.v1", "module": {"id": "billing_portal"},
-                                         "actions": [{"id": "get_subscription_status"}]})
+                                         "actions": [{"id": "get_subscription_status", "permissions": ["invented.admin"]}]})
     dashboard = _page("dashboard", "/dashboard", [{"id": "hero", "primitive": "Panel", "config": {"title": "Overview"}}])
     context = _assembly_context(
         generated_files={"ui/pages/billing.yaml": "stale: previous assembly copy\n"},
@@ -193,6 +193,7 @@ async def test_assembly_takes_pack_owned_files_only_from_the_templates(caplog):
     files = detach(context.get("generated_files"))
     for path in (*PACK_PAGES, "modules/billing_portal/module.yaml", "modules/billing_portal/backend/service.py"):
         assert files[path] == templates[path], path
+    assert "invented.admin" not in files["modules/billing_portal/module.yaml"]
     discarded = " ".join(record.getMessage() for record in caplog.records if "PACK_OWNED_OUTPUT_DISCARDED" in record.getMessage())
     for path in ("ui/pages/pricing.yaml", "modules/billing_portal/module.yaml", "ui/pages/billing.yaml"):
         assert path in discarded

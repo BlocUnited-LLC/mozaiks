@@ -247,6 +247,44 @@ def test_auth_only_task_candidate_is_rejected_before_it_can_be_admitted(plan, pa
         close_module_actions(candidate, app_build_plan=plan)
 
 
+@pytest.mark.parametrize("lane", ["python_files", "database_files", "model_files", "js_files", "service_foundation_bundle"])
+def test_auth_candidate_is_rejected_from_every_raw_file_lane(lane):
+    entry = {"path": "./config\\auth.yaml", "content": _auth("tasks.veiw")[AUTH_PATH]}
+    candidate = {lane: {"files": [entry]} if lane == "service_foundation_bundle" else [entry]}
+    with pytest.raises(ValueError, match="Generated task output cannot author config/auth.yaml"):
+        close_module_actions(candidate, app_build_plan=_plan())
+
+
+@pytest.mark.parametrize("lane", ["python_files", "service_foundation_bundle"])
+def test_save_generated_code_cannot_persist_raw_lane_auth_edit(lane):
+    entry = {"path": AUTH_PATH, "content": _auth("tasks.veiw")[AUTH_PATH]}
+    context = {
+        "structured_output": {lane: {"files": [entry]} if lane == "service_foundation_bundle" else [entry]},
+        "app_build_plan": {"auth_strategy": "public", "roles": [], "capability_packs": [], "pages": []},
+        "generated_files": {}, "code_files": [], "deleted_files": [],
+    }
+    before = deepcopy(context)
+    with pytest.raises(ValueError, match="Generated task output cannot author config/auth.yaml"):
+        save_generated_code(context)
+    assert context == before
+
+
+@pytest.mark.parametrize("path", [AUTH_PATH, "config\\auth.yaml", "./config/auth.yaml"])
+def test_generated_task_cannot_delete_admitted_auth(path):
+    candidate = {"deleted_files": [path]}
+    with pytest.raises(ValueError, match="Generated task output cannot delete config/auth.yaml"):
+        close_module_actions(candidate, app_build_plan=None)
+    context = {
+        "structured_output": candidate,
+        "app_build_plan": _plan("basic-login"),
+        "generated_files": _auth("tasks.view"), "code_files": [], "deleted_files": [],
+    }
+    before = deepcopy(context)
+    with pytest.raises(ValueError, match="Generated task output cannot delete config/auth.yaml"):
+        save_generated_code(context)
+    assert context == before
+
+
 @pytest.mark.asyncio
 async def test_task_rejection_retains_candidate_and_one_recovery_can_preserve_known_restriction(monkeypatch):
     candidate = _candidate("tasks.veiw")

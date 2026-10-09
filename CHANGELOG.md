@@ -744,6 +744,7 @@ This project follows a practical pre-1.0 changelog format:
   still returns a cursor when more rows exist. The Common Ground reference
   builds its own JSX and runs eight desktop/phone browser checks in dedicated
   CI using disposable local MongoDB and Keycloak services.
+
 - `dispatch_module_action` called without an `app` no longer imports the
   platform host as a side effect. On a serving runtime-only host that import
   could never complete: every call failed with "Cannot add middleware after an

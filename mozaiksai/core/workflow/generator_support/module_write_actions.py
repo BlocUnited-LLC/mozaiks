@@ -23,11 +23,13 @@ from mozaiksai.core.runtime.app.paths import APP_AUTH_CONFIG_PATH
 from mozaiksai.core.semantics.closed_contract_schema import import_closed_contract_schema
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import (
+    _FILE_ENTRY_LANES,
     _materialize_schema_contract,
     _unwrap_output_envelope,
     auth_required_from_strategy,
     data_contract_requires_auth,
     extract_code_file_map_from_payload,
+    extract_deleted_file_paths_from_payload,
 )
 from mozaiksai.core.workflow.generator_support.data_contract_fields import (
     DATE_FIELD_TYPES,
@@ -698,13 +700,19 @@ def close_module_actions(
     restrictions must resolve after canonical CRUD normalization.
     """
     output = _unwrap_output_envelope(detach(payload))
-    if isinstance(output, dict) and APP_AUTH_CONFIG_PATH in extract_code_file_map_from_payload(
-        {"code_files": output.get("code_files")},
-    ):
-        raise ValueError(
-            f"Generated task output cannot author {APP_AUTH_CONFIG_PATH}; "
-            "the admitted app baseline or save_auth_scaffold owns auth."
-        )
+    if isinstance(output, dict):
+        raw_file_lanes = {lane: output.get(lane) for lane in _FILE_ENTRY_LANES}
+        raw_file_lanes["service_foundation_bundle"] = output.get("service_foundation_bundle")
+        if APP_AUTH_CONFIG_PATH in extract_code_file_map_from_payload(raw_file_lanes):
+            raise ValueError(
+                f"Generated task output cannot author {APP_AUTH_CONFIG_PATH}; "
+                "the admitted app baseline or save_auth_scaffold owns auth."
+            )
+        if APP_AUTH_CONFIG_PATH in extract_deleted_file_paths_from_payload(output):
+            raise ValueError(
+                f"Generated task output cannot delete {APP_AUTH_CONFIG_PATH}; "
+                "the admitted app baseline or save_auth_scaffold owns auth."
+            )
     plan = detach(app_build_plan)
     if not isinstance(output, dict) or not isinstance(plan, dict):
         return output
