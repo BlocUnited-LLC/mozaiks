@@ -116,8 +116,9 @@ manager returns health and identity without a preview URL. This does not
 provide a browser preview or authorize promotion. It boots the framework
 platform host; authenticated apps need a future preview-scoped OIDC setup, and
 hosted product entrypoints need a trusted fixed host selection before their
-behavior can be claimed. Stop the session through the
-existing owner-bound lifecycle when its check is no longer needed.
+behavior can be claimed. A trusted caller must verify the owner and build
+identity before stopping the session through the existing manager. Generic
+preview routes hide sealed sessions.
 
 Beyond one-shot validation, the Studio host mounts an artifact preview session
 API so the AppWorkbench can boot and restart a saved generated bundle on demand.
