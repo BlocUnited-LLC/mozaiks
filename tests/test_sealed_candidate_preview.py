@@ -64,6 +64,35 @@ async def test_sealed_cleanup_after_restart_uses_stored_docker_provider(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_legacy_sealed_image_record_fails_new_admission_but_still_cleans_up(monkeypatch):
+    import mozaiksai.core.adapters.docker_sandbox as docker_sandbox
+
+    adapter = _SealedAdapter()
+    monkeypatch.setattr(docker_sandbox, "docker_available", lambda: True)
+    monkeypatch.setattr(docker_sandbox, "get_docker_sandbox", lambda: adapter)
+    monkeypatch.setenv("MOZAIKS_PREVIEW_PROVIDER", "docker")
+    store = _store()
+    first = ArtifactPreviewSessionManager(store=store, startup_timeout_seconds=0)
+    data = _archive(**{"app/app.json": APP_JSON})
+    state = await first.create_sealed_candidate(
+        **IDENTITY, archive_bytes=data, archive_sha256=archive_digest(data), sealed_runtime_ref=IMAGE_ID,
+    )
+    ledger = next(iter(store._ledger_collection().documents.values()))
+    entry = next(item for item in ledger["entries"] if item["sandbox_id"] == state.sandbox_id)
+    entry["sealed_image_id"] = entry.pop("sealed_runtime_ref")
+
+    with pytest.raises(ValueError, match="identity"):
+        await first.create_sealed_candidate(
+            **IDENTITY, archive_bytes=data, archive_sha256=archive_digest(data), sealed_runtime_ref=IMAGE_ID,
+        )
+    monkeypatch.setenv("MOZAIKS_PREVIEW_PROVIDER", "e2b")
+    monkeypatch.delenv("E2B_API_KEY", raising=False)
+    await ArtifactPreviewSessionManager(store=store).cleanup(expired_only=False)
+    assert await store.get(state.sandbox_id) is None
+    assert [name for name, _ in adapter.calls].count("terminate_session") == 1
+
+
+@pytest.mark.asyncio
 async def test_sealed_e2b_boot_uses_exact_runtime_ref_without_url_or_mutable_write():
     adapter = _SealedAdapter(provider="e2b")
     manager = _manager(adapter, provider="e2b")
@@ -183,7 +212,8 @@ async def test_sealed_boot_binds_digest_runtime_ref_and_owner_without_url_or_syn
 
 
 @pytest.mark.asyncio
-async def test_sealed_stage_timeout_kills_session_and_releases_reservation():
+@pytest.mark.parametrize(("stage_timeout", "ttl_minutes"), [(0.001, 30), (180, 0.0001)])
+async def test_sealed_stage_timeout_kills_session_and_releases_reservation(stage_timeout, ttl_minutes):
     class SlowStager(_SealedAdapter):
         async def stage_sealed_files(self, **kwargs):
             self.calls.append(("stage_sealed_files", kwargs))
@@ -191,7 +221,8 @@ async def test_sealed_stage_timeout_kills_session_and_releases_reservation():
 
     adapter = SlowStager()
     manager = _manager(adapter)
-    manager._sealed_stage_timeout_seconds = 0.001
+    manager._sealed_stage_timeout_seconds = stage_timeout
+    manager._ttl_minutes = ttl_minutes
     data = _archive(**{"app/app.json": APP_JSON})
     with pytest.raises(TimeoutError):
         await manager.create_sealed_candidate(

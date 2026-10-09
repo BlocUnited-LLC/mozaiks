@@ -422,7 +422,10 @@ class ArtifactPreviewSessionManager:
                 assert isinstance(adapter, _SealedCandidateStager)
                 if info.provider != allocation["provider"]:
                     raise RuntimeError("Sealed preview provider did not match its reservation")
-                async with asyncio.timeout(self._sealed_stage_timeout_seconds):
+                remaining = self._ttl_minutes * 60 - (time.monotonic() - started)
+                if remaining <= 0:
+                    raise TimeoutError("Sealed preview provider lifetime expired before staging")
+                async with asyncio.timeout(min(self._sealed_stage_timeout_seconds, remaining)):
                     await adapter.stage_sealed_files(session_id=info.session_id, files=sealed_files)
                 result = await adapter.run_command(
                     session_id=info.session_id, background=True, timeout_seconds=15,
