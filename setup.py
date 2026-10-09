@@ -2,7 +2,81 @@
 
 from __future__ import annotations
 
+import json
+import re
+import subprocess
+from pathlib import Path
+
 from setuptools import find_namespace_packages, setup
+from setuptools.command.build_py import build_py
+from setuptools.command.sdist import sdist
+
+_REVISION_PATH = Path("mozaiksai/_build_revision.json")
+_COMMIT = re.compile(r"[0-9a-f]{40}")
+
+
+def _source_commit(root: Path) -> str | None:
+    if (root / ".git").exists():
+        try:
+            commit = subprocess.run(
+                ["git", "-C", str(root), "rev-parse", "HEAD"],
+                check=True, capture_output=True, text=True, timeout=20,
+            ).stdout.strip()
+            dirty = subprocess.run(
+                ["git", "-C", str(root), "status", "--porcelain", "--untracked-files=no"],
+                check=True, capture_output=True, text=True, timeout=20,
+            ).stdout.strip()
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise RuntimeError("Cannot verify the exact Mozaiks package source revision") from exc
+        if dirty:
+            raise RuntimeError("Commit tracked package changes before building a Mozaiks distribution")
+    elif (root / _REVISION_PATH).exists():
+        try:
+            revision = json.loads((root / _REVISION_PATH).read_text(encoding="utf-8"))
+            if not isinstance(revision, dict) or revision.get("schema_version") != "mozaiks.source_revision.v1":
+                raise ValueError
+            commit = revision["commit"]
+        except (OSError, ValueError, KeyError) as exc:
+            raise RuntimeError("Source distribution has no verified Mozaiks revision") from exc
+    else:
+        # A Docker context may intentionally omit Git metadata. Its generic
+        # host wheel can run, but Android export will refuse missing provenance.
+        return None
+    if not isinstance(commit, str) or not _COMMIT.fullmatch(commit):
+        raise RuntimeError("Mozaiks package source revision must be an exact Git commit")
+    return commit
+
+
+def _revision_bytes(root: Path) -> bytes | None:
+    commit = _source_commit(root)
+    if commit is None:
+        return None
+    return (json.dumps({
+        "schema_version": "mozaiks.source_revision.v1", "commit": commit,
+    }, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+
+
+class BuildPyWithRevision(build_py):
+    def run(self) -> None:
+        super().run()
+        target = Path(self.build_lib) / _REVISION_PATH
+        revision = _revision_bytes(Path(__file__).resolve().parent)
+        if revision is None:
+            target.unlink(missing_ok=True)
+            return
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(revision)
+
+
+class SdistWithRevision(sdist):
+    def make_release_tree(self, base_dir: str, files: list[str]) -> None:
+        super().make_release_tree(base_dir, files)
+        revision = _revision_bytes(Path(__file__).resolve().parent)
+        if revision is None:
+            raise RuntimeError("Source distribution requires an exact Mozaiks source revision")
+        target = Path(base_dir) / _REVISION_PATH
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(revision)
 
 PACKAGE_INCLUDES = [
     "factory_app",
@@ -50,4 +124,6 @@ packages = sorted(set(packages))
 setup(
     packages=packages,
     package_dir={"mozaiks_chat_ui": "chat-ui"},
+    package_data={"mozaiksai": ["_build_revision.json"]},
+    cmdclass={"build_py": BuildPyWithRevision, "sdist": SdistWithRevision},
 )
