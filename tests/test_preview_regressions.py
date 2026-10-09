@@ -212,19 +212,27 @@ async def test_docker_rejects_invalid_paths_before_any_provider_command(monkeypa
     run.assert_not_awaited()
 
 
-@pytest.mark.parametrize("confirmation,terminated", [
-    ((0, "", ""), True),
-    ((0, "review-container\n", ""), False),
-    ((1, "", "daemon unavailable"), False),
+@pytest.mark.parametrize("confirmation,final_confirmation,terminated", [
+    ((0, "", ""), None, True),
+    ((0, "review-container\n", ""), (0, "", ""), True),
+    ((0, "review-container\n", ""), (0, "review-container\n", ""), False),
+    ((1, "", "daemon unavailable"), None, False),
 ])
 @pytest.mark.asyncio
-async def test_docker_stop_requires_confirmed_absence_after_failure(monkeypatch, confirmation, terminated):
+async def test_docker_stop_requires_confirmed_absence_after_failure(
+    monkeypatch, confirmation, final_confirmation, terminated,
+):
     adapter = DockerSandboxAdapter()
-    run = AsyncMock(side_effect=[(1, "", "stop failed"), confirmation])
+    results = [(1, "", "stop failed"), confirmation]
+    if final_confirmation is not None:
+        results.extend([(0, "", ""), final_confirmation])
+    run = AsyncMock(side_effect=results)
     monkeypatch.setattr(adapter, "_run", run)
 
     assert await adapter.terminate_session(session_id="review-container") is terminated
-    assert run.await_count == 2
+    assert run.await_count == len(results)
+    if final_confirmation is not None:
+        assert run.await_args_list[2].args[0] == ["docker", "rm", "-f", "review-container"]
     assert "id=review-container" in run.await_args.args[0]
 
 
