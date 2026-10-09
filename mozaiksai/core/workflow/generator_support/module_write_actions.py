@@ -19,7 +19,7 @@ from typing import Any
 import yaml
 
 from mozaiksai.core.runtime.app.module_loader import CANONICAL_EVENT_PREFIXES
-from mozaiksai.core.runtime.app.paths import APP_AUTH_CONFIG_PATH
+from mozaiksai.core.runtime.app.paths import APP_AUTH_CONFIG_PATH, normalize_app_path
 from mozaiksai.core.semantics.closed_contract_schema import import_closed_contract_schema
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import (
@@ -60,7 +60,6 @@ from mozaiksai.core.workflow.generator_support.module_read_actions import (
     _replace_functions,
     close_module_read_actions,
 )
-from mozaiksai.core.workflow.path_ownership import normalize_owned_paths
 from mozaiksai.resources import resolve_factory_app_root
 
 logger = logging.getLogger(__name__)
@@ -281,7 +280,10 @@ def _validate_generated_action_permissions(
     manifest_path = f"modules/{module_id}/module.yaml"
     authored_by_task = any(
         task.get("task_type") == "module_contract"
-        and manifest_path in normalize_owned_paths(task.get("owned_paths"))
+        and any(
+            normalize_app_path(path) == manifest_path
+            for path in task.get("owned_paths") or []
+        )
         for task in plan.get("build_tasks") or [] if isinstance(task, dict)
     )
     if not declared_generated and not authored_by_task:

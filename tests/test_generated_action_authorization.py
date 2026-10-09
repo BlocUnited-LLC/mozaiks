@@ -205,6 +205,24 @@ def test_model_owned_module_cannot_bypass_auth_with_pack_source(source, owned_pa
         )
 
 
+def test_model_owned_module_with_key_in_id_keeps_valid_auth_scopes():
+    module_id = "keyboard"
+    manifest_path = f"modules/{module_id}/module.yaml"
+    plan = _plan(source="framework_pack")
+    plan["capability_packs"][0]["capability_pack_id"] = module_id
+    plan["build_tasks"] = [{
+        "task_id": "keyboard_contract", "task_type": "module_contract",
+        "capability_pack_id": module_id, "owned_paths": [manifest_path],
+    }]
+    candidate = _payload("keyboard.view")
+    candidate["module_contract"]["module_id"] = module_id
+    candidate["module_contract"]["module_yaml"]["module"]["id"] = module_id
+    closed = close_module_actions(candidate, app_build_plan=plan, companion_files=_auth("keyboard.view"))
+    assert _permissions(closed) == ["keyboard.view"]
+    with pytest.raises(ValueError, match="keyboard.view"):
+        close_module_actions(candidate, app_build_plan=plan, companion_files=_auth("tasks.view"))
+
+
 @pytest.mark.parametrize("strategy", ["basic-login", "role-based", "third-party"])
 def test_missing_auth_uses_only_canonical_scaffold_scopes(strategy):
     closed = close_module_actions(_payload("openid"), app_build_plan=_plan(strategy))
