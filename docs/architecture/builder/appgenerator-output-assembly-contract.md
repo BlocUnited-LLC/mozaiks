@@ -45,7 +45,7 @@ detached task execution, including nested sections and admin panels. Module-owne
 
 List actions use `page`, `page_size`, and `search`, returning `items` and `total`.
 Repositories use the deterministically rendered collection policy described in
-[the data contract](data-contract-and-revision-contract.md#deterministic-generated-module-policies).
+[the data contract](data-contract-and-revision-contract.md#runtime-ownership-and-generated-policy-preflight).
 Wiring and runtime-quality validators remain the acceptance backstop.
 
 ## Page Output and Action Binding Acceptance
