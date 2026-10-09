@@ -176,31 +176,39 @@ class ConfiguredEntitlementAdapter:
         user_id: str | None = None,
         tenant_id: str | None = None,
         workspace_id: str | None = None,
+        product_id: str | None = None,
     ) -> str | None:
-        """Return the effective active plan id for this scope.
+        """Return the effective active plan id for this scope and product.
 
-        The default plan is returned when no assignment store exists or no
-        active assignment is found. Active assignment plan IDs are returned as
-        stored so operator-authored catalogs can snapshot plans that are not in
-        the static app config fallback.
+        In a v2 catalog, omitting product_id selects the primary product. An
+        explicit product_id selects only that product; an unknown id returns
+        None. The product's default plan is returned when no active assignment
+        is found. Active assignment IDs are returned as stored so operator-
+        authored catalogs can snapshot plans absent from static config.
         """
 
         app_id = str(app_id or "").strip()
         if not self._config or not app_id:
             return None
 
-        # v2: return the primary (default) product's active plan
+        # v2: use an explicit product when requested, otherwise the primary.
         if self._config.products:
             primary_product = None
-            if self._config.default_product_id:
+            requested_product_id = str(product_id or "").strip()
+            if requested_product_id:
+                for p in self._config.products:
+                    if p.product_id == requested_product_id:
+                        primary_product = p
+                        break
+                if primary_product is None:
+                    return None
+            elif self._config.default_product_id:
                 for p in self._config.products:
                     if p.product_id == self._config.default_product_id:
                         primary_product = p
                         break
-            if primary_product is None and self._config.products:
-                primary_product = self._config.products[0]
             if primary_product is None:
-                return None
+                primary_product = self._config.products[0]
             store = primary_product.assignment_store
             if store is None:
                 return primary_product.default_plan_id
@@ -220,7 +228,7 @@ class ConfiguredEntitlementAdapter:
                 plan_id = str(_field_value(record, store.plan_id_field, primary_product.default_plan_id) or "").strip()
                 return plan_id or primary_product.default_plan_id
             except Exception:
-                return primary_product.default_plan_id
+                return None if requested_product_id else primary_product.default_plan_id
 
         # v1: existing behavior
         store = self._config.assignment_store
