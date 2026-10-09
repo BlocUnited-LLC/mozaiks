@@ -8,9 +8,14 @@ export function useWorkspaceApps(errorFallback = 'Workspace apps could not be lo
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [dataMode] = useState('live')
+  const [requestVersion, setRequestVersion] = useState(0)
+
+  const retry = useCallback(() => setRequestVersion((version) => version + 1), [])
 
   useEffect(() => {
     let cancelled = false
+    setLoading(true)
+    setError(null)
 
     async function load() {
       try {
@@ -35,7 +40,7 @@ export function useWorkspaceApps(errorFallback = 'Workspace apps could not be lo
     return () => {
       cancelled = true
     }
-  }, [errorFallback])
+  }, [errorFallback, requestVersion])
 
   const deleteApp = useCallback(async (buildRegistryId) => {
     try {
@@ -58,6 +63,7 @@ export function useWorkspaceApps(errorFallback = 'Workspace apps could not be lo
     error,
     dataMode,
     deleteApp,
+    retry,
   }
 }
 

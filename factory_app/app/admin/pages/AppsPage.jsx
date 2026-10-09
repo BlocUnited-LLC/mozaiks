@@ -195,7 +195,7 @@ function AppsTable({ rows, onOpen, onDashboard, onDelete }) {
 }
 
 export function AppsDirectory({
-  apps, loading, error, deleteApp, navigationForApp, pagination,
+  apps, loading, error, deleteApp, retry, navigationForApp, pagination,
   searchValue: controlledSearch, onSearchChange, activeFilter: controlledFilter, onFilterChange,
 }) {
   const navigate = useNavigate()
@@ -279,7 +279,16 @@ export function AppsDirectory({
   }
 
   if (loading && !pagination) return <StudioLoadingState label="Loading your apps…" />
-  if (error && !pagination) return <StudioErrorState title="Could not load apps" message={error} />
+  const retryAction = pagination?.onRetry || retry
+  const errorState = (
+    <StudioErrorState
+      title="Could not load apps"
+      message="The app list is temporarily unavailable. Try again in a moment."
+      action={retryAction ? { label: 'Try again', onClick: retryAction } : null}
+    />
+  )
+
+  if (error && !pagination) return errorState
 
   return (
     <WorkspaceLayout>
@@ -300,10 +309,7 @@ export function AppsDirectory({
             onFilterChange={onFilterChange ?? setLocalFilter}
           />
           {loading ? <StudioLoadingState label="Loading your apps…" /> : error ? (
-            <div className="space-y-3">
-              <StudioErrorState title="Could not load apps" message={error} />
-              {pagination?.onRetry && <ActionButton onClick={pagination.onRetry}>Try again</ActionButton>}
-            </div>
+            errorState
           ) : visibleRows.length > 0 ? (
             <AppsTable rows={visibleRows} onOpen={handleOpen} onDashboard={handleDashboard} onDelete={deleteApp ? handleDelete : null} />
           ) : portfolio.rows.length === 0 && !searchValue && activeFilter === 'all' && (!pagination || pagination.page === 1) ? (
