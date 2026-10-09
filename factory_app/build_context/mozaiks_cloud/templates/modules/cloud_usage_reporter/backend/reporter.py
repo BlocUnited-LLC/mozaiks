@@ -44,7 +44,10 @@ def _reporting_enabled() -> bool:
 
 
 def _app_id() -> str:
-    return str(os.environ.get("MOZAIKS_APP_ID", "") or "default").strip() or "default"
+    app_id = str(os.environ.get("MOZAIKS_APP_ID", "")).strip()
+    if not app_id:
+        raise ValueError("MOZAIKS_APP_ID is required")
+    return app_id
 
 
 class UsageReporterService:
@@ -100,14 +103,15 @@ class UsageReporterService:
         )
         from mozaiksai.core.metrics.app_metrics import AppMetrics
 
-        client = MozaiksCloudUsageClient()
+        app_id = _app_id()
+        client = MozaiksCloudUsageClient(app_id=app_id)
         if not await client.is_configured():
             return {"sent": 0, "reason": "unconfigured"}
 
         since = (datetime.now(UTC) - timedelta(days=2)).replace(
             hour=0, minute=0, second=0, microsecond=0
         )
-        metrics = AppMetrics(SimpleNamespace(app_id=_app_id()))
+        metrics = AppMetrics(SimpleNamespace(app_id=app_id))
         rollups = await metrics.usage_rollup(since=since)
         if not rollups:
             return {"sent": 0, "reason": "no_usage"}

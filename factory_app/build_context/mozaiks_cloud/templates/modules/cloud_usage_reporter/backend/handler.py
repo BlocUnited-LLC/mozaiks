@@ -14,7 +14,10 @@ class CloudUsageReporterHandler:
         enabled = str(
             os.environ.get("MOZAIKS_CLOUD_USAGE_REPORTING", "")
         ).strip().lower() not in {"0", "false", "no", "off"}
-        configured = await MozaiksCloudUsageClient().is_configured()
+        app_id = str(getattr(ctx, "app_id", None) or "").strip()
+        if not app_id:
+            raise ValueError("ctx.app_id is required")
+        configured = await MozaiksCloudUsageClient(app_id=app_id).is_configured()
         return {
             "enabled": enabled,
             "configured": configured,

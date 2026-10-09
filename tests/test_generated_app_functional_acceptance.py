@@ -4,6 +4,7 @@ import json
 import textwrap
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
 import anyio
 import pytest
@@ -921,6 +922,11 @@ def test_generated_monetized_saas_bundle_boots_and_serves_mozaikspay_runtime_sur
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("MOZAIKSPAY_API_BASE", "https://mozaikspay-compatible.test")
     monkeypatch.setenv("MOZAIKSPAY_API_KEY", "mzk_test_generated_saas")
+    from mozaiksai.core.data.persistence.connector_store import ConnectorStore
+
+    # This fixture exercises environment setup with no saved connector; an
+    # unavailable metadata store must not stand in for an absent record.
+    monkeypatch.setattr(ConnectorStore, "get", AsyncMock(return_value=None))
     reset_auth_adapter()
 
     provider_requests: list[dict[str, Any]] = []
