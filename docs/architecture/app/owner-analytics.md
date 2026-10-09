@@ -136,7 +136,10 @@ fabrication in live mode.
   specifically, so a revenue-only app still reports active users as pending
   rather than zero.
 - `retention`/`churn_rate` are period ratios from churned-user snapshots,
-  not cohort retention curves.
+  not cohort retention curves. The separate
+  [D30 authenticated action cohort contract](d30-action-cohort-evidence.md)
+  requires app-authoritative eligibility and complete action sources before
+  it can publish a cohort rate.
 - Portfolio trend series render for metrics with daily data (MRR, net new
   MRR, ARR, active/paying/new users); NRR and retention appear as values,
   not series.
