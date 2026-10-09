@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import pytest
+import yaml
 
 from factory_app.workflows.AppGenerator.tools.deployment_contract import (
     _default_ci_secret_requirements,
@@ -180,7 +181,7 @@ def test_generated_readiness_workflow_is_environment_staging_gate() -> None:
     assert "environment: staging" in workflow
     assert "Artifact review staging happens inside Mozaiks/Studio" in workflow
     assert "Validate readiness contract" in workflow
-    assert "docker build -t generated-app:readiness ." in workflow
+    assert "Build generated app image" in workflow
     assert "APP_IMAGE_SMOKE_VERIFIED_AT.txt" in workflow
     assert "APP_HEALTHCHECK_VERIFIED_AT.txt" in workflow
     assert "APP_AUTH_SMOKE_VERIFIED_AT" in workflow
@@ -193,6 +194,28 @@ def test_generated_readiness_workflow_is_environment_staging_gate() -> None:
     assert "${{ secrets.MONGO_URI }}" in workflow
     assert "AZURE_SUBSCRIPTION_ID" not in workflow
     assert "MOZAIKSPAY" not in workflow
+
+
+def test_generated_ci_builds_use_a_public_base_mirror_without_changing_the_portable_dockerfile() -> None:
+    result = generate_deployment_artifacts(
+        app_id="demo_app",
+        deployment_profile="production_container",
+        include_workflow=True,
+    )
+    artifacts = result["artifacts"]
+    assert artifacts["Dockerfile"].startswith("FROM python:3.13-slim\n")
+    context = (
+        "python:3.13-slim=docker-image://"
+        "public.ecr.aws/docker/library/python:3.13-slim"
+    )
+    for path, job_id, image_tag in (
+        (".github/workflows/readiness.yml", "readiness", "generated-app:readiness"),
+        (".github/workflows/deploy.yml", "build-and-smoke", "generated-app:ci"),
+    ):
+        workflow = yaml.safe_load(artifacts[path])
+        steps = workflow["jobs"][job_id]["steps"]
+        build = next(step for step in steps if step.get("name", "").startswith("Build "))
+        assert build["run"] == f"docker build --build-context {context} -t {image_tag} ."
 
 
 def test_env_example_contains_placeholders_not_secrets() -> None:

@@ -197,6 +197,15 @@ host loads its declarative pages, modules, services, and workflows. Generated
 apps do not depend on a repository-local launcher, the Studio host, or
 BlocUnited-operated infrastructure.
 
+The root `Dockerfile` keeps the portable `python:3.13-slim` base. The generated
+GitHub readiness and deploy workflows supply a BuildKit named context that
+resolves that base from the public Docker Official Images mirror at
+`public.ecr.aws/docker/library/python:3.13-slim`. This avoids anonymous Docker
+Hub pull limits on shared CI runners. The mirror only supplies build input; it
+does not choose a deployment provider, require an AWS account, or add a secret
+to the generated app. Operators can replace the workflow's public base mirror
+with another trusted OCI source while preserving the Dockerfile and manifest.
+
 ### Authenticated App Contract
 
 Generated apps declare whether their runtime requires login through
