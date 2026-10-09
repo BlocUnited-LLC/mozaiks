@@ -108,6 +108,13 @@ to the refinement route. Its
 setting is rejected; it never controlled provider retries. This does not
 change provider-specific retry parameters inside `llm_config`.
 
+A trusted ACP-only worker can pass an approved `ControlPlaneACPProviderConfig`
+directly to `ACPCodingProvider(provider_config=...)`. That worker does not make
+structured-output calls, so it does not need a synthetic `codegen` model
+profile. Normal refinement routing still loads the full policy and requires a
+named model profile for enabled coding and its structured fallback. The direct
+provider configuration does not authorize a worker launch or relax isolation.
+
 ## Minimal Harness
 
 ```yaml

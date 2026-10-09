@@ -14,8 +14,7 @@ from pydantic import Field, StrictStr
 
 from mozaiksai.control_plane import (
     CodingWorkerRequest,
-    ControlPlaneCodingCapabilityConfig,
-    ControlPlaneConfig,
+    ControlPlaneACPProviderConfig,
     export_repository_workspace_archive,
 )
 from mozaiksai.control_plane.implementations.acp_coding_provider import ACPCodingProvider
@@ -82,16 +81,8 @@ def _fake_config(*, workspace_root: Path, turn_timeout_seconds: int, **_kwargs: 
 
 async def _execute() -> str:
     request = _ProofWorkerRequest.model_validate_json(sys.stdin.buffer.read())
-    policy = ControlPlaneConfig(
-        enabled=True,
-        llm_profiles={"codegen": {"llm_config": {"model": "proof-model"}}},
-        coding=ControlPlaneCodingCapabilityConfig.model_validate(
-            {
-                "enabled": True,
-                "llm_profile": "codegen",
-                "providers": {"acp": {"enabled": True, "budget": {"max_wall_seconds": 30}}},
-            }
-        ),
+    provider_config = ControlPlaneACPProviderConfig.model_validate(
+        {"enabled": True, "budget": {"max_wall_seconds": 30}}
     )
     observed_archive: bytes | None = None
 
@@ -103,7 +94,7 @@ async def _execute() -> str:
         )
 
     provider = ACPCodingProvider(
-        config_loader=lambda: policy,
+        provider_config=provider_config,
         staging_root=Path("/workspace/acp_staging"),
         acp_config_factory=_fake_config,
         env_source={},

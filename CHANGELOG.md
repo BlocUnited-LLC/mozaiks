@@ -1372,6 +1372,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Changed
 
+- Trusted isolated ACP-only workers can supply their approved adapter and
+  budget directly to the coding provider without inventing a structured-output
+  model profile. Normal refinement coding still resolves its named model
+  profile and fallback through the full policy.
 - Workflow agents can declare `pending_turn_replay: block` to stop automatic
   replay of uncertain AG2 pending turns. Existing agents default to `allow`;
   AppGenerator artifact workers now block replay. Deploy the runtime and Factory
