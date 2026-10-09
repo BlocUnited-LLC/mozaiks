@@ -62,8 +62,9 @@ Current repo-local infra uses those assets directly.
 
 Examples from the current implementation:
 
-- Docker Compose mounts Keycloak realm and theme assets from
-  `factory_app/app/brand/`
+- Local Docker Compose mounts Keycloak realm and theme assets from
+  `factory_app/app/brand/`; production Compose requires a separate
+  operator-owned realm import and retains only the theme mount
 - Studio host bootstrap falls back to `factory_app/app/` when no external app
   workspace is supplied
 - Studio host bootstrap prefers `factory_app/workflows/` as the workflow root

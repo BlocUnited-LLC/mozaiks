@@ -39,7 +39,10 @@ dispatch:
    release workflow repeats the audit's strict documentation build. Confirm
    `mozaiksai/version.py` is `0.2.0` and any existing
    `v0.2.0` tag resolves to the same candidate commit.
-6. Recheck `factory_app/app/brand/realm-export.json` for production values.
+6. Recheck `factory_app/app/brand/realm-export.json` for production values. Its
+   localhost browser callback is a local-development seed. Confirm production
+   Compose requires the separate operator-owned import and its validator; do
+   not put deployment domains or secrets in the packaged realm.
 7. Have the repository operator configure the GitHub `pypi` environment
    with at least one required reviewer, **admin bypass disabled**, and
    deployments limited to protected branches. Verify the live result before

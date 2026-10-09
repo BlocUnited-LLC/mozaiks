@@ -12,6 +12,12 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Security
+
+- Production Compose now requires a separately managed Keycloak realm import
+  and validates public HTTPS browser callbacks before Keycloak starts; the
+  packaged localhost realm remains for local development.
+
 ### Added
 
 - An optional runtime-only Mozaiks Cloud usage API key for generated usage
