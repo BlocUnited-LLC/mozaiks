@@ -13,6 +13,10 @@ from typing import Any
 DEFAULT_RUNTIME_PORT = 8000
 DEFAULT_HEALTH_PATH = "/api/health"
 DEFAULT_PROFILE = "generic_container"
+_GENERATED_PYTHON_BASE = "python:3.13-slim"
+_GENERATED_CI_BASE_CONTEXT = (
+    f"{_GENERATED_PYTHON_BASE}=docker-image://public.ecr.aws/docker/library/{_GENERATED_PYTHON_BASE}"
+)
 PRODUCTION_DEPLOYMENT_PROFILES = frozenset(
     {
         "production",
@@ -1188,7 +1192,7 @@ def _render_dockerfile(spec: dict[str, Any]) -> str:
     runtime_env = _auth_runtime_env(spec)
     return "\n".join(
         [
-            "FROM python:3.13-slim",
+            f"FROM {_GENERATED_PYTHON_BASE}",
             "WORKDIR /app",
             "COPY requirements.txt ./",
             "RUN pip install --no-cache-dir -r requirements.txt",
@@ -1335,7 +1339,7 @@ def _render_workflow(spec: dict[str, Any]) -> str:
     lines.extend(
         [
             "      - name: Build container",
-            "        run: docker build -t generated-app:ci .",
+            f"        run: docker build --build-context {_GENERATED_CI_BASE_CONTEXT} -t generated-app:ci .",
             "      - name: Smoke check",
             f"        run: docker run --rm -e PORT={port} generated-app:ci python -c \"print('smoke ok')\"",
         ]
@@ -1545,7 +1549,7 @@ def _render_readiness_workflow(spec: dict[str, Any]) -> str:
             "",
             "      - name: Build generated app image",
             "        if: ${{ inputs.run_container_gate }}",
-            "        run: docker build -t generated-app:readiness .",
+            f"        run: docker build --build-context {_GENERATED_CI_BASE_CONTEXT} -t generated-app:readiness .",
             "",
             "      - name: Smoke generated app image",
             "        if: ${{ inputs.run_container_gate }}",

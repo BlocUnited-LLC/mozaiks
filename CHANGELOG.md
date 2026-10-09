@@ -25,6 +25,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Generated app readiness and deploy workflows resolve their Python base from
+  a public mirror, avoiding Docker Hub anonymous pull limits on CI runners
+  while keeping the generated Dockerfile portable.
 - CI and operator reference container builds resolve public base images from a
   public mirror, avoiding anonymous Docker Hub pull limits during release checks.
 - Restored the assistant launcher on declared app home pages and other custom
