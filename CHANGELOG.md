@@ -575,6 +575,8 @@ This project follows a practical pre-1.0 changelog format:
   longer fail because they have no VCS `direct_url.json`.
 - AppGenerator rejects generated action permissions that do not resolve against
   the approved auth contract during task admission, repair, and assembly.
+  A model-authored module contract remains subject to this check even if its
+  plan mislabels the module as a framework or operator pack.
   Diagnostics identify the action and declared scope choices; valid restrictions
   remain intact. Authenticated generation resolves early defaults from the
   canonical auth scaffold instead of waiting for its file to be materialized.

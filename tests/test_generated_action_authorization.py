@@ -185,6 +185,25 @@ def test_operator_and_pack_permissions_are_not_reinterpreted_as_generated_auth(s
     assert _permissions(closed) == ["operator.tasks.read"]
 
 
+@pytest.mark.parametrize("source", ["framework_pack", "operator_pack"])
+def test_model_owned_module_cannot_bypass_auth_with_pack_source(source):
+    plan = _plan(source=source)
+    plan["build_tasks"] = [{
+        "task_id": TASK_ID,
+        "task_type": "module_contract",
+        "capability_pack_id": MODULE,
+        "owned_paths": [MANIFEST],
+    }]
+    candidate = _payload("tasks.veiw")
+    with pytest.raises(ValueError, match="tasks.veiw"):
+        close_module_actions(candidate, app_build_plan=plan, companion_files=_auth("tasks.view"))
+    with pytest.raises(ValueError, match="tasks.veiw"):
+        materialize_module_actions(
+            {MANIFEST: yaml.safe_dump(candidate["module_contract"]["module_yaml"]), **_auth("tasks.view")},
+            app_build_plan=plan,
+        )
+
+
 @pytest.mark.parametrize("strategy", ["basic-login", "role-based", "third-party"])
 def test_missing_auth_uses_only_canonical_scaffold_scopes(strategy):
     closed = close_module_actions(_payload("openid"), app_build_plan=_plan(strategy))

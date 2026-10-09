@@ -273,10 +273,16 @@ def _validate_generated_action_permissions(
     module_id: str, manifest: Mapping[str, Any], plan: Mapping[str, Any], scopes: frozenset[str],
 ) -> None:
     """Reject unresolved restrictions after bounded canonical CRUD normalization."""
-    if not any(
+    declared_generated = any(
         pack.get("capability_pack_id") == module_id and pack.get("capability_source") == "generated_module"
         for pack in plan.get("capability_packs") or [] if isinstance(pack, dict)
-    ):
+    )
+    manifest_path = f"modules/{module_id}/module.yaml"
+    authored_by_task = any(
+        task.get("task_type") == "module_contract" and manifest_path in (task.get("owned_paths") or [])
+        for task in plan.get("build_tasks") or [] if isinstance(task, dict)
+    )
+    if not declared_generated and not authored_by_task:
         return  # Selected packs and host-authored modules have their own authorization owner.
     for action in manifest.get("actions") or []:
         permissions = action.get("permissions")

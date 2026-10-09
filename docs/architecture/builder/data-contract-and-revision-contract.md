@@ -346,7 +346,7 @@ explicitly with its access policy and ServiceAgent implements them. Ordinary
 canonical implementations remain code-owned.
 
 After this bounded CRUD normalization, every remaining action permission on a
-`generated_module` must resolve against the admitted `config/auth.yaml`
+`generated_module` or model-owned module contract must resolve against the admitted `config/auth.yaml`
 `frontend.default_scopes`. Before that file is materialized, an authenticated
 plan or owner-scoped data contract uses the scopes in the canonical
 `webapp_builder` auth template. Module permission catalogues and plan roles are
