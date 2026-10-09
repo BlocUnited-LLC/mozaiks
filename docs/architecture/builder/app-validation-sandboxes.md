@@ -276,18 +276,23 @@ build:
 python scripts/build_e2b_preview_template.py --name mozaiks-preview --confirm-paid-build
 ```
 
-The helper consumes `infra/docker/Dockerfile.preview`, requires
-`E2B_API_KEY`, and prints build progress and template/build identifiers. The
-resulting name or ID belongs in `E2B_TEMPLATE` or `SANDBOX_TEMPLATE`; credentials remain in
-the operator environment. The helper does not run automatically during app
-generation or CI.
+The helper consumes the committed `infra/docker/Dockerfile.preview`, requires
+`E2B_API_KEY` and a clean Git checkout, and prints build progress, template/build
+identifiers, the OSS source SHA, and a SHA-256 digest of the staged context. Save
+those values together and compare the source SHA with the App Zero OSS pin used
+for live acceptance. An alternate `--dockerfile` must also be tracked in the
+same checkout. The resulting name or ID belongs in `E2B_TEMPLATE` or
+`SANDBOX_TEMPLATE`; credentials remain in the operator environment. The helper
+does not run automatically during app generation or CI.
 
-The staged upload includes only the framework source and packaging files.
-It excludes local `.env` files (retaining `.env.example`), `node_modules`,
-virtual environments, generated Tailwind source links, caches, build output,
-browser reports, and runtime logs.
-The `logs` Python package remains included; its generated output directories
-are excluded.
+The staged upload is built from tracked files in the commit's declared
+framework, frontend, `logs` package, and packaging paths. Tracked screenshot
+fixtures under `web_shell/logs` are included. Files ignored by Git, including
+local `.env` values, `node_modules`, generated Tailwind source junctions,
+caches, build output, browser reports, and runtime logs, are not staged.
+Tracked links are rejected. Uncommitted changes or untracked files require a
+fresh clean checkout before the paid build. Dry-run mode does not stage or
+upload files.
 
 Only explicitly configured `MOZAIKS_PREVIEW_ENV_<NAME>` values become preview
 environment variables. Factory API keys, credentials, and database URLs are not

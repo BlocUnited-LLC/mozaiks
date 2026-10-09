@@ -52,6 +52,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- E2B preview template builds stage only committed files from a clean OSS
+  checkout, reject linked source entries and Dockerfiles outside that commit,
+  and report the source commit and staged-context digest alongside the build ID.
+  Ignored local files and junctions cannot enter the provider upload.
+
 - Existing previews continue to use their recorded Docker or E2B provider
   after the configured provider changes, so a restarted worker can stop them
   and release capacity without routing cleanup to the wrong sandbox.
