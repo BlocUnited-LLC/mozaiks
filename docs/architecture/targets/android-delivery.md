@@ -227,7 +227,7 @@ specification option.
 
 ## Acceptance
 
-The [mobile reference](../../../examples/mobile-reference/README.md) consumes
+The [mobile reference](https://github.com/BlocUnited-LLC/mozaiks/blob/main/examples/mobile-reference/README.md) consumes
 this packaging path. Its CI checks Android browser authentication, app actions,
 sign-out, and rejection cases against disposable local services. A separately
 named external workspace exercises reuse outside the OSS checkout. Evidence
