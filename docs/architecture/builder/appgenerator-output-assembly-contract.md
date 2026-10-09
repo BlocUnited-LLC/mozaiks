@@ -390,9 +390,15 @@ migrations remain separate capability-owned `data_migrations` tasks.
 
 An approved `ui_only` surface also retains its realization kind when its ID is
 reused by a proposed capability or task. Naming that surface does not authorize
-backend module work. Review rejects that mismatch before repairs or scheduling,
-and returns guidance to retain the approved browser behavior in `page_bundle`
-work. It does not silently remove requirements or create a provider for them.
+backend module work. A task on that surface may own only approved page artifacts
+and the exact page-bundle theme, shell, or asset config files. It may bind a
+capability only when the trusted selected pack declares
+the same UI-only surface. A proposed capability must match that selected pack's
+ID, source, and surface; category hints alone grant nothing. Review checks the
+raw typed plan before path or identity repair, so a backend path or glob cannot
+be dropped and then admitted. Rejection returns guidance to retain the approved
+browser behavior in `page_bundle` work. It does not silently remove requirements
+or create a provider for them.
 An app with only UI behavior and no selected provider can keep
 `capability_packs: []`; its page task uses a null capability ID. DesignDocs
 `source_capability_packs` values are descriptive category hints, not provider
