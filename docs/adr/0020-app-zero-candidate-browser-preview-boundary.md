@@ -114,12 +114,31 @@ record can substitute for that durable identity.
   origin. Disabling auth or setting `VITE_MOCK_MODE` is not an acceptable
   shortcut. The candidate may compromise this disposable persona; the persona
   must have no authority outside its preview.
-- The trusted supervisor selects the fixed product backend entrypoint
-  `app.host:app` and a product-compatible frontend from the attested runtime
-  image. It cannot accept a candidate-provided arbitrary command. The current
-  `mozaiksai.hosts.platform:app` boot remains valid for generic app checks but
-  is not evidence that App Zero works. A health response alone is not an
-  interactive acceptance result.
+- The trusted supervisor selects a fixed, attested App Zero preview product-host
+  entrypoint and compatible frontend. It cannot accept a candidate-provided
+  arbitrary command. The current `mozaiksai.hosts.platform:app` boot remains
+  valid for generic app checks but is not evidence that App Zero works. A
+  health response alone is not an interactive acceptance result.
+
+### Product-host preview profile is required
+
+The deployed `app.host:app` composition calls App Zero's production security
+guard during import. That guard requires operator metrics and telemetry secrets
+and durable generated-bundle storage in deployed mode. Supplying those secrets
+or the product's storage identity to untrusted candidate code would cross the
+preview boundary. `E2B_API_KEY` is separate from this startup guard; when E2B
+is selected, only the trusted preview controller may hold its provider key.
+
+Before browser preview can activate, App Zero must provide a dedicated,
+attested preview-safe product-host composition and configuration profile. It
+must load the candidate's App Zero bundle and the product routes needed for the
+review journey, use disposable OIDC and an isolated Mongo database, and run
+without operator provider credentials or access to production data. Product
+integrations that cannot run on disposable preview state must fail closed and
+be identified as unverified in the review evidence. The profile must not
+disable authentication or weaken the deployed `app.host:app` startup guard.
+Until this composition and its isolation are proven, the existing offline boot
+cannot be promoted to an owner-visible App Zero preview.
 
 ## Provider routes
 
@@ -172,6 +191,8 @@ host, with product rate and cost policy layered on the same session identity.
 - Start `app.host:app` with arbitrary candidate commands or install candidate
   dependencies at runtime: rejected because the archive would choose its own
   execution and network boundary after admission.
+- Pass deployed-host operator secrets to the candidate or relax the deployed
+  startup guard: rejected because either would erase the product trust boundary.
 - Make AG2's coding sandbox or a new App Zero preview ledger the preview
   authority: rejected by ADR 0010 and the existing OSS lifecycle contract.
 - Require a draft PR before browser review: rejected because the owner should
@@ -183,8 +204,9 @@ host, with product rate and cost policy layered on the same session identity.
 This decision adds a product-facing security boundary and a typed OSS preview
 runtime identity. It allows a responsive pre-PR review without weakening the
 offline check or GitHub merge gates. It also requires a gateway, disposable
-OIDC issuer, fixed product runtime image, browser tests, and a deliberate
-provider migration before activation. Reversibility is **medium risk**: the
+OIDC issuer and Mongo database, a preview-safe App Zero host profile, fixed
+product runtime image, browser tests, and a deliberate provider migration
+before activation. Reversibility is **medium risk**: the
 preview route can be disabled, but persisted runtime identities and product
 review evidence need coordinated migration if their shape changes.
 
@@ -208,17 +230,23 @@ the candidate input.
 1. Prove the exact archive, dependency lock, OSS pin, fixed entrypoint, and
    runtime image/template build match before admission and again at approval.
    Mismatches, stale descriptors, mutable tags, and missing receipts fail closed.
-2. Run a real local Docker App Zero browser journey through the separate-origin
+2. Prove the preview-safe product host starts without operator provider secrets
+   while the deployed `app.host:app` guard still rejects missing production
+   prerequisites. Verify disposable OIDC and Mongo isolation, deny production
+   and provider access from candidate code, and record any product integration
+   that the preview cannot exercise. Missing profile or isolation evidence
+   blocks the browser URL and owner approval.
+3. Run a real local Docker App Zero browser journey through the separate-origin
    gateway and disposable OIDC: login, HTTP actions, WebSocket traffic, private
    database state, owner review, rejection, stop, and TTL cleanup. Assert that
    no host port, provider URL, source-control token, production token, or
    cross-origin cookie is exposed.
-3. Exercise unauthorized owners, ticket replay, origin spoofing, malicious
+4. Exercise unauthorized owners, ticket replay, origin spoofing, malicious
    redirects and paths, cross-session browser storage and service workers, lost
    gateway state, concurrent capacity, revocation, browser refresh, and
    interrupted provider teardown. Confirm access closes while uncertain cleanup
    retains its reservation.
-4. Use fake E2B adapter tests for ingress-token handling and durable provider
+5. Use fake E2B adapter tests for ingress-token handling and durable provider
    routing. Any live E2B build or session needs operator cost approval and the
    same browser/security evidence before that provider is enabled.
 
