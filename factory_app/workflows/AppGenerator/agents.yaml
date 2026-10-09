@@ -672,9 +672,11 @@ agents:
           the selected provider adapter. Do not generate `modules/mozaikspay/`,
           app-local token ledgers, provider checkout internals, provider price ids,
           or direct page bindings to hosted internals. Custom routes that
-          trigger token-metered work must detect `INSUFFICIENT_TOKENS`, route to
-          the configured top-up/billing recovery path, and return without
-          retrying the failed action or workflow.
+          trigger token-metered work must detect `INSUFFICIENT_TOKENS` and use
+          a safe app-local recovery route when one is available. If
+          `recovery_action=contact_admin` has no safe contact route, keep the
+          user on the current page with inline administrator-contact guidance.
+          Return without automatically retrying the failed action or workflow.
   - id: brownfield_scope
     heading: '[BROWNFIELD ADOPTION SCOPE]'
     content: |-
@@ -1010,7 +1012,7 @@ agents:
         - call module actions using the named export `import { moduleAction } from '../../lib/moduleApi.js'` from ui/pages/custom/*.jsx; the helper has no default export and assembly includes it before validation. Do NOT hardcode API base URLs or write raw fetch calls directly in page components
         - Workflow/tool UI surfaces must use `useChatUI()` / shipped adapters instead of hardcoded API base URLs; app custom route pages must use the generated `moduleAction` helper above
         - handle module action errors by catching `err.error_code` to branch on specific backend states (e.g. `RECORD_NOT_FOUND`, `VALIDATION_FAILED`, `ALREADY_EXISTS`) — the generated moduleApi.js preserves structured error fields on thrown errors so catch blocks can inspect them without parsing raw response text
-        - for LLM-backed or token-metered actions/workflows, import `isInsufficientTokensError` and `insufficientTokensRecoveryPath` from `../../lib/moduleApi.js`; when `isInsufficientTokensError(err)` is true or `err.error_code === "INSUFFICIENT_TOKENS"`, navigate to `insufficientTokensRecoveryPath(err)` and return without retrying the action automatically
+        - for LLM-backed or token-metered actions/workflows, handle `INSUFFICIENT_TOKENS` by importing `isInsufficientTokensError` and `insufficientTokensRecoveryPath` from `../../lib/moduleApi.js`; when `isInsufficientTokensError(err)` is true, call `insufficientTokensRecoveryPath(err)` and navigate only when it returns a route. If it returns null, stay on the current page and show inline guidance to contact an administrator. In both cases return without automatically retrying the failed action or workflow; never navigate to null.
         - for entitlement-gated module actions, import `isEntitlementRequiredError` and `entitlementUpgradePath` from `../../lib/moduleApi.js`; when `isEntitlementRequiredError(err)` is true, navigate to `entitlementUpgradePath(err)` (defaults to `/pricing`) and return without retrying — do not show a generic error to the user
         - import shared UI primitives from `@mozaiks/chat-ui/ui` for buttons, status pills, cards/panels, metrics/summary strips, collection search, resource lists, loading/error states, and inline empty states
         - compose thin domain wrappers over shared primitives when needed, but never define local visual clones such as `StatusPill`, `MetricTile`, `StatCard`, or `Badge`

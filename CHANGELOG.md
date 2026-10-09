@@ -488,6 +488,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Generated token recovery now stays on the current page with administrator-
+  contact guidance when no safe local route is configured; AppGenerator guidance
+  no longer navigates to a null recovery route.
+
 - Subscription token-recovery routes now reject protocol-relative destinations
   such as `//provider.example/billing` at app load, including optional top-up,
   upgrade, and administrator-contact routes.

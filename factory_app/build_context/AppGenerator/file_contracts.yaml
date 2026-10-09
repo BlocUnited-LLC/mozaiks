@@ -70,7 +70,7 @@ task_contracts:
       - The model never writes endpoint URLs. Code renders api_endpoint for section reads and href for submit/delete from typed data_source pairs. Page-level filters, pagination limits, and record identifiers must go in payload or the module action input schema.
       - Custom route JSX must call module actions through the named moduleAction export from ui/lib/moduleApi.js (no default export). Assembly includes this helper before validation. Do not write raw fetch() calls to /api/modules/** directly in page components.
       - Custom route error handling must use err.error_code (and err.code) from the caught error object to branch on backend states. The generated moduleApi.js preserves structured error fields on thrown errors. Do not parse raw response text or HTTP status codes to infer error state.
-      - Custom routes that launch LLM-backed or token-metered actions/workflows must detect INSUFFICIENT_TOKENS with isInsufficientTokensError(err), navigate to insufficientTokensRecoveryPath(err), and return without retrying automatically.
+      - Custom routes that launch LLM-backed or token-metered actions/workflows must detect INSUFFICIENT_TOKENS with isInsufficientTokensError(err), call insufficientTokensRecoveryPath(err), and navigate only when it returns a route. If it returns null, stay on the current page with inline administrator-contact guidance. Return without automatically retrying; never navigate to null.
       - Custom routes that call entitlement-gated module actions must detect ENTITLEMENT_REQUIRED with isEntitlementRequiredError(err), navigate to entitlementUpgradePath(err), and return without retrying automatically. Both helpers are exported from ui/lib/moduleApi.js.
 
   module_contract:

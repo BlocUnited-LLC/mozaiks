@@ -71,14 +71,28 @@ export function isInsufficientTokensError(err) {
   )
 }
 
+function appLocalRoute(value) {
+  if (typeof value !== 'string') return null
+  const route = value.trim()
+  if (!route.startsWith('/') || route.startsWith('//') || route.includes(String.fromCharCode(92))) return null
+  for (const char of route) {
+    const code = char.charCodeAt(0)
+    if (code < 32 || code === 127) return null
+  }
+  return route
+}
+
 export function insufficientTokensRecoveryPath(err, fallback = '/billing') {
   const metadata = tokenRecoveryMetadata(err)
+  if (metadata.recovery_action === 'contact_admin') {
+    return appLocalRoute(metadata.contact_route)
+  }
   return (
-    metadata.top_up_route ||
-    metadata.billing_route ||
-    metadata.upgrade_route ||
-    metadata.contact_route ||
-    fallback
+    appLocalRoute(metadata.top_up_route) ||
+    appLocalRoute(metadata.billing_route) ||
+    appLocalRoute(metadata.upgrade_route) ||
+    appLocalRoute(metadata.contact_route) ||
+    appLocalRoute(fallback)
   )
 }
 
@@ -98,10 +112,10 @@ export function isEntitlementRequiredError(err) {
 export function entitlementUpgradePath(err, fallback = '/pricing') {
   const metadata = tokenRecoveryMetadata(err)
   return (
-    metadata.upgrade_route ||
-    metadata.billing_route ||
-    metadata.pricing_route ||
-    fallback
+    appLocalRoute(metadata.upgrade_route) ||
+    appLocalRoute(metadata.billing_route) ||
+    appLocalRoute(metadata.pricing_route) ||
+    appLocalRoute(fallback)
   )
 }
 

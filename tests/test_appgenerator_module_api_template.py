@@ -253,6 +253,61 @@ console.log(JSON.stringify({ tokenDenial, bodylessDenial }))
     }
 
 
+def test_generated_token_recovery_honors_administrator_contact_without_inventing_a_route():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required to execute the generated browser helper")
+    metadata = [
+        {"recovery_action": "contact_admin"},
+        {"recovery_action": "contact_admin", "billing_route": "/billing"},
+        {"recovery_action": "contact_admin", "billing_route": "/billing", "contact_route": "/help"},
+        {"recovery_action": "contact_admin", "contact_route": "https://outside.example/help"},
+        {"recovery_action": "contact_admin", "contact_route": "//outside.example/help"},
+        {"recovery_action": "contact_admin", "contact_route": "/\\outside.example/help"},
+        {"recovery_action": "top_up", "top_up_route": "/token-packs"},
+        {"recovery_action": "top_up", "top_up_route": "//outside.example/help"},
+        {"recovery_action": "top_up", "top_up_route": "/\\outside.example/help"},
+        {"recovery_action": "upgrade"},
+    ]
+    errors = [{"data": {"extra_data": item}} for item in metadata]
+    script = (
+        _template_js()
+        + "\nconsole.log(JSON.stringify("
+        + json.dumps(errors)
+        + ".map(err => insufficientTokensRecoveryPath(err))))\n"
+    )
+    completed = subprocess.run(
+        [node, "--input-type=module"], input=script, capture_output=True, text=True, timeout=15
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout) == [
+        None, None, "/help", None, None, None, "/token-packs", "/billing",
+        "/billing", "/billing",
+    ]
+
+
+def test_generated_entitlement_recovery_stays_inside_the_app():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required to execute the generated browser helper")
+    errors = [
+        {"data": {"upgrade_route": "/plans/pro"}},
+        {"data": {"upgrade_route": "//outside.example/plans"}},
+        {"data": {"billing_route": "https://outside.example/billing"}},
+    ]
+    script = (
+        _template_js()
+        + "\nconsole.log(JSON.stringify("
+        + json.dumps(errors)
+        + ".map(err => entitlementUpgradePath(err))))\n"
+    )
+    completed = subprocess.run(
+        [node, "--input-type=module"], input=script, capture_output=True, text=True, timeout=15
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout) == ["/plans/pro", "/pricing", "/pricing"]
+
+
 # ---------------------------------------------------------------------------
 # Group 2: HTTP request shape (4)
 # ---------------------------------------------------------------------------
@@ -501,6 +556,11 @@ class TestAgentsYamlModuleApiGuidance:
         )
         assert "INSUFFICIENT_TOKENS" in agent_section
         assert "insufficientTokensRecoveryPath" in agent_section
+        assert "navigate only when it returns a route" in agent_section
+        assert "If it returns null, stay on the current page" in agent_section
+        assert "contact an administrator" in agent_section
+        assert "never navigate to null" in agent_section
+        assert "`recovery_action=contact_admin` has no safe contact route" in _agents_text()
 
 
 # ---------------------------------------------------------------------------
@@ -531,6 +591,10 @@ class TestFileContractsModuleApi:
         )
         assert "INSUFFICIENT_TOKENS" in page_bundle
         assert "insufficientTokensRecoveryPath" in page_bundle
+        assert "navigate only when it returns a route" in page_bundle
+        assert "If it returns null, stay on the current page" in page_bundle
+        assert "administrator-contact guidance" in page_bundle
+        assert "never navigate to null" in page_bundle
 
 
 # ---------------------------------------------------------------------------
