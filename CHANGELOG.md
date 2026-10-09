@@ -751,7 +751,8 @@ This project follows a practical pre-1.0 changelog format:
 
 - Chat replies arriving together or immediately after a server restart now
   reach the existing workflow channel instead of being saved without delivery.
-  If recovery cannot accept a reply, the client receives an explicit error.
+  If recovery cannot accept a reply, WebSocket and HTTP callers receive an
+  explicit error and the chat UI shows that the reply was not sent.
 
 - A copied `.env.example` now imports the hosts and points the local shell's
   API proxy at the backend; `mozaiks context index` passes its workspace key.

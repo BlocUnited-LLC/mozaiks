@@ -1246,6 +1246,11 @@ async def handle_user_input(
         message=message,
         app_id=app_id,
     )
+    if not isinstance(result, dict) or result.get("status") != "success":
+        return JSONResponse(
+            status_code=409,
+            content={"status": "Message was not accepted.", "result": result},
+        )
     return {"status": "Message received and is being processed.", "result": result}
 
 

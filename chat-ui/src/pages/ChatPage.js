@@ -5484,7 +5484,7 @@ const ChatPage = () => {
         targetChatId,
         artifactContextPayload ? { artifact_context: artifactContextPayload } : null
       );
-      if (success) {
+      if (success && success.success !== false) {
         if (pendingWorkflowReply) {
           setPendingWorkflowReply(null);
         }

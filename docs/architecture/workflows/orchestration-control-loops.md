@@ -219,7 +219,9 @@ settles pending turns through the existing resume path. Only a restored,
 human-waiting channel may receive the incoming reply. The live continuation path
 then persists, echoes, and delivers that reply once. Failed or terminal recovery,
 or a missing channel handle, refuses the reply with a transport error; it does
-not start a replacement run. Recovery without new text remains recovery-only.
+not start a replacement run. The HTTP input route returns a non-2xx response
+with that refusal result; WebSocket callers receive the error event. Recovery
+without new text remains recovery-only.
 Opening a saved chat without user text is passive observation; it does not
 submit a callback resume. A declared agent continuation can still resume
 without user text through the explicit resume path.
