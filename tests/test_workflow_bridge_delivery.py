@@ -208,7 +208,7 @@ async def test_waiting_live_message_refuses_after_prior_message_completes(delive
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", [RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.PAUSED])
-async def test_recovery_announces_once_before_refusing_undeliverable_input(live_send_path, status):
+async def test_recovery_announces_once_before_refusing_undeliverable_input(live_send_path, status):  # noqa: F811 - imported pytest fixture
     """Input refusal must not emit another outcome after recovery announced it."""
     path = live_send_path
     path.persistence.chat_has_resumable_run = AsyncMock(return_value=True)
