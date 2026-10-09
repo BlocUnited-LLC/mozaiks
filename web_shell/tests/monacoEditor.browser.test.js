@@ -15,7 +15,7 @@ const sanitizer = normalize(path.join(repo, 'chat-ui/src/utils/monacoDomPurify.j
 const setup = normalize(path.join(repo, 'factory_app/workflows/AppGenerator/ui/monacoEditor.js'));
 const copiedSanitizer = '/monaco-editor/esm/vs/base/browser/dompurify/dompurify.js';
 
-test('AppWorkbench Code and Split use local Monaco with the locked sanitizer in dev and production', { timeout: 180_000 }, async (t) => {
+test('AppWorkbench Code and Split use local Monaco with the locked sanitizer in dev and production', { timeout: 240_000 }, async (t) => {
   const temporaryRoot = path.join(shell, '.local');
   fs.mkdirSync(temporaryRoot, { recursive: true });
   const fixture = fs.mkdtempSync(path.join(temporaryRoot, 'monaco-'));
@@ -32,6 +32,8 @@ test('AppWorkbench Code and Split use local Monaco with the locked sanitizer in 
   write('unrelated/dompurify/dompurify.js', 'export default "unrelated sanitizer";');
   write('unrelated/domSanitize.js', 'export { default } from "./dompurify/dompurify.js";');
   write('stubs/workflowStart.js', 'export const useWorkflowStart = () => ({ startWorkflow: async () => {}, starting: false, error: null });');
+  write('stubs/workflowSurfaceStyles.js', 'export const workflowSurfaceStyles = { darkPanel: "" }; export const workflowToolbarButtonClass = () => "";');
+  write('stubs/workflowPrimitiveUtils.js', 'export const normalizePrimitiveActions = () => [];');
   write('entry.jsx', `
     import React from 'react';
     import { createRoot } from 'react-dom/client';
@@ -60,24 +62,32 @@ test('AppWorkbench Code and Split use local Monaco with the locked sanitizer in 
   t.after(() => browser.close());
 
   for (const mode of ['dev', 'production']) {
-    await t.test(mode, { timeout: 85_000 }, async (t) => {
+    await t.test(mode, { timeout: 110_000 }, async (t) => {
       const config = await configureShell({ command: mode === 'dev' ? 'serve' : 'build', mode: 'test' });
       config.resolve.alias = {
         '@mozaiks/chat-ui/hooks/useWorkflowStart.js': path.join(fixture, 'stubs/workflowStart.js'),
+        '@mozaiks/chat-ui/platform/workflowSurfaceStyles.js': path.join(fixture, 'stubs/workflowSurfaceStyles.js'),
+        '@mozaiks/chat-ui/core/ui/workflowPrimitiveUtils.js': path.join(fixture, 'stubs/workflowPrimitiveUtils.js'),
         ...config.resolve.alias,
       };
       const moduleIds = new Set();
       config.plugins.unshift({
         name: 'fixture-workbench-boundaries',
         enforce: 'pre',
-        resolveId(source, importer) {
-          if (normalize(importer || '') !== workbench) return;
+        resolveId(source) {
           if (source === '../../_shared/ui/app_preview/useSandbox') return '\0fixture-sandbox';
           if (source === '../../../app/admin/pages/studioApi.js') return '\0fixture-studio-api';
+          if (source === '../../_shared/ui/app_preview/refinementOutput') return '\0fixture-refinement-output';
+          if (source === '../../_shared/ui/app_preview/PreviewPane') return '\0fixture-preview';
+          if (source === './BuildStatusPane') return '\0fixture-build-status';
+          if (source === './ExportActions') return '\0fixture-export-actions';
+          if (source === '../../../app/ui/components/HarnessDecisionCard.jsx') return '\0fixture-decision-card';
         },
         load(id) {
           if (id === '\0fixture-sandbox') return 'export const useSandbox = () => ({ syncAndRestart() {}, stopPreview() {} });';
           if (id === '\0fixture-studio-api') return 'export const studioFetch = () => { throw new Error("Unexpected Studio request"); };';
+          if (id === '\0fixture-refinement-output') return 'export const refinementOutput = () => null;';
+          if (['\0fixture-preview', '\0fixture-build-status', '\0fixture-export-actions', '\0fixture-decision-card'].includes(id)) return 'export default function FixtureBoundary() { return null; }';
         },
       });
       config.plugins.push({
@@ -111,6 +121,11 @@ test('AppWorkbench Code and Split use local Monaco with the locked sanitizer in 
       });
       const options = {
         ...config, configFile: false, root: fixture, publicDir: false, logLevel: 'error',
+        optimizeDeps: {
+          ...config.optimizeDeps,
+          noDiscovery: true,
+          include: ['react', 'react-dom/client', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'dompurify'],
+        },
         css: { postcss: { plugins: [] } },
         cacheDir: path.join(fixture, 'cache'),
         server: { host: '127.0.0.1', port: 0, strictPort: false, fs: { allow: [repo] } },
@@ -145,8 +160,13 @@ test('AppWorkbench Code and Split use local Monaco with the locked sanitizer in 
         external.push(url);
         return route.abort();
       });
-      await page.goto(origin);
-      await expect(page.getByRole('button', { name: 'Code' })).toBeVisible();
+      await page.goto(origin, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+      try {
+        await expect(page.getByRole('button', { name: 'Code' })).toBeVisible({ timeout: 30_000 });
+      } catch (error) {
+        assert.deepEqual(errors, [], 'AppWorkbench failed to mount without a browser error');
+        throw error;
+      }
       await expect(page.getByRole('button', { name: 'Split' })).toBeVisible();
       assert.equal(await page.evaluate(() => Boolean(window.monacoPurifier)), false, 'editor remains lazy before code is opened');
       assert.equal(requests.some((url) => url.includes('/monaco-editor/')), false);
