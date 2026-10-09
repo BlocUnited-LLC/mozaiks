@@ -87,6 +87,7 @@ const FluidChatLayout = ({
   const artifactPaneRef = useRef(null);
 
   useLayoutEffect(() => {
+    let focusFrame = null;
     const focusVisible = (...candidates) => {
       for (const candidate of candidates) {
         if (!candidate?.isConnected || typeof candidate.focus !== 'function'
@@ -112,10 +113,24 @@ const FluidChatLayout = ({
         conversation,
         artifactPaneRef.current,
       );
+      if (!isMobile && layoutMode === 'minimized') {
+        // Resizing can remove the focused mobile collapse button after the
+        // layout effect runs. Restore focus once the desktop rail is painted.
+        focusFrame = window.requestAnimationFrame(() => {
+          const active = document.activeElement;
+          if (active === document.body || !active?.isConnected
+            || active?.closest('[inert], [hidden], [aria-hidden="true"]')) {
+            focusVisible(expandButtonRef.current, artifactPaneRef.current);
+          }
+        });
+      }
       returnFocus.current = null;
     }
     wasMobileDrawerOpen.current = mobileDrawerOpen;
-  }, [mobileDrawerOpen]);
+    return () => {
+      if (focusFrame !== null) window.cancelAnimationFrame(focusFrame);
+    };
+  }, [mobileDrawerOpen, isMobile, layoutMode]);
 
   const chatVisible = isMobile ? !drawerVisible : layout.chatVisible;
   const composerVisible = chatVisible && (isMobile || layoutMode !== 'minimized');
