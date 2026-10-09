@@ -169,12 +169,20 @@ jobs:
 
           text = Path("CHANGELOG.md").read_text(encoding="utf-8")
           version = re.escape(os.environ["RELEASE_VERSION"])
-          match = re.search(rf"(?m)^## {version} - (\d{{4}}-\d{{2}}-\d{{2}})$", text)
-          if match is None:
+          sections = list(re.finditer(r"(?m)^## (.+)$", text))
+          if not sections or sections[0].group(1) != "Unreleased":
+              raise SystemExit("CHANGELOG.md must begin with an Unreleased section")
+          if len(sections) < 2:
               raise SystemExit("CHANGELOG.md needs a dated section for the release version")
-          date.fromisoformat(match.group(1))
-          if re.search(r"(?m)^## Unreleased$", text) is None:
-              raise SystemExit("CHANGELOG.md needs an Unreleased header")
+          if text[sections[0].end():sections[1].start()].strip():
+              raise SystemExit("CHANGELOG.md Unreleased section must be empty before publication")
+          match = re.fullmatch(rf"{version} - (\d{{4}}-\d{{2}}-\d{{2}})", sections[1].group(1))
+          if match is None:
+              raise SystemExit("CHANGELOG.md needs a dated section for the release version directly below Unreleased")
+          try:
+              date.fromisoformat(match.group(1))
+          except ValueError as exc:
+              raise SystemExit("CHANGELOG.md release section has an invalid date") from exc
           PY
           tag_lines="$(git ls-remote --tags origin "refs/tags/$RELEASE_TAG" "refs/tags/$RELEASE_TAG^{}")"
           if [[ -n "$tag_lines" ]]; then

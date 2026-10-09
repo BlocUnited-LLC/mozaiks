@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,6 +18,20 @@ JOBS = WORKFLOW["jobs"]
 
 def _step(job: str, name: str) -> dict:
     return next(step for step in JOBS[job]["steps"] if step.get("name") == name)
+
+
+def _run_changelog_gate(tmp_path: Path, changelog: str) -> subprocess.CompletedProcess[str]:
+    (tmp_path / "CHANGELOG.md").write_text(changelog, encoding="utf-8")
+    command = _step("build", "Verify dated release notes and tag identity")["run"]
+    script = command.split("python - <<'PY'\n", 1)[1].split("\nPY", 1)[0]
+    return subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=tmp_path,
+        env={**os.environ, "RELEASE_VERSION": "0.2.0"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
 
 
 def test_release_requires_explicit_main_candidate_and_successful_push_ci() -> None:
@@ -47,6 +65,42 @@ def test_publication_requires_dated_notes_and_protected_pypi_environment() -> No
     assert 'environment.get("can_admins_bypass") is not False' in protection
     assert 'branch_policy.get("protected_branches") is not True' in protection
     assert 'branch_policy.get("custom_branch_policies") is not False' in protection
+
+
+@pytest.mark.parametrize(
+    ("changelog", "error"),
+    [
+        (
+            "## Unreleased\n\n### Changed\n\n- Pending change.\n\n"
+            "## 0.2.0 - 2026-10-08\n\n- Release notes.\n",
+            "Unreleased section must be empty",
+        ),
+        (
+            "## Unreleased\n\n## 0.1.11 - 2026-07-20\n\n- Old notes.\n\n"
+            "## 0.2.0 - 2026-10-08\n\n- Release notes.\n",
+            "dated section for the release version directly below Unreleased",
+        ),
+        (
+            "## Unreleased\n\n## 0.2.0 - 2026-02-30\n\n- Release notes.\n",
+            "release section has an invalid date",
+        ),
+    ],
+)
+def test_release_changelog_rejects_unprepared_notes(
+    tmp_path: Path, changelog: str, error: str
+) -> None:
+    result = _run_changelog_gate(tmp_path, changelog)
+    assert result.returncode != 0
+    assert error in result.stderr
+
+
+def test_release_changelog_accepts_prepared_notes(tmp_path: Path) -> None:
+    result = _run_changelog_gate(
+        tmp_path,
+        "# Changelog\n\n## Unreleased\n\n## 0.2.0 - 2026-10-08\n\n"
+        "### Changed\n\n- Release notes.\n\n## 0.1.11 - 2026-07-20\n",
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_testpypi_rehearsal_cannot_publish_to_production() -> None:

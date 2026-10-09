@@ -30,9 +30,11 @@ dispatch:
    run, and offline functional acceptance. Do not point it at the development
    MongoDB server: the runtime uses fixed database names regardless of the URI
    database segment.
-5. Ensure `CHANGELOG.md` has a dated `## 0.2.0 - YYYY-MM-DD` section and a
-   fresh `## Unreleased` header. Confirm `mozaiksai/version.py` is `0.2.0`
-   and any existing `v0.2.0` tag resolves to the same candidate commit.
+5. Move every release entry from `CHANGELOG.md`'s `## Unreleased` section into
+   a dated `## 0.2.0 - YYYY-MM-DD` section immediately below it. Leave
+   `## Unreleased` empty, with no headings or entries between those two
+   sections. Confirm `mozaiksai/version.py` is `0.2.0` and any existing
+   `v0.2.0` tag resolves to the same candidate commit.
 6. Recheck `factory_app/app/brand/realm-export.json` for production values.
 7. Have the repository operator configure the GitHub `pypi` environment
    with at least one required reviewer, **admin bypass disabled**, and
@@ -51,7 +53,8 @@ dispatch:
 The tag trigger remains disabled. A manual workflow dispatch is the only
 entrypoint. It requires a full candidate SHA, a target-specific confirmation,
 the exact current `main` checkout, a successful CI push run for that SHA, a
-dated changelog section, and a matching existing tag if one exists. It does
+empty `Unreleased` section followed immediately by the dated candidate
+changelog section, and a matching existing tag if one exists. It does
 not validate hosted acceptance; the operator must verify item 2 before use.
 
 ### Local candidate audit
