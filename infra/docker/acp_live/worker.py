@@ -23,8 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, field_v
 
 from mozaiksai.control_plane import (
     CodingWorkerRequest,
-    ControlPlaneCodingCapabilityConfig,
-    ControlPlaneConfig,
+    ControlPlaneACPProviderConfig,
     export_repository_workspace_archive,
 )
 from mozaiksai.control_plane.implementations.acp_coding_provider import ACPCodingProvider
@@ -195,21 +194,15 @@ def _live_config(live: _LiveTurn):
 
 
 async def _execute(request: _LiveWorkerRequest) -> bytes:
-    policy = ControlPlaneConfig(
-        enabled=True,
-        coding=ControlPlaneCodingCapabilityConfig.model_validate({
-            "enabled": True,
-            "providers": {"acp": {
-                "enabled": True,
-                "adapter": request.live.adapter,
-                "budget": {
-                    "max_files": _MAX_FILES,
-                    "max_diff_bytes": _MAX_ARCHIVE_BYTES,
-                    "max_wall_seconds": request.live.max_wall_seconds,
-                },
-            }},
-        }),
-    )
+    provider_config = ControlPlaneACPProviderConfig.model_validate({
+        "enabled": True,
+        "adapter": request.live.adapter,
+        "budget": {
+            "max_files": _MAX_FILES,
+            "max_diff_bytes": _MAX_ARCHIVE_BYTES,
+            "max_wall_seconds": request.live.max_wall_seconds,
+        },
+    })
     observed_archive: bytes | None = None
 
     def capture_workspace(workspace: StagedCodingWorkspace) -> None:
@@ -223,7 +216,7 @@ async def _execute(request: _LiveWorkerRequest) -> bytes:
         )
 
     provider = ACPCodingProvider(
-        config_loader=lambda: policy,
+        provider_config=provider_config,
         staging_root=_STAGING_ROOT,
         acp_config_factory=_live_config(request.live),
         env_source={},

@@ -26,6 +26,10 @@ request with exact `create_paths` and `delete_paths` plus:
 }
 ```
 
+The worker constructs the typed `ControlPlaneACPProviderConfig` directly from
+this approved turn envelope. The app's checkpoint `llm_profiles` do not select
+the ACP adapter or its model.
+
 The launcher must supply no host mount or model credential to the worker,
 mount fresh writable tmpfs at `/workspace`, `/tmp`, and `/home/sandbox`, and
 restrict its network to the one-job model gateway. The gateway owns the real
