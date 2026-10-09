@@ -476,6 +476,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Zero-second OIDC discovery and JWKS cache TTLs now always refetch, including
+  when consecutive checks observe the same clock tick.
+
 - Handler reactions now receive the fields of flat events,
   including host webhook events, instead of an empty payload.
 
