@@ -476,6 +476,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Subscription token-recovery routes now reject protocol-relative destinations
+  such as `//provider.example/billing` at app load, including optional top-up,
+  upgrade, and administrator-contact routes.
+
 - Zero-second OIDC discovery and JWKS cache TTLs now always refetch, including
   when consecutive checks observe the same clock tick.
 
