@@ -476,6 +476,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Generated token recovery now stays on the current page with administrator-
+  contact guidance when no safe local route is configured; AppGenerator guidance
+  no longer navigates to a null recovery route.
+
 - Zero-second OIDC discovery and JWKS cache TTLs now always refetch, including
   when consecutive checks observe the same clock tick.
 

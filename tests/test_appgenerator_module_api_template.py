@@ -451,6 +451,11 @@ class TestAgentsYamlModuleApiGuidance:
         )
         assert "INSUFFICIENT_TOKENS" in agent_section
         assert "insufficientTokensRecoveryPath" in agent_section
+        assert "navigate only when it returns a route" in agent_section
+        assert "If it returns null, stay on the current page" in agent_section
+        assert "contact an administrator" in agent_section
+        assert "never navigate to null" in agent_section
+        assert "`recovery_action=contact_admin` has no safe contact route" in _agents_text()
 
 
 # ---------------------------------------------------------------------------
@@ -481,6 +486,10 @@ class TestFileContractsModuleApi:
         )
         assert "INSUFFICIENT_TOKENS" in page_bundle
         assert "insufficientTokensRecoveryPath" in page_bundle
+        assert "navigate only when it returns a route" in page_bundle
+        assert "If it returns null, stay on the current page" in page_bundle
+        assert "administrator-contact guidance" in page_bundle
+        assert "never navigate to null" in page_bundle
 
 
 # ---------------------------------------------------------------------------
