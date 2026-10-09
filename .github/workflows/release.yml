@@ -43,16 +43,6 @@ jobs:
     permissions:
       contents: read
       actions: read
-    services:
-      mongodb:
-        image: mongo:7
-        ports:
-          - 27017:27017
-        options: >-
-          --health-cmd="mongosh --eval 'db.runCommand({ ping: 1 })'"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
     outputs:
       version: ${{ steps.meta.outputs.version }}
       tag: ${{ steps.meta.outputs.tag }}
@@ -115,6 +105,9 @@ jobs:
               raise SystemExit(f"Candidate CI run {latest.get('id')} is not successful")
           print(f"Candidate CI run {latest['id']} succeeded for {sha}")
           PY
+
+      - name: Start MongoDB from public mirror
+        run: bash scripts/ci/mongo_service.sh start
 
       - name: Setup Python
         uses: actions/setup-python@v5
