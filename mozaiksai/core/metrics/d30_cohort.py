@@ -193,34 +193,34 @@ def calculate_d30_action_cohort(
         return unavailable("empty_cohort")
 
     returned_ids: set[str] = set()
-    for row in actions:
-        if not isinstance(row, ActionObservation):
+    for observation in actions:
+        if not isinstance(observation, ActionObservation):
             return unavailable("invalid_action_record")
-        at = _utc(row.occurred_at)
+        at = _utc(observation.occurred_at)
         if (
-            row.scope != scope
-            or not isinstance(row.user_id, str)
-            or not row.user_id.strip()
-            or row.user_id != row.user_id.strip()
+            observation.scope != scope
+            or not isinstance(observation.user_id, str)
+            or not observation.user_id.strip()
+            or observation.user_id != observation.user_id.strip()
             or at is None
-            or not isinstance(row.action_id, str)
-            or not row.action_id.strip()
-            or not isinstance(row.auth_provenance, str)
-            or not row.auth_provenance.strip()
-            or not isinstance(row.actor_kind, str)
-            or not row.actor_kind.strip()
-            or not isinstance(row.succeeded, bool)
+            or not isinstance(observation.action_id, str)
+            or not observation.action_id.strip()
+            or not isinstance(observation.auth_provenance, str)
+            or not observation.auth_provenance.strip()
+            or not isinstance(observation.actor_kind, str)
+            or not observation.actor_kind.strip()
+            or not isinstance(observation.succeeded, bool)
         ):
             return unavailable("invalid_action_record")
         if (
-            row.user_id in cohort_ids
+            observation.user_id in cohort_ids
             and d30_start <= at < d30_end
-            and row.action_id in action_ids
-            and row.auth_provenance == "token_validated"
-            and row.actor_kind == "end_user"
-            and row.succeeded is True
+            and observation.action_id in action_ids
+            and observation.auth_provenance == "token_validated"
+            and observation.actor_kind == "end_user"
+            and observation.succeeded is True
         ):
-            returned_ids.add(row.user_id)
+            returned_ids.add(observation.user_id)
 
     denominator = len(cohort_ids)
     numerator = len(returned_ids)
