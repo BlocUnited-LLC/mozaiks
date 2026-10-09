@@ -8,6 +8,7 @@ conservative provider deadline; operation-lease expiry does not release them.
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import Callable
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
@@ -21,6 +22,7 @@ from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE, Platform
 
 _LEDGER_ID = "artifact-previews"
 _IDENTITY_FIELDS = ("app_id", "user_id", "artifact_id", "target_app_id", "build_registry_id", "provider")
+_SEALED_IDENTITY_FIELDS = ("sealed_archive_sha256", "sealed_image_id")
 _STATE_FIELDS = {
     "session_id", "status", "preview_url", "last_error", "last_access_at",
     "manifest", "paths", "has_requirements", "health_checked_at",
@@ -118,8 +120,17 @@ class MongoPreviewStore:
         self, identity: dict[str, Any], *, max_sessions: int, max_owner_sessions: int,
         max_pending: int, queue_seconds: float, ttl_seconds: float,
     ) -> dict[str, Any]:
-        if set(identity) != set(_IDENTITY_FIELDS) or not all(isinstance(value, str) and value for value in identity.values()):
+        fields = set(identity)
+        if fields not in (set(_IDENTITY_FIELDS), set(_IDENTITY_FIELDS) | set(_SEALED_IDENTITY_FIELDS)) or not all(
+            isinstance(value, str) and value for value in identity.values()
+        ):
             raise ValueError("Preview requires its complete immutable identity")
+        if fields & set(_SEALED_IDENTITY_FIELDS):
+            if identity["provider"] != "docker" or any(
+                re.fullmatch(r"sha256:[0-9a-f]{64}", identity[name]) is None
+                for name in _SEALED_IDENTITY_FIELDS
+            ):
+                raise ValueError("Sealed preview requires Docker and exact archive/image SHA-256 identities")
         if queue_seconds <= 0 or ttl_seconds <= 0 or max_sessions + max_pending > _MAX_RESERVATIONS:
             raise ValueError("Preview queue and lifetime must be positive and bounded")
         now = self._now()
@@ -134,7 +145,7 @@ class MongoPreviewStore:
             self._bind_limits(document, {"max_sessions": max_sessions, "max_owner_sessions": max_owner_sessions, "max_pending": max_pending})
             for current in document["entries"]:
                 if all(current[name] == identity[name] for name in ("app_id", "user_id", "artifact_id")):
-                    if any(current[name] != identity[name] for name in _IDENTITY_FIELDS):
+                    if any(current.get(name) != identity.get(name) for name in (*_IDENTITY_FIELDS, *_SEALED_IDENTITY_FIELDS)):
                         raise ValueError("Preview artifact identity changed")
                     return cast(dict[str, Any], current)
             if sum(item["phase"] == "queued" for item in document["entries"]) >= max_pending:

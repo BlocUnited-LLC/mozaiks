@@ -87,7 +87,9 @@ def create_sandbox_router(
         app_id, user_id = resolve_scope(principal)
         manager = get_artifact_preview_sessions()
         try:
-            await manager.require_owner(sandboxId, app_id=app_id, user_id=user_id)
+            state = await manager.require_owner(sandboxId, app_id=app_id, user_id=user_id)
+            if state.sealed_archive_sha256:
+                raise KeyError("Sandbox not found")
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Sandbox not found") from exc
         except PreviewOperationBusy as exc:
@@ -121,7 +123,7 @@ def create_sandbox_router(
             "sandboxId": state.sandbox_id, "artifactId": state.artifact_id,
             "buildRegistryId": state.build_registry_id, "status": state.status,
             "previewUrl": state.preview_url, "lastError": state.last_error,
-        } for state in states]}
+        } for state in states if not state.sealed_archive_sha256]}
 
     @router.post("/api/artifacts/{artifactId}/sandbox", response_model=_SandboxCreateResponse)
     async def create_preview(
@@ -217,7 +219,9 @@ def create_sandbox_router(
         manager = get_artifact_preview_sessions()
         try:
             app_id, user_id = resolve_scope(UserPrincipal(**asdict(ws_user)))
-            await manager.require_owner(sandboxId, app_id=app_id, user_id=user_id)
+            state = await manager.require_owner(sandboxId, app_id=app_id, user_id=user_id)
+            if state.sealed_archive_sha256:
+                raise KeyError("Sandbox not found")
         except (KeyError, HTTPException):
             await websocket.close(code=WS_CLOSE_POLICY_VIOLATION, reason="Sandbox not found")
             return

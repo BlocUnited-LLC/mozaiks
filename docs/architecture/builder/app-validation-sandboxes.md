@@ -99,6 +99,26 @@ decision and configuration matrix is [ADR 0010](../../adr/0010-agent-and-app-san
 
 ## Live preview sessions (AppWorkbench)
 
+The internal sealed candidate path is an offline boot check before an
+interactive review surface exists. A trusted host passes a canonical archive,
+its exact digest, owner/build identity, and a local `sha256:` preview image ID
+to `ArtifactPreviewSessionManager.create_sealed_candidate`. The archive accepts
+only `app/`, `workflows/`, and root `requirements.txt` files. The input ZIP is
+limited to 80,000,000 bytes; its files are limited to 2,000 entries,
+64,000,000 total bytes, and 8,000,000 bytes each, matching App Zero's
+candidate preparation limits. It is validated before Docker allocation.
+`requirements.txt` is staged as identity-bound read-only source and is never
+installed at runtime. The trusted caller must attest the local image's build
+source and installed dependencies against the candidate's framework pin and
+provenance before claiming exact candidate behavior. Source is staged once,
+read-only to the app UID. Docker has no network or published ports, and the
+manager returns health and identity without a preview URL. This does not
+provide a browser preview or authorize promotion. It boots the framework
+platform host; authenticated apps need a future preview-scoped OIDC setup, and
+hosted product entrypoints need a trusted fixed host selection before their
+behavior can be claimed. Stop the session through the
+existing owner-bound lifecycle when its check is no longer needed.
+
 Beyond one-shot validation, the Studio host mounts an artifact preview session
 API so the AppWorkbench can boot and restart a saved generated bundle on demand.
 A refinement selects a new artifact version and clears the old preview; the
