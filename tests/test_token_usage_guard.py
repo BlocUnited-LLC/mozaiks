@@ -73,6 +73,10 @@ class _Ledger:
         self.ensure_calls.append(kwargs)
         return [SimpleNamespace(status="applied")]
 
+    async def ensure_resolved_wallet_allowances(self, **kwargs):
+        self.ensure_calls.append(kwargs)
+        return [SimpleNamespace(status="applied")]
+
     async def query_balance(self, **kwargs):
         self.query_calls.append(kwargs)
         return {"balance": self.balance}
@@ -355,7 +359,7 @@ async def test_v2_depleted_wallet_uses_owning_product_plan(
         "/pricing" if expected_action == "upgrade" else None
     )
     assert decision.top_up_product_ids == ()
-    assert ledger.ensure_calls == []
+    assert ledger.ensure_calls == []  # Paid v2 grants belong to billing fulfillment.
 
 
 @pytest.mark.asyncio

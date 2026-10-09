@@ -16,6 +16,7 @@ from mozaiksai.core.runtime.app.subscriptions_loader import (
     SubscriptionsConfig,
     load_subscriptions_config,
 )
+from mozaiksai.core.tokens.plan_resolution import resolve_v2_wallet_plans
 from mozaiksai.core.tokens.wallet import TokenWalletLedger, get_token_wallet_ledger
 from mozaiksai.core.workflow.paths import resolve_active_app_root
 
@@ -46,10 +47,10 @@ class TokenWalletUsageIngestClient:
 
     async def handle_usage_delta(self, payload: dict[str, Any]) -> None:
         config = self._load_config()
-        if config is None or not config.token_wallets:
+        if config is None or not config.effective_token_wallets:
             return
 
-        wallets = [wallet for wallet in config.token_wallets if wallet.auto_debit_usage]
+        wallets = [wallet for wallet in config.effective_token_wallets if wallet.auto_debit_usage]
         if not wallets:
             return
 
@@ -61,20 +62,47 @@ class TokenWalletUsageIngestClient:
             return
 
         try:
-            plan_id = await ConfiguredEntitlementAdapter(config=config).current_plan_id(
-                app_id=app_id,
-                user_id=user_id,
-                tenant_id=tenant_id,
-                workspace_id=workspace_id,
-            )
+            entitlements = ConfiguredEntitlementAdapter(config=config)
             ledger = self._ledger or get_token_wallet_ledger()
-            await ledger.ensure_plan_allowances(
-                config=config,
-                app_id=app_id,
-                plan_id=plan_id,
-                user_id=user_id,
-                tenant_id=tenant_id,
-            )
+            if config.products:
+                wallet_plans = await resolve_v2_wallet_plans(
+                    config=config,
+                    entitlements=entitlements,
+                    app_id=app_id,
+                    user_id=user_id,
+                    tenant_id=tenant_id,
+                    workspace_id=workspace_id,
+                )
+                payable_wallet_plans = {
+                    wallet.wallet_id: wallet_plans[wallet.wallet_id]
+                    for wallet in wallets
+                    if wallet.wallet_id in wallet_plans
+                    and wallet_plans[wallet.wallet_id].status == "resolved"
+                    and wallet_plans[wallet.wallet_id].grant_authority == "runtime_default"
+                    and wallet_plans[wallet.wallet_id].allowances
+                }
+                if payable_wallet_plans:
+                    await ledger.ensure_resolved_wallet_allowances(
+                        config=config,
+                        app_id=app_id,
+                        wallet_plans=payable_wallet_plans,
+                        user_id=user_id,
+                        tenant_id=tenant_id,
+                    )
+            else:
+                plan_id = await entitlements.current_plan_id(
+                    app_id=app_id,
+                    user_id=user_id,
+                    tenant_id=tenant_id,
+                    workspace_id=workspace_id,
+                )
+                await ledger.ensure_plan_allowances(
+                    config=config,
+                    app_id=app_id,
+                    plan_id=plan_id,
+                    user_id=user_id,
+                    tenant_id=tenant_id,
+                )
             for wallet in wallets:
                 if wallet.scope == "user" and not user_id:
                     continue

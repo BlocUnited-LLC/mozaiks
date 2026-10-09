@@ -714,6 +714,21 @@ def test_capabilities_for_plan_free_has_no_capabilities() -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_v2_rejects_conflicting_root_and_product_wallet_definitions() -> None:
+    with pytest.raises(ValidationError, match="conflicting root/product definitions"):
+        SubscriptionsConfig.model_validate({
+            "schema_version": "mozaiks.subscriptions.v2",
+            "label": "Multi-product SaaS",
+            "default_product_id": "ai",
+            "token_wallets": [{"wallet_id": "ai_tokens", "scope": "user"}],
+            "products": [{
+                "product_id": "ai", "label": "AI", "default_plan_id": "free",
+                "token_wallets": [{"wallet_id": "ai_tokens", "scope": "tenant"}],
+                "plans": [{"plan_id": "free", "label": "Free"}],
+            }],
+        })
+
+
 def test_app_load_result_has_subscriptions_config_field() -> None:
     """AppLoadResult must expose subscriptions_config for platform.py wiring."""
     from mozaiksai.core.runtime.app.loader import AppLoadResult

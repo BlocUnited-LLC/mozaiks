@@ -22,6 +22,7 @@ from mozaiksai.core.runtime.app.subscriptions_loader import (
     TokenWalletDef,
     load_subscriptions_config,
 )
+from mozaiksai.core.tokens.plan_resolution import resolve_v2_wallet_plans
 from mozaiksai.core.tokens.wallet import TokenWalletLedger, get_token_wallet_ledger
 from mozaiksai.core.workflow.paths import resolve_active_app_root
 
@@ -132,10 +133,10 @@ class TokenUsageGuard:
         required_tokens: int = 1,
     ) -> TokenUsageDecision:
         config = self._load_config()
-        if config is None or not config.token_wallets:
+        if config is None or not config.effective_token_wallets:
             return TokenUsageDecision(allowed=True, reason="not_configured")
 
-        wallets = [wallet for wallet in config.token_wallets if wallet.auto_debit_usage]
+        wallets = [wallet for wallet in config.effective_token_wallets if wallet.auto_debit_usage]
         if not wallets:
             return TokenUsageDecision(allowed=True, reason="auto_debit_disabled")
 
@@ -164,8 +165,35 @@ class TokenUsageGuard:
             workspace_id=workspace_id_text,
         )
 
-        plan_declared = any(plan.plan_id == plan_id for plan in config.plans)
-        if plan_id and plan_declared:
+        if config.products:
+            try:
+                wallet_plans = await resolve_v2_wallet_plans(
+                    config=config,
+                    entitlements=entitlements,
+                    app_id=app_id_text,
+                    user_id=user_id_text,
+                    tenant_id=tenant_id_text,
+                    workspace_id=workspace_id_text,
+                )
+                payable_wallet_plans = {
+                    wallet.wallet_id: wallet_plans[wallet.wallet_id]
+                    for wallet in wallets
+                    if wallet.wallet_id in wallet_plans
+                    and wallet_plans[wallet.wallet_id].status == "resolved"
+                    and wallet_plans[wallet.wallet_id].grant_authority == "runtime_default"
+                    and wallet_plans[wallet.wallet_id].allowances
+                }
+                if payable_wallet_plans:
+                    await ledger.ensure_resolved_wallet_allowances(
+                        config=config,
+                        app_id=app_id_text,
+                        wallet_plans=payable_wallet_plans,
+                        user_id=user_id_text,
+                        tenant_id=tenant_id_text,
+                    )
+            except Exception as exc:
+                logger.debug("token allowance preflight sync skipped: %s", exc)
+        elif plan_id and any(plan.plan_id == plan_id for plan in config.plans):
             try:
                 await ledger.ensure_plan_allowances(
                     config=config,

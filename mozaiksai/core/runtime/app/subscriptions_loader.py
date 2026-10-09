@@ -1078,6 +1078,16 @@ class SubscriptionsConfig(BaseModel):
                     f"default_product_id {self.default_product_id!r} must reference a declared product_id; "
                     f"known: {product_ids}"
                 )
+            wallet_definitions: dict[str, TokenWalletDef] = {}
+            for wallet in [
+                *self.token_wallets,
+                *(wallet for product in self.products for wallet in product.token_wallets),
+            ]:
+                existing = wallet_definitions.setdefault(wallet.wallet_id, wallet)
+                if existing != wallet:
+                    raise ValueError(
+                        f"token_wallet {wallet.wallet_id!r} has conflicting root/product definitions"
+                    )
             if self.pricing_catalog:
                 all_plan_ids: set[str] = set()
                 for product_def in self.products:
@@ -1200,9 +1210,20 @@ class SubscriptionsConfig(BaseModel):
                 return plan
         return self.plans[0]
 
+    @property
+    def effective_token_wallets(self) -> list[TokenWalletDef]:
+        """Root and product-local wallets, deduplicated by wallet identity."""
+        wallets: dict[str, TokenWalletDef] = {}
+        for wallet in self.token_wallets:
+            wallets.setdefault(wallet.wallet_id, wallet)
+        for product in self.products:
+            for wallet in product.token_wallets:
+                wallets.setdefault(wallet.wallet_id, wallet)
+        return list(wallets.values())
+
     def token_wallet_by_id(self, wallet_id: str) -> TokenWalletDef | None:
         wallet_key = str(wallet_id or "").strip()
-        for wallet in self.token_wallets:
+        for wallet in self.effective_token_wallets:
             if wallet.wallet_id == wallet_key:
                 return wallet
         return None

@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from mozaiksai.core.runtime.app.entitlements import ProductPlanSelection
 from mozaiksai.core.tokens.usage_ingest import TokenWalletUsageIngestClient
 
 
@@ -83,6 +84,73 @@ async def test_usage_ingest_materializes_allowance_and_debits_wallet(tmp_path: P
             "wallet_id": "ai_tokens",
         },
     )
+
+
+@pytest.mark.asyncio
+async def test_v2_usage_ingest_uses_wallet_product_not_primary(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    config_dir.joinpath("subscriptions.yaml").write_text(
+        textwrap.dedent("""
+            schema_version: mozaiks.subscriptions.v2
+            label: Multi-product SaaS
+            default_product_id: platform
+            token_wallets:
+              - wallet_id: ai_tokens
+                scope: user
+                auto_debit_usage: true
+            products:
+              - product_id: platform
+                label: Platform
+                default_plan_id: builder
+                plans:
+                  - plan_id: builder
+                    label: Builder
+              - product_id: ai
+                label: AI
+                default_plan_id: ai_starter
+                plans:
+                  - plan_id: ai_starter
+                    label: Starter
+                  - plan_id: ai_pro
+                    label: Pro
+                    token_allowances:
+                      - wallet_id: ai_tokens
+                        amount: 500
+                        cadence: monthly
+        """),
+        encoding="utf-8",
+    )
+    calls: list[tuple[str, dict]] = []
+
+    class _Entitlements:
+        def __init__(self, *, config):
+            assert config.products
+
+        async def current_product_plan(self, *, product_id=None, **kwargs):
+            assert product_id == "ai"
+            return ProductPlanSelection("ai", "ai_pro", "active_assignment")
+
+    class _Ledger:
+        async def ensure_resolved_wallet_allowances(self, **kwargs):
+            calls.append(("ensure", kwargs))
+            return []
+
+        async def record_usage_debit(self, payload, *, wallet):
+            calls.append(("debit", {"wallet_id": wallet.wallet_id}))
+
+    monkeypatch.setattr(
+        "mozaiksai.core.tokens.usage_ingest.ConfiguredEntitlementAdapter", _Entitlements
+    )
+    client = TokenWalletUsageIngestClient(ledger=_Ledger(), app_root=tmp_path)
+    await client.handle_usage_delta({
+        "event_id": "usage_evt_1", "app_id": "app_1", "user_id": "user_1",
+        "total_tokens": 25,
+    })
+
+    assert calls == [("debit", {"wallet_id": "ai_tokens"})]
 
 
 @pytest.mark.asyncio

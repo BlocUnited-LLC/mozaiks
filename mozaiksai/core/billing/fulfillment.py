@@ -1118,7 +1118,7 @@ class BillingFulfillmentService:
         subject_key = self._subject_key(command)
         if subject_key is None or self._config is None or command.subject_revision is None:
             return True
-        for wallet in self._config.token_wallets or []:
+        for wallet in self._config.effective_token_wallets:
             scope = getattr(wallet, "scope", None)
             if scope == "tenant" and not command.tenant_id:
                 continue

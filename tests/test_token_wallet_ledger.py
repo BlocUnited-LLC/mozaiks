@@ -8,7 +8,9 @@ import pytest
 from pymongo.errors import DuplicateKeyError
 
 from mozaiksai.core.data.persistence.namespaces import RuntimeCollections
+from mozaiksai.core.runtime.app.entitlements import ProductPlanSelection
 from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
+from mozaiksai.core.tokens.plan_resolution import resolve_v2_wallet_plans
 from mozaiksai.core.tokens.wallet import TokenWalletLedger
 
 
@@ -183,6 +185,77 @@ def _subscriptions_config() -> SubscriptionsConfig:
     )
 
 
+def _v2_subscriptions_config(
+    *, shared_wallet: bool = False, default_allowance: bool = False,
+    nested_wallet: bool = False,
+) -> SubscriptionsConfig:
+    products = [
+        {
+            "product_id": "platform", "label": "Platform", "default_plan_id": "builder",
+            "plans": [{"plan_id": "builder", "label": "Builder"}],
+        },
+        {
+            "product_id": "ai", "label": "AI", "default_plan_id": "ai_starter",
+            "plans": [
+                {"plan_id": "ai_starter", "label": "Starter", "token_allowances": (
+                    [{"wallet_id": "ai_tokens", "amount": 100, "cadence": "monthly"}]
+                    if default_allowance else []
+                )},
+                {"plan_id": "ai_pro", "label": "AI Pro", "token_allowances": [
+                    {"wallet_id": "ai_tokens", "amount": 500, "cadence": "monthly"}
+                ]},
+            ],
+        },
+    ]
+    if shared_wallet:
+        products.append({
+            "product_id": "other", "label": "Other", "default_plan_id": "other_free",
+            "plans": [
+                {"plan_id": "other_free", "label": "Free"},
+                {"plan_id": "other_paid", "label": "Paid", "token_allowances": [
+                    {"wallet_id": "ai_tokens", "amount": 200, "cadence": "monthly"}
+                ]},
+            ],
+        })
+    wallet = {"wallet_id": "ai_tokens", "scope": "user"}
+    if nested_wallet:
+        products[1]["token_wallets"] = [wallet]
+    return SubscriptionsConfig.model_validate({
+        "schema_version": "mozaiks.subscriptions.v2",
+        "label": "Multi-product SaaS",
+        "default_product_id": "platform",
+        "token_wallets": [] if nested_wallet else [wallet],
+        "products": products,
+    })
+
+
+class _ProductPlans:
+    def __init__(
+        self, ai_plan_id: str | None = "ai_pro", snapshot_amount: int | None = None,
+    ) -> None:
+        self.ai_plan_id = ai_plan_id
+        self.snapshot_amount = snapshot_amount
+        self.requested_products: list[str | None] = []
+
+    async def current_product_plan(self, **kwargs) -> ProductPlanSelection:
+        product_id = kwargs.get("product_id")
+        self.requested_products.append(product_id)
+        if product_id != "ai":
+            return ProductPlanSelection("platform", "builder", "default_plan")
+        if self.ai_plan_id is None:
+            return ProductPlanSelection("ai", None, "unavailable")
+        if self.ai_plan_id == "ai_starter":
+            return ProductPlanSelection("ai", "ai_starter", "default_plan")
+        snapshot = (
+            [{"wallet_id": "ai_tokens", "amount": self.snapshot_amount,
+              "cadence": "monthly"}]
+            if self.snapshot_amount is not None else None
+        )
+        return ProductPlanSelection(
+            "ai", self.ai_plan_id, "active_assignment", snapshot
+        )
+
+
 @pytest.mark.asyncio
 async def test_credit_is_idempotent_and_updates_balance_once() -> None:
     ledger = _ledger()
@@ -340,6 +413,138 @@ async def test_subscription_allowances_can_use_assignment_snapshot() -> None:
     entries = await ledger.list_entries(app_id="app_1", user_id="user_1")
     assert entries[0]["reason"] == "Operator catalog monthly AI tokens"
     assert entries[0]["metadata"]["plan_id"] == "operator_plus"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("billing_first", [True, False])
+async def test_v2_paid_wallet_displays_ai_plan_without_runtime_grant(
+    billing_first: bool,
+) -> None:
+    config = _v2_subscriptions_config()
+    entitlements = _ProductPlans(snapshot_amount=350)
+    selected = await resolve_v2_wallet_plans(
+        config=config, entitlements=entitlements, app_id="app_1", user_id="user_1"
+    )
+    assert entitlements.requested_products == ["ai"]
+    assert selected["ai_tokens"].product_id == "ai"
+    assert selected["ai_tokens"].plan_id == "ai_pro"
+    assert selected["ai_tokens"].grant_authority == "billing_fulfillment"
+    assert selected["ai_tokens"].allowance_source == "assignment_snapshot"
+
+    ledger = _ledger()
+
+    async def billing_grant() -> None:
+        await ledger.ensure_plan_allowances(
+            config=config,
+            app_id="app_1",
+            plan_id="ai_pro",
+            plan_label="AI Pro",
+            token_allowances=[
+                {"wallet_id": "ai_tokens", "amount": 350, "cadence": "monthly"}
+            ],
+            user_id="user_1",
+        )
+
+    if billing_first:
+        await billing_grant()
+    summary = await ledger.wallet_summaries_for_config(
+        config=config,
+        app_id="app_1",
+        user_id="user_1",
+        plan_id="builder",
+        wallet_plans=selected,
+        ensure_allowances=True,
+    )
+    if not billing_first:
+        await billing_grant()
+
+    wallet = summary["wallets"][0]
+    assert summary["plan_id"] == "builder"  # Legacy primary-plan field.
+    assert wallet["product_id"] == "ai"
+    assert wallet["plan_id"] == "ai_pro"
+    assert wallet["plan_resolution"] == "resolved"
+    assert wallet["plan_allowances"][0]["amount"] == 350
+    assert wallet["grant_authority"] == "billing_fulfillment"
+    assert wallet["allowance_source"] == "assignment_snapshot"
+    assert wallet["balance"]["balance"] == (350 if billing_first else 0)
+    balance = await ledger.query_balance(
+        app_id="app_1", wallet_id="ai_tokens", user_id="user_1"
+    )
+    assert balance["balance"] == 350
+    assert balance["entry_count"] == 1
+    entries = await ledger.list_entries(
+        app_id="app_1", wallet_id="ai_tokens", user_id="user_1"
+    )
+    assert entries[0]["metadata"]["plan_id"] == "ai_pro"
+    assert "product_id" not in entries[0]["metadata"]  # Legacy billing grant.
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("nested_wallet", [True, False])
+async def test_v2_default_plan_allowance_sync_is_idempotent_and_has_product_provenance(
+    nested_wallet: bool,
+) -> None:
+    config = _v2_subscriptions_config(
+        default_allowance=True, nested_wallet=nested_wallet
+    )
+    assert config.token_wallet_by_id("ai_tokens") is not None
+    selected = await resolve_v2_wallet_plans(
+        config=config, entitlements=_ProductPlans("ai_starter"),
+        app_id="app_1", user_id="user_1",
+    )
+    assert selected["ai_tokens"].grant_authority == "runtime_default"
+    ledger = _ledger()
+    for _ in range(2):
+        await ledger.wallet_summaries_for_config(
+            config=config, app_id="app_1", user_id="user_1",
+            plan_id="builder", wallet_plans=selected, ensure_allowances=True,
+        )
+    balance = await ledger.query_balance(
+        app_id="app_1", wallet_id="ai_tokens", user_id="user_1"
+    )
+    assert balance["balance"] == 100
+    assert balance["entry_count"] == 1
+    entries = await ledger.list_entries(
+        app_id="app_1", wallet_id="ai_tokens", user_id="user_1"
+    )
+    assert entries[0]["metadata"]["product_id"] == "ai"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("shared_wallet", "ai_plan_id", "expected_status"),
+    [
+        (True, "ai_pro", "ambiguous_product"),
+        (False, "operator_ai_plan", "unknown_plan"),
+        (False, None, "plan_unavailable"),
+    ],
+)
+async def test_v2_ambiguous_or_unknown_wallet_plan_never_auto_grants(
+    shared_wallet: bool, ai_plan_id: str | None, expected_status: str,
+) -> None:
+    config = _v2_subscriptions_config(shared_wallet=shared_wallet)
+    selected = await resolve_v2_wallet_plans(
+        config=config,
+        entitlements=_ProductPlans(ai_plan_id),
+        app_id="app_1",
+        user_id="user_1",
+    )
+    assert selected["ai_tokens"].status == expected_status
+
+    ledger = _ledger()
+    summary = await ledger.wallet_summaries_for_config(
+        config=config,
+        app_id="app_1",
+        user_id="user_1",
+        plan_id="builder",
+        wallet_plans=selected,
+        ensure_allowances=True,
+    )
+    wallet = summary["wallets"][0]
+    assert wallet["plan_resolution"] == expected_status
+    assert wallet["plan_allowances"] == []
+    assert wallet["balance"]["balance"] == 0
+    assert wallet["balance"]["entry_count"] == 0
 
 
 @pytest.mark.asyncio
