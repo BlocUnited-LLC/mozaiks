@@ -103,22 +103,33 @@ function tailwindSourceLinkType(target) {
 
 function ensureTailwindSourceLinks(entries) {
   const linkRoot = path.resolve(__dirname, '.mozaiks-tailwind-sources');
+  const previewTarget = process.env.MOZAIKS_PREVIEW_TAILWIND_SOURCE_DIR;
+  const writeRoot = previewTarget || linkRoot;
 
-  try {
-    fs.rmSync(linkRoot, { recursive: true, force: true });
-    fs.mkdirSync(linkRoot, { recursive: true });
-  } catch (error) {
-    console.warn(`[mozaiks-web-shell] Failed to prepare Tailwind source links: ${error.message}`);
-    return linkRoot;
+  if (previewTarget) {
+    if (!path.isAbsolute(previewTarget) || !fs.lstatSync(linkRoot).isSymbolicLink() || fs.readlinkSync(linkRoot) !== previewTarget) {
+      throw new Error('Preview image is missing its fixed Tailwind source link');
+    }
+    fs.rmSync(previewTarget, { recursive: true, force: true });
+    fs.mkdirSync(previewTarget, { recursive: true });
+  } else {
+    try {
+      fs.rmSync(linkRoot, { recursive: true, force: true });
+      fs.mkdirSync(linkRoot, { recursive: true });
+    } catch (error) {
+      console.warn(`[mozaiks-web-shell] Failed to prepare Tailwind source links: ${error.message}`);
+      return linkRoot;
+    }
   }
 
   for (const [name, target] of entries) {
     if (!target || !fs.existsSync(target)) continue;
 
     try {
-      const linkPath = path.join(linkRoot, name);
+      const linkPath = path.join(writeRoot, name);
       fs.symlinkSync(fs.realpathSync(target), linkPath, tailwindSourceLinkType(target));
     } catch (error) {
+      if (previewTarget) throw error;
       console.warn(`[mozaiks-web-shell] Failed to link Tailwind source '${name}': ${error.message}`);
     }
   }
@@ -265,7 +276,7 @@ export default defineConfig(({ mode }) => {
   };
 
   return {
-  cacheDir: path.join(__dirname, 'node_modules', '.vite-apps', createHash('sha256').update(platformAppDir).digest('hex').slice(0, 16)),
+  cacheDir: process.env.MOZAIKS_PREVIEW_VITE_CACHE_DIR || path.join(__dirname, 'node_modules', '.vite-apps', createHash('sha256').update(platformAppDir).digest('hex').slice(0, 16)),
   plugins: [
     {
       name: 'monaco-patched-sanitizer',

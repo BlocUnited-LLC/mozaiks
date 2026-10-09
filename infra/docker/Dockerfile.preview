@@ -41,10 +41,11 @@ COPY web_shell/ ./web_shell/
 COPY chat-ui/ ./chat-ui/
 RUN pip install --no-cache-dir . --break-system-packages \
     && pip list --format=freeze > /opt/mozaiks/preview-constraints.txt \
-    && npm ci --prefix web_shell --no-audit --no-fund \
-    && useradd --create-home --uid 10001 sandbox \
+    && npm ci --prefix web_shell --no-audit --no-fund
+RUN useradd --create-home --uid 10001 sandbox \
     && mkdir -p /workspace/app /workspace/logs \
-    && chown -R sandbox:sandbox /workspace /opt/mozaiks/web_shell
+    && ln -s /tmp/mozaiks-preview/tailwind-sources /opt/mozaiks/web_shell/.mozaiks-tailwind-sources \
+    && chown -R sandbox:sandbox /workspace
 
 USER sandbox
 WORKDIR /workspace

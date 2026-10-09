@@ -29,6 +29,7 @@ test('the actual shell config compiles JavaScript sources and preserves Vite ass
     MOZAIKS_WORKFLOWS_PATH: workflowRoot,
     MOZAIKS_FACTORY_APP_PATH: path.join(repoRoot, 'factory_app'),
     MOZAIKS_CHAT_UI_PATH: path.join(repoRoot, 'chat-ui'),
+    MOZAIKS_PREVIEW_VITE_CACHE_DIR: path.join(workspace, 'preview-vite-cache'),
   };
   for (const [key, value] of Object.entries(environment)) {
     const previous = process.env[key];
@@ -39,6 +40,7 @@ test('the actual shell config compiles JavaScript sources and preserves Vite ass
     });
   }
   const config = await configureShell({ command: 'build', mode: 'test' });
+  assert.equal(config.cacheDir, path.join(workspace, 'preview-vite-cache'));
   const plugin = config.plugins.find((entry) => entry.name === 'jsx-in-js');
   assert.ok(plugin);
   const jsx = 'export default function View() { return <section>jsx-preserved</section>; }';

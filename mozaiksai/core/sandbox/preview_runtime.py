@@ -70,6 +70,8 @@ def preview_environment(app_root: Path, *, preview_url: str) -> dict[str, str]:
         "VITE_USAGE_DEMO_MODE": "false",
         "VITE_OIDC_REDIRECT_URI": preview_url.rstrip("/") + auth_contract.routes.callback if auth_contract else "",
         "LOGS_BASE_DIR": str(_STATE_ROOT / "logs"),
+        "MOZAIKS_PREVIEW_VITE_CACHE_DIR": (_STATE_ROOT / "vite-cache").as_posix(),
+        "MOZAIKS_PREVIEW_TAILWIND_SOURCE_DIR": (_STATE_ROOT / "tailwind-sources").as_posix(),
     })
     if auth_contract is None:
         # A public app is previewed as its visitors see it: anonymous, without
@@ -179,7 +181,7 @@ def run_runtime(*, app_root: Path, preview_url: str) -> int:
             ], cwd=app_root.parent, env=env, stdout=log, stderr=log))
             children.append(subprocess.Popen([
                 "node", "node_modules/vite/bin/vite.js", "--host", "0.0.0.0",
-                "--port", "3000", "--strictPort",
+                "--port", "3000", "--strictPort", "--configLoader", "native",
             ], cwd=env["MOZAIKS_WEB_SHELL_PATH"], env=env, stdout=log, stderr=log))
             while not stopping:
                 if any(child.poll() is not None for child in children):
