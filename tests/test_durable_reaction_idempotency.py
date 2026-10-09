@@ -327,9 +327,127 @@ async def test_real_mongo_completion_read_is_bound_to_exact_scope() -> None:
         assert await store.is_completed(**{**scope, "tenant_id": "tenant-2"}) is False
         assert await store.is_completed(**{**scope, "workspace_id": "workspace-2"}) is False
         assert await store.is_completed(**{**scope, "idempotency_key_str": "other"}) is False
+
+        calls = 0
+
+        class Wallet:
+            async def on_order(self, _ctx: Any, *, order_id: str, **_kwargs: Any) -> bool:
+                nonlocal calls
+                calls += 1
+                return order_id == "order-99"
+
+        event_type = "domain.order.created"
+        reaction = _handler_reaction(event_type, module_id="wallet", reaction_id="wallet.credit")
+        router = ModuleEventRouter(
+            [_loaded_module("wallet", handler=Wallet(), reactions=[reaction])],
+            idempotency_store=store,
+        )
+        dispatcher = UnifiedEventDispatcher()
+        router.register(dispatcher)
+        envelope = {
+            "id": "same-event-id", "type": event_type,
+            "tenant": {"app_id": "app-1", "tenant_id": "tenant-1", "workspace_id": "workspace-1"},
+            "payload": {"order_id": "order-99"},
+        }
+        first = await dispatcher.emit(event_type, envelope)
+        second = await dispatcher.emit(
+            event_type,
+            {**envelope, "tenant": {**envelope["tenant"], "tenant_id": "tenant-2"}},
+        )
+        assert required_module_reaction(first, module_id="wallet", reaction_id="wallet.credit").status == "ok"
+        assert required_module_reaction(second, module_id="wallet", reaction_id="wallet.credit").status == "ok"
+        assert calls == 2
     finally:
         await client.drop_database(database)
         client.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("use_store", [False, True])
+@pytest.mark.parametrize("changed_scope", ["app_id", "tenant_id", "workspace_id"])
+async def test_same_event_id_in_different_scope_runs_reaction_again(
+    use_store: bool, changed_scope: str,
+) -> None:
+    calls = 0
+
+    class Wallet:
+        async def on_order(self, _ctx: Any, *, order_id: str, **_kwargs: Any) -> bool:
+            nonlocal calls
+            calls += 1
+            return order_id == "order-99"
+
+    event_type = "domain.order.created"
+    store = _InMemoryIdempotencyStore() if use_store else None
+    reaction = _handler_reaction(event_type, module_id="wallet", reaction_id="wallet.credit")
+    router = ModuleEventRouter(
+        [_loaded_module("wallet", handler=Wallet(), reactions=[reaction])],
+        idempotency_store=store,
+    )
+    dispatcher = UnifiedEventDispatcher()
+    router.register(dispatcher)
+    first_envelope = {
+        "id": "shared-event-id", "type": event_type,
+        "tenant": {"app_id": "app-1", "tenant_id": "tenant-1", "workspace_id": "workspace-1"},
+        "payload": {"order_id": "order-99"},
+    }
+    second_envelope = {
+        **first_envelope,
+        "tenant": {**first_envelope["tenant"], changed_scope: "different"},
+    }
+
+    first = await dispatcher.emit(event_type, first_envelope)
+    second = await dispatcher.emit(event_type, second_envelope)
+
+    assert required_module_reaction(first, module_id="wallet", reaction_id="wallet.credit").status == "ok"
+    assert required_module_reaction(second, module_id="wallet", reaction_id="wallet.credit").status == "ok"
+    assert calls == 2
+    if store is not None:
+        assert len(store._records) == 2
+
+
+@pytest.mark.asyncio
+async def test_raising_capability_releases_durable_claim_for_same_router_retry() -> None:
+    store = _InMemoryIdempotencyStore()
+    calls = 0
+
+    async def invoke(*_args: Any) -> bool:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("temporary failure")
+        return True
+
+    event_type = "domain.order.created"
+    reaction = MagicMock()
+    reaction.event_type = event_type
+    reaction.model_dump.return_value = {
+        "id": "wallet.credit", "idempotency_key": "order_id",
+        "target": {"kind": "capability", "capability_id": "wallet.credit"},
+    }
+    module = _loaded_module("wallet", reactions=[reaction])
+    module.definition = None
+    router = ModuleEventRouter(
+        [module], capability_invoker=invoke, idempotency_store=store,
+    )
+    dispatcher = UnifiedEventDispatcher()
+    router.register(dispatcher)
+    envelope = {
+        "id": "evt-1", "type": event_type,
+        "tenant": {"app_id": "app-1", "tenant_id": "tenant-1"},
+        "payload": {"order_id": "order-99"},
+    }
+
+    first = await dispatcher.emit(event_type, envelope)
+    assert required_module_reaction(
+        first, module_id="wallet", reaction_id="wallet.credit"
+    ).status == "failed"
+    assert [record.status for record in store._records.values()] == ["retryable"]
+    second = await dispatcher.emit(event_type, envelope)
+    assert required_module_reaction(
+        second, module_id="wallet", reaction_id="wallet.credit"
+    ).status == "ok"
+    assert [record.status for record in store._records.values()] == ["completed"]
+    assert calls == 2
 
 
 # ---------------------------------------------------------------------------

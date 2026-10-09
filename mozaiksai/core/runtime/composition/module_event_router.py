@@ -234,9 +234,7 @@ class ModuleEventRouter:
         self._capability_ids: set[str] = set()
         self._capability_index_available = False
         self._handler_emits_by_module_method: dict[tuple[str, str], list[str]] = {}
-        self._processed_reaction_keys: dict[
-            tuple[str, str, str, str, str], Literal["claimed", "completed"]
-        ] = {}
+        self._processed_reaction_keys: dict[tuple[str, ...], Literal["claimed", "completed"]] = {}
         self._index_modules(modules)
         self._validate_reaction_targets()
         self._validate_static_reaction_cycles()
@@ -317,13 +315,17 @@ class ModuleEventRouter:
                 )
                 continue
             idempotency_key = self._idempotency_key(reaction, event_type, envelope, event_provenance)
+            memory_key = (
+                self._memory_idempotency_key(idempotency_key, event_provenance)
+                if idempotency_key is not None else None
+            )
             # durable_key_str and claim_token are set when the durable store is active and
             # the slot was successfully claimed; used to mark complete/fail after dispatch.
             durable_key_str: str | None = None
             claim_token: str | None = None
             if idempotency_key is not None:
                 # Fast path: in-memory check (same process, established by PR #256).
-                if idempotency_key in self._processed_reaction_keys:
+                if memory_key in self._processed_reaction_keys:
                     completed = await self._reaction_is_completed(
                         idempotency_key, event_provenance
                     )
@@ -370,7 +372,8 @@ class ModuleEventRouter:
                         )
                         continue
                     claim_token = lease_claim.claim_token
-                self._processed_reaction_keys[idempotency_key] = "claimed"
+                assert memory_key is not None
+                self._processed_reaction_keys[memory_key] = "claimed"
             target = reaction.get("target") if isinstance(reaction.get("target"), dict) else {}
             target_kind = str(target.get("kind") or "").strip()
             if target_kind == "notification":
@@ -435,8 +438,8 @@ class ModuleEventRouter:
                         idempotency_key, durable_key_str, claim_token, event_provenance
                     )
                 else:
-                    if idempotency_key is not None:
-                        self._processed_reaction_keys.pop(idempotency_key, None)
+                    if memory_key is not None:
+                        self._processed_reaction_keys.pop(memory_key, None)
                     await self._durable_mark_failed(durable_key_str, claim_token, reaction, event_provenance)
             elif target_kind == "service_adapter":
                 adapter_result = await self._dispatch_service_adapter(
@@ -470,8 +473,8 @@ class ModuleEventRouter:
                     )
                 )
                 if adapter_failed:
-                    if idempotency_key is not None:
-                        self._processed_reaction_keys.pop(idempotency_key, None)
+                    if memory_key is not None:
+                        self._processed_reaction_keys.pop(memory_key, None)
                     await self._durable_mark_failed(durable_key_str, claim_token, reaction, event_provenance)
                 else:
                     await self._complete_reaction(
@@ -489,12 +492,16 @@ class ModuleEventRouter:
                         event=event_provenance,
                         reaction=reaction_provenance,
                         outcome="failed" if platform_failed else "ok",
-                        reason="capability returned false" if platform_failed else None,
+                        reason=(
+                            str(platform_result.get("error_code") or "capability returned false")
+                            if isinstance(platform_result, Mapping)
+                            else "capability returned false"
+                        ) if platform_failed else None,
                     )
                 )
                 if platform_failed:
-                    if idempotency_key is not None:
-                        self._processed_reaction_keys.pop(idempotency_key, None)
+                    if memory_key is not None:
+                        self._processed_reaction_keys.pop(memory_key, None)
                     await self._durable_mark_failed(
                         durable_key_str, claim_token, reaction, event_provenance
                     )
@@ -722,13 +729,28 @@ class ModuleEventRouter:
         )
         return (module_id, reaction_id, event_type, declared, event_identity)
 
+    @staticmethod
+    def _memory_idempotency_key(
+        idempotency_key: tuple[str, str, str, str, str],
+        event_provenance: ModuleEventProvenance,
+    ) -> tuple[str, ...]:
+        """Use the same app, tenant, and workspace scope as the durable ledger."""
+        return (
+            event_provenance.app_id or "",
+            event_provenance.tenant_id or "",
+            event_provenance.workspace_id or "",
+            *idempotency_key,
+        )
+
     async def _reaction_is_completed(
         self,
         idempotency_key: tuple[str, str, str, str, str],
         event_provenance: ModuleEventProvenance,
     ) -> bool:
         if self._idempotency_store is None:
-            return self._processed_reaction_keys.get(idempotency_key) == "completed"
+            return self._processed_reaction_keys.get(
+                self._memory_idempotency_key(idempotency_key, event_provenance)
+            ) == "completed"
         try:
             return await self._idempotency_store.is_completed(
                 app_id=event_provenance.app_id or "",
@@ -755,10 +777,11 @@ class ModuleEventRouter:
             durable_key_str, claim_token, event_provenance
         )
         if idempotency_key is not None:
+            memory_key = self._memory_idempotency_key(idempotency_key, event_provenance)
             if confirmed:
-                self._processed_reaction_keys[idempotency_key] = "completed"
+                self._processed_reaction_keys[memory_key] = "completed"
             else:
-                self._processed_reaction_keys.pop(idempotency_key, None)
+                self._processed_reaction_keys.pop(memory_key, None)
 
     async def _durable_complete(
         self,
@@ -903,9 +926,18 @@ class ModuleEventRouter:
                 or ""
             ).strip()
             if capability_id and self._capability_invoker is not None:
-                dispatch_result = await self._maybe_await(
-                    self._capability_invoker(capability_id, envelope, reaction)
-                )
+                try:
+                    dispatch_result = await self._maybe_await(
+                        self._capability_invoker(capability_id, envelope, reaction)
+                    )
+                except Exception as exc:
+                    logger.error(
+                        "CAPABILITY_REACTION_ERROR: capability=%s error=%s",
+                        capability_id,
+                        type(exc).__name__,
+                        exc_info=True,
+                    )
+                    dispatch_result = {"success": False, "error_code": type(exc).__name__}
             else:
                 dispatch_result = False
 

@@ -400,3 +400,38 @@ async def test_partial_required_reactions_converge_with_verified_same_router_com
     ]
     assert audits[2].reason == "idempotent reaction already completed"
     assert second.listeners[0].result.reactions[0].audit_id == audits[2].reaction_dispatch_id
+
+
+@pytest.mark.asyncio
+async def test_raising_capability_is_failed_and_retried_on_same_router() -> None:
+    calls = 0
+
+    async def invoke(*_args: Any) -> bool:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("temporary capability failure")
+        return True
+
+    router = ModuleEventRouter(
+        [_module(
+            "wallet", object(), "wallet.credit", idempotency_key="payment_id",
+            target={"kind": "capability", "capability_id": "wallet.credit"},
+        )],
+        capability_invoker=invoke,
+    )
+    dispatcher = UnifiedEventDispatcher()
+    router.register(dispatcher)
+    envelope = {
+        "id": "evt-pay-1", "type": EVENT_TYPE,
+        "tenant": {"app_id": "app-1", "tenant_id": "tenant-1"},
+        "payload": {"payment_id": "pay-1"},
+    }
+    first = await dispatcher.emit(EVENT_TYPE, envelope)
+    second = await dispatcher.emit(EVENT_TYPE, envelope)
+
+    failed = required_module_reaction(first, module_id="wallet", reaction_id="wallet.credit")
+    assert failed.status == "failed"
+    assert failed.reason == "RuntimeError"
+    assert required_module_reaction(second, module_id="wallet", reaction_id="wallet.credit").status == "ok"
+    assert calls == 2

@@ -478,7 +478,9 @@ This project follows a practical pre-1.0 changelog format:
   failed reactions no longer remain suppressed by a same-process idempotency
   key. A verified prior completion is distinct from active, retryable, and
   dead-letter skips, allowing partial multi-consumer delivery to converge
-  when the original event identity is re-delivered. Existing best-effort
+  when the original event identity is re-delivered. Capability callback
+  exceptions are reported as failed reactions, and same-process completion
+  checks are scoped by app, tenant, and workspace. Existing best-effort
   emitters continue to work.
 
 - Handler reactions now receive the fields of flat events,

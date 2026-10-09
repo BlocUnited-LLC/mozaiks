@@ -132,6 +132,7 @@ is a `ModuleEventDeliveryOutcome` with payload-free results for each declared
 reaction; arbitrary callback return values are not exposed to the producer.
 A handler, service adapter, or capability returning `False` or a mapping with
 `success: false` is a failed reaction;
+an exception from a capability callback also becomes a failed reaction;
 the same failure is recorded in the reaction audit and does not leave an
 in-memory idempotency key blocking a later retry. The durable reaction ledger
 still enforces its lease, delay, and attempt budget. Existing emitters that
@@ -148,7 +149,8 @@ completed, so the handler was safely suppressed on this delivery; its audit
 still says `skipped` and records the completed reason. An active lease, retry
 delay, dead letter, permission denial, or nonmatching condition is never
 accepted as `completed`. Without a durable ledger this evidence lasts only for
-the current router process. An event
+the current router process, and its in-memory identity is scoped by app,
+tenant, and workspace just like the durable ledger. An event
 rejected before dispatch still returns `ModuleEventRejection` through
 `ctx.emit`; the helper treats that as failed. Only `status == "ok"` confirms
 that particular synchronous reaction returned successfully; `completed`
