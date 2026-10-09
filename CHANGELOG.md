@@ -102,6 +102,12 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
+- Canonical Docker build validation now runs without container networking or
+  published ports. The Docker adapter uses the local daemon with a clean CLI
+  configuration, so inherited remote Docker contexts cannot receive app files.
+  Build validation also excludes explicitly forwarded interactive-preview
+  environment values.
+
 - Android source export and delivery verification now reject literal values
   under credential objects even when nested payload fields use unfamiliar names.
   Descriptive metadata and names-only references remain exportable.
