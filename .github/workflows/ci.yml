@@ -74,7 +74,7 @@ jobs:
 
   acp-isolation-proof:
     # The real Docker cases are opt-in in normal pytest collection. Build the
-    # credential-free proof image and run them explicitly on every PR and push.
+    # credential-free proof and preview images and run them on every PR and push.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -101,6 +101,16 @@ jobs:
         run: |
           docker build --build-context node:24-bookworm-slim=docker-image://public.ecr.aws/docker/library/node:24-bookworm-slim -f infra/docker/Dockerfile.preview -t mozaiks-sandbox:local .
           docker build -f infra/docker/Dockerfile.acp-proof -t mozaiks-acp-proof:local .
+
+      - name: Capture built preview image ID
+        id: preview_image
+        run: |
+          image_id=$(docker image inspect --format '{{.Id}}' mozaiks-sandbox:local)
+          if [[ ! "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo 'Preview image did not resolve to a local sha256 ID' >&2
+            exit 1
+          fi
+          printf 'image_id=%s\n' "$image_id" >> "$GITHUB_OUTPUT"
 
       - name: Capture built proof image ID
         id: proof_image
@@ -129,8 +139,25 @@ jobs:
               raise SystemExit(f'Expected three executed Docker proof cases; found {len(cases)} cases')
           PY
 
+      - name: Run generated Docker build acceptance proof
+        env:
+          MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE: ${{ steps.preview_image.outputs.image_id }}
+        run: |
+          python -m pytest -q --no-cov --reruns 0 \
+            --junitxml=/tmp/generated-build-proof.xml \
+            tests/test_canonical_app_build_validation.py::test_real_docker_build_includes_generated_tailwind_class \
+            tests/test_app_acceptance_isolation.py::test_generated_acceptance_uses_local_docker_with_poisoned_client_settings \
+            tests/test_app_acceptance_isolation.py::test_generated_gate_admits_only_pinned_contained_evidence
+          python - <<'PY'
+          from xml.etree import ElementTree
+
+          cases = ElementTree.parse('/tmp/generated-build-proof.xml').findall('.//testcase')
+          if len(cases) != 3 or any(case.find('skipped') is not None for case in cases):
+              raise SystemExit(f'Expected three executed generated Docker cases; found {len(cases)} cases')
+          PY
+
   test:
-    # Fan-in gate for the shard matrix and real Docker isolation proof. Holds
+    # Fan-in gate for the shard matrix and real Docker proofs. Holds
     # the required-check name `test`, then enforces combined coverage.
     runs-on: ubuntu-latest
     needs: [test-shard, acp-isolation-proof]
