@@ -309,6 +309,34 @@ class ReactionIdempotencyStore:
         )
         return bool(result.modified_count == 1)
 
+    async def is_completed(
+        self,
+        *,
+        app_id: str,
+        tenant_id: str | None,
+        workspace_id: str | None,
+        idempotency_key_str: str,
+    ) -> bool:
+        """Confirm terminal completion for this exact scoped reaction identity.
+
+        A denied claim alone cannot distinguish completion from an active lease,
+        retry delay, or dead letter. Completion is terminal, so a positive read
+        remains valid if another worker changes its claim while we inspect it.
+        """
+        record = await self._collection().find_one(
+            {
+                **self._key_filter(
+                    app_id=app_id,
+                    tenant_id=tenant_id,
+                    workspace_id=workspace_id,
+                    idempotency_key_str=idempotency_key_str,
+                ),
+                "status": "completed",
+            },
+            {"_id": 1},
+        )
+        return record is not None
+
     async def mark_failed(
         self,
         *,

@@ -16,13 +16,22 @@ All tests use an in-memory mock store — no MongoDB required.
 """
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import MagicMock
+from uuid import uuid4
 
 import pytest
 
-from mozaiksai.core.runtime.composition.module_event_router import ModuleEventRouter
+from mozaiksai.core.events.unified_event_dispatcher import UnifiedEventDispatcher
+from mozaiksai.core.runtime.composition.module_event_provenance import (
+    normalize_module_event_provenance,
+)
+from mozaiksai.core.runtime.composition.module_event_router import (
+    ModuleEventRouter,
+    required_module_reaction,
+)
 from mozaiksai.core.runtime.composition.reaction_idempotency_store import (
     LeaseClaim,
     ReactionIdempotencyStore,
@@ -144,6 +153,21 @@ class _InMemoryIdempotencyStore(ReactionIdempotencyStore):
         rec.status = "completed"
         return True
 
+    async def is_completed(
+        self,
+        *,
+        app_id: str,
+        tenant_id: str | None,
+        workspace_id: str | None,
+        idempotency_key_str: str,
+    ) -> bool:
+        return self.status(
+            app_id=app_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+            idempotency_key_str=idempotency_key_str,
+        ) == "completed"
+
     async def mark_failed(
         self,
         *,
@@ -177,6 +201,135 @@ class _InMemoryIdempotencyStore(ReactionIdempotencyStore):
         scope = f"{app_id}|{tenant_id or ''}|{workspace_id or ''}|{idempotency_key_str}"
         rec = self._records.get(scope)
         return rec.status if rec is not None else None
+
+
+@pytest.mark.asyncio
+async def test_partial_consumer_completion_converges_after_router_restart() -> None:
+    """A completed ledger entry is accepted without running the consumer twice."""
+    store = _InMemoryIdempotencyStore()
+    event_type = "domain.order.created"
+    wallet_calls = 0
+    campaign_calls = 0
+
+    class Wallet:
+        async def on_order(self, _ctx: Any, *, order_id: str, **_kwargs: Any) -> bool:
+            nonlocal wallet_calls
+            wallet_calls += 1
+            return order_id == "order-99"
+
+    class Campaign:
+        async def on_order(self, _ctx: Any, *, order_id: str, **_kwargs: Any) -> bool:
+            nonlocal campaign_calls
+            campaign_calls += 1
+            return campaign_calls > 1 and order_id == "order-99"
+
+    wallet = Wallet()
+    campaign = Campaign()
+
+    def dispatcher_with_new_router() -> UnifiedEventDispatcher:
+        router = ModuleEventRouter(
+            [
+                _loaded_module("wallet", handler=wallet, reactions=[
+                    _handler_reaction(event_type, module_id="wallet", reaction_id="wallet.credit")
+                ]),
+                _loaded_module("campaign", handler=campaign, reactions=[
+                    _handler_reaction(event_type, module_id="campaign", reaction_id="campaign.backing")
+                ]),
+            ],
+            idempotency_store=store,
+        )
+        dispatcher = UnifiedEventDispatcher()
+        router.register(dispatcher)
+        return dispatcher
+
+    envelope = _envelope("evt_order_1")
+    envelope["type"] = event_type
+    first = await dispatcher_with_new_router().emit(event_type, envelope)
+    second = await dispatcher_with_new_router().emit(event_type, envelope)
+
+    assert required_module_reaction(first, module_id="wallet", reaction_id="wallet.credit").status == "ok"
+    assert required_module_reaction(first, module_id="campaign", reaction_id="campaign.backing").status == "failed"
+    assert required_module_reaction(second, module_id="wallet", reaction_id="wallet.credit").status == "completed"
+    assert required_module_reaction(second, module_id="campaign", reaction_id="campaign.backing").status == "ok"
+    assert second.success is True
+    assert (wallet_calls, campaign_calls) == (1, 2)
+
+    different_event = _envelope("evt_order_2")
+    different_event["type"] = event_type
+    third = await dispatcher_with_new_router().emit(event_type, different_event)
+    assert required_module_reaction(third, module_id="wallet", reaction_id="wallet.credit").status == "ok"
+    assert wallet_calls == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blocked_status", ["claimed", "retryable", "dead_letter"])
+async def test_uncompleted_durable_claim_never_reports_completed(
+    blocked_status: str,
+) -> None:
+    store = _InMemoryIdempotencyStore()
+    event_type = "domain.order.created"
+    reaction = _handler_reaction(event_type, module_id="wallet", reaction_id="wallet.credit")
+    module = _loaded_module("wallet", handler=_make_handler(["ok"]), reactions=[reaction])
+    router = ModuleEventRouter([module], idempotency_store=store)
+    dispatcher = UnifiedEventDispatcher()
+    router.register(dispatcher)
+    envelope = _envelope("evt_order_1")
+    envelope["type"] = event_type
+    key = router._idempotency_key(
+        reaction.model_dump.return_value, event_type, envelope,
+        normalize_module_event_provenance(event_type, envelope),
+    )
+    assert key is not None
+    scoped = {
+        "app_id": "app-1", "tenant_id": "tenant-1", "workspace_id": None,
+        "idempotency_key_str": "|".join(key),
+    }
+    claim = await store.claim(**scoped, max_attempts=1 if blocked_status == "dead_letter" else None)
+    if blocked_status != "claimed":
+        await store.mark_failed(
+            **scoped, claim_token=claim.claim_token,
+            retry_delay_seconds=60 if blocked_status == "retryable" else 0,
+        )
+    assert store.status(**scoped) == blocked_status
+
+    receipt = await dispatcher.emit(event_type, envelope)
+    assert required_module_reaction(
+        receipt, module_id="wallet", reaction_id="wallet.credit"
+    ).status == "skipped"
+
+
+@pytest.mark.asyncio
+async def test_real_mongo_completion_read_is_bound_to_exact_scope() -> None:
+    uri = os.getenv("MONGO_URI")
+    if not uri:
+        pytest.skip("MONGO_URI is not set")
+    from motor.motor_asyncio import AsyncIOMotorClient
+
+    client = AsyncIOMotorClient(uri, serverSelectionTimeoutMS=2000)
+    try:
+        await client.admin.command("ping")
+    except Exception:
+        client.close()
+        pytest.skip("MongoDB is unavailable")
+    database = f"reaction_receipt_{uuid4().hex}"
+    try:
+        store = ReactionIdempotencyStore(client=client, database_name=database)
+        await store.ensure_indexes()
+        scope = {
+            "app_id": "app-1", "tenant_id": "tenant-1", "workspace_id": "workspace-1",
+            "idempotency_key_str": "wallet|credit|domain.order.created|order_id|evt-1",
+        }
+        claim = await store.claim(**scope)
+        assert claim.claimed
+        assert await store.is_completed(**scope) is False
+        assert await store.complete(**scope, claim_token=claim.claim_token) is True
+        assert await store.is_completed(**scope) is True
+        assert await store.is_completed(**{**scope, "tenant_id": "tenant-2"}) is False
+        assert await store.is_completed(**{**scope, "workspace_id": "workspace-2"}) is False
+        assert await store.is_completed(**{**scope, "idempotency_key_str": "other"}) is False
+    finally:
+        await client.drop_database(database)
+        client.close()
 
 
 # ---------------------------------------------------------------------------

@@ -130,7 +130,8 @@ Its listener entries identify synchronous callback success, a returned
 `success: false`, or a raised exception. The platform router's listener result
 is a `ModuleEventDeliveryOutcome` with payload-free results for each declared
 reaction; arbitrary callback return values are not exposed to the producer.
-A handler return containing `success: false` is a failed reaction;
+A handler, service adapter, or capability returning `False` or a mapping with
+`success: false` is a failed reaction;
 the same failure is recorded in the reaction audit and does not leave an
 in-memory idempotency key blocking a later retry. The durable reaction ledger
 still enforces its lease, delay, and attempt budget. Existing emitters that
@@ -141,13 +142,23 @@ Code that must acknowledge one specific downstream effect checks
 `required_module_reaction(receipt, module_id=..., reaction_id=...)` from
 `mozaiksai.core.runtime.composition.module_event_router`. It returns `missing`
 when no listener or matching reaction reported a result, and `skipped` or
-`failed` for an attempted reaction that did not report success. An event
+`failed` for an attempted reaction that did not report success. `completed`
+means the exact scoped event/reaction idempotency identity was previously
+completed, so the handler was safely suppressed on this delivery; its audit
+still says `skipped` and records the completed reason. An active lease, retry
+delay, dead letter, permission denial, or nonmatching condition is never
+accepted as `completed`. Without a durable ledger this evidence lasts only for
+the current router process. An event
 rejected before dispatch still returns `ModuleEventRejection` through
 `ctx.emit`; the helper treats that as failed. Only `status == "ok"` confirms
-that particular synchronous reaction returned successfully. This receipt is
+that particular synchronous reaction returned successfully; `completed`
+confirms prior completion for the same identity. This receipt is
 not a durable outbox or proof that an external payment settled. Financial
 producers must keep their own once-only persistence and recovery boundary
-before acknowledging a provider callback or retrying an event.
+before acknowledging a provider callback or retrying an event. Re-delivery
+must preserve the original event identity, or the producer must persist
+per-consumer completion checkpoints: a new `ctx.emit` call creates a new
+event ID and cannot inherit another event's completion evidence.
 
 ### Module Event/Reaction Contract
 

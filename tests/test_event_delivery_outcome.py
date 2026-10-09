@@ -34,16 +34,18 @@ class _Reaction:
         *,
         permissions: list[str] | None = None,
         idempotency_key: str | None = None,
+        target: dict[str, str] | None = None,
     ) -> None:
         self.event_type = EVENT_TYPE
         self.reaction_id = reaction_id
         self.permissions = permissions or []
         self.idempotency_key = idempotency_key
+        self.target = target or {"kind": "handler", "handler_method": "on_payment"}
 
     def model_dump(self, **_kwargs: Any) -> dict[str, Any]:
         return {
             "id": self.reaction_id,
-            "target": {"kind": "handler", "handler_method": "on_payment"},
+            "target": self.target,
             "permissions": self.permissions,
             "idempotency_key": self.idempotency_key,
         }
@@ -56,6 +58,7 @@ def _module(
     *,
     permissions: list[str] | None = None,
     idempotency_key: str | None = None,
+    target: dict[str, str] | None = None,
 ) -> Any:
     return SimpleNamespace(
         name=name,
@@ -67,6 +70,7 @@ def _module(
                     reaction_id,
                     permissions=permissions,
                     idempotency_key=idempotency_key,
+                    target=target,
                 )]
             ),
             notifications=None,
@@ -256,3 +260,143 @@ async def test_returned_failure_does_not_suppress_same_router_retry() -> None:
     assert required_module_reaction(first, module_id="wallet", reaction_id="wallet.credit").status == "failed"
     assert required_module_reaction(second, module_id="wallet", reaction_id="wallet.credit").status == "ok"
     assert attempts == 2
+
+
+@pytest.mark.asyncio
+async def test_bare_false_handler_is_failed_and_retryable_with_matching_audit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = 0
+
+    class Wallet:
+        async def on_payment(self, _ctx: Any, *, payment_id: str) -> bool:
+            nonlocal attempts
+            attempts += 1
+            assert payment_id == "pay-1"
+            return attempts > 1
+
+    router = ModuleEventRouter([
+        _module("wallet", Wallet(), "wallet.credit", idempotency_key="payment_id")
+    ])
+    audits: list[ModuleReactionAudit] = []
+
+    async def capture_audit(audit: ModuleReactionAudit) -> None:
+        audits.append(audit)
+
+    monkeypatch.setattr(router, "_emit_reaction_audit", capture_audit)
+    dispatcher = UnifiedEventDispatcher()
+    router.register(dispatcher)
+    envelope = {
+        "id": "evt-pay-1", "type": EVENT_TYPE,
+        "tenant": {"app_id": "app-1", "tenant_id": "tenant-1"},
+        "payload": {"payment_id": "pay-1"},
+    }
+
+    first = await dispatcher.emit(EVENT_TYPE, envelope)
+    second = await dispatcher.emit(EVENT_TYPE, envelope)
+
+    assert required_module_reaction(first, module_id="wallet", reaction_id="wallet.credit").status == "failed"
+    assert required_module_reaction(second, module_id="wallet", reaction_id="wallet.credit").status == "ok"
+    assert [audit.outcome for audit in audits] == ["failed", "ok"]
+    assert attempts == 2
+
+
+@pytest.mark.asyncio
+async def test_bare_false_service_adapter_and_capability_are_failed_and_retryable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = 0
+    router = ModuleEventRouter([
+        _module(
+            "billing", object(), "billing.post",
+            idempotency_key="payment_id",
+            target={"kind": "service_adapter", "adapter": "test:Adapter", "adapter_method": "post"},
+        )
+    ])
+
+    async def adapter(*_args: Any, **_kwargs: Any) -> bool:
+        nonlocal attempts
+        attempts += 1
+        return attempts > 1
+
+    monkeypatch.setattr(router, "_dispatch_service_adapter", adapter)
+    dispatcher = UnifiedEventDispatcher()
+    router.register(dispatcher)
+    envelope = {
+        "id": "evt-pay-1", "type": EVENT_TYPE,
+        "tenant": {"app_id": "app-1", "tenant_id": "tenant-1"},
+        "payload": {"payment_id": "pay-1"},
+    }
+    first = await dispatcher.emit(EVENT_TYPE, envelope)
+    second = await dispatcher.emit(EVENT_TYPE, envelope)
+    assert required_module_reaction(first, module_id="billing", reaction_id="billing.post").status == "failed"
+    assert required_module_reaction(second, module_id="billing", reaction_id="billing.post").status == "ok"
+    assert attempts == 2
+
+    capability_router = ModuleEventRouter(
+        [_module(
+            "billing", object(), "billing.capability", idempotency_key="payment_id",
+            target={"kind": "capability", "capability_id": "billing.post"},
+        )],
+        capability_invoker=lambda *_args: False,
+    )
+    capability_dispatcher = UnifiedEventDispatcher()
+    capability_router.register(capability_dispatcher)
+    capability = await capability_dispatcher.emit(EVENT_TYPE, envelope)
+    assert required_module_reaction(
+        capability, module_id="billing", reaction_id="billing.capability"
+    ).status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_partial_required_reactions_converge_with_verified_same_router_completion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wallet_calls = 0
+    campaign_calls = 0
+
+    class Wallet:
+        async def on_payment(self, _ctx: Any, *, payment_id: str) -> bool:
+            nonlocal wallet_calls
+            wallet_calls += 1
+            return payment_id == "pay-1"
+
+    class Campaign:
+        async def on_payment(self, _ctx: Any, *, payment_id: str) -> bool:
+            nonlocal campaign_calls
+            campaign_calls += 1
+            return campaign_calls > 1 and payment_id == "pay-1"
+
+    router = ModuleEventRouter([
+        _module("wallet", Wallet(), "wallet.credit", idempotency_key="payment_id"),
+        _module("campaign", Campaign(), "campaign.backing", idempotency_key="payment_id"),
+    ])
+    audits: list[ModuleReactionAudit] = []
+
+    async def capture_audit(audit: ModuleReactionAudit) -> None:
+        audits.append(audit)
+
+    monkeypatch.setattr(router, "_emit_reaction_audit", capture_audit)
+    dispatcher = UnifiedEventDispatcher()
+    router.register(dispatcher)
+    envelope = {
+        "id": "evt-pay-1", "type": EVENT_TYPE,
+        "tenant": {"app_id": "app-1", "tenant_id": "tenant-1"},
+        "payload": {"payment_id": "pay-1"},
+    }
+
+    first = await dispatcher.emit(EVENT_TYPE, envelope)
+    second = await dispatcher.emit(EVENT_TYPE, envelope)
+
+    assert required_module_reaction(first, module_id="wallet", reaction_id="wallet.credit").status == "ok"
+    assert required_module_reaction(first, module_id="campaign", reaction_id="campaign.backing").status == "failed"
+    assert required_module_reaction(second, module_id="wallet", reaction_id="wallet.credit").status == "completed"
+    assert required_module_reaction(second, module_id="campaign", reaction_id="campaign.backing").status == "ok"
+    assert second.success is True
+    assert (wallet_calls, campaign_calls) == (1, 2)
+    assert [(audit.reaction.reaction_id, audit.outcome) for audit in audits] == [
+        ("wallet.credit", "ok"), ("campaign.backing", "failed"),
+        ("wallet.credit", "skipped"), ("campaign.backing", "ok"),
+    ]
+    assert audits[2].reason == "idempotent reaction already completed"
+    assert second.listeners[0].result.reactions[0].audit_id == audits[2].reaction_dispatch_id

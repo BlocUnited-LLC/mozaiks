@@ -395,9 +395,15 @@ action keeps its handler's outcome.
 
 An outbox that requires one consumer must check that exact reaction, not just
 the absence of a rejection or the dispatcher's overall success. A skipped,
-failed, or missing reaction does not acknowledge the outbox entry. A successful
-receipt confirms the synchronous handler returned successfully; the outbox
-still owns durable once-only delivery and any controlled replay.
+failed, or missing reaction does not acknowledge the outbox entry. A reaction
+receipt is successful when its status is `ok` or `completed`: the former means
+the synchronous handler returned successfully, and the latter means the exact
+scoped event/reaction identity already completed in the idempotency ledger (or
+in this router process when no durable ledger is configured). An active lease,
+retry delay, dead letter, or permission skip remains unsuccessful. The outbox
+still owns durable once-only delivery and any controlled replay. Re-delivery
+must keep the original event identity, or the outbox must persist per-consumer
+checkpoints; each new `ctx.emit` call creates a new event ID.
 
 ```python
 from mozaiksai.core.runtime.composition.module_event_router import required_module_reaction
