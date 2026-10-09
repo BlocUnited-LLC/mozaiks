@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
+
 import pytest
 
 from tests.import_utils import import_module_directly
@@ -49,6 +52,16 @@ class _FakeSandbox:
         self.connection_config = type("_Cfg", (), {"debug": False})()
         self.timeout = None
         self.killed = False
+        self.details = SimpleNamespace(
+            allow_internet_access=True,
+            network={"allow_public_traffic": True},
+            lifecycle={"on_timeout": "kill", "auto_resume": False},
+            metadata={},
+            template_id="template-123",
+        )
+
+    def get_info(self):
+        return self.details
 
     def get_host(self, port):  # noqa: ANN001
         return f"preview-{port}.example"
@@ -120,6 +133,7 @@ async def test_e2b_adapter_uses_real_sdk_shape(monkeypatch) -> None:
 
     extended = await adapter.extend_session(session_id="sbx_123", timeout_seconds=900)
     assert extended.session_id == "sbx_123"
+    assert extended.metadata["sandbox_domain"] == "sandbox.example"
     assert created.timeout == 900
 
     terminated = await adapter.terminate_session(session_id="sbx_123")
@@ -183,5 +197,93 @@ async def test_cancelled_allocation_waits_for_creation_and_kills_the_sandbox(mon
     release.set()
     with pytest.raises(asyncio.CancelledError):
         await task
+    assert sandbox.killed
+    assert not adapter._sessions
+
+
+_EXACT_BUILD = "preview:f47ac10b-58cc-4372-a567-0e02b2c3d479"
+
+
+@pytest.mark.asyncio
+async def test_sealed_e2b_session_requires_exact_build_and_no_environment(monkeypatch):
+    from unittest.mock import Mock
+
+    factory = Mock()
+    monkeypatch.setattr(_sandbox_mod, "Sandbox", factory)
+    adapter = E2BSandboxAdapter()
+    with pytest.raises(ValueError, match="exact template build"):
+        await adapter.create_session(template="preview:production", metadata={"purpose": "sealed_candidate_preview"})
+    with pytest.raises(ValueError, match="environment"):
+        await adapter.create_session(
+            template=_EXACT_BUILD, metadata={"purpose": "sealed_candidate_preview"}, envs={"TOKEN": "secret"},
+        )
+    factory.create.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sealed_e2b_session_confirms_network_isolation_and_hides_provider_host(monkeypatch):
+    from unittest.mock import Mock
+
+    sandbox = _FakeSandbox()
+    sandbox.details = SimpleNamespace(
+        allow_internet_access=False,
+        network={"allow_public_traffic": False},
+        lifecycle={"on_timeout": "kill", "auto_resume": False},
+        metadata={"purpose": "sealed_candidate_preview"},
+        template_id="verified-template-id",
+    )
+    factory = Mock()
+    factory.create.return_value = sandbox
+    monkeypatch.setattr(_sandbox_mod, "Sandbox", factory)
+    adapter = E2BSandboxAdapter()
+    session = await adapter.create_session(template=_EXACT_BUILD, metadata={"purpose": "sealed_candidate_preview"})
+    assert session.metadata == {
+        "template": _EXACT_BUILD, "purpose": "sealed_candidate_preview", "template_id": "verified-template-id",
+    }
+    assert factory.create.call_args.kwargs["allow_internet_access"] is False
+    assert factory.create.call_args.kwargs["network"] == {"allow_public_traffic": False}
+    assert factory.create.call_args.kwargs["lifecycle"] == {"on_timeout": "kill", "auto_resume": False}
+    sandbox.get_host = Mock(side_effect=AssertionError("sealed host must remain private"))
+    assert await adapter.get_preview_url(session_id=session.session_id, port=3000) is None
+    assert adapter._sessions[session.session_id] is sandbox
+
+    reconnected = E2BSandboxAdapter()
+    factory.get_info.return_value = SimpleNamespace(end_at=datetime.now(UTC) + timedelta(seconds=45))
+    factory.connect.return_value = sandbox
+    assert await reconnected.get_preview_url(session_id=session.session_id, port=3000) is None
+    assert "sandbox_domain" not in (await reconnected.connect(session_id=session.session_id)).metadata
+    sandbox.commands.run = Mock(wraps=sandbox.commands.run)
+    with pytest.raises(ValueError, match="command environment"):
+        await reconnected.run_command(session_id=session.session_id, command="true", envs={"TOKEN": "secret"})
+    sandbox.commands.run.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("egress,ingress,purpose,on_timeout,auto_resume", [
+    (True, False, "sealed_candidate_preview", "kill", False),
+    (False, True, "sealed_candidate_preview", "kill", False),
+    (False, False, "artifact_preview", "kill", False),
+    (False, False, "sealed_candidate_preview", "pause", False),
+    (False, False, "sealed_candidate_preview", "kill", True),
+])
+async def test_sealed_e2b_allocation_fails_closed_when_provider_attestation_disagrees(
+    monkeypatch, egress, ingress, purpose, on_timeout, auto_resume,
+):
+    from unittest.mock import Mock
+
+    sandbox = _FakeSandbox()
+    sandbox.details = SimpleNamespace(
+        allow_internet_access=egress,
+        network={"allow_public_traffic": ingress},
+        lifecycle={"on_timeout": on_timeout, "auto_resume": auto_resume},
+        metadata={"purpose": purpose},
+        template_id="verified-template-id",
+    )
+    factory = Mock()
+    factory.create.return_value = sandbox
+    monkeypatch.setattr(_sandbox_mod, "Sandbox", factory)
+    adapter = E2BSandboxAdapter()
+    with pytest.raises(RuntimeError, match="did not confirm"):
+        await adapter.create_session(template=_EXACT_BUILD, metadata={"purpose": "sealed_candidate_preview"})
     assert sandbox.killed
     assert not adapter._sessions

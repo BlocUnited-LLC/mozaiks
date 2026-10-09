@@ -14,6 +14,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- Prepared the E2B adapter for private sealed candidate sessions with an exact
+  template build reference, denied internet egress, token-gated port access,
+  and no provider preview URL. The sealed candidate manager still selects Docker.
 - Internal offline sealed candidate boot over the existing preview session
   ledger: canonical archive and pinned Docker image identities, bounded
   root-owned staging, non-root runtime health, and confirmed cleanup without
