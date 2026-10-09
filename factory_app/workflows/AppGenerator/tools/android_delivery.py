@@ -56,6 +56,10 @@ _COMMIT = re.compile(r"[0-9a-f]{40}")
 _EXCLUDED_PARTS = {".git", ".local", "__pycache__", "node_modules", ".pytest_cache"}
 _WEB_ROOT_FILES = {"App.jsx", "main.jsx", "styles.css", "index.html", "package.json", "package-lock.json", "postcss.config.js", "tailwind.config.js", "vite.config.js", "workflowUi.js"}
 _UI_ROOT_FILES = {"package.json", "package-lock.json", "postcss.config.js", "tailwind.config.js", "tsconfig.json"}
+_TEXT_RESOURCE_SUFFIXES = frozenset({
+    ".css", ".html", ".js", ".jsx", ".json", ".md",
+    ".mjs", ".svg", ".ts", ".tsx", ".yaml", ".yml",
+})
 
 
 class AndroidDeliveryError(ValueError):
@@ -268,6 +272,12 @@ def _verified_distribution_bytes(distribution: importlib.metadata.Distribution, 
     return raw
 
 
+def _canonical_resource_bytes(name: str, raw: bytes) -> bytes:
+    # A Windows VCS wheel can contain CRLF checkouts despite the LF Git attribute.
+    # RECORD is checked first; the delivery uses the committed text representation.
+    return raw.replace(b"\r\n", b"\n") if Path(name).suffix.lower() in _TEXT_RESOURCE_SUFFIXES else raw
+
+
 def _installed_source_commit(distribution: importlib.metadata.Distribution, root: Path) -> str:
     revision_path = "mozaiksai/_build_revision.json"
     entries = [
@@ -328,7 +338,9 @@ def _framework_snapshot() -> tuple[dict[str, bytes], dict[str, Any]]:
                 if not _resource_selected(mapped):
                     continue
                 expected = (shell if mapped.startswith("web_shell/") else ui) / mapped.split("/", 1)[1]
-                files[mapped] = _verified_distribution_bytes(distribution, distribution_entry, expected)
+                files[mapped] = _canonical_resource_bytes(
+                    mapped, _verified_distribution_bytes(distribution, distribution_entry, expected)
+                )
         except AndroidDeliveryError:
             raise
         except (importlib.metadata.PackageNotFoundError, ValueError, OSError) as exc:

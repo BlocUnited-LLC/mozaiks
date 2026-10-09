@@ -151,11 +151,13 @@ install a generic host wheel without revision metadata; Android export in that
 image remains unavailable. A release wheel or source distribution built from
 a clean, exact Git checkout carries the revision needed for mobile delivery.
 
-Shared-shell resources use LF text checkouts through the repository's
-`.gitattributes`; binary resources retain their bytes. This keeps Windows Git
-installs and Linux compiler installs identical for the recorded resource digest.
-Install the matching revision again if an older checkout policy produced CRLF
-resources. The verifier rejects mismatched bytes even when commit IDs match.
+Shared-shell text is committed with LF through `.gitattributes`. Some Windows
+VCS wheel builds still contain CRLF checkouts. The exporter first checks each
+installed file against the wheel's distribution record, then restores LF for
+the selected text resources before calculating the framework digest. Binary
+resources keep their original bytes. The Linux compiler independently renders
+the same committed resource bytes; a different revision or other resource drift
+still fails verification.
 
 After compilation, `mobile/build-result.json` binds the output to those input
 identities and records the APK's relative path, byte size, and SHA-256. The CLI
