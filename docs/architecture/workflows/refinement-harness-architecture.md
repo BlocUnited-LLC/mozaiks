@@ -178,9 +178,8 @@ points, including directory junctions, before traversal or file reads. A linked
 workspace root is rejected too. These are scope violations; linked targets are
 never harvested or deleted by the harvester.
 
-ACP provider selection uses the approved artifact kind and file budget, not the
-number of files as a proxy for patch complexity. The shipped refinement policy
-keeps ACP disabled, and the default local ACP subprocess path refuses execution
+The shipped refinement policy keeps ACP disabled, and the default local ACP
+subprocess path refuses execution
 until an isolated worker is available. The repository Docker executor keeps its
 offline proof as the default and also offers a trusted-worker-only, opt-in live
 profile. That profile runs a one-shot Codex or Claude ACP worker on a private
