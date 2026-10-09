@@ -18,7 +18,7 @@ from mozaiksai.core.runtime.app.subscriptions_loader import (
 
 WalletPlanStatus = Literal[
     "resolved", "no_product", "ambiguous_product", "plan_unavailable",
-    "unknown_plan", "invalid_snapshot",
+    "unknown_plan", "missing_snapshot", "invalid_snapshot",
 ]
 
 
@@ -106,7 +106,16 @@ async def resolve_v2_wallet_plans(
             continue
         source: Literal["catalog", "assignment_snapshot"] = "catalog"
         plan_allowances = plan.token_allowances
-        if selection.source == "active_assignment" and selection.allowances_snapshot is not None:
+        if selection.source == "active_assignment":
+            if selection.allowances_snapshot is None:
+                resolutions[wallet.wallet_id] = WalletPlanResolution(
+                    wallet_id=wallet.wallet_id,
+                    status="missing_snapshot",
+                    product_id=product.product_id,
+                    plan_id=plan.plan_id,
+                    grant_authority="billing_fulfillment",
+                )
+                continue
             if not isinstance(selection.allowances_snapshot, list):
                 resolutions[wallet.wallet_id] = WalletPlanResolution(
                     wallet_id=wallet.wallet_id,

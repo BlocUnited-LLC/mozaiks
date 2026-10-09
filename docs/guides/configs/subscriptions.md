@@ -202,6 +202,8 @@ definition. The token summary reports each wallet's governing `product_id`,
 top-level `plan_id` remains the primary product plan for older clients. A wallet
 referenced by more than one product has no single governing plan, so its plan
 allowances are marked ambiguous and automatic grants are skipped.
+An active assignment without a stored allowance snapshot is marked
+`missing_snapshot`; the summary does not substitute a catalog amount.
 
 The runtime may materialize default-plan token allowances. For an active v2
 subscription assignment, billing fulfillment owns token credits from the stored

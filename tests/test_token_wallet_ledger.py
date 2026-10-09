@@ -511,6 +511,33 @@ async def test_v2_default_plan_allowance_sync_is_idempotent_and_has_product_prov
 
 
 @pytest.mark.asyncio
+async def test_v2_active_assignment_without_snapshot_does_not_imply_catalog_grant() -> None:
+    config = _v2_subscriptions_config()
+    selected = await resolve_v2_wallet_plans(
+        config=config,
+        entitlements=_ProductPlans("ai_pro"),
+        app_id="app_1",
+        user_id="user_1",
+    )
+    assert selected["ai_tokens"].status == "missing_snapshot"
+    assert selected["ai_tokens"].plan_id == "ai_pro"
+
+    summary = await _ledger().wallet_summaries_for_config(
+        config=config,
+        app_id="app_1",
+        user_id="user_1",
+        plan_id="builder",
+        wallet_plans=selected,
+        ensure_allowances=True,
+    )
+    wallet = summary["wallets"][0]
+    assert wallet["plan_resolution"] == "missing_snapshot"
+    assert wallet["grant_authority"] == "billing_fulfillment"
+    assert wallet["plan_allowances"] == []
+    assert wallet["balance"]["balance"] == 0
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("shared_wallet", "ai_plan_id", "expected_status"),
     [
