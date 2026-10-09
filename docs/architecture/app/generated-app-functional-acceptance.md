@@ -268,9 +268,37 @@ distinguish a rejected emit from no emit. Contained results declare
 `observer_unverified_checks: [event_rejection]`, including when their observed
 checks pass. A's reported rejection list is not trusted evidence. The ordinary
 in-process smoke detects rejected events, but imported Genesis acceptance must
-stay closed until this invariant has a trusted check or an explicit acceptance
-contract excludes it. `observer_origin` attests the source of the bounded
-observations, not parity with every in-process smoke check.
+stay closed under its separate admission contract. `observer_origin` attests
+the source of the bounded observations, not parity with every in-process smoke
+check.
+
+### Generated-app contained acceptance scope 2.0
+
+[ADR 0020](../../adr/0020-generated-app-contained-runtime-acceptance-scope.md)
+defines the narrower generated-app claim. Its only
+`acceptance_scope.excluded_observer_checks` value is `event_rejection`.
+The generated result retains `observer_unverified_checks: [event_rejection]`;
+that field is never cleared or described as independently verified. The
+platform-wired action emitter rejects invalid declared events before dispatch,
+as proven by framework tests. The contained observer does not establish that a
+particular candidate attempted no rejected `ctx.emit` or emitted every event
+needed by its intended behavior. Required downstream event effects need their
+own external acceptance checks.
+
+The generated gate attaches `acceptance_scope: {version: "2.0",
+excluded_observer_checks: [event_rejection]}` only after the host checks all
+supported external outcomes, one matching boot and completion receipt, the
+trusted observer origin and run ID, exact generated-source digest, locally
+preflighted immutable validator image ID, and confirmed removal of both
+containers. Its contained AppLoader worker must also have host-confirmed
+cleanup and matching source/image identity. A missing, altered, or extra
+unverified check leaves the generated gate pending and issues no snapshot
+digest. Imported Genesis does not use this generated scope.
+
+This runtime decision does not complete build validation. The current `local`
+strategy can run build commands and npm scripts on the host. It must be
+isolated or made non-promotional before #925 provides a promotable generated
+path; a passing runtime scope cannot override that separate prerequisite.
 
 The preview image must be rebuilt after changing this smoke module:
 `docker build -f infra/docker/Dockerfile.preview -t mozaiks-sandbox:local .`.
@@ -334,10 +362,10 @@ actions are called like any other, as a signed-in user.
 
 **Known follow-ups.** Pack-owned permissions outside `config/auth.yaml`
 default scopes (commerce) are reported as ungrantable. Failures on code-rendered
-files without an owning task remain blocked for repair. A smoke result with
-observer checks it cannot independently verify stays pending, even if the app
-reported success. The Docker validator image must be built and pinned by the
-operator; the gate never downloads one on demand.
+files without an owning task remain blocked for repair. Only the exact
+generated-app scope above permits the one known unverified observer check;
+other unverified checks remain pending. The Docker validator image must be
+built and pinned by the operator; the gate never downloads one on demand.
 
 **Proof.** `tests/test_app_runtime_smoke.py` exercises the retained trusted-fixture
 child path on real Mongo against two recorded bundles
@@ -353,11 +381,13 @@ child path on real Mongo against two recorded bundles
 
 `tests/test_app_acceptance_isolation.py` verifies that generated acceptance
 delegates to the contained loader and smoke runners, blocks when the image is
-unavailable, and treats unverified observer checks as pending. Its opt-in real
-Docker test loads the recorded good bundle and observes its HTTP boot with a
-pinned local image even when ambient Docker host, context, and config settings
+unavailable, and admits only the exact generated scope with trusted observer
+evidence. Its opt-in real Docker test loads the recorded good bundle and
+observes its HTTP boot with a pinned local image even when ambient Docker
+host, context, and config settings
 point elsewhere. The independently unverified rejected-event check remains
-pending and blocks promotion.
+visible in the accepted scope; the contained invalid-emission fixture shows
+why that check cannot be claimed as verified.
 
 The suite-wide conftest gives every other test no smoke database, so acceptance
 tests that do not opt in report `skipped`.

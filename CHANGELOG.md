@@ -256,6 +256,12 @@ This project follows a practical pre-1.0 changelog format:
   remain outside the observer's verified scope and cannot authorize imported
   Genesis acceptance yet.
 
+- Generated-app contained runtime acceptance now records scope version 2.0:
+  the trusted observer's HTTP and Mongo checks may pass while
+  `event_rejection` remains explicitly unverified. Source, image, receipt,
+  and cleanup evidence must match before the narrower generated scope passes.
+  Host build-command isolation remains a separate prerequisite.
+
 - Scoped connector vault keys now separate app and workspace credentials, and
   older unqualified records fail closed. Self-hosters must inventory existing
   connector metadata and re-enter any ambiguous credentials before use.

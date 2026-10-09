@@ -2064,14 +2064,25 @@ async def run_app_bundle_acceptance_gate(
     )
     app_runtime_load_result = await _app_runtime_load_result(generated_files)
     runtime_smoke_result = await _app_runtime_smoke_result(generated_files)
-    load_worker_verified = app_runtime_load_result.get("worker_containment_verified") is True
+    runtime_smoke_result = app_runtime_smoke.apply_generated_acceptance_scope(
+        runtime_smoke_result, generated_files,
+        os.environ.get("MOZAIKS_APP_RUNTIME_IMAGE_ID", "").strip(),
+    )
+    load_worker_verified = (
+        app_runtime_load_result.get("worker_containment_verified") is True
+        and app_runtime_load_result.get("validator_image_id") == runtime_smoke_result.get("validator_image_id")
+        and app_runtime_load_result.get("source_content_sha256") == runtime_smoke_result.get("source_content_sha256")
+        and bool(app_runtime_load_result.get("validator_image_id"))
+        and bool(app_runtime_load_result.get("source_content_sha256"))
+    )
     load_worker_result = {
         "contract_version": "1.0",
         "status": "passed" if load_worker_verified else "skipped",
         "passed": load_worker_verified if load_worker_verified else None,
         "skipped_reason": (
             None if load_worker_verified else
-            app_runtime_load_result.get("skipped_reason") or "contained AppLoader worker cleanup was not verified"
+            app_runtime_load_result.get("skipped_reason") or
+            "contained AppLoader worker source, image, or cleanup was not verified"
         ),
         "checks": [{
             "id": "app_runtime_load_worker",

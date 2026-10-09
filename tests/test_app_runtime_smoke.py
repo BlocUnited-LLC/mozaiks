@@ -266,6 +266,7 @@ async def test_imported_smoke_without_docker_is_pending_not_a_pass(monkeypatch):
     assert result["skipped_reason"] == "contained Docker validation is unavailable"
     assert result["checks"][0]["details"]["blocking"] is True
     assert result["observer_unverified_checks"] == ["event_rejection"]
+    assert "acceptance_scope" not in result
 
 
 def test_imported_smoke_preflight_requires_docker_and_pinned_image(monkeypatch):
@@ -336,6 +337,36 @@ async def test_imported_smoke_rejects_changed_validator_tag_before_staging(monke
     )
     assert result["status"] == "skipped"
     assert result["skipped_reason"] == "contained Docker image is unavailable"
+
+
+@pytest.mark.parametrize("receipt_order", ["done_before_boot", "outcome_after_done"])
+async def test_imported_smoke_requires_ordered_completion_receipt(monkeypatch, receipt_order):
+    image_id = "sha256:" + "a" * 64
+    monkeypatch.setattr(app_runtime_smoke, "preflight_contained_imported_smoke", lambda **_kwargs: image_id)
+
+    class ReorderedObserver:
+        def run(self, _app_root, _plan_root, _image, _timeout, nonce):
+            boot = {"event": "outcome", "observer_nonce": nonce,
+                    "check": "boot.http_ready", "status": "passed"}
+            done = {"event": "done", "observer_nonce": nonce}
+            events = ([done, boot] if receipt_order == "done_before_boot" else
+                      [boot, done, {"event": "outcome", "observer_nonce": nonce,
+                                    "check": "crud.items.a_create", "status": "passed"}])
+            stdout = "".join(
+                app_runtime_smoke._EVENT_PREFIX + json.dumps(event) + "\n" for event in events
+            )
+            return app_runtime_smoke._ChildRun(stdout, "", 0, False, contained=True)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(app_runtime_smoke, "_ContainedDockerProcess", ReorderedObserver)
+    result = await _contained_smoke(_good())
+
+    assert result["status"] == "failed"
+    assert _by_check(result)["smoke.observer"]["status"] == "failed"
+    assert "observer_origin" not in result
+    assert result["observer_unverified_checks"] == ["event_rejection"]
 
 
 async def test_imported_smoke_rejects_hardlinked_host_file(tmp_path):
@@ -995,6 +1026,33 @@ async def test_contained_smoke_names_its_unverified_rejected_event_check():
     assert result["status"] == "passed", result["results"]
     assert result["observer_origin"] == "trusted_external_probe_v1"
     assert result["observer_unverified_checks"] == ["event_rejection"]
+    assert "acceptance_scope" not in result
+    assert not any(row["check"].startswith("event.") for row in result["results"])
+
+
+@pytest.mark.skipif(
+    not os.getenv("MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE"),
+    reason="set MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE to a freshly built local preview image",
+)
+async def test_generated_scope_preserves_invalid_emission_as_unverified(monkeypatch):
+    image = os.environ["MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE"]
+    inspected = subprocess.run(
+        ["docker", "image", "inspect", "--format", "{{.Id}}", image],
+        capture_output=True, text=True, check=True, timeout=5,
+    )
+    monkeypatch.setenv("MOZAIKS_APP_RUNTIME_IMAGE_ID", inspected.stdout.strip())
+
+    result = await app_runtime_smoke.run_contained_generated_app_runtime_smoke(
+        _created_event_without_owner(_good()),
+    )
+
+    assert result["status"] == "passed", result
+    assert result["observer_unverified_checks"] == ["event_rejection"]
+    assert result["acceptance_scope"] == {
+        "version": "2.0", "excluded_observer_checks": ["event_rejection"],
+    }
+    assert result["observer_completion_verified"] is True
+    assert result["observer_cleanup_verified"] is True
     assert not any(row["check"].startswith("event.") for row in result["results"])
 
 

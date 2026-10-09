@@ -18,11 +18,10 @@ empty platform hook registry, in-memory audit and no usage metering. Startup
 services are not started because they run outside module dispatch with their
 own clients.
 
-An emitted event that breaks its declared contract does not fail the action
-that emitted it: the runtime reports the action as succeeded and names the
-rejected event on its dispatch result. The gate reads that result and records
-each distinct rejected event (per action, event type and reason) as its own
-failed check.
+The direct trusted-fixture smoke records an event rejected by the runtime as
+its own failed check. The contained external observer cannot see that internal
+rejection. Generated-app acceptance records this limit in its versioned scope
+without claiming the candidate made no invalid emission attempt.
 """
 from __future__ import annotations
 
@@ -58,6 +57,7 @@ from mozaiksai.core.adapters.local_docker_cli import _docker_cli_env, _docker_pr
 logger = logging.getLogger(__name__)
 
 SMOKE_CONTRACT_VERSION = "1.0"
+GENERATED_ACCEPTANCE_SCOPE_VERSION = "2.0"
 SMOKE_TIMEOUT_SECONDS = 60.0
 _CHILD_MODULE = "factory_app.workflows.AppGenerator.tools.app_runtime_smoke"
 _EVENT_PREFIX = "@@mozaiks-runtime-smoke@@ "
@@ -545,10 +545,11 @@ async def run_contained_imported_app_runtime_smoke(
             child.close()
         result = _child_result(run, mongo_uri="", timeout_seconds=timeout_seconds, started=started)
         events = _events(run.stdout)
-        boot = [event for event in events if event.get("event") == "outcome"
+        boot = [index for index, event in enumerate(events) if event.get("event") == "outcome"
                 and event.get("check") == "boot.http_ready" and event.get("status") == "passed"]
-        done = [event for event in events if event.get("event") == "done"]
+        done = [index for index, event in enumerate(events) if event.get("event") == "done"]
         valid_receipt = (bool(events) and len(boot) == 1 and len(done) == 1
+                         and boot[0] < done[0] == len(events) - 1
                          and all(event.get("observer_nonce") == observer_nonce for event in events))
         if result["status"] == "passed" and not valid_receipt:
             result = _summary([*result["results"], {
@@ -563,6 +564,8 @@ async def run_contained_imported_app_runtime_smoke(
             result["observer_origin"] = "trusted_external_probe_v1"
             result["observer_run_id"] = observer_nonce
             result["observed_boot"] = {"check": "boot.http_ready", "status": "passed"}
+            result["observer_completion_verified"] = True
+            result["observer_cleanup_verified"] = not run.cleanup_failed
         return _imported_observer_scope(result)
 
 
@@ -612,6 +615,96 @@ def _generated_source_digests(files: Mapping[str, str]) -> dict[str, str]:
     if "app.json" not in digests:
         raise ValueError("generated app has no app.json")
     return digests
+
+
+def _source_content_sha256(digests: Mapping[str, str]) -> str:
+    return hashlib.sha256(json.dumps(
+        digests, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+
+
+def generated_acceptance_scope() -> dict[str, Any]:
+    """The narrower claim made only by contained generated-app acceptance."""
+    return {
+        "version": GENERATED_ACCEPTANCE_SCOPE_VERSION,
+        "excluded_observer_checks": ["event_rejection"],
+    }
+
+
+def generated_smoke_evidence_issue(
+    result: Mapping[str, Any], files: Mapping[str, str], expected_image_id: str,
+) -> str | None:
+    """Check the host-owned observer evidence before applying the generated scope."""
+    try:
+        expected_source_digest = _source_content_sha256(_generated_source_digests(files))
+    except (UnicodeError, ValueError):
+        return "generated source identity could not be verified"
+    if result.get("status") != "passed" or result.get("passed") is not True:
+        return "the external observer did not pass"
+    if result.get("observer_unverified_checks") != ["event_rejection"]:
+        return "the external observer's unverified checks differ from the generated scope"
+    if (not re.fullmatch(r"sha256:[0-9a-f]{64}", expected_image_id)
+            or result.get("validator_image_id") != expected_image_id):
+        return "the external observer image identity does not match the pinned image"
+    if result.get("source_content_sha256") != expected_source_digest:
+        return "the external observer source identity does not match the generated snapshot"
+    if (result.get("observer_origin") != "trusted_external_probe_v1"
+            or not re.fullmatch(r"[0-9a-f]{32}", str(result.get("observer_run_id") or ""))
+            or result.get("observed_boot") != {"check": "boot.http_ready", "status": "passed"}
+            or result.get("observer_completion_verified") is not True):
+        return "the external observer boot and completion receipts were not verified"
+    if result.get("observer_cleanup_verified") is not True:
+        return "the external observer container cleanup was not verified"
+    outcomes = result.get("results")
+    checks = result.get("checks")
+    if (not isinstance(outcomes, list) or not outcomes
+            or not all(isinstance(row, dict) and row.get("status") in {"passed", "not_run"}
+                       for row in outcomes)
+            or sum(row.get("check") == "boot.http_ready" and row.get("status") == "passed"
+                   for row in outcomes) != 1
+            or not isinstance(checks, list) or len(checks) != 1
+            or not isinstance(checks[0], dict) or checks[0].get("id") != "app_runtime_smoke"
+            or checks[0].get("status") != "passed" or checks[0].get("passed") is not True
+            or result.get("failed_tests") != []):
+        return "the external observer runtime checks did not all complete successfully"
+    details = checks[0].get("details")
+    if (not isinstance(details, dict) or details.get("status") != "passed"
+            or details.get("check_count") != sum(row["status"] == "passed" for row in outcomes)
+            or details.get("failed_check_count") != 0
+            or details.get("not_run_check_count") != sum(row["status"] == "not_run" for row in outcomes)):
+        return "the external observer runtime check summary does not match its outcomes"
+    return None
+
+
+def _generated_scope_pending(result: dict[str, Any], reason: str) -> dict[str, Any]:
+    """Retain observer evidence while refusing an incomplete generated claim."""
+    result.pop("acceptance_scope", None)
+    result["status"] = "pending"
+    result["passed"] = None
+    result["skipped_reason"] = reason
+    result["checks"] = [{
+        "id": "app_runtime_smoke", "status": "pending", "passed": None,
+        "message": f"Contained runtime acceptance awaits {reason}.",
+        "details": {"status": "pending", "blocking": True},
+    }]
+    return result
+
+
+def apply_generated_acceptance_scope(
+    result: dict[str, Any], files: Mapping[str, str], expected_image_id: str,
+) -> dict[str, Any]:
+    """Admit only the exact generated scope on a fully verified observer run."""
+    if result.get("status") != "passed":
+        result.pop("acceptance_scope", None)
+        return result
+    issue = generated_smoke_evidence_issue(result, files, expected_image_id)
+    if not issue and ("acceptance_scope" in result
+                      and result["acceptance_scope"] != generated_acceptance_scope()):
+        issue = "the generated acceptance scope differs from the approved contract"
+    if issue:
+        return _generated_scope_pending(result, issue)
+    result["acceptance_scope"] = generated_acceptance_scope()
+    return result
 
 
 def _stage_generated_source(root: Path, files: Mapping[str, str]) -> None:
@@ -717,9 +810,7 @@ async def run_contained_generated_app_runtime_load(files: dict[str, str]) -> dic
     # but it cannot attest that the host removed its worker afterward.
     result["worker_containment_verified"] = True
     result["validator_image_id"] = image_id
-    result["source_content_sha256"] = hashlib.sha256(json.dumps(
-        digests, sort_keys=True, separators=(",", ":"),
-    ).encode("utf-8")).hexdigest()
+    result["source_content_sha256"] = _source_content_sha256(digests)
     return result
 
 
@@ -743,17 +834,7 @@ async def run_contained_generated_app_runtime_smoke(files: dict[str, str]) -> di
             )
     except OSError:
         return _contained_unavailable("generated app source staging failed", started=started)
-    if result.get("status") == "passed" and result.get("observer_unverified_checks"):
-        unverified = ", ".join(result["observer_unverified_checks"])
-        result["status"] = "pending"
-        result["passed"] = None
-        result["skipped_reason"] = f"contained observer cannot verify {unverified}"
-        result["checks"][0].update({
-            "status": "pending", "passed": None,
-            "message": f"Contained runtime checks passed; acceptance awaits {unverified} verification.",
-        })
-        result["checks"][0]["details"].update({"status": "pending", "blocking": True})
-    return result
+    return apply_generated_acceptance_scope(result, files, image_id)
 
 
 def _redact(text: str, mongo_uri: str) -> str:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import subprocess
@@ -17,6 +18,31 @@ from tests.test_generated_app_functional_acceptance import _basic_crud_files
 
 def _files() -> dict[str, str]:
     return {"app.json": '{"id":"fixture","name":"Fixture"}'}
+
+
+def _source_digest(files: dict[str, str]) -> str:
+    digests = {path: hashlib.sha256(content.encode("utf-8")).hexdigest()
+               for path, content in files.items()}
+    return hashlib.sha256(json.dumps(
+        digests, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+
+
+def _observed_pass(files: dict[str, str], image_id: str) -> dict:
+    return {
+        "contract_version": "1.0", "status": "passed", "passed": True,
+        "results": [{"check": "boot.http_ready", "status": "passed"}],
+        "checks": [{
+            "id": "app_runtime_smoke", "status": "passed", "passed": True,
+            "details": {"status": "passed", "check_count": 1,
+                        "failed_check_count": 0, "not_run_check_count": 0},
+        }],
+        "failed_tests": [], "observer_unverified_checks": ["event_rejection"],
+        "observer_origin": "trusted_external_probe_v1", "observer_run_id": "c" * 32,
+        "observed_boot": {"check": "boot.http_ready", "status": "passed"},
+        "observer_completion_verified": True, "observer_cleanup_verified": True,
+        "validator_image_id": image_id, "source_content_sha256": _source_digest(files),
+    }
 
 
 @pytest.mark.asyncio
@@ -170,7 +196,7 @@ async def test_generated_load_cancellation_removes_container_created_in_flight(m
 
 
 @pytest.mark.asyncio
-async def test_generated_smoke_uses_contained_observer_and_blocks_unverified_events(monkeypatch):
+async def test_generated_smoke_applies_only_its_scoped_event_exclusion(monkeypatch):
     image_id = "sha256:" + "b" * 64
     monkeypatch.setattr(app_runtime_smoke, "_preflight_generated_image", lambda: image_id)
     observed: list[tuple[Path, dict]] = []
@@ -178,21 +204,63 @@ async def test_generated_smoke_uses_contained_observer_and_blocks_unverified_eve
     async def smoke(app_root, **kwargs):
         observed.append((app_root, kwargs))
         assert (app_root / "app.json").read_text(encoding="utf-8") == _files()["app.json"]
-        return {
-            "contract_version": "1.0", "status": "passed", "passed": True,
-            "checks": [{"id": "app_runtime_smoke", "status": "passed", "passed": True,
-                        "details": {"status": "passed"}}],
-            "failed_tests": [], "observer_unverified_checks": ["event_rejection"],
-        }
+        return _observed_pass(_files(), image_id)
 
     monkeypatch.setattr(app_runtime_smoke, "run_contained_imported_app_runtime_smoke", smoke)
     result = await app_validation._app_runtime_smoke_result(_files())
 
     assert observed[0][1]["image"] == image_id
     assert observed[0][1]["expected_image_id"] == image_id
-    assert result["status"] == "pending"
-    assert result["passed"] is None
-    assert result["checks"][0]["details"]["blocking"] is True
+    assert (result["status"], result["passed"]) == ("passed", True)
+    assert result["observer_unverified_checks"] == ["event_rejection"]
+    assert result["acceptance_scope"] == {
+        "version": "2.0", "excluded_observer_checks": ["event_rejection"],
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tamper", [
+    "missing_marker", "extra_marker", "image", "source", "origin", "run_id",
+    "boot", "completion", "cleanup", "outcome", "summary", "failed_test",
+])
+async def test_generated_smoke_refuses_tampered_observer_evidence(monkeypatch, tamper):
+    image_id = "sha256:" + "b" * 64
+    monkeypatch.setattr(app_runtime_smoke, "_preflight_generated_image", lambda: image_id)
+    result = _observed_pass(_files(), image_id)
+    if tamper == "missing_marker":
+        del result["observer_unverified_checks"]
+    elif tamper == "extra_marker":
+        result["observer_unverified_checks"].append("auth")
+    elif tamper == "image":
+        result["validator_image_id"] = "sha256:" + "a" * 64
+    elif tamper == "source":
+        result["source_content_sha256"] = "0" * 64
+    elif tamper == "origin":
+        del result["observer_origin"]
+    elif tamper == "run_id":
+        result["observer_run_id"] = "wrong-run"
+    elif tamper == "boot":
+        result["observed_boot"] = None
+    elif tamper == "completion":
+        result["observer_completion_verified"] = False
+    elif tamper == "cleanup":
+        result["observer_cleanup_verified"] = False
+    elif tamper == "outcome":
+        result["results"].append({"check": "crud.items.a_create", "status": "failed"})
+    elif tamper == "summary":
+        result["checks"][0]["details"]["check_count"] = 2
+    else:
+        result["failed_tests"] = [{"test": "app_runtime_smoke", "error": "failed"}]
+
+    async def smoke(_app_root, **_kwargs):
+        return result
+
+    monkeypatch.setattr(app_runtime_smoke, "run_contained_imported_app_runtime_smoke", smoke)
+    scoped = await app_validation._app_runtime_smoke_result(_files())
+
+    assert (scoped["status"], scoped["passed"]) == ("pending", None)
+    assert scoped["checks"][0]["details"]["blocking"] is True
+    assert "acceptance_scope" not in scoped
 
 
 @pytest.mark.asyncio
@@ -237,34 +305,77 @@ async def test_generated_acceptance_uses_local_docker_with_poisoned_client_setti
     assert smoked["validator_image_id"] == image_id
     assert smoked["observer_origin"] == "trusted_external_probe_v1", smoked
     assert smoked["observed_boot"] == {"check": "boot.http_ready", "status": "passed"}
-    assert smoked["status"] == "pending"
+    assert smoked["status"] == "passed"
     assert smoked["observer_unverified_checks"] == ["event_rejection"]
+    assert smoked["acceptance_scope"] == {
+        "version": "2.0", "excluded_observer_checks": ["event_rejection"],
+    }
+
+
+@pytest.mark.skipif(
+    not os.getenv("MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE"),
+    reason="set MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE to a freshly built local preview image",
+)
+@pytest.mark.asyncio
+async def test_generated_gate_admits_only_pinned_contained_evidence(monkeypatch):
+    image = os.environ["MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE"]
+    inspected = subprocess.run(
+        ["docker", "image", "inspect", "--format", "{{.Id}}", image],
+        capture_output=True, text=True, check=True, timeout=5,
+    )
+    monkeypatch.setenv("MOZAIKS_APP_RUNTIME_IMAGE_ID", inspected.stdout.strip())
+    context: dict = {}
+    files = json.loads((Path(__file__).parent / "fixtures" /
+                        "runtime_smoke_good_bundle_fdfa818e.json").read_text(encoding="utf-8"))["files"]
+    # This recorded bundle predates the self-hosted entitlement_dispatch module.
+    del files["config/subscriptions.yaml"]
+
+    result = await app_validation.run_app_bundle_acceptance_gate(
+        files=files, context_variables=context,
+    )
+
+    assert result["status"] == "passed", json.dumps(result["failed_tests"], indent=2)
+    assert "snapshot_digest" in result
+    assert result["app_runtime_smoke"]["observer_unverified_checks"] == ["event_rejection"]
+    assert result["app_runtime_smoke"]["acceptance_scope"] == {
+        "version": "2.0", "excluded_observer_checks": ["event_rejection"],
+    }
+    assert result["app_runtime_load_worker"]["passed"] is True
+    assert context["app_bundle_acceptance_result"]["snapshot_digest"] == result["snapshot_digest"]
 
 
 @pytest.mark.asyncio
 async def test_loader_diagnostic_cannot_authorize_or_block_promotion(monkeypatch):
+    image_id = "sha256:" + "b" * 64
+    monkeypatch.setenv("MOZAIKS_APP_RUNTIME_IMAGE_ID", image_id)
+    files = _basic_crud_files()
+
     async def loader(_files):
         return {
             "contract_version": "1.0", "passed": False,
             "worker_containment_verified": True,
+            "validator_image_id": image_id,
+            "source_content_sha256": _source_digest(files),
             "checks": [{"id": "app_runtime_load", "passed": False, "message": "Candidate diagnostic failed."}],
             "failed_tests": [{"test": "app_runtime_load", "error": "Candidate diagnostic failed."}],
             "warnings": [], "details": {},
         }
 
     async def smoke(_files):
-        return {
-            "contract_version": "1.0", "status": "passed", "passed": True,
-            "checks": [{"id": "app_runtime_smoke", "status": "passed", "passed": True}],
-            "failed_tests": [], "warnings": [],
-        }
+        return _observed_pass(files, image_id)
 
     monkeypatch.setattr(app_validation, "_app_runtime_load_result", loader)
     monkeypatch.setattr(app_validation, "_app_runtime_smoke_result", smoke)
-    result = await app_validation.run_app_bundle_acceptance_gate(files=_basic_crud_files())
+    context: dict = {}
+    result = await app_validation.run_app_bundle_acceptance_gate(files=files, context_variables=context)
 
     assert result["status"] == "passed", result["validation_evidence"]
     assert "snapshot_digest" in result
+    assert result["app_runtime_smoke"]["observer_unverified_checks"] == ["event_rejection"]
+    assert result["app_runtime_smoke"]["acceptance_scope"] == {
+        "version": "2.0", "excluded_observer_checks": ["event_rejection"],
+    }
+    assert context["app_bundle_acceptance_result"]["app_runtime_smoke"] == result["app_runtime_smoke"]
     assert "app_runtime_load" not in result["validation_evidence"]["completed"]
     assert "app_runtime_load" not in result["validation_evidence"]["failed"]
     assert "app_runtime_load_worker" in result["validation_evidence"]["completed"]
@@ -304,6 +415,10 @@ async def test_loader_success_cannot_override_failed_external_smoke(monkeypatch)
 
 @pytest.mark.asyncio
 async def test_loader_worker_cleanup_must_be_host_verified_even_if_smoke_passes(monkeypatch):
+    image_id = "sha256:" + "b" * 64
+    monkeypatch.setenv("MOZAIKS_APP_RUNTIME_IMAGE_ID", image_id)
+    files = _basic_crud_files()
+
     async def loader(_files):
         return {
             "contract_version": "1.0", "passed": True,
@@ -314,15 +429,11 @@ async def test_loader_worker_cleanup_must_be_host_verified_even_if_smoke_passes(
         }
 
     async def smoke(_files):
-        return {
-            "contract_version": "1.0", "status": "passed", "passed": True,
-            "checks": [{"id": "app_runtime_smoke", "status": "passed", "passed": True}],
-            "failed_tests": [], "warnings": [],
-        }
+        return _observed_pass(files, image_id)
 
     monkeypatch.setattr(app_validation, "_app_runtime_load_result", loader)
     monkeypatch.setattr(app_validation, "_app_runtime_smoke_result", smoke)
-    result = await app_validation.run_app_bundle_acceptance_gate(files=_basic_crud_files())
+    result = await app_validation.run_app_bundle_acceptance_gate(files=files)
 
     assert result["status"] == "pending", result["validation_evidence"]
     assert "snapshot_digest" not in result
@@ -333,3 +444,46 @@ async def test_loader_worker_cleanup_must_be_host_verified_even_if_smoke_passes(
     }]
     check = next(item for item in result["checks"] if item["id"] == "app_runtime_load_worker")
     assert check["details"]["blocking"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tamper", ["source", "image", "receipt", "cleanup", "scope", "worker_source"])
+async def test_acceptance_gate_refuses_tampered_containment_evidence(monkeypatch, tamper):
+    image_id = "sha256:" + "b" * 64
+    monkeypatch.setenv("MOZAIKS_APP_RUNTIME_IMAGE_ID", image_id)
+    files = _basic_crud_files()
+    observed = _observed_pass(files, image_id)
+    worker = {
+        "contract_version": "1.0", "passed": True,
+        "worker_containment_verified": True,
+        "validator_image_id": image_id,
+        "source_content_sha256": _source_digest(files),
+        "checks": [{"id": "app_runtime_load", "passed": True}],
+        "failed_tests": [], "warnings": [], "details": {},
+    }
+    if tamper == "source":
+        observed["source_content_sha256"] = "0" * 64
+    elif tamper == "image":
+        observed["validator_image_id"] = "sha256:" + "a" * 64
+    elif tamper == "receipt":
+        observed["observer_completion_verified"] = False
+    elif tamper == "cleanup":
+        observed["observer_cleanup_verified"] = False
+    elif tamper == "scope":
+        observed["acceptance_scope"] = {"version": "2.0", "excluded_observer_checks": []}
+    else:
+        worker["source_content_sha256"] = "0" * 64
+
+    async def loader(_files):
+        return worker
+
+    async def smoke(_files):
+        return observed
+
+    monkeypatch.setattr(app_validation, "_app_runtime_load_result", loader)
+    monkeypatch.setattr(app_validation, "_app_runtime_smoke_result", smoke)
+    result = await app_validation.run_app_bundle_acceptance_gate(files=files)
+
+    assert result["status"] == "pending", result["validation_evidence"]
+    assert "snapshot_digest" not in result
+    assert "app_runtime_smoke" in result["validation_evidence"]["skipped"] or tamper == "worker_source"
