@@ -83,6 +83,9 @@ export function isInsufficientTokensError(err) {
     err?.error_code === 'INSUFFICIENT_TOKENS' ||
     err?.code === 'INSUFFICIENT_TOKENS' ||
     err?.data?.error_code === 'INSUFFICIENT_TOKENS' ||
+    err?.data?.code === 'INSUFFICIENT_TOKENS' ||
+    err?.data?.detail?.error_code === 'INSUFFICIENT_TOKENS' ||
+    err?.data?.detail?.code === 'INSUFFICIENT_TOKENS' ||
     err?.data?.extra_data?.error_code === 'INSUFFICIENT_TOKENS'
   )
 }
@@ -113,9 +116,9 @@ export function insufficientTokensRecoveryPath(err, fallback = '/billing') {
 }
 
 export function isEntitlementRequiredError(err) {
-  // HTTP 402 is the canonical signal — the backend maps ENTITLEMENT_REQUIRED to
-  // it in one place. Checking status as well as error_code means a denial is
-  // still recognised if the body is unreadable or reshaped in transit.
+  // Token depletion can also use HTTP 402. Its explicit code takes precedence;
+  // status remains a fallback when an entitlement body is unreadable.
+  if (isInsufficientTokensError(err)) return false
   return (
     err?.status === 402 ||
     err?.error_code === 'ENTITLEMENT_REQUIRED' ||

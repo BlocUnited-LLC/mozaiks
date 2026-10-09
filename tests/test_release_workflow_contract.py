@@ -61,6 +61,8 @@ def test_publication_requires_dated_notes_and_protected_pypi_environment() -> No
         "build", "Verify dated release notes and tag identity"
     )["run"]
     assert "approve-release" not in JOBS
+    assert 'pip install -e ".[dev,docs]" build twine' in _step("build", "Install release dependencies")["run"]
+    assert _step("build", "Build documentation strictly")["run"] == "python -m mkdocs build --strict"
     protection = _step("publish-pypi", "Verify PyPI environment protection")["run"]
     assert 'rule.get("type") == "required_reviewers"' in protection
     assert 'environment.get("can_admins_bypass") is not False' in protection
@@ -122,6 +124,14 @@ def test_release_audits_installed_d30_calculator(tmp_path: Path) -> None:
         (
             "## Unreleased\n\n## 0.2.0 - 2026-02-30\n\n- Release notes.\n",
             "release section has an invalid date",
+        ),
+        (
+            "## Unreleased\n\n## 0.2.0 - 2026-10-08\n\n## 0.1.11 - 2026-07-20\n\n- Old notes.\n",
+            "release section needs at least one note",
+        ),
+        (
+            "## Unreleased\n\n## 0.2.0 - 2026-10-08\n\n### Changed\n\n## 0.1.11 - 2026-07-20\n",
+            "release section needs at least one note",
         ),
     ],
 )

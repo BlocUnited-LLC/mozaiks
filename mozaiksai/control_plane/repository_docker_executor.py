@@ -14,7 +14,6 @@ import asyncio
 import base64
 import binascii
 import json
-import os
 import re
 import subprocess
 import tempfile
@@ -25,6 +24,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from mozaiksai.core.adapters.local_docker_cli import _docker_cli_env, _docker_prefix
 from mozaiksai.core.semantics.archive import ArchiveError, read_archive_manifest
 
 from .contracts import (
@@ -73,19 +73,9 @@ class RepositoryDockerTurn:
     usage: IsolatedACPUsage | None = None
 
 
-def _local_docker_endpoint() -> str:
-    return "npipe:////./pipe/docker_engine" if os.name == "nt" else "unix:///var/run/docker.sock"
-
-
-def _docker_cli_env() -> dict[str, str]:
-    """Keep only process-launch basics; Docker gets an empty config separately."""
-    allowed = ("PATH", "SystemRoot", "WINDIR") if os.name == "nt" else ("PATH",)
-    return {key: os.environ[key] for key in allowed if key in os.environ}
-
-
 def _remove_container(container_name: str, config_dir: str) -> None:
     """Remove only this random name, including after a lost create response."""
-    prefix = ["docker", "--config", config_dir, "--host", _local_docker_endpoint()]
+    prefix = _docker_prefix(config_dir)
     try:
         removed = subprocess.run(
             [*prefix, "rm", "--force", container_name],
@@ -126,7 +116,7 @@ async def _docker(
     args: list[str], *, config_dir: str, stdin_bytes: bytes | None,
     timeout_seconds: int, stdout_limit: int,
 ) -> bytes:
-    command = ["docker", "--config", config_dir, "--host", _local_docker_endpoint(), *args]
+    command = [*_docker_prefix(config_dir), *args]
     try:
         process = await asyncio.create_subprocess_exec(
             *command,

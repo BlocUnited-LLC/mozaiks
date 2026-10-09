@@ -55,11 +55,18 @@ def sandbox_workspace_root(provider: str) -> str:
 
 
 def sandbox_resource_environment() -> dict[str, str]:
-    # Dockerfile ENV is build-time only in E2B; credentials require explicit opt-in.
     return {
         "MOZAIKS_WEB_SHELL_PATH": "/opt/mozaiks/web_shell",
         "MOZAIKS_CHAT_UI_PATH": "/opt/mozaiks/chat-ui",
         "MOZAIKS_FACTORY_APP_PATH": "/opt/mozaiks/factory_app",
+        "VITE_MOZAIKS_PREVIEW": "true",
+    }
+
+
+def preview_resource_environment() -> dict[str, str]:
+    # Interactive previews explicitly opt in to forwarded environment values.
+    return {
+        **sandbox_resource_environment(),
         **{name[len(_ENV_PREFIX):]: value for name, value in os.environ.items() if name.startswith(_ENV_PREFIX)},
         "VITE_MOZAIKS_PREVIEW": "true",
     }
@@ -287,7 +294,7 @@ class ArtifactPreviewSessionManager:
             async with asyncio.timeout(self._allocation_timeout_seconds):
                 info = await adapter.create_session(
                     template=self._template, timeout_seconds=self._ttl_minutes * 60,
-                    envs=sandbox_resource_environment(),
+                    envs=preview_resource_environment(),
                     metadata={
                         "purpose": "artifact_preview", "manager_sandbox_id": sandbox_id,
                         **{name: allocation[name] for name in ("artifact_id", "app_id", "user_id", "target_app_id", "build_registry_id")},

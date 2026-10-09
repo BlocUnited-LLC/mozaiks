@@ -25,6 +25,7 @@ from mozaiksai.control_plane.repository_patch import (
     finalize_repository_patch,
     stage_repository_workspace_archive,
 )
+from mozaiksai.core.adapters.local_docker_cli import _local_docker_endpoint
 from mozaiksai.core.semantics.archive import ArchiveEntry, build_deterministic_archive
 
 _PATH = "app/ui/pages/Dashboard.jsx"
@@ -630,7 +631,7 @@ def test_docker_cli_does_not_inherit_credentials(monkeypatch: pytest.MonkeyPatch
     assert "ANTHROPIC_API_KEY" not in environment
     assert "DOCKER_HOST" not in environment
     assert "DOCKER_CONFIG" not in environment
-    assert executor._local_docker_endpoint().startswith("npipe:" if os.name == "nt" else "unix:")
+    assert _local_docker_endpoint().startswith("npipe:" if os.name == "nt" else "unix:")
 
 
 @pytest.mark.skipif(

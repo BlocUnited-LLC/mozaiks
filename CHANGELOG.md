@@ -12,6 +12,12 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Security
+
+- Production Compose now requires a separately managed Keycloak realm import
+  and validates public HTTPS browser callbacks before Keycloak starts; the
+  packaged localhost realm remains for local development.
+
 ### Added
 
 - An optional runtime-only Mozaiks Cloud usage API key for generated usage
@@ -101,6 +107,12 @@ This project follows a practical pre-1.0 changelog format:
   honor it.
 
 ### Security
+
+- Canonical Docker build validation now runs without container networking or
+  published ports. The Docker adapter uses the local daemon with a clean CLI
+  configuration, so inherited remote Docker contexts cannot receive app files.
+  Build validation also excludes explicitly forwarded interactive-preview
+  environment values.
 
 - Android source export and delivery verification now reject literal values
   under credential objects even when nested payload fields use unfamiliar names.
@@ -480,8 +492,15 @@ This project follows a practical pre-1.0 changelog format:
   contact guidance when no safe local route is configured; AppGenerator guidance
   no longer navigates to a null recovery route.
 
+- Subscription token-recovery routes now reject protocol-relative destinations
+  such as `//provider.example/billing` at app load, including optional top-up,
+  upgrade, and administrator-contact routes.
+
 - Zero-second OIDC discovery and JWKS cache TTLs now always refetch, including
   when consecutive checks observe the same clock tick.
+
+- The 0.2.0 publication gate now requires a release-note bullet in its dated
+  changelog section and a strict documentation build before upload.
 
 - Handler reactions now receive the fields of flat events,
   including host webhook events, instead of an empty payload.

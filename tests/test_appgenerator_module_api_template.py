@@ -148,6 +148,111 @@ class TestModuleApiTemplateModule:
         assert "metadata.billing_route" in js
 
 
+@pytest.mark.parametrize(
+    "source_path",
+    [
+        None,
+        "examples/canonical-apps/community/app/ui/lib/moduleApi.js",
+        "web_shell/playwright/fixtures/generated-app/app/ui/lib/moduleApi.js",
+    ],
+)
+def test_token_denial_takes_precedence_over_http_402_entitlement_fallback(source_path):
+    """Execute the generated helper and its mirrors against both denial types."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required to execute the generated browser helper")
+    js = _template_js() if source_path is None else (_WORKSPACE / source_path).read_text(encoding="utf-8")
+    cases = [
+        {"status": 402, "error_code": "INSUFFICIENT_TOKENS"},
+        {"status": 402, "code": "INSUFFICIENT_TOKENS"},
+        {"status": 402, "data": {"error_code": "INSUFFICIENT_TOKENS"}},
+        {"status": 402, "data": {"code": "INSUFFICIENT_TOKENS"}},
+        {"status": 402, "data": {"detail": {"error_code": "INSUFFICIENT_TOKENS"}}},
+        {"status": 402, "data": {"detail": {"code": "INSUFFICIENT_TOKENS"}}},
+        {"status": 402, "data": {"extra_data": {"error_code": "INSUFFICIENT_TOKENS"}}},
+        {"status": 402, "error_code": "ENTITLEMENT_REQUIRED"},
+        {"status": 402, "data": {"detail": {"error_code": "ENTITLEMENT_REQUIRED"}}},
+        {"status": 402},
+        {"status": 500, "error_code": "RECORD_NOT_FOUND"},
+    ]
+    script = (
+        js
+        + "\nconst cases = "
+        + json.dumps(cases)
+        + ";\nconsole.log(JSON.stringify(cases.map(err => ["
+        + "isInsufficientTokensError(err), isEntitlementRequiredError(err)])))\n"
+    )
+    completed = subprocess.run(
+        [node, "--input-type=module"], input=script, capture_output=True, text=True, timeout=15
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout) == (
+        [[True, False]] * 7
+        + [[False, True]] * 3
+        + [[False, False]]
+    )
+
+
+def test_module_action_preserves_fastapi_token_metadata_and_bodyless_402_fallback():
+    """The actual fetch path must unwrap detail while retaining recovery metadata."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required to execute the generated browser helper")
+    script = _template_js() + """
+async function denialResult() {
+  try {
+    await moduleAction('reports', 'generate', {})
+    return { unexpectedSuccess: true }
+  } catch (err) {
+    return {
+      status: err.status,
+      code: err.error_code || null,
+      recoveryAction: err.data?.extra_data?.recovery_action || null,
+      token: isInsufficientTokensError(err),
+      entitlement: isEntitlementRequiredError(err),
+    }
+  }
+}
+globalThis.fetch = async () => ({
+  ok: false,
+  status: 402,
+  json: async () => ({ detail: {
+    error: 'Insufficient token balance',
+    error_code: 'INSUFFICIENT_TOKENS',
+    extra_data: { recovery_action: 'contact_admin' },
+  } }),
+})
+const tokenDenial = await denialResult()
+globalThis.fetch = async () => ({
+  ok: false,
+  status: 402,
+  json: async () => { throw new Error('non-JSON body') },
+})
+const bodylessDenial = await denialResult()
+console.log(JSON.stringify({ tokenDenial, bodylessDenial }))
+"""
+    completed = subprocess.run(
+        [node, "--input-type=module"], input=script, capture_output=True, text=True, timeout=15
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout) == {
+        "tokenDenial": {
+            "status": 402,
+            "code": "INSUFFICIENT_TOKENS",
+            "recoveryAction": "contact_admin",
+            "token": True,
+            "entitlement": False,
+        },
+        "bodylessDenial": {
+            "status": 402,
+            "code": None,
+            "recoveryAction": None,
+            "token": False,
+            "entitlement": True,
+        },
+    }
+
+
 def test_generated_token_recovery_honors_administrator_contact_without_inventing_a_route():
     node = shutil.which("node")
     if node is None:
@@ -590,32 +695,23 @@ import {
   insufficientTokensRecoveryPath,
 } from '../../ui/lib/moduleApi.js'
 import { useNavigate } from 'react-router-dom'
-import { useCallback, useState } from 'react'
+import { useCallback } from 'react'
 
 export default function GenerateReportPage() {
   const navigate = useNavigate()
-  const [depletionMessage, setDepletionMessage] = useState(null)
   const handleGenerate = useCallback(async () => {
     try {
       await moduleAction('reports', 'generate_report', { topic: 'demo' })
     } catch (err) {
       if (isInsufficientTokensError(err)) {
-        const recoveryPath = insufficientTokensRecoveryPath(err)
-        if (recoveryPath) {
-          navigate(recoveryPath, { replace: true })
-        } else {
-          setDepletionMessage('AI capacity is depleted. Contact an administrator for help.')
-        }
+        navigate(insufficientTokensRecoveryPath(err), { replace: true })
         return
       }
       throw err
     }
   }, [navigate])
 
-  return <>
-    {depletionMessage && <p role="alert">{depletionMessage}</p>}
-    <button disabled={Boolean(depletionMessage)} onClick={handleGenerate}>Generate</button>
-  </>
+  return <button onClick={handleGenerate}>Generate</button>
 }
 """
 
@@ -652,16 +748,12 @@ export default function GenerateReportPage() {
         assert "err.error_code === 'REQUEST_ALREADY_APPROVED'" in self._APPROVAL_JSX
         assert "err.error_code === 'VALIDATION_FAILED'" in self._APPROVAL_JSX
 
-    def test_fixture_handles_route_free_token_depletion_without_retrying(self):
-        """Custom route JSX shows contact guidance when no local route exists."""
+    def test_fixture_routes_insufficient_tokens_without_retrying(self):
+        """Custom route JSX redirects depleted users and returns without retry."""
         jsx = self._TOKEN_DEPLETION_JSX
         assert "isInsufficientTokensError(err)" in jsx
-        assert "const recoveryPath = insufficientTokensRecoveryPath(err)" in jsx
-        assert "if (recoveryPath)" in jsx
-        assert "navigate(recoveryPath, { replace: true })" in jsx
-        assert 'role="alert"' in jsx
-        assert "Contact an administrator" in jsx
-        assert "return" in jsx.split("navigate(recoveryPath, { replace: true })", 1)[1]
+        assert "navigate(insufficientTokensRecoveryPath(err), { replace: true })" in jsx
+        assert "return" in jsx.split("navigate(insufficientTokensRecoveryPath(err), { replace: true })", 1)[1]
 
     def test_fixture_no_proprietary_names(self):
         """JSX fixtures contain no proprietary product names."""

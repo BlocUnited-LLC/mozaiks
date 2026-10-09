@@ -223,7 +223,7 @@ class TokenWalletRecoveryDef(BaseModel):
         value = value.strip()
         if not value:
             return None
-        if "://" in value or not _ROUTE_RE.match(value):
+        if value.startswith("//") or "://" in value or not _ROUTE_RE.match(value):
             raise ValueError(f"route must be an app-local path, got {value!r}")
         return value
 

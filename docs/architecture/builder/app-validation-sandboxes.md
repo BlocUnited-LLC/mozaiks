@@ -51,6 +51,19 @@ All sandbox strategies route through the `SandboxPort` seam
 Sandboxes are **ephemeral workspaces, never truth stores** — outcomes
 persist into build records; the sandbox itself is disposable.
 
+The Docker adapter connects only to the local daemon. Its CLI subprocess
+ignores inherited `DOCKER_HOST`, `DOCKER_CONTEXT`, Docker CLI config, and model
+credentials.
+One-shot `app_validation` sessions have no network and publish no ports; the
+validation tool sets that purpose itself even when supplied other metadata.
+Validation receives only the fixed nonsecret sandbox resource paths. Explicit
+`MOZAIKS_PREVIEW_ENV_*` values are reserved for interactive preview sessions and
+are never forwarded into build validation.
+Canonical compilation and the shared shell build use dependencies already in
+the preview image. Interactive Studio preview sessions remain separate and
+network-capable, so this isolation does not authorize private repository
+candidate previews.
+
 Canonical app bundles do not own an npm project. Build validation stages bundle
 members into the existing standalone workspace layout, compiles generated Python,
 and builds the packaged shared web shell against that app workspace. Agent-provided

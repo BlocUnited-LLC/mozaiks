@@ -76,6 +76,7 @@ from mozaiksai.core.runtime.persistence.request_scope import (
     bind_persistence_principal,
     current_persistence_principal,
 )
+from mozaiksai.core.tokens.guard import TokenUsageDenied
 
 logger = get_workflow_logger("module_executor")
 
@@ -757,6 +758,22 @@ class ModuleExecutor:
                 success=False,
                 error="Permission denied.",
                 error_code="PERMISSION_DENIED",
+            )
+        except TokenUsageDenied as exc:
+            error_code = exc.decision.error_code or "TOKEN_USAGE_DENIED"
+            logger.warning(
+                "MODULE_TOKEN_USAGE_DENIED: module=%s action=%s error_code=%s",
+                request.module, request.action, error_code,
+            )
+            await self._finalize_dispatch_audit(
+                replace(dispatch_audit, outcome="denied", reason="token usage denied"),
+                error=error_code,
+            )
+            return ModuleResult(
+                success=False,
+                data={"extra_data": exc.decision.to_error_metadata()},
+                error=str(exc),
+                error_code=error_code,
             )
         except Exception as exc:
             logger.error(
