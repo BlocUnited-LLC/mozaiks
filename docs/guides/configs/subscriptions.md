@@ -195,6 +195,10 @@ pricing_catalog:
 | Non-token add-ons | `add_on_products[]` |
 | Pricing-page grouping | `pricing_catalog.groups[]` or `products[].pricing_catalog_group` |
 
+Token wallet `depleted_balance` routes must be app-local paths beginning with a
+single `/`. Protocol-relative paths such as `//provider.example/billing` are
+invalid because browsers treat them as external destinations.
+
 ## Module Gate Example
 
 ```yaml
