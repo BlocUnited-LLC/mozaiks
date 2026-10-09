@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
+import { FiMessageCircle } from "react-icons/fi";
 import { useNavigation } from "../../providers/NavigationProvider";
 import { useNavigationActions } from "../../navigation/useNavigationActions";
 import { deriveShellActionContext, isShellItemVisible, resolveShellActions } from "../../navigation/shellActions";
@@ -87,7 +88,17 @@ const buildAutoItems = ({ headerPages, header, notifications, profile, actionCon
 const MobileBottomBar = ({ route = null, shellMode = null }) => {
   const location = useLocation();
   const handleNavigationItem = useNavigationActions();
-  const { login, logout, user } = useChatUI();
+  const {
+    login,
+    logout,
+    user,
+    isInWidgetMode,
+    isWidgetVisible,
+    isChatOverlayOpen,
+    setIsChatOverlayOpen,
+    unreadChatCount,
+    setUnreadChatCount,
+  } = useChatUI();
   const { mobile, headerPages, header, notifications, profile } = useNavigation();
   const [notificationCount, setNotificationCount] = useState(0);
   const actionContext = useMemo(
@@ -145,6 +156,8 @@ const MobileBottomBar = ({ route = null, shellMode = null }) => {
 
   if (bottomBar.visible === false || items.length === 0) return null;
 
+  const showAssistant = isInWidgetMode && isWidgetVisible;
+
   const execute = async (item) => {
     if (item.action === "signout" || item.id === "signout") {
       await logout?.();
@@ -180,6 +193,25 @@ const MobileBottomBar = ({ route = null, shellMode = null }) => {
           </button>
         );
       })}
+      {showAssistant && (
+        <button
+          type="button"
+          className={`shell-mobile-bottom-item${isChatOverlayOpen ? " is-active" : ""}`}
+          onClick={() => {
+            setIsChatOverlayOpen((open) => !open);
+            setUnreadChatCount(0);
+          }}
+          aria-label={isChatOverlayOpen ? "Close assistant" : "Open assistant"}
+          aria-expanded={isChatOverlayOpen}
+          aria-controls="mozaiks-assistant-panel"
+        >
+          <span className="shell-mobile-bottom-glyph" aria-hidden="true">
+            <FiMessageCircle className="shell-mobile-bottom-icon" />
+            {unreadChatCount > 0 && <span className="shell-mobile-bottom-badge">{unreadChatCount > 9 ? "9+" : unreadChatCount}</span>}
+          </span>
+          <span className="shell-mobile-bottom-label">Assistant</span>
+        </button>
+      )}
     </nav>
   );
 };

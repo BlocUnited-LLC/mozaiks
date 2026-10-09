@@ -89,6 +89,9 @@ This project follows a practical pre-1.0 changelog format:
   and report the source commit and staged-context digest alongside the build ID.
   Ignored local files and junctions cannot enter the provider upload.
 
+- On mobile app shells, Assistant opens from the bottom navigation instead of
+  covering search and filter controls. Shells without a bottom bar keep the
+  floating Assistant launcher, and desktop behavior remains the same.
 - Mobile app navigation shows recognizable icons for the default Create, Alerts,
   and Account actions while retaining configured app icons and labels.
 - Existing previews continue to use their recorded Docker or E2B provider
