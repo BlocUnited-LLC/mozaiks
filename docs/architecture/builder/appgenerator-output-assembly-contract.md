@@ -387,6 +387,26 @@ It preserves the task ID, dependency edges, approved data, and all actual
 capabilities. Extra paths, missing approved data, another worker, or a real
 capability association cannot use this correction to gain approval. Additive
 migrations remain separate capability-owned `data_migrations` tasks.
+
+An approved `ui_only` surface also retains its realization kind when its ID is
+reused by a proposed capability or task. Naming that surface does not authorize
+backend module work. A task on that surface may own only approved page artifacts
+and the exact page-bundle theme, shell, or asset config files. It may bind a
+capability only when the trusted selected pack declares
+the same UI-only surface. A proposed capability must match that selected pack's
+ID, source, and surface; category hints alone grant nothing. Review checks the
+raw typed plan before path or identity repair, so a backend path or glob cannot
+be dropped and then admitted. Rejection returns guidance to retain the approved
+browser behavior in `page_bundle` work. It does not silently remove requirements
+or create a provider for them.
+An app with only UI behavior and no selected provider can keep
+`capability_packs: []`; its page task uses a null capability ID. DesignDocs
+`source_capability_packs` values are descriptive category hints, not provider
+bindings. The existing data-contract serializer remains required when the
+approved data contract calls for it; UI-only scope does not authorize new
+persistent entities. Unsupported page behavior needs an upstream contract
+repair rather than an invented module or provider.
+
 What a page task owns determines that scope. Before the surface check, a
 `page_bundle` task with a null capability ID that owns at least one path, every
 one an approved page artifact (an approved page file or `app.json`), is labelled

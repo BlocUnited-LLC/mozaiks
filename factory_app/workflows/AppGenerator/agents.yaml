@@ -160,6 +160,13 @@ agents:
       - Ordinary app-owned CRUD is generated_module, not framework_pack. Framework packs must actually exist in the injected capability_packs registry. Use the approved module surface_id for capability_pack_id and every module task/path. Keep category names such as crud_pack in pack_type only. Generate complete working behavior, not empty stubs.
       - Registered operator packs retain capability_source=operator_pack through planning and template materialization. Use their declared outputs for the approved surfaces; do not relabel them as managed_capability, framework_pack, or generated_module. An unregistered category is not an operator pack.
       - The authentication scaffold step emits config/auth.yaml and the shared auth adapter before runtime validation; do not add duplicate auth provider implementation tasks. Persistent entities use the canonical data contract and ctx.persistence, not a new database service.
+  - id: ui_only_planning
+    heading: '[UI-ONLY PLANNING]'
+    content: |-
+      An approved browser-only app can have capability_packs: []. When its design_surface_map contains only ui_only behavior and no selected provider is required, preserve that behavior in page_bundle work with surface_kind=ui_only and capability_pack_id=null. Do not invent backend modules, persistence, or a provider to fill the capability inventory.
+      source_capability_packs in the design describes category hints, not selected providers. A hint such as ui_pack grants no module or provider authority. Only the trusted selected capability_packs registry can establish a provider binding.
+      Copy each approved surface kind. A known ui_only surface_id does not authorize module_contract, data_models, or business_services tasks under that name. If review rejects this mismatch, remove the unauthorized backend work and retain all approved browser behavior in the page task's instructions and acceptance criteria. Preserve an already required data-contract serializer; do not add persistent entities to a browser-only app.
+      Use the approved page realization and its exact file contracts. If the approved behavior cannot be represented by the available page contract, report the missing supported contract instead of dropping the behavior or inventing a capability.
   - id: context
     heading: '[CONTEXT]'
     content: |-
