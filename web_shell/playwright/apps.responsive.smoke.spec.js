@@ -1106,6 +1106,11 @@ async function mockStudioApis(page) {
     const versionId = new URL(route.request().url()).pathname.split('/').at(-2);
     await route.fulfill({ json: { review: savedBuildBundle(versionId).review } });
   });
+  await page.route('**/api/sandbox?**', async (route) => {
+    expect(route.request().method()).toBe('GET');
+    expect(new URL(route.request().url()).searchParams.get('build_registry_id')).toBeTruthy();
+    await route.fulfill({ json: { sessions: [] } });
+  });
 
   await page.route('**/api/studio/integrations?**', async (route) => {
     const url = new URL(route.request().url());
@@ -2068,7 +2073,10 @@ test('saved build review ignores a late response from an earlier selection', asy
 
 test('saved build review retains preview ownership when switching versions', async ({ page }) => {
   const commands = [];
-  await page.route('**/preview-fixture', route => route.fulfill({ contentType: 'text/html', body: '<h1>Isolated preview fixture</h1>' }));
+  await page.route('**/preview-fixture', route => route.fulfill({
+    contentType: 'text/html',
+    body: '<h1>Isolated preview fixture</h1><button onclick="this.textContent=\'Preview is interactive\'">Try preview</button>',
+  }));
   await page.routeWebSocket('**/ws/sandbox/**', socket => socket.close());
   await page.route('**/api/artifacts/*/sandbox?**', async route => {
     const versionId = new URL(route.request().url()).pathname.split('/').at(-2);
@@ -2088,10 +2096,22 @@ test('saved build review retains preview ownership when switching versions', asy
   await page.getByRole('button', { name: 'Start draft preview', exact: true }).click();
   await expect(page.getByRole('link', { name: 'Open draft preview', exact: true })).toBeVisible();
   expect(commands).toEqual(['allocate:ver-17', 'sync:sandbox-ver-17', 'start:sandbox-ver-17']);
+  const preview = page.frameLocator('iframe[title="Draft app preview"]');
+  await preview.getByRole('button', { name: 'Try preview', exact: true }).click();
+  await expect(preview.getByRole('button', { name: 'Preview is interactive', exact: true })).toBeVisible();
   await page.getByLabel('Starting version', { exact: true }).selectOption('ver-16');
   await expect(page.getByText('Saved build ver-16', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Start draft preview', exact: true }).click();
+  await expect(page.getByText('Preview based on version ver-17', { exact: true })).toBeVisible();
+  await expect(page.getByText('A different draft is selected.', { exact: true })).toBeVisible();
+  await expect(preview.getByRole('button', { name: 'Preview is interactive', exact: true })).toBeVisible();
+  expect(commands.filter(command => !command.startsWith('status:'))).toEqual([
+    'allocate:ver-17', 'sync:sandbox-ver-17', 'start:sandbox-ver-17',
+  ]);
+  await expect(page.getByRole('button', { name: 'Start draft preview', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Update preview', exact: true }).click();
+  await expect(page.getByText('Preview based on version ver-16', { exact: true })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Open draft preview', exact: true })).toBeVisible();
+  await expect(preview.getByRole('button', { name: 'Try preview', exact: true })).toBeVisible();
   expect(commands.filter(command => !command.startsWith('status:'))).toEqual([
     'allocate:ver-17', 'sync:sandbox-ver-17', 'start:sandbox-ver-17',
     'stop:sandbox-ver-17', 'allocate:ver-16', 'sync:sandbox-ver-16', 'start:sandbox-ver-16',
@@ -2173,7 +2193,7 @@ test('saved build review preserves candidate source through a failed selection a
   await expect(page.getByText('Version B temporarily unavailable.', { exact: true })).toBeVisible();
   await page.getByLabel('Starting version', { exact: true }).selectOption('ver-17');
   await expect(page.getByText('Saved build ver-17', { exact: true })).toBeVisible();
-  await expect(page.getByText('Version candidate-a2', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Preview based on version candidate-a2', { exact: true })).toBeVisible();
   await expect(page.getByText('Candidate A2 review evidence', { exact: true })).toBeVisible();
   await expect(page.getByText('Strategy: docker', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Accept artifact', exact: true })).toBeVisible();
@@ -2190,9 +2210,11 @@ test('saved build review preserves candidate source through a failed selection a
 
   failOtherVersion = false;
   await page.getByLabel('Starting version', { exact: true }).selectOption('ver-16');
-  await expect(page.getByText('Version ver-16', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Saved build ver-16', { exact: true })).toBeVisible();
+  await expect(page.getByText('Preview based on version candidate-a2', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Start draft preview', exact: true }).click();
   await expect.poll(() => receipts.filter(item => item.action === 'sync').length).toBe(3);
+  await expect(page.getByText('Preview based on version ver-16', { exact: true })).toBeVisible();
   expect(receipts.filter(item => item.action === 'allocate').at(-1).versionId).toBe('ver-16');
   expect(receipts.filter(item => item.action === 'sync').at(-1).files).toEqual([{ path: 'README.md', content: '# Saved fixture ver-16' }]);
 });

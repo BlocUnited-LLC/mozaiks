@@ -12,7 +12,9 @@ import asyncio
 import hashlib
 import json
 import os
+import site
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -781,6 +783,15 @@ def test_child_environment_holds_no_host_configuration(monkeypatch):
         *app_runtime_smoke._CHILD_ENVIRONMENT,
         "PYTHONPATH", "PYTHON_DOTENV_DISABLED", "PYTHONUTF8", "PYTHONIOENCODING", "PYTHONDONTWRITEBYTECODE",
     }
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Python resolves user-site packages through APPDATA")
+def test_child_environment_preserves_windows_python_user_site():
+    child = subprocess.run(
+        [sys.executable, "-c", "import site; print(site.getusersitepackages())"],
+        env=child_environment(), capture_output=True, text=True, check=True,
+    )
+    assert child.stdout.strip() == site.getusersitepackages()
 
 
 async def test_generated_code_runs_without_any_host_secret_in_its_environment(mongo, monkeypatch):

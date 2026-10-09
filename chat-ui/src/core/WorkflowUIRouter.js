@@ -6,6 +6,7 @@
 
 import React from 'react';
 import { getComponent } from '../registry/componentRegistry';
+import { artifactRenderKey } from './ui/artifactRenderKey';
 
 function WorkflowUIRenderError({ error, onCancel, toolCallId }) {
   return (
@@ -95,6 +96,7 @@ const WorkflowUIRouter = ({
   const sourceWorkflowName = payload?.workflow_name || 'Unknown';
   const generatedWorkflowName = payload?.workflow?.name || null;
   const componentType = payload?.component_type || 'UnknownComponent';
+  const renderKey = artifactRenderKey({ payload, tool_name: toolName }, toolCallId || `${sourceWorkflowName}-${componentType}`);
   
   /**
    * Resolve workflow component deterministically from the registry.
@@ -146,11 +148,11 @@ const WorkflowUIRouter = ({
     } finally {
       setIsLoading(false);
     }
-  }, [toolCallId, toolName]);
+  }, [renderKey, toolName]);
 
   React.useEffect(() => {
     loadWorkflowComponent(sourceWorkflowName, componentType);
-  }, [sourceWorkflowName, componentType, toolCallId, loadWorkflowComponent]); // Include toolCallId to reload on new events
+  }, [sourceWorkflowName, componentType, renderKey, loadWorkflowComponent]);
 
   // 🛡️ DEFENSIVE PAYLOAD VALIDATION - After all hooks, before rendering
   if (!payload || typeof payload !== 'object') {
@@ -223,10 +225,10 @@ const WorkflowUIRouter = ({
         onCancel={onCancel}
         toolCallId={toolCallId}
       >
-        {/* CRITICAL: Use toolCallId as key to force remount on new artifact events (prevents state collision on revisions) */}
+        {/* Scoped read-only app surfaces retain their preview; response tools keep event identity. */}
         {Component && typeof Component === 'function' ? (
           <Component
-            key={toolCallId || `${sourceWorkflowName}-${componentType}`}
+            key={renderKey}
             payload={payload || {}}
             onResponse={onResponse}
             onCancel={onCancel}

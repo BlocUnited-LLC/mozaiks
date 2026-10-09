@@ -98,4 +98,113 @@ mutation boundary.
 - promotion and restore are out of scope
 - no `mozaiks-app` files are touched
 
+## Studio and E2B acceptance
+
+The diagnostic above does not prove the Studio chat, artifact UI, or running
+preview. Verify those separately against a recorded OSS commit:
+
+1. Start an isolated Studio with its normal auth posture and an owned database.
+   Record the exact source commit, model configuration, and E2B template build.
+   Rebuild the template when the preview runtime changes; updating Studio alone
+   does not update code installed inside an existing template.
+2. Use an owned saved app bundle with passed checks. Open **Review builds** from
+   its app overview. The registered AppWorkbench loads the saved version; it
+   does not need a fabricated workflow completion. If the baseline comes from
+   deterministic fixture materialization, state that explicitly: it proves
+   refinement of that fixture, not a completed live generation journey.
+3. Start its draft preview and exercise a real app action in the iframe. For
+   public apps, each public page explicitly declares `meta.requiresAuth: false`.
+   App-level public identity alone does not make every page public. Check the
+   landing route as a visitor, not just `/api/health` or `/api/pages/...`.
+4. Type a bounded change into **App change request** and apply it with real
+   provider calls. Verify the saved revision, file diff, and fresh validation
+   evidence. Repeat for a second revision. Include an app using a capability
+   pack with generated support files, so refinement cannot silently lose the
+   original pack declaration.
+5. While a change runs, try the existing preview. Once a newer draft is ready,
+   its label must still identify the version actually displayed. **Update
+   preview** explicitly replaces that sandbox. With one allowed preview, the
+   previous session must stop before another starts; a short restart interval
+   is expected. A failed change must not advance the selected preview version.
+6. Inspect desktop and narrow-screen screenshots. Status and the next action
+   stay visible; technical failure details and logs can be expanded when needed.
+   Verify no horizontal overflow, working controls, expiry, and reload behavior.
+7. Stop the preview and verify the provider session is absent. A background
+   health check can briefly return a busy response; stopping retries that
+   response up to three requests, using a bounded `Retry-After` delay. A failed
+   stop must retain its cleanup handle and block replacement allocation. Seeing
+   the Start button again is not proof of cleanup: verify the stop response and
+   provider absence. Stop owned local services and retain private evidence
+   without publishing credentials.
+
+The **AppReview conversation** is a separate entry into the same refinement
+boundary. Test it through a real journey with its prerequisite artifacts;
+materializing only an app bundle does not satisfy those prerequisites. Do not
+report Workbench text input as proof that chat messages, pause/resume, or the
+full journey worked.
+
+### Chat artifact preview
+
+AppReview presents `AppReviewWorkspace` in the existing artifact panel. It uses
+the shared preview lifecycle and loads saved bundles through the authenticated
+Studio bundle endpoint. The preview appears first; acceptance and activation
+remain gated by that saved version's checks and lifecycle.
+
+For acceptance, continue a real AppReview conversation and verify:
+
+1. Open the artifact panel and start the preview. Exercise an app control, then
+   hide and reopen the panel. Its iframe and app state must remain mounted.
+   On mobile, switch between chat and artifact without creating another sandbox.
+2. Request a change in the chat composer. Keep using the original preview while
+   the agents work. A checked successor enables **Update preview**; an unsuccessful
+   attempt keeps the previous working preview and identifies the failed change.
+   Confirm the actual `chat.revision_requested` websocket event reaches the
+   normal Studio trigger endpoint with the saved artifact version. An agent's
+   acknowledgement alone does not prove that an edit started. The source review's
+   completion must not cover an ongoing edit, approval decision, or error with
+   a success dialog.
+3. After an inline refinement, Studio creates a new AppReview session bound to
+   the settled build. The client adopts only its matching server descriptor;
+   connecting its websocket starts the review through the existing launch owner.
+   The previous run's immutable build binding is never rewritten. Verify a
+   second chat edit addresses the new saved version.
+4. Reject cross-app/version bundle responses and late responses from an abandoned
+   chat. A failed review handoff must show an error rather than implying that
+   another chat is ready. Acceptance must refetch the canonical saved review
+   before activation becomes available.
+5. Repeat the explicit update and provider-confirmed Stop checks above. Record
+   real model/provider receipts separately from browser tests with HTTP fixtures.
+   Reload while a preview is running, then submit another edit before preview
+   recovery completes. Studio must recover the preview's actual artifact and
+   cleanup handle from its owner/build-registry records. The newer selected
+   draft must not relabel the older iframe. With an owner quota of one, Update
+   must stop the recovered preview before allocating its replacement; Stop
+   must remain available after recovery even when that preview needs attention.
+   Also cover multiple retained sessions for the same build registry: explicit
+   Update/Stop cleans them all, without touching another registry's sessions.
+   A failed recovery read must prevent allocation until recovery succeeds.
+   Recovery uses the authenticated `GET /api/sandbox?build_registry_id=...`
+   read; URLs and cleanup handles must not enter transcripts or client storage.
+   Then open a different saved app's review chat. With an owner quota of one,
+   Start must recover and stop the former app's preview before retrying the new
+   allocation. This path uses the authenticated owner-wide `GET /api/sandbox`
+   read because the new chat does not retain the old preview hook.
+6. From **Review builds**, select the current saved version and choose **Continue
+   in chat**. This also supports a saved inline result with no active review chat.
+   Verify the new review loads the owned current artifact without allocating a
+   build, and historical selections cannot start this recovery. Explicit old
+   source chats and stale resumed bindings must still be rejected. During a chat
+   edit, the review heading reads **Updating your draft**; acceptance and
+   activation remain disabled until that edit settles with saved checks.
+   Request an edit from this reopened chat and verify its messages stay visible
+   when the successor review opens, without reloading the page. The URL must
+   name the successor chat, and a second edit must complete from that chat
+   without reloading, retaining the conversation and preview. The canonical URL
+   update must not resume an already-adopted session a second time; ordinary
+   navigation to another chat must still use the normal resume path.
+
+Passing checks makes a draft ready for the user's review. **Accept this draft**
+records that acceptance; **Activate this version** promotes it into the app
+workspace. Neither action provisions hosting or publishes a public deployment.
+
 

@@ -91,6 +91,37 @@ async def _create(host, *, owner="alice"):
     return response.json()["app"]
 
 
+@pytest.mark.parametrize("initial_chat,explicit_null", [(None, False), (None, True), ("source-review", False)])
+async def test_review_continuation_compare_and_swap_keeps_one_winner(registry_host, initial_chat, explicit_null):
+    host = registry_host
+    record = (await host.service.create_app_record(
+        owner_user_id="alice", status="review", chat_app_id="factory",
+        active_chat_id=initial_chat, active_workflow_id="AppReview",
+        current_build_run={"build_id": "inline-build", "phase": "refinement"},
+    ))["app"]
+    if explicit_null:
+        await host.collection.update_one({"_id": record["build_registry_id"]}, {"$set": {"active_chat_id": None}})
+    async def continue_review(chat_id):
+        return await host.service.update_build_status(
+            build_registry_id=record["build_registry_id"], owner_user_id="alice",
+            status="review", active_chat_id=chat_id, active_workflow_id="AppReview",
+            expected_build_id="inline-build", expected_lifecycle_state="review",
+            expected_active_chat_id=initial_chat,
+        )
+    outcomes = await asyncio.gather(continue_review("review-a"), continue_review("review-b"))
+    assert sum(outcome["success"] for outcome in outcomes) == 1
+    winner = next(outcome["app"]["active_chat_id"] for outcome in outcomes if outcome["success"])
+    final = await host.collection.find_one({"_id": record["build_registry_id"]})
+    assert final["active_chat_id"] == winner
+    assert final["current_build_run"]["active_chat_id"] == winner
+    # An omitted constraint keeps existing service callers' semantics.
+    unguarded = await host.service.update_build_status(
+        build_registry_id=record["build_registry_id"], owner_user_id="alice",
+        status="review", active_chat_id="review-explicit", expected_build_id="inline-build",
+    )
+    assert unguarded["success"] is True
+
+
 async def _concept_target(host, *, name=None, name_source=None, description=None):
     record = (await host.service.create_app_record(
         owner_user_id="alice", name=name, name_source=name_source, description=description,

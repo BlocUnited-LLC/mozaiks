@@ -15,12 +15,7 @@ const BuildStatusPane = ({
   config = {},
 }) => {
   const statusCfg = useMemo(() => config?.artifacts?.['build-status'] || {}, [config]);
-  // Logs default open only when there is something to debug; a passing
-  // build stays a slim strip so the app itself is the hero.
-  const [showLogs, setShowLogs] = useState(
-    statusCfg.showLogs === true ||
-    (statusCfg.showLogs !== false && validationStatus === 'failed')
-  );
+  const [showLogs, setShowLogs] = useState(statusCfg.showLogs === true);
   const [showWarnings, setShowWarnings] = useState(statusCfg.collapseWarnings === false);
   const logRef = useRef(null);
 
@@ -170,6 +165,7 @@ const BuildStatusPane = ({
         </div>
         <button
           type="button"
+          aria-expanded={showLogs}
           onClick={() => setShowLogs((v) => !v)}
           className="px-3 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-xs text-[var(--color-text-secondary)] transition-colors flex items-center gap-1"
         >
@@ -219,14 +215,19 @@ const BuildStatusPane = ({
             )}
 
             {integrationFailures.length > 0 && (
-              <div className="mt-2 space-y-1">
-                {integrationFailures.slice(0, 10).map((f, idx) => (
-                  <div key={idx} className="text-[10px] font-mono text-[var(--color-text-secondary)]">
-                    <span className="text-[var(--color-error)]">{f.id || f.test || 'integration_check'}</span>
-                    <span className="ml-2">{f.message || f.error || ''}</span>
-                  </div>
-                ))}
-              </div>
+              <details className="mt-2 text-xs text-[var(--color-text-secondary)]">
+                <summary className="cursor-pointer text-[var(--color-error)]">
+                  {integrationFailures.length} failed check(s) to review
+                </summary>
+                <div className="mt-2 max-h-40 overflow-auto space-y-1 whitespace-pre-wrap [overflow-wrap:anywhere]">
+                  {integrationFailures.map((f, idx) => (
+                    <div key={idx} className="text-[10px] font-mono text-[var(--color-text-secondary)]">
+                      <span className="text-[var(--color-error)]">{f.id || f.test || 'integration_check'}</span>
+                      <span className="ml-2">{f.message || f.error || ''}</span>
+                    </div>
+                  ))}
+                </div>
+              </details>
             )}
 
             {integrationWarnings.length > 0 && (
@@ -244,31 +245,30 @@ const BuildStatusPane = ({
       )}
 
       {parsedErrors.length > 0 && (
-        <div className="px-4 pb-3">
-          <div className="text-xs font-semibold text-[var(--color-error)] mb-2">{parsedErrors.length} error(s)</div>
-          <div className="space-y-1">
-            {parsedErrors.slice(0, 20).map((e, idx) => (
+        <details className="px-4 pb-3 text-xs">
+          <summary className="cursor-pointer font-semibold text-[var(--color-error)]">{parsedErrors.length} error(s) to review</summary>
+          <div className="mt-2 max-h-40 overflow-auto space-y-1 whitespace-pre-wrap [overflow-wrap:anywhere]">
+            {parsedErrors.map((e, idx) => (
               <div key={idx} className="text-xs font-mono text-[var(--color-text-secondary)]">
                 <span className="text-[var(--color-error)]">{e.file || 'unknown'}:{e.line || '?'}</span>
                 <span className="ml-2">{e.message || ''}</span>
               </div>
             ))}
-            {parsedErrors.length > 20 && <div className="text-[10px] text-[var(--color-text-muted)]">… {parsedErrors.length - 20} more</div>}
           </div>
-        </div>
+        </details>
       )}
 
       {rawErrors.length > 0 && parsedErrors.length === 0 && (
-        <div className="px-4 pb-3">
-          <div className="text-xs font-semibold text-[var(--color-error)] mb-2">{rawErrors.length} error(s)</div>
-          <div className="space-y-1">
-            {rawErrors.slice(0, 10).map((e, idx) => (
+        <details className="px-4 pb-3 text-xs">
+          <summary className="cursor-pointer font-semibold text-[var(--color-error)]">{rawErrors.length} error(s) to review</summary>
+          <div className="mt-2 max-h-40 overflow-auto space-y-1 whitespace-pre-wrap [overflow-wrap:anywhere]">
+            {rawErrors.map((e, idx) => (
               <div key={idx} className="text-xs font-mono text-[var(--color-text-secondary)]">
                 {String(e)}
               </div>
             ))}
           </div>
-        </div>
+        </details>
       )}
 
       {warnings.length > 0 && (

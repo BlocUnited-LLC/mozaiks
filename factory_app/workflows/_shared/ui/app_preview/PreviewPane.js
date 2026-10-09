@@ -1,5 +1,5 @@
 // ==============================================================================
-// FILE: factory_app/workflows/AppGenerator/ui/PreviewPane.js
+// FILE: factory_app/workflows/_shared/ui/app_preview/PreviewPane.js
 // DESCRIPTION: Preview iframe with basic controls
 // ==============================================================================
 
@@ -12,11 +12,18 @@ const PreviewPane = ({
   sandboxSyncing,
   sandboxError,
   artifactVersionId,
+  previewArtifactId,
+  refinementPending = false,
   config = {},
   onStartPreview = null,
   canStartPreview = false,
   onStopPreview = null,
   sandboxStopping = false,
+  sandboxRecovering = false,
+  sandboxRecoveredStarting = false,
+  sandboxRecoveryError = null,
+  onRetryRecovery = null,
+  unavailableMessage = 'Your preview will be available once this build is saved.',
 }) => {
   const previewCfg = config?.artifacts?.['e2b-preview'] || {};
   const [iframeKey, setIframeKey] = useState(0);
@@ -40,12 +47,26 @@ const PreviewPane = ({
     setIframeKey((k) => k + 1);
   }, []);
 
-  const isRestarting = sandboxSyncing || sandboxStatus === 'starting';
+  const isRestarting = sandboxSyncing || sandboxStopping || sandboxRecovering
+    || (sandboxStatus === 'starting' && !sandboxRecoveredStarting);
+  const differentDraftSelected = Boolean(url && previewArtifactId && artifactVersionId && previewArtifactId !== artifactVersionId);
+  const displayedVersion = previewArtifactId || artifactVersionId;
+  const recoveryFailure = sandboxRecoveryError && (
+    <div role="alert" className="mt-3 text-sm text-destructive">
+      <p>{sandboxRecoveryError}</p>
+      {onRetryRecovery && (
+        <button type="button" onClick={onRetryRecovery} disabled={isRestarting}
+          className="mt-2 rounded-lg border border-border px-3 py-2 text-xs text-foreground disabled:opacity-50">
+          Retry preview recovery
+        </button>
+      )}
+    </div>
+  );
   const stopControl = onStopPreview && (
     <button
       type="button"
       onClick={onStopPreview}
-      disabled={sandboxSyncing || sandboxStopping}
+      disabled={sandboxSyncing || sandboxStopping || sandboxRecovering}
       className="inline-flex items-center px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-50 text-xs text-[var(--color-text-secondary)]"
     >
       {sandboxStopping ? 'Stopping preview…' : 'Stop preview'}
@@ -55,13 +76,18 @@ const PreviewPane = ({
     <div className="min-w-0">
       <div className="flex flex-wrap items-center gap-2">
         <div className="text-sm font-semibold text-white">Draft app preview</div>
-        {artifactVersionId && (
-          <span className="text-[10px] text-[var(--color-text-muted)] font-mono" title={artifactVersionId}>
-            Version {artifactVersionId.slice(0, 12)}
+        {displayedVersion && (
+          <span className="text-[10px] text-[var(--color-text-muted)] font-mono" title={displayedVersion}>
+            {previewArtifactId ? 'Preview based on version' : 'Version'} {displayedVersion.slice(0, 12)}
           </span>
         )}
       </div>
       <div className="mt-1 text-xs text-[var(--color-text-muted)]">Temporary preview · Changes here do not publish your app.</div>
+      {url && (differentDraftSelected || refinementPending) && (
+        <p role="status" className="mt-2 text-sm text-[var(--color-text-secondary)]">
+          {differentDraftSelected ? 'A different draft is selected.' : 'Making your changes. You can keep trying this preview.'}
+        </p>
+      )}
     </div>
   );
 
@@ -69,16 +95,19 @@ const PreviewPane = ({
     return (
       <div className="rounded-lg border border-white/10 bg-black/30 p-4" role="status">
         {previewIdentity}
-        {isRestarting ? (
+        {sandboxRecoveryError ? recoveryFailure : isRestarting ? (
           <div className="mt-3 flex items-center gap-2 text-sm text-[var(--color-text-muted)]">
             <div className="h-4 w-4 border-2 border-[var(--color-primary-light)] border-t-transparent rounded-full animate-spin flex-shrink-0" />
-            Starting draft preview...
+            {sandboxRecovering ? 'Recovering existing previews…' : sandboxStopping ? 'Stopping preview…' : 'Starting draft preview...'}
           </div>
         ) : (
           <>
             <div className="mt-3 text-sm text-[var(--color-text-muted)]">
-              {sandboxError ? 'Preview could not start' : 'Start the preview to try your app.'}
+              {sandboxError || sandboxRecoveredStarting ? 'Preview needs attention' : 'Start the preview to try your app.'}
             </div>
+            {sandboxRecoveredStarting && (
+              <p className="mt-1 text-xs text-[var(--color-text-muted)]">Preview setup has not finished. Retry or stop it to continue.</p>
+            )}
             {onStartPreview && canStartPreview ? (
               <>
                 <button
@@ -86,16 +115,17 @@ const PreviewPane = ({
                   onClick={onStartPreview}
                   className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-semibold text-white border border-white/10 transition-colors"
                 >
-                  <Play className="w-3.5 h-3.5" /> Start draft preview
+                  <Play className="w-3.5 h-3.5" /> {sandboxRecoveredStarting ? 'Retry draft preview' : 'Start draft preview'}
                 </button>
               </>
             ) : (
               <div className="text-xs text-[var(--color-text-muted)] mt-1">
-                Your preview will be available once this build is saved.
+                {unavailableMessage}
               </div>
             )}
           </>
         )}
+        {!sandboxRecoveryError && recoveryFailure}
         {sandboxError && (
           <details className="mt-3 text-xs text-red-300">
             <summary className="cursor-pointer">Preview details</summary>
@@ -113,16 +143,17 @@ const PreviewPane = ({
         {previewIdentity}
         <div className="flex flex-wrap items-center gap-2">
           {stopControl}
-          {onStartPreview && canStartPreview && (
+          {onStartPreview && canStartPreview && !sandboxRecoveryError && (
             <button
               type="button"
               onClick={onStartPreview}
               disabled={isRestarting}
-              className="p-2 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-50 text-[var(--color-text-secondary)] hover:text-white"
-              title="Restart draft preview"
-              aria-label="Restart draft preview"
+              className="inline-flex items-center gap-2 p-2 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-50 text-xs font-semibold text-[var(--color-text-secondary)] hover:text-white"
+              title={differentDraftSelected ? 'Update preview' : 'Restart draft preview'}
+              aria-label={differentDraftSelected ? 'Update preview' : 'Restart draft preview'}
             >
               <Play className="w-4 h-4" />
+              {differentDraftSelected && 'Update preview'}
             </button>
           )}
           <button
@@ -145,6 +176,7 @@ const PreviewPane = ({
           </a>
         </div>
       </div>
+      {recoveryFailure}
 
       <div className="relative h-[520px] bg-white">
         {isRestarting && (

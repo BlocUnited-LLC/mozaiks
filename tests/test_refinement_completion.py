@@ -49,6 +49,14 @@ def _saved_surface_candidate(**kwargs):
     return BuildRecord(id="surface-candidate", version_number=1, lineage_root_id="parent", **kwargs)
 
 
+def _artifact_store(create):
+    parent = BuildRecord(
+        id="parent", app_id="customer", build_family="app_bundle", build_key="app_bundle",
+        version_number=1, lineage_root_id="parent",
+    )
+    return SimpleNamespace(create_build_record=create, get_build_record=AsyncMock(return_value=parent))
+
+
 def _config():
     return ControlPlaneConfig(enabled=True, coding={"enabled": True})
 
@@ -99,7 +107,7 @@ async def test_worker_validation_and_saved_draft_agree_with_completion_event(
 ):
     recorded = AsyncMock()
     monkeypatch.setattr(orchestration_control, "record_refinement_event", recorded)
-    store = SimpleNamespace(create_build_record=AsyncMock(side_effect=_saved_candidate))
+    store = _artifact_store(AsyncMock(side_effect=_saved_candidate))
     worker = ScopedRefinementCodingWorker(
         provider=SimpleNamespace(execute=AsyncMock(return_value=_proposal())),
         config_loader=_config, artifact_store=store, output_root=tmp_path,
@@ -131,7 +139,7 @@ async def test_failed_artifact_persistence_does_not_emit_success(monkeypatch, tm
     worker = ScopedRefinementCodingWorker(
         provider=SimpleNamespace(execute=AsyncMock(return_value=_proposal())),
         config_loader=_config, output_root=tmp_path,
-        artifact_store=SimpleNamespace(create_build_record=AsyncMock(side_effect=RuntimeError("store unavailable"))),
+        artifact_store=_artifact_store(AsyncMock(side_effect=RuntimeError("store unavailable"))),
         candidate_validation_runner=AsyncMock(return_value=_candidate_validation("passed")),
     )
     harness = orchestration_control.OrchestrationControlHarness(coding_worker=worker, config_loader=_config)
@@ -157,7 +165,7 @@ async def test_configured_content_store_must_save_before_a_draft_can_be_ready(mo
         coding_module, "get_artifact_content_store",
         lambda: SimpleNamespace(backend_name="gridfs", put_bundle=upload),
     )
-    store = SimpleNamespace(create_build_record=AsyncMock(side_effect=_saved_candidate))
+    store = _artifact_store(AsyncMock(side_effect=_saved_candidate))
     worker = ScopedRefinementCodingWorker(
         provider=SimpleNamespace(execute=AsyncMock(return_value=_proposal())),
         config_loader=_config, artifact_store=store, output_root=tmp_path,
@@ -331,7 +339,7 @@ async def test_finalization_bounds_extra_owned_paths_and_keeps_only_effective_ch
         ],
     )
     validate = AsyncMock(return_value=_candidate_validation("skipped"))
-    store = SimpleNamespace(create_build_record=AsyncMock(side_effect=_saved_candidate))
+    store = _artifact_store(AsyncMock(side_effect=_saved_candidate))
     worker = ScopedRefinementCodingWorker(
         candidate_validation_runner=validate, artifact_store=store, output_root=tmp_path,
     )
@@ -382,7 +390,7 @@ async def test_surface_finalizer_writes_real_audit_document_after_validation_and
         create.side_effect = RuntimeError("store unavailable")
     worker = ScopedRefinementCodingWorker(
         candidate_validation_runner=AsyncMock(return_value=_candidate_validation(validation_status)),
-        artifact_store=SimpleNamespace(create_build_record=create), output_root=tmp_path,
+        artifact_store=_artifact_store(create), output_root=tmp_path,
     )
     harness = orchestration_control.OrchestrationControlHarness(coding_worker=worker, config_loader=_config)
     result = await harness.finalize_surface_output(

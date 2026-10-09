@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 from factory_app.workflows._shared.platform.build_target import require_build_binding
+from mozaiksai.core.artifacts import ArtifactLifecycleStatus, get_artifact_store
+from mozaiksai.core.session.build_binding import RunBuildBinding
 from mozaiksai.core.workflow.context.frozen import detach
 
 _VALIDATION_STATUSES = {"passed", "failed", "skipped", "pending"}
@@ -16,6 +18,52 @@ _LIFECYCLE_STATES = {
     "needs_revision",
     "archived",
 }
+
+
+def saved_review_context(version: Any, *, lifecycle_state: str) -> dict[str, Any]:
+    """Project review facts from one verified saved artifact."""
+    metadata = version.commit_metadata.metadata or {}
+    acceptance = metadata.get("app_bundle_acceptance") or {}
+    return {
+        "artifact_kind": version.build_family, "artifact_key": version.build_key,
+        "artifact_version_id": version.id, "bundle_path": metadata.get("workspace_dir"),
+        "lifecycle_state": lifecycle_state,
+        "app_validation_status": version.app_validation_status,
+        "app_validation_strategy_used": version.app_validation_strategy,
+        "app_bundle_acceptance_status": acceptance.get("status"),
+        "integration_tests_passed": acceptance.get("passed"),
+    }
+
+
+async def load_registered_review_context(
+    *, binding: RunBuildBinding, app_id: str, user_id: str, registry: Any,
+) -> dict[str, Any]:
+    """Hydrate a new AppReview from the owned registry's current build."""
+    record = (await registry.get_app_record(
+        owner_user_id=user_id, build_registry_id=binding.build_registry_id,
+    )).get("app")
+    if (not record or record.get("chat_app_id") != app_id
+            or record.get("app_id") != binding.target_app_id):
+        raise ValueError("Review build is not available to this owner in this host")
+    current = record.get("current_build_run") or {}
+    if current.get("build_id") != binding.build_id or current.get("phase") != binding.phase:
+        raise ValueError("Review build has been superseded")
+    artifact_id = current.get("artifact_version_id")
+    if not artifact_id:
+        raise ValueError("Review build has no saved app artifact")
+    version = await get_artifact_store().get_build_record(
+        app_id=binding.target_app_id, build_record_id=artifact_id,
+    )
+    if (version is None or version.id != artifact_id or version.app_id != binding.target_app_id
+            or version.build_family != "app_bundle"
+            or version.lifecycle_status in {ArtifactLifecycleStatus.ARCHIVED, ArtifactLifecycleStatus.DELETED}):
+        raise ValueError("Review app artifact is unavailable")
+    metadata = version.commit_metadata.metadata or {}
+    if version.commit_metadata.author_user_id != user_id or any(
+        metadata.get(key) != value for key, value in binding.model_dump().items()
+    ):
+        raise ValueError("Review artifact does not belong to the current owned build")
+    return saved_review_context(version, lifecycle_state=record["lifecycle_state"])
 
 
 def _context_get(context_variables: Any | None, key: str) -> Any | None:
@@ -158,6 +206,7 @@ def build_review_summary_payload(context_variables: Any | None) -> dict[str, Any
         "integration_tests_passed": integration_tests_passed,
         "security_readiness_summary": _context_get(context_variables, "security_readiness_summary")
         or {},
+        "review_notice": _text(_context_get(context_variables, "review_notice")),
         "promotion_blockers": promotion_blockers,
         "revision_blockers": revision_blockers,
         "review_ready": can_promote and can_revise,

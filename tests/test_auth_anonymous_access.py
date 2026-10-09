@@ -1788,6 +1788,8 @@ def test_studio_preview_routes_refuse_an_anonymous_visitor(monkeypatch) -> None:
     visitor = TestClient(studio.app, raise_server_exceptions=False, client=LAN, base_url=HERE)
     response = visitor.get("/api/sandbox/sandbox-1/status")
     assert (response.status_code, response.json()["detail"]) == (403, STUDIO_PUBLIC_MESSAGE)
+    recovered = visitor.get("/api/sandbox?build_registry_id=registry-one")
+    assert (recovered.status_code, recovered.json()["detail"]) == (403, STUDIO_PUBLIC_MESSAGE)
     closed = _ws_refusal(visitor, "/ws/sandbox/sandbox-1")
     assert (closed.code, closed.reason) == (1008, "Sandbox not found")
 

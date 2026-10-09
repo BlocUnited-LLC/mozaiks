@@ -144,9 +144,19 @@ class _SmokeArtifactStore:
 
     async def get_build_record(self, **kwargs):  # noqa: ANN003
         build_record_id = str(kwargs.get("build_record_id") or "")
+        app_id = str(kwargs.get("app_id") or "")
         for version in self.created_versions:
-            if version.id == build_record_id:
+            if version.id == build_record_id and version.app_id == app_id:
                 return version
+        # The smoke scenarios own these pack-free baselines before any child is saved.
+        for spec in _scenario_specs():
+            if spec.artifact_version_id == build_record_id and spec.app_id == app_id:
+                return ArtifactVersionDoc(
+                    id=spec.artifact_version_id, app_id=spec.app_id,
+                    build_family="app_bundle", build_key="app_bundle",
+                    version_number=1, lineage_root_id=spec.artifact_version_id,
+                    commit_metadata={"metadata": {"capability_packs": []}},
+                )
         return None
 
     async def list_build_records(self, **kwargs):  # noqa: ANN003

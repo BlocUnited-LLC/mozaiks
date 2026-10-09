@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import '../../styles/mobile.css';
 
 /**
@@ -70,6 +70,10 @@ const FluidChatLayout = ({
   };
 
   const layout = getLayoutStyles();
+  const [artifactVisited, setArtifactVisited] = useState(false);
+  useEffect(() => {
+    if (layout.artifactVisible) setArtifactVisited(true);
+  }, [layout.artifactVisible]);
   const panelContainer =
     'relative flex flex-col min-h-0 h-full self-stretch transition-all duration-500 ease-in-out pt-0';
 
@@ -116,10 +120,13 @@ const FluidChatLayout = ({
       )}
 
       {/* Artifact Panel - relies on ArtifactPanel component for styling */}
-      {layout.artifactVisible && (
+      {(layout.artifactVisible || artifactVisited) && (
         <div
           className={`${panelContainer} artifact-panel h-full`}
-          style={{ width: layout.artifactWidth }}
+          hidden={!layout.artifactVisible}
+          inert={!layout.artifactVisible}
+          aria-hidden={!layout.artifactVisible}
+          style={{ width: layout.artifactWidth, display: layout.artifactVisible ? undefined : 'none' }}
         >
           <div className="flex-1 min-h-0 overflow-visible h-full pt-0 flex flex-col">
             {artifactContent}

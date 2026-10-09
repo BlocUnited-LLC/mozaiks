@@ -160,6 +160,12 @@ def test_register_app_bundle_artifact_version_sets_context_and_parent(monkeypatc
             "artifact_version_id": "av_parent_1",
             "build_id": "build_1",
             "build_registry_id": "appreg_1",
+            "app_build_plan": {"capability_packs": [{
+                "id": "operator_readiness", "capability_source": "config_file",
+                "pack_source_path": "/installed/operator_readiness",
+                "version": "1.0.0", "config": {"profile": "local"},
+            }]},
+            "available_capability_packs": [{"id": "unselected_pack"}],
             "app_bundle_acceptance_status": "passed",
             "app_bundle_acceptance_result": {
                 "status": "passed",
@@ -198,6 +204,9 @@ def test_register_app_bundle_artifact_version_sets_context_and_parent(monkeypatc
     assert metadata["build_registry_id"] == "appreg_1"
     assert metadata["app_bundle_acceptance"]["status"] == "passed"
     assert metadata["validation_evidence"]["failed"] == []
+    assert metadata["capability_packs"] == context.data["app_build_plan"]["capability_packs"]
+    context.data["app_build_plan"]["capability_packs"][0]["config"]["profile"] = "changed"
+    assert metadata["capability_packs"][0]["config"]["profile"] == "local"
     assert context.data["artifact_version_id"] == "av_bundle_1"
 
 

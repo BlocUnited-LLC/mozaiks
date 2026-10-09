@@ -209,6 +209,53 @@ async def test_submit_revision_request_rejects_empty_revision() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("chat_id", [None, "", "   "])
+async def test_revision_without_a_chat_cannot_complete_or_broadcast(chat_id, monkeypatch):
+    module = importlib.import_module("factory_app.workflows.AppReview.tools.submit_revision_request")
+    from mozaiksai.core.transport.simple_transport import SimpleTransport
+
+    get_transport = AsyncMock()
+    monkeypatch.setattr(SimpleTransport, "get_instance", get_transport)
+    context = _review_context(chat_id=chat_id)
+    with pytest.raises(ValueError, match="review chat session"):
+        await module.submit_revision_request("Make the timer teal.", context_variables=context)
+    get_transport.assert_not_awaited()
+    assert "review_complete" not in context.data
+    assert "revision_submitted" not in context.data
+
+
+@pytest.mark.asyncio
+async def test_revision_reaches_only_its_websocket_through_real_transport(monkeypatch):
+    module = importlib.import_module("factory_app.workflows.AppReview.tools.submit_revision_request")
+    from mozaiksai.core.transport.simple_transport import SimpleTransport
+
+    class Socket:
+        def __init__(self):
+            self.messages = []
+
+        async def send_json(self, message):
+            self.messages.append(message)
+
+    source, other = Socket(), Socket()
+    transport = SimpleTransport()
+    transport.connections = {
+        "chat_review_1": {"websocket": source, "workflow_name": "AppReview"},
+        "other_chat": {"websocket": other, "workflow_name": "AppReview"},
+    }
+    monkeypatch.setattr(SimpleTransport, "get_instance", AsyncMock(return_value=transport))
+    result = await module.submit_revision_request("Make the timer teal.", context_variables=_review_context())
+    assert result["event_emitted"] is True
+    assert len(source.messages) == 1
+    assert not other.messages
+    envelope = source.messages[0]
+    assert envelope["schema_version"] == "mozaiks.ui.event.v1"
+    assert envelope["type"] == "chat.revision_requested"
+    assert envelope["data"]["refinement_request"] == "Make the timer teal."
+    assert envelope["data"]["artifact_version_id"] == "av_app_bundle_1"
+    assert envelope["data"]["extra"]["build_registry_id"] == "appreg_1"
+
+
+@pytest.mark.asyncio
 async def test_submit_revision_request_marks_promotion_complete(monkeypatch) -> None:
     submit_module = importlib.import_module(
         "factory_app.workflows.AppReview.tools.submit_revision_request"

@@ -45,6 +45,19 @@ async def test_preview_preserves_binary_assets_without_changing_scanner_input(bu
 
 
 @pytest.mark.asyncio
+async def test_preview_rejects_rootless_refinement_zip_even_with_a_matching_archive_digest(bundle):
+    artifact, archive = bundle
+    with zipfile.ZipFile(archive, "w") as output:
+        output.writestr("app.json", '{"appId":"tracker"}')
+    artifact.commit_metadata.metadata["bundle_mode"] = "staged_refinement_bundle"
+    artifact.files_manifest[0].sha256 = hashlib.sha256(archive.read_bytes()).hexdigest()
+
+    files, diagnostics = await read_artifact_bundle(artifact, include_binary=True)
+    assert files == {}
+    assert diagnostics == [{"path":"app.json", "code":"outside_bundle_root", "blocking":True}]
+
+
+@pytest.mark.asyncio
 async def test_preview_resolver_uses_owned_target_and_verified_archive(studio, monkeypatch, bundle):
     module, _ = studio
     artifact, archive = bundle
@@ -81,3 +94,25 @@ async def test_preview_never_launches_a_partially_read_archive(studio, monkeypat
     with pytest.raises(HTTPException) as raised:
         await module._resolve_preview_artifact(None, "version-one", "registry_tracker")
     assert raised.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_preview_recovery_resolves_registry_without_loading_any_artifact(studio, monkeypatch):
+    module, service = studio
+
+    def unavailable_archive():
+        pytest.fail("Cleanup recovery must not depend on the selected artifact or archive")
+
+    monkeypatch.setattr(module, "get_artifact_store", unavailable_archive)
+    assert await module._resolve_preview_build(None, "registry_tracker") == "tracker"
+    service.get_app_record.assert_awaited_once_with(build_registry_id="registry_tracker", owner_user_id="owner")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("record", [None, {"app_id": "tracker", "chat_app_id": "foreign_host"}])
+async def test_preview_recovery_rejects_missing_and_foreign_registry(studio, record):
+    module, service = studio
+    service.get_app_record.return_value = {"app": record}
+    with pytest.raises(HTTPException) as raised:
+        await module._resolve_preview_build(None, "registry_tracker")
+    assert raised.value.status_code == 404

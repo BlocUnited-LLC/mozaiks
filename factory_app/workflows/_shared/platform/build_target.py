@@ -49,7 +49,8 @@ async def bind_factory_session(
         build_registry_id or session_fields.get("run_build_binding") or trigger_source == "refinement"
     ):
         return {}
-    binding = await AppRegistryService().resolve_build_binding(
+    registry = AppRegistryService()
+    binding = await registry.resolve_build_binding(
         owner_user_id=user_id,
         app_id=app_id,
         chat_id=chat_id,
@@ -60,5 +61,15 @@ async def bind_factory_session(
         resume=phase == "resume",
         refinement=trigger_source == "refinement",
         allow_create=workflow_name in {"ValueEngine", "ExistingAppDiscovery"},
+        allow_current_build=(workflow_name == "AppReview" and phase == "prepare" and trigger_source != "refinement"),
     )
-    return {"run_build_binding": binding.model_dump()}
+    fields: dict[str, Any] = {"run_build_binding": binding.model_dump()}
+    if workflow_name == "AppReview" and phase == "prepare":
+        from factory_app.workflows.AppReview.tools.review_context import (
+            load_registered_review_context,
+        )
+
+        fields.update(await load_registered_review_context(
+            binding=binding, app_id=app_id, user_id=user_id, registry=registry,
+        ))
+    return fields

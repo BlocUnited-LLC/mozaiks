@@ -132,7 +132,7 @@ NO_FREE_TEXT_AGENTS = frozenset({
 REVIEW_WORKFLOW = "AppReview"
 REVIEW_AGENT = "ReviewAgent"
 WORKBENCH_COMPONENT = "AppWorkbench"
-REVIEW_SUMMARY_COMPONENT = "AppReviewSummary"
+REVIEW_SUMMARY_COMPONENT = "AppReviewWorkspace"
 INPUT_REQUEST_COMPONENT = "UserInputRequest"
 # The AppWorkbench "Continue" action, as the chat UI sends it.
 WORKBENCH_RESPONSE: dict[str, Any] = {
@@ -1253,7 +1253,7 @@ class JourneyDriver:
         if review is None:
             raise self._human_assist(
                 "review_without_summary",
-                "ReviewAgent asked for input before presenting AppReviewSummary, so there is no "
+                "ReviewAgent asked for input before presenting AppReviewWorkspace, so there is no "
                 "reviewed build to promote.",
                 agent=REVIEW_AGENT,
             )

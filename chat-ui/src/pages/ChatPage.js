@@ -116,7 +116,14 @@ const ChatPage = () => {
   // can land in the same tick, and a state read would still name the chat we
   // just left. Same reason pendingTransitionIdRef exists below.
   const currentChatIdRef = useRef(null);
+  // A server-created review successor can keep the same app preview mounted.
+  const reviewContinuationRef = useRef(null);
+  // A handed-off review run cannot announce revision success, even if its
+  // terminal event arrives after the trigger failed or requested approval.
+  const revisionHandoffRef = useRef(null);
   const setCurrentChatId = useCallback((id) => {
+    if (reviewContinuationRef.current?.chat_id !== id) reviewContinuationRef.current = null;
+    if (revisionHandoffRef.current?.chatId !== id) revisionHandoffRef.current = null;
     currentChatIdRef.current = id;
     _setCurrentChatId(id);
   }, []);
@@ -1240,11 +1247,10 @@ const ChatPage = () => {
           ? { ...base.trigger_payload }
           : {},
       actions,
-      metadata: source?.metadata && typeof source.metadata === 'object'
-        ? { ...source.metadata }
-        : base.metadata && typeof base.metadata === 'object'
-          ? { ...base.metadata }
-          : {},
+      metadata: {
+        ...(base.metadata && typeof base.metadata === 'object' ? base.metadata : {}),
+        ...(source?.metadata && typeof source.metadata === 'object' ? source.metadata : {}),
+      },
     };
   }, []);
   const applySessionStatePendingHarnessDecision = useCallback((sessionState) => {
@@ -1314,11 +1320,127 @@ const ChatPage = () => {
     setCurrentChatId,
     setCurrentWorkflowName,
   ]);
+  const findRevisionArtifact = useCallback((buildRegistryId, artifactKind, artifactVersionId) => (
+    currentArtifactMessagesRef.current.find(message => {
+      const payload = message?.toolCall?.payload;
+      return payload?.build_registry_id === buildRegistryId
+        && (payload.artifact_kind || payload.build_family) === artifactKind
+        && payload.artifact_version_id === artifactVersionId;
+    })?.toolCall
+  ), []);
+  const adoptInlineRefinement = useCallback(async (triggerData, operation) => {
+    const { artifactVersionId, artifactKind, artifactKey, buildRegistryId,
+      sourceChatId, resolvedAppId, sourceArtifact } = operation;
+    const sourceToolCallId = sourceArtifact?.tool_call_id;
+    const isCurrentRevision = () => currentChatIdRef.current === sourceChatId;
+    if (!isCurrentRevision()) return;
+    const result = triggerData.execution_mode === 'coding_worker'
+      ? triggerData.coding_worker : triggerData.surface_result;
+    if (!result || !artifactVersionId || !buildRegistryId) {
+      throw new Error('The revision response was incomplete. Reopen the app review to inspect its current state.');
+    }
+    const bundleResponse = await authFetch(
+      `/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/bundle?build_registry_id=${encodeURIComponent(buildRegistryId)}`,
+      {}, { auth },
+    );
+    if (!bundleResponse.ok) {
+      throw new Error('The revision result could not be opened. Reopen the app review to inspect it.');
+    }
+    const bundle = await bundleResponse.json();
+    if (!isCurrentRevision()) return;
+    if (bundle?.artifact_version_id !== artifactVersionId
+        || bundle?.build_family !== artifactKind
+        || bundle?.workbench?.artifact_version_id !== artifactVersionId
+        || bundle?.workbench?.build_registry_id !== buildRegistryId
+        || bundle?.workbench?.target_app_id !== bundle?.app_id
+        || (sourceArtifact?.payload?.target_app_id
+          && bundle.app_id !== sourceArtifact.payload.target_app_id)) {
+      throw new Error('The revision result does not match the selected app and version.');
+    }
+    const workbenchUI = bundle.workbench_ui;
+    if (typeof workbenchUI?.component !== 'string' || !workbenchUI.component.trim()
+        || typeof workbenchUI?.workflow_name !== 'string' || !workbenchUI.workflow_name.trim()) {
+      throw new Error('The revision result has no registered review surface. Reopen the app review.');
+    }
+    const continuation = triggerData.review_continuation;
+    if (continuation && (
+      typeof continuation.chat_id !== 'string' || !continuation.chat_id.trim()
+      || continuation.chat_id === sourceChatId || continuation.workflow_id !== 'AppReview'
+      || continuation.source_chat_id !== sourceChatId || continuation.app_id !== resolvedAppId
+      || continuation.target_app_id !== bundle.app_id
+      || continuation.build_registry_id !== buildRegistryId
+      || continuation.artifact_kind !== artifactKind
+      || continuation.artifact_version_id !== (result.metadata?.build_record_id || artifactVersionId)
+    )) {
+      throw new Error('The next review does not match this app and revision. Reopen the app review.');
+    }
+    const patch = {
+      ...bundle.workbench,
+      artifact_version_id: artifactVersionId, artifact_kind: artifactKind, artifact_key: artifactKey,
+      build_registry_id: buildRegistryId, refinement_result: triggerData, refinement_pending: false,
+      refinement_error: triggerData.review_continuation_error || null,
+    };
+    const stillShowingSource = sourceToolCallId && currentArtifactMessagesRef.current.some(
+      message => message?.toolCall?.tool_call_id === sourceToolCallId,
+    );
+    await dynamicUIHandler.processUIEvent(stillShowingSource ? {
+      type: 'ui.update', tool_call_id: sourceToolCallId, patch,
+    } : {
+      type: 'ui.render', component: workbenchUI.component, workflow_name: workbenchUI.workflow_name,
+      tool_call_id: `refinement-${triggerData.refinement_session_id || artifactVersionId}`,
+      display: 'artifact', awaiting_response: false, interaction_type: 'ui_surface',
+      payload: patch,
+    });
+    if (!isCurrentRevision()) return;
+    setPendingHarnessDecision(null);
+    setPendingHarnessDecisionError(null);
+    setLoading(false);
+    setPendingWorkflowReply(null);
+    if (triggerData.review_continuation_error) {
+      throw new Error(triggerData.review_continuation_error);
+    }
+    if (continuation) {
+      // Adopt state and route together so the previous URL cannot resume the
+      // superseded source, and the successor cannot clear the conversation.
+      const params = new URLSearchParams(location.search || '');
+      params.set('workflow', continuation.workflow_id);
+      params.set('chat_id', continuation.chat_id);
+      params.set('mode', 'workflow');
+      queryResumeHandledRef.current = `${continuation.chat_id}:${continuation.workflow_id}`;
+      reviewContinuationRef.current = continuation;
+      setConnectionStatus('disconnected');
+      navigate(`${location.pathname}?${params.toString()}`, { replace: true });
+      setCurrentChatId(continuation.chat_id);
+      setActiveChatId(continuation.chat_id);
+      setCurrentWorkflowName(continuation.workflow_id);
+      setActiveWorkflowName(continuation.workflow_id);
+      rememberWorkflowChatSession(continuation.chat_id, continuation.workflow_id);
+      setConversationMode('workflow');
+      setWorkflowCompleted(false);
+      setCompletionData(null);
+      setPendingTransitionId(null);
+      setPendingTransitionContext({});
+    }
+  }, [auth, location.pathname, location.search, navigate, rememberWorkflowChatSession, setActiveChatId, setActiveWorkflowName,
+    setConversationMode, setCurrentChatId, setCurrentWorkflowName]);
   const handlePendingHarnessDecisionAction = useCallback(async (action) => {
     if (!pendingHarnessDecision || !action) {
       return;
     }
 
+    const sourceChatId = pendingHarnessDecision.metadata?.source_chat_id || null;
+    const submissionChatId = currentChatIdRef.current;
+    if ((sourceChatId && sourceChatId !== submissionChatId)
+      || !pendingHarnessDecision.actions.some(candidate => candidate.action_id === action.action_id)) {
+      setPendingHarnessDecisionError('This decision no longer belongs to the active review. Reopen the app review.');
+      return;
+    }
+    const request = pendingHarnessDecision.trigger_payload?.refinement_request;
+    const sourceArtifact = findRevisionArtifact(pendingHarnessDecision.build_registry_id,
+      request?.artifact_kind, request?.artifact_version_id);
+    const sourceToolCallId = sourceArtifact?.tool_call_id;
+    if (sourceToolCallId) dynamicUIHandler.processUIEvent({type:'ui.update', tool_call_id:sourceToolCallId,
+      patch:{refinement_pending:true, refinement_error:null}});
     setPendingHarnessDecisionError(null);
     // Approval repeats the bound request; the server owns the chosen re-entry.
     const workflowId = pendingHarnessDecision.requested_workflow_id || null;
@@ -1338,45 +1460,72 @@ const ChatPage = () => {
       triggerPayload.revision_id = pendingHarnessDecision.revision_id;
     }
 
-    const result = await startPendingHarnessWorkflow(workflowId, contextVariables, {
-      trigger_source: pendingHarnessDecision.trigger_source || 'refinement',
-      journey_id: pendingHarnessDecision.journey_id || null,
-      build_registry_id: pendingHarnessDecision.build_registry_id || null,
-      app_id: currentAppId || null,
-      user_id: currentUserId || null,
-      trigger_payload: triggerPayload,
-    });
-
-    if (!result) {
-      setPendingHarnessDecisionError(
-        pendingHarnessWorkflowStartError || 'Failed to continue this harness decision.'
-      );
-      return;
+    revisionHandoffRef.current = { chatId: submissionChatId };
+    if (pendingTransitionIdRef.current === 'workflow_complete') {
+      setPendingTransitionId(null);
+      setPendingTransitionContext({});
     }
+    try {
+      const result = await startPendingHarnessWorkflow(workflowId, contextVariables, {
+        trigger_source: pendingHarnessDecision.trigger_source || 'refinement',
+        journey_id: pendingHarnessDecision.journey_id || null,
+        build_registry_id: pendingHarnessDecision.build_registry_id || null,
+        app_id: currentAppId || null,
+        user_id: currentUserId || null,
+        source_chat_id: sourceChatId,
+        trigger_payload: triggerPayload,
+      });
+      if (currentChatIdRef.current !== submissionChatId) return;
 
-    if (result.execution_mode === 'harness_decision') {
-      const nextDecision = buildPendingHarnessDecision(
-        result.harness_decision,
-        {
-          ...pendingHarnessDecision,
-          trigger_source: pendingHarnessDecision.trigger_source || 'refinement',
-          requested_workflow_id: workflowId,
-          recommended_workflow_id: result.workflow_id || workflowId || pendingHarnessDecision.recommended_workflow_id,
-          journey_id: pendingHarnessDecision.journey_id || null,
-          context_variables: contextVariables,
-          trigger_payload: triggerPayload,
-          change_request_id: result.change_request_id || pendingHarnessDecision.change_request_id,
-          revision_id: result.revision_id || pendingHarnessDecision.revision_id,
-        },
-      );
-      setPendingHarnessDecision(nextDecision);
+      if (!result) {
+        throw new Error(pendingHarnessWorkflowStartError || 'Failed to continue this harness decision.');
+      }
+
+      if (result.execution_mode === 'harness_decision') {
+        const nextDecision = buildPendingHarnessDecision(
+          result.harness_decision,
+          {
+            ...pendingHarnessDecision,
+            trigger_source: pendingHarnessDecision.trigger_source || 'refinement',
+            requested_workflow_id: workflowId,
+            recommended_workflow_id: result.workflow_id || workflowId || pendingHarnessDecision.recommended_workflow_id,
+            journey_id: pendingHarnessDecision.journey_id || null,
+            context_variables: contextVariables,
+            trigger_payload: triggerPayload,
+            change_request_id: result.change_request_id || pendingHarnessDecision.change_request_id,
+            revision_id: result.revision_id || pendingHarnessDecision.revision_id,
+          },
+        );
+        setPendingHarnessDecision(nextDecision);
+        setPendingHarnessDecisionError(null);
+        return;
+      }
+
+      if (['coding_worker', 'surface_regeneration'].includes(result.execution_mode)) {
+        await adoptInlineRefinement(result, {
+          artifactVersionId: request?.artifact_version_id,
+          artifactKind: request?.artifact_kind, artifactKey: request?.artifact_key || request?.artifact_kind,
+          buildRegistryId: pendingHarnessDecision.build_registry_id,
+          sourceChatId: submissionChatId, resolvedAppId: currentAppId, sourceArtifact,
+        });
+      }
+
+      setPendingHarnessDecision(null);
       setPendingHarnessDecisionError(null);
-      return;
+    } catch (error) {
+      if (currentChatIdRef.current !== submissionChatId) return;
+      setPendingHarnessDecisionError(error.message || 'The revision could not be opened.');
+      if (sourceToolCallId) dynamicUIHandler.processUIEvent({type:'ui.update', tool_call_id:sourceToolCallId,
+        patch:{refinement_error:error.message || 'The revision could not be opened.'}});
+    } finally {
+      if (currentChatIdRef.current === submissionChatId && sourceToolCallId) {
+        dynamicUIHandler.processUIEvent({type:'ui.update', tool_call_id:sourceToolCallId,
+          patch:{refinement_pending:false}});
+      }
     }
-
-    setPendingHarnessDecision(null);
-    setPendingHarnessDecisionError(null);
   }, [
+    adoptInlineRefinement,
+    findRevisionArtifact,
     buildPendingHarnessDecision,
     currentAppId,
     currentUserId,
@@ -1945,6 +2094,9 @@ const ChatPage = () => {
     };
     const artifactPayload = {
       ...cachedArtifact.payload,
+      // Passive UI surfaces do not await a tool response. The persisted artifact
+      // stores interaction_type, while live events also carry awaiting_response.
+      ...(cachedArtifact.payload.interaction_type === 'ui_surface' ? { awaiting_response: false } : {}),
       artifact_id: deriveArtifactId(cachedArtifact.payload, cachedArtifact.tool_call_id || cachedArtifact.tool_name),
     };
     const restoredArtifactMessage = {
@@ -1995,6 +2147,13 @@ const ChatPage = () => {
 
     if (isArtifactDisplay) {
       setCurrentArtifactMessages((prev) => {
+        const continuation = reviewContinuationRef.current;
+        if (continuation?.chat_id === targetChatId
+            && continuation.target_app_id === artifactPayload.target_app_id
+            && continuation.build_registry_id === artifactPayload.build_registry_id
+            && continuation.artifact_version_id === artifactPayload.artifact_version_id) {
+          return [restoredArtifactMessage];
+        }
         if (Array.isArray(prev) && prev.length > 0) {
           return prev;
         }
@@ -2092,7 +2251,8 @@ const ChatPage = () => {
     try {
       const meta = await api.get(`/api/chats/meta/${encodedAppId}/${encodedWorkflow}/${encodedChatId}`);
       // A forced terminal-status refresh supersedes older metadata, including its cleanup.
-      if (chatMetaHydrationInFlightRef.current.get(metaKey) !== requestId) return false;
+      if (chatMetaHydrationInFlightRef.current.get(metaKey) !== requestId
+          || currentChatIdRef.current !== targetChatId) return false;
       if (!meta) {
         return false;
       }
@@ -2254,7 +2414,7 @@ const ChatPage = () => {
           setStoredChatCacheSeed(metaChatId, data.cache_seed);
         }
       }
-      if (data.chat_exists === false) {
+      if (data.chat_exists === false && reviewContinuationRef.current?.chat_id !== metaChatId) {
         // Backend indicates this chat_id had no persisted session (fresh after client-side reuse)
         setChatExists(false);
         clearStoredArtifactState(metaChatId);
@@ -2300,7 +2460,7 @@ const ChatPage = () => {
                 setStoredChatCacheSeed(metaChatId, metaData.cache_seed);
               }
             }
-            if (metaData.chat_exists === false) {
+            if (metaData.chat_exists === false && reviewContinuationRef.current?.chat_id !== metaChatId) {
               setChatExists(false);
               clearStoredArtifactState(metaChatId);
               setCurrentArtifactMessages([]);
@@ -3580,7 +3740,9 @@ const ChatPage = () => {
         const isCompletionForAbandonedChat = Boolean(
           completedChatId && activeChatIdNow && completedChatId !== activeChatIdNow,
         );
-        if (!pendingTransitionIdRef.current && !isHumanInTheLoop && !isCompletionForAbandonedChat) {
+        const isRevisionHandoff = Boolean(revisionHandoffRef.current
+          && revisionHandoffRef.current.chatId === (completedChatId || activeChatIdNow));
+        if (!pendingTransitionIdRef.current && !isHumanInTheLoop && !isCompletionForAbandonedChat && !isRevisionHandoff) {
           const duration = data.duration_sec || data.data?.duration_sec;
           const tokensUsed = data.total_tokens || data.data?.total_tokens;
           // Only carry a summary when a field actually has a value. An object
@@ -3596,7 +3758,7 @@ const ChatPage = () => {
         }
         return;
       }
-      case 'chat.revision_requested': {
+      case 'revision_requested': {
         // Emitted by AppReview's submit_revision_request tool when the user
         // requests changes. Route into the refinement control plane and switch
         // the active chat session to the new workflow in-place.
@@ -3634,7 +3796,23 @@ const ChatPage = () => {
         }
         const triggerPayload = {
           refinement_request: refinementRequest,
+          coding_request: {},
         };
+        const sourceChatId = currentChatId;
+        const sourceArtifact = findRevisionArtifact(buildRegistryId, artifactKind, artifactVersionId);
+        const sourceToolCallId = sourceArtifact?.tool_call_id;
+        const isCurrentRevision = () => currentChatIdRef.current === sourceChatId;
+        revisionHandoffRef.current = { chatId: sourceChatId };
+        if (pendingTransitionIdRef.current === 'workflow_complete') {
+          setPendingTransitionId(null);
+          setPendingTransitionContext({});
+        }
+        if (sourceToolCallId) {
+          dynamicUIHandler.processUIEvent({
+            type: 'ui.update', tool_call_id: sourceToolCallId,
+            patch: { refinement_pending: true, refinement_error: null },
+          });
+        }
         return authFetch('/api/workflows/trigger', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -3649,42 +3827,15 @@ const ChatPage = () => {
         }, { auth })
           .then(async (res) => {
             if (!res.ok) {
-              throw new Error('The revision could not be started. Please retry from the app review.');
+              const errorBody = await res.json().catch(() => null);
+              const detail = typeof errorBody?.detail === 'string' ? errorBody.detail.trim() : '';
+              throw new Error(detail || 'The revision could not be started. Please retry from the app review.');
             }
             const triggerData = await res.json();
+            if (!isCurrentRevision()) return;
             if (['coding_worker', 'surface_regeneration'].includes(triggerData.execution_mode)) {
-              const result = triggerData.execution_mode === 'coding_worker'
-                ? triggerData.coding_worker : triggerData.surface_result;
-              if (!result || !artifactVersionId || !buildRegistryId) {
-                throw new Error('The revision response was incomplete. Reopen the app review to inspect its current state.');
-              }
-              const bundleResponse = await authFetch(
-                `/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/bundle?build_registry_id=${encodeURIComponent(buildRegistryId)}`,
-                {}, { auth },
-              );
-              if (!bundleResponse.ok) {
-                throw new Error('The revision result could not be opened. Reopen the app review to inspect it.');
-              }
-              const bundle = await bundleResponse.json();
-              const workbenchUI = bundle.workbench_ui;
-              if (typeof workbenchUI?.component !== 'string' || !workbenchUI.component.trim()
-                  || typeof workbenchUI?.workflow_name !== 'string' || !workbenchUI.workflow_name.trim()) {
-                throw new Error('The revision result has no registered review surface. Reopen the app review.');
-              }
-              await dynamicUIHandler.processUIEvent({
-                type: 'ui.render', component: workbenchUI.component, workflow_name: workbenchUI.workflow_name,
-                tool_call_id: `refinement-${triggerData.refinement_session_id || artifactVersionId}`,
-                display: 'artifact', awaiting_response: false, interaction_type: 'ui_surface',
-                payload: {
-                  ...bundle.workbench,
-                  artifact_version_id: artifactVersionId, artifact_kind: artifactKind, artifact_key: artifactKey,
-                  build_registry_id: buildRegistryId, refinement_result: triggerData,
-                },
-              });
-              setPendingHarnessDecision(null);
-              setPendingHarnessDecisionError(null);
-              setLoading(false);
-              setPendingWorkflowReply(null);
+              await adoptInlineRefinement(triggerData, { artifactVersionId, artifactKind, artifactKey,
+                buildRegistryId, sourceChatId, resolvedAppId, sourceArtifact });
               return;
             }
             if (triggerData.execution_mode === 'workflow' && triggerData.chat_id && triggerData.workflow_id) {
@@ -3712,6 +3863,7 @@ const ChatPage = () => {
                   journey_id: triggerData.journey_id || null,
                   context_variables: {},
                   trigger_payload: triggerPayload,
+                  metadata: { source_chat_id: sourceChatId },
                 },
               );
               setPendingHarnessDecision(nextDecision);
@@ -3723,13 +3875,26 @@ const ChatPage = () => {
             }
           })
           .catch((err) => {
+            if (!isCurrentRevision()) return;
             console.error('❌ [ChatPage] revision trigger error:', err);
+            if (sourceToolCallId) dynamicUIHandler.processUIEvent({
+              type: 'ui.update', tool_call_id: sourceToolCallId,
+              patch: { refinement_pending: false, refinement_error: err.message || 'The revision could not be started.' },
+            });
             setLoading(false);
             setPendingWorkflowReply(null);
             setMessagesWithLogging(prev => [...prev, {
               id: `revision-error-${Date.now()}`, sender: 'system', agentName: 'System', isStreaming: false,
               content: err.message || 'The revision could not be started. Please retry from the app review.',
             }]);
+          })
+          .finally(() => {
+            if (isCurrentRevision() && sourceToolCallId) {
+              dynamicUIHandler.processUIEvent({
+                type: 'ui.update', tool_call_id: sourceToolCallId,
+                patch: { refinement_pending: false },
+              });
+            }
           });
       }
       case 'error': {
@@ -3771,7 +3936,7 @@ const ChatPage = () => {
       default:
         return;
     }
-  }, [activeChatId, activeWorkflowName, appId, auth, config, user, currentChatId, currentWorkflowName, rememberWorkflowChatSession, resolveKnownWorkflowName, sanitizeVisibleWorkflowMessages, setMessagesWithLogging, setWorkflowMessages, persistWorkflowTranscriptSnapshot, cacheWorkflowTranscriptMessage, extractAgentName, isSidePanelOpen, showInitSpinner, setLayoutMode, isMobileView, mobileDrawerState, setConversationMode, setActiveGeneralChatId, setGeneralChatSummary, hydrateGeneralTranscript, refreshGeneralSessions, setActiveChatId, setActiveWorkflowName, setCurrentChatId, setCurrentWorkflowName, applyArtifactUpdateForAction, updateArtifactPayload, applySessionStatePendingHarnessDecision, applySessionStatePendingTransition, buildPendingHarnessDecision, cacheServerLastArtifact, handleMissingBackendArtifact, urlWorkflowName, observeSessionMeta, hydrateServerArtifactForChat]);
+  }, [adoptInlineRefinement, findRevisionArtifact, activeChatId, activeWorkflowName, appId, auth, config, user, currentChatId, currentWorkflowName, rememberWorkflowChatSession, resolveKnownWorkflowName, sanitizeVisibleWorkflowMessages, setMessagesWithLogging, setWorkflowMessages, persistWorkflowTranscriptSnapshot, cacheWorkflowTranscriptMessage, extractAgentName, isSidePanelOpen, showInitSpinner, setLayoutMode, isMobileView, mobileDrawerState, setConversationMode, setActiveGeneralChatId, setGeneralChatSummary, hydrateGeneralTranscript, refreshGeneralSessions, setActiveChatId, setActiveWorkflowName, setCurrentChatId, setCurrentWorkflowName, applyArtifactUpdateForAction, updateArtifactPayload, applySessionStatePendingHarnessDecision, applySessionStatePendingTransition, buildPendingHarnessDecision, cacheServerLastArtifact, handleMissingBackendArtifact, urlWorkflowName, observeSessionMeta, hydrateServerArtifactForChat]);
   useEffect(() => {
     handleIncomingRef.current = handleIncoming;
   }, [handleIncoming]);
@@ -4449,7 +4614,7 @@ const ChatPage = () => {
           },
           onMessage: (data) => {
             // Ignore callbacks from stale sockets that are no longer active.
-            if (!connection || wsRef.current !== connection) {
+            if (!connection || wsRef.current !== connection || connection.chatId !== currentChatIdRef.current) {
               return;
             }
             if (handleIncomingRef.current) {

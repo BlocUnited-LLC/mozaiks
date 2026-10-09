@@ -30,7 +30,7 @@ const failureText = `The app build cannot continue.\n\n**Blocking errors:**\n\n$
 
 async function failureMessageFromEvent() {
   const source = await fs.readFile(path.join(ui, 'pages/ChatPage.js'), 'utf8');
-  const completion = source.split("case 'run_complete':")[1].split("case 'chat.revision_requested':")[0];
+  const completion = source.split("case 'run_complete':")[1].split("case 'revision_requested':")[0];
   let messages = [{ id: 'thinking', isThinking: true }];
   vm.runInNewContext(`(() => { switch (data.type) { case 'run_complete': ${completion} } })()`, {
     data: { type: 'run_complete', data: { status: 2, error: failureText } },
@@ -79,6 +79,7 @@ async function metadataHarness() {
   const state = {
     useCallback: fn => fn, currentAppId: 'execution-host', currentUserId: 'operator',
     currentChatId: 'failed-chat', currentWorkflowName: 'ExampleWorkflow',
+    currentChatIdRef: { current: 'failed-chat' },
     token: 'initial-token', resolveKnownWorkflowName: value => value,
     chatMetaHydratedRef: { current: new Set() },
     chatMetaHydrationInFlightRef: { current: new Map() },
@@ -94,6 +95,22 @@ async function metadataHarness() {
     workflow_name: 'ExampleWorkflow', last_artifact: { tool_name: 'ExistingReview' } });
   return { state, requests, observed, hydrate, meta };
 }
+
+test('late source-chat metadata cannot hydrate state after review succession', async () => {
+  const { state, requests, observed, hydrate, meta } = await metadataHarness();
+  const mutations = [];
+  for (const name of ['cacheServerLastArtifact', 'setLoading', 'setCacheSeed', 'setStoredChatCacheSeed', 'setChatExists']) {
+    state[name] = () => mutations.push(name);
+  }
+  const pending = hydrate();
+  state.currentChatIdRef.current = 'next-review';
+  requests[0].resolve({ ...meta(0), cache_seed: 'previous-seed' });
+  assert.equal(await pending, false);
+  assert.deepEqual(observed, []);
+  assert.deepEqual(mutations, []);
+  assert.equal(state.chatMetaHydrationInFlightRef.current.size, 0);
+  assert.equal(state.chatMetaHydratedRef.current.size, 0);
+});
 
 test('forced failure metadata bypasses an already hydrated artifact cache', async () => {
   const { requests, observed, hydrate, meta } = await metadataHarness();
@@ -137,7 +154,7 @@ test('ChatPage observes persisted status on reopen and refreshes it after termin
   const hydration = source.split('const hydrateServerArtifactForChat =')[1].split('const handleIncomingRef =')[0];
   assert.match(hydration, /await api\.get\(`\/api\/chats\/meta\//);
   assert.match(hydration, /observeSessionMeta\(meta\)/);
-  const completion = source.split("case 'run_complete':")[1].split("case 'chat.revision_requested':")[0];
+  const completion = source.split("case 'run_complete':")[1].split("case 'revision_requested':")[0];
   assert.match(completion, /hydrateServerArtifactForChat\(/);
   assert.match(completion, /force: true, reason: 'workflow_failed'/);
   assert.equal((source.match(/failedWorkflowRetry=\{failedWorkflowRetry.available \? failedWorkflowRetry : null\}/g) || []).length, 2);

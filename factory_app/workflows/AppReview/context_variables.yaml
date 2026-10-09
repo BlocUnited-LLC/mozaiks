@@ -129,6 +129,16 @@ definitions:
       type: computed
       default: false
 
+  review_notice:
+    type: string
+    writer_ids: [transition_router]
+    description: >
+      Server-derived explanation when a prior inline edit needs repair or
+      produced no saved candidate. The selected artifact remains authoritative.
+    source:
+      type: state
+      default: null
+
   revision_submitted:
     type: boolean
     description: >

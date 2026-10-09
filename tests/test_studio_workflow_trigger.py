@@ -200,7 +200,8 @@ def _refinement_session_doc(
     )
 
 
-def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch):
+@pytest.mark.parametrize("source_chat_id", [None, "review-original"])
+def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch, _owned_build_target, source_chat_id):
     from mozaiksai.core.auth import reset_auth_adapter
 
     monkeypatch.setenv("AUTH_ENABLED", "false")
@@ -208,6 +209,8 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
     reset_auth_adapter()
     from mozaiksai.hosts import studio as studio_app
 
+    source_binding = AsyncMock(return_value=_BINDING.model_dump())
+    _owned_build_target.repo = SimpleNamespace(get_owned_chat_binding=source_binding)
     captured_prepare: dict = {}
     persisted_changes: list[dict] = []
     persisted_invalidations: list[dict] = []
@@ -280,6 +283,7 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
         json={
             "build_registry_id": "appreg_1",
             "trigger_source": "refinement",
+            **({"source_chat_id": source_chat_id} if source_chat_id else {}),
             "trigger_payload": {
                 "refinement_request": {
                     "artifact_kind": "app_bundle",
@@ -296,6 +300,13 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
     assert response.status_code == 200
     no_inline.assert_not_awaited()
     assert "coding_request" not in captured_prepare["trigger_payload"]
+    assert captured_prepare["source_chat_id"] == source_chat_id
+    if source_chat_id:
+        source_binding.assert_awaited_once_with(
+            app_id="factory", owner_user_id="demo-user", chat_id=source_chat_id,
+        )
+    else:
+        source_binding.assert_not_awaited()
     assert response.json() == {
         "execution_mode": "workflow",
         "chat_id": "chat_refine_1",
@@ -564,13 +575,29 @@ def test_studio_trigger_endpoint_rejects_refinement_when_control_plane_disabled(
     assert "Control-plane harness" not in detail
 
 
-def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch):
+@pytest.mark.parametrize("continuation_case", ["none", "ready", "unavailable"])
+def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch, _owned_build_target, continuation_case):
     from mozaiksai.core.auth import reset_auth_adapter
 
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
     reset_auth_adapter()
     from mozaiksai.hosts import studio as studio_app
+
+    continuation = None
+    continuation_error = None
+    if continuation_case != "none":
+        _owned_build_target.repo = SimpleNamespace(get_owned_chat_binding=AsyncMock(return_value=_BINDING.model_dump()))
+        continuation = {"chat_id": "review-child", "workflow_id": "AppReview", "artifact_version_id": "av_child_code_1"}
+        reopen = AsyncMock(return_value=continuation)
+        if continuation_case == "unavailable":
+            reopen.side_effect = ValueError("superseded")
+            continuation = None
+            continuation_error = (
+                "The edit finished, but its review chat could not be reopened. "
+                "Open the app's saved builds to review the result."
+            )
+        monkeypatch.setattr(studio_app, "continue_inline_app_review", reopen)
 
     persisted_changes: list[dict] = []
     persisted_sessions: list[dict] = []
@@ -655,6 +682,7 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch)
         json={
             "build_registry_id": "appreg_1",
             "trigger_source": "refinement",
+            **({"source_chat_id": "review-parent"} if continuation_case != "none" else {}),
             "trigger_payload": {
                 "refinement_request": {
                     "artifact_kind": "app_bundle",
@@ -682,6 +710,8 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch)
         "routing_explanation": "Re-entering AppGenerator to apply a scoped patch to the app bundle.",
         "rerouted_by_dependency": False,
         "refinement_session_id": "rs_code_1",
+        "review_continuation": continuation,
+        "review_continuation_error": continuation_error,
             "harness_decision": {
                 "decision_type": "auto_patch",
                 "message": "Scoped patch staged for review.",
@@ -735,6 +765,11 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch)
             },
     }
     assert persisted_changes[0]["router_decision"]["execution_mode"] == "coding_worker"
+    if continuation_case != "none":
+        reopen.assert_awaited_once()
+        assert reopen.await_args.kwargs["source_chat_id"] == "review-parent"
+        assert reopen.await_args.kwargs["baseline_id"] == "av_456"
+        assert reopen.await_args.kwargs["binding"] == _BINDING
     assert persisted_sessions == [
         {
             "app_id": persisted_changes[0]["app_id"],
@@ -1303,6 +1338,8 @@ def test_studio_trigger_endpoint_returns_core_harness_decision_before_launch(mon
             "metadata": {
                 "change_class": "core",
                 "workflow_sequence": "full_rebuild",
+                "build_registry_id": "appreg_1",
+                "source_chat_id": None,
                     "scope_summary": "Restart from ValueEngine and invalidate downstream outputs that depend on the app bundle.",
             },
         },
@@ -1312,19 +1349,22 @@ def test_studio_trigger_endpoint_returns_core_harness_decision_before_launch(mon
     ))
     pending = snapshot["pending_harness_decision"]
     assert pending["metadata"]["build_registry_id"] == "appreg_1"
+    assert pending["metadata"]["source_chat_id"] is None
     assert pending["requested_workflow_id"] is None
     assert "harness_action" not in pending["trigger_payload"]["refinement_request"]["extra"]
 
 
 @pytest.mark.parametrize("continuation", ["run_recommended_workflow", "confirm_recommended_workflow"])
-@pytest.mark.parametrize("mutation", [None, "request", "artifact", "revision", "action", "context", "route"])
-def test_studio_trigger_endpoint_reuses_prelaunch_revision_intent_on_confirm(monkeypatch, mutation, continuation):
+@pytest.mark.parametrize("mutation", [None, "request", "artifact", "revision", "action", "context", "route", "source", "source_missing"])
+def test_studio_trigger_endpoint_reuses_prelaunch_revision_intent_on_confirm(monkeypatch, _owned_build_target, mutation, continuation):
     from mozaiksai.core.auth import reset_auth_adapter
 
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
     reset_auth_adapter()
     from mozaiksai.hosts import studio as studio_app
+
+    _owned_build_target.repo = SimpleNamespace(get_owned_chat_binding=AsyncMock(return_value=_BINDING.model_dump()))
 
     expected_workflow = "ValueEngine" if continuation == "confirm_recommended_workflow" else "AppGenerator"
     expected_sequence = "full_rebuild" if continuation == "confirm_recommended_workflow" else "app_revision"
@@ -1388,6 +1428,7 @@ def test_studio_trigger_endpoint_reuses_prelaunch_revision_intent_on_confirm(mon
         json={
             "build_registry_id": "appreg_1",
             "trigger_source": "refinement",
+            "source_chat_id": "review-original",
             "trigger_payload": {
                 "refinement_request": {
                     "artifact_kind": "app_bundle",
@@ -1403,6 +1444,7 @@ def test_studio_trigger_endpoint_reuses_prelaunch_revision_intent_on_confirm(mon
 
     assert first.status_code == 200
     assert first.json()["execution_mode"] == "harness_decision"
+    assert first.json()["harness_decision"]["metadata"]["source_chat_id"] == "review-original"
     assert create_calls and len(create_calls) == 1
     target_router = studio_app.get_session_router().for_target("app_1")
     persisted_state = asyncio.run(target_router.get_session_snapshot(app_id="factory", user_id="demo-user"))
@@ -1410,6 +1452,7 @@ def test_studio_trigger_endpoint_reuses_prelaunch_revision_intent_on_confirm(mon
     assert persisted_state["active_change_request_id"] == "cr_core_1"
     assert persisted_state["active_revision_id"]
     assert captured_pending_harness_decision["trigger_payload"]["refinement_request"]["build_record_id"] == "av_core_1"
+    assert captured_pending_harness_decision["metadata"]["source_chat_id"] == "review-original"
 
     monkeypatch.setattr(harness, "prepare_coding_request", no_inline)
     monkeypatch.setattr(harness, "prepare_contract_surface_request", no_inline)
@@ -1433,6 +1476,10 @@ def test_studio_trigger_endpoint_reuses_prelaunch_revision_intent_on_confirm(mon
         classifier.side_effect = _async_classifier(
             change_class="feature" if continuation == "confirm_recommended_workflow" else "core", rationale="Different route", confidence=0.95, signals=[],
         )
+    elif mutation == "source":
+        confirmed["source_chat_id"] = "another-owned-review"
+    elif mutation == "source_missing":
+        confirmed.pop("source_chat_id")
     second = client.post("/api/workflows/trigger", json=confirmed)
     no_inline.assert_not_awaited()
     if mutation is not None:

@@ -97,6 +97,12 @@ class _CapturingArtifactStore:
         self.calls: list[dict[str, Any]] = []
         self._child_id = child_id
 
+    async def get_build_record(self, *, app_id: str, build_record_id: str) -> BuildRecord:
+        return BuildRecord(
+            id=build_record_id, app_id=app_id, build_family="app_bundle", build_key="app_bundle",
+            version_number=1, lineage_root_id=build_record_id,
+        )
+
     async def create_build_record(self, **kwargs: Any) -> BuildRecord:
         self.calls.append(dict(kwargs))
         return BuildRecord(id=self._child_id, version_number=1, lineage_root_id="parent", **kwargs)
@@ -443,7 +449,7 @@ async def test_broken_artifact_store_sets_failed_status_and_surfaces_error(tmp_p
     result.error and result.metadata so operators can diagnose the root cause.
     """
 
-    class _BrokenStore:
+    class _BrokenStore(_CapturingArtifactStore):
         async def create_build_record(self, **kwargs: Any) -> None:
             raise RuntimeError("artifact store unavailable")
 

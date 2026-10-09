@@ -62,6 +62,25 @@ This project follows a practical pre-1.0 changelog format:
 - Optional native browser navigation for the shared OIDC adapter, with an
   Android Common Ground reference and authenticated emulator acceptance workflow.
 
+- AppReview shows an interactive app preview in the chat artifact panel, using
+  the same sandbox controls as the saved-build workbench. Inline edits reopen
+  review against the settled build so another change can be requested in chat.
+  Hiding the panel retains the running preview; failed drafts cannot replace a
+  checked preview or inherit their parent's activation checks.
+  Review replies route back to the agent and start refinement against the owned
+  saved draft. Completion notices no longer obscure a pending edit or its error.
+  The saved-build page can reopen the current draft in chat without allocating
+  another build; ongoing edits show progress instead of a failed-check heading.
+  Review handoffs preserve the visible conversation and select the successor
+  chat URL so further edits continue without a page reload. Reloading a saved
+  draft waits for its checks before showing a review status.
+  New chat refinement ZIPs use the canonical bundle root required by saved
+  preview and revision validation; pre-fix local drafts need a new build.
+  Reloading recovers existing previews and their Stop controls from owned build
+  records, including when another edit finishes before recovery completes.
+  A saved chat for another app can recover and release an older owned preview
+  when the owner's preview quota is full.
+
 - An experimental Capacitor Android packaging reference for Common Ground,
   with web-asset verification, a diagnostic debug APK build in CI, and explicit
   native integration prerequisites.
@@ -431,12 +450,28 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Resuming an AppReview chat now restores scoped persisted workflow state to the
+  durable AG2 channel under replay validation. Router-owned build checks no
+  longer fail as if the user tried to rewrite them, while live user context
+  still cannot change those checks.
+
+- Generated-app runtime smoke now keeps the Windows Python user-site path in its
+  scrubbed child environment, so local builds with user-installed dependencies
+  reach the app checks instead of failing on an unrelated missing import.
 - Pin shared-shell text checkouts to LF so installed Android framework resources
   have identical provenance on Windows and Linux. Binary assets stay unchanged.
 
 - Android apps can use a separately registered public sign-in client on the
   same backend as the browser app. Native sign-in requires the configured
   Android profile and a callback matching the packaged application.
+
+- Refinement retains the saved app's selected capability packs during validation
+  and later revisions, so declared pack support files remain recognized.
+- Studio keeps an existing preview visible while a newer version is ready,
+  labels the version actually displayed, and offers an explicit **Update preview**.
+  Detailed validation errors and logs start collapsed while failed checks remain
+  visible. Stopping briefly retries busy responses from background health checks;
+  a replacement waits until the prior preview is confirmed stopped.
 
 - Refinement confirmations ignore unbound nested actions and retain the original
   request, build and revision through ChatPage. Pending decisions normalize their

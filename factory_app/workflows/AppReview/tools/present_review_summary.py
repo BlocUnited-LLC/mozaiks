@@ -10,7 +10,7 @@ async def present_review_summary(context_variables: Any | None = None) -> dict[s
     """Called by ReviewAgent on its first turn.
 
     Reads build validation context from context_variables and emits an
-    AppReviewSummary UI surface artifact in the chat.
+    app review workspace artifact, including its preview, in the chat.
     """
     ctx = context_variables or {}
 

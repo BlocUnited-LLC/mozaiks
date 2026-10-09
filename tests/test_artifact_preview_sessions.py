@@ -184,6 +184,85 @@ async def test_two_workers_reuse_the_same_durable_preview():
 
 
 @pytest.mark.asyncio
+async def test_recover_build_keeps_all_versions_across_worker_restart_without_provider_access(monkeypatch):
+    adapter = FakeSandboxAdapter()
+    manager = _manager(adapter)
+    first = await _create(manager, "artifact-old")
+    await _sync_manifest(manager, first)
+    await manager.start(first.sandbox_id)
+    second = await _create(manager, "artifact-new")
+    before = list(adapter.calls)
+    restarted = _manager(adapter, store=manager._store)
+    restarted._max_owner_sessions = 1  # A lower quota must not hide existing handles.
+    monkeypatch.setattr(restarted, "_provider_resolver", lambda: pytest.fail("Recovery contacted provider"))
+    monkeypatch.setattr(restarted, "status", AsyncMock(side_effect=AssertionError("Recovery probed health")))
+
+    recovered = await restarted.list_for_build(**IDENTITY)
+
+    assert [item.sandbox_id for item in recovered] == [second.sandbox_id, first.sandbox_id]
+    assert [item.artifact_id for item in recovered] == ["artifact-new", "artifact-old"]
+    assert recovered[1].status == "running"
+    assert recovered[1].preview_url == "https://preview.example"
+    assert adapter.calls == before
+
+
+@pytest.mark.asyncio
+async def test_recover_owner_finds_other_builds_after_chat_remount_without_leaking_other_owners():
+    adapter = FakeSandboxAdapter()
+    manager = _manager(adapter)
+    first = await _create(manager)
+    second = await _create(manager, "artifact-b", build_registry_id="appreg-b")
+    await _create(manager, "artifact-c", user_id="someone-else")
+    await _create(manager, "artifact-d", app_id="another-host")
+    before = list(adapter.calls)
+
+    recovered = await manager.list_for_owner(app_id="factory", user_id="tester")
+
+    assert {state.sandbox_id for state in recovered} == {first.sandbox_id, second.sandbox_id}
+    assert {state.build_registry_id for state in recovered} == {"appreg-a", "appreg-b"}
+    assert adapter.calls == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["app_id", "user_id", "target_app_id", "build_registry_id"])
+async def test_recover_build_excludes_foreign_scope_before_status_or_cleanup(monkeypatch, field):
+    adapter = FakeSandboxAdapter()
+    manager = _manager(adapter)
+    state = await _create(manager)
+    monkeypatch.setattr(preview_sessions, "_utcnow", lambda: state.expires_at + timedelta(seconds=1))
+    before = list(adapter.calls)
+
+    assert await manager.list_for_build(**{**IDENTITY, field: "foreign"}) == []
+
+    assert adapter.calls == before
+    assert await manager._store.get(state.sandbox_id) is not None
+
+
+@pytest.mark.asyncio
+async def test_recover_build_retains_failed_cleanup_and_expired_handles(monkeypatch):
+    adapter = FakeSandboxAdapter()
+    manager = _manager(adapter)
+    state = await _create(manager)
+    await _sync_manifest(manager, state)
+    await manager.start(state.sandbox_id)
+    adapter.terminate_session = AsyncMock(return_value=False)
+    with pytest.raises(RuntimeError):
+        await manager.stop(state.sandbox_id)
+
+    recovered = await manager.list_for_build(**IDENTITY)
+    assert len(recovered) == 1 and recovered[0].sandbox_id == state.sandbox_id
+    assert recovered[0].status == "error" and recovered[0].preview_url is None
+    assert "cleanup" in recovered[0].last_error.lower()
+    monkeypatch.setattr(preview_sessions, "_utcnow", lambda: state.expires_at + timedelta(seconds=1))
+    expired = await manager.list_for_build(**IDENTITY)
+    assert expired[0].sandbox_id == state.sandbox_id
+    assert expired[0].status == "error" and expired[0].preview_url is None
+    assert "expired" in expired[0].last_error.lower()
+    assert await manager._store.get(state.sandbox_id) is not None
+    adapter.terminate_session.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_workers_share_one_health_check_per_interval(monkeypatch):
     adapter = FakeSandboxAdapter()
     database = FakePreviewDatabase()
@@ -573,18 +652,75 @@ def api_client(monkeypatch):
             raise HTTPException(status_code=404, detail="Artifact not found")
         return "preview-app", {"app.json": MANIFEST}
 
+    async def resolve_build(user, registry_id):
+        if (user.app_id, user.user_id, registry_id) != ("factory", "tester", "appreg-a"):
+            raise HTTPException(status_code=404, detail="Build target not found")
+        return "preview-app"
+
     async def websocket_auth(_socket):
         return WebSocketUser(user_id=principal.user_id, app_id=principal.app_id, email=None, name=None, roles=[], scopes=[], raw_claims={}, provider="test")
 
     monkeypatch.setattr("mozaiksai.hosts.routers.sandbox.authenticate_websocket", websocket_auth)
     app = FastAPI()
-    app.include_router(create_sandbox_router(resolve_scope=lambda user: (user.app_id, user.user_id), resolve_artifact=resolve_artifact))
+    app.include_router(create_sandbox_router(
+        resolve_scope=lambda user: (user.app_id, user.user_id), resolve_build=resolve_build,
+        resolve_artifact=resolve_artifact,
+    ))
     app.dependency_overrides[require_user_scope] = lambda: principal
     with TestClient(app) as client:
         yield client, adapter, principal
 
 
 CREATE_URL = "/api/artifacts/artifact-a/sandbox?build_registry_id=appreg-a"
+RECOVER_URL = "/api/sandbox?build_registry_id=appreg-a"
+
+
+def test_router_recovers_actual_identity_and_safe_dto_without_provider_calls(api_client):
+    client, adapter, _ = api_client
+    assert client.get(RECOVER_URL).json() == {"sessions": []}
+    assert adapter.calls == []
+    sid = client.post(CREATE_URL).json()["sandboxId"]
+    client.post(f"/api/sandbox/{sid}/start")
+    before = list(adapter.calls)
+
+    response = client.get(RECOVER_URL)
+
+    assert response.status_code == 200
+    assert response.json() == {"sessions": [{
+        "sandboxId": sid, "artifactId": "artifact-a", "buildRegistryId": "appreg-a",
+        "status": "running", "previewUrl": "https://preview.example", "lastError": None,
+    }]}
+    assert client.get("/api/sandbox").json() == response.json()
+    assert adapter.calls == before
+    assert client.post(f"/api/sandbox/{sid}/stop").status_code == 200
+    assert client.get(RECOVER_URL).json() == {"sessions": []}
+
+
+def test_router_requires_owned_registry_before_reading_sessions(api_client, monkeypatch):
+    client, adapter, _ = api_client
+    listing = AsyncMock(side_effect=AssertionError("Foreign registry read preview ledger"))
+    monkeypatch.setattr(preview_sessions._manager, "list_for_build", listing)
+    assert client.get("/api/sandbox").json() == {"sessions": []}
+    assert client.get("/api/sandbox?build_registry_id=foreign").status_code == 404
+    listing.assert_not_awaited()
+    assert not adapter.calls
+
+
+def test_router_recovery_failure_never_becomes_empty_success_or_leaks_details(api_client, monkeypatch):
+    client, adapter, _ = api_client
+    monkeypatch.setattr(preview_sessions._manager, "list_for_build", AsyncMock(
+        side_effect=RuntimeError("private-database-credential"),
+    ))
+    response = client.get(RECOVER_URL)
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Preview recovery unavailable; try again shortly"}
+    monkeypatch.setattr(preview_sessions._manager, "list_for_owner", AsyncMock(
+        side_effect=RuntimeError("private-database-credential"),
+    ))
+    response = client.get("/api/sandbox")
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Preview recovery unavailable; try again shortly"}
+    assert not adapter.calls
 
 
 def test_router_create_sync_start_status_stop(api_client):
@@ -617,6 +753,8 @@ def test_all_http_operations_enforce_owner(api_client, field, value):
     for path in ("start", "stop", "sync"):
         assert client.post(f"/api/sandbox/{sid}/{path}", json={"files": [], "deleted": []}).status_code == 404
     assert client.get(f"/api/sandbox/{sid}/status").status_code == 404
+    assert client.get(RECOVER_URL).status_code == 404
+    assert client.get("/api/sandbox").json() == {"sessions": []}
     assert len(adapter.calls) == count
 
 

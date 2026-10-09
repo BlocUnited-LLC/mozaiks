@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from types import EllipsisType
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -55,6 +56,7 @@ class AppRegistryService:
         resume: bool = False,
         refinement: bool = False,
         allow_create: bool = False,
+        allow_current_build: bool = False,
     ) -> RunBuildBinding:
         """Bind a build through authenticated registry/session ownership.
 
@@ -105,7 +107,18 @@ class AppRegistryService:
                 raise ValueError("Persisted build target does not match the registry")
             if binding is None and not refinement:
                 active_chat = record.get("active_chat_id")
-                if not active_chat:
+                if not active_chat and allow_current_build:
+                    current = record.get("current_build_run") or {}
+                    if (record.get("lifecycle_state") not in {"review", "needs_revision", "active"}
+                            or not current.get("artifact_version_id")):
+                        raise ValueError("Registered app has no saved build available for review")
+                    # Inline execution can save a build without a workflow chat.
+                    # Factory review may bind that owned build; it does not start one.
+                    binding = RunBuildBinding.model_validate({
+                        "build_registry_id": build_registry_id, "target_app_id": record["app_id"],
+                        "build_id": current.get("build_id"), "phase": current.get("phase"),
+                    })
+                elif not active_chat:
                     if not allow_create or record.get("lifecycle_state") != "draft":
                         raise ValueError("Registered app has no resumable build session")
                     binding = RunBuildBinding(
@@ -276,6 +289,7 @@ class AppRegistryService:
         current_build_run: dict[str, Any] | None = None,
         expected_build_id: str | None = None,
         expected_lifecycle_state: str | None = None,
+        expected_active_chat_id: str | None | EllipsisType = ...,
     ) -> dict[str, Any]:
         payload = ensure_status_payload(
             build_registry_id=build_registry_id,
@@ -299,6 +313,7 @@ class AppRegistryService:
             current_build_run=payload["current_build_run"],
             expected_build_id=expected_build_id,
             expected_lifecycle_state=expected_lifecycle_state,
+            expected_active_chat_id=expected_active_chat_id,
         )
         return {"success": app is not None, "app": app}
 

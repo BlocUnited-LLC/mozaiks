@@ -463,6 +463,9 @@ path collisions before materialization; foreign ownership, retired records,
 missing content, and incomplete loading fail rather than producing a partial
 baseline. Binary assets and SVGs remain in the immutable source archive,
 outside AG2 context.
+Coding-worker refinement archives use the same canonical top-level bundle folder
+recorded by `bundle_name`; the verifier does not reinterpret older rootless ZIPs.
+Pre-fix local drafts need a new canonical build before preview or revision.
 Security readiness may explicitly read SVG text for its secret scan. Assembly
 rechecks the baseline, then applies schema/task outputs, accumulated repairs,
 and explicit deletions in that order. Finalization rechecks the selected record,
@@ -1167,6 +1170,9 @@ After it, the gate runs `app_runtime_smoke`: in a child process with a scrubbed
 environment and a hard time limit, the bundle is booted on a disposable
 database and its module actions are called as two signed-in users (see
 [Runtime Smoke Gate](../app/generated-app-functional-acceptance.md#runtime-smoke-gate)).
+The child receives only operating-system startup paths and the current code's
+import roots; on Windows, this includes `APPDATA` so Python can locate the same
+user-site packages as the factory process. Host credentials are not forwarded.
 Generated code does not run in the factory process. The result is persisted as
 `app_runtime_smoke_result` and inside `app_bundle_acceptance_result`, which the
 downloaded bundle's metadata carries. Failures join the bundle repair

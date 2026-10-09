@@ -23,12 +23,25 @@ from scripts.smoke_refinement_live_coding_worker import (
     REQUEST_ID,
     REQUEST_TEXT,
     _manual_validation_runner,
+    _scenario_specs,
     _SmokeArtifactStore,
     _SmokeControlPlaneToolExecutor,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_PATH = REPO_ROOT / "tests" / "fixtures" / "refinement_live_coding_worker_output.json"
+
+
+@pytest.mark.asyncio
+async def test_smoke_store_resolves_only_owned_scenario_parents():
+    store = _SmokeArtifactStore()
+    for spec in _scenario_specs():
+        parent = await store.get_build_record(app_id=spec.app_id, build_record_id=spec.artifact_version_id)
+        assert parent.id == spec.artifact_version_id
+        assert parent.commit_metadata.metadata["capability_packs"] == []
+        assert await store.get_build_record(app_id="foreign", build_record_id=spec.artifact_version_id) is None
+    assert await store.get_build_record(app_id=APP_ID, build_record_id="unknown") is None
+    assert store.created_versions == []
 
 
 def _require_fixture() -> dict:

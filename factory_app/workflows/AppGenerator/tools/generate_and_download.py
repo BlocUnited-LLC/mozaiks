@@ -648,6 +648,7 @@ async def _register_app_bundle_artifact_version(
     bundle_content_metadata: dict[str, Any] = {
         "artifact_path": str(zip_path.resolve()),
         "bundle_name": bundle_name,
+        "capability_packs": _selected_capability_packs(context_variables),
     }
     if app_dir is not None:
         bundle_content_metadata["workspace_dir"] = str(app_dir.resolve())
