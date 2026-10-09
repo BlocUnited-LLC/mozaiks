@@ -149,6 +149,45 @@ def test_preview_provider_rejects_unknown_explicit_value():
         resolve_preview_provider({"MOZAIKS_PREVIEW_PROVIDER": "modal"})
 
 
+@pytest.mark.asyncio
+async def test_restarted_preview_uses_stored_e2b_provider_after_selection_changes(monkeypatch):
+    import mozaiksai.core.adapters.docker_sandbox as docker_sandbox
+    import mozaiksai.core.adapters.e2b_sandbox as e2b_sandbox
+
+    e2b = FakeSandboxAdapter()
+    docker = FakeSandboxAdapter()
+    monkeypatch.setattr(e2b_sandbox, "get_e2b_sandbox", lambda: e2b)
+    monkeypatch.setattr(docker_sandbox, "docker_available", lambda: True)
+    monkeypatch.setattr(docker_sandbox, "get_docker_sandbox", lambda: docker)
+    monkeypatch.setenv("E2B_API_KEY", "test-key")
+    monkeypatch.setenv("MOZAIKS_PREVIEW_PROVIDER", "e2b")
+
+    database = FakePreviewDatabase()
+    first = ArtifactPreviewSessionManager(store=_store(database))
+    state = await _create(first)
+    await _sync_manifest(first, state)
+    monkeypatch.setenv("MOZAIKS_PREVIEW_PROVIDER", "docker")
+
+    restarted = ArtifactPreviewSessionManager(store=_store(database))
+    await restarted.sync(state.sandbox_id, [{"path": "app.json", "content": MANIFEST}], [])
+    assert any(name == "write_files" for name, _ in e2b.calls)
+    assert docker.calls == []
+
+    # A lost E2B credential cannot release the old reservation or stop a
+    # different provider. Cleanup can retry once the credential returns.
+    monkeypatch.delenv("E2B_API_KEY")
+    await restarted.cleanup(expired_only=False)
+    assert await restarted._store.get(state.sandbox_id) is not None
+    assert docker.calls == []
+    monkeypatch.setenv("E2B_API_KEY", "test-key")
+    await restarted.cleanup(expired_only=False)
+    assert await restarted._store.get(state.sandbox_id) is None
+    assert [name for name, _ in e2b.calls].count("terminate_session") == 1
+
+    await _create(restarted, "next-artifact")
+    assert [name for name, _ in docker.calls].count("create_session") == 1
+
+
 @pytest.mark.parametrize("path", ["/etc/passwd", "C:/outside", "../outside", "a/../../outside", "", ".", "a\x00b"])
 def test_safe_relpath_rejects_unsafe_paths(path):
     assert _safe_relpath(path) is None

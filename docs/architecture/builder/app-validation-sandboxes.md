@@ -341,6 +341,12 @@ provider-published hostname via Vite's
 subdomains. Explicit `E2B_TIMEOUT` caps one-shot validation even when a tool
 requests a longer timeout.
 
+`MOZAIKS_PREVIEW_PROVIDER` selects the provider for new sessions. Existing
+sessions, including sealed candidates, use their persisted provider for status,
+operations, and cleanup after a worker restart or provider switch. Missing
+credentials leave the old session recorded for cleanup retry; they do not route
+it to the newly selected provider or release its capacity.
+
 `MongoPreviewStore` owns immutable host/user/artifact/build/target bindings in
 the framework system database. `PreviewCoordination` holds bounded admission
 reservations; `PreviewSessions` holds provider IDs, status, operation leases,

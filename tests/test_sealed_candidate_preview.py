@@ -8,12 +8,13 @@ from unittest.mock import patch
 import pytest
 
 from mozaiksai.core.adapters.docker_sandbox import DockerSandboxAdapter
+from mozaiksai.core.sandbox.preview_sessions import ArtifactPreviewSessionManager
 from mozaiksai.core.semantics.archive import (
     ArchiveEntry,
     archive_digest,
     build_deterministic_archive,
 )
-from tests.test_artifact_preview_sessions import FakeSandboxAdapter, _manager
+from tests.test_artifact_preview_sessions import FakeSandboxAdapter, _manager, _store
 
 IMAGE_ID = "sha256:" + "a" * 64
 IDENTITY = dict(
@@ -32,6 +33,32 @@ def _archive(**files: bytes) -> bytes:
 class _SealedAdapter(FakeSandboxAdapter):
     async def stage_sealed_files(self, **kwargs):
         self.calls.append(("stage_sealed_files", kwargs))
+
+
+@pytest.mark.asyncio
+async def test_sealed_cleanup_after_restart_uses_stored_docker_provider(monkeypatch):
+    import mozaiksai.core.adapters.docker_sandbox as docker_sandbox
+
+    adapter = _SealedAdapter()
+    monkeypatch.setattr(docker_sandbox, "docker_available", lambda: True)
+    monkeypatch.setattr(docker_sandbox, "get_docker_sandbox", lambda: adapter)
+    monkeypatch.setenv("MOZAIKS_PREVIEW_PROVIDER", "docker")
+    store = _store()
+    first = ArtifactPreviewSessionManager(store=store, startup_timeout_seconds=0)
+    data = _archive(**{"app/app.json": APP_JSON})
+    state = await first.create_sealed_candidate(
+        **IDENTITY, archive_bytes=data, archive_sha256=archive_digest(data), image_id=IMAGE_ID,
+    )
+
+    # The new selection is unconfigured; the old Docker session still needs
+    # a confirmed stop through its persisted provider identity.
+    monkeypatch.setenv("MOZAIKS_PREVIEW_PROVIDER", "e2b")
+    monkeypatch.delenv("E2B_API_KEY", raising=False)
+    restarted = ArtifactPreviewSessionManager(store=store)
+    await restarted.cleanup(expired_only=False)
+
+    assert await store.get(state.sandbox_id) is None
+    assert [name for name, _ in adapter.calls].count("terminate_session") == 1
 
 
 @pytest.mark.asyncio

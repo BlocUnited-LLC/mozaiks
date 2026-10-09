@@ -11,7 +11,7 @@ import re
 import shlex
 import time
 import zipfile
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -143,9 +143,11 @@ def _safe_relpath(raw: str) -> str | None:
     return str(path)
 
 
-def resolve_preview_provider(env: dict[str, str] | None = None) -> tuple[str, SandboxPort]:
+def resolve_preview_provider(
+    env: dict[str, str] | None = None, *, provider: str | None = None,
+) -> tuple[str, SandboxPort]:
     env_map = os.environ if env is None else env
-    requested = str(env_map.get("MOZAIKS_PREVIEW_PROVIDER", "")).strip().lower()
+    requested = str(provider if provider is not None else env_map.get("MOZAIKS_PREVIEW_PROVIDER", "")).strip().lower()
     if requested == "e2b":
         if not str(env_map.get("E2B_API_KEY", "")).strip():
             raise RuntimeError(
@@ -154,7 +156,7 @@ def resolve_preview_provider(env: dict[str, str] | None = None) -> tuple[str, Sa
         from mozaiksai.core.adapters.e2b_sandbox import get_e2b_sandbox
 
         return "e2b", get_e2b_sandbox()
-    if requested not in {"", "docker"}:
+    if requested not in ({"docker"} if provider is not None else {"", "docker"}):
         raise ValueError(
             f"Unsupported preview provider {requested!r}; expected 'docker' or 'e2b'"
         )
@@ -205,13 +207,13 @@ class ArtifactPreviewSessionManager:
     """Studio preview lifecycle; Mongo owns identity, admission and operation leases."""
 
     def __init__(
-        self, *, provider_resolver: Any | None = None,
+        self, *, provider_resolver: Callable[[], tuple[str, SandboxPort]] | None = None,
         startup_timeout_seconds: float = 120, store: MongoPreviewStore | None = None,
     ) -> None:
         self._store = store if store is not None else MongoPreviewStore()
         self._ws_clients: dict[str, set[Any]] = {}
         self._ws_status: dict[str, dict[str, Any]] = {}
-        self._provider_resolver = provider_resolver or resolve_preview_provider
+        self._provider_resolver = provider_resolver
         self._ttl_minutes = self._positive_setting("SANDBOX_TTL_MINUTES", 30)
         self._max_sessions = self._positive_setting("SANDBOX_MAX_SESSIONS", 20)
         self._max_owner_sessions = self._positive_setting("SANDBOX_MAX_OWNER_SESSIONS", 2)
@@ -236,10 +238,17 @@ class ArtifactPreviewSessionManager:
         return sandbox_workspace_root(provider)
 
     def _adapter(self, provider: str) -> SandboxPort:
+        if self._provider_resolver is None:
+            # Selection controls new allocations; durable provider identity
+            # controls every operation on a session that already exists.
+            return resolve_preview_provider(provider=provider)[1]
         resolved_provider, adapter = self._provider_resolver()
         if resolved_provider != provider:
-            raise RuntimeError("Preview provider changed; restore the provider to stop its existing previews")
+            raise RuntimeError("Preview adapter does not match the stored provider")
         return adapter
+
+    def _selected_provider(self) -> tuple[str, SandboxPort]:
+        return (self._provider_resolver or resolve_preview_provider)()
 
     @staticmethod
     def _is_expired(state: PreviewSessionState) -> bool:
@@ -304,7 +313,7 @@ class ArtifactPreviewSessionManager:
     ) -> PreviewSessionState:
         if not all(is_valid_artifact_id(value) for value in (artifact_id, app_id, target_app_id, build_registry_id)) or not user_id:
             raise ValueError("Invalid preview identity")
-        provider, adapter = self._provider_resolver()
+        provider, adapter = self._selected_provider()
         identity = dict(
             artifact_id=artifact_id, app_id=app_id, user_id=user_id,
             target_app_id=target_app_id, build_registry_id=build_registry_id, provider=provider,
@@ -321,7 +330,7 @@ class ArtifactPreviewSessionManager:
         if not isinstance(image_id, str) or not _SHA256_RE.fullmatch(image_id):
             raise ValueError("Sealed preview requires a trusted image ID")
         files = _sealed_archive_files(archive_bytes, archive_sha256, target_app_id)
-        provider, adapter = self._provider_resolver()
+        provider, adapter = self._selected_provider()
         if provider != "docker" or not isinstance(adapter, _SealedCandidateStager):
             raise RuntimeError("Sealed preview requires the local Docker sandbox adapter")
         identity = dict(
