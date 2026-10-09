@@ -251,12 +251,23 @@ jobs:
         shell: bash
         run: |
           . .release-venv/bin/activate
-          python - <<'PY'
-          from importlib.util import find_spec
+          python -I - <<'PY'
+          from pathlib import Path
+          import sysconfig
 
+          import mozaiksai.core.metrics.d30_cohort as cohort_module
           from mozaiksai.core.metrics.d30_cohort import calculate_d30_action_cohort
           from mozaiksai.core.runtime import persistence
+          from mozaiksai.core.runtime.app import module_loader, subscriptions_loader
           from mozaiksai.core.runtime.app.module_loader import ActionDef
+
+          site_packages = Path(sysconfig.get_paths()["purelib"]).resolve()
+          for module in (cohort_module, persistence, module_loader, subscriptions_loader):
+              module_path = Path(module.__file__).resolve()
+              if not module_path.is_relative_to(site_packages):
+                  raise SystemExit(
+                      f"Runtime contract imported outside installed wheel: {module_path}"
+                  )
 
           required_action_fields = {"api_surface", "entitlement_gate"}
           missing_action_fields = required_action_fields.difference(ActionDef.model_fields)
@@ -272,8 +283,6 @@ jobs:
                   f"Installed wheel persistence package missing exports: {missing_persistence_exports}"
               )
 
-          if find_spec("mozaiksai.core.runtime.app.subscriptions_loader") is None:
-              raise SystemExit("Installed wheel missing subscriptions_loader runtime module")
           if not callable(calculate_d30_action_cohort):
               raise SystemExit("Installed wheel missing D30 cohort calculator")
 
