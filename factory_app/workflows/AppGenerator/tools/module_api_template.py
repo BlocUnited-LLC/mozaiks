@@ -15,7 +15,8 @@ Behavioral contract:
       err.status      — HTTP status code (integer)
       err.data        — full parsed body for caller inspection
       isInsufficientTokensError(err) detects runtime token depletion.
-      insufficientTokensRecoveryPath(err) returns the app-local recovery route.
+      insufficientTokensRecoveryPath(err) returns an app-local recovery route,
+      or null when administrator contact has no safe route.
       isEntitlementRequiredError(err) detects plan entitlement denial.
       entitlementUpgradePath(err) returns the app-local upgrade/pricing route.
     This lets generated custom-route JSX branch on backend states:
@@ -49,8 +50,9 @@ _MODULE_API_TEMPLATE = """\
  *     err.status      — HTTP status integer
  *     err.data        — full parsed response body
  *   Catch and branch on err.error_code to handle specific backend states.
- *   For INSUFFICIENT_TOKENS, navigate to insufficientTokensRecoveryPath(err)
- *   and do not retry the action automatically.
+ *   For INSUFFICIENT_TOKENS, navigate when insufficientTokensRecoveryPath(err)
+ *   returns a route. Otherwise show inline administrator-contact guidance.
+ *   Do not retry the action automatically.
  *   For ENTITLEMENT_REQUIRED, navigate to entitlementUpgradePath(err)
  *   and do not retry the action automatically.
  *
@@ -124,8 +126,22 @@ export function isInsufficientTokensError(err) {
   )
 }
 
+function appLocalRoute(value) {
+  if (typeof value !== 'string') return null
+  const route = value.trim()
+  if (!route.startsWith('/') || route.startsWith('//') || route.includes(String.fromCharCode(92))) return null
+  for (const char of route) {
+    const code = char.charCodeAt(0)
+    if (code < 32 || code === 127) return null
+  }
+  return route
+}
+
 export function insufficientTokensRecoveryPath(err, fallback = '/billing') {
   const metadata = tokenRecoveryMetadata(err)
+  if (metadata.recovery_action === 'contact_admin') {
+    return appLocalRoute(metadata.contact_route)
+  }
   return (
     metadata.top_up_route ||
     metadata.billing_route ||

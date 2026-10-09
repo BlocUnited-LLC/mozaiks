@@ -148,6 +148,36 @@ class TestModuleApiTemplateModule:
         assert "metadata.billing_route" in js
 
 
+def test_generated_token_recovery_honors_administrator_contact_without_inventing_a_route():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required to execute the generated browser helper")
+    metadata = [
+        {"recovery_action": "contact_admin"},
+        {"recovery_action": "contact_admin", "billing_route": "/billing"},
+        {"recovery_action": "contact_admin", "billing_route": "/billing", "contact_route": "/help"},
+        {"recovery_action": "contact_admin", "contact_route": "https://outside.example/help"},
+        {"recovery_action": "contact_admin", "contact_route": "//outside.example/help"},
+        {"recovery_action": "contact_admin", "contact_route": "/\\outside.example/help"},
+        {"recovery_action": "top_up", "top_up_route": "/token-packs"},
+        {"recovery_action": "upgrade"},
+    ]
+    errors = [{"data": {"extra_data": item}} for item in metadata]
+    script = (
+        _template_js()
+        + "\nconsole.log(JSON.stringify("
+        + json.dumps(errors)
+        + ".map(err => insufficientTokensRecoveryPath(err))))\n"
+    )
+    completed = subprocess.run(
+        [node, "--input-type=module"], input=script, capture_output=True, text=True, timeout=15
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout) == [
+        None, None, "/help", None, None, None, "/token-packs", "/billing"
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Group 2: HTTP request shape (4)
 # ---------------------------------------------------------------------------
@@ -526,23 +556,32 @@ import {
   insufficientTokensRecoveryPath,
 } from '../../ui/lib/moduleApi.js'
 import { useNavigate } from 'react-router-dom'
-import { useCallback } from 'react'
+import { useCallback, useState } from 'react'
 
 export default function GenerateReportPage() {
   const navigate = useNavigate()
+  const [depletionMessage, setDepletionMessage] = useState(null)
   const handleGenerate = useCallback(async () => {
     try {
       await moduleAction('reports', 'generate_report', { topic: 'demo' })
     } catch (err) {
       if (isInsufficientTokensError(err)) {
-        navigate(insufficientTokensRecoveryPath(err), { replace: true })
+        const recoveryPath = insufficientTokensRecoveryPath(err)
+        if (recoveryPath) {
+          navigate(recoveryPath, { replace: true })
+        } else {
+          setDepletionMessage('AI capacity is depleted. Contact an administrator for help.')
+        }
         return
       }
       throw err
     }
   }, [navigate])
 
-  return <button onClick={handleGenerate}>Generate</button>
+  return <>
+    {depletionMessage && <p role="alert">{depletionMessage}</p>}
+    <button disabled={Boolean(depletionMessage)} onClick={handleGenerate}>Generate</button>
+  </>
 }
 """
 
@@ -579,12 +618,16 @@ export default function GenerateReportPage() {
         assert "err.error_code === 'REQUEST_ALREADY_APPROVED'" in self._APPROVAL_JSX
         assert "err.error_code === 'VALIDATION_FAILED'" in self._APPROVAL_JSX
 
-    def test_fixture_routes_insufficient_tokens_without_retrying(self):
-        """Custom route JSX redirects depleted users and returns without retry."""
+    def test_fixture_handles_route_free_token_depletion_without_retrying(self):
+        """Custom route JSX shows contact guidance when no local route exists."""
         jsx = self._TOKEN_DEPLETION_JSX
         assert "isInsufficientTokensError(err)" in jsx
-        assert "navigate(insufficientTokensRecoveryPath(err), { replace: true })" in jsx
-        assert "return" in jsx.split("navigate(insufficientTokensRecoveryPath(err), { replace: true })", 1)[1]
+        assert "const recoveryPath = insufficientTokensRecoveryPath(err)" in jsx
+        assert "if (recoveryPath)" in jsx
+        assert "navigate(recoveryPath, { replace: true })" in jsx
+        assert 'role="alert"' in jsx
+        assert "Contact an administrator" in jsx
+        assert "return" in jsx.split("navigate(recoveryPath, { replace: true })", 1)[1]
 
     def test_fixture_no_proprietary_names(self):
         """JSX fixtures contain no proprietary product names."""
