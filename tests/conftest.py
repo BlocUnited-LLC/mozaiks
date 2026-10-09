@@ -18,6 +18,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+from types import FunctionType, ModuleType
 
 import pytest
 
@@ -69,25 +70,52 @@ def _trusted_generated_app_fixture_probe(monkeypatch, request):
     if request.node.path.name not in _TRUSTED_GENERATED_APP_FIXTURE_TESTS:
         return
 
-    from factory_app.workflows.AppGenerator.tools import app_runtime_smoke, app_validation
-    from factory_app.workflows.AppGenerator.tools.app_runtime_load_probe import probe_app_root
+    from factory_app.workflows.AppGenerator.tools import app_validation
+    validation_name = app_validation.__name__
+    validation_globals = {id(vars(app_validation)): vars(app_validation)}
 
-    async def trusted_fixture_load(generated_files):
-        with tempfile.TemporaryDirectory(prefix="mozaiks-test-runtime-load-") as temporary:
-            app_root = Path(temporary) / "app"
-            app_validation._write_files_to_dir(app_root, generated_files)
-            return await probe_app_root(app_root)
+    def include_validation_reference(value):
+        if isinstance(value, ModuleType) and value.__name__ == validation_name:
+            validation_globals[id(vars(value))] = vars(value)
+        elif isinstance(value, FunctionType) and value.__module__ == validation_name:
+            validation_globals[id(value.__globals__)] = value.__globals__
 
-    async def trusted_fixture_smoke(generated_files):
-        with tempfile.TemporaryDirectory(prefix="mozaiks-test-runtime-smoke-") as temporary:
-            app_root = Path(temporary) / "app"
-            app_validation._write_files_to_dir(app_root, generated_files)
-            return await app_runtime_smoke.run_app_runtime_smoke(
-                app_root, mongo_uri=app_runtime_smoke.resolve_smoke_mongo_uri(),
+    test_namespace = vars(request.node.module)
+    for value in test_namespace.values():
+        include_validation_reference(value)
+        # Workflow loading evicts cached tool modules. A test or script that
+        # imported a gate before that reload still calls its original globals.
+        if isinstance(value, FunctionType) and value.__module__.startswith(("tests.", "scripts.")):
+            for imported in value.__globals__.values():
+                include_validation_reference(imported)
+        elif isinstance(value, ModuleType) and value.__name__.startswith(("tests.", "scripts.")):
+            for imported in vars(value).values():
+                include_validation_reference(imported)
+
+    for globals_dict in validation_globals.values():
+        smoke_module = globals_dict["app_runtime_smoke"]
+
+        async def trusted_fixture_load(generated_files, *, _globals=globals_dict):
+            from factory_app.workflows.AppGenerator.tools.app_runtime_load_probe import (
+                probe_app_root,
             )
 
-    monkeypatch.setattr(app_validation, "_app_runtime_load_result", trusted_fixture_load)
-    monkeypatch.setattr(app_validation, "_app_runtime_smoke_result", trusted_fixture_smoke)
+            with tempfile.TemporaryDirectory(prefix="mozaiks-test-runtime-load-") as temporary:
+                app_root = Path(temporary) / "app"
+                _globals["_write_files_to_dir"](app_root, generated_files)
+                return await probe_app_root(app_root)
+
+        async def trusted_fixture_smoke(generated_files, *, _globals=globals_dict, _smoke=smoke_module):
+            with tempfile.TemporaryDirectory(prefix="mozaiks-test-runtime-smoke-") as temporary:
+                app_root = Path(temporary) / "app"
+                _globals["_write_files_to_dir"](app_root, generated_files)
+                return await _smoke.run_app_runtime_smoke(
+                    app_root, mongo_uri=_smoke.resolve_smoke_mongo_uri(),
+                )
+
+        monkeypatch.setitem(globals_dict, "_app_runtime_load_result", trusted_fixture_load)
+        monkeypatch.setitem(globals_dict, "_app_runtime_smoke_result", trusted_fixture_smoke)
+        monkeypatch.setattr(smoke_module, "resolve_smoke_mongo_uri", lambda: None)
 
 
 def _repo_factory_app_bundle() -> Path:
