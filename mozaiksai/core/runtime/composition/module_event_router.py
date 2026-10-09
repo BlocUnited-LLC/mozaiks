@@ -15,16 +15,21 @@ import importlib
 import inspect
 import re
 from collections import defaultdict
-from collections.abc import Awaitable, Callable, Iterable
-from dataclasses import replace
+from collections.abc import Awaitable, Callable, Iterable, Mapping
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from logs.logging_config import get_workflow_logger
+from mozaiksai.core.events.unified_event_dispatcher import (
+    EventDeliveryEvidence,
+    EventDispatchOutcome,
+)
 from mozaiksai.core.runtime.app.module_loader import LoadedModule
 from mozaiksai.core.runtime.composition.module_event_provenance import (
     ModuleEventProvenance,
+    ModuleEventRejection,
     ModuleReactionAudit,
     ModuleReactionProvenance,
     build_module_reaction_audit,
@@ -47,6 +52,66 @@ logger = get_workflow_logger("module_event_router")
 EventEmitter = Callable[[str, dict[str, Any]], Awaitable[Any] | Any]
 NotificationStore = Callable[[dict[str, Any]], Awaitable[Any] | Any]
 CapabilityInvoker = Callable[[str, dict[str, Any], dict[str, Any]], Awaitable[Any] | Any]
+
+
+@dataclass(frozen=True)
+class ModuleReactionDeliveryOutcome:
+    """Payload-free receipt for one declared module reaction."""
+
+    module_id: str
+    reaction_id: str
+    status: Literal["ok", "skipped", "failed", "missing"]
+    reason: str | None = None
+    audit_id: str | None = None
+
+    @property
+    def success(self) -> bool:
+        return self.status == "ok"
+
+
+@dataclass(frozen=True)
+class ModuleEventDeliveryOutcome(EventDeliveryEvidence):
+    """Reaction results from the platform router for one emitted event."""
+
+    event_type: str
+    reactions: tuple[ModuleReactionDeliveryOutcome, ...]
+
+    @property
+    def success(self) -> bool:
+        return all(reaction.success for reaction in self.reactions)
+
+
+def required_module_reaction(
+    dispatch: EventDispatchOutcome | ModuleEventRejection | None,
+    *,
+    module_id: str,
+    reaction_id: str,
+) -> ModuleReactionDeliveryOutcome:
+    """Fail closed unless exactly one router reports the expected reaction as ok."""
+
+    missing = ModuleReactionDeliveryOutcome(
+        module_id=module_id,
+        reaction_id=reaction_id,
+        status="missing",
+        reason="required reaction did not report delivery",
+    )
+    if isinstance(dispatch, ModuleEventRejection):
+        return replace(missing, status="failed", reason=f"event rejected: {dispatch.category}")
+    if not isinstance(dispatch, EventDispatchOutcome):
+        return missing
+    matching = [
+        reaction
+        for listener in dispatch.listeners
+        if isinstance(listener.result, ModuleEventDeliveryOutcome)
+        and listener.result.event_type == dispatch.event_type
+        for reaction in listener.result.reactions
+        if reaction.module_id == module_id and reaction.reaction_id == reaction_id
+    ]
+    if not matching:
+        return missing
+    if len(matching) != 1:
+        return replace(missing, status="failed", reason="multiple required reaction deliveries")
+    return matching[0]
 
 
 class _ReactionCtx:
@@ -73,9 +138,10 @@ class _ReactionCtx:
         self.causation_id = event_provenance.causation_id if event_provenance is not None else None
         self._event_emitter = event_emitter
 
-    async def emit(self, event_type: str, payload: dict[str, Any]) -> None:
+    async def emit(self, event_type: str, payload: dict[str, Any]) -> EventDispatchOutcome | None:
         if self._event_emitter is not None:
-            await ModuleEventRouter._maybe_await(self._event_emitter(event_type, payload))
+            return await ModuleEventRouter._maybe_await(self._event_emitter(event_type, payload))
+        return None
 
 
 def is_router_reaction_context(
@@ -183,9 +249,25 @@ class ModuleEventRouter:
             logger.info("MODULE_EVENT_ROUTER_READY: %s event type(s)", count)
         return count
 
-    async def handle_event(self, event_type: str, envelope: dict[str, Any]) -> None:
+    async def handle_event(
+        self, event_type: str, envelope: dict[str, Any]
+    ) -> ModuleEventDeliveryOutcome:
         """Handle one canonical module event envelope."""
         emitted_notifications: set[tuple[str, str]] = set()
+        delivered: list[ModuleReactionDeliveryOutcome] = []
+
+        async def record_delivery(audit: ModuleReactionAudit) -> None:
+            await self._emit_reaction_audit(audit)
+            delivered.append(
+                ModuleReactionDeliveryOutcome(
+                    module_id=audit.reaction.source_module_id,
+                    reaction_id=audit.reaction.reaction_id,
+                    status=audit.outcome,
+                    reason=audit.reason,
+                    audit_id=audit.reaction_dispatch_id,
+                )
+            )
+
         event_provenance = normalize_module_event_provenance(event_type, envelope)
         validation_error = self._validate_event_payload(event_type, envelope, event_provenance)
         if validation_error is not None:
@@ -199,7 +281,7 @@ class ModuleEventRouter:
                 extra={"module_event_payload_validation": validation_error.to_dict()},
             )
             for reaction in self._reactions_by_event.get(event_type, []):
-                await self._emit_reaction_audit(
+                await record_delivery(
                     build_module_reaction_audit(
                         event=event_provenance,
                         reaction=self._reaction_provenance(reaction),
@@ -217,7 +299,7 @@ class ModuleEventRouter:
                 idempotency_enforced=bool(reaction.get("idempotency_key")),
             )
             if not permission_result["allowed"]:
-                await self._emit_reaction_audit(
+                await record_delivery(
                     build_module_reaction_audit(
                         event=event_provenance,
                         reaction=reaction_provenance,
@@ -234,7 +316,7 @@ class ModuleEventRouter:
             if idempotency_key is not None:
                 # Fast path: in-memory check (same process, established by PR #256).
                 if idempotency_key in self._processed_reaction_keys:
-                    await self._emit_reaction_audit(
+                    await record_delivery(
                         build_module_reaction_audit(
                             event=event_provenance,
                             reaction=reaction_provenance,
@@ -256,7 +338,7 @@ class ModuleEventRouter:
                     )
                     if not lease_claim.claimed:
                         durable_key_str = None  # not our claim; do not mark complete/fail
-                        await self._emit_reaction_audit(
+                        await record_delivery(
                             build_module_reaction_audit(
                                 event=event_provenance,
                                 reaction=reaction_provenance,
@@ -278,7 +360,7 @@ class ModuleEventRouter:
                 )
                 if rule is not None:
                     if not _notification_rule_matches(rule, envelope):
-                        await self._emit_reaction_audit(
+                        await record_delivery(
                             build_module_reaction_audit(
                                 event=event_provenance,
                                 reaction=reaction_provenance,
@@ -290,7 +372,7 @@ class ModuleEventRouter:
                     key = (str(rule.get("module_id") or ""), str(rule.get("id") or ""))
                     await self._create_notification(rule, event_type, envelope)
                     emitted_notifications.add(key)
-                    await self._emit_reaction_audit(
+                    await record_delivery(
                         build_module_reaction_audit(
                             event=event_provenance,
                             reaction=reaction_provenance,
@@ -299,7 +381,7 @@ class ModuleEventRouter:
                     )
                     await self._durable_complete(durable_key_str, claim_token, event_provenance)
                 else:
-                    await self._emit_reaction_audit(
+                    await record_delivery(
                         build_module_reaction_audit(
                             event=event_provenance,
                             reaction=reaction_provenance,
@@ -316,7 +398,7 @@ class ModuleEventRouter:
                     reaction_provenance=reaction_provenance,
                     permissions=permission_result["granted"],
                 )
-                await self._emit_reaction_audit(
+                await record_delivery(
                     build_module_reaction_audit(
                         event=event_provenance,
                         reaction=reaction_provenance,
@@ -327,6 +409,8 @@ class ModuleEventRouter:
                 if outcome == "ok":
                     await self._durable_complete(durable_key_str, claim_token, event_provenance)
                 else:
+                    if idempotency_key is not None:
+                        self._processed_reaction_keys.discard(idempotency_key)
                     await self._durable_mark_failed(durable_key_str, claim_token, reaction, event_provenance)
             elif target_kind == "service_adapter":
                 adapter_result = await self._dispatch_service_adapter(
@@ -342,8 +426,11 @@ class ModuleEventRouter:
                     envelope,
                     reaction_result=adapter_result,
                 )
-                adapter_failed = isinstance(adapter_result, dict) and adapter_result.get("success") is False
-                await self._emit_reaction_audit(
+                adapter_failed = (
+                    isinstance(adapter_result, Mapping)
+                    and adapter_result.get("success") is False
+                )
+                await record_delivery(
                     build_module_reaction_audit(
                         event=event_provenance,
                         reaction=reaction_provenance,
@@ -356,12 +443,14 @@ class ModuleEventRouter:
                     )
                 )
                 if adapter_failed:
+                    if idempotency_key is not None:
+                        self._processed_reaction_keys.discard(idempotency_key)
                     await self._durable_mark_failed(durable_key_str, claim_token, reaction, event_provenance)
                 else:
                     await self._durable_complete(durable_key_str, claim_token, event_provenance)
             elif target_kind:
                 await self._emit_platform_reaction(reaction, event_type, envelope)
-                await self._emit_reaction_audit(
+                await record_delivery(
                     build_module_reaction_audit(
                         event=event_provenance,
                         reaction=reaction_provenance,
@@ -374,6 +463,7 @@ class ModuleEventRouter:
             key = (str(rule.get("module_id") or ""), str(rule.get("id") or ""))
             if key not in emitted_notifications and _notification_rule_matches(rule, envelope):
                 await self._create_notification(rule, event_type, envelope)
+        return ModuleEventDeliveryOutcome(event_type=event_type, reactions=tuple(delivered))
 
     def _index_modules(self, modules: Iterable[LoadedModule]) -> None:
         for module in modules:
@@ -687,9 +777,9 @@ class ModuleEventRouter:
                         exc_info=True,
                     )
 
-    def _handler_for(self, event_type: str) -> Callable[[dict[str, Any]], Awaitable[None]]:
-        async def handle(envelope: dict[str, Any]) -> None:
-            await self.handle_event(event_type, envelope)
+    def _handler_for(self, event_type: str) -> Callable[[dict[str, Any]], Awaitable[ModuleEventDeliveryOutcome]]:
+        async def handle(envelope: dict[str, Any]) -> ModuleEventDeliveryOutcome:
+            return await self.handle_event(event_type, envelope)
 
         return handle
 
@@ -873,7 +963,7 @@ class ModuleEventRouter:
         else:
             payload = {}
         try:
-            await self._maybe_await(method(ctx, **payload))
+            result = await self._maybe_await(method(ctx, **payload))
         except Exception as exc:
             logger.error(
                 "HANDLER_DISPATCH_ERROR: %r.%r raised %s",
@@ -883,6 +973,8 @@ class ModuleEventRouter:
                 exc_info=True,
             )
             return "failed", type(exc).__name__
+        if isinstance(result, Mapping) and result.get("success") is False:
+            return "failed", str(result.get("error_code") or "handler returned success=false")
         return "ok", None
 
     async def _emit_reaction_audit(self, audit: ModuleReactionAudit) -> None:

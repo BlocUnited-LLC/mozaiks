@@ -472,6 +472,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Module event producers can now inspect whether each declared reaction ran,
+  returned a failure, raised, or was skipped before acknowledging a required
+  downstream effect. Failed reactions no longer remain suppressed by a
+  same-process idempotency key; existing best-effort emitters continue to work.
+
 - Handler reactions now receive the fields of flat events,
   including host webhook events, instead of an empty payload.
 

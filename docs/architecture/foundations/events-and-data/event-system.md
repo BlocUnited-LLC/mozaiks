@@ -125,6 +125,30 @@ Current implementation:
   `app.services.adapters.*` class for provider or hosted-product integration
   mechanics while keeping durable facts and public actions module-owned.
 
+`ctx.emit(...)` returns an `EventDispatchOutcome` when the runtime bus is wired.
+Its listener entries identify synchronous callback success, a returned
+`success: false`, or a raised exception. The platform router's listener result
+is a `ModuleEventDeliveryOutcome` with payload-free results for each declared
+reaction; arbitrary callback return values are not exposed to the producer.
+A handler return containing `success: false` is a failed reaction;
+the same failure is recorded in the reaction audit and does not leave an
+in-memory idempotency key blocking a later retry. The durable reaction ledger
+still enforces its lease, delay, and attempt budget. Existing emitters that
+ignore the return keep best-effort behavior, and a module action whose write
+already committed is not changed to a failed action by downstream delivery.
+
+Code that must acknowledge one specific downstream effect checks
+`required_module_reaction(receipt, module_id=..., reaction_id=...)` from
+`mozaiksai.core.runtime.composition.module_event_router`. It returns `missing`
+when no listener or matching reaction reported a result, and `skipped` or
+`failed` for an attempted reaction that did not report success. An event
+rejected before dispatch still returns `ModuleEventRejection` through
+`ctx.emit`; the helper treats that as failed. Only `status == "ok"` confirms
+that particular synchronous reaction returned successfully. This receipt is
+not a durable outbox or proof that an external payment settled. Financial
+producers must keep their own once-only persistence and recovery boundary
+before acknowledging a provider callback or retrying an event.
+
 ### Module Event/Reaction Contract
 
 - `contracts/events.yaml` declares the event types a module may emit.

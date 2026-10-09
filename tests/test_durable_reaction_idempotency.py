@@ -465,6 +465,28 @@ async def test_failed_execution_transitions_to_retryable_then_retry_succeeds() -
     assert "completed" in statuses_after
 
 
+@pytest.mark.asyncio
+async def test_returned_failure_can_retry_on_same_router_with_durable_store() -> None:
+    store = _InMemoryIdempotencyStore()
+    attempts = 0
+
+    class _Handler:
+        async def on_order(self, ctx: Any, **kwargs: Any) -> dict[str, Any]:
+            nonlocal attempts
+            attempts += 1
+            return {"success": attempts > 1}
+
+    router = _router_with_store(store, _Handler())
+    first = await router.handle_event("order.created", _envelope("evt_retry"))
+    assert first.reactions[0].status == "failed"
+    assert next(iter(store._records.values())).status == "retryable"
+
+    second = await router.handle_event("order.created", _envelope("evt_retry"))
+    assert second.reactions[0].status == "ok"
+    assert attempts == 2
+    assert next(iter(store._records.values())).status == "completed"
+
+
 # ---------------------------------------------------------------------------
 # 7. Ledger records do not contain raw event payload
 # ---------------------------------------------------------------------------
