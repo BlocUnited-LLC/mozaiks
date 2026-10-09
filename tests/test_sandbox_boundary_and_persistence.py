@@ -17,9 +17,21 @@ from factory_app.workflows.AppGenerator.tools.app_validation import (
 )
 from mozaiksai.control_plane.contracts import CodingWorkerPlan
 from mozaiksai.control_plane.implementations.coding_worker import resolve_coding_validation_strategy
-from mozaiksai.core.adapters.docker_sandbox import DockerSandboxAdapter, _preview_ports
+from mozaiksai.core.adapters.docker_sandbox import (
+    DockerSandboxAdapter,
+    _preview_ports,
+)
+from mozaiksai.core.adapters.local_docker_cli import (
+    _docker_cli_env,
+    _docker_prefix,
+    _local_docker_endpoint,
+)
 from mozaiksai.core.artifacts.models import BuildRecord
 from mozaiksai.core.ports.sandbox import SandboxRunResult, SandboxSessionInfo
+from mozaiksai.core.sandbox.preview_sessions import (
+    preview_resource_environment,
+    sandbox_resource_environment,
+)
 from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
     APP_VALIDATION_STRATEGIES,
 )
@@ -56,6 +68,57 @@ async def test_docker_create_session_publishes_preview_ports(monkeypatch):
     port_bindings = [args[i + 1] for i, a in enumerate(args) if a == "-p"]
     assert "127.0.0.1:0:3000" in port_bindings
     assert "127.0.0.1:0:8000" in port_bindings
+
+
+@pytest.mark.asyncio
+async def test_docker_validation_session_has_no_network_or_published_ports(monkeypatch):
+    monkeypatch.setenv("SANDBOX_PREVIEW_PORT", "invalid-preview-port")
+    adapter = DockerSandboxAdapter()
+    captured: dict[str, list[str]] = {}
+
+    async def fake_run(args, timeout: float = 60.0):
+        captured["args"] = list(args)
+        return 0, "validation-container\n", ""
+
+    with patch.object(adapter, "_run", side_effect=fake_run):
+        session = await adapter.create_session(metadata={"purpose": "app_validation"})
+
+    args = captured["args"]
+    assert session.session_id == "validation-container"
+    assert args[args.index("--network") + 1] == "none"
+    assert "-p" not in args
+
+
+@pytest.mark.asyncio
+async def test_docker_commands_ignore_remote_context_and_host_credentials(monkeypatch):
+    monkeypatch.setenv("DOCKER_CONTEXT", "remote")
+    monkeypatch.setenv("DOCKER_HOST", "tcp://remote.example:2375")
+    monkeypatch.setenv("OPENAI_API_KEY", "host-secret")
+    assert "DOCKER_CONTEXT" not in _docker_cli_env()
+    assert "DOCKER_HOST" not in _docker_cli_env()
+    assert "OPENAI_API_KEY" not in _docker_cli_env()
+    assert _docker_prefix("isolated-config")[-2:] == ["--host", _local_docker_endpoint()]
+
+    process = AsyncMock()
+    process.returncode = 0
+    process.communicate.return_value = (b"ok", b"")
+    with patch("asyncio.create_subprocess_exec", return_value=process) as launch:
+        rc, stdout, stderr = await DockerSandboxAdapter._run(["docker", "info"])
+    assert (rc, stdout, stderr) == (0, "ok", "")
+    args = launch.call_args.args
+    assert args[:3] == ("docker", "--config", args[2])
+    assert args[3:5] == ("--host", _local_docker_endpoint())
+    assert args[-1] == "info"
+    assert launch.call_args.kwargs["env"] == _docker_cli_env()
+
+    process.wait.return_value = 0
+    with patch("asyncio.create_subprocess_exec", return_value=process) as launch:
+        result = await DockerSandboxAdapter().run_command(
+            session_id="validation-container", command="true", background=True,
+        )
+    assert result.success
+    assert launch.call_args.args[3:5] == ("--host", _local_docker_endpoint())
+    assert launch.call_args.kwargs["env"] == _docker_cli_env()
 
 
 # ---------------------------------------------------------------------------
@@ -146,6 +209,18 @@ async def test_sandbox_validation_persists_session_identity_and_metadata():
 
 
 @pytest.mark.asyncio
+async def test_validation_caller_cannot_change_sandbox_purpose():
+    fake = _FakeAdapter()
+    with patch("mozaiksai.core.adapters.get_sandbox_adapter", return_value=fake):
+        await _run_sandbox_validation(
+            strategy="docker", resolved_files={"app.json": "{}"}, commands=[],
+            start_dev_server=False, timeout_seconds=60,
+            session_metadata={"purpose": "artifact_preview", "app_id": "app-1"},
+        )
+    assert fake.create_kwargs["metadata"] == {"purpose": "app_validation", "app_id": "app-1"}
+
+
+@pytest.mark.asyncio
 async def test_sandbox_validation_defaults_purpose_metadata():
     fake = _FakeAdapter()
     with patch(
@@ -160,6 +235,20 @@ async def test_sandbox_validation_defaults_purpose_metadata():
             timeout_seconds=60,
         )
     assert fake.create_kwargs["metadata"] == {"purpose": "app_validation"}
+
+
+@pytest.mark.asyncio
+async def test_validation_does_not_receive_preview_forwarded_environment(monkeypatch):
+    monkeypatch.setenv("MOZAIKS_PREVIEW_ENV_OPENAI_API_KEY", "operator-preview-secret")
+    assert "OPENAI_API_KEY" not in sandbox_resource_environment()
+    assert preview_resource_environment()["OPENAI_API_KEY"] == "operator-preview-secret"
+    fake = _FakeAdapter()
+    with patch("mozaiksai.core.adapters.get_sandbox_adapter", return_value=fake):
+        await _run_sandbox_validation(
+            strategy="docker", resolved_files={"app.json": "{}"}, commands=[],
+            start_dev_server=False, timeout_seconds=60,
+        )
+    assert "OPENAI_API_KEY" not in fake.create_kwargs["envs"]
 
 
 # ---------------------------------------------------------------------------

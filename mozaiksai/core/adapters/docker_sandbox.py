@@ -19,6 +19,7 @@ import os
 import re
 import shutil
 import tarfile
+import tempfile
 from pathlib import PurePosixPath
 
 _ENV_KEY_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$", re.IGNORECASE)
@@ -26,6 +27,8 @@ from typing import Any
 
 from logs.logging_config import get_core_logger
 from mozaiksai.core.ports.sandbox import SandboxRunResult, SandboxSessionInfo
+
+from .local_docker_cli import _docker_cli_env, _docker_prefix
 
 logger = get_core_logger("docker_sandbox")
 
@@ -46,16 +49,18 @@ def _preview_ports() -> list[int]:
 
 
 def docker_available() -> bool:
-    """Return True if the Docker CLI is installed and the daemon is reachable."""
+    """Return True only for the local Docker daemon used by this adapter."""
     if not shutil.which("docker"):
         return False
     try:
         import subprocess
-        result = subprocess.run(
-            ["docker", "info"],
-            capture_output=True,
-            timeout=5,
-        )
+        with tempfile.TemporaryDirectory(prefix="mozaiks-docker-cli-") as config_dir:
+            result = subprocess.run(
+                [*_docker_prefix(config_dir), "info"],
+                capture_output=True,
+                timeout=5,
+                env=_docker_cli_env(),
+            )
         return result.returncode == 0
     except Exception:
         return False
@@ -79,20 +84,24 @@ class DockerSandboxAdapter:
 
     @staticmethod
     async def _run(args: list[str], *, timeout: float = 30.0, input_data: bytes | None = None) -> tuple[int, str, str]:
-        proc = await asyncio.create_subprocess_exec(
-            *args,
-            stdin=asyncio.subprocess.PIPE if input_data is not None else None,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(input_data), timeout=timeout)
-        except TimeoutError as exc:
-            proc.kill()
-            await proc.communicate()
-            raise RuntimeError(f"Docker command timed out after {timeout}s") from exc
-        rc = int(proc.returncode or 0)
-        return rc, stdout_b.decode("utf-8", errors="replace"), stderr_b.decode("utf-8", errors="replace")
+        if not args or args[0] != "docker":
+            raise ValueError("Docker adapter accepts Docker CLI commands only")
+        with tempfile.TemporaryDirectory(prefix="mozaiks-docker-cli-") as config_dir:
+            proc = await asyncio.create_subprocess_exec(
+                *_docker_prefix(config_dir), *args[1:],
+                stdin=asyncio.subprocess.PIPE if input_data is not None else None,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=_docker_cli_env(),
+            )
+            try:
+                stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(input_data), timeout=timeout)
+            except TimeoutError as exc:
+                proc.kill()
+                await proc.communicate()
+                raise RuntimeError(f"Docker command timed out after {timeout}s") from exc
+            rc = int(proc.returncode or 0)
+            return rc, stdout_b.decode("utf-8", errors="replace"), stderr_b.decode("utf-8", errors="replace")
 
     # ------------------------------------------------------------------
     # SandboxPort implementation
@@ -120,15 +129,18 @@ class DockerSandboxAdapter:
         # get_preview_url's `docker port` lookup can resolve a URL. Without
         # -p at create time no binding ever exists and docker previews are
         # structurally dead.
+        offline_validation = bool(metadata and metadata.get("purpose") == "app_validation")
         port_args: list[str] = []
-        for container_port in _preview_ports():
-            port_args += ["-p", f"127.0.0.1:0:{container_port}"]
+        if not offline_validation:
+            for container_port in _preview_ports():
+                port_args += ["-p", f"127.0.0.1:0:{container_port}"]
 
         # Run a long-lived idle container so we can exec into it
         rc, stdout, stderr = await self._run([
             "docker", "run", "-d", "--rm",
             "--init", "--cap-drop=ALL", "--security-opt=no-new-privileges",
             "--pids-limit=512", "--memory=2g", "--cpus=2",
+            *(["--network", "none"] if offline_validation else []),
             "-w", _DEFAULT_WORKDIR,
             *label_args,
             *env_args,
@@ -238,22 +250,24 @@ class DockerSandboxAdapter:
 
         if background:
             # Docker detaches the process; its own launch result still matters.
-            proc = await asyncio.create_subprocess_exec(
-                "docker", "exec", "-d",
-                *env_args,
-                "-w", workdir,
-                session_id,
-                "sh", "-c", command,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            try:
-                returncode = await asyncio.wait_for(proc.wait(), timeout=float(timeout_seconds or 60))
-            except TimeoutError:
-                proc.kill()
-                await proc.wait()
-                return SandboxRunResult(success=False, error="sandbox_timeout")
-            return SandboxRunResult(success=returncode == 0, exit_code=returncode)
+            with tempfile.TemporaryDirectory(prefix="mozaiks-docker-cli-") as config_dir:
+                proc = await asyncio.create_subprocess_exec(
+                    *_docker_prefix(config_dir), "exec", "-d",
+                    *env_args,
+                    "-w", workdir,
+                    session_id,
+                    "sh", "-c", command,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                    env=_docker_cli_env(),
+                )
+                try:
+                    returncode = await asyncio.wait_for(proc.wait(), timeout=float(timeout_seconds or 60))
+                except TimeoutError:
+                    proc.kill()
+                    await proc.wait()
+                    return SandboxRunResult(success=False, error="sandbox_timeout")
+                return SandboxRunResult(success=returncode == 0, exit_code=returncode)
 
         try:
             rc, stdout, stderr = await self._run(
