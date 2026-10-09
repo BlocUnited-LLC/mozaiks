@@ -34,11 +34,11 @@ dispatch:
    fresh `## Unreleased` header. Confirm `mozaiksai/version.py` is `0.2.0`
    and any existing `v0.2.0` tag resolves to the same candidate commit.
 6. Recheck `factory_app/app/brand/realm-export.json` for production values.
-7. Have the repository operator configure the GitHub `release` environment
-   with at least one required reviewer and **admin bypass disabled**. Verify
-   the live result before dispatch. As checked on 2026-10-08, it had
-   `protection_rules: []` and `can_admins_bypass: true`. The workflow now
-   fails if those conditions remain.
+7. Have the repository operator configure the GitHub `pypi` environment
+   with at least one required reviewer, **admin bypass disabled**, and
+   deployments limited to protected branches. Verify the live result before
+   dispatch. The workflow fails if those conditions are removed. This is the
+   single human approval gate for public upload.
 8. Have the PyPI project owner verify that `mozaiks` trusts
    `BlocUnited-LLC/mozaiks`, `.github/workflows/release.yml`, and the
    `pypi` GitHub environment for OIDC publication. PyPI account settings
@@ -73,8 +73,9 @@ evidence for the selected candidate.
 
 Only after the release hold is lifted for this candidate, configure a separate
 TestPyPI trusted publisher for the same repository and workflow with GitHub
-environment `testpypi`. Protect that environment with required reviewers and
-admin bypass disabled. TestPyPI and PyPI have separate accounts, projects, and
+environment `testpypi`. Protect that environment with required reviewers,
+admin bypass disabled, and protected-branch-only deployments. TestPyPI and
+PyPI have separate accounts, projects, and
 trusted-publisher settings; production credentials are not used for rehearsal.
 
 After the owner verifies those settings, dispatch from `main` with the exact
@@ -106,7 +107,7 @@ gh workflow run release.yml --ref main \
   -f confirm_release=release-confirmed
 ```
 
-The workflow builds and tests the candidate, waits on the protected `release`
+The workflow builds and tests the candidate, waits on the protected `pypi`
 environment, rechecks that the candidate is still current `main`, publishes
 the built distributions to PyPI, then creates the GitHub release and tag at
 that exact candidate SHA. The GitHub release body comes from the dated

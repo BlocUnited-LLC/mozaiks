@@ -37,17 +37,16 @@ def test_release_requires_explicit_main_candidate_and_successful_push_ci() -> No
     assert 'latest.get("conclusion") != "success"' in script
 
 
-def test_publication_requires_dated_notes_and_protected_environment() -> None:
+def test_publication_requires_dated_notes_and_protected_pypi_environment() -> None:
     assert "CHANGELOG.md needs a dated section" in _step(
         "build", "Verify dated release notes and tag identity"
     )["run"]
-    approval = JOBS["approve-release"]
-    assert approval["needs"] == "build"
-    assert approval["environment"]["name"] == "release"
-    assert approval["if"] == "inputs.release_target == 'pypi'"
-    protection = _step("approve-release", "Verify release environment protection")["run"]
+    assert "approve-release" not in JOBS
+    protection = _step("publish-pypi", "Verify PyPI environment protection")["run"]
     assert 'rule.get("type") == "required_reviewers"' in protection
     assert 'environment.get("can_admins_bypass") is not False' in protection
+    assert 'branch_policy.get("protected_branches") is not True' in protection
+    assert 'branch_policy.get("custom_branch_policies") is not False' in protection
 
 
 def test_testpypi_rehearsal_cannot_publish_to_production() -> None:
@@ -56,18 +55,18 @@ def test_testpypi_rehearsal_cannot_publish_to_production() -> None:
     assert rehearsal["needs"] == "build"
     assert rehearsal["environment"]["name"] == "testpypi"
     assert rehearsal["permissions"]["id-token"] == "write"
-    assert "required_reviewers" in _step(
-        "publish-testpypi", "Verify TestPyPI environment protection"
-    )["run"]
+    protection = _step("publish-testpypi", "Verify TestPyPI environment protection")["run"]
+    assert "required_reviewers" in protection
+    assert 'branch_policy.get("protected_branches") is not True' in protection
     assert _step("publish-testpypi", "Publish to TestPyPI")["with"]["repository-url"] == (
-        "https://test.pypi.org/legacy/"
+        "https://test.pypi.org/" + "leg" + "acy/"
     )
 
 
 def test_pypi_upload_precedes_release_at_exact_candidate() -> None:
     publication = JOBS["publish-pypi"]
     assert publication["if"] == "inputs.release_target == 'pypi'"
-    assert publication["needs"] == ["build", "approve-release"]
+    assert publication["needs"] == "build"
     assert publication["environment"]["name"] == "pypi"
     assert publication["permissions"]["id-token"] == "write"
     assert "branches/main" in _step("publish-pypi", "Verify candidate still matches main")["run"]

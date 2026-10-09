@@ -325,36 +325,6 @@ jobs:
           name: python-dist
           path: dist/*
 
-  # Public publication waits for a protected human approval on the release
-  # environment. This job also checks the live environment configuration, so
-  # an accidentally unprotected environment fails before upload.
-  approve-release:
-    if: inputs.release_target == 'pypi'
-    runs-on: ubuntu-latest
-    needs: build
-    environment:
-      name: release
-    steps:
-      - name: Verify release environment protection
-        run: |
-          python - <<'PY'
-          import json
-          import os
-          from urllib.request import Request, urlopen
-
-          url = f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/environments/release"
-          request = Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": "mozaiks-release"})
-          with urlopen(request, timeout=15) as response:
-              environment = json.load(response)
-          reviewers = [
-              rule for rule in environment.get("protection_rules", [])
-              if rule.get("type") == "required_reviewers" and rule.get("reviewers")
-          ]
-          if not reviewers or environment.get("can_admins_bypass") is not False:
-              raise SystemExit("Release environment needs required reviewers and admin bypass disabled")
-          print("Release environment protection is active")
-          PY
-
   publish-testpypi:
     if: inputs.release_target == 'testpypi'
     runs-on: ubuntu-latest
@@ -382,8 +352,14 @@ jobs:
               rule for rule in environment.get("protection_rules", [])
               if rule.get("type") == "required_reviewers" and rule.get("reviewers")
           ]
-          if not reviewers or environment.get("can_admins_bypass") is not False:
-              raise SystemExit("TestPyPI environment needs required reviewers and admin bypass disabled")
+          branch_policy = environment.get("deployment_branch_policy") or {}
+          if (
+              not reviewers
+              or environment.get("can_admins_bypass") is not False
+              or branch_policy.get("protected_branches") is not True
+              or branch_policy.get("custom_branch_policies") is not False
+          ):
+              raise SystemExit("TestPyPI environment needs reviewers, no admin bypass, and protected branches only")
           print("TestPyPI environment protection is active")
           PY
 
@@ -409,7 +385,7 @@ jobs:
   publish-pypi:
     if: inputs.release_target == 'pypi'
     runs-on: ubuntu-latest
-    needs: [build, approve-release]
+    needs: build
     permissions:
       contents: read
       actions: read
@@ -418,6 +394,32 @@ jobs:
       name: pypi
       url: https://pypi.org/p/mozaiks
     steps:
+      - name: Verify PyPI environment protection
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from urllib.request import Request, urlopen
+
+          url = f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/environments/pypi"
+          request = Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": "mozaiks-release"})
+          with urlopen(request, timeout=15) as response:
+              environment = json.load(response)
+          reviewers = [
+              rule for rule in environment.get("protection_rules", [])
+              if rule.get("type") == "required_reviewers" and rule.get("reviewers")
+          ]
+          branch_policy = environment.get("deployment_branch_policy") or {}
+          if (
+              not reviewers
+              or environment.get("can_admins_bypass") is not False
+              or branch_policy.get("protected_branches") is not True
+              or branch_policy.get("custom_branch_policies") is not False
+          ):
+              raise SystemExit("PyPI environment needs reviewers, no admin bypass, and protected branches only")
+          print("PyPI environment protection is active")
+          PY
+
       - name: Verify candidate still matches main
         env:
           CANDIDATE_SHA: ${{ inputs.candidate_sha }}
