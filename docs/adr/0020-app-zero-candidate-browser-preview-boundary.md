@@ -62,7 +62,10 @@ before an owner can safely review a live candidate.
    verifies that the installed dependencies satisfy the candidate's
    `requirements.txt` and provenance before claiming exact behavior. A valid
    image ID or template name alone is insufficient. No candidate-controlled
-   install or image build occurs during preview startup.
+   install or image build occurs during preview startup. The trusted build must
+   compile UI changes from the same candidate archive and bind the resulting
+   frontend asset digest in the receipt. Serving a baseline SPA with a changed
+   backend does not prove the candidate the owner will review.
 
 The existing sealed identity fields are Docker-shaped (`sealed_archive_sha256`
 and `sealed_image_id`, with `provider=docker` enforced). Provider support must
@@ -238,6 +241,8 @@ the candidate input.
 
 1. Prove the exact archive, dependency lock, OSS pin, fixed entrypoint, and
    runtime image/template build match before admission and again at approval.
+   Render a marker from changed candidate UI through the browser and verify its
+   asset digest belongs to that same archive and runtime receipt.
    Mismatches, stale descriptors, mutable tags, and missing receipts fail closed.
 2. Prove the preview-safe product host starts without operator provider secrets
    while the deployed `app.host:app` guard still rejects missing production
