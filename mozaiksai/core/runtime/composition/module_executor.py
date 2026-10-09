@@ -76,7 +76,6 @@ from mozaiksai.core.runtime.persistence.request_scope import (
     bind_persistence_principal,
     current_persistence_principal,
 )
-from mozaiksai.core.tokens.guard import TokenUsageDenied
 
 logger = get_workflow_logger("module_executor")
 
@@ -426,6 +425,11 @@ class ModuleExecutor:
         context: ModuleContext | None,
         rejected_events: list[ModuleEventRejection],
     ) -> ModuleResult:
+        # The token guard loads runtime app contracts. Importing it while this
+        # module is initialized creates a cycle when a consumer imports the
+        # wallet directly before any runtime module.
+        from mozaiksai.core.tokens.guard import TokenUsageDenied
+
         dispatch_authority = request.authority
         dispatch_provenance = request.provenance or ModuleDispatchProvenance(
             correlation_id=request.correlation_id,
