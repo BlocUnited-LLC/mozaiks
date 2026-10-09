@@ -44,7 +44,7 @@ async def test_request_readiness_requires_build_validation_pass(monkeypatch, bui
     names = (
         "bundle_scan", "agent_backend", "module_wiring", "module_implementation",
         "module_runtime_quality", "functional_completeness", "workflow_integration",
-        "app_runtime_load", "app_runtime_smoke",
+        "app_runtime_load", "app_runtime_load_worker", "app_runtime_smoke",
     )
 
     async def accepted(**kwargs):
