@@ -196,8 +196,9 @@ def test_owned_app_reaches_every_selected_route_with_signed_token(studio_client,
     assert registry.lookups == [(app_id, "alice")] * (2 * len(routes))
 
 
-def test_owned_and_implicit_app_scopes_keep_their_existing_response(studio_client, monkeypatch) -> None:
+def test_static_dashboard_does_not_authorize_implicit_app_integrations(studio_client, monkeypatch) -> None:
     studio, client, headers, registry = studio_client
+    monkeypatch.setattr(studio.platform_app, "_resolve_default_app_id", lambda: "alice-app")
     monkeypatch.setattr(studio, "build_integrations_summary", AsyncMock(return_value={"app_id": "alice-app"}))
     monkeypatch.setattr(studio, "list_connectors", AsyncMock(return_value=[]))
 
@@ -210,13 +211,47 @@ def test_owned_and_implicit_app_scopes_keep_their_existing_response(studio_clien
     default_connectors = client.get("/api/studio/integrations/connectors", headers=headers("bob"))
     assert [response.status_code for response in (
         default_dashboard, default_integrations, default_connectors,
-    )] == [200, 200, 200]
-    assert default_connectors.json()["connectors"] == []
-    assert registry.lookups == [("alice-app", "alice")]
+    )] == [200, 404, 404]
+    assert registry.lookups == [("alice-app", "alice"), ("alice-app", "bob"), ("alice-app", "bob")]
+    studio.build_integrations_summary.assert_awaited_once_with(app_id="alice-app")
+    studio.list_connectors.assert_not_awaited()
 
     claimed_without_selector = client.get("/api/studio/dashboard", headers=headers("bob", "alice-app"))
     assert claimed_without_selector.status_code == 404
     assert registry.lookups[-1] == ("alice-app", "bob")
+
+    assert client.get("/api/studio/integrations", headers=headers("alice")).status_code == 200
+    assert client.get("/api/studio/integrations/connectors", headers=headers("alice")).status_code == 200
+
+
+def test_implicit_default_connector_routes_reject_non_owner_before_side_effects(studio_client, monkeypatch) -> None:
+    studio, client, headers, registry = studio_client
+    monkeypatch.setattr(studio.platform_app, "_resolve_default_app_id", lambda: "alice-app")
+    methods = {
+        "list_connectors": AsyncMock(return_value=[]),
+        "save_connector": AsyncMock(),
+        "patch_connector": AsyncMock(),
+        "run_connector_health_check": AsyncMock(),
+        "delete_connector": AsyncMock(),
+    }
+    for name, mock in methods.items():
+        monkeypatch.setattr(studio, name, mock)
+
+    connector = "/api/studio/integrations/connectors"
+    routes = [
+        ("GET", connector, None),
+        ("POST", connector, {"service": "analytics_provider", "secret_value": "synthetic-secret"}),
+        ("PATCH", connector + "/analytics_provider", {"notes": "overwritten"}),
+        ("POST", connector + "/analytics_provider/health-check", None),
+        ("DELETE", connector + "/analytics_provider", None),
+    ]
+    for method, path, body in routes:
+        response = client.request(method, path, headers=headers("bob"), json=body)
+        assert response.status_code == 404, (method, path, response.text)
+
+    assert registry.lookups == [("alice-app", "bob")] * len(routes)
+    for mock in methods.values():
+        mock.assert_not_awaited()
 
 
 def test_local_development_uses_the_single_developer_as_registry_owner(monkeypatch) -> None:

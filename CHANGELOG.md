@@ -106,6 +106,10 @@ This project follows a practical pre-1.0 changelog format:
   under credential objects even when nested payload fields use unfamiliar names.
   Descriptive metadata and names-only references remain exportable.
 
+- Studio now checks registry ownership for app integrations and connectors even
+  when a signed-in caller omits the app ID and the host selects its default app.
+  The shared dashboard manifest remains available without selecting an app.
+
 - Repository Docker coding turns now require a trusted local image ID, reject
   changed image tags before source transfer, verify the created container's
   image, and reject unrecognized baked environment keys.
