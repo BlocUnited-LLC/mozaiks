@@ -67,13 +67,14 @@ asserted with `verified_workspace_id`. The optional `workspace_id` argument must
 name that workspace; any other workspace is refused, and a workspace or tenant
 selected by the request never chooses one. A signed-in caller with no verified
 workspace cannot use the connector actions, and `list_app_integration_needs`
-then returns declarations without a connector overlay. With authentication off
-and development access, the action uses the requested workspace, then the
+returns declarations without a connector overlay when no scope was requested.
+A requested workspace or tenant without verified identity is refused. With
+authentication off and development access, the action uses the requested workspace, then the
 dispatch workspace or tenant, then `demo-workspace`.
 
-Workspace actions refuse a dispatch workspace or tenant that conflicts with the
-verified principal before storage or message events. App declaration actions
-require the selected app to have an app registry record owned by the caller;
+Workspace, app-catalog and declaration actions refuse a dispatch workspace or
+tenant that conflicts with the verified principal before storage or events.
+App declaration actions require the selected app to have an app registry record owned by the caller;
 the selected app may differ from Studio's loaded app. Module dispatch remains
 bound to the loaded host app. Catalog usage counts are
 limited to the caller's registry-owned apps. The AppGenerator tool writes

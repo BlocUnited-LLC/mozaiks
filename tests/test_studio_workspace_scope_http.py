@@ -531,9 +531,14 @@ def test_app_integration_needs_overlay_only_the_verified_workspace(studio) -> No
     studio.authenticated()
     client = studio.client()
 
-    unbound = _connector(
+    spoofed = _connector(
         client, "list_app_integration_needs", studio.token(), params={"app_id": "built-app"},
         context={"workspace_id": FOREIGN, "tenant_id": FOREIGN},
+    )
+    assert spoofed.status_code == 403
+    assert studio.declarations.calls == []
+    unbound = _connector(
+        client, "list_app_integration_needs", studio.token(), params={"app_id": "built-app"},
     )
     assert unbound.status_code == 200, unbound.text
     assert unbound.json()["declarations"][0]["connector_status"] == "not_configured"
@@ -551,6 +556,62 @@ DECLARATION_ACTIONS = {
     "upsert_app_integration_need": {"need": {"service": "twilio"}},
     "delete_app_integration_need": {"service": "resend"},
 }
+
+
+@pytest.mark.parametrize("action", sorted(DECLARATION_ACTIONS))
+@pytest.mark.parametrize("verified", [False, True], ids=["unbound", "bound_elsewhere"])
+@pytest.mark.parametrize("request_scope", [
+    {"workspace_id": FOREIGN},
+    {"tenant_id": FOREIGN},
+    {"workspace_id": FOREIGN, "tenant_id": FOREIGN},
+], ids=["workspace", "tenant", "both"])
+def test_app_declarations_reject_unverified_dispatch_scope(studio, action, verified, request_scope) -> None:
+    studio.authenticated()
+    headers = studio.token(workspace=OWN, tenant="tenant-own") if verified else studio.token()
+    response = _connector(
+        studio.client(), action, headers,
+        params={"app_id": "built-app", **DECLARATION_ACTIONS[action]},
+        context=request_scope,
+    )
+
+    assert response.status_code == 403
+    assert studio.declarations.calls == []
+    assert studio.store.calls == []
+
+
+@pytest.mark.parametrize("action,params", [
+    ("list_integrations", {}),
+    ("get_integration", {"integration_id": "openai"}),
+    ("set_integration_note", {"integration_id": "openai", "note": "test"}),
+])
+@pytest.mark.parametrize("request_scope", [
+    {"workspace_id": FOREIGN},
+    {"tenant_id": FOREIGN},
+    {"workspace_id": FOREIGN, "tenant_id": FOREIGN},
+], ids=["workspace", "tenant", "both"])
+def test_app_catalog_rejects_unverified_dispatch_scope(studio, action, params, request_scope) -> None:
+    studio.authenticated()
+    response = _connector(
+        studio.client(), action, studio.token(), params=params,
+        context=request_scope,
+    )
+
+    assert response.status_code == 403
+    assert studio.declarations.calls == []
+    assert studio.store.calls == []
+
+
+@pytest.mark.parametrize("action", sorted(DECLARATION_ACTIONS))
+def test_owned_app_declarations_accept_matching_verified_dispatch_scope(studio, action) -> None:
+    studio.authenticated()
+    response = _connector(
+        studio.client(), action, studio.token(workspace=OWN, tenant="tenant-own"),
+        params={"app_id": "built-app", **DECLARATION_ACTIONS[action]},
+        context={"workspace_id": OWN, "tenant_id": "tenant-own"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert len(studio.declarations.calls) == 1
 
 
 @pytest.mark.parametrize("action", sorted(DECLARATION_ACTIONS))

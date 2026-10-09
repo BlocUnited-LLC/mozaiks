@@ -304,6 +304,8 @@ class _FakeCtx:
     user_id = "user_1"
     tenant_id = None
     workspace_id = None
+    dispatch_authority = None
+    persistence = None
 
 
 class _FakeOwnedAppRegistry:

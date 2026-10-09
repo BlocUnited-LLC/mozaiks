@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from .policy import derive_status
+from .policy import assert_app_dispatch_scope, derive_status
 from .schemas import (
     CATALOG_BY_ID,
     INTEGRATIONS_CATALOG,
@@ -49,6 +49,7 @@ class WorkspaceIntegrationsService:
         return principal.user_id
 
     async def require_owned_app(self, ctx: ModuleContext, app_id: str) -> None:
+        assert_app_dispatch_scope(ctx)
         if not app_id:
             raise PermissionError("App integration target is required.")
         owner_id = self._caller_owner_id(ctx)
@@ -107,6 +108,7 @@ class WorkspaceIntegrationsService:
         *,
         category: str | None = None,
     ) -> dict[str, Any]:
+        assert_app_dispatch_scope(ctx)
         notes_list = await self.repo.get_all_notes(ctx)
         notes_by_id = {n["integration_id"]: n.get("note") for n in notes_list}
 
@@ -155,6 +157,7 @@ class WorkspaceIntegrationsService:
         *,
         integration_id: str,
     ) -> dict[str, Any]:
+        assert_app_dispatch_scope(ctx)
         spec = CATALOG_BY_ID.get(integration_id)
         if not spec:
             return {"integration": None}
@@ -179,6 +182,7 @@ class WorkspaceIntegrationsService:
         note: str,
         user_id: str,
     ) -> dict[str, Any]:
+        assert_app_dispatch_scope(ctx)
         if integration_id not in CATALOG_BY_ID:
             raise ValueError(f"Unknown integration: {integration_id}")
 
