@@ -42,16 +42,17 @@ MANIFEST = '{"appId":"preview-app","appName":"Preview","authRequired":false}'
 
 
 class FakeSandboxAdapter:
-    def __init__(self, *, preview_url="https://preview.example"):
+    def __init__(self, *, preview_url="https://preview.example", provider="docker"):
         self.calls = []
         self.preview_url = preview_url
+        self.provider = provider
         self.install_result = SandboxRunResult(success=True, exit_code=0)
         self.background_result = SandboxRunResult(success=True, exit_code=0)
         self.command_results = {}
 
     async def create_session(self, **kwargs):
         self.calls.append(("create_session", kwargs))
-        return SandboxSessionInfo(session_id=f"sess-{len(self.calls)}", provider="docker")
+        return SandboxSessionInfo(session_id=f"sess-{len(self.calls)}", provider=self.provider)
 
     async def write_files(self, **kwargs):
         self.calls.append(("write_files", kwargs))

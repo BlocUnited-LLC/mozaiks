@@ -18,6 +18,7 @@ from mozaiksai.core.semantics.archive import (
 from tests.test_artifact_preview_sessions import FakeSandboxAdapter, _manager, _store
 
 IMAGE_ID = "sha256:" + "a" * 64
+E2B_BUILD_REF = "preview:f47ac10b-58cc-4372-a567-0e02b2c3d479"
 IDENTITY = dict(
     artifact_id="candidate-a", app_id="factory", user_id="owner",
     target_app_id="preview-app", build_registry_id="build-a",
@@ -60,6 +61,78 @@ async def test_sealed_cleanup_after_restart_uses_stored_docker_provider(monkeypa
 
     assert await store.get(state.sandbox_id) is None
     assert [name for name, _ in adapter.calls].count("terminate_session") == 1
+
+
+@pytest.mark.asyncio
+async def test_sealed_e2b_boot_uses_exact_runtime_ref_without_url_or_mutable_write():
+    adapter = _SealedAdapter(provider="e2b")
+    manager = _manager(adapter, provider="e2b")
+    data = _archive(**{"app/app.json": APP_JSON})
+    state = await manager.create_sealed_candidate(
+        **IDENTITY, archive_bytes=data, archive_sha256=archive_digest(data), sealed_runtime_ref=E2B_BUILD_REF,
+    )
+    assert state.provider == "e2b" and state.sealed_runtime_ref == E2B_BUILD_REF
+    assert state.status == "running" and state.preview_url is None
+    creates = [args for name, args in adapter.calls if name == "create_session"]
+    assert len(creates) == 1 and creates[0]["template"] == E2B_BUILD_REF
+    assert creates[0]["envs"] == {}
+    assert not any(name in {"get_preview_url", "write_files"} for name, _ in adapter.calls)
+    await manager.stop(state.sandbox_id)
+    assert await manager._store.get(state.sandbox_id) is None
+
+
+@pytest.mark.asyncio
+async def test_sealed_e2b_cleanup_after_restart_uses_stored_provider(monkeypatch):
+    import mozaiksai.core.adapters.e2b_sandbox as e2b_sandbox
+
+    adapter = _SealedAdapter(provider="e2b")
+    monkeypatch.setattr(e2b_sandbox, "get_e2b_sandbox", lambda: adapter)
+    monkeypatch.setenv("MOZAIKS_PREVIEW_PROVIDER", "e2b")
+    monkeypatch.setenv("E2B_API_KEY", "test-key")
+    store = _store()
+    first = ArtifactPreviewSessionManager(store=store, startup_timeout_seconds=0)
+    data = _archive(**{"app/app.json": APP_JSON})
+    state = await first.create_sealed_candidate(
+        **IDENTITY, archive_bytes=data, archive_sha256=archive_digest(data), sealed_runtime_ref=E2B_BUILD_REF,
+    )
+    monkeypatch.setenv("MOZAIKS_PREVIEW_PROVIDER", "docker")
+    restarted = ArtifactPreviewSessionManager(store=store)
+    await restarted.cleanup(expired_only=False)
+    assert await store.get(state.sandbox_id) is None
+    assert [name for name, _ in adapter.calls].count("terminate_session") == 1
+
+
+@pytest.mark.asyncio
+async def test_sealed_e2b_rejects_wrong_runtime_ref_or_missing_stager_before_allocation():
+    adapter = _SealedAdapter(provider="e2b")
+    manager = _manager(adapter, provider="e2b")
+    data = _archive(**{"app/app.json": APP_JSON})
+    with pytest.raises(ValueError, match="does not match"):
+        await manager.create_sealed_candidate(
+            **IDENTITY, archive_bytes=data, archive_sha256=archive_digest(data), sealed_runtime_ref=IMAGE_ID,
+        )
+    assert adapter.calls == []
+    ordinary_adapter = FakeSandboxAdapter(provider="e2b")
+    manager = _manager(ordinary_adapter, provider="e2b")
+    with pytest.raises(RuntimeError, match="immutable staging"):
+        await manager.create_sealed_candidate(
+            **IDENTITY, archive_bytes=data, archive_sha256=archive_digest(data), sealed_runtime_ref=E2B_BUILD_REF,
+        )
+    assert ordinary_adapter.calls == []
+
+
+@pytest.mark.asyncio
+async def test_sealed_e2b_rejects_provider_mismatch_and_cleans_up():
+    adapter = _SealedAdapter(provider="docker")
+    manager = _manager(adapter, provider="e2b")
+    data = _archive(**{"app/app.json": APP_JSON})
+    with pytest.raises(RuntimeError, match="did not match"):
+        await manager.create_sealed_candidate(
+            **IDENTITY, archive_bytes=data, archive_sha256=archive_digest(data), sealed_runtime_ref=E2B_BUILD_REF,
+        )
+    assert [name for name, _ in adapter.calls].count("stage_sealed_files") == 0
+    assert [name for name, _ in adapter.calls].count("terminate_session") == 1
+    assert await manager._store.list() == []
 
 
 @pytest.mark.asyncio

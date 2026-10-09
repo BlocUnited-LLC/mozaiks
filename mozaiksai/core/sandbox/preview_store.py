@@ -19,17 +19,11 @@ from bson import BSON
 from pymongo.errors import DuplicateKeyError
 
 from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE, PlatformCollections
+from mozaiksai.core.sandbox.sealed_runtime_ref import is_sealed_runtime_ref
 
 _LEDGER_ID = "artifact-previews"
 _IDENTITY_FIELDS = ("app_id", "user_id", "artifact_id", "target_app_id", "build_registry_id", "provider")
 _SEALED_IDENTITY_FIELDS = ("sealed_archive_sha256", "sealed_runtime_ref")
-_SEALED_RUNTIME_REFS = {
-    "docker": re.compile(r"sha256:[0-9a-f]{64}"),
-    "e2b": re.compile(
-        r"(?:[A-Za-z0-9][A-Za-z0-9._-]*/)?[A-Za-z0-9][A-Za-z0-9._-]*:"
-        r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
-    ),
-}
 _STATE_FIELDS = {
     "session_id", "status", "preview_url", "last_error", "last_access_at",
     "manifest", "paths", "has_requirements", "health_checked_at",
@@ -52,11 +46,6 @@ class PreviewOperationBusy(RuntimeError):
 
 class PreviewRecoveryRequired(RuntimeError):
     """An interrupted mutation requires termination before another mutation."""
-
-
-def is_sealed_runtime_ref(provider: str, runtime_ref: str) -> bool:
-    pattern = _SEALED_RUNTIME_REFS.get(provider)
-    return isinstance(runtime_ref, str) and pattern is not None and pattern.fullmatch(runtime_ref) is not None
 
 
 def _utc(value: datetime) -> datetime:

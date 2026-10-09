@@ -27,8 +27,8 @@ from mozaiksai.core.sandbox.preview_store import (
     PreviewCapacityError,
     PreviewLeaseLostError,
     PreviewOperationBusy,
-    is_sealed_runtime_ref,
 )
+from mozaiksai.core.sandbox.sealed_runtime_ref import is_sealed_runtime_ref
 from mozaiksai.core.semantics.archive import read_archive_manifest
 
 logger = get_core_logger("artifact_preview_sessions")
@@ -333,10 +333,10 @@ class ArtifactPreviewSessionManager:
             raise ValueError("Sealed preview requires an exact provider runtime reference")
         files = _sealed_archive_files(archive_bytes, archive_sha256, target_app_id)
         provider, adapter = self._selected_provider()
-        if provider != "docker" or not isinstance(adapter, _SealedCandidateStager):
-            raise RuntimeError("Sealed preview requires the local Docker sandbox adapter")
         if not is_sealed_runtime_ref(provider, sealed_runtime_ref):
             raise ValueError("Sealed runtime reference does not match the selected provider")
+        if not isinstance(adapter, _SealedCandidateStager):
+            raise RuntimeError("Sealed preview requires a sandbox adapter with immutable staging")
         identity = dict(
             artifact_id=artifact_id, app_id=app_id, user_id=user_id,
             target_app_id=target_app_id, build_registry_id=build_registry_id, provider=provider,
@@ -420,6 +420,8 @@ class ArtifactPreviewSessionManager:
         try:
             if sealed_files is not None:
                 assert isinstance(adapter, _SealedCandidateStager)
+                if info.provider != allocation["provider"]:
+                    raise RuntimeError("Sealed preview provider did not match its reservation")
                 async with asyncio.timeout(self._sealed_stage_timeout_seconds):
                     await adapter.stage_sealed_files(session_id=info.session_id, files=sealed_files)
                 result = await adapter.run_command(
