@@ -791,10 +791,9 @@ def _resolve_studio_scope(
 async def _resolve_owned_app_scope(
     principal: UserPrincipal, *, app_id: str | None = None,
 ) -> tuple[str, str]:
-    """Resolve an explicitly selected Studio app through its registry owner."""
+    """Resolve an app-scoped Studio resource through its registry owner."""
     resolved_app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
-    if str(app_id or "").strip() or str(principal.app_id or "").strip():
-        await _get_owned_app_record(resolved_app_id, user_id)
+    await _get_owned_app_record(resolved_app_id, user_id)
     return resolved_app_id, user_id
 
 
@@ -809,7 +808,12 @@ async def get_studio_dashboard_config(
     app_id: str | None = None,
     principal: UserPrincipal = Depends(require_studio_user),
 ):
-    resolved_app_id, _ = await _resolve_owned_app_scope(principal, app_id=app_id)
+    # The manifest is a shared navigation contract when no app is selected.
+    # An explicit selection or app-bound token still needs the registry check.
+    if app_id or principal.app_id:
+        resolved_app_id, _ = await _resolve_owned_app_scope(principal, app_id=app_id)
+    else:
+        resolved_app_id, _ = _resolve_studio_scope(principal)
     manifest = load_dashboard_manifest(resolve_app_root())
     payload = manifest.model_dump(mode="json")
     payload["resolved"] = {

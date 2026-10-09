@@ -29,11 +29,12 @@ the existing app record.
 
 ## App Ownership
 
-Studio dashboard, integration, and source-context actions for a selected app
-use the app registry to verify that the signed-in user owns it. An app missing
-from that user's registry view returns 404; a selected app that conflicts with
-an app-bound token still returns 403. When no app is selected or claimed,
-Studio retains its implicit host app behavior.
+Studio app-scoped integration, connector, and source-context actions use the app
+registry to verify that the signed-in user owns the resolved app, including when
+the request omits `app_id` and resolves to the host default. An app missing from
+that user's registry view returns 404; a selected app that conflicts with an
+app-bound token still returns 403. The shared dashboard manifest remains
+available without selecting an app because it does not read app resources.
 
 With authentication disabled and local development access enabled, Studio uses
 the configured `MOZAIKS_DEFAULT_USER_ID` (default `demo-user`) as the single
