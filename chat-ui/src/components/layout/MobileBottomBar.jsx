@@ -184,7 +184,7 @@ const MobileBottomBar = ({ route = null, shellMode = null }) => {
           >
             <span className="shell-mobile-bottom-glyph" aria-hidden="true">
               <ShellNavigationIcon
-                icon={item.icon || item.id}
+                icon={item.icon || (item.iconLabel ? null : item.id)}
                 fallback={(item.iconLabel || item.label || item.id || "?").slice(0, 1).toUpperCase()}
               />
               {showBadge && <span className="shell-mobile-bottom-badge">{notificationCount > 9 ? "9+" : notificationCount}</span>}
