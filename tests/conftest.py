@@ -16,9 +16,78 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
+
+# Existing deterministic Factory tests feed source authored in this repository.
+# They exercise repair/build contracts using the trusted fixture probes, while
+# test_app_acceptance_isolation.py exercises the production Docker boundary.
+_TRUSTED_GENERATED_APP_FIXTURE_TESTS = {
+    "test_agentgenerator_generate_and_download_collection.py",
+    "test_ai_research_workspace_golden_path.py",
+    "test_app_auth_generation.py",
+    "test_app_build_failure_routing.py",
+    "test_app_runtime_smoke.py",
+    "test_app_validation_readiness.py",
+    "test_app_validation_strategy.py",
+    "test_appgenerator_assembly_failures.py",
+    "test_appgenerator_bounded_recovery.py",
+    "test_appgenerator_download_admission.py",
+    "test_appgenerator_export_snapshot.py",
+    "test_appgenerator_generate_and_download_persistence.py",
+    "test_appgenerator_recovery_resume.py",
+    "test_appgenerator_recovery_routing.py",
+    "test_appgenerator_revision_baseline.py",
+    "test_appgenerator_task_integrity.py",
+    "test_appgenerator_wiring_acceptance_boundary.py",
+    "test_appplan_materialization_acceptance.py",
+    "test_appschema_scoped_manifest.py",
+    "test_ask_context_contract_closure.py",
+    "test_brownfield_agentgenerator_acceptance.py",
+    "test_continuous_deterministic_materialization.py",
+    "test_deterministic_page_materialization.py",
+    "test_e2e_deterministic_acceptance_gate.py",
+    "test_factory_bundle_promotion_to_host_load.py",
+    "test_factory_regression_suite.py",
+    "test_generated_app_archetype_matrix.py",
+    "test_generated_app_candidate_validation.py",
+    "test_generated_app_functional_acceptance.py",
+    "test_managed_capability_artifact_replay.py",
+    "test_materialized_bundle_production_runtime.py",
+    "test_offline_factory_build_sequence_smoke.py",
+    "test_offline_generated_build_acceptance.py",
+    "test_run_termination.py",
+    "test_smoke_appgenerator_live_acceptance.py",
+    "test_smoke_appgenerator_live_subscription.py",
+}
+
+
+@pytest.fixture(autouse=True)
+def _trusted_generated_app_fixture_probe(monkeypatch, request):
+    if request.node.path.name not in _TRUSTED_GENERATED_APP_FIXTURE_TESTS:
+        return
+
+    from factory_app.workflows.AppGenerator.tools import app_runtime_smoke, app_validation
+    from factory_app.workflows.AppGenerator.tools.app_runtime_load_probe import probe_app_root
+
+    async def trusted_fixture_load(generated_files):
+        with tempfile.TemporaryDirectory(prefix="mozaiks-test-runtime-load-") as temporary:
+            app_root = Path(temporary) / "app"
+            app_validation._write_files_to_dir(app_root, generated_files)
+            return await probe_app_root(app_root)
+
+    async def trusted_fixture_smoke(generated_files):
+        with tempfile.TemporaryDirectory(prefix="mozaiks-test-runtime-smoke-") as temporary:
+            app_root = Path(temporary) / "app"
+            app_validation._write_files_to_dir(app_root, generated_files)
+            return await app_runtime_smoke.run_app_runtime_smoke(
+                app_root, mongo_uri=app_runtime_smoke.resolve_smoke_mongo_uri(),
+            )
+
+    monkeypatch.setattr(app_validation, "_app_runtime_load_result", trusted_fixture_load)
+    monkeypatch.setattr(app_validation, "_app_runtime_smoke_result", trusted_fixture_smoke)
 
 
 def _repo_factory_app_bundle() -> Path:

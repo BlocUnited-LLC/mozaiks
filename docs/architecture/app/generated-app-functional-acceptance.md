@@ -147,35 +147,24 @@ enabled, crashed on every write and denied paying users. `app_runtime_smoke`
 (`factory_app/workflows/AppGenerator/tools/app_runtime_smoke.py`) runs the
 bundle instead.
 
-**Process boundary.** Generated code never runs in the factory process.
-Acceptance writes the bundle to a temporary `app/` root and the gate starts
-`python -m factory_app.workflows.AppGenerator.tools.app_runtime_smoke`:
+**Process boundary.** Generated Python runs in disposable Docker containers,
+never in Studio or a host Python child. Before staging any generated source,
+the gate checks that local Docker can inspect the exact image ID in
+`MOZAIKS_APP_RUNTIME_IMAGE_ID`. A missing or mismatched ID makes acceptance
+`skipped` and blocks export. The AppLoader diagnostic probe runs in a container
+with no network or published ports. The separate runtime smoke uses a private
+MongoDB container and a source-free observer; its result is the acceptance
+authority. The loader probe only supplies repair diagnostics. Both paths remove
+their containers and treat unconfirmed cleanup as a blocking result.
 
-- The child's environment holds only what a Python process needs to start on
-  the operating system: `PATH`, `SYSTEMROOT`, temp directories, locale. It also
-  gets `PYTHONPATH` for the factory's own code and `PYTHON_DOTENV_DISABLED=1`.
-  No host secret, provider key, `MOZAIKS_*` setting or `MONGO_URI` is passed.
-- The disposable database URI and name arrive on stdin.
-- If loading the runtime still adds an environment variable (a `.env` file
-  read), the child refuses to run generated code. Mozaiks requires
-  python-dotenv 1.2 or later, which honors `PYTHON_DOTENV_DISABLED`.
-- The parent kills the child at a hard total limit (60 s by default) and drops
-  the database whether the child finished, crashed, timed out or the gate was
-  cancelled.
-- The child streams each check result as one JSON line, so a killed run still
-  reports every check it finished. The timeout failure names the action that
-  was running.
-- Every message is redacted of the database URI before it is returned.
-
-**Boot.** The child loads the bundle with `AppLoader.load()` and applies the
-declared indexes and data migrations to the disposable database
-(`mozaiks_runtime_smoke_*` on the host's configured Mongo). It registers modules
+**Boot.** The contained app loads the bundle with `AppLoader.load()` and applies the
+declared indexes and data migrations to its private disposable database. It registers modules
 with `ModuleExecutor.register_loaded_module`, the same call the platform host
 makes, and mounts the `api_router` extensions. **Startup services are not
 started.** They run outside module dispatch with their own clients and
 credentials, so the smoke cannot keep them inside the disposable database. They
 are reported `not_run`, and only the deployed app starts them. Requests go
-through the real module router over an in-process ASGI client inside the child:
+through the real module router over an in-process ASGI client inside the contained app:
 no port.
 
 **Two-user CRUD.** For every collection whose canonical create action
@@ -210,7 +199,7 @@ every signed-in user. That is reported once per action. The call is then
 repeated for the same user with exactly the missing permissions, so the defects
 behind it are reported in the same pass.
 
-**Dispatch collaborators.** Inside the child, the composed app is dispatched in
+**Dispatch collaborators.** Inside the contained app, the composed app is dispatched in
 enforce mode through a `ModuleDispatchEnvironment` dependency override:
 
 - an empty `PlatformHookRegistry`, an in-memory audit log, local event
@@ -220,8 +209,8 @@ enforce mode through a `ModuleDispatchEnvironment` dependency override:
 
 The host's auth mode, platform hooks, audit log, usage metering and system
 database are never used. A hosted factory may register module scope, permission,
-policy and audit hooks. With the database dropped, nothing the smoke wrote
-remains on the host's Mongo.
+policy and audit hooks. Generated-app smoke does not receive the host's Mongo
+URI or write to the host database.
 
 ### Imported-source runtime smoke
 
@@ -229,8 +218,8 @@ An imported Genesis can contain arbitrary Python. Its proposed acceptance path u
 `run_contained_imported_app_runtime_smoke(app_root, expected_source_sha256=...)`
 on the exact staged app bytes. The caller supplies every verified source-file
 digest; the runner checks the copied mount bytes and rejects missing or extra
-files. This is a separate opt-in backend; ordinary generated-app acceptance
-continues to use the child-process smoke described above.
+files. Generated-app acceptance now delegates to this contained runner after
+its own image preflight; imported Genesis callers still opt in separately.
 
 Before staging imported source, a caller can use
 `preflight_contained_imported_smoke()` to require a reachable local Docker
@@ -333,22 +322,15 @@ gate. Actions on the `internal` and `admin_internal` surfaces are out of scope:
 signed-in users cannot call them over HTTP. `public` and `public_readonly`
 actions are called like any other, as a signed-in user.
 
-**Known follow-ups.** These are not handled by the gate yet:
+**Known follow-ups.** Pack-owned permissions outside `config/auth.yaml`
+default scopes (commerce) are reported as ungrantable. Failures on code-rendered
+files without an owning task remain blocked for repair. A smoke result with
+observer checks it cannot independently verify stays pending, even if the app
+reported success. The Docker validator image must be built and pinned by the
+operator; the gate never downloads one on demand.
 
-- Outbound calls to unconfigured integrations run in the child and fail or wait
-  until the time limit.
-- Pack-owned permissions outside `config/auth.yaml` default scopes (commerce)
-  are reported as ungrantable.
-- The host's Mongo credentials are not yet scoped to the disposable database.
-- Stale `mozaiks_runtime_smoke_*` databases left by a killed factory process are
-  not swept.
-- Failures on code-rendered files (no owning task) are blocked for repair rather
-  than routed.
-- Generated code runs as the factory's operating-system user without a
-  filesystem sandbox.
-
-**Proof.** `tests/test_app_runtime_smoke.py` runs the gate through the child
-process on real Mongo against two recorded bundles
+**Proof.** `tests/test_app_runtime_smoke.py` exercises the retained trusted-fixture
+child path on real Mongo against two recorded bundles
 (`tests/fixtures/runtime_smoke_*.json`):
 
 - The 93a7 replay fails for its known reasons: null index name, migration
@@ -356,8 +338,16 @@ process on real Mongo against two recorded bundles
   crash on every create and on a missing id, and paying users denied. With the
   create crash repaired, the stored record shows the wrong id and owner fields.
 - The fdfa818e run replayed at c8b9ea2e passes every check.
-- Further tests cover the hard timeout, the child environment, startup services
-  and the no-subscriptions case.
+- Further tests cover the trusted fixture's hard timeout, child environment,
+  startup services and the no-subscriptions case.
+
+`tests/test_app_acceptance_isolation.py` verifies that generated acceptance
+delegates to the contained loader and smoke runners, blocks when the image is
+unavailable, and treats unverified observer checks as pending. Its opt-in real
+Docker test loads the recorded good bundle and observes its HTTP boot with a
+pinned local image even when ambient Docker host, context, and config settings
+point elsewhere. The independently unverified rejected-event check remains
+pending and blocks promotion.
 
 The suite-wide conftest gives every other test no smoke database, so acceptance
 tests that do not opt in report `skipped`.
@@ -856,10 +846,11 @@ Parent validation and source-index checks cannot certify a new candidate.
 
 Execution strategy comes from operator policy and the request, never a model's
 suggestion. `skip` runs neither acceptance nor build execution and cannot activate
-the candidate. Acceptance uses the existing local runtime load and smoke process;
-Docker/E2B isolates the subsequent compilation stage, not the whole acceptance
-pipeline. This entrypoint proves explicit bundle correctness. It does not replay
-Genesis task execution or manufacture task evidence from a refinement request.
+the candidate. Acceptance uses the pinned local Docker image for AppLoader
+diagnostics and the contained runtime smoke; Docker or E2B can separately isolate
+the compilation stage. This entrypoint proves explicit bundle correctness. It
+does not replay Genesis task execution or manufacture task evidence from a
+refinement request.
 
 Saved archives use the same canonical identity and digest checks as normal builds.
 The existing Studio lifecycle registers the exact candidate for review; explicit

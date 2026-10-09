@@ -294,7 +294,11 @@ def test_imported_smoke_preflight_returns_exact_immutable_image_id(monkeypatch):
 
     monkeypatch.setattr(app_runtime_smoke.subprocess, "run", inspect)
     assert preflight_contained_imported_smoke(image="trusted:local", expected_image_id=image_id) == image_id
-    assert commands == [["docker", "image", "inspect", "--format", "{{.Id}}", "trusted:local"]]
+    assert len(commands) == 1
+    assert commands[0][0] == "docker"
+    assert commands[0][1] == "--config"
+    assert commands[0][3] == "--host"
+    assert commands[0][-5:] == ["image", "inspect", "--format", "{{.Id}}", "trusted:local"]
 
 
 async def test_imported_smoke_requires_pinned_validator_image(monkeypatch, tmp_path):
@@ -465,14 +469,14 @@ async def test_imported_smoke_cancellation_waits_for_container_registration(monk
     removed = []
 
     def create(command, **_kwargs):
-        assert command[:2] == ["docker", "create"]
+        assert command[0] == "docker" and "create" in command
         entered.set()
         assert release.wait(timeout=5)
         return SimpleNamespace(returncode=0)
 
     monkeypatch.setattr(app_runtime_smoke.subprocess, "run", create)
     monkeypatch.setattr(app_runtime_smoke.subprocess, "Popen", lambda *_args, **_kwargs: pytest.fail("cancelled container started"))
-    monkeypatch.setattr(app_runtime_smoke, "_container_removed", lambda name: removed.append(name) or True)
+    monkeypatch.setattr(app_runtime_smoke, "_container_removed", lambda name, **_kwargs: removed.append(name) or True)
     child = app_runtime_smoke._ContainedDockerProcess()
     running = asyncio.create_task(asyncio.to_thread(
         child.run, tmp_path, tmp_path, "sha256:" + "a" * 64, 1.0, "a" * 32,
@@ -487,6 +491,7 @@ async def test_imported_smoke_cancellation_waits_for_container_registration(monk
     assert result.contained is True
     assert result.returncode is None
     assert removed and set(removed) == {child.name, child.probe_name}
+    child.close()
 
 
 @pytest.mark.skipif(
@@ -811,6 +816,7 @@ async def test_generated_code_runs_without_any_host_secret_in_its_environment(mo
     assert visible <= {
         *app_runtime_smoke._CHILD_ENVIRONMENT,
         "PYTHONPATH", "PYTHON_DOTENV_DISABLED", "PYTHONUTF8", "PYTHONIOENCODING", "PYTHONDONTWRITEBYTECODE",
+        "USERPROFILE" if os.name == "nt" else "HOME",
     }
     assert mongo.uri not in json.dumps(result)
 

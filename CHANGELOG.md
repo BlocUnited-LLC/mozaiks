@@ -202,6 +202,9 @@ This project follows a practical pre-1.0 changelog format:
   Build validation also excludes explicitly forwarded interactive-preview
   environment values.
 
+- Generated AppGenerator acceptance now loads candidate Python only inside a
+  pinned local Docker validator. Missing Docker or image evidence blocks export
+  before source staging; the host child smoke remains limited to trusted fixtures.
 - Android source export and delivery verification now reject literal values
   under credential objects even when nested payload fields use unfamiliar names.
   Descriptive metadata and names-only references remain exportable.
