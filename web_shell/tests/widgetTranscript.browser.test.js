@@ -50,6 +50,7 @@ before(async () => {
         const [activeGeneralChatId,setActiveGeneralChatId]=useState(window.initialGeneralId === undefined ? 'saved' : window.initialGeneralId);
         const [askMessages,setAskMessages]=useState([]);
         const [unreadChatCount,setUnreadChatCount]=useState(0);
+        const [isChatOverlayOpen,setIsChatOverlayOpen]=useState(false);
         const [mounted,setMounted]=useState(true);
         window.switchIdentity=setIdentity;window.selectConversation=setActiveGeneralChatId;
         window.unmountWidget=()=>setMounted(false);
@@ -59,6 +60,7 @@ before(async () => {
           api,config:{appId:identity.app,appName:'Sample App'},user:{id:identity.user,app_id:identity.app},
           askMessages,setAskMessages,activeGeneralChatId,setActiveGeneralChatId,
           unreadChatCount,setUnreadChatCount,setConversationMode:noop,setActiveChatId:noop,setActiveWorkflowName:noop,
+          isChatOverlayOpen,setIsChatOverlayOpen,
         }}>{mounted&&<Widget/>}</ChatContext.Provider>;
       }
       createRoot(document.getElementById('root')).render(<BrowserRouter><Fixture/></BrowserRouter>);
