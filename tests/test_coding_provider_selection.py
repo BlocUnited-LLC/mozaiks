@@ -1,9 +1,7 @@
-"""Tests for deterministic coding-provider selection and the fallback ladder.
+"""Tests for bounded coding-provider selection without silent fallback.
 
 Dispatch is pure policy: the model never chooses its own execution provider,
-and an ACP attempt that fails for operational reasons falls back to the
-structured provider exactly once — while an out-of-scope ACP result surfaces
-as a failure with no retry.
+and an ACP attempt that fails for operational reasons remains a failed attempt.
 """
 
 from __future__ import annotations
@@ -14,6 +12,7 @@ from typing import Any
 import pytest
 
 from mozaiksai.control_plane import (
+    ACPCodingProvider,
     CodingWorkerRequest,
     ControlPlaneCodingCapabilityConfig,
     ControlPlaneConfig,
@@ -62,49 +61,56 @@ def _request(files: dict[str, str] | None = None, **overrides: Any) -> CodingWor
 
 
 @pytest.mark.parametrize(
-    ("files", "acp_enabled", "importable", "kind", "expected", "reason_prefix"),
+    ("files", "acp_enabled", "worker_ready", "validation_ready", "kind", "expected", "reason_prefix"),
     [
-        ({_FILE_A: "a", _FILE_B: "b"}, True, True, "app_bundle", "acp", "multi_file_scope_within_budget"),
-        ({_FILE_A: "a", _FILE_B: "b"}, True, True, "theme_capture", "acp", "multi_file_scope_within_budget"),
-        ({_FILE_A: "a"}, True, True, "app_bundle", "structured_output", "single_file_scope"),
-        ({_FILE_A: "a", _FILE_B: "b"}, False, True, "app_bundle", "structured_output", "acp_disabled"),
-        ({_FILE_A: "a", _FILE_B: "b"}, True, False, "app_bundle", "structured_output", "acp_extra_not_installed"),
-        ({_FILE_A: "a", _FILE_B: "b"}, True, True, "workflow_bundle", "structured_output", "artifact_kind_not_acp_eligible"),
+        ({_FILE_A: "a", _FILE_B: "b"}, True, True, True, "app_bundle", "acp", "bounded_scope_within_budget"),
+        ({_FILE_A: "a", _FILE_B: "b"}, True, True, True, "theme_capture", "acp", "bounded_scope_within_budget"),
+        ({_FILE_A: "a"}, True, True, True, "app_bundle", "acp", "bounded_scope_within_budget"),
+        ({_FILE_A: "a", _FILE_B: "b"}, False, True, True, "app_bundle", "structured_output", "acp_disabled"),
+        ({_FILE_A: "a", _FILE_B: "b"}, True, False, True, "app_bundle", None, "isolated_acp_worker_unavailable"),
+        ({_FILE_A: "a", _FILE_B: "b"}, True, True, False, "app_bundle", None, "isolated_candidate_validation_unavailable"),
+        ({_FILE_A: "a", _FILE_B: "b"}, True, True, True, "workflow_bundle", None, "artifact_kind_not_acp_eligible"),
+        ({}, True, True, True, "app_bundle", None, "empty_file_scope"),
     ],
 )
 def test_selection_matrix(
     files: dict[str, str],
     acp_enabled: bool,
-    importable: bool,
+    worker_ready: bool,
+    validation_ready: bool,
     kind: str,
-    expected: str,
+    expected: str | None,
     reason_prefix: str,
 ) -> None:
     selection = select_coding_provider(
         _request(files, artifact_kind=kind),
         _config(acp_enabled=acp_enabled),
-        acp_importable=importable,
+        acp_worker_ready=worker_ready,
+        acp_validation_ready=validation_ready,
     )
     assert selection.provider == expected
     assert selection.reason.startswith(reason_prefix)
 
 
-def test_scope_over_acp_budget_prefers_structured() -> None:
+def test_scope_over_acp_budget_blocks_dispatch() -> None:
     files = {f"app/f{i}.py": "x" for i in range(5)}
-    selection = select_coding_provider(_request(files), _config(max_files=3), acp_importable=True)
+    selection = select_coding_provider(
+        _request(files), _config(max_files=3), acp_worker_ready=True, acp_validation_ready=True,
+    )
 
-    assert selection.provider == "structured_output"
+    assert selection.provider is None
     assert selection.reason.startswith("scope_exceeds_acp_max_files")
 
 
 # ---------------------------------------------------------------------------
-# Worker dispatch + fallback ladder
+# Worker dispatch and fail-closed results
 # ---------------------------------------------------------------------------
 
 
 class _StubProvider:
-    def __init__(self, provider_id: str, proposal: StagedPatchProposal) -> None:
+    def __init__(self, provider_id: str, proposal: StagedPatchProposal, *, ready: bool = True) -> None:
         self.provider_id = provider_id
+        self.isolated_runtime_ready = ready
         self._proposal = proposal
         self.calls = 0
 
@@ -153,16 +159,25 @@ async def _passing_validation(**kwargs):  # noqa: ANN003
     }
 
 
+class _IsolatedValidationStub:
+    def __init__(self, *, ready: bool = True) -> None:
+        self.isolated_validation_ready = ready
+
+    async def __call__(self, **kwargs: Any) -> dict[str, Any]:
+        return await _passing_validation(**kwargs)
+
+
 def _worker(
     tmp_path: Path,
     *,
     acp: _StubProvider,
     structured: _StubProvider,
     acp_enabled: bool = True,
+    validation_ready: bool = True,
 ) -> ScopedRefinementCodingWorker:
     return ScopedRefinementCodingWorker(
         config_loader=lambda: _config(acp_enabled=acp_enabled),
-        candidate_validation_runner=_passing_validation,
+        candidate_validation_runner=_IsolatedValidationStub(ready=validation_ready),
         artifact_store=_FakeArtifactStore(),
         output_root=tmp_path,
         provider=structured,
@@ -188,8 +203,15 @@ async def test_multi_file_scope_dispatches_to_acp(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_single_file_scope_stays_on_structured(tmp_path: Path) -> None:
-    acp = _StubProvider("acp_claude_code", _proposal("acp_claude_code"))
+async def test_single_file_scope_dispatches_to_acp(tmp_path: Path) -> None:
+    acp = _StubProvider(
+        "acp_claude_code",
+        _proposal(
+            "acp_claude_code",
+            changed_files=[ProposedFileChange(path=_FILE_A, content="patched-a")],
+            owned_paths=[_FILE_A],
+        ),
+    )
     single = _proposal(
         "control_plane_coding",
         changed_files=[ProposedFileChange(path=_FILE_A, content="patched-a")],
@@ -201,14 +223,15 @@ async def test_single_file_scope_stays_on_structured(tmp_path: Path) -> None:
         _request(files={_FILE_A: "a"}, validation_strategy="local")
     )
 
-    assert acp.calls == 0
-    assert structured.calls == 1
-    assert result.provider == "control_plane_coding"
+    assert acp.calls == 1
+    assert structured.calls == 0
+    assert result.status == "validated"
+    assert result.provider == "acp_claude_code"
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("acp_status", ["unavailable", "failed", "empty", "timeout", "budget_exceeded"])
-async def test_operational_acp_failure_falls_back_to_structured(tmp_path: Path, acp_status: str) -> None:
+async def test_operational_acp_failure_never_falls_back(tmp_path: Path, acp_status: str) -> None:
     acp = _StubProvider("acp_claude_code", _proposal("acp_claude_code", status=acp_status, error="boom"))
     structured = _StubProvider("control_plane_coding", _proposal("control_plane_coding"))
 
@@ -217,15 +240,14 @@ async def test_operational_acp_failure_falls_back_to_structured(tmp_path: Path, 
     )
 
     assert acp.calls == 1
-    assert structured.calls == 1
-    assert result.status == "validated"
-    assert result.provider == "control_plane_coding"
+    assert structured.calls == 0
+    assert result.status == "failed"
+    assert result.provider == "acp_claude_code"
+    assert result.error == "boom"
     attempts = result.metadata["coding_provider_attempts"]
     assert [(a["provider"], a["status"]) for a in attempts] == [
         ("acp_claude_code", acp_status),
-        ("control_plane_coding", "completed"),
     ]
-    assert attempts[1]["reason"] == "acp_fallback"
 
 
 @pytest.mark.asyncio
@@ -245,6 +267,57 @@ async def test_scope_rejection_never_falls_back(tmp_path: Path) -> None:
     assert result.status == "failed"
     assert result.provider == "acp_claude_code"
     assert "out-of-scope" in str(result.error)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("files", "kind", "ready", "validation_ready", "reason"),
+    [
+        ({_FILE_A: "a"}, "app_bundle", False, True, "isolated_acp_worker_unavailable"),
+        ({_FILE_A: "a"}, "app_bundle", True, False, "isolated_candidate_validation_unavailable"),
+        ({f"app/f{i}.py": "x" for i in range(5)}, "app_bundle", True, True, "scope_exceeds_acp_max_files"),
+        ({_FILE_A: "a"}, "workflow_bundle", True, True, "artifact_kind_not_acp_eligible"),
+    ],
+)
+async def test_enabled_acp_blocks_without_dispatch(
+    tmp_path: Path, files: dict[str, str], kind: str, ready: bool, validation_ready: bool, reason: str,
+) -> None:
+    acp = _StubProvider("acp_claude_code", _proposal("acp_claude_code"), ready=ready)
+    structured = _StubProvider("control_plane_coding", _proposal("control_plane_coding"))
+
+    result = await _worker(
+        tmp_path, acp=acp, structured=structured, validation_ready=validation_ready,
+    ).execute(
+        _request(files=files, artifact_kind=kind, validation_strategy="local")
+    )
+
+    assert result.status == "ineligible"
+    assert result.blocked_reason.startswith(reason)
+    assert acp.calls == 0
+    assert structured.calls == 0
+
+
+def test_shipped_local_acp_provider_does_not_claim_isolated_readiness() -> None:
+    assert ACPCodingProvider(config_loader=_config).isolated_runtime_ready is False
+
+
+@pytest.mark.asyncio
+async def test_default_candidate_validator_blocks_ready_acp_provider(tmp_path: Path) -> None:
+    acp = _StubProvider("acp_claude_code", _proposal("acp_claude_code"))
+    structured = _StubProvider("control_plane_coding", _proposal("control_plane_coding"))
+    worker = ScopedRefinementCodingWorker(
+        config_loader=lambda: _config(),
+        output_root=tmp_path,
+        provider=structured,
+        acp_provider=acp,
+    )
+
+    result = await worker.execute(_request(validation_strategy="docker"))
+
+    assert result.status == "ineligible"
+    assert result.blocked_reason == "isolated_candidate_validation_unavailable"
+    assert acp.calls == 0
+    assert structured.calls == 0
 
 
 @pytest.mark.asyncio

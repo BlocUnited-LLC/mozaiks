@@ -31,6 +31,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Enabled ACP routing for one-file bounded app and theme patches only when
+  trusted isolated coding and candidate validation both report ready. An
+  unavailable, failed, or over-budget ACP attempt no longer silently switches
+  to structured-output coding; the harness reports the blocked or failed patch.
 - CI and operator reference container builds resolve public base images from a
   public mirror, avoiding anonymous Docker Hub pull limits during release checks.
 - Restored the assistant launcher on declared app home pages and other custom

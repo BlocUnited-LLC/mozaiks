@@ -51,8 +51,11 @@ coding:
   # Used by structured-output coding. ACP runs a separate coding agent and
   # does not consume this model profile.
   llm_profile: codegen
-  # ACP execution is disabled until an isolated worker is connected to this
-  # route. The structured-output provider uses the codegen profile above.
+  # ACP execution is disabled until trusted isolated coding and candidate
+  # validation workers are connected to this route and report ready. Installing
+  # the ACP extra or enabling this flag alone cannot launch the local subprocess.
+  # The structured-output provider uses the codegen profile above only while
+  # ACP is disabled.
   # Budgets are hard ceilings enforced outside the model. No credentials or
   # adapter connection details belong in this file.
   providers:

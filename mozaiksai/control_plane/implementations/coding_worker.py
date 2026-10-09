@@ -21,17 +21,15 @@ from mozaiksai.control_plane.contracts import (
 )
 from mozaiksai.control_plane.implementations.acp_coding_provider import (
     ACPCodingProvider,
-    acp_available,
 )
 from mozaiksai.control_plane.implementations.coding_provider_selection import (
-    ACP_FALLBACK_STATUSES,
     select_coding_provider,
 )
 from mozaiksai.control_plane.implementations.structured_coding_provider import (
     StructuredOutputCodingProvider,
 )
 from mozaiksai.control_plane.loader import load_selected_refinement_harness
-from mozaiksai.control_plane.ports import CodingExecutionProvider
+from mozaiksai.control_plane.ports import CodingExecutionProvider, IsolatedCodingExecutionProvider
 from mozaiksai.control_plane.workspace import (
     harvest_coding_workspace,
     materialize_coding_workspace,
@@ -82,7 +80,9 @@ class ScopedRefinementCodingWorker:
     The worker owns eligibility, validation, artifact persistence, and the
     checkpoint result shape. Producing the staged file changes is delegated to
     a :class:`~mozaiksai.control_plane.ports.CodingExecutionProvider`; the
-    default provider is the single-shot structured-output provider.
+    default provider is the single-shot structured-output provider. The default
+    candidate validator imports generated app code in the host process, so an
+    ACP route also requires a trusted host-injected isolated validator.
     """
 
     def __init__(
@@ -97,7 +97,7 @@ class ScopedRefinementCodingWorker:
         artifact_store: Any = None,
         output_root: Any = None,
         provider: CodingExecutionProvider | None = None,
-        acp_provider: CodingExecutionProvider | None = None,
+        acp_provider: IsolatedCodingExecutionProvider | None = None,
     ) -> None:
         self._structured_provider: CodingExecutionProvider = provider or StructuredOutputCodingProvider(
             agent_factory=agent_factory,
@@ -106,7 +106,7 @@ class ScopedRefinementCodingWorker:
             pack_loader=pack_loader,
             tool_executor=tool_executor,
         )
-        self._acp_provider: CodingExecutionProvider = acp_provider or ACPCodingProvider(
+        self._acp_provider: IsolatedCodingExecutionProvider = acp_provider or ACPCodingProvider(
             config_loader=config_loader,
         )
         self._config_loader = config_loader
@@ -128,7 +128,21 @@ class ScopedRefinementCodingWorker:
                 metadata={"build_family": request.build_family, "change_class": request.change_class},
             )
 
-        selection = select_coding_provider(request, self._load_config(), acp_importable=acp_available())
+        selection = select_coding_provider(
+            request,
+            self._load_config(),
+            acp_worker_ready=getattr(self._acp_provider, "isolated_runtime_ready", False) is True,
+            acp_validation_ready=(
+                getattr(self._candidate_validation_runner, "isolated_validation_ready", False) is True
+            ),
+        )
+        if selection.provider is None:
+            return CodingWorkerResult(
+                eligible=False,
+                status="ineligible",
+                blocked_reason=selection.reason,
+                metadata={"build_family": request.build_family, "change_class": request.change_class},
+            )
         provider_attempts: list[dict[str, str]] = []
 
         if selection.provider == "acp":
@@ -136,17 +150,6 @@ class ScopedRefinementCodingWorker:
             provider_attempts.append(
                 {"provider": proposal.provider_id, "status": proposal.status, "reason": selection.reason}
             )
-            if proposal.status in ACP_FALLBACK_STATUSES:
-                logger.warning(
-                    "ACP_CODING_ATTEMPT_FELL_BACK app=%s status=%s: %s",
-                    request.app_id,
-                    proposal.status,
-                    proposal.error,
-                )
-                proposal = await self._structured_provider.execute(request)
-                provider_attempts.append(
-                    {"provider": proposal.provider_id, "status": proposal.status, "reason": "acp_fallback"}
-                )
         else:
             proposal = await self._structured_provider.execute(request)
             provider_attempts.append(
