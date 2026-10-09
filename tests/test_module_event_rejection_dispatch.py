@@ -117,6 +117,7 @@ notifications:
 
 HANDLER_PY = '''
 from uuid import uuid4
+from mozaiksai.core.runtime.composition.module_event_provenance import ModuleEventRejection
 
 
 class TaskBoardModule:
@@ -133,8 +134,8 @@ class TaskBoardModule:
 
     @staticmethod
     def _outcome(rejection):
-        # What a caller that must know learns from emit: None, or the rejection.
-        return None if rejection is None else rejection.event_id
+        # An accepted emission now returns a dispatch receipt, not None.
+        return rejection.event_id if isinstance(rejection, ModuleEventRejection) else None
 
     async def create_task(self, ctx, *, title):
         task_id = await self._store(ctx, title)

@@ -385,22 +385,35 @@ action keeps its handler's outcome.
 
 `ctx.emit` returns normally either way, and its value says which happened:
 
-- `None`: the event was handed to the event bus.
+- An `EventDispatchOutcome`: the event reached the runtime bus. It contains
+  synchronous, payload-free listener results. It may still report a failed or
+  missing downstream reaction.
 - A `ModuleEventRejection`: the event was refused. It carries the event id, the
   event type, the category (`undeclared`, `value_invalid` or `schema_invalid`)
   and the schema rule the event failed, never payload contents.
+- `None`: no bus was wired, or a caller-supplied/test context gave no receipt.
 
-Code that must know whether an event went out checks the value. An outbox that
-marks an event delivered, for example, must not do so for a rejection. Test for
-the rejection type, not for `None`: a test double such as `AsyncMock` returns a
-value that is not `None` even when nothing was refused.
+An outbox that requires one consumer must check that exact reaction, not just
+the absence of a rejection or the dispatcher's overall success. A skipped,
+failed, or missing reaction does not acknowledge the outbox entry. A reaction
+receipt is successful when its status is `ok` or `completed`: the former means
+the synchronous handler returned successfully, and the latter means the exact
+scoped event/reaction identity already completed in the idempotency ledger (or
+in this router process when no durable ledger is configured). An active lease,
+retry delay, dead letter, or permission skip remains unsuccessful. The outbox
+still owns durable once-only delivery and any controlled replay. Re-delivery
+must keep the original event identity, or the outbox must persist per-consumer
+checkpoints; each new `ctx.emit` call creates a new event ID.
 
 ```python
-from mozaiksai.core.runtime.composition import ModuleEventRejection
+from mozaiksai.core.runtime.composition.module_event_router import required_module_reaction
 
 outcome = await ctx.emit("domain.my_module.item_created", payload)
-if isinstance(outcome, ModuleEventRejection):
-    ...  # not delivered: keep the outbox entry retryable
+required = required_module_reaction(
+    outcome, module_id="downstream", reaction_id="downstream.apply_item"
+)
+if not required.success:
+    ...  # keep the delivery pending for an authorized, idempotent retry
 ```
 
 The rejection is also named on the dispatch result
@@ -408,15 +421,15 @@ The rejection is also named on the dispatch result
 as `MODULE_EVENT_REJECTED` and counted in `ModuleExecutor.health()`. The
 AppGenerator runtime smoke fails a generated bundle on any rejected event.
 
-These checks and this return value belong to the context `ModuleExecutor`
-builds for a dispatched action. In these cases `ctx.emit` returns `None`
-without them, so `None` does not prove the event was checked or delivered:
+The emitted-event contract checks belong to the context `ModuleExecutor`
+builds for a dispatched action. Other contexts may not apply those checks:
 
-- **No event bus wired.** Emitting does nothing.
+- **No event bus wired.** Emitting does nothing and returns `None`.
 - **Caller-supplied context.** A context passed to `ModuleExecutor.execute`
-  keeps its own emitter.
+  keeps its own emitter and may return a test-specific value.
 - **Reaction handlers.** A reaction handler's `ctx.emit` sends its event
-  straight to the bus. There the event router checks only the event's
+  straight to the bus and returns its dispatch receipt when wired. There the
+  event router checks only the event's
   `payload_schema`, and only when exactly one module declares a schema for that
   event type, before running that event's reactions. It drops an invalid event.
   It never checks a reaction-emitted event against any `emits` list.
