@@ -654,6 +654,16 @@ async def test_ai_research_workspace_offline_golden_path(
     candidates.update({file["filename"]: file["content"] for file in materialize_app_config_contracts(
         app_id="research", app_build_plan=normalized_plan, context_variables=context,
     )})
+    # The custom action scopes are an operator-approved input to this golden
+    # path, not a grant inferred from the model's module.yaml declaration.
+    auth_template = (
+        REPO_ROOT / "factory_app/build_context/webapp_builder/templates/config/auth.yaml"
+    ).read_text(encoding="utf-8")
+    approved_auth = yaml.safe_load(auth_template.replace("{{AUTH_DEFAULT_ROUTE}}", "/research"))
+    approved_auth["frontend"]["default_scopes"].extend(["research.read", "research.execute"])
+    context.set("generated_files", {
+        "config/auth.yaml": yaml.safe_dump(approved_auth, sort_keys=False),
+    })
     task_outputs = {
         task["task_id"]: {"code_files": [
             {"filename": path, "content": candidates[path]}
@@ -682,6 +692,9 @@ async def test_ai_research_workspace_offline_golden_path(
     research_module = yaml.safe_load(files["modules/research/module.yaml"])
     execute_action = next(action for action in research_module["actions"] if action["id"] == "execute_research")
     assert execute_action["entitlement_gate"] == RESEARCH_ACTION_GATE
+    assert {"research.read", "research.execute"} <= set(
+        yaml.safe_load(files["config/auth.yaml"])["frontend"]["default_scopes"]
+    )
     assert detach(context["subscription_contract"])["workflow_contract_updates"] == []
     assert "services/integrations/mozaikspay_client.py" in files
     assert {"ui/pages/billing.yaml", "ui/pages/pricing.yaml", "ui/pages/usage.yaml"} <= set(files)
