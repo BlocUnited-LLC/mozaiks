@@ -77,7 +77,7 @@ def _manager(adapter, *, store=None, provider="docker"):
         provider_resolver=lambda: (provider, adapter), startup_timeout_seconds=0,
         store=store if store is not None else _store(),
     )
-    manager._queue_seconds = 0.05
+    manager._queue_seconds = 1
     manager._poll_seconds = 0.001
     manager._broadcast = AsyncMock()
     return manager
@@ -580,7 +580,6 @@ async def test_shared_capacity_waits_for_another_worker_to_release_a_session(mon
     database = FakePreviewDatabase()
     first = _manager(adapter, store=_store(database))
     second = _manager(adapter, store=_store(database))
-    second._queue_seconds = 1
     active = await _create(first)
     waiting = asyncio.create_task(_create(second, user_id="another-user"))
     try:
