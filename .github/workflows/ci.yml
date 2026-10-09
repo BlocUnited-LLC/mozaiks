@@ -29,22 +29,14 @@ jobs:
       matrix:
         shard: [0, 1, 2, 3, 4, 5, 6, 7]
 
-    services:
-      mongodb:
-        image: mongo:7
-        ports:
-          - 27017:27017
-        options: >-
-          --health-cmd="mongosh --eval 'db.runCommand({ ping: 1 })'"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
-
     steps:
       - name: Checkout
         uses: actions/checkout@v7
         with:
           persist-credentials: false
+
+      - name: Start MongoDB from public mirror
+        run: bash scripts/ci/mongo_service.sh start
 
       - name: Setup Python
         uses: actions/setup-python@v7
@@ -102,9 +94,12 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
+      - name: Pull preview base from public mirror
+        run: bash scripts/ci/pull_public_image.sh public.ecr.aws/docker/library/node:24-bookworm-slim node:24-bookworm-slim
+
       - name: Build offline ACP proof image
         run: |
-          docker build -f infra/docker/Dockerfile.preview -t mozaiks-sandbox:local .
+          docker build --build-context node:24-bookworm-slim=docker-image://public.ecr.aws/docker/library/node:24-bookworm-slim -f infra/docker/Dockerfile.preview -t mozaiks-sandbox:local .
           docker build -f infra/docker/Dockerfile.acp-proof -t mozaiks-acp-proof:local .
 
       - name: Capture built proof image ID
@@ -477,22 +472,15 @@ jobs:
 
   package:
     runs-on: ubuntu-latest
-    services:
-      # Throwaway MongoDB server for the installed first-run smoke below.
-      mongodb:
-        image: mongo:7
-        ports:
-          - 27017:27017
-        options: >-
-          --health-cmd="mongosh --eval 'db.runCommand({ ping: 1 })'"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
     steps:
       - name: Checkout
         uses: actions/checkout@v7
         with:
           persist-credentials: false
+
+      # Throwaway MongoDB server for the installed first-run smoke below.
+      - name: Start MongoDB from public mirror
+        run: bash scripts/ci/mongo_service.sh start
 
       - name: Setup Python
         uses: actions/setup-python@v7
@@ -624,21 +612,14 @@ jobs:
     # Dockerfile actually build and run, instead of only being reviewed by hand. See
     # docs/architecture/deployment/oss-infra-and-generated-app-deployment.md.
     runs-on: ubuntu-latest
-    services:
-      mongodb:
-        image: mongo:7
-        ports:
-          - 27017:27017
-        options: >-
-          --health-cmd="mongosh --eval 'db.runCommand({ ping: 1 })'"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
     steps:
       - name: Checkout
         uses: actions/checkout@v7
         with:
           persist-credentials: false
+
+      - name: Start MongoDB from public mirror
+        run: bash scripts/ci/mongo_service.sh start
 
       - name: Setup Python
         uses: actions/setup-python@v7
@@ -651,8 +632,11 @@ jobs:
           python -m pip install --upgrade pip wheel
           python -m pip install -e ".[dev]"
 
+      - name: Pull repo host base from public mirror
+        run: bash scripts/ci/pull_public_image.sh public.ecr.aws/docker/library/python:3.13-slim python:3.13-slim
+
       - name: Build repo host image
-        run: docker build -t mozaiks-repo-host:ci -f infra/docker/Dockerfile .
+        run: docker build --build-context python:3.13-slim=docker-image://public.ecr.aws/docker/library/python:3.13-slim -t mozaiks-repo-host:ci -f infra/docker/Dockerfile .
 
       - name: Smoke-run repo host image
         run: |
