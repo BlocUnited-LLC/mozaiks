@@ -12,11 +12,7 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
-### Security
-
-- Production Compose now requires a separately managed Keycloak realm import
-  and validates public HTTPS browser callbacks before Keycloak starts; the
-  packaged localhost realm remains for local development.
+## 0.2.0 - 2026-10-09
 
 ### Added
 
@@ -107,6 +103,10 @@ This project follows a practical pre-1.0 changelog format:
   honor it.
 
 ### Security
+
+- Production Compose now requires a separately managed Keycloak realm import
+  and validates public HTTPS browser callbacks before Keycloak starts; the
+  packaged localhost realm remains for local development.
 
 - Canonical Docker build validation now runs without container networking or
   published ports. The Docker adapter uses the local daemon with a clean CLI
@@ -491,6 +491,13 @@ This project follows a practical pre-1.0 changelog format:
 - Generated token recovery now stays on the current page with administrator-
   contact guidance when no safe local route is configured; AppGenerator guidance
   no longer navigates to a null recovery route.
+
+- Generated module API clients now treat explicit token depletion on HTTP 402
+  as a token-wallet denial, while a bodyless 402 remains an entitlement fallback.
+
+- Module HTTP actions now preserve token-wallet denial codes and recovery
+  metadata: depleted balances return 402 and missing usage scope returns 403,
+  instead of both becoming generic execution failures.
 
 - Subscription token-recovery routes now reject protocol-relative destinations
   such as `//provider.example/billing` at app load, including optional top-up,
@@ -1449,8 +1456,6 @@ This project follows a practical pre-1.0 changelog format:
   Workspaces scaffolded without `AUTH_ANON_ROLES` add
   `AUTH_ANON_ROLES=admin,user` to `.env` to keep the admin pages on their own
   machine; the refusal says so.
-
-## 0.2.0 - 2026-09-18
 
 ### Fixed
 
