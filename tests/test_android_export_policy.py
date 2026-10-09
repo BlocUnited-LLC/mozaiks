@@ -124,7 +124,10 @@ def export_input(tmp_path, monkeypatch):
     ),
     ("app/services/config.py", f'API_TOKEN = "{SYNTHETIC_TOKEN}"\n'),
     ("workflows/Fixture/tools/local_config.py", f'API_TOKEN = "{SYNTHETIC_TOKEN}"\n'),
-], ids=["developer-brand-file", "app-service-token", "workflow-tool-token"])
+    ("app/config/provider.json", json.dumps({"access_token": [SYNTHETIC_TOKEN]})),
+    ("app/config/provider.json", json.dumps({"access_token": {"futurePayloadField": [SYNTHETIC_TOKEN]}})),
+], ids=["developer-brand-file", "app-service-token", "workflow-tool-token",
+        "direct-credential-list", "nested-credential-payload-list"])
 def test_demonstrated_leaks_are_rejected_independently_before_either_archive(export_input, name, content):
     workspace, spec, output = export_input
     _write(workspace, name, content)
@@ -283,6 +286,9 @@ def test_ordinary_xml_content_metadata_is_public(export_input):
     ("app/config/provider.json", b'{"access_token":{"metadata":{"entries":[{"description":"Public note"}]}}}'),
     ("app/config/provider.json", b'{"access_token":{"metadata":{"entries":[{"description":"Public note","type":"string","required":true,"env_name":"INTEGRATION_API_TOKEN"}]}}}'),
     ("app/config/provider.json", b'{"access_token":[{"metadata":{"description":"Public description"}}]}'),
+    ("app/config/provider.json", b'{"properties":{"access_token":{"type":["string","null"],"description":"Public schema"}}}'),
+    ("app/config/provider.json", b'{"access_token":{"description":["Public paragraph"]}}'),
+    ("app/config/provider.json", b'{"access_token":{"env_name":["INTEGRATION_API_TOKEN"]}}'),
     ("app/config/provider.xml", b'<configuration><meta name="title"><item content="Public title"/></meta></configuration>'),
     ("app/config/provider.xml", (
         b'<configuration><access_token><description>Public description</description>'
@@ -736,6 +742,11 @@ def test_yaml_alias_reused_in_credential_context_does_not_inherit_a_safe_verdict
         "app/config/provider.json",
         b'{"access_token":{"defaultValue":"${INTEGRATION_API_TOKEN}"}}',
         json.dumps({"access_token": {"defaultValue": SYNTHETIC_TOKEN}}).encode(),
+    ),
+    (
+        "app/config/provider.json",
+        json.dumps({"access_token": ["${INTEGRATION_API_TOKEN}"]}).encode(),
+        json.dumps({"access_token": [SYNTHETIC_TOKEN]}).encode(),
     ),
     (
         "app/config/provider.json",

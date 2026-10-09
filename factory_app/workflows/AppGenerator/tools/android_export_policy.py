@@ -47,7 +47,7 @@ _PUBLIC_CREDENTIAL_METADATA_FIELDS = frozenset({
     "description", "title", "label", "help", "type", "format", "required", "optional",
     "name", "env", "env_name", "secret_name", "secret_ref", "ref",
 })
-_PUBLIC_CREDENTIAL_LIST_CONTAINERS = frozenset({"metadata"})
+_PUBLIC_CREDENTIAL_LIST_FIELDS = _PUBLIC_CREDENTIAL_METADATA_FIELDS | {"metadata"}
 
 
 def _normalized_key(value: str) -> str:
@@ -121,7 +121,7 @@ def _structured_credentials(
         )
         if _structured_credentials(
             item, credential=credential or key_is_credential, value_payload=sensitive,
-            list_payload=(credential or key_is_credential) and normalized not in _PUBLIC_CREDENTIAL_LIST_CONTAINERS,
+            list_payload=(credential or key_is_credential) and normalized not in _PUBLIC_CREDENTIAL_LIST_FIELDS,
             ancestors=ancestors, visited=visited,
         ):
             return True
