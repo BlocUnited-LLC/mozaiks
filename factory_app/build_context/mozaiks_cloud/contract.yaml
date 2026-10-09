@@ -139,14 +139,22 @@ runtime_boundaries:
       using the runtime-injected ctx.app_id, and fail when that identity is
       missing. A request's app_id is provider operation data only; omitting or
       changing it must not select another app's connector or skip its lookup.
-      Usage status uses ctx.app_id; the background reporter uses the configured
-      MOZAIKS_APP_ID and refuses to run without it. Normal usage reporting keeps
-      this app scope; the explicit dedicated usage key remains separate.
+      Usage status verifies configured reporter identity against ctx.app_id; the
+      background reporter uses explicit MOZAIKS_CLOUD_APP_ID or MOZAIKS_APP_ID
+      and refuses missing or conflicting identities. Normal usage reporting
+      keeps this app scope; the explicit dedicated usage key remains separate.
   - id: no_provision_on_import
     rule: >
       Importing or constructing any MozaiksCloud sub-client must not provision,
       create, or modify external infrastructure. Side effects are confined to
       explicit authorized API method calls.
+  - id: usage_reporter_app_identity
+    rule: >
+      The optional usage reporter reads local metrics only for an explicitly
+      configured app identity. MOZAIKS_CLOUD_APP_ID is the hosted identity;
+      MOZAIKS_APP_ID may identify a standalone app. If both are set they must
+      match. Missing or conflicting identity never falls back to a default app
+      scope and never sends a usage report.
   - id: page_bindings
     rule: >
       Generated pages must call app-owned cloud_deployment and cloud_domain

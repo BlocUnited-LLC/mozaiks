@@ -10,6 +10,7 @@ Off switches, in order:
 - No mozaiks_cloud connector / MOZAIKS_CLOUD_* configuration → silently idle
   (checked every cycle, so configuring later needs no restart).
 - MOZAIKS_CLOUD_USAGE_REPORTING=0 → hard off.
+- No explicit app identity, or conflicting cloud/runtime app identities → idle.
 
 Aggregate counts only. No per-user or per-session records leave the app.
 """
@@ -21,6 +22,8 @@ import os
 import uuid
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+
+from .identity import UsageReporterIdentityError, configured_app_id as _app_id
 
 logger = logging.getLogger("app.cloud_usage_reporter")
 
@@ -41,13 +44,6 @@ def _interval_seconds() -> int:
 def _reporting_enabled() -> bool:
     value = str(os.environ.get("MOZAIKS_CLOUD_USAGE_REPORTING", "")).strip().lower()
     return value not in _DISABLED_VALUES
-
-
-def _app_id() -> str:
-    app_id = str(os.environ.get("MOZAIKS_APP_ID", "")).strip()
-    if not app_id:
-        raise ValueError("MOZAIKS_APP_ID is required")
-    return app_id
 
 
 class UsageReporterService:
@@ -103,7 +99,13 @@ class UsageReporterService:
         )
         from mozaiksai.core.metrics.app_metrics import AppMetrics
 
-        app_id = _app_id()
+        if not _reporting_enabled():
+            return {"sent": 0, "reason": "disabled"}
+        try:
+            app_id = _app_id()
+        except UsageReporterIdentityError as exc:
+            self.last_error = str(exc)
+            return {"sent": 0, "reason": exc.code}
         client = MozaiksCloudUsageClient(app_id=app_id)
         if not await client.is_configured():
             return {"sent": 0, "reason": "unconfigured"}
