@@ -153,6 +153,7 @@ def test_execution_plan_reports_planning_profile_for_route_class() -> None:
 
 def test_surface_profile_reporting_is_independent_of_coding_capability() -> None:
     config = ControlPlaneConfig.model_validate({
+        "enabled": True,
         "llm_profiles": {
             "impact_analyzer": {"llm_config": {"model": "planning-model"}},
             "surface_regeneration": {"llm_config": {"model": "surface-model"}},
@@ -171,6 +172,24 @@ def test_surface_profile_reporting_is_independent_of_coding_capability() -> None
     assert feature.planner_replanner == "impact_analyzer"
     assert feature.codegen is None
     assert feature.surface_regeneration == "surface_regeneration"
+
+
+def test_disabled_policy_reports_no_executable_model_profiles() -> None:
+    config = ControlPlaneConfig.model_validate({
+        "enabled": False,
+        "classifier": {"enabled": True},
+        "scope": {"enabled": True},
+        "coding": {"enabled": True},
+        "contract_surface": {"enabled": True},
+    })
+
+    profiles = dry_run.resolve_execution_profiles(config=config, requires_replanning=False, change_class="patch")
+
+    assert profiles.classifier == "disabled"
+    assert profiles.planner_replanner is None
+    assert profiles.codegen is None
+    assert profiles.surface_regeneration is None
+    assert profiles.reviewer_validator is None
 
 
 def test_live_classifier_fixture_cases_convert_to_execution_plans() -> None:

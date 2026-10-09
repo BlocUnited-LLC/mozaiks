@@ -378,7 +378,7 @@ async def test_surface_regeneration_uses_explicit_generation_model_after_surface
 @pytest.mark.parametrize(
     ("config_data", "error"),
     [
-        ({}, "regeneration_llm_profile is required"),
+        ({}, "regeneration_llm_profile requires llm_profile"),
         ({"contract_surface": {"regeneration_llm_profile": "codegen"}}, "unknown LLM profile"),
         ({
             "contract_surface": {"regeneration_llm_profile": "codegen"},
@@ -908,7 +908,10 @@ async def test_harness_execute_surface_plan_delegates_to_worker():
 
     enabled_config = ControlPlaneConfig(
         enabled=True,
-        contract_surface=ControlPlaneContractSurfaceCapabilityConfig(enabled=True),
+        llm_profiles={"codegen": {"llm_config": {"model": "test-model"}}},
+        contract_surface=ControlPlaneContractSurfaceCapabilityConfig(
+            enabled=True, llm_profile="codegen", regeneration_llm_profile="codegen"
+        ),
     )
 
     harness = OrchestrationControlHarness(

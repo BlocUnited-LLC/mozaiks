@@ -95,7 +95,11 @@ def run(args) -> int:
 
     _apply_app_config(app_config=app_config, app_name=app_name)
     _apply_ai_config(ai_config=ai_config, app_name=app_name, provider=provider, model=model)
-    refinement_policy_config = _apply_refinement_policy_config(refinement_policy_path)
+    try:
+        refinement_policy_config = _apply_refinement_policy_config(refinement_policy_path)
+    except ValueError as exc:
+        print(f"Error: {exc}")
+        return 1
 
     _write_json(app_json_path, app_config)
     print(f"Updated {app_json_path.relative_to(workspace_root)}")
@@ -291,6 +295,10 @@ def _apply_ai_config(*, ai_config: dict, app_name: str, provider: str, model: st
 
 
 def _apply_refinement_policy_config(path: Path) -> dict:
+    from pydantic import ValidationError
+
+    from mozaiksai.control_plane.config import ControlPlaneConfig
+
     existing: dict = {}
     if path.exists():
         try:
@@ -302,6 +310,15 @@ def _apply_refinement_policy_config(path: Path) -> dict:
 
     merged = build_default_refinement_policy_config()
     merged.update(existing)
+    try:
+        ControlPlaneConfig.model_validate(merged)
+    except ValidationError as exc:
+        fields = sorted({".".join(map(str, error["loc"])) or "refinement_policy" for error in exc.errors()})
+        raise ValueError(
+            f"invalid refinement policy at {path}: {', '.join(fields)}. "
+            "Enabled capabilities need named llm_profile references to profiles with models; "
+            "remove inline capability llm_config."
+        ) from None
     return merged
 
 

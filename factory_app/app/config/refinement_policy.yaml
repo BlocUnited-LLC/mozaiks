@@ -11,6 +11,8 @@ enabled: true
 #
 # Operators can replace these provider/model pairs with their own supported
 # models. The shipped profiles use the model exercised by Factory acceptance.
+# Every enabled capability below must reference one of these profiles with a
+# non-empty model. Inline capability llm_config is not accepted.
 # ---------------------------------------------------------------------------
 llm_profiles:
   classifier:

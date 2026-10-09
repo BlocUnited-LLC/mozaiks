@@ -628,8 +628,12 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch,
         "_config_loader",
         lambda: ControlPlaneConfig(
             enabled=True,
-            classifier={"enabled": True},
-            coding={"enabled": True, "llm_config": {"model": "gpt-5.2-codex", "temperature": 0.1}},
+            llm_profiles={
+                "classifier": {"llm_config": {"model": "test-classifier"}},
+                "codegen": {"llm_config": {"model": "gpt-5.2-codex", "temperature": 0.1}},
+            },
+            classifier={"enabled": True, "llm_profile": "classifier"},
+            coding={"enabled": True, "llm_profile": "codegen"},
         ),
     )
     monkeypatch.setattr(
@@ -879,8 +883,12 @@ def test_studio_trigger_endpoint_can_auto_scope_before_coding_worker(monkeypatch
         "_config_loader",
         lambda: ControlPlaneConfig(
             enabled=True,
-            classifier={"enabled": True},
-            coding={"enabled": True, "llm_config": {"model": "gpt-5.2-codex", "temperature": 0.1}},
+            llm_profiles={
+                "classifier": {"llm_config": {"model": "test-classifier"}},
+                "codegen": {"llm_config": {"model": "gpt-5.2-codex", "temperature": 0.1}},
+            },
+            classifier={"enabled": True, "llm_profile": "classifier"},
+            coding={"enabled": True, "llm_profile": "codegen"},
         ),
     )
     monkeypatch.setattr(
@@ -1045,8 +1053,12 @@ def test_studio_trigger_endpoint_can_confirm_proposed_multi_file_scope(monkeypat
         "_config_loader",
         lambda: ControlPlaneConfig(
             enabled=True,
-            classifier={"enabled": True},
-            coding={"enabled": True, "llm_config": {"model": "gpt-5.2-codex", "temperature": 0.1}},
+            llm_profiles={
+                "classifier": {"llm_config": {"model": "test-classifier"}},
+                "codegen": {"llm_config": {"model": "gpt-5.2-codex", "temperature": 0.1}},
+            },
+            classifier={"enabled": True, "llm_profile": "classifier"},
+            coding={"enabled": True, "llm_profile": "codegen"},
         ),
     )
     monkeypatch.setattr(
@@ -1189,7 +1201,11 @@ def test_selected_file_scope_rejects_broader_classification_when_surface_refinem
     reset_auth_adapter()
     harness = studio.get_orchestration_control_harness()
     monkeypatch.setattr(harness, "_config_loader", lambda: ControlPlaneConfig(
-        enabled=True, classifier={"enabled": True}, coding={"enabled": True}, contract_surface={"enabled": False},
+        enabled=True,
+        llm_profiles={"codegen": {"llm_config": {"model": "test-model"}}},
+        classifier={"enabled": True, "llm_profile": "codegen"},
+        coding={"enabled": True, "llm_profile": "codegen"},
+        contract_surface={"enabled": False},
     ))
     classifier = AsyncMock(side_effect=_async_classifier(
         change_class=change_class, rationale="Requires broader contracts", confidence=0.95, signals=[],
@@ -2270,7 +2286,10 @@ async def test_cancelled_inline_refinement_releases_bound_build_without_promotio
     monkeypatch.setattr(orchestration_control, "record_refinement_event", record_event)
     harness = studio.get_orchestration_control_harness()
     monkeypatch.setattr(harness, "_config_loader", lambda: ControlPlaneConfig(
-        enabled=True, classifier={"enabled": True}, coding={"enabled": True},
+        enabled=True,
+        llm_profiles={"codegen": {"llm_config": {"model": "test-model"}}},
+        classifier={"enabled": True, "llm_profile": "codegen"},
+        coding={"enabled": True, "llm_profile": "codegen"},
     ))
     monkeypatch.setattr(harness, "contract_surface_enabled", lambda: cancel_at != "coding")
     monkeypatch.setattr(harness._refinement_resolver, "_classifier", SimpleNamespace(
@@ -2374,7 +2393,10 @@ def test_tampered_refinement_baseline_cannot_start_coding(monkeypatch, _owned_bu
     reset_auth_adapter()
     harness = studio.get_orchestration_control_harness()
     monkeypatch.setattr(harness, "_config_loader", lambda: ControlPlaneConfig(
-        enabled=True, classifier={"enabled": True}, coding={"enabled": True},
+        enabled=True,
+        llm_profiles={"codegen": {"llm_config": {"model": "test-model"}}},
+        classifier={"enabled": True, "llm_profile": "codegen"},
+        coding={"enabled": True, "llm_profile": "codegen"},
     ))
     monkeypatch.setattr(harness, "contract_surface_enabled", lambda: False)
     monkeypatch.setattr(harness._refinement_resolver, "_classifier", SimpleNamespace(

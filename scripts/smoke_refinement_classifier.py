@@ -221,8 +221,8 @@ async def run_smoke() -> dict[str, Any]:
     _load_dotenv()
 
     control_plane_config = load_control_plane_config(APP_ROOT)
-    llm_profile_used = str(control_plane_config.classifier.llm_profile or "raw_llm_config")
     classifier_llm_config = control_plane_config.resolve_capability_llm_config("classifier")
+    llm_profile_used = str(control_plane_config.classifier.llm_profile)
     provider_ok, provider_message = _provider_available()
     if not provider_ok:
         return {

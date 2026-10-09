@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -43,11 +43,10 @@ class ControlPlaneLLMProfileConfig(BaseModel):
 
 
 class ControlPlaneCapabilityConfig(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
     llm_profile: ControlPlaneLLMProfileId | None = None
-    llm_config: dict[str, Any] | None = None
 
 
 class ControlPlaneCodingProviderBudget(BaseModel):
@@ -125,49 +124,53 @@ class ControlPlaneConfig(BaseModel):
             raise ValueError(f"Unknown refinement policy LLM profile id(s): {', '.join(unknown)}. Allowed: {allowed}.")
         return value
 
+    @model_validator(mode="after")
+    def _validate_enabled_checkpoint_profiles(self) -> ControlPlaneConfig:
+        if self.enabled:
+            for capability in ("classifier", "scope", "contract_surface", "coding"):
+                if getattr(self, capability).enabled:
+                    self.resolve_capability_llm_config(capability)
+            if self.contract_surface.enabled:
+                self.resolve_contract_surface_regeneration_llm_config()
+        return self
+
     def classifier_enabled(self) -> bool:
         return bool(self.enabled and self.classifier.enabled)
 
     def coding_enabled(self) -> bool:
         return bool(self.enabled and self.coding.enabled)
 
-    def resolve_capability_llm_config(self, capability: str) -> dict[str, Any] | None:
+    def _resolve_profile_llm_config(self, *, profile_id: ControlPlaneLLMProfileId | None, owner: str) -> dict[str, Any]:
+        if profile_id is None:
+            raise ValueError(f"{owner} requires llm_profile")
+        profile = self.llm_profiles.get(profile_id)
+        if profile is None:
+            raise ValueError(f"{owner} references unknown LLM profile '{profile_id}'")
+        llm_config = profile.llm_config
+        if not isinstance(llm_config, dict):
+            raise ValueError(f"{owner} LLM profile '{profile_id}' requires a non-empty model")
+        if "config_list" in llm_config:
+            raise ValueError(f"{owner} LLM profile '{profile_id}' must use a flat model configuration; config_list is not supported")
+        model = llm_config.get("model")
+        if not isinstance(model, str) or not model.strip():
+            raise ValueError(f"{owner} LLM profile '{profile_id}' requires a non-empty model")
+        return dict(llm_config)
+
+    def resolve_capability_llm_config(self, capability: str) -> dict[str, Any]:
         capability_config = getattr(self, capability, None)
         if not isinstance(capability_config, ControlPlaneCapabilityConfig):
             raise ValueError(f"Unknown refinement capability '{capability}'")
-
-        if capability_config.llm_profile:
-            profile = self.llm_profiles.get(capability_config.llm_profile)
-            if profile is None:
-                raise ValueError(
-                    f"Refinement capability '{capability}' references unknown LLM profile "
-                    f"'{capability_config.llm_profile}'."
-                )
-            if profile.llm_config is None:
-                raise ValueError(
-                    f"Refinement policy LLM profile '{capability_config.llm_profile}' does not declare llm_config."
-                )
-            return dict(profile.llm_config)
-
-        if capability_config.llm_config is not None:
-            return dict(capability_config.llm_config)
-        return None
+        return self._resolve_profile_llm_config(
+            profile_id=capability_config.llm_profile,
+            owner=f"Refinement capability '{capability}'",
+        )
 
     def resolve_contract_surface_regeneration_llm_config(self) -> dict[str, Any]:
         """Resolve the declared generation model before any surface call starts."""
-        profile_id = self.contract_surface.regeneration_llm_profile
-        if profile_id is None:
-            raise ValueError("contract_surface.regeneration_llm_profile is required for surface regeneration")
-        profile = self.llm_profiles.get(profile_id)
-        if profile is None:
-            raise ValueError(f"Surface regeneration references unknown LLM profile '{profile_id}'")
-        llm_config = profile.llm_config
-        if llm_config is None:
-            raise ValueError(f"Surface regeneration LLM profile '{profile_id}' requires a non-empty model")
-        model = llm_config.get("model")
-        if not isinstance(model, str) or not model.strip():
-            raise ValueError(f"Surface regeneration LLM profile '{profile_id}' requires a non-empty model")
-        return dict(llm_config)
+        return self._resolve_profile_llm_config(
+            profile_id=self.contract_surface.regeneration_llm_profile,
+            owner="contract_surface.regeneration_llm_profile",
+        )
 
 
 def resolve_ai_config_path(app_root: Path | None = None) -> Path:

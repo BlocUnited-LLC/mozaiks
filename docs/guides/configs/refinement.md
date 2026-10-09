@@ -49,13 +49,20 @@ coding:
 Model parameters belong inside each profile's `llm_config`. For models that
 support temperature, use `llm_config.temperature`. Profile fields are strict:
 `purpose`, `expected_behavior`, and `llm_config`. The unused
-`default_temperature` field is rejected.
+`default_temperature` field is rejected. Every enabled capability must name a
+declared profile with a non-empty model; inline capability `llm_config` and
+unknown capability fields are rejected when the policy loads.
 
 ### Model profiles and coding agents
 
 `llm_profiles` configures AG2 structured-output calls. A profile name describes
-the work; its `llm_config.model` selects the model for that call. The first-party
-policy uses these profiles:
+the work; its `llm_config.model` selects the model for that call.
+
+Use a flat `llm_config` with `model` and optional `api_type`. Enabled refinement
+profiles reject `config_list` because AG2 would select its first entry instead
+of the declared flat model.
+
+The first-party policy uses these profiles:
 
 | Refinement step | Profile | What it does |
 | --- | --- | --- |

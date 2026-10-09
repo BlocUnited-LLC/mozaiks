@@ -43,6 +43,13 @@ def _build_workspace(tmp_path: Path) -> Path:
             [
                 "schema_version: mozaiks.refinement.policy.v1",
                 "enabled: true",
+                "llm_profiles:",
+                "  classifier:",
+                "    llm_config:",
+                "      model: test-classifier",
+                "  codegen:",
+                "    llm_config:",
+                "      model: test-codegen",
                 "classifier:",
                 "  enabled: true",
                 "  llm_profile: classifier",

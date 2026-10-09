@@ -180,10 +180,8 @@ def _pack() -> LoadedControlPlanePack:
 def _config() -> ControlPlaneConfig:
     return ControlPlaneConfig(
         enabled=True,
-        coding=ControlPlaneCodingCapabilityConfig(
-            enabled=True,
-            llm_config={"model": "gpt-4o", "temperature": 0.1},
-        ),
+        llm_profiles={"codegen": {"llm_config": {"model": "gpt-4o", "temperature": 0.1}}},
+        coding=ControlPlaneCodingCapabilityConfig(enabled=True, llm_profile="codegen"),
     )
 
 

@@ -329,6 +329,7 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Changed
 
+- Enabled refinement checkpoints now require named profiles with non-empty models; inline capability model settings and unknown capability fields are rejected.
 - Refinement scope and contract-surface selection now use the planning model
   profile. Contract-surface regeneration has its own explicit generation
   profile and fails before the agent call if no model is configured; structured

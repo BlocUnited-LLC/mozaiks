@@ -485,7 +485,7 @@ def resolve_execution_profiles(
     requires_replanning: bool,
     change_class: str | None = None,
 ) -> RefinementExecutionProfiles:
-    classifier = str(config.classifier.llm_profile or "raw_llm_config")
+    classifier = str(config.classifier.llm_profile) if config.enabled and config.classifier.enabled else "disabled"
     if change_class == ChangeClass.PATCH.value:
         planning_capability = config.scope
     elif change_class in {ChangeClass.DESIGN.value, ChangeClass.FEATURE.value}:
@@ -495,10 +495,10 @@ def resolve_execution_profiles(
     else:
         planning_capability = config.contract_surface if requires_replanning else config.scope
     planner_replanner = (
-        str(planning_capability.llm_profile or "raw_llm_config")
-        if planning_capability is not None
+        str(planning_capability.llm_profile)
+        if config.enabled
+        and planning_capability is not None
         and planning_capability.enabled
-        and (planning_capability.llm_profile or planning_capability.llm_config is not None)
         else None
     )
     is_patch = change_class == ChangeClass.PATCH.value or (change_class is None and not requires_replanning)
@@ -506,16 +506,16 @@ def resolve_execution_profiles(
         change_class is None and requires_replanning
     )
     codegen = (
-        str(config.coding.llm_profile or "raw_llm_config")
-        if is_patch and config.coding.enabled
+        str(config.coding.llm_profile)
+        if config.enabled and is_patch and config.coding.enabled
         else None
     )
     surface_regeneration = (
         str(config.contract_surface.regeneration_llm_profile)
-        if is_surface and config.contract_surface.enabled and config.contract_surface.regeneration_llm_profile
+        if config.enabled and is_surface and config.contract_surface.enabled
         else None
     )
-    reviewer_validator = "reviewer_validator" if "reviewer_validator" in config.llm_profiles else None
+    reviewer_validator = "reviewer_validator" if config.enabled and "reviewer_validator" in config.llm_profiles else None
     return RefinementExecutionProfiles(
         classifier=classifier,
         planner_replanner=planner_replanner,

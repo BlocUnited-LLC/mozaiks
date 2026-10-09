@@ -1,6 +1,8 @@
 import json
 from argparse import Namespace
 
+import yaml
+
 from mozaiks_cli.commands import init_command, onboard_command
 from mozaiks_cli.main import create_parser
 from mozaiks_cli.workspace import resolve_theme_config_path, resolve_ui_route_manifest_path
@@ -67,6 +69,31 @@ def test_onboard_command_updates_scaffold_surfaces_non_interactively(tmp_path) -
     # onboard writes the canonical Studio ask prompt, not journey-specific onboarding content
     if "ask" in ai_json:
         assert "journey" not in str(ai_json["ask"])
+
+
+def test_onboard_rejects_legacy_inline_refinement_model_without_writing(tmp_path, capsys) -> None:
+    target_dir = tmp_path / "prior-policy-app"
+    init_command.run(Namespace(preset="chat", name="prior-policy", directory=str(target_dir), starter=False))
+    app_path = target_dir / "app" / "app.json"
+    ai_path = target_dir / "app" / "config" / "ai.json"
+    policy_path = target_dir / "app" / "config" / "refinement_policy.yaml"
+    existing = yaml.safe_load(policy_path.read_text(encoding="utf-8"))
+    existing["classifier"]["llm_config"] = {"model": "obsolete-model"}
+    policy_path.write_text(yaml.safe_dump(existing), encoding="utf-8")
+    original_app = app_path.read_bytes()
+    original_ai = ai_path.read_bytes()
+    original_policy = policy_path.read_bytes()
+
+    result = onboard_command.run(Namespace(
+        directory=str(target_dir), name="Renamed", provider="openai", model="gpt-4.1",
+        non_interactive=True, open_studio=False,
+    ))
+
+    assert result == 1
+    assert "classifier.llm_config" in capsys.readouterr().out
+    assert app_path.read_bytes() == original_app
+    assert ai_path.read_bytes() == original_ai
+    assert policy_path.read_bytes() == original_policy
 
 
 def test_onboard_command_refreshes_blank_shell_placeholder(tmp_path) -> None:

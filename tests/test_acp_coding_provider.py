@@ -39,8 +39,9 @@ def _policy(**acp_overrides: Any):
     def _load() -> ControlPlaneConfig:
         return ControlPlaneConfig(
             enabled=True,
+            llm_profiles={"codegen": {"llm_config": {"model": "test-model"}}},
             coding=ControlPlaneCodingCapabilityConfig.model_validate(
-                {"enabled": True, "providers": {"acp": {"enabled": True, **acp_overrides}}}
+                {"enabled": True, "llm_profile": "codegen", "providers": {"acp": {"enabled": True, **acp_overrides}}}
             ),
         )
 

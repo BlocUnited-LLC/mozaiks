@@ -906,9 +906,11 @@ for structured patches and contract-surface file generation. Regeneration
 requires an explicit model even if the coding capability is disabled. ACP coding is a separate execution provider:
 its adapter does not consume `llm_profiles.codegen.llm_config.model`.
 
-Capability-level `llm_config` values in `app/config/refinement_policy.yaml`
-take precedence only when that capability does not reference an `llm_profile`.
-Do not put refinement model overrides in `app/config/ai.json`.
+Every enabled capability must reference a declared `llm_profile` with a
+non-empty model. The surface capability also needs
+`regeneration_llm_profile`. Inline capability `llm_config` and unknown
+capability fields are rejected when the policy loads. Do not put refinement
+model overrides in `app/config/ai.json`.
 
 ## Runtime Flow
 

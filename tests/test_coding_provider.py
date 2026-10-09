@@ -96,7 +96,8 @@ class _FakeToolExecutor:
 def _enabled_control_plane() -> ControlPlaneConfig:
     return ControlPlaneConfig(
         enabled=True,
-        coding=ControlPlaneCodingCapabilityConfig(enabled=True, llm_config={"model": "gpt-5.2-codex"}),
+        llm_profiles={"codegen": {"llm_config": {"model": "gpt-5.2-codex"}}},
+        coding=ControlPlaneCodingCapabilityConfig(enabled=True, llm_profile="codegen"),
     )
 
 

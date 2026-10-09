@@ -85,6 +85,8 @@ routes and checkpoint overrides under `refinement_harness/`.
 Declares LLM profiles for structured-output refinement calls. The classifier
 and codegen profiles are the two needed by this minimal starter. An ACP coding
 agent uses a separate adapter and does not read the codegen model setting.
+Each enabled capability must reference a named profile with a non-empty model;
+inline capability `llm_config` is not a supported policy field.
 
 ```yaml
 schema_version: mozaiks.refinement.policy.v1
