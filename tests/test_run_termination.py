@@ -891,7 +891,7 @@ async def test_owned_build_failure_routes_to_approved_agent_then_stops_identical
     acceptance = {key: {"passed": True} for key in (
         "bundle_scan", "agent_backend", "module_wiring", "module_implementation",
         "module_runtime_quality", "functional_completeness", "workflow_integration",
-        "app_runtime_load", "app_runtime_smoke",
+        "app_runtime_load", "app_runtime_load_worker", "app_runtime_smoke",
     )}
     acceptance.update(status="passed", passed=True, skipped_checks=[],
                       bundle_repair={"status": "passed", "target_agent": None})

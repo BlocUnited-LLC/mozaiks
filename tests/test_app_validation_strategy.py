@@ -797,7 +797,9 @@ async def test_runtime_import_failure_uses_stable_bounded_bundle_repair(repair) 
     second = await module.run_app_bundle_acceptance_gate(files=files, context_variables=context)
     assert second["app_runtime_load"]["passed"] is repair
     assert second["passed"] is False
-    assert second["status"] == ("pending" if repair else "failed")
+    assert second["status"] == "pending"
+    assert "app_runtime_load" not in second["validation_evidence"]["failed"]
+    assert "app_runtime_smoke" in second["validation_evidence"]["skipped"]
     assert second["bundle_repair"]["status"] == "blocked"
     assert second["bundle_repair"]["no_progress"] is (not repair)
     assert context.get("bundle_repair_attempt_count") == 1
