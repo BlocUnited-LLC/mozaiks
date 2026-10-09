@@ -980,8 +980,6 @@ class ModuleEventRouter:
             "event_type": event_type,
             "source_event_id": envelope.get("id"),
             "app_id": tenant.get("app_id"),
-            "tenant_id": tenant.get("tenant_id"),
-            "workspace_id": normalize_module_event_provenance(event_type, envelope).workspace_id,
             "actor": envelope.get("actor") if isinstance(envelope.get("actor"), dict) else None,
             "audience": audience,
             "channels": rule.get("channels") if isinstance(rule.get("channels"), list) else ["in_app"],
@@ -991,6 +989,16 @@ class ModuleEventRouter:
             "created_at": _utc_now(),
             "source_event": envelope,
         }
+        # An absent owner is not a present, mismatched owner. Preserve invalid
+        # nonblank values so broad-audience reads still fail closed on them.
+        tenant_id = tenant.get("tenant_id")
+        if tenant_id is not None and not (isinstance(tenant_id, str) and not tenant_id.strip()):
+            record["tenant_id"] = tenant_id
+        workspace_id = normalize_module_event_provenance(event_type, envelope).workspace_id
+        if workspace_id is not None and not (
+            isinstance(workspace_id, str) and not workspace_id.strip()
+        ):
+            record["workspace_id"] = workspace_id
         if context is not None:
             record["context"] = context
 

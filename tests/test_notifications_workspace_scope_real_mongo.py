@@ -296,6 +296,120 @@ def test_owned_role_alerts_require_exact_verified_workspace_and_tenant(notificat
     assert client.get("/api/notifications/count", headers=b).json() == {"count": 9, "unread_count": 9}
 
 
+@pytest.mark.parametrize("event_shape", ["structured", "flat"])
+@pytest.mark.parametrize("audience", [{"roles": ["owner"]}, {"permissions": ["workspace_support.read"]}])
+def test_generated_workspace_alert_without_tenant_reaches_only_verified_member(
+    notification_http, event_shape, audience,
+):
+    notification_id = f"generated-{event_shape}-{'role' if 'roles' in audience else 'permission'}"
+
+    async def store(record):
+        record["notification_id"] = notification_id
+        notification_http.collection.insert_one(record)
+
+    event_type = "domain.workspace_support.request_created"
+    rule = {
+        "id": "workspace_support.created", "module_id": "workspace_support",
+        "audience": audience,
+        "template": {"title": "New support request", "body": "Review the request"},
+    }
+    envelope = {
+        "id": f"event-{notification_id}",
+        "type": event_type,
+        "app_id": APP_ID,
+        "workspace_id": WORKSPACE_A,
+    }
+    if event_shape == "structured":
+        envelope = {
+            "id": f"event-{notification_id}",
+            "type": event_type,
+            "tenant": {"app_id": APP_ID, "workspace_id": WORKSPACE_A},
+            "payload": {"request_id": notification_id},
+        }
+
+    before = notification_http.client.get(
+        "/api/notifications/count", headers=notification_http.token(WORKSPACE_A, roles=["owner"]),
+    ).json()["count"]
+    asyncio.run(ModuleEventRouter([], notification_store=store)._create_notification(
+        rule, event_type, envelope,
+    ))
+    stored = notification_http.collection.find_one({"notification_id": notification_id})
+    assert stored is not None
+    assert "tenant_id" not in stored
+    assert stored["workspace_id"] == WORKSPACE_A
+
+    client = notification_http.client
+    member_a = notification_http.token(WORKSPACE_A, roles=["owner"])
+    member_b = notification_http.token(WORKSPACE_B, roles=["owner"])
+    unbound = notification_http.token(None, roles=["owner"])
+    assert notification_id in _ids(client.get("/api/notifications", headers=member_a))
+    assert client.get("/api/notifications/count", headers=member_a).json()["count"] == before + 1
+    assert notification_id not in _ids(client.get("/api/notifications", headers=member_b))
+    assert notification_id not in _ids(client.get("/api/notifications", headers=unbound))
+    assert client.post(f"/api/notifications/{notification_id}/read", headers=member_b).json()["success"] is False
+    assert client.post(f"/api/notifications/{notification_id}/read", headers=member_a).json()["success"] is True
+    assert client.get("/api/notifications/count", headers=member_a).json()["count"] == before
+
+
+@pytest.mark.parametrize("event_shape", ["structured", "flat"])
+def test_generated_tenant_alert_without_workspace_requires_verified_tenant(
+    notification_http, event_shape,
+):
+    notification_id = f"tenant-only-{event_shape}"
+
+    async def store(record):
+        record["notification_id"] = notification_id
+        notification_http.collection.insert_one(record)
+
+    event_type = "hosted.hosting.app.deployed"
+    envelope = {
+        "id": f"event-{notification_id}", "type": event_type,
+        "app_id": APP_ID, "tenant_id": TENANT_A,
+    }
+    if event_shape == "structured":
+        envelope = {
+            "id": f"event-{notification_id}", "type": event_type,
+            "tenant": {"app_id": APP_ID, "tenant_id": TENANT_A},
+            "payload": {"hosting_url": "https://example.invalid"},
+        }
+    asyncio.run(ModuleEventRouter([], notification_store=store)._create_notification(
+        {
+            "id": "hosting_deployed.user", "module_id": "hosting",
+            "audience": {"roles": ["owner"]},
+            "template": {"title": "App deployed", "body": "Deployment complete"},
+        },
+        event_type,
+        envelope,
+    ))
+    stored = notification_http.collection.find_one({"notification_id": notification_id})
+    assert stored is not None
+    assert stored["tenant_id"] == TENANT_A
+    assert "workspace_id" not in stored
+
+    client = notification_http.client
+    member_a = notification_http.token(WORKSPACE_A, roles=["owner"])
+    member_b = notification_http.token(WORKSPACE_B, roles=["owner"])
+    assert notification_id in _ids(client.get("/api/notifications", headers=member_a))
+    assert notification_id not in _ids(client.get("/api/notifications", headers=member_b))
+    assert notification_id not in _ids(client.get(
+        "/api/notifications", headers=notification_http.token(None, roles=["owner"]),
+    ))
+
+
+def test_present_null_owners_do_not_authorize_a_broad_alert(notification_http):
+    record = _role_record("malformed-null-owners", workspace_id=None)
+    record["tenant_id"] = None
+    notification_http.collection.insert_one(record)
+    for workspace_id in (WORKSPACE_A, WORKSPACE_B, None):
+        headers = notification_http.token(workspace_id, roles=["owner"])
+        assert "malformed-null-owners" not in _ids(notification_http.client.get(
+            "/api/notifications", headers=headers,
+        ))
+        assert notification_http.client.post(
+            "/api/notifications/malformed-null-owners/read", headers=headers,
+        ).json()["success"] is False
+
+
 def test_owned_role_alert_mutations_deny_foreign_and_ambiguous_owners(notification_http):
     _seed_role_notifications(notification_http)
     client = notification_http.client
