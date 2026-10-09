@@ -162,6 +162,14 @@ must preserve the original event identity, or the producer must persist
 per-consumer completion checkpoints: a new `ctx.emit` call creates a new
 event ID and cannot inherit another event's completion evidence.
 
+For a declared notification reaction, `ok` requires the notification store to
+accept the record. A store exception or explicit failure produces a failed,
+retryable reaction receipt and no `notification.created` signal. An implicit
+notification rule has no reaction receipt and cannot bypass a skipped declared
+notification reaction. `platform.reaction.*_dispatched` and notification UI
+signals are secondary publications: a publisher exception is logged but does
+not change the adapter or stored notification's delivery outcome.
+
 ### Module Event/Reaction Contract
 
 - `contracts/events.yaml` declares the event types a module may emit.

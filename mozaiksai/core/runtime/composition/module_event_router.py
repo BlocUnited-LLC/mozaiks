@@ -258,6 +258,12 @@ class ModuleEventRouter:
     ) -> ModuleEventDeliveryOutcome:
         """Handle one canonical module event envelope."""
         emitted_notifications: set[tuple[str, str]] = set()
+        declared_notification_rules = {
+            (str(reaction.get("module_id") or ""), str(target.get("notification_id") or ""))
+            for reaction in self._reactions_by_event.get(event_type, [])
+            if isinstance(target := reaction.get("target"), dict)
+            and target.get("kind") == "notification"
+        }
         delivered: list[ModuleReactionDeliveryOutcome] = []
 
         async def record_delivery(
@@ -395,18 +401,26 @@ class ModuleEventRouter:
                         )
                         continue
                     key = (str(rule.get("module_id") or ""), str(rule.get("id") or ""))
-                    await self._create_notification(rule, event_type, envelope)
+                    stored = await self._create_notification(rule, event_type, envelope)
                     emitted_notifications.add(key)
                     await record_delivery(
                         build_module_reaction_audit(
                             event=event_provenance,
                             reaction=reaction_provenance,
-                            outcome="ok",
+                            outcome="ok" if stored else "failed",
+                            reason=None if stored else "notification storage failed",
                         )
                     )
-                    await self._complete_reaction(
-                        idempotency_key, durable_key_str, claim_token, event_provenance
-                    )
+                    if stored:
+                        await self._complete_reaction(
+                            idempotency_key, durable_key_str, claim_token, event_provenance
+                        )
+                    else:
+                        if memory_key is not None:
+                            self._processed_reaction_keys.pop(memory_key, None)
+                        await self._durable_mark_failed(
+                            durable_key_str, claim_token, reaction, event_provenance
+                        )
                 else:
                     await record_delivery(
                         build_module_reaction_audit(
@@ -512,7 +526,11 @@ class ModuleEventRouter:
 
         for rule in self._notifications_by_event.get(event_type, []):
             key = (str(rule.get("module_id") or ""), str(rule.get("id") or ""))
-            if key not in emitted_notifications and _notification_rule_matches(rule, envelope):
+            if (
+                key not in declared_notification_rules
+                and key not in emitted_notifications
+                and _notification_rule_matches(rule, envelope)
+            ):
                 await self._create_notification(rule, event_type, envelope)
         return ModuleEventDeliveryOutcome(event_type=event_type, reactions=tuple(delivered))
 
@@ -966,8 +984,24 @@ class ModuleEventRouter:
         }
         if dispatch_result is not None:
             reaction_payload["payload"]["result"] = dispatch_result
-        await self._maybe_await(self._event_emitter(reaction_event_type, reaction_payload))
+        await self._emit_secondary_event(reaction_event_type, reaction_payload)
         return dispatch_result
+
+    async def _emit_secondary_event(
+        self, event_type: str, payload: dict[str, Any]
+    ) -> None:
+        """Publish observational events without changing the target's delivery result."""
+        if self._event_emitter is None:
+            return
+        try:
+            await self._maybe_await(self._event_emitter(event_type, payload))
+        except Exception as exc:
+            logger.warning(
+                "SECONDARY_MODULE_EVENT_EMIT_FAILED: event=%s error=%s",
+                event_type,
+                type(exc).__name__,
+                exc_info=True,
+            )
 
     async def _dispatch_service_adapter(
         self,
@@ -1119,7 +1153,7 @@ class ModuleEventRouter:
         rule: dict,
         event_type: str,
         envelope: dict[str, Any],
-    ) -> None:
+    ) -> bool:
         # Structured envelope: {tenant: {...}, payload: {...}, ...}
         # Flat envelope (module events): {session_id: ..., app_id: ..., amount: ..., ...}
         raw_payload = envelope.get("payload")
@@ -1196,7 +1230,8 @@ class ModuleEventRouter:
         if context is not None:
             record["context"] = context
 
-        await self._store_notification(record)
+        if not await self._store_notification(record):
+            return False
         if self._event_emitter is not None:
             notification_event = {
                 "id": f"evt_{uuid4().hex}",
@@ -1213,7 +1248,7 @@ class ModuleEventRouter:
                 "payload": record,
                 "visibility": "internal",
             }
-            await self._maybe_await(self._event_emitter("notification.created", notification_event))
+            await self._emit_secondary_event("notification.created", notification_event)
             count_changed_event = {
                 "id": f"evt_{uuid4().hex}",
                 "type": "notification.count_changed",
@@ -1231,19 +1266,24 @@ class ModuleEventRouter:
                 },
                 "visibility": "internal",
             }
-            await self._maybe_await(self._event_emitter("notification.count_changed", count_changed_event))
+            await self._emit_secondary_event("notification.count_changed", count_changed_event)
+        return True
 
-    async def _store_notification(self, record: dict[str, Any]) -> None:
+    async def _store_notification(self, record: dict[str, Any]) -> bool:
         try:
             if self._notification_store is not None:
-                await self._maybe_await(self._notification_store(record))
-                return
+                result = await self._maybe_await(self._notification_store(record))
+                return not _reaction_result_failed(result)
 
             from mozaiksai.core.core_config import get_mongo_client
 
-            await get_mongo_client()["mozaiks"]["platform_notifications"].insert_one(dict(record))
+            result = await get_mongo_client()["mozaiks"]["platform_notifications"].insert_one(
+                dict(record)
+            )
+            return result.acknowledged is not False
         except Exception as exc:
-            logger.debug("NOTIFICATION_STORE_SKIPPED: %s", exc)
+            logger.warning("NOTIFICATION_STORE_FAILED: %s", type(exc).__name__)
+            return False
 
     @staticmethod
     async def _maybe_await(result: Any) -> Any:

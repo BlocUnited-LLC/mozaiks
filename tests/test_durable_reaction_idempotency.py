@@ -450,6 +450,121 @@ async def test_raising_capability_releases_durable_claim_for_same_router_retry()
     assert calls == 2
 
 
+@pytest.mark.asyncio
+async def test_secondary_publisher_exception_does_not_strand_successful_adapter_claim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _InMemoryIdempotencyStore()
+    calls = 0
+    event_type = "domain.order.created"
+    reaction = MagicMock()
+    reaction.event_type = event_type
+    reaction.model_dump.return_value = {
+        "id": "billing.post", "idempotency_key": "order_id",
+        "target": {"kind": "service_adapter", "adapter": "test:Adapter", "adapter_method": "post"},
+    }
+    module = _loaded_module("billing", reactions=[reaction])
+
+    async def secondary_publisher(_event_type: str, _payload: dict[str, Any]) -> None:
+        raise RuntimeError("secondary publisher unavailable")
+
+    router = ModuleEventRouter(
+        [module], idempotency_store=store, event_emitter=secondary_publisher,
+    )
+
+    async def adapter(*_args: Any, **_kwargs: Any) -> dict[str, bool]:
+        nonlocal calls
+        calls += 1
+        return {"success": True}
+
+    monkeypatch.setattr(router, "_dispatch_service_adapter", adapter)
+    dispatcher = UnifiedEventDispatcher()
+    router.register(dispatcher)
+    envelope = {
+        "id": "evt-1", "type": event_type,
+        "tenant": {"app_id": "app-1", "tenant_id": "tenant-1"},
+        "payload": {"order_id": "order-99"},
+    }
+
+    first = await dispatcher.emit(event_type, envelope)
+    second = await dispatcher.emit(event_type, envelope)
+    assert required_module_reaction(first, module_id="billing", reaction_id="billing.post").status == "ok"
+    assert required_module_reaction(second, module_id="billing", reaction_id="billing.post").status == "completed"
+    assert [record.status for record in store._records.values()] == ["completed"]
+    assert calls == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_mode", ["raise", "false"])
+async def test_notification_storage_failure_is_failed_and_retryable(
+    failure_mode: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _InMemoryIdempotencyStore()
+    stored: list[dict[str, Any]] = []
+    emitted: list[str] = []
+    attempts = 0
+    event_type = "domain.order.created"
+    reaction = MagicMock()
+    reaction.event_type = event_type
+    reaction.model_dump.return_value = {
+        "id": "notify.owner", "idempotency_key": "order_id",
+        "target": {"kind": "notification", "notification_id": "order_notice"},
+    }
+    module = _loaded_module("notices", reactions=[reaction])
+    module.manifests.notifications = MagicMock(notifications=[{
+        "id": "order_notice", "event_type": event_type, "module_id": "notices",
+        "channels": ["in_app"], "template": {"title": "Order", "body": "Created"},
+    }])
+
+    async def notification_store(record: dict[str, Any]) -> bool | None:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            if failure_mode == "raise":
+                raise RuntimeError("notification store unavailable")
+            return False
+        stored.append(record)
+        return None
+
+    async def secondary_publisher(event_name: str, _payload: dict[str, Any]) -> None:
+        emitted.append(event_name)
+
+    router = ModuleEventRouter(
+        [module], idempotency_store=store, notification_store=notification_store,
+        event_emitter=secondary_publisher,
+    )
+    audits: list[Any] = []
+
+    async def capture_audit(audit: Any) -> None:
+        audits.append(audit)
+
+    monkeypatch.setattr(router, "_emit_reaction_audit", capture_audit)
+    dispatcher = UnifiedEventDispatcher()
+    router.register(dispatcher)
+    envelope = {
+        "id": "evt-1", "type": event_type,
+        "tenant": {"app_id": "app-1", "tenant_id": "tenant-1"},
+        "payload": {"order_id": "order-99"},
+    }
+
+    first = await dispatcher.emit(event_type, envelope)
+    assert required_module_reaction(first, module_id="notices", reaction_id="notify.owner").status == "failed"
+    assert [record.status for record in store._records.values()] == ["retryable"]
+    assert emitted == []
+    second = await dispatcher.emit(event_type, envelope)
+    third = await dispatcher.emit(event_type, envelope)
+    assert required_module_reaction(second, module_id="notices", reaction_id="notify.owner").status == "ok"
+    assert required_module_reaction(third, module_id="notices", reaction_id="notify.owner").status == "completed"
+    assert [record.status for record in store._records.values()] == ["completed"]
+    assert attempts == 2
+    assert len(stored) == 1
+    assert emitted == ["notification.created", "notification.count_changed"]
+    assert [audit.outcome for audit in audits] == ["failed", "ok", "skipped"]
+    assert audits[0].reason == "notification storage failed"
+    assert audits[2].reason == "idempotent reaction already completed"
+
+
 # ---------------------------------------------------------------------------
 # Module / reaction fixtures
 # ---------------------------------------------------------------------------

@@ -480,8 +480,10 @@ This project follows a practical pre-1.0 changelog format:
   dead-letter skips, allowing partial multi-consumer delivery to converge
   when the original event identity is re-delivered. Capability callback
   exceptions are reported as failed reactions, and same-process completion
-  checks are scoped by app, tenant, and workspace. Existing best-effort
-  emitters continue to work.
+  checks are scoped by app, tenant, and workspace. Declared notification
+  reactions report storage failures rather than acknowledging a missing
+  notification; secondary platform event publications remain best-effort.
+  Existing best-effort emitters continue to work.
 
 - Handler reactions now receive the fields of flat events,
   including host webhook events, instead of an empty payload.

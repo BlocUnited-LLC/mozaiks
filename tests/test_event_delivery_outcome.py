@@ -59,6 +59,7 @@ def _module(
     permissions: list[str] | None = None,
     idempotency_key: str | None = None,
     target: dict[str, str] | None = None,
+    notification_rules: list[dict[str, Any]] | None = None,
 ) -> Any:
     return SimpleNamespace(
         name=name,
@@ -73,7 +74,10 @@ def _module(
                     target=target,
                 )]
             ),
-            notifications=None,
+            notifications=(
+                SimpleNamespace(notifications=notification_rules)
+                if notification_rules is not None else None
+            ),
             events=None,
         ),
     )
@@ -435,3 +439,31 @@ async def test_raising_capability_is_failed_and_retried_on_same_router() -> None
     assert failed.reason == "RuntimeError"
     assert required_module_reaction(second, module_id="wallet", reaction_id="wallet.credit").status == "ok"
     assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_skipped_explicit_notification_is_not_recreated_by_implicit_rules() -> None:
+    stored: list[dict[str, Any]] = []
+    module = _module(
+        "notices", object(), "notify.owner",
+        permissions=["notices.send"],
+        target={"kind": "notification", "notification_id": "owner_notice"},
+        notification_rules=[{
+            "id": "owner_notice", "event_type": EVENT_TYPE, "module_id": "notices",
+            "channels": ["in_app"], "template": {"title": "Notice", "body": ""},
+        }],
+    )
+    router = ModuleEventRouter([module], notification_store=stored.append)
+    dispatcher = UnifiedEventDispatcher()
+    router.register(dispatcher)
+
+    receipt = await dispatcher.emit(EVENT_TYPE, {
+        "id": "evt-1", "type": EVENT_TYPE,
+        "tenant": {"app_id": "app-1", "tenant_id": "tenant-1"},
+        "payload": {"payment_id": "pay-1"},
+    })
+
+    assert required_module_reaction(
+        receipt, module_id="notices", reaction_id="notify.owner"
+    ).status == "skipped"
+    assert stored == []
