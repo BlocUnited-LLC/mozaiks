@@ -1282,7 +1282,10 @@ test('mobile shell navigation keeps an app configured icon and label', async ({ 
         ...composedShellConfig,
         mobile: {
           bottomBar: {
-            items: [{ id: 'create', label: 'My workspace', action: 'navigate', path: '/apps', icon: 'settings.svg' }],
+            items: [
+              { id: 'create', label: 'My workspace', action: 'navigate', path: '/apps', icon: 'settings.svg' },
+              { id: 'notifications', label: 'Special', action: 'navigate', path: '/usage', iconLabel: 'S' },
+            ],
           },
         },
       },
@@ -1297,7 +1300,10 @@ test('mobile shell navigation keeps an app configured icon and label', async ({ 
     const button = navigation.getByRole('button', { name: 'My workspace' });
     await expect(button).toBeVisible();
     await expect(button.locator('.shell-mobile-bottom-icon')).toHaveCSS('mask-image', /settings\.svg/);
-    await expect(navigation.getByRole('button')).toHaveCount(2);
+    const labeledButton = navigation.getByRole('button', { name: 'Special' });
+    await expect(labeledButton.locator('.shell-mobile-bottom-glyph')).toHaveText('S');
+    await expect(labeledButton.locator('svg')).toHaveCount(0);
+    await expect(navigation.getByRole('button')).toHaveCount(3);
   }
 });
 
@@ -1353,14 +1359,44 @@ test('assistant bottom action leaves mobile controls tappable and opens the chat
     await expect(closeAssistant).toHaveAttribute('aria-expanded', 'true');
     await expect(closeAssistant).toHaveAttribute('aria-controls', 'mozaiks-assistant-panel');
     await expect(page.locator('#mozaiks-assistant-panel')).toBeVisible();
+    const openNavLayout = await navigation.evaluate((element) => ({
+      width: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+      scrollLeft: element.scrollLeft,
+      buttons: [...element.querySelectorAll('button')].map((button) => {
+        const rect = button.getBoundingClientRect();
+        const topmost = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+        return {
+          left: rect.left,
+          right: rect.right,
+          topmost: topmost?.closest('button') === button,
+        };
+      }),
+    }));
+    expect(openNavLayout.scrollWidth).toBeLessThanOrEqual(openNavLayout.width);
+    expect(openNavLayout.scrollLeft).toBe(0);
+    for (const button of openNavLayout.buttons) {
+      expect(button.left).toBeGreaterThanOrEqual(0);
+      expect(button.right).toBeLessThanOrEqual(openNavLayout.width);
+      expect(button.topmost).toBe(true);
+    }
+    await expectNoHorizontalOverflow(page);
     if (process.env.MOBILE_NAV_QA_DIR) {
       fs.mkdirSync(process.env.MOBILE_NAV_QA_DIR, { recursive: true });
       await page.screenshot({
         path: path.join(process.env.MOBILE_NAV_QA_DIR, `${testInfo.project.name}-assistant-open.png`),
       });
+      await navigation.screenshot({
+        path: path.join(process.env.MOBILE_NAV_QA_DIR, `${testInfo.project.name}-assistant-open-bar.png`),
+      });
     }
-    await closeAssistant.click();
+    await closeAssistant.focus();
+    await page.keyboard.press('Enter');
     await expect(assistant).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.locator('#mozaiks-assistant-panel')).toHaveCount(0);
+    await assistant.click();
+    await expect(page.locator('#mozaiks-assistant-panel')).toBeVisible();
+    await navigation.getByRole('button', { name: 'Close assistant' }).click();
     await expect(page.locator('#mozaiks-assistant-panel')).toHaveCount(0);
     await expect(launcher).toBeHidden();
     if (process.env.MOBILE_NAV_QA_DIR) {
