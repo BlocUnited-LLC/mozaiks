@@ -162,6 +162,7 @@ def test_module_get_decodes_only_declared_integer_inputs(monkeypatch):
     monkeypatch.setattr(modules, "is_auth_enabled", lambda: False)
     monkeypatch.setattr(modules, "get_platform_hooks", lambda: SimpleNamespace(call_module_scope=scope))
     app = FastAPI()
+    app.state.loaded_app_id = "books-app"
     app.include_router(modules.router)
     app.state.executor_registry = SimpleNamespace(module_executor=executor)
     app.state.module_action_surfaces = {}

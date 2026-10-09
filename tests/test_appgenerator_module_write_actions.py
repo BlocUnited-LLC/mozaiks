@@ -1043,6 +1043,7 @@ def test_two_users_drive_compiled_writes_over_http_with_closed_schemas_and_gates
         action_entitlements={"update_task": "task.edit"},
     )
     app = FastAPI()
+    app.state.loaded_app_id = "writes-app"
     app.state.module_action_surfaces = {MODULE: dict.fromkeys(actions)}
     app.state.executor_registry = SimpleNamespace(module_executor=executor)
     app.include_router(module_router.router)

@@ -42,6 +42,7 @@ async def test_module_context_user_id_override_reaches_executor(monkeypatch):
     request = SimpleNamespace(
         app=SimpleNamespace(
             state=SimpleNamespace(
+                loaded_app_id="mozaiks-factory",
                 failed_module_names=[],
                 executor_registry=SimpleNamespace(module_executor=executor),
                 module_action_surfaces={},
@@ -120,10 +121,8 @@ def test_reconcile_reserved_params_keeps_declared_user_id_and_skips_context_prom
     assert context_overrides["app_id"] == "demo-app"
 
 
-def test_reconcile_reserved_params_keeps_and_promotes_declared_app_id():
-    """app_id stays available in params (many actions declare it as a
-    resource-scoping business input) and is also promoted into context when
-    the caller omits it there."""
+def test_reconcile_reserved_params_keeps_declared_app_id_out_of_context():
+    """A target app is a business input, not the loaded host identity."""
     params = {"name": "My Community", "app_id": "demo-app"}
     context_overrides: dict[str, object] = {}
 
@@ -134,7 +133,7 @@ def test_reconcile_reserved_params_keeps_and_promotes_declared_app_id():
     )
 
     assert params["app_id"] == "demo-app"
-    assert context_overrides["app_id"] == "demo-app"
+    assert "app_id" not in context_overrides
 
 
 def test_reconcile_reserved_params_strips_undeclared_reserved_key():
@@ -189,6 +188,7 @@ async def test_module_action_own_user_id_param_does_not_hijack_actor_identity(mo
     request = SimpleNamespace(
         app=SimpleNamespace(
             state=SimpleNamespace(
+                loaded_app_id="demo-app",
                 failed_module_names=[],
                 executor_registry=SimpleNamespace(module_executor=executor),
                 module_action_surfaces={},
@@ -255,6 +255,7 @@ async def test_module_action_own_user_id_param_does_not_hijack_actor_identity_ra
     request = SimpleNamespace(
         app=SimpleNamespace(
             state=SimpleNamespace(
+                loaded_app_id="host-app",
                 failed_module_names=[],
                 executor_registry=SimpleNamespace(module_executor=executor),
                 module_action_surfaces={},
@@ -321,6 +322,7 @@ async def test_module_action_raw_body_keeps_declared_app_id_param(monkeypatch):
     request = SimpleNamespace(
         app=SimpleNamespace(
             state=SimpleNamespace(
+                loaded_app_id="host-app",
                 failed_module_names=[],
                 executor_registry=SimpleNamespace(module_executor=executor),
                 module_action_surfaces={},
@@ -361,7 +363,7 @@ async def test_module_action_raw_body_keeps_declared_app_id_param(monkeypatch):
     )
 
     assert executor.requests[0].params["app_id"] == "demo-app"
-    assert executor.requests[0].app_id == "demo-app"
+    assert executor.requests[0].app_id == "host-app"
 
 
 @pytest.mark.asyncio
@@ -378,6 +380,7 @@ async def test_support_subject_app_id_does_not_override_authenticated_runtime_sc
     request = SimpleNamespace(
         app=SimpleNamespace(
             state=SimpleNamespace(
+                loaded_app_id="mozaiks-app",
                 failed_module_names=[],
                 executor_registry=SimpleNamespace(module_executor=executor),
                 module_action_surfaces={},

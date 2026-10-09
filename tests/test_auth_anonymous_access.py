@@ -1140,6 +1140,7 @@ def _module_client(
     registry = ExecutorRegistry()
     registry.register(executor)
     app = FastAPI()
+    app.state.loaded_app_id = "orders-app"
     app.state.executor_registry = registry
     app.state.module_action_surfaces = {
         "orders": {"authority": None, "manage": None, "catalog": "public", "premium": None}

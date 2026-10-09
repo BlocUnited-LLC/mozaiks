@@ -281,7 +281,15 @@ async def _platform_startup() -> None:
         load_options = {"module_defaults_path": module_defaults_path} if module_defaults_path else {}
         load_result = await AppLoader.load(str(app_root), **load_options)
         app.state.loaded_app_root = app_root.resolve()
-        app.state.loaded_app_id = load_result.definition.config.get("appId")
+        # Module dispatch, indexes, and migrations must use the same host app
+        # identity. app.json may omit appId (including generated bundles), so
+        # preserve the existing data-contract/default resolution in that case.
+        app.state.loaded_app_id = str(
+            (load_result.data_contract or {}).get("app_id")
+            or load_result.definition.config.get("appId")
+            or load_result.definition.config.get("app_id")
+            or _resolve_default_app_id()
+        ).strip()
         app.state.loaded_app_name = load_result.definition.config.get("appName")
         app.state.subscriptions_config = load_result.subscriptions_config
         app.state.metrics_config = load_result.metrics_config
@@ -294,12 +302,7 @@ async def _platform_startup() -> None:
         app.state.data_contract = load_result.data_contract
         persistence_enabled = database_persistence_is_enabled(database_startup_policy)
         if load_result.data_contract and persistence_enabled:
-            index_app_id = (
-                load_result.data_contract.get("app_id")
-                or load_result.definition.config.get("appId")
-                or load_result.definition.config.get("app_id")
-                or _resolve_default_app_id()
-            )
+            index_app_id = app.state.loaded_app_id
             try:
                 index_result = await apply_database_indexes(
                     load_result.data_contract,
@@ -335,12 +338,7 @@ async def _platform_startup() -> None:
         try:
             migrations = load_data_migrations(app_root)
             if migrations:
-                migration_app_id = (
-                    (load_result.data_contract or {}).get("app_id")
-                    or load_result.definition.config.get("appId")
-                    or load_result.definition.config.get("app_id")
-                    or _resolve_default_app_id()
-                )
+                migration_app_id = app.state.loaded_app_id
                 migration_count = await apply_data_migrations(
                     app_id=str(migration_app_id),
                     migrations=migrations,

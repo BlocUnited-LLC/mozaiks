@@ -174,6 +174,7 @@ async def _configure_app(name: str, monkeypatch: pytest.MonkeyPatch) -> Any:
     registry.register(executor)
     monkeypatch.setattr(platform, "executor_registry", registry)
     platform.app.state.executor_registry = registry
+    platform.app.state.loaded_app_id = str(loaded.definition.config["appId"])
     platform.app.state.failed_module_names = []
     platform.app.state.module_action_surfaces = {
         module.name: module.action_api_surface_map for module in loaded.modules
@@ -318,6 +319,7 @@ async def test_research_ops_loads_workflow_admin_and_module_http(monkeypatch: py
 def _restore_runtime_state():
     previous_state = {
         "executor_registry": getattr(platform.app.state, "executor_registry", None),
+        "loaded_app_id": getattr(platform.app.state, "loaded_app_id", None),
         "failed_module_names": list(getattr(platform.app.state, "failed_module_names", [])),
         "module_action_surfaces": deepcopy(getattr(platform.app.state, "module_action_surfaces", {})),
         "page_schemas": deepcopy(getattr(platform.app.state, "page_schemas", {})),
@@ -328,6 +330,7 @@ def _restore_runtime_state():
 
     initialize_workflows(str(FACTORY_WORKFLOWS_ROOT))
     platform.app.state.executor_registry = previous_state["executor_registry"]
+    platform.app.state.loaded_app_id = previous_state["loaded_app_id"]
     platform.app.state.failed_module_names = previous_state["failed_module_names"]
     platform.app.state.module_action_surfaces = previous_state["module_action_surfaces"]
     platform.app.state.page_schemas = previous_state["page_schemas"]
