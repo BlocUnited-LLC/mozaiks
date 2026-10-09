@@ -459,7 +459,7 @@ async def test_v2_paid_wallet_displays_ai_plan_without_runtime_grant(
         await billing_grant()
 
     wallet = summary["wallets"][0]
-    assert summary["plan_id"] == "builder"  # Legacy primary-plan field.
+    assert summary["plan_id"] == "builder"  # Existing primary-plan field.
     assert wallet["product_id"] == "ai"
     assert wallet["plan_id"] == "ai_pro"
     assert wallet["plan_resolution"] == "resolved"
@@ -476,7 +476,7 @@ async def test_v2_paid_wallet_displays_ai_plan_without_runtime_grant(
         app_id="app_1", wallet_id="ai_tokens", user_id="user_1"
     )
     assert entries[0]["metadata"]["plan_id"] == "ai_pro"
-    assert "product_id" not in entries[0]["metadata"]  # Legacy billing grant.
+    assert "product_id" not in entries[0]["metadata"]  # Existing billing grant.
 
 
 @pytest.mark.asyncio
