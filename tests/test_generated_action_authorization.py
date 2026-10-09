@@ -186,13 +186,14 @@ def test_operator_and_pack_permissions_are_not_reinterpreted_as_generated_auth(s
 
 
 @pytest.mark.parametrize("source", ["framework_pack", "operator_pack"])
-def test_model_owned_module_cannot_bypass_auth_with_pack_source(source):
+@pytest.mark.parametrize("owned_path", [MANIFEST, f"./{MANIFEST}", MANIFEST.replace("/", "\\")])
+def test_model_owned_module_cannot_bypass_auth_with_pack_source(source, owned_path):
     plan = _plan(source=source)
     plan["build_tasks"] = [{
         "task_id": TASK_ID,
         "task_type": "module_contract",
         "capability_pack_id": MODULE,
-        "owned_paths": [MANIFEST],
+        "owned_paths": [owned_path],
     }]
     candidate = _payload("tasks.veiw")
     with pytest.raises(ValueError, match="tasks.veiw"):

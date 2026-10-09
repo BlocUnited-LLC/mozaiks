@@ -60,6 +60,7 @@ from mozaiksai.core.workflow.generator_support.module_read_actions import (
     _replace_functions,
     close_module_read_actions,
 )
+from mozaiksai.core.workflow.path_ownership import normalize_owned_paths
 from mozaiksai.resources import resolve_factory_app_root
 
 logger = logging.getLogger(__name__)
@@ -279,7 +280,8 @@ def _validate_generated_action_permissions(
     )
     manifest_path = f"modules/{module_id}/module.yaml"
     authored_by_task = any(
-        task.get("task_type") == "module_contract" and manifest_path in (task.get("owned_paths") or [])
+        task.get("task_type") == "module_contract"
+        and manifest_path in normalize_owned_paths(task.get("owned_paths"))
         for task in plan.get("build_tasks") or [] if isinstance(task, dict)
     )
     if not declared_generated and not authored_by_task:
