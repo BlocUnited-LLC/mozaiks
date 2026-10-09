@@ -11,6 +11,20 @@ from factory_app.workflows.AppGenerator.tools import app_validation
 from mozaiksai.core import adapters
 
 
+def _mock_provider(monkeypatch, provider, adapter):
+    if provider == "docker":
+        image_id = "sha256:" + "a" * 64
+        monkeypatch.setattr(app_validation.app_runtime_smoke, "_preflight_generated_image", lambda: image_id)
+
+        def docker_adapter(*, image):
+            assert image == image_id
+            return adapter
+
+        monkeypatch.setattr(adapters, "DockerSandboxAdapter", docker_adapter)
+    else:
+        monkeypatch.setattr(adapters, "get_sandbox_adapter", lambda _: adapter)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("provider", ["docker", "e2b"])
 @pytest.mark.parametrize("cancellation", ["anyio", "asyncio"])
@@ -41,7 +55,7 @@ async def test_cancelled_validation_finishes_teardown_and_propagates(monkeypatch
         write_files=AsyncMock(), run_command=AsyncMock(side_effect=run),
         terminate_session=AsyncMock(side_effect=terminate),
     )
-    monkeypatch.setattr(adapters, "get_sandbox_adapter", lambda _: adapter)
+    _mock_provider(monkeypatch, provider, adapter)
     with anyio.CancelScope() as scope:
         with pytest.raises(asyncio.CancelledError) as raised:
             await app_validation._run_sandbox_validation(
@@ -71,7 +85,7 @@ async def test_unconfirmed_sandbox_cleanup_keeps_failed_status(monkeypatch, prov
         run_command=AsyncMock(return_value=SimpleNamespace(success=True, stdout="compiled", stderr="")),
         terminate_session=AsyncMock(side_effect=terminate),
     )
-    monkeypatch.setattr(adapters, "get_sandbox_adapter", lambda _: adapter)
+    _mock_provider(monkeypatch, provider, adapter)
     result = await app_validation._run_sandbox_validation(
         strategy=provider, resolved_files={"app.json": "{}"}, commands=[],
         start_dev_server=False, timeout_seconds=120,

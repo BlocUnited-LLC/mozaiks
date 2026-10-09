@@ -1268,7 +1268,11 @@ async def test_acceptance_fails_the_dead_bundle_and_routes_smoke_diagnostics_to_
 
     assert "app_runtime_smoke" in result["validation_evidence"]["failed"]
     assert result["app_runtime_smoke"]["status"] == "failed"
-    assert result["skipped_checks"] == []
+    assert result["skipped_checks"] == [{
+        "id": "app_runtime_load_worker",
+        "reason": "contained AppLoader worker source, image, or cleanup was not verified",
+    }]
+    assert result["validation_evidence"]["skipped"] == ["app_runtime_load_worker"]
     smoke_errors = [error for error in result["bundle_repair"]["errors"] if error.startswith("app_runtime_smoke: ")]
     assert len(smoke_errors) == len(result["app_runtime_smoke"]["failed_tests"])
     assert any("indexes[0].name is required" in error for error in smoke_errors)
