@@ -2254,9 +2254,15 @@ class TestCacheTtlArithmetic:
         entry = CachedJWKS(keys={}, fetched_at=time.time(), ttl_seconds=ttl, source_url="u")
         assert entry.is_expired() is (ttl == 0)
 
-    @pytest.mark.parametrize("ttl", [0, 1, 31, 3600, 86400])
-    def test_helper_matches_original_boundary_semantics(self, ttl):
-        """For representable TTLs, reproduce `now > fetched_at + ttl` exactly."""
+    def test_zero_ttl_expires_at_same_clock_tick(self):
+        """Zero means always refetch, even when the clock has not advanced."""
+        from mozaiksai.core.auth.cache_ttl import cache_entry_is_expired
+
+        assert cache_entry_is_expired(1000.0, 0, now=1000.0) is True
+
+    @pytest.mark.parametrize("ttl", [1, 31, 3600, 86400])
+    def test_helper_matches_positive_ttl_boundary_semantics(self, ttl):
+        """Positive TTLs retain the strict expiry boundary."""
         from mozaiksai.core.auth.cache_ttl import cache_entry_is_expired
 
         assert cache_entry_is_expired(1000.0, ttl, now=1000.0 + ttl) is False
