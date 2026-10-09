@@ -295,10 +295,12 @@ cleanup and matching source/image identity. A missing, altered, or extra
 unverified check leaves the generated gate pending and issues no snapshot
 digest. Imported Genesis does not use this generated scope.
 
-This runtime decision does not complete build validation. The current `local`
-strategy can run build commands and npm scripts on the host. It must be
-isolated or made non-promotional before #925 provides a promotable generated
-path; a passing runtime scope cannot override that separate prerequisite.
+Build validation is a separate required gate. Generated apps can select only
+`docker`, explicit `e2b`, or `skip`; `skip` blocks promotion. The Docker build
+path inspects the same immutable local image ID before staging source and runs
+offline as a non-root user with a read-only image and bounded writable space.
+Candidate package scripts never run through a host npm subprocess. A passing
+runtime scope cannot override a failed or skipped build.
 
 The preview image must be rebuilt after changing this smoke module:
 `docker build -f infra/docker/Dockerfile.preview -t mozaiks-sandbox:local .`.

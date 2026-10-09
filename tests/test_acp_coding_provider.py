@@ -138,7 +138,7 @@ async def test_happy_path_harvests_modified_file(tmp_path: Path) -> None:
     # CRLF; harvest reports the exact on-disk bytes, which is the contract.
     assert proposal.changed_files[0].content.replace("\r\n", "\n") == _PATCHED
     assert proposal.owned_paths == [_SCOPED_PATH]
-    assert proposal.validation_strategy_hint == "local"
+    assert proposal.validation_strategy_hint == "docker"
     assert proposal.needs_human_review is True
     assert proposal.summary == "Patched the file."
     assert proposal.usage == {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120}

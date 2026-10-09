@@ -47,7 +47,7 @@ _GOOD_PLAN = CodingWorkerPlan(
     updated_files=[
         FileUpdate(path=_SCOPED_PATH, content='export default function Dashboard() { return "patched"; }')
     ],
-    validation_strategy="local",
+    validation_strategy="docker",
     validation_commands=["npm run build"],
     start_preview=False,
     needs_human_review=False,
@@ -169,7 +169,7 @@ async def test_structured_provider_returns_completed_scoped_proposal() -> None:
     assert proposal.changed_files[0].op == "update"
     assert proposal.changed_files[0].content.endswith('"patched"; }')
     assert proposal.owned_paths == [_SCOPED_PATH]
-    assert proposal.validation_strategy_hint == "local"
+    assert proposal.validation_strategy_hint == "docker"
     assert proposal.validation_commands == ["npm run build"]
     assert proposal.summary == _GOOD_PLAN.summary
     assert proposal.rationale == _GOOD_PLAN.rationale
@@ -289,7 +289,7 @@ def _completed_proposal(**overrides: Any) -> StagedPatchProposal:
             ProposedFileChange(path=_SCOPED_PATH, op="update", content="stub content")
         ],
         "owned_paths": [_SCOPED_PATH],
-        "validation_strategy_hint": "local",
+        "validation_strategy_hint": "docker",
     }
     payload.update(overrides)
     return StagedPatchProposal(**payload)
@@ -309,7 +309,7 @@ async def test_worker_runs_injected_provider_through_full_lifecycle(tmp_path: Pa
         output_root=tmp_path,
         provider=provider,
     )
-    result = await worker.execute(_request(validation_strategy="local"))
+    result = await worker.execute(_request(validation_strategy="docker"))
 
     assert provider.requests and provider.requests[0].app_id == "app_1"
     assert result.eligible is True
@@ -318,7 +318,7 @@ async def test_worker_runs_injected_provider_through_full_lifecycle(tmp_path: Pa
     assert result.applied_files == {_SCOPED_PATH: "stub content"}
     assert result.plan is not None
     assert result.plan.summary == "Stub patch"
-    assert result.plan.validation_strategy == "local"
+    assert result.plan.validation_strategy == "docker"
     assert result.metadata["applied_paths"] == [_SCOPED_PATH]
     assert artifact_store.calls[0]["parent_build_record_id"] == "av_123"
     assert artifact_store.calls[0]["lifecycle_status"].value == "draft"
@@ -463,7 +463,7 @@ async def test_persistence_records_staged_file_hashes(tmp_path: Path) -> None:
         output_root=tmp_path,
         provider=_StubProvider(_completed_proposal()),
     )
-    result = await worker.execute(_request(validation_strategy="local"))
+    result = await worker.execute(_request(validation_strategy="docker"))
 
     assert result.status == "validated"
     staged_hashes = artifact_store.calls[0]["commit_metadata"]["metadata"]["staged_file_sha256"]
@@ -487,7 +487,7 @@ async def test_secret_scoped_file_fails_before_source_validation(tmp_path: Path)
         provider=_StubProvider(proposal),
     )
     result = await worker.execute(
-        _request(files={secret_path: "key: old"}, validation_strategy="local")
+        _request(files={secret_path: "key: old"}, validation_strategy="docker")
     )
 
     assert result.status == "failed"
@@ -507,7 +507,7 @@ async def test_provider_execution_metadata_is_persisted(tmp_path: Path) -> None:
         output_root=tmp_path,
         provider=_StubProvider(_completed_proposal()),
     )
-    result = await worker.execute(_request(validation_strategy="local"))
+    result = await worker.execute(_request(validation_strategy="docker"))
 
     assert result.status == "validated"
     execution = result.metadata["coding_provider"]

@@ -98,6 +98,9 @@ This project follows a practical pre-1.0 changelog format:
 - Contain generated AppLoader repair diagnostics in a read-only, offline Docker
   worker with bounded writable space. The host confirms worker removal and
   excludes candidate-written diagnostic JSON from promotion evidence.
+- Remove host-local generated build validation. Docker builds require a pinned
+  local image ID and run offline as non-root in a read-only container; missing
+  sandbox capability blocks promotion.
 
 ## 0.2.0 - 2026-10-09
 

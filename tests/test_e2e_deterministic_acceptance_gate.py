@@ -674,7 +674,7 @@ class TestPositiveE2EAcceptanceGate:
         gate = await run_app_bundle_acceptance_gate(files=_canonical_fixture())
         assert gate["status"] == "pending", gate
         assert gate["validation_evidence"]["failed"] == []
-        assert gate["validation_evidence"]["skipped"] == ["app_runtime_smoke"]
+        assert gate["validation_evidence"]["skipped"] == ["app_runtime_load_worker", "app_runtime_smoke"]
         assert gate["functional_completeness"]["passed"] is True
 
     @pytest.mark.asyncio

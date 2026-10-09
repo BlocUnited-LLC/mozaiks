@@ -695,7 +695,7 @@ async def _materialize_plan_bundle(*, tmp_path: Path) -> tuple[dict[str, str], P
     )
     assert gate["status"] == "pending", gate
     assert gate["validation_evidence"]["failed"] == []
-    assert gate["validation_evidence"]["skipped"] == ["app_runtime_smoke"]
+    assert gate["validation_evidence"]["skipped"] == ["app_runtime_load_worker", "app_runtime_smoke"]
     assert gate["functional_completeness"]["passed"] is True
 
     app_root = tmp_path / "app"

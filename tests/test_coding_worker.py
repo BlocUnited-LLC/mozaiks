@@ -57,7 +57,7 @@ async def test_refinement_preserves_unselected_files_and_bound_target(tmp_path):
         app_id="factory", target_app_id="app_1", user_id="user_1", run_build_binding=binding,
         build_family="app_bundle", build_record_id="av_parent", change_class="patch",
         requested_workflow_id="AppGenerator", raw_user_request="Change the dashboard",
-        files={"app/ui/pages/Dashboard.jsx": original}, validation_strategy="local",
+        files={"app/ui/pages/Dashboard.jsx": original}, validation_strategy="docker",
         baseline_files={"app/ui/pages/Dashboard.jsx": original, "app/app.json": unchanged},
     ))
     assert result.status == "validated", result.error
@@ -107,7 +107,7 @@ _GOOD_PLAN = CodingWorkerPlan(
             content='export default function Dashboard() { return "patched"; }',
         )
     ],
-    validation_strategy="local",
+    validation_strategy="docker",
     validation_commands=["npm run build"],
     start_preview=False,
     needs_human_review=False,
@@ -269,7 +269,7 @@ async def test_coding_worker_executes_for_scoped_patch_request(tmp_path: Path) -
             source_surface="app_build",
             change_class="patch",
             files={"app/ui/pages/Dashboard.jsx": "export default function Dashboard() {}"},
-            validation_strategy="local",
+            validation_strategy="docker",
             context_seed={"change_class": "patch"},
         )
     )
@@ -277,12 +277,12 @@ async def test_coding_worker_executes_for_scoped_patch_request(tmp_path: Path) -
     assert result.eligible is True
     assert result.status == "validated"
     assert result.plan is not None
-    assert result.plan.validation_strategy == "local"
+    assert result.plan.validation_strategy == "docker"
     updated_dict = {fu.path: fu.content for fu in result.plan.updated_files}
     assert updated_dict["app/ui/pages/Dashboard.jsx"].endswith('"patched"; }')
     assert result.applied_files["app/ui/pages/Dashboard.jsx"].endswith('"patched"; }')
     assert result.validation_result["validation_status"] == "passed"
-    assert result.validation_result["validation_strategy"] == "local"
+    assert result.validation_result["validation_strategy"] == "docker"
     assert result.validation_result["app_bundle_acceptance_result"]["passed"] is True
     assert result.metadata["build_record_id"] == "av_child_1"
     assert result.metadata["bundle_mode"] == "staged_refinement_bundle"
@@ -393,7 +393,7 @@ async def test_coding_worker_surfaces_artifact_persistence_errors(tmp_path: Path
             source_surface="app_build",
             change_class="patch",
             files={"app/ui/pages/Dashboard.jsx": "export default function Dashboard() {}"},
-            validation_strategy="local",
+            validation_strategy="docker",
             context_seed={"change_class": "patch"},
         )
     )
@@ -434,7 +434,7 @@ def test_generated_app_worker_rejects_repository_operations(op, content):
     )
     with pytest.raises(ValueError, match="only supports updates"):
         ScopedRefinementCodingWorker._plan_from_proposal(
-            request=_candidate_request(), proposal=proposal, resolved_strategy="local"
+            request=_candidate_request(), proposal=proposal, resolved_strategy="docker"
         )
 
 
@@ -630,9 +630,9 @@ async def test_refinement_cannot_resolve_parent_outside_target_app(tmp_path, par
 @pytest.mark.asyncio
 @pytest.mark.parametrize("requested,operator,hint,expected", [
     ("docker", None, "skip", "docker"),
-    ("e2b", None, "local", "e2b"),
-    ("skip", None, "local", "skip"),
-    ("local", "docker", "skip", "docker"),
+    ("e2b", None, "docker", "e2b"),
+    ("skip", None, "docker", "skip"),
+    ("docker", "docker", "skip", "docker"),
     (None, "e2b", "skip", "e2b"),
 ])
 async def test_candidate_execution_uses_operator_policy_not_provider_hint(

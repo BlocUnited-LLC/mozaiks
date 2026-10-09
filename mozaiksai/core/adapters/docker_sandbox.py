@@ -7,7 +7,6 @@ the generated app in an iframe without requiring E2B credentials.
 Resolution order (see app_validation_strategy.py):
   e2b    -> E2BSandboxAdapter  (requires E2B_API_KEY)
   docker -> DockerSandboxAdapter (requires Docker daemon)
-  local  -> subprocess on host (npm must be available, no preview URL)
   skip   -> no validation
 """
 
@@ -147,15 +146,19 @@ class DockerSandboxAdapter:
                 port_args += ["-p", f"127.0.0.1:0:{container_port}"]
 
         # Run a long-lived idle container so we can exec into it
-        # Generated app Python used for repair diagnostics gets only bounded,
-        # disposable writable space. The image filesystem stays read-only.
-        diagnostic_args = ([
+        # Generated source and build scripts get only bounded, disposable
+        # writable space. The image filesystem stays read-only.
+        build_cache_args = ([
+            "--tmpfs", "/opt/mozaiks/web_shell/node_modules/.vite-temp:rw,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=0750",
+        ] if purpose == "app_validation" else [])
+        contained_args = ([
             "--read-only", "--user", "10001:10001", "--memory-swap=2g",
             "--log-driver=none",
-            "--tmpfs", "/workspace:rw,nosuid,nodev,size=128m,uid=10001,gid=10001,mode=0750",
+            "--tmpfs", f"/workspace:rw,nosuid,nodev,size={'512m' if purpose == 'app_validation' else '128m'},uid=10001,gid=10001,mode=0750",
+            *build_cache_args,
             "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m,mode=1777",
             "--tmpfs", "/home/sandbox:rw,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=0750",
-        ] if diagnostic_worker else [])
+        ] if purpose in {"app_validation", "app_runtime_diagnostic"} else [])
         rc, stdout, stderr = await self._run([
             "docker", "run", "-d", "--rm",
             "--init", "--cap-drop=ALL", "--security-opt=no-new-privileges",
@@ -168,7 +171,7 @@ class DockerSandboxAdapter:
                "--tmpfs", "/opt/mozaiks/web_shell/node_modules/.vite-temp:rw,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=0700",
                "--tmpfs", "/opt/mozaiks/web_shell/node_modules/.vite:rw,nosuid,nodev,size=64m,uid=10001,gid=10001,mode=0700"]
               if sealed_candidate else []),
-            *diagnostic_args,
+            *contained_args,
             *(["--network", "none"] if offline_validation else []),
             "-w", _DEFAULT_WORKDIR,
             *label_args,

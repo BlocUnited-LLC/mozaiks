@@ -458,7 +458,7 @@ reviewing, comparing, and promoting generated output happens in Studio.
 
 ```text
 mozaiks gen [-h] [--prompt PROMPT] [--output OUTPUT]
-            [--validation-strategy {e2b,docker,local,skip}] [--allow-interactive]
+            [--validation-strategy {e2b,docker,skip}] [--allow-interactive]
             [{workflow,app}]
 ```
 

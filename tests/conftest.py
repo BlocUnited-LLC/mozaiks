@@ -94,8 +94,19 @@ def _trusted_generated_app_fixture_probe(monkeypatch, request):
 
     for globals_dict in validation_globals.values():
         smoke_module = globals_dict["app_runtime_smoke"]
+        fixture_image_id = "sha256:" + "a" * 64
+        monkeypatch.setenv("MOZAIKS_APP_RUNTIME_IMAGE_ID", fixture_image_id)
 
-        async def trusted_fixture_load(generated_files, *, _globals=globals_dict):
+        def fixture_source_digest(generated_files, *, _smoke=smoke_module):
+            try:
+                return _smoke._source_content_sha256(_smoke._generated_source_digests(generated_files))
+            except (UnicodeError, ValueError):
+                return None
+
+        async def trusted_fixture_load(
+            generated_files, *, _globals=globals_dict, _image_id=fixture_image_id,
+            _digest=fixture_source_digest,
+        ):
             from factory_app.workflows.AppGenerator.tools.app_runtime_load_probe import (
                 probe_app_root,
             )
@@ -107,15 +118,46 @@ def _trusted_generated_app_fixture_probe(monkeypatch, request):
                 # This fixture runs repository-authored source directly and has
                 # no disposable Docker worker to remove.
                 result["worker_containment_verified"] = True
+                result["validator_image_id"] = _image_id
+                result["source_content_sha256"] = _digest(generated_files)
                 return result
 
-        async def trusted_fixture_smoke(generated_files, *, _globals=globals_dict, _smoke=smoke_module):
+        async def trusted_fixture_smoke(
+            generated_files, *, _globals=globals_dict, _smoke=smoke_module,
+            _image_id=fixture_image_id, _digest=fixture_source_digest,
+        ):
             with tempfile.TemporaryDirectory(prefix="mozaiks-test-runtime-smoke-") as temporary:
                 app_root = Path(temporary) / "app"
                 _globals["_write_files_to_dir"](app_root, generated_files)
-                return await _smoke.run_app_runtime_smoke(
+                result = await _smoke.run_app_runtime_smoke(
                     app_root, mongo_uri=_smoke.resolve_smoke_mongo_uri(),
                 )
+                if result.get("status") == "passed":
+                    # Test-only synthetic observer receipt for repository-authored
+                    # fixtures. Production receipts come from the external probe.
+                    outcomes = result.get("results") or []
+                    if not any(row.get("check") == "boot.http_ready" for row in outcomes):
+                        outcomes = [*outcomes, {"check": "boot.http_ready", "status": "passed"}]
+                    result["results"] = outcomes
+                    result["checks"] = [{
+                        "id": "app_runtime_smoke", "status": "passed", "passed": True,
+                        "details": {
+                            "status": "passed",
+                            "check_count": sum(row.get("status") == "passed" for row in outcomes),
+                            "failed_check_count": 0,
+                            "not_run_check_count": sum(row.get("status") == "not_run" for row in outcomes),
+                        },
+                    }]
+                    result["failed_tests"] = []
+                    result["observer_unverified_checks"] = ["event_rejection"]
+                    result["observer_origin"] = "trusted_external_probe_v1"
+                    result["observer_run_id"] = "c" * 32
+                    result["observed_boot"] = {"check": "boot.http_ready", "status": "passed"}
+                    result["observer_completion_verified"] = True
+                    result["observer_cleanup_verified"] = True
+                    result["validator_image_id"] = _image_id
+                    result["source_content_sha256"] = _digest(generated_files)
+                return result
 
         monkeypatch.setitem(globals_dict, "_app_runtime_load_result", trusted_fixture_load)
         monkeypatch.setitem(globals_dict, "_app_runtime_smoke_result", trusted_fixture_smoke)

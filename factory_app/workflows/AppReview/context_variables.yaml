@@ -76,7 +76,7 @@ definitions:
     type: string
     description: >
       Validation strategy used by AppGenerator during this build.
-      One of: e2b, local, skip. Displayed in the review summary.
+      One of: e2b, docker, skip. Displayed in the review summary.
     source:
       type: state
       default: null

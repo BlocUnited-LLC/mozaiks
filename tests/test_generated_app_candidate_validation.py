@@ -24,7 +24,7 @@ async def test_candidate_uses_same_complete_snapshot_and_operator_strategy(gates
     acceptance, build = gates
     files = {"app.json": "{}", "brand/theme_config.json": '{"accent":"coral"}'}
     result = await validate_generated_app_candidate(
-        files=files, app_id="owned_app", validation_strategy="local", timeout_seconds=45,
+        files=files, app_id="owned_app", validation_strategy="docker", timeout_seconds=45,
     )
     assert result["validation_status"] == "passed"
     for gate in gates:
@@ -40,7 +40,7 @@ async def test_candidate_uses_same_complete_snapshot_and_operator_strategy(gates
 @pytest.mark.asyncio
 async def test_candidate_passes_selected_pack_contracts_without_parent_evidence(gates):
     acceptance, build = gates
-    selected = [{"id": "operator_readiness", "config": {"profile": "local"}}]
+    selected = [{"id": "operator_readiness", "config": {"profile": "docker"}}]
     result = await validate_generated_app_candidate(
         files={"app.json": "{}"}, app_id="owned_app", capability_packs=selected,
     )
@@ -48,7 +48,7 @@ async def test_candidate_passes_selected_pack_contracts_without_parent_evidence(
     forwarded = acceptance.await_args.kwargs["capability_packs"]
     assert forwarded == selected
     forwarded[0]["config"]["profile"] = "changed"
-    assert selected[0]["config"]["profile"] == "local"
+    assert selected[0]["config"]["profile"] == "docker"
     assert acceptance.await_args.kwargs["context_variables"] == {"app_id": "owned_app"}
     assert build.await_args.kwargs["context_variables"] == {"app_id": "owned_app"}
 

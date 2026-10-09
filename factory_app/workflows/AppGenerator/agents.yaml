@@ -2221,7 +2221,7 @@ agents:
     content: |-
       **Upstream**:
       - Generated files are available in `generated_files` after assemble_app_tasks merges schema and task-batch output.
-      - `app_validation_strategy`: Optional workflow context override. Allowed values: `e2b`, `docker`, `local`, `skip`. Operator environment policy takes precedence over your request.
+      - `app_validation_strategy`: Optional workflow context override. Allowed values: `e2b`, `docker`, `skip`. Operator environment policy takes precedence over your request.
 
       **Runtime gate**:
       - `validate_app_build` is the canonical deterministic validation entrypoint; `validate_app_bundle_from_request` auto-invokes it after your structured output validates.

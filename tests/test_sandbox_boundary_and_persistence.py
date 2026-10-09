@@ -260,14 +260,15 @@ async def test_sandbox_validation_persists_session_identity_and_metadata():
 
 
 @pytest.mark.asyncio
-async def test_validation_caller_cannot_change_sandbox_purpose():
+async def test_validation_caller_cannot_change_sandbox_purpose(monkeypatch):
     fake = _FakeAdapter()
-    with patch("mozaiksai.core.adapters.get_sandbox_adapter", return_value=fake):
-        await _run_sandbox_validation(
-            strategy="docker", resolved_files={"app.json": "{}"}, commands=[],
-            start_dev_server=False, timeout_seconds=60,
-            session_metadata={"purpose": "artifact_preview", "app_id": "app-1"},
-        )
+    monkeypatch.setattr("factory_app.workflows.AppGenerator.tools.app_runtime_smoke._preflight_generated_image", lambda: "sha256:" + "a" * 64)
+    monkeypatch.setattr("mozaiksai.core.adapters.DockerSandboxAdapter", lambda *, image: fake)
+    await _run_sandbox_validation(
+        strategy="docker", resolved_files={"app.json": "{}"}, commands=[],
+        start_dev_server=False, timeout_seconds=60,
+        session_metadata={"purpose": "artifact_preview", "app_id": "app-1"},
+    )
     assert fake.create_kwargs["metadata"] == {"purpose": "app_validation", "app_id": "app-1"}
 
 
@@ -294,11 +295,12 @@ async def test_validation_does_not_receive_preview_forwarded_environment(monkeyp
     assert "OPENAI_API_KEY" not in sandbox_resource_environment()
     assert preview_resource_environment()["OPENAI_API_KEY"] == "operator-preview-secret"
     fake = _FakeAdapter()
-    with patch("mozaiksai.core.adapters.get_sandbox_adapter", return_value=fake):
-        await _run_sandbox_validation(
-            strategy="docker", resolved_files={"app.json": "{}"}, commands=[],
-            start_dev_server=False, timeout_seconds=60,
-        )
+    monkeypatch.setattr("factory_app.workflows.AppGenerator.tools.app_runtime_smoke._preflight_generated_image", lambda: "sha256:" + "a" * 64)
+    monkeypatch.setattr("mozaiksai.core.adapters.DockerSandboxAdapter", lambda *, image: fake)
+    await _run_sandbox_validation(
+        strategy="docker", resolved_files={"app.json": "{}"}, commands=[],
+        start_dev_server=False, timeout_seconds=60,
+    )
     assert "OPENAI_API_KEY" not in fake.create_kwargs["envs"]
 
 

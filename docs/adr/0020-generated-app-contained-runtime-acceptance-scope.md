@@ -61,10 +61,11 @@ future input. Where an approved app requirement depends on event-driven effects,
 acceptance must observe those effects separately; the generic scope cannot
 stand in for them.
 
-Build execution is independently required before promotion. This ADR does not
-authorize running generated build commands or npm scripts on the host. The
-current local build-validation fallback must be isolated or made non-promotional
-in a separate change before #925 can be merged as a promotable path.
+Build execution is independently required before promotion. Generated build
+validation accepts only Docker, explicit E2B, or blocking `skip`. The Docker
+path must inspect the pinned local image ID before source staging and run
+offline as a non-root user in a read-only image with bounded writable space.
+Candidate build commands and npm scripts have no host execution path.
 
 ## Rejected Alternatives
 

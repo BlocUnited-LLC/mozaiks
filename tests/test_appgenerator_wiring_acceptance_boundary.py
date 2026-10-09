@@ -186,7 +186,7 @@ async def test_valid_explicit_bundle_counts_real_wired_endpoints():
     assert result["module_wiring"]["checks"][0]["details"]["wired_count"] == 2
     assert result["status"] == "pending"
     assert result["validation_evidence"]["failed"] == []
-    assert result["validation_evidence"]["skipped"] == ["app_runtime_smoke"]
+    assert result["validation_evidence"]["skipped"] == ["app_runtime_load_worker", "app_runtime_smoke"]
     assert files == before
 
 

@@ -588,7 +588,7 @@ async def validate_appgenerator_acceptance_handoff(
     )
 
     validation = await validate_app_bundle_from_request(
-        {"validation_strategy": "local", "start_dev_server": False}, context_variables=context,
+        {"validation_strategy": "docker", "start_dev_server": False}, context_variables=context,
     )
     acceptance = validation["app_bundle_acceptance_result"]
     export_gate = resolve_export_gate(context)
@@ -656,7 +656,7 @@ async def run_deterministic_appgenerator_repair_loop_smoke() -> dict[str, Any]:
         "code_files": [{"filename": SUPPORT_HANDLER_PATH, "content": accepted_handler}],
     }))
     repaired_validation = await validate_app_bundle_from_request(
-        {"validation_strategy": "local", "start_dev_server": False}, context_variables=context,
+        {"validation_strategy": "docker", "start_dev_server": False}, context_variables=context,
     )
     repaired_acceptance = repaired_validation["app_bundle_acceptance_result"]
     export_gate = resolve_export_gate(context)

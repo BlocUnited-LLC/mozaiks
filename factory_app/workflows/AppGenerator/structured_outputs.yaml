@@ -1983,7 +1983,6 @@ models:
     values:
     - e2b
     - docker
-    - local
     - skip
   AppValidation:
     type: model

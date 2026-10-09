@@ -1098,7 +1098,7 @@ async def validate_subscription_acceptance_handoff(
     files = {file["filename"]: file["content"] for file in assembled["code_files"]}
     wiring = await validate_wiring(context_variables=context)
     validation = await validate_app_bundle_from_request(
-        {"validation_strategy": "local", "start_dev_server": False}, context_variables=context,
+        {"validation_strategy": "docker", "start_dev_server": False}, context_variables=context,
     )
     acceptance = validation["app_bundle_acceptance_result"]
     export_gate = resolve_export_gate(context)

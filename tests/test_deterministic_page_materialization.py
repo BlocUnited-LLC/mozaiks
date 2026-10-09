@@ -822,7 +822,7 @@ async def _validate_and_load(files: dict[str, bytes], app_root: Path):
     gate = await run_app_bundle_acceptance_gate(files=text_files)
     assert gate["status"] == "pending", gate
     assert gate["validation_evidence"]["failed"] == []
-    assert gate["validation_evidence"]["skipped"] == ["app_runtime_smoke"]
+    assert gate["validation_evidence"]["skipped"] == ["app_runtime_load_worker", "app_runtime_smoke"]
     _write_bundle(app_root, text_files)
     loaded = await AppLoader.load(str(app_root))
     assert loaded.failed_module_names == []

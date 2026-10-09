@@ -74,7 +74,7 @@ def _external_boundaries(monkeypatch, tmp_path, historical_outputs):
 
 async def _download_and_assert_snapshot(context, boundaries):
     context.set("app_validation_status", "passed")
-    context.set("app_validation_strategy_used", "local")
+    context.set("app_validation_strategy_used", "docker")
     result = await generate_and_download.generate_and_download(
         {}, "Review the admitted app bundle.", context_variables=context,
     )

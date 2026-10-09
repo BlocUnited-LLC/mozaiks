@@ -36,7 +36,7 @@ def _candidate_validation(status):
         },
         "app_validation_result": {
             "validation_status": status,
-            "validation_strategy": "skip" if status == "skipped" else "local",
+            "validation_strategy": "skip" if status == "skipped" else "docker",
         },
     }
 
@@ -119,7 +119,7 @@ async def test_worker_validation_and_saved_draft_agree_with_completion_event(
     )
     harness = orchestration_control.OrchestrationControlHarness(coding_worker=worker, config_loader=_config)
 
-    result = await harness.execute_coding_request(_request(validation_strategy="local"))
+    result = await harness.execute_coding_request(_request(validation_strategy="docker"))
 
     assert result.status == coding_status
     assert result.metadata["build_record_id"] == "candidate"

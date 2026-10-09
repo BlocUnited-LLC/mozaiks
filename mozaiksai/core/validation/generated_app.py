@@ -176,8 +176,9 @@ async def validate_generated_app_candidate(
     No prior validation result, model context, or generated repair is admitted.
     Selected pack contracts must come from the caller's trusted build record.
     The caller retains responsibility for scope, lineage, review and promotion.
-    Acceptance includes the existing local runtime load/smoke; the selected
-    Docker/E2B/local strategy controls the subsequent build execution.
+    Acceptance uses the contained runtime worker and external observer. The
+    selected Docker/E2B strategy controls subsequent build execution; skip
+    leaves the candidate unverified.
     """
     from factory_app.workflows.AppGenerator.tools.app_validation import (
         _trim_validation_result,

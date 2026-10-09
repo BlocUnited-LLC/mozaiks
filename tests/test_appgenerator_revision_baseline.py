@@ -398,7 +398,7 @@ async def test_revision_acceptance_binds_source_hashes_and_tombstones(baseline, 
     context.set("generated_workflow_startup_mode", integration["startup_mode"])
     context.set("generated_workflow_trigger_events", integration["trigger_events"])
     context.set("app_validation_status", "passed")
-    context.set("app_validation_strategy_used", "local")
+    context.set("app_validation_strategy_used", "docker")
     _accept_support_tasks(context, files)
     monkeypatch.setattr(app_validation.app_runtime_smoke, "run_app_runtime_smoke", AsyncMock(return_value={
         "status": "passed", "passed": True, "failed_tests": [], "checks": [],
@@ -517,7 +517,7 @@ async def test_export_verifies_revision_binary_against_bound_source_before_provi
         "allow_export": files is None or files == baseline.files,
         "reasons": [] if files is None or files == baseline.files else ["text mismatch"],
         "app_bundle_acceptance_status": "passed", "app_validation_status": "passed",
-        "app_validation_strategy_used": "local", "integration_tests_passed": True,
+        "app_validation_strategy_used": "docker", "integration_tests_passed": True,
     })
     provider = AsyncMock(return_value=SimpleNamespace(success=False, model_dump=lambda: {"success": False}))
     monkeypatch.setattr(export_app_code.export_to_github_tool, "execute", provider)

@@ -503,7 +503,7 @@ class ACPCodingProvider:
                 for entry in changed
             ],
             owned_paths=[entry.path for entry in changed],
-            validation_strategy_hint="local",
+            validation_strategy_hint="docker",
             needs_human_review=True,
         )
 

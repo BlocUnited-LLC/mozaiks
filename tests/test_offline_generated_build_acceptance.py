@@ -597,7 +597,7 @@ async def test_offline_generated_build_acceptance_gate_loads_runtime_app(tmp_pat
     )
 
     assert validation["status"] == "failed"
-    assert validation["app_bundle_acceptance_result"]["validation_evidence"]["skipped"] == ["app_runtime_smoke"]
+    assert validation["app_bundle_acceptance_result"]["validation_evidence"]["skipped"] == ["app_runtime_load_worker", "app_runtime_smoke"]
     assert detach(context.get("app_task_batch_results")) == accepted
     assert validation["app_bundle_acceptance_result"]["status"] == "pending"
     assert validation["integration_tests_passed"] is False
@@ -700,8 +700,7 @@ class OrdersService:
 
     assert acceptance["status"] == "pending"
     assert "app_runtime_load" not in acceptance["validation_evidence"]["failed"]
-    assert "app_runtime_load_worker" in acceptance["validation_evidence"]["completed"]
-    assert acceptance["validation_evidence"]["skipped"] == ["app_runtime_smoke"]
+    assert acceptance["validation_evidence"]["skipped"] == ["app_runtime_load_worker", "app_runtime_smoke"]
     assert context.get("app_runtime_load_passed") is False
     assert context.get("app_runtime_load_result")["passed"] is False
     assert gate["allow_export"] is False
@@ -777,7 +776,7 @@ async def test_offline_saas_build_acceptance_gate_passes(monkeypatch) -> None:
     )
 
     assert validation["status"] == "failed"
-    assert validation["app_bundle_acceptance_result"]["validation_evidence"]["skipped"] == ["app_runtime_smoke"]
+    assert validation["app_bundle_acceptance_result"]["validation_evidence"]["skipped"] == ["app_runtime_load_worker", "app_runtime_smoke"]
     assert detach(context.get("app_task_batch_results")) == accepted
     assert validation["app_bundle_acceptance_result"]["status"] == "pending"
     assert validation["integration_tests_passed"] is False

@@ -708,10 +708,9 @@ async def test_ai_research_workspace_offline_golden_path(
     acceptance = validation["app_bundle_acceptance_result"]
     assert acceptance["status"] == "pending", acceptance["failed_tests"]
     assert acceptance["validation_evidence"]["failed"] == []
-    assert acceptance["validation_evidence"]["skipped"] == ["app_runtime_smoke"]
+    assert acceptance["validation_evidence"]["skipped"] == ["app_runtime_load_worker", "app_runtime_smoke"]
     assert set(acceptance["validation_evidence"]["completed"]) == {
         "agent_backend",
-        "app_runtime_load_worker",
         "bundle_scan",
         "functional_completeness",
         "module_implementation",

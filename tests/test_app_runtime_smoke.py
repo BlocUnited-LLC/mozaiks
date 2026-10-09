@@ -783,8 +783,11 @@ async def test_acceptance_reports_a_skipped_smoke_explicitly_and_consistently():
     smoke_check = next(check for check in result["checks"] if check["id"] == "app_runtime_smoke")
     assert (smoke_check["passed"], smoke_check["status"]) == (None, "skipped")
     assert result["app_runtime_smoke"]["passed"] is None
-    assert result["skipped_checks"] == [{"id": "app_runtime_smoke", "reason": "no database configured"}]
-    assert result["validation_evidence"]["skipped"] == ["app_runtime_smoke"]
+    assert result["skipped_checks"] == [
+        {"id": "app_runtime_load_worker", "reason": "contained AppLoader worker source, image, or cleanup was not verified"},
+        {"id": "app_runtime_smoke", "reason": "no database configured"},
+    ]
+    assert result["validation_evidence"]["skipped"] == ["app_runtime_load_worker", "app_runtime_smoke"]
     assert "app_runtime_smoke" not in result["validation_evidence"]["completed"]
     assert "app_runtime_smoke" not in result["validation_evidence"]["failed"]
     # What the build UI reads carries the skip too.
@@ -797,8 +800,8 @@ async def test_skipped_validation_evidence_is_canonical():
 
     evidence = normalize_validation_evidence(result["validation_evidence"])
 
-    assert evidence.skipped == ["app_runtime_smoke"]
-    assert evidence.skipped_names() == {"app_runtime_smoke"}
+    assert evidence.skipped == ["app_runtime_load_worker", "app_runtime_smoke"]
+    assert evidence.skipped_names() == {"app_runtime_load_worker", "app_runtime_smoke"}
     assert "app_runtime_smoke" not in evidence.completed_names() | evidence.failed_names()
 
 

@@ -31,6 +31,8 @@ from tests.import_utils import import_module_directly
 _workflow_manager_mod = import_module_directly("mozaiksai.core.workflow.workflow_manager")
 _structured_mod = import_module_directly("mozaiksai.core.workflow.outputs.structured")
 
+from tests._generated_acceptance_fixtures import stub_contained_generated_runtime
+
 
 def _load_appgenerator_structured_registry():
     _workflow_manager_mod.UnifiedWorkflowManager._instance = None
@@ -371,7 +373,7 @@ def test_module_contract_validator_uses_typed_contract_over_raw_file_drift() -> 
 async def test_deterministic_subscription_smoke_keeps_unavailable_runtime_checks_pending(monkeypatch) -> None:
     monkeypatch.setattr(app_runtime_smoke, "resolve_smoke_mongo_uri", lambda: None)
     build = AsyncMock(side_effect=AssertionError("Incomplete runtime acceptance must not reach the build."))
-    monkeypatch.setattr(app_validation, "_run_local_validation", build)
+    monkeypatch.setattr(app_validation, "_run_sandbox_validation", build)
     payload = await run_deterministic_appgenerator_subscription_smoke()
 
     assert payload["success"] is False
@@ -389,7 +391,7 @@ async def test_deterministic_subscription_smoke_keeps_unavailable_runtime_checks
     assert acceptance["acceptance"]["status"] == "pending"
     assert acceptance["acceptance"]["passed"] is False
     assert acceptance["acceptance"]["validation_evidence"]["failed"] == []
-    assert acceptance["acceptance"]["validation_evidence"]["skipped"] == ["app_runtime_smoke"]
+    assert acceptance["acceptance"]["validation_evidence"]["skipped"] == ["app_runtime_load_worker", "app_runtime_smoke"]
     assert "snapshot_digest" not in acceptance["acceptance"]
     assert acceptance["app_validation_result"]["validation_status"] == "pending"
     assert acceptance["context"]["integration_tests_passed"] is False
@@ -428,12 +430,9 @@ async def test_deterministic_subscription_smoke_keeps_unavailable_runtime_checks
 async def test_subscription_export_requires_completed_runtime_and_build_checks(monkeypatch):
     # Explicit execution fixtures for this unit test; the canonical validator
     # still writes acceptance, build and integration evidence into context.
-    smoke = AsyncMock(return_value={
-        "status": "passed", "passed": True, "failed_tests": [], "checks": [],
-    })
-    build = AsyncMock(return_value=app_validation._base_result(strategy="local", status="passed"))
-    monkeypatch.setattr(app_runtime_smoke, "run_app_runtime_smoke", smoke)
-    monkeypatch.setattr(app_validation, "_run_local_validation", build)
+    smoke = stub_contained_generated_runtime(monkeypatch, app_validation)
+    build = AsyncMock(return_value=app_validation._base_result(strategy="docker", status="passed"))
+    monkeypatch.setattr(app_validation, "_run_sandbox_validation", build)
 
     payload = await run_deterministic_appgenerator_subscription_smoke()
 
@@ -441,7 +440,7 @@ async def test_subscription_export_requires_completed_runtime_and_build_checks(m
     result = payload["appgenerator_acceptance"]
     assert result["acceptance"]["status"] == "passed"
     assert result["app_validation_result"]["validation_status"] == "passed"
-    assert result["context"]["app_validation_strategy_used"] == "local"
+    assert result["context"]["app_validation_strategy_used"] == "docker"
     assert result["context"]["integration_tests_passed"] is True
     assert result["export_gate"]["allow_export"] is True
     smoke.assert_awaited_once()

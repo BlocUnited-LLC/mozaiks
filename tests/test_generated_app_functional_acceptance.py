@@ -853,7 +853,7 @@ async def test_app_generator_acceptance_gate_includes_functional_completeness(mo
 
     assert result["status"] == "pending"
     assert result["validation_evidence"]["failed"] == []
-    assert result["validation_evidence"]["skipped"] == ["app_runtime_smoke"]
+    assert result["validation_evidence"]["skipped"] == ["app_runtime_load_worker", "app_runtime_smoke"]
     assert result["functional_completeness"]["passed"] is True
     assert "functional_completeness" in result["validation_evidence"]["completed"]
 

@@ -3,7 +3,7 @@ App validation tool for generated applications.
 
 This tool can:
 - resolve generated files from an explicit `files` mapping or the current admitted artifacts
-- validate the generated app with an explicit strategy: `e2b`, `docker`, `local`, or `skip`
+- validate the generated app with an explicit strategy: `e2b`, `docker`, or `skip`
 - run build/test commands
 - optionally start a preview server (e2b and docker strategies expose a URL)
 """
@@ -19,8 +19,6 @@ import os
 import posixpath
 import re
 import shlex
-import subprocess
-import sys
 import tempfile
 import zipfile
 
@@ -65,7 +63,6 @@ from mozaiksai.core.artifacts.content_store import ContentNotFoundError
 from mozaiksai.core.runtime.app.auth_contract import AppAuthContractError
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
-    local_app_validation_available,
     resolve_app_validation_strategy,
 )
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
@@ -76,12 +73,8 @@ from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
 )
 
 # Set on a validation result that failed because the validation environment
-# (sandbox provider, local toolchain) was unavailable, not because of the app.
+# (sandbox provider) was unavailable, not because of the app.
 INFRASTRUCTURE_FAILURE = "infrastructure_failure"
-
-
-def _local_validation_available() -> bool:
-    return local_app_validation_available()
 
 
 def _base_result(*, strategy: str, status: str) -> dict[str, Any]:
@@ -114,16 +107,14 @@ def _safe_relpath(raw: str) -> str | None:
 
 
 def _is_safe_build_command(command: str) -> bool:
-    """Return True when *command* looks like a safe build/test shell command.
+    """Reject shell syntax outside the bounded sandbox build commands.
 
     Blocks shell metacharacters that enable command chaining or substitution:
     ``;``, ``&&``, ``||``, ``|``, backtick, ``$(…)``, and output redirection
     (``>`` / ``<``).  Also rejects commands that contain null bytes.
 
-    This is defence-in-depth against prompt-injection attacks where a
-    compromised or confused agent emits shell payloads inside
-    ``validation_commands``.  Legitimate build commands (``npm install``,
-    ``npm run build``, ``python -m pytest``, etc.) never need these characters.
+    A package script can still execute arbitrary code; all candidate commands
+    run only inside the selected disposable sandbox.
     """
     if not command or "\x00" in command:
         return False
@@ -161,42 +152,6 @@ def _read_package_scripts_from_text(package_text: str) -> dict[str, Any]:
         pkg = {}
     scripts = pkg.get("scripts") if isinstance(pkg, dict) else {}
     return scripts if isinstance(scripts, dict) else {}
-
-
-def _read_package_scripts_from_dir(root: Path) -> dict[str, Any]:
-    package_path = root / "package.json"
-    if not package_path.exists():
-        return {}
-    try:
-        return _read_package_scripts_from_text(package_path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-
-
-async def _run_local_command(
-    *,
-    command: str,
-    cwd: Path,
-    timeout_seconds: int,
-    env: dict[str, str] | None = None,
-) -> tuple[int, str, str]:
-    process = await asyncio.create_subprocess_shell(
-        command,
-        cwd=str(cwd),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        env=env,
-    )
-    try:
-        stdout_bytes, stderr_bytes = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)
-    except TimeoutError as exc:
-        process.kill()
-        await process.communicate()
-        raise RuntimeError(f"Command timed out after {timeout_seconds}s: {command}") from exc
-
-    stdout = stdout_bytes.decode("utf-8", errors="replace") if stdout_bytes else ""
-    stderr = stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else ""
-    return int(process.returncode or 0), stdout, stderr
 
 
 def _strip_ansi(value: str) -> str:
@@ -907,12 +862,10 @@ def _canonical_workspace_files(files: dict[str, str]) -> dict[str, str]:
     return staged
 
 
-def _canonical_build_steps(root: str, shell: str, *, sandbox: bool) -> list[tuple[str, str]]:
-    join = shlex.join if sandbox or os.name != "nt" else subprocess.list2cmdline
-    python = "python" if sandbox else sys.executable
+def _canonical_build_steps(root: str, shell: str) -> list[tuple[str, str]]:
     return [
-        (join([python, "-m", "compileall", "-q", "."]), root),
-        (join(["node", f"{shell}/node_modules/vite/bin/vite.js", "build", "--outDir", f"{root}/build"]), shell),
+        (shlex.join(["python", "-m", "compileall", "-q", "."]), root),
+        (shlex.join(["node", f"{shell}/node_modules/vite/bin/vite.js", "build", "--outDir", f"{root}/build"]), shell),
     ]
 
 
@@ -944,14 +897,19 @@ async def _run_sandbox_validation(
     identity is recorded on the result so the run that produced a validation
     outcome is durable evidence rather than an ephemeral local variable.
     """
-    from mozaiksai.core.adapters import get_sandbox_adapter
+    from mozaiksai.core.adapters import DockerSandboxAdapter, get_sandbox_adapter
     from mozaiksai.core.sandbox.preview_sessions import (
         sandbox_resource_environment,
         sandbox_workspace_root,
     )
 
+    image_id: str | None = None
     try:
-        adapter = get_sandbox_adapter(strategy)
+        if strategy == "docker":
+            image_id = await asyncio.to_thread(app_runtime_smoke._preflight_generated_image)
+            adapter = DockerSandboxAdapter(image=image_id)
+        else:
+            adapter = get_sandbox_adapter(strategy)
     except Exception as exc:
         logger.error("sandbox_adapter_unavailable strategy=%s exception=%s", strategy, type(exc).__name__)
         return {
@@ -961,6 +919,8 @@ async def _run_sandbox_validation(
         }
 
     result = _base_result(strategy=strategy, status="passed")
+    if image_id is not None:
+        result["sandbox_image_id"] = image_id
     session_id: str | None = None
     try:
         canonical = "app.json" in resolved_files
@@ -969,7 +929,7 @@ async def _run_sandbox_validation(
         resource_env = sandbox_resource_environment() if canonical else {}
         build_env = _canonical_build_environment(root) if root is not None else {}
         steps = (
-            _canonical_build_steps(root, resource_env["MOZAIKS_WEB_SHELL_PATH"], sandbox=True)
+            _canonical_build_steps(root, resource_env["MOZAIKS_WEB_SHELL_PATH"])
             if root is not None else [(cmd, None) for cmd in commands]
         )
         if strategy == "e2b" and os.getenv("E2B_TIMEOUT"):
@@ -1093,99 +1053,6 @@ async def _run_sandbox_validation(
             if not result["sandbox_terminated"]:
                 result.update(success=False, validation_status="failed", **{INFRASTRUCTURE_FAILURE: True})
                 result["errors"].append("Sandbox cleanup could not be confirmed; retry cleanup using the recorded session ID.")
-
-
-async def _run_local_validation(
-    *,
-    resolved_files: dict[str, str],
-    commands: list[str],
-    start_dev_server: bool,
-    timeout_seconds: int,
-) -> dict[str, Any]:
-    if not _local_validation_available():
-        return {
-            **_base_result(strategy="local", status="failed"),
-            "errors": ["Local validation requested but npm is not available on this runtime host"],
-            INFRASTRUCTURE_FAILURE: True,
-        }
-
-    result = _base_result(strategy="local", status="passed")
-    env = os.environ.copy()
-    env.setdefault("CI", "1")
-
-    try:
-        with tempfile.TemporaryDirectory(prefix="mozaiks-app-validation-") as temp_dir:
-            root = Path(temp_dir)
-            canonical = "app.json" in resolved_files
-            _write_files_to_dir(root, _canonical_workspace_files(resolved_files) if canonical else resolved_files)
-            if canonical:
-                from mozaiksai.resources import resolve_web_shell_root
-
-                shell = resolve_web_shell_root()
-                if shell is None or not (shell / "node_modules/vite/bin/vite.js").is_file():
-                    raise ValueError("Install shared web shell dependencies before local app validation")
-                env.update(_canonical_build_environment(root.as_posix()))
-                steps = _canonical_build_steps(root.as_posix(), shell.as_posix(), sandbox=False)
-            else:
-                steps = [(cmd, str(root)) for cmd in commands]
-
-            for cmd, cwd in steps:
-                if not _is_safe_build_command(cmd):
-                    if canonical:
-                        raise ValueError("Invalid canonical build command configuration")
-                    result["warnings"].append(
-                        f"Skipped unsafe validation command (contains shell metacharacters): {cmd!r}"
-                    )
-                    continue
-                exit_code, stdout, stderr = await _run_local_command(
-                    command=cmd,
-                    cwd=Path(cwd),
-                    timeout_seconds=timeout_seconds,
-                    env=env,
-                )
-                _append_command_output(result, command=cmd, stdout=stdout, stderr=stderr)
-                if exit_code != 0:
-                    result["success"] = False
-                    result["validation_status"] = "failed"
-                    result["errors"].append(f"{cmd} failed: {stderr or stdout}")
-                    break
-                if stderr and "warning" in stderr.lower():
-                    result["warnings"].append(stderr)
-
-            result["parsed_errors"] = parse_build_errors(
-                result.get("build_output", ""),
-                app_root=(root / "app").as_posix() if canonical else None,
-                cwd=cwd if canonical else None,
-            )
-
-            if not canonical and result["validation_status"] == "passed":
-                scripts = _read_package_scripts_from_dir(root)
-                if "test" in scripts:
-                    exit_code, stdout, stderr = await _run_local_command(
-                        command="npm test -- --watchAll=false",
-                        cwd=root,
-                        timeout_seconds=timeout_seconds,
-                        env=env,
-                    )
-                    result["test_results"] = stdout
-                    if exit_code != 0:
-                        result["warnings"].append(f"Tests failed: {stderr or stdout}")
-
-            if start_dev_server and result["validation_status"] == "passed":
-                result["warnings"].append(
-                    "Local validation does not start a preview server; preview_url is null."
-                )
-
-            return result
-    except Exception as exc:
-        return {
-            **result,
-            "success": False,
-            "validation_status": "failed",
-            "errors": [f"Local validation error: {exc}"],
-            "preview_url": None,
-            INFRASTRUCTURE_FAILURE: True,
-        }
 
 
 def _trim_validation_result(result: dict[str, Any]) -> dict[str, Any]:
@@ -2314,17 +2181,6 @@ async def validate_app_build(
         result = _base_result(strategy="skip", status="skipped")
         result["strategy_reason"] = strategy_reason
         result["warnings"].append(f"App validation did not execute: {strategy_reason}.")
-        _persist_validation_context(context_variables=context_variables, result=result)
-        return result
-
-    if strategy == "local":
-        result = await _run_local_validation(
-            resolved_files=resolved_files,
-            commands=list(commands),
-            start_dev_server=bool(start_dev_server),
-            timeout_seconds=timeout_seconds,
-        )
-        result["strategy_reason"] = strategy_reason
         _persist_validation_context(context_variables=context_variables, result=result)
         return result
 

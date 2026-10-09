@@ -37,7 +37,7 @@ async def _accepted_context(*, line_ending="\n"):
         "generated_workflow_capability_id": integration["capability_id"],
         "generated_workflow_startup_mode": integration["startup_mode"],
         "generated_workflow_trigger_events": integration["trigger_events"],
-        "app_validation_status": "passed", "app_validation_strategy_used": "local",
+        "app_validation_status": "passed", "app_validation_strategy_used": "docker",
     })
     _accept_support_tasks(context, files)
     accepted = await run_app_bundle_acceptance_gate(files=files, context_variables=context)

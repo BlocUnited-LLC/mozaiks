@@ -52,7 +52,7 @@ async def test_request_readiness_requires_build_validation_pass(monkeypatch, bui
                 **{name: {"passed": True} for name in names}}
 
     async def validated(**kwargs):
-        return factory_validation._base_result(strategy="local", status=build_status)
+        return factory_validation._base_result(strategy="docker", status=build_status)
 
     monkeypatch.setattr(factory_validation, "run_app_bundle_acceptance_gate", accepted)
     monkeypatch.setattr(factory_validation, "validate_app_build", validated)
@@ -64,7 +64,7 @@ async def test_request_readiness_requires_build_validation_pass(monkeypatch, bui
 
 
 @pytest.mark.parametrize("strategy_input", [None, "omitted"])
-@pytest.mark.parametrize("available,expected", [("docker", "docker"), ("local", "local"), (None, "skip")])
+@pytest.mark.parametrize("available,expected", [("docker", "docker"), (None, "skip")])
 async def test_compiled_request_defers_to_runtime_default(monkeypatch, strategy_input, available, expected):
     from mozaiksai.core.workflow.context.adapter import create_context_container
     from mozaiksai.core.workflow.generator_support import app_validation_strategy
@@ -72,11 +72,8 @@ async def test_compiled_request_defers_to_runtime_default(monkeypatch, strategy_
 
     monkeypatch.delenv("MOZAIKS_APP_VALIDATION_STRATEGY", raising=False)
     monkeypatch.setattr(app_validation_strategy, "docker_app_validation_available", lambda: available == "docker")
-    monkeypatch.setattr(app_validation_strategy, "local_app_validation_available", lambda: available == "local")
     sandbox = AsyncMock(return_value=factory_validation._base_result(strategy="docker", status="passed"))
-    local = AsyncMock(return_value=factory_validation._base_result(strategy="local", status="passed"))
     monkeypatch.setattr(factory_validation, "_run_sandbox_validation", sandbox)
-    monkeypatch.setattr(factory_validation, "_run_local_validation", local)
     models, _ = load_workflow_structured_outputs("AppGenerator")
     raw = {"start_dev_server": False, "timeout_seconds": 120, "commands": None}
     if strategy_input != "omitted":
@@ -90,9 +87,8 @@ async def test_compiled_request_defers_to_runtime_default(monkeypatch, strategy_
     assert context.get("app_validation_strategy_used") == expected
     assert result["validation_status"] == ("skipped" if expected == "skip" else "passed")
     assert sandbox.await_count == (expected == "docker")
-    assert local.await_count == (expected == "local")
     if expected == "skip":
-        assert "no sandbox or local npm" in result["warnings"][0]
+        assert "no sandbox is available" in result["warnings"][0]
         assert "explicitly" not in result["warnings"][0]
 
 

@@ -471,7 +471,7 @@ async def _run_lineage_smoke_with_store(
     }
     context.set("generated_files", files)
     validation = await validate_app_bundle_from_request(
-        {"validation_strategy": "local", "start_dev_server": False}, context_variables=context,
+        {"validation_strategy": "docker", "start_dev_server": False}, context_variables=context,
     )
     acceptance = validation["app_bundle_acceptance_result"]
     export_gate = resolve_export_gate(context)
