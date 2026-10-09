@@ -157,7 +157,7 @@ def test_widget_ask_waits_for_persisted_general_mode_before_flushing() -> None:
     assert "wsStatus === 'connected' && generalModeReady" in widget_source
     assert "const [generalModeReady, setGeneralModeReady] = useState(false);" in widget_ws_source
     assert "setGeneralModeReady(true);" in widget_ws_source
-    assert "if (!wsRef.current || !generalModeReady) return false;" in widget_ws_source
+    assert "if (!wsRef.current || !readyRef.current || !acknowledgedIdRef.current) return false;" in widget_ws_source
 
 
 def test_dialog_and_overlay_primitives_use_mobile_sheet_layout() -> None:
@@ -339,29 +339,25 @@ def test_factory_app_react_files_are_classified() -> None:
 
 
 
-def test_widget_always_offers_workflow_access() -> None:
-    """The widget is ask-only, so its workspace button is the user's only route
-    back into a running build from a non-chat route. It must never be hidden
-    behind an active-session check, and it must reach *any* running session —
-    not only the one this browser last touched."""
+def test_widget_offers_declared_or_resumable_workflow_access() -> None:
+    """Any owned running session remains reachable, while apps without a
+    workflow session or declared entrypoint do not invent a destination."""
     widget_source = _read("chat-ui/src/components/chat/PersistentChatWidget.jsx")
 
-    # Rendered unconditionally (support mode swaps the panel, not the button).
-    assert "{!inSupportMode && (" in widget_source
-    assert "hasActiveWorkflow && !inSupportMode" not in widget_source
+    assert "{!inSupportMode && hasWorkflowAccess && (" in widget_source
 
     # Server-side session list, not just this browser's stored pointers.
     assert "/api/sessions/list/" in widget_source
     assert "const [workflowSessions, setWorkflowSessions] = useState([]);" in widget_source
 
-    # One session resumes directly, several open a picker, none starts one.
+    # One session resumes directly; several open the existing picker.
     assert "const handleWorkflowAccess = () => {" in widget_source
     assert "if (workflowSessions.length > 1) {" in widget_source
     assert "handleBackToWorkspace(workflowSessions[0]);" in widget_source
-    assert "navigate('/chat?mode=workflow');" in widget_source
+    assert "navigate('/chat?mode=workflow');" not in widget_source
 
     # An explicit pick must win over the stored per-browser chat id.
-    assert "const handleBackToWorkspace = (target = null) => {" in widget_source
+    assert "const handleBackToWorkspace = (target = resumableWorkflow) => {" in widget_source
     assert "target?.chat_id" in widget_source
 
 
@@ -432,12 +428,10 @@ def test_widget_no_sessions_routes_to_declared_fresh_start_entrypoint() -> None:
     assert "freshStartPath = null," in widget_source
     assert "navigate(freshStartPath);" in widget_source
 
-    # The guessed-workflow route stays only as a last resort for an app that
-    # declares no entrypoint at all.
+    # An app with no workflow target must not expose a guessed workflow route.
     access_block = widget_source.split("const handleWorkflowAccess")[1].split("};")[0]
-    assert access_block.index("navigate(freshStartPath);") < access_block.index(
-        "navigate('/chat?mode=workflow');"
-    )
+    assert "navigate('/chat?mode=workflow');" not in access_block
+    assert "!inSupportMode && hasWorkflowAccess" in widget_source
 
 
 def test_factory_declares_a_fresh_start_entrypoint() -> None:

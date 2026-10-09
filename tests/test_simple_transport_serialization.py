@@ -100,6 +100,7 @@ def test_stream_chunks_preserve_message_source_metadata(monkeypatch):
                     "metadata": {
                         "source": "general_agent",
                         "general_chat_id": "generalchat-app-1-user-1-0001",
+                        "general_message_id": "general_persisted_message",
                     },
                 },
             }
@@ -126,6 +127,7 @@ def test_stream_chunks_preserve_message_source_metadata(monkeypatch):
     assert all(event["data"]["metadata"] == {"source": "general_agent"} for event in chunk_events)
     assert sent[-1][0]["type"] == "chat.stream_end"
     assert sent[-1][0]["data"]["metadata"]["source"] == "general_agent"
+    assert sent[-1][0]["data"]["metadata"]["general_message_id"] == "general_persisted_message"
 
 
 class RecursiveString:
