@@ -21,6 +21,7 @@ const buildAutoItems = ({ headerPages, header, notifications, profile, actionCon
           id: item.id || item.path,
           label: item.label || item.id || "Page",
           icon: item.icon,
+          iconLabel: item.iconLabel,
           action: "navigate",
           path: item.path,
         });
@@ -37,6 +38,7 @@ const buildAutoItems = ({ headerPages, header, notifications, profile, actionCon
       id: primaryAction.id || primaryAction.path || primaryAction.href,
       label: primaryAction.label || "Action",
       icon: primaryAction.icon,
+      iconLabel: primaryAction.iconLabel,
       action: "navigate",
       path: primaryAction.path,
       href: primaryAction.href,
@@ -48,6 +50,7 @@ const buildAutoItems = ({ headerPages, header, notifications, profile, actionCon
     items.push({
       id: "notifications",
       label: "Alerts",
+      icon: notifications.icon,
       action: "navigate",
       path: notifications.path,
     });
@@ -65,6 +68,8 @@ const buildAutoItems = ({ headerPages, header, notifications, profile, actionCon
     items.push({
       id: profileItem.id || "profile",
       label: profileItem.label || "Account",
+      icon: profileItem.icon || profile.icon,
+      iconLabel: profileItem.iconLabel,
       action: "navigate",
       path: profileItem.path,
     });
@@ -166,7 +171,7 @@ const MobileBottomBar = ({ route = null, shellMode = null }) => {
           >
             <span className="shell-mobile-bottom-glyph" aria-hidden="true">
               <ShellNavigationIcon
-                icon={item.icon}
+                icon={item.icon || item.id}
                 fallback={(item.iconLabel || item.label || item.id || "?").slice(0, 1).toUpperCase()}
               />
               {showBadge && <span className="shell-mobile-bottom-badge">{notificationCount > 9 ? "9+" : notificationCount}</span>}
