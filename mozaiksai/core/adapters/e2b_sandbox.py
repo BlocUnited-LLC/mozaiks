@@ -136,7 +136,11 @@ class E2BSandboxAdapter:
     ) -> SandboxSessionInfo:
         sandbox_cls = self._require_sdk()
         timeout = timeout_seconds if timeout_seconds is not None else self._default_timeout_seconds
-        sealed = (metadata or {}).get("purpose") == _SEALED_PURPOSE
+        request_metadata = dict(metadata or {})
+        purpose = request_metadata.setdefault("purpose", "artifact_preview")
+        if purpose not in _ORDINARY_PURPOSES and purpose != _SEALED_PURPOSE:
+            raise ValueError("Unsupported E2B sandbox purpose")
+        sealed = purpose == _SEALED_PURPOSE
         if sealed:
             if not template or not _PINNED_BUILD_REF.fullmatch(template):
                 raise ValueError("Sealed E2B preview requires an exact template build reference")
@@ -154,7 +158,7 @@ class E2BSandboxAdapter:
             sandbox_cls.create,
             template=template or self._default_template,
             timeout=timeout,
-            metadata=metadata,
+            metadata=request_metadata,
             envs=envs,
             **isolation,
         ))

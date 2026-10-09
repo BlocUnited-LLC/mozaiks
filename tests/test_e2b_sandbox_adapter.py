@@ -105,9 +105,10 @@ async def test_e2b_adapter_uses_real_sdk_shape(monkeypatch) -> None:
 
     adapter = E2BSandboxAdapter(default_template="mozaiks-runtime-v1", default_timeout_seconds=120)
 
-    session = await adapter.create_session(metadata={"purpose": "artifact_preview", "app_id": "app-1"}, envs={"A": "1"})
+    session = await adapter.create_session(metadata={"app_id": "app-1"}, envs={"A": "1"})
     assert session.session_id == "sbx_123"
     assert session.provider == "e2b"
+    assert created.metadata == {"purpose": "artifact_preview", "app_id": "app-1"}
 
     write_result = await adapter.write_files(
         session_id="sbx_123",
@@ -153,10 +154,19 @@ async def test_e2b_adapter_uses_real_sdk_shape(monkeypatch) -> None:
 async def test_ordinary_io_does_not_renew_the_provider_timeout(monkeypatch):
     from unittest.mock import Mock
     factory = Mock()
-    factory.create.return_value = _FakeSandbox()
+    sandbox = _FakeSandbox()
+
+    def create(**kwargs):
+        sandbox.details.metadata = kwargs["metadata"]
+        return sandbox
+
+    factory.create.side_effect = create
     monkeypatch.setattr(_sandbox_mod, "Sandbox", factory)
     adapter = E2BSandboxAdapter(default_timeout_seconds=60)
     session = await adapter.create_session()
+    assert factory.create.call_args.kwargs["metadata"] == {"purpose": "artifact_preview"}
+    assert await adapter.get_preview_url(session_id=session.session_id, port=3000) == "https://preview-3000.example"
+    assert (await adapter.write_files(session_id=session.session_id, files={"hello.txt": "hello"}))["count"] == 1
     for _ in range(3):
         await adapter.run_command(session_id=session.session_id, command="true")
         await adapter.get_preview_url(session_id=session.session_id, port=3000)
@@ -227,6 +237,8 @@ async def test_sealed_e2b_session_requires_exact_build_and_no_environment(monkey
         await adapter.create_session(
             template=_EXACT_BUILD, metadata={"purpose": "sealed_candidate_preview"}, envs={"TOKEN": "secret"},
         )
+    with pytest.raises(ValueError, match="purpose"):
+        await adapter.create_session(metadata={"purpose": "unknown"})
     factory.create.assert_not_called()
 
 
