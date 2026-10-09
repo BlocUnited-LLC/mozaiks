@@ -539,6 +539,15 @@ If the app declares `assignment_store.workspace_id_field`, the active plan is
 resolved with app/user/tenant/workspace scope before allowances are
 materialized.
 
+For a depleted auto-debit wallet, the guard uses the active plan in the one
+product that declares monthly allowances for that wallet. If no plan in that
+product grants more monthly tokens than the current plan, and no active token
+top-up is declared, the denial advises `contact_admin` without an upgrade
+route. When multiple products grant the same wallet, allowances use different
+cadences, or the active plan is absent from the catalog, the guard leaves the
+app's declared recovery action unchanged. This recovery hint does not grant
+tokens or authorize a purchase.
+
 Generated apps should treat this file as declarative infrastructure. They may
 display balances through `/api/me/usage` and `/api/me/tokens`, and may declare
 future metering intent for expensive module/workflow actions, but they must not

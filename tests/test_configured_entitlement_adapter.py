@@ -431,3 +431,72 @@ async def test_current_plan_id_falls_back_to_default_for_inactive_assignment() -
     plan_id = await adapter.current_plan_id(app_id="app-1")
 
     assert plan_id == "free"
+
+
+@pytest.mark.asyncio
+async def test_current_plan_id_can_resolve_a_nonprimary_v2_product() -> None:
+    config = SubscriptionsConfig.model_validate({
+        "schema_version": "mozaiks.subscriptions.v2",
+        "label": "Multi-product SaaS",
+        "default_product_id": "platform",
+        "products": [
+            {
+                "product_id": "platform",
+                "label": "Platform",
+                "default_plan_id": "starter",
+                "assignment_store": {
+                    "data_alias": "billing.platform",
+                    "user_id_field": "user_id",
+                    "workspace_id_field": "workspace_id",
+                    "active_statuses": ["active"],
+                },
+                "plans": [
+                    {"plan_id": "starter", "label": "Starter"},
+                    {"plan_id": "builder", "label": "Builder"},
+                ],
+            },
+            {
+                "product_id": "ai",
+                "label": "AI",
+                "default_plan_id": "ai_starter",
+                "assignment_store": {
+                    "data_alias": "billing.ai",
+                    "user_id_field": "user_id",
+                    "workspace_id_field": "workspace_id",
+                    "active_statuses": ["active"],
+                },
+                "plans": [
+                    {"plan_id": "ai_starter", "label": "Starter"},
+                    {"plan_id": "ai_enterprise", "label": "Enterprise"},
+                ],
+            },
+        ],
+    })
+    platform = FakeCollection([{
+        "app_id": "app-1", "user_id": "user-1", "tenant_id": None,
+        "workspace_id": None, "plan_id": "builder", "status": "active",
+    }])
+    ai = FakeCollection([{
+        "app_id": "app-1", "user_id": "user-1", "tenant_id": None,
+        "workspace_id": None, "plan_id": "ai_enterprise", "status": "active",
+    }])
+    collections = {"billing.platform": platform, "billing.ai": ai}
+    adapter = ConfiguredEntitlementAdapter(
+        config=config, collection_resolver=collections.__getitem__,
+    )
+
+    assert await adapter.current_plan_id(app_id="app-1", user_id="user-1") == "builder"
+    assert await adapter.current_plan_id(
+        app_id="app-1", user_id="user-1", product_id="ai",
+    ) == "ai_enterprise"
+    assert await adapter.current_plan_id(
+        app_id="app-1", user_id="user-1", product_id="unknown",
+    ) is None
+    assert platform.queries == [{
+        "app_id": "app-1", "tenant_id": None, "workspace_id": None,
+        "user_id": "user-1",
+    }]
+    assert ai.queries == [{
+        "app_id": "app-1", "tenant_id": None, "workspace_id": None,
+        "user_id": "user-1",
+    }]
