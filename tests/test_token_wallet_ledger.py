@@ -508,6 +508,9 @@ async def test_v2_default_plan_allowance_sync_is_idempotent_and_has_product_prov
         app_id="app_1", wallet_id="ai_tokens", user_id="user_1"
     )
     assert entries[0]["metadata"]["product_id"] == "ai"
+    assert entries[0]["idempotency_key"].startswith(
+        "subscription_allowance:ai_starter:ai_tokens:monthly:"
+    )  # Existing single-owner key stays stable across the upgrade.
 
 
 @pytest.mark.asyncio
@@ -535,6 +538,58 @@ async def test_v2_active_assignment_without_snapshot_does_not_imply_catalog_gran
     assert wallet["grant_authority"] == "billing_fulfillment"
     assert wallet["plan_allowances"] == []
     assert wallet["balance"]["balance"] == 0
+
+
+@pytest.mark.asyncio
+async def test_v2_shared_wallet_paid_grants_require_product_identity_and_do_not_collide() -> None:
+    config = SubscriptionsConfig.model_validate({
+        "schema_version": "mozaiks.subscriptions.v2",
+        "label": "Shared paid wallet",
+        "default_product_id": "a",
+        "token_wallets": [{"wallet_id": "shared", "scope": "user"}],
+        "products": [
+            {
+                "product_id": product_id,
+                "label": product_id,
+                "default_plan_id": "free",
+                "plans": [
+                    {"plan_id": "free", "label": "Free"},
+                    {"plan_id": "pro", "label": "Pro", "token_allowances": [
+                        {"wallet_id": "shared", "amount": 100, "cadence": "monthly"}
+                    ]},
+                ],
+            }
+            for product_id in ("a", "b")
+        ],
+    })
+    ledger = _ledger()
+
+    with pytest.raises(ValueError, match="product_id is required"):
+        await ledger.ensure_plan_allowances(
+            config=config, app_id="app_1", plan_id="pro",
+            token_allowances=[{"wallet_id": "shared", "amount": 100}],
+            user_id="user_1",
+        )
+
+    for product_id in ("a", "b", "a", "b"):
+        await ledger.ensure_plan_allowances(
+            config=config, app_id="app_1", product_id=product_id,
+            plan_id="pro", token_allowances=[
+                {"wallet_id": "shared", "amount": 100, "cadence": "monthly"}
+            ], user_id="user_1",
+        )
+    balance = await ledger.query_balance(
+        app_id="app_1", wallet_id="shared", user_id="user_1"
+    )
+    assert balance["balance"] == 200
+    assert balance["entry_count"] == 2
+    entries = await ledger.list_entries(
+        app_id="app_1", wallet_id="shared", user_id="user_1"
+    )
+    assert {entry["metadata"]["product_id"] for entry in entries} == {"a", "b"}
+    assert {
+        entry["idempotency_key"].split(":")[1] for entry in entries
+    } == {"a", "b"}
 
 
 @pytest.mark.asyncio

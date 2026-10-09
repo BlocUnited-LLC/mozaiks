@@ -1088,6 +1088,21 @@ class SubscriptionsConfig(BaseModel):
                     raise ValueError(
                         f"token_wallet {wallet.wallet_id!r} has conflicting root/product definitions"
                     )
+            debit_wallets_by_meter: dict[str, str] = {}
+            for wallet in wallet_definitions.values():
+                if not wallet.auto_debit_usage:
+                    continue
+                if not wallet.usage_meter_id:
+                    raise ValueError(
+                        f"auto-debit token_wallet {wallet.wallet_id!r} requires usage_meter_id"
+                    )
+                existing_wallet_id = debit_wallets_by_meter.setdefault(
+                    wallet.usage_meter_id, wallet.wallet_id
+                )
+                if existing_wallet_id != wallet.wallet_id:
+                    raise ValueError(
+                        f"usage meter {wallet.usage_meter_id!r} has multiple auto-debit token wallets"
+                    )
             if self.pricing_catalog:
                 all_plan_ids: set[str] = set()
                 for product_def in self.products:

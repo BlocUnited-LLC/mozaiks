@@ -1043,6 +1043,27 @@ class TokenWalletLedger:
         for allowance in allowances:
             if allowance.amount <= 0 or allowance.cadence == "manual":
                 continue
+            allowance_product_id = product_id
+            shared_wallet = False
+            if config.products:
+                declared_products = {product.product_id for product in config.products}
+                if allowance_product_id and allowance_product_id not in declared_products:
+                    raise ValueError("token allowance product_id is not declared")
+                owners = {
+                    product.product_id
+                    for product in config.products
+                    if any(wallet.wallet_id == allowance.wallet_id for wallet in product.token_wallets)
+                    or any(
+                        item.wallet_id == allowance.wallet_id
+                        for plan in product.plans
+                        for item in plan.token_allowances
+                    )
+                }
+                if owners and allowance_product_id and allowance_product_id not in owners:
+                    raise ValueError("token allowance wallet belongs to a different product")
+                shared_wallet = len(owners) > 1
+                if shared_wallet and not allowance_product_id:
+                    raise ValueError("product_id is required for a shared token wallet allowance")
             wallet = config.token_wallet_by_id(allowance.wallet_id)
             preferred_scope = wallet.scope if wallet is not None else None
             if preferred_scope == "tenant" and not tenant_id:
@@ -1061,7 +1082,9 @@ class TokenWalletLedger:
                     amount=allowance.amount,
                     operation="allocation",
                     idempotency_key=(
-                        f"subscription_allowance:{resolved_plan_id}:{allowance.wallet_id}:"
+                        "subscription_allowance:"
+                        + (f"{allowance_product_id}:" if shared_wallet else "")
+                        + f"{resolved_plan_id}:{allowance.wallet_id}:"
                         f"{allowance.cadence}:{period_key}"
                     ),
                     user_id=user_id,

@@ -154,6 +154,53 @@ async def test_v2_usage_ingest_uses_wallet_product_not_primary(
 
 
 @pytest.mark.asyncio
+async def test_v2_chat_usage_debits_only_its_meter_wallet(tmp_path: Path) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    config_dir.joinpath("subscriptions.yaml").write_text(
+        textwrap.dedent("""
+            schema_version: mozaiks.subscriptions.v2
+            label: Metered products
+            default_product_id: ai
+            products:
+              - product_id: ai
+                label: AI
+                default_plan_id: free
+                token_wallets:
+                  - wallet_id: ai_tokens
+                    usage_meter_id: ai_tokens
+                    auto_debit_usage: true
+                plans:
+                  - plan_id: free
+                    label: Free
+              - product_id: tools
+                label: Tools
+                default_plan_id: free
+                token_wallets:
+                  - wallet_id: tool_credits
+                    usage_meter_id: tool_calls
+                    auto_debit_usage: true
+                plans:
+                  - plan_id: free
+                    label: Free
+        """),
+        encoding="utf-8",
+    )
+    debited: list[str] = []
+
+    class _Ledger:
+        async def record_usage_debit(self, payload, *, wallet):
+            debited.append(wallet.wallet_id)
+
+    client = TokenWalletUsageIngestClient(ledger=_Ledger(), app_root=tmp_path)
+    await client.handle_usage_delta({
+        "event_id": "usage_evt_1", "app_id": "app_1", "user_id": "user_1",
+        "total_tokens": 25,
+    })
+    assert debited == ["ai_tokens"]
+
+
+@pytest.mark.asyncio
 async def test_usage_ingest_is_noop_when_auto_debit_disabled(tmp_path: Path) -> None:
     _write_subscriptions(tmp_path, auto_debit_usage=False)
     calls: list[str] = []
