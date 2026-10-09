@@ -235,8 +235,16 @@ def test_candidate_auth_cannot_approve_its_own_permission(typed):
         payload = {"code_files": [{"filename": path, "content": content}
                                   for path, content in extract_code_file_map_from_payload(payload).items()]}
     payload.setdefault("code_files", []).append({"filename": AUTH_PATH, "content": _auth("tasks.veiw")[AUTH_PATH]})
-    with pytest.raises(ValueError, match="tasks.veiw"):
+    with pytest.raises(ValueError, match="Generated task output cannot author config/auth.yaml"):
         close_module_actions(payload, app_build_plan=_plan(), companion_files=_auth("tasks.view"))
+
+
+@pytest.mark.parametrize("plan", [None, _plan()])
+@pytest.mark.parametrize("path", [AUTH_PATH, "config\\auth.yaml", "./config/auth.yaml"])
+def test_auth_only_task_candidate_is_rejected_before_it_can_be_admitted(plan, path):
+    candidate = {"code_files": [{"filename": path, "content": _auth("tasks.veiw")[AUTH_PATH]}]}
+    with pytest.raises(ValueError, match="Generated task output cannot author config/auth.yaml"):
+        close_module_actions(candidate, app_build_plan=plan)
 
 
 @pytest.mark.asyncio
@@ -372,6 +380,36 @@ def test_final_bundle_cannot_reintroduce_unresolved_custom_permission(boundary):
             _merge_code_files([{"code_files": [{"filename": path, "content": content}
                                                for path, content in files.items()]}], app_build_plan=_plan())
     assert files == before
+
+
+@pytest.mark.parametrize("admitted", [None, _auth("tasks.view")])
+def test_assembly_cannot_use_candidate_auth_edit_to_approve_its_action(admitted):
+    files = {**_auth("tasks.veiw"), **extract_code_file_map_from_payload(_payload("tasks.veiw"))}
+    outputs = [{"code_files": [{"filename": path, "content": content} for path, content in files.items()]}]
+    context = {"generated_files": admitted} if admitted is not None else None
+    with pytest.raises(ValueError, match="tasks.veiw"):
+        _merge_code_files(outputs, app_build_plan=_plan(), context_variables=context)
+
+
+def test_assembly_preserves_action_permission_from_admitted_auth():
+    approved = _auth("tasks.view")
+    files = {**approved, **extract_code_file_map_from_payload(_payload("tasks.view"))}
+    assembled = _merge_code_files([{"code_files": [
+        {"filename": path, "content": content} for path, content in files.items()
+    ]}], app_build_plan=_plan(), context_variables={"generated_files": approved})
+    manifest = yaml.safe_load(next(item["content"] for item in assembled if item["filename"] == MANIFEST))
+    assert next(action for action in manifest["actions"] if action["id"] == ACTION)["permissions"] == ["tasks.view"]
+
+
+def test_selected_pack_template_manifest_keeps_its_permission_owner():
+    files = extract_code_file_map_from_payload(_payload("pack.tasks.read"))
+    with pytest.raises(ValueError, match="pack.tasks.read"):
+        materialize_module_actions(files, app_build_plan=_plan())
+    files.update(materialize_module_actions(
+        files, app_build_plan=_plan(), pack_owned_manifest_paths=frozenset({MANIFEST}),
+    ))
+    manifest = yaml.safe_load(files[MANIFEST])
+    assert next(action for action in manifest["actions"] if action["id"] == ACTION)["permissions"] == ["pack.tasks.read"]
 
 
 @pytest.mark.asyncio

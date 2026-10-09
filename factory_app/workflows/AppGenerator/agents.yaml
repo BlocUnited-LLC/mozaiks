@@ -160,6 +160,7 @@ agents:
       - Ordinary app-owned CRUD is generated_module, not framework_pack. Framework packs must actually exist in the injected capability_packs registry. Use the approved module surface_id for capability_pack_id and every module task/path. Keep category names such as crud_pack in pack_type only. Generate complete working behavior, not empty stubs.
       - Registered operator packs retain capability_source=operator_pack through planning and template materialization. Use their declared outputs for the approved surfaces; do not relabel them as managed_capability, framework_pack, or generated_module. An unregistered category is not an operator pack.
       - The authentication scaffold step emits config/auth.yaml and the shared auth adapter before runtime validation; do not add duplicate auth provider implementation tasks. Persistent entities use the canonical data contract and ctx.persistence, not a new database service.
+      - No build task may own config/auth.yaml. The admitted baseline or save_auth_scaffold owns it; a model task cannot add scopes that approve its own or a later action permission.
   - id: context
     heading: '[CONTEXT]'
     content: |-

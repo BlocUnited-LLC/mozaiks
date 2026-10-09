@@ -19,6 +19,7 @@ from typing import Any
 import yaml
 
 from mozaiksai.core.runtime.app.module_loader import CANONICAL_EVENT_PREFIXES
+from mozaiksai.core.runtime.app.paths import APP_AUTH_CONFIG_PATH
 from mozaiksai.core.semantics.closed_contract_schema import import_closed_contract_schema
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import (
@@ -685,7 +686,7 @@ def close_module_events(
 def close_module_actions(
     payload: Any, *, app_build_plan: Any, data_contract: Any = None, design_surface_map: Any = None,
     subscription_contract: Any = None, declared_auth_scopes: frozenset[str] | None = None,
-    companion_files: Mapping[str, str] | None = None,
+    companion_files: Mapping[str, str] | None = None, validate_generated_permissions: bool = True,
 ) -> Any:
     """Return detached output with every canonical write and read declared.
 
@@ -697,6 +698,13 @@ def close_module_actions(
     restrictions must resolve after canonical CRUD normalization.
     """
     output = _unwrap_output_envelope(detach(payload))
+    if isinstance(output, dict) and APP_AUTH_CONFIG_PATH in extract_code_file_map_from_payload(
+        {"code_files": output.get("code_files")},
+    ):
+        raise ValueError(
+            f"Generated task output cannot author {APP_AUTH_CONFIG_PATH}; "
+            "the admitted app baseline or save_auth_scaffold owns auth."
+        )
     plan = detach(app_build_plan)
     if not isinstance(output, dict) or not isinstance(plan, dict):
         return output
@@ -756,7 +764,8 @@ def close_module_actions(
     closed = output["module_contract"]
     _require_declared_design_actions(module_id, closed["module_yaml"], design_surface_map)
     _close_user_data_scope(module_id, closed["module_yaml"], plan, contract)
-    _validate_generated_action_permissions(module_id, closed["module_yaml"], plan, granted)
+    if validate_generated_permissions:
+        _validate_generated_action_permissions(module_id, closed["module_yaml"], plan, granted)
     events = close_module_events(
         module_id, closed["module_yaml"], closed.get("events_yaml"),
         {key: closed[key] for key in _COMPANION_PATHS if isinstance(closed.get(key), dict)},
@@ -797,6 +806,7 @@ def materialize_module_actions(
     files_map: Mapping[str, str], *, app_build_plan: Any, data_contract: Any = None,
     design_surface_map: Any = None, subscription_contract: Any = None,
     declared_auth_scopes: frozenset[str] | None = None,
+    pack_owned_manifest_paths: frozenset[str] = frozenset(),
 ) -> dict[str, str]:
     """Render closed module manifests and their event companions for an admitted app bundle."""
     changed: dict[str, str] = {}
@@ -831,6 +841,7 @@ def materialize_module_actions(
             {"module_contract": bundle}, app_build_plan=app_build_plan, data_contract=data_contract,
             design_surface_map=design_surface_map, subscription_contract=subscription_contract,
             declared_auth_scopes=granted, companion_files=files_map,
+            validate_generated_permissions=path not in pack_owned_manifest_paths,
         )["module_contract"]
         expanded = closed["module_yaml"]
         for action in expanded.get("actions") or []:

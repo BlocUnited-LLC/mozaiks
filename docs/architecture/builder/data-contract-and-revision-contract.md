@@ -356,6 +356,8 @@ admission, repair persistence, and final materialization with the module path,
 action, unknown permissions, and declared choices. The closure never strips
 custom restrictions: repair must preserve the approved access intent, exposure, and
 subscription gate, or revise the authorization contract before retrying.
+Build tasks cannot own `config/auth.yaml`; auth-only task output is rejected at
+admission, and assembly resolves scopes from the pre-merge admitted bundle.
 Requested scopes do not prove that an identity provider issues them; runtime
 dispatch still denies a caller lacking any required permission. This Factory
 policy covers generated modules; selected pack templates and host-owned
