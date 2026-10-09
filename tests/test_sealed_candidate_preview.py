@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from unittest.mock import patch
 
@@ -47,7 +48,7 @@ async def test_sealed_cleanup_after_restart_uses_stored_docker_provider(monkeypa
     first = ArtifactPreviewSessionManager(store=store, startup_timeout_seconds=0)
     data = _archive(**{"app/app.json": APP_JSON})
     state = await first.create_sealed_candidate(
-        **IDENTITY, archive_bytes=data, archive_sha256=archive_digest(data), image_id=IMAGE_ID,
+        **IDENTITY, archive_bytes=data, archive_sha256=archive_digest(data), sealed_runtime_ref=IMAGE_ID,
     )
 
     # The new selection is unconfigured; the old Docker session still needs
@@ -62,7 +63,7 @@ async def test_sealed_cleanup_after_restart_uses_stored_docker_provider(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_sealed_boot_binds_digest_image_and_owner_without_url_or_sync(monkeypatch):
+async def test_sealed_boot_binds_digest_runtime_ref_and_owner_without_url_or_sync(monkeypatch):
     monkeypatch.setenv("MOZAIKS_PREVIEW_ENV_OPENAI_API_KEY", "must-not-forward")
     adapter = _SealedAdapter()
     manager = _manager(adapter)
@@ -74,12 +75,12 @@ async def test_sealed_boot_binds_digest_image_and_owner_without_url_or_sync(monk
         "requirements.txt": b"mozaiksai==0.2.0\n",
     })
     state = await manager.create_sealed_candidate(
-        **IDENTITY, archive_bytes=data, archive_sha256=archive_digest(data), image_id=IMAGE_ID,
+        **IDENTITY, archive_bytes=data, archive_sha256=archive_digest(data), sealed_runtime_ref=IMAGE_ID,
     )
     assert state.status == "running"
     assert state.preview_url is None
     assert state.sealed_archive_sha256 == archive_digest(data)
-    assert state.sealed_image_id == IMAGE_ID
+    assert state.sealed_runtime_ref == IMAGE_ID
     assert state.manifest is None and state.paths == []
     stored = await manager._store.get(state.sandbox_id)
     assert stored["manifest"] is None and stored["paths"] == []
@@ -102,10 +103,29 @@ async def test_sealed_boot_binds_digest_image_and_owner_without_url_or_sync(monk
         await manager.start(state.sandbox_id)
     with pytest.raises(ValueError, match="identity changed"):
         await manager.create_sealed_candidate(
-            **IDENTITY, archive_bytes=data, archive_sha256=archive_digest(data), image_id="sha256:" + "b" * 64,
+            **IDENTITY, archive_bytes=data, archive_sha256=archive_digest(data), sealed_runtime_ref="sha256:" + "b" * 64,
         )
     await manager.stop(state.sandbox_id)
     assert [name for name, _ in adapter.calls].count("terminate_session") == 1
+
+
+@pytest.mark.asyncio
+async def test_sealed_stage_timeout_kills_session_and_releases_reservation():
+    class SlowStager(_SealedAdapter):
+        async def stage_sealed_files(self, **kwargs):
+            self.calls.append(("stage_sealed_files", kwargs))
+            await asyncio.sleep(1)
+
+    adapter = SlowStager()
+    manager = _manager(adapter)
+    manager._sealed_stage_timeout_seconds = 0.001
+    data = _archive(**{"app/app.json": APP_JSON})
+    with pytest.raises(TimeoutError):
+        await manager.create_sealed_candidate(
+            **IDENTITY, archive_bytes=data, archive_sha256=archive_digest(data), sealed_runtime_ref=IMAGE_ID,
+        )
+    assert [name for name, _ in adapter.calls].count("terminate_session") == 1
+    assert await manager._store.list() == []
 
 
 @pytest.mark.asyncio
@@ -121,7 +141,7 @@ async def test_sealed_archive_rejects_wrong_app_and_unknown_paths_before_provide
     manager._provider_resolver = lambda: pytest.fail("Invalid archive contacted provider")
     with pytest.raises(ValueError):
         await manager.create_sealed_candidate(
-            **IDENTITY, archive_bytes=data, archive_sha256=archive_digest(data), image_id=IMAGE_ID,
+            **IDENTITY, archive_bytes=data, archive_sha256=archive_digest(data), sealed_runtime_ref=IMAGE_ID,
         )
 
 
@@ -136,7 +156,7 @@ async def test_sealed_archive_rejects_malformed_oversize_or_wrong_digest_before_
     manager._provider_resolver = lambda: pytest.fail("Invalid archive contacted provider")
     with pytest.raises(ValueError):
         await manager.create_sealed_candidate(
-            **IDENTITY, archive_bytes=data, archive_sha256=digest, image_id=IMAGE_ID,
+            **IDENTITY, archive_bytes=data, archive_sha256=digest, sealed_runtime_ref=IMAGE_ID,
         )
 
 
@@ -159,7 +179,7 @@ async def test_sealed_zip_budget_rejects_before_canonical_parser_or_provider(mon
     manager._provider_resolver = lambda: pytest.fail("Oversize archive contacted provider")
     with pytest.raises(ValueError, match="file limits"):
         await manager.create_sealed_candidate(
-            **IDENTITY, archive_bytes=data, archive_sha256=archive_digest(data), image_id=IMAGE_ID,
+            **IDENTITY, archive_bytes=data, archive_sha256=archive_digest(data), sealed_runtime_ref=IMAGE_ID,
         )
 
 
@@ -235,13 +255,13 @@ async def test_sealed_stage_rejects_unlabelled_container_before_root_exec():
 @pytest.mark.asyncio
 @pytest.mark.skipif(os.getenv("MOZAIKS_RUN_SEALED_DOCKER_SMOKE") != "1", reason="opt-in real Docker smoke")
 async def test_real_docker_sealed_public_app_boots_and_tears_down():
-    image_id = os.environ["MOZAIKS_SEALED_PREVIEW_IMAGE_ID"]
+    runtime_ref = os.environ["MOZAIKS_SEALED_PREVIEW_IMAGE_ID"]
     adapter = DockerSandboxAdapter()
     manager = _manager(adapter)
     manager._startup_timeout_seconds = 120
     data = _archive(**{"app/app.json": APP_JSON})
     state = await manager.create_sealed_candidate(
-        **IDENTITY, archive_bytes=data, archive_sha256=archive_digest(data), image_id=image_id,
+        **IDENTITY, archive_bytes=data, archive_sha256=archive_digest(data), sealed_runtime_ref=runtime_ref,
     )
     try:
         assert state.status == "running" and state.preview_url is None

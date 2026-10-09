@@ -731,7 +731,7 @@ async def test_generic_router_hides_sealed_sessions_even_from_same_owner(api_cli
     state = await manager.create_sealed_candidate(
         "candidate-a", app_id="factory", user_id="tester", target_app_id="preview-app",
         build_registry_id="appreg-a", archive_bytes=archive,
-        archive_sha256=archive_digest(archive), image_id="sha256:" + "a" * 64,
+        archive_sha256=archive_digest(archive), sealed_runtime_ref="sha256:" + "a" * 64,
     )
     assert client.get(RECOVER_URL).json() == {"sessions": []}
     assert client.get(f"/api/sandbox/{state.sandbox_id}/status").status_code == 404

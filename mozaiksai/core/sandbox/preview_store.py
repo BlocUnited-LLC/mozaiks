@@ -22,7 +22,14 @@ from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE, Platform
 
 _LEDGER_ID = "artifact-previews"
 _IDENTITY_FIELDS = ("app_id", "user_id", "artifact_id", "target_app_id", "build_registry_id", "provider")
-_SEALED_IDENTITY_FIELDS = ("sealed_archive_sha256", "sealed_image_id")
+_SEALED_IDENTITY_FIELDS = ("sealed_archive_sha256", "sealed_runtime_ref")
+_SEALED_RUNTIME_REFS = {
+    "docker": re.compile(r"sha256:[0-9a-f]{64}"),
+    "e2b": re.compile(
+        r"(?:[A-Za-z0-9][A-Za-z0-9._-]*/)?[A-Za-z0-9][A-Za-z0-9._-]*:"
+        r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+    ),
+}
 _STATE_FIELDS = {
     "session_id", "status", "preview_url", "last_error", "last_access_at",
     "manifest", "paths", "has_requirements", "health_checked_at",
@@ -45,6 +52,11 @@ class PreviewOperationBusy(RuntimeError):
 
 class PreviewRecoveryRequired(RuntimeError):
     """An interrupted mutation requires termination before another mutation."""
+
+
+def is_sealed_runtime_ref(provider: str, runtime_ref: str) -> bool:
+    pattern = _SEALED_RUNTIME_REFS.get(provider)
+    return isinstance(runtime_ref, str) and pattern is not None and pattern.fullmatch(runtime_ref) is not None
 
 
 def _utc(value: datetime) -> datetime:
@@ -126,11 +138,11 @@ class MongoPreviewStore:
         ):
             raise ValueError("Preview requires its complete immutable identity")
         if fields & set(_SEALED_IDENTITY_FIELDS):
-            if identity["provider"] != "docker" or any(
-                re.fullmatch(r"sha256:[0-9a-f]{64}", identity[name]) is None
-                for name in _SEALED_IDENTITY_FIELDS
+            if (
+                re.fullmatch(r"sha256:[0-9a-f]{64}", identity["sealed_archive_sha256"]) is None
+                or not is_sealed_runtime_ref(identity["provider"], identity["sealed_runtime_ref"])
             ):
-                raise ValueError("Sealed preview requires Docker and exact archive/image SHA-256 identities")
+                raise ValueError("Sealed preview requires an exact archive digest and provider runtime reference")
         if queue_seconds <= 0 or ttl_seconds <= 0 or max_sessions + max_pending > _MAX_RESERVATIONS:
             raise ValueError("Preview queue and lifetime must be positive and bounded")
         now = self._now()
