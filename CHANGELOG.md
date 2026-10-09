@@ -101,6 +101,8 @@ This project follows a practical pre-1.0 changelog format:
 - Remove host-local generated build validation. Docker builds require a pinned
   local image ID and run offline as non-root in a read-only container; missing
   sandbox capability blocks promotion.
+- Require generated Tailwind source links for build validation so missing UI
+  classes fail the build, and bound app build timeouts and Docker CLI output.
 
 ## 0.2.0 - 2026-10-09
 

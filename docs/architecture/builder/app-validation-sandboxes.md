@@ -62,6 +62,13 @@ generated files and build output are confined to bounded disposable tmpfs space
 as a non-root user. A missing image, unavailable sandbox or unconfirmed cleanup
 fails build validation and blocks promotion. Generated package scripts never
 execute as host npm subprocesses.
+Canonical builds also mount a 16 MiB writable Tailwind source-link directory in
+the read-only shared shell. Link setup is required for validation: a failed link
+fails the build instead of silently omitting generated UI classes from CSS.
+App build requests are limited to 120 seconds per command and session; larger
+values are capped, and nonpositive values fail before allocation. The Docker CLI
+adapter captures at most 1 MiB from each output stream and terminates commands
+that exceed the limit, so candidate output cannot grow host memory without bound.
 Validation receives only the fixed nonsecret sandbox resource paths. Explicit
 `MOZAIKS_PREVIEW_ENV_*` values are reserved for interactive preview sessions and
 are never forwarded into build validation.

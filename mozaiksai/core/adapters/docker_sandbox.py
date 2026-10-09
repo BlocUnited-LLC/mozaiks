@@ -35,6 +35,36 @@ _DEFAULT_IMAGE = os.getenv("DOCKER_SANDBOX_IMAGE", "mozaiks-sandbox:local")
 _DEFAULT_WORKDIR = "/workspace"
 _DEFAULT_TIMEOUT_SECONDS = int(os.getenv("DOCKER_SANDBOX_TIMEOUT") or "300")
 _IMAGE_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_MAX_DOCKER_OUTPUT_BYTES = 1_048_576
+
+
+class _DockerOutputLimitExceeded(Exception):
+    pass
+
+
+async def _read_bounded_output(stream: asyncio.StreamReader) -> bytes:
+    output = bytearray()
+    while chunk := await stream.read(min(65_536, _MAX_DOCKER_OUTPUT_BYTES - len(output) + 1)):
+        if len(output) + len(chunk) > _MAX_DOCKER_OUTPUT_BYTES:
+            raise _DockerOutputLimitExceeded
+        output.extend(chunk)
+    return bytes(output)
+
+
+async def _discard_output(stream: asyncio.StreamReader) -> None:
+    while await stream.read(65_536):
+        pass
+
+
+async def _write_stdin(stream: asyncio.StreamWriter, data: bytes) -> None:
+    try:
+        for offset in range(0, len(data), 65_536):
+            stream.write(data[offset:offset + 65_536])
+            await stream.drain()
+    except (BrokenPipeError, ConnectionResetError):
+        pass
+    finally:
+        stream.close()
 
 
 def _preview_ports() -> list[int]:
@@ -94,12 +124,34 @@ class DockerSandboxAdapter:
                 stderr=asyncio.subprocess.PIPE,
                 env=_docker_cli_env(),
             )
+            assert proc.stdout is not None and proc.stderr is not None
+            stdout_task = asyncio.create_task(_read_bounded_output(proc.stdout))
+            stderr_task = asyncio.create_task(_read_bounded_output(proc.stderr))
+            tasks = [
+                stdout_task,
+                stderr_task,
+                asyncio.create_task(proc.wait()),
+            ]
+            if input_data is not None:
+                assert proc.stdin is not None
+                tasks.append(asyncio.create_task(_write_stdin(proc.stdin, input_data)))
             try:
-                stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(input_data), timeout=timeout)
-            except TimeoutError as exc:
-                proc.kill()
-                await proc.communicate()
-                raise RuntimeError(f"Docker command timed out after {timeout}s") from exc
+                await asyncio.wait_for(asyncio.gather(*tasks), timeout=timeout)
+            except BaseException as exc:
+                if proc.returncode is None:
+                    proc.kill()
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                await asyncio.gather(
+                    _discard_output(proc.stdout), _discard_output(proc.stderr), proc.wait(),
+                )
+                if isinstance(exc, TimeoutError):
+                    raise RuntimeError(f"Docker command timed out after {timeout}s") from exc
+                if isinstance(exc, _DockerOutputLimitExceeded):
+                    raise RuntimeError("Docker command output exceeded 1 MiB per stream") from exc
+                raise
+            stdout_b, stderr_b = stdout_task.result(), stderr_task.result()
             rc = int(proc.returncode or 0)
             return rc, stdout_b.decode("utf-8", errors="replace"), stderr_b.decode("utf-8", errors="replace")
 
@@ -131,7 +183,6 @@ class DockerSandboxAdapter:
         # structurally dead.
         purpose = (metadata or {}).get("purpose")
         sealed_candidate = purpose == "sealed_candidate_preview"
-        diagnostic_worker = purpose == "app_runtime_diagnostic"
         offline_validation = purpose in {"app_validation", "app_runtime_diagnostic", "sealed_candidate_preview"}
         if sealed_candidate:
             if not _IMAGE_ID_RE.fullmatch(image) or envs:
@@ -150,6 +201,7 @@ class DockerSandboxAdapter:
         # writable space. The image filesystem stays read-only.
         build_cache_args = ([
             "--tmpfs", "/opt/mozaiks/web_shell/node_modules/.vite-temp:rw,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=0750",
+            "--tmpfs", "/opt/mozaiks/web_shell/.mozaiks-tailwind-sources:rw,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=0750",
         ] if purpose == "app_validation" else [])
         contained_args = ([
             "--read-only", "--user", "10001:10001", "--memory-swap=2g",

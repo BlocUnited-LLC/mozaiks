@@ -1,5 +1,6 @@
 """Canonical app compilation uses the shared shell, never invented npm scripts."""
 
+import os
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -43,6 +44,7 @@ async def test_canonical_build_stages_workspace_and_always_terminates(monkeypatc
     envs = adapter.create_session.await_args.kwargs["envs"]
     assert envs["PLATFORM_PATH"] == root + "/app"
     assert envs["MOZAIKS_WEB_SHELL_PATH"] == "/opt/mozaiks/web_shell"
+    assert envs["MOZAIKS_REQUIRE_TAILWIND_SOURCE_LINKS"] == "1"
     assert "OPENAI_API_KEY" not in envs
     calls = adapter.run_command.await_args_list
     assert calls[0].kwargs["command"] == "python -m compileall -q ."
@@ -73,6 +75,73 @@ async def test_conflicting_canonical_paths_fail_before_allocation(monkeypatch):
     )
     assert result["validation_status"] == "failed"
     adapter.create_session.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_oversized_docker_build_timeout_is_capped_before_allocation(monkeypatch):
+    from factory_app.workflows.AppGenerator.tools import app_runtime_smoke
+    from mozaiksai.core import adapters
+
+    adapter = SimpleNamespace(
+        create_session=AsyncMock(return_value=SimpleNamespace(session_id="build", provider="docker")),
+        write_files=AsyncMock(),
+        run_command=AsyncMock(return_value=SimpleNamespace(success=True, stdout="", stderr="")),
+        terminate_session=AsyncMock(return_value=True),
+    )
+    monkeypatch.setattr(adapters, "DockerSandboxAdapter", lambda *, image: adapter)
+    monkeypatch.setattr(app_runtime_smoke, "_preflight_generated_image", lambda: "sha256:" + "a" * 64)
+    result = await _run_sandbox_validation(
+        strategy="docker", resolved_files={"app.json": "{}"}, commands=[],
+        start_dev_server=False, timeout_seconds=9999,
+    )
+    assert result["validation_status"] == "passed"
+    assert adapter.create_session.await_args.kwargs["timeout_seconds"] == 120
+    assert [call.kwargs["timeout_seconds"] for call in adapter.run_command.await_args_list] == [120.0, 120.0]
+    adapter.terminate_session.assert_awaited_once_with(session_id="build")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("timeout", [0, -1, True, "9999"])
+async def test_invalid_build_timeout_fails_before_file_resolution(monkeypatch, timeout):
+    from factory_app.workflows.AppGenerator.tools import app_validation
+
+    resolve_files = AsyncMock(side_effect=AssertionError("Resolved files before timeout validation"))
+    monkeypatch.setattr(app_validation, "_resolve_files", resolve_files)
+    result = await app_validation.validate_app_build(
+        files={"app.json": "{}"}, validation_strategy="docker", timeout_seconds=timeout,
+    )
+    assert result["validation_status"] == "failed"
+    assert result["errors"] == ["App build timeout must be a positive integer"]
+    resolve_files.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream_name", ["stdout", "stderr"])
+async def test_docker_cli_output_is_bounded_and_process_reaped(monkeypatch, stream_name):
+    import asyncio
+    import sys
+
+    from mozaiksai.core.adapters.docker_sandbox import DockerSandboxAdapter
+
+    create = asyncio.create_subprocess_exec
+    processes = []
+
+    async def emit_large_output(*args, **kwargs):
+        process = await create(
+            sys.executable, "-c", f"import sys; sys.{stream_name}.write('X' * 5000000)",
+            **kwargs,
+        )
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", emit_large_output)
+    with pytest.raises(RuntimeError, match="output exceeded 1 MiB"):
+        await DockerSandboxAdapter._run(["docker", "exec", "container", "echo", "irrelevant"])
+    result = await DockerSandboxAdapter().run_command(session_id="container", command="echo irrelevant")
+    assert result.success is False
+    assert result.error == "sandbox_error"
+    assert len(processes) == 2
+    assert all(process.returncode is not None for process in processes)
 
 
 def test_validation_models_match_runtime_provider_taxonomy():
@@ -232,4 +301,53 @@ async def test_docker_build_session_uses_bounded_read_only_offline_container(mon
     assert "--log-driver=none" in command
     assert any("/workspace:rw,nosuid,nodev,size=512m" in arg for arg in command)
     assert any("/opt/mozaiks/web_shell/node_modules/.vite-temp:rw,nosuid,nodev,size=16m" in arg for arg in command)
+    assert any("/opt/mozaiks/web_shell/.mozaiks-tailwind-sources:rw,nosuid,nodev,size=16m" in arg for arg in command)
     assert "-p" not in command
+
+
+@pytest.mark.skipif(
+    not os.getenv("MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE"),
+    reason="set MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE to a freshly built local preview image",
+)
+@pytest.mark.asyncio
+async def test_real_docker_build_includes_generated_tailwind_class(monkeypatch):
+    import subprocess
+
+    from factory_app.workflows.AppGenerator.tools.app_validation import validate_app_build
+    from mozaiksai.core import adapters
+    from tests.test_generated_app_functional_acceptance import _basic_crud_files
+
+    image = os.environ["MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE"]
+    image_id = subprocess.check_output(
+        ["docker", "image", "inspect", "--format", "{{.Id}}", image],
+        text=True, timeout=5,
+    ).strip()
+    monkeypatch.setenv("MOZAIKS_APP_RUNTIME_IMAGE_ID", image_id)
+    captured = {}
+    real_adapter = adapters.DockerSandboxAdapter
+
+    class InspectingAdapter(real_adapter):
+        async def terminate_session(self, *, session_id):
+            captured["source_link"] = await self.run_command(
+                session_id=session_id,
+                command="test -L /opt/mozaiks/web_shell/.mozaiks-tailwind-sources/platform-ui",
+            )
+            captured["css"] = await self.run_command(
+                session_id=session_id,
+                command="grep -R -l '#123abc' /workspace/build --include='*.css'",
+            )
+            return await super().terminate_session(session_id=session_id)
+
+    monkeypatch.setattr(adapters, "DockerSandboxAdapter", InspectingAdapter)
+    files = _basic_crud_files()
+    files["ui/index.js"] = "export const cssProof = 'bg-[#123abc]';\n"
+    result = await validate_app_build(
+        files=files, validation_strategy="docker", start_dev_server=False,
+        timeout_seconds=120,
+    )
+    assert result["validation_status"] == "passed", result["errors"]
+    assert result["sandbox_image_id"] == image_id
+    assert result["sandbox_terminated"] is True
+    assert captured["source_link"].success is True
+    assert captured["css"].success is True, captured["css"].stderr
+    assert "Failed to prepare Tailwind source links" not in result["build_output"]

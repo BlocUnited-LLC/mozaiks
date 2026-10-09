@@ -152,7 +152,9 @@ async def test_docker_commands_ignore_remote_context_and_host_credentials(monkey
 
     process = AsyncMock()
     process.returncode = 0
-    process.communicate.return_value = (b"ok", b"")
+    process.stdout.read.side_effect = [b"ok", b""]
+    process.stderr.read.return_value = b""
+    process.wait.return_value = 0
     with patch("asyncio.create_subprocess_exec", return_value=process) as launch:
         rc, stdout, stderr = await DockerSandboxAdapter._run(["docker", "info"])
     assert (rc, stdout, stderr) == (0, "ok", "")

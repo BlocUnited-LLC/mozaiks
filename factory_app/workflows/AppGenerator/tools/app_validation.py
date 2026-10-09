@@ -878,7 +878,17 @@ def _canonical_build_environment(root: str) -> dict[str, str]:
         "VITE_MOZAIKS_HOST": "platform",
         "PYTHON_DOTENV_DISABLED": "1",
         "CI": "1",
+        "MOZAIKS_REQUIRE_TAILWIND_SOURCE_LINKS": "1",
     }
+
+
+_MAX_APP_BUILD_TIMEOUT_SECONDS = 120
+
+
+def _bounded_validation_timeout(timeout_seconds: int) -> int:
+    if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, int) or timeout_seconds < 1:
+        raise ValueError("App build timeout must be a positive integer")
+    return min(timeout_seconds, _MAX_APP_BUILD_TIMEOUT_SECONDS)
 
 
 async def _run_sandbox_validation(
@@ -902,6 +912,11 @@ async def _run_sandbox_validation(
         sandbox_resource_environment,
         sandbox_workspace_root,
     )
+
+    try:
+        timeout_seconds = _bounded_validation_timeout(timeout_seconds)
+    except ValueError as exc:
+        return {**_base_result(strategy=strategy, status="failed"), "errors": [str(exc)]}
 
     image_id: str | None = None
     try:
@@ -2125,13 +2140,6 @@ async def validate_app_build(
     validation_strategy: str | None = None,
     context_variables: Any | None = None,
 ) -> dict[str, Any]:
-    try:
-        env_timeout = os.getenv("E2B_TIMEOUT")
-        if env_timeout and timeout_seconds == 120:
-            timeout_seconds = int(env_timeout)
-    except Exception:
-        pass
-
     workflow_name = "AppGenerator"
     chat_id = None
     app_id = None
@@ -2144,6 +2152,13 @@ async def validate_app_build(
         pass
 
     wf_logger = get_workflow_logger(workflow_name=workflow_name, chat_id=chat_id, app_id=app_id)
+    try:
+        timeout_seconds = _bounded_validation_timeout(timeout_seconds)
+    except ValueError as exc:
+        result = {**_base_result(strategy="skip", status="failed"), "errors": [str(exc)]}
+        _persist_validation_context(context_variables=context_variables, result=result)
+        return result
+
     resolved_files, chat_id, app_id = await _resolve_files(
         files=files,
         context_variables=context_variables,
@@ -2421,7 +2436,7 @@ async def validate_app_bundle_from_request(
         validation = await validate_app_build(
             files=materialized_files, commands=commands,
             start_dev_server=bool(request.get("start_dev_server", True)),
-            timeout_seconds=int(request.get("timeout_seconds") or 120),
+            timeout_seconds=request.get("timeout_seconds", 120),
             validation_strategy=request.get("validation_strategy"), context_variables=context_variables,
         )
     else:

@@ -103,11 +103,15 @@ function tailwindSourceLinkType(target) {
 
 function ensureTailwindSourceLinks(entries) {
   const linkRoot = path.resolve(__dirname, '.mozaiks-tailwind-sources');
+  const required = process.env.MOZAIKS_REQUIRE_TAILWIND_SOURCE_LINKS === '1';
 
   try {
-    fs.rmSync(linkRoot, { recursive: true, force: true });
     fs.mkdirSync(linkRoot, { recursive: true });
+    for (const name of fs.readdirSync(linkRoot)) {
+      fs.rmSync(path.join(linkRoot, name), { recursive: true, force: true });
+    }
   } catch (error) {
+    if (required) throw error;
     console.warn(`[mozaiks-web-shell] Failed to prepare Tailwind source links: ${error.message}`);
     return linkRoot;
   }
@@ -119,6 +123,7 @@ function ensureTailwindSourceLinks(entries) {
       const linkPath = path.join(linkRoot, name);
       fs.symlinkSync(fs.realpathSync(target), linkPath, tailwindSourceLinkType(target));
     } catch (error) {
+      if (required) throw error;
       console.warn(`[mozaiks-web-shell] Failed to link Tailwind source '${name}': ${error.message}`);
     }
   }

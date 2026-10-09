@@ -38,6 +38,28 @@ async def test_candidate_uses_same_complete_snapshot_and_operator_strategy(gates
 
 
 @pytest.mark.asyncio
+async def test_candidate_caps_validation_timeout_before_any_gate(gates):
+    acceptance, build = gates
+    result = await validate_generated_app_candidate(
+        files={"app.json": "{}"}, app_id="owned_app", timeout_seconds=9999,
+    )
+    assert result["validation_status"] == "passed"
+    acceptance.assert_awaited_once()
+    assert build.await_args.kwargs["timeout_seconds"] == 120
+
+
+@pytest.mark.asyncio
+async def test_candidate_rejects_invalid_timeout_before_any_gate(gates):
+    result = await validate_generated_app_candidate(
+        files={"app.json": "{}"}, app_id="owned_app", timeout_seconds=0,
+    )
+    assert result["validation_status"] == "failed"
+    assert result["errors"] == ["App build timeout must be a positive integer"]
+    for gate in gates:
+        gate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_candidate_passes_selected_pack_contracts_without_parent_evidence(gates):
     acceptance, build = gates
     selected = [{"id": "operator_readiness", "config": {"profile": "docker"}}]
