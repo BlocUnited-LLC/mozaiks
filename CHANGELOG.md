@@ -102,6 +102,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
+- Android source export and delivery verification now reject literal values
+  under credential objects even when nested payload fields use unfamiliar names.
+  Descriptive metadata and names-only references remain exportable.
+
 - Repository Docker coding turns now require a trusted local image ID, reject
   changed image tags before source transfer, verify the created container's
   image, and reject unrecognized baked environment keys.
@@ -458,6 +462,15 @@ This project follows a practical pre-1.0 changelog format:
 - Generated-app runtime smoke now keeps the Windows Python user-site path in its
   scrubbed child environment, so local builds with user-installed dependencies
   reach the app checks instead of failing on an unrelated missing import.
+
+- Android delivery checks every app and workflow input before creating either
+  archive, rejects credential/developer files, virtual environments, type-checker
+  caches and recognizable credential literals in structured config, text,
+  source assignments, XML/SVG fields and standard PNG text metadata,
+  and restricts public brand content to the theme and supported image/font assets.
+  Ordinary delivery manifests also reject local/internal backend destinations;
+  deliberate local test origins remain confined to explicit acceptance tooling.
+
 - Pin shared-shell text checkouts to LF so installed Android framework resources
   have identical provenance on Windows and Linux. Binary assets stay unchanged.
 

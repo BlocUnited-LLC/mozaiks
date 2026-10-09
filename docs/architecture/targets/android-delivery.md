@@ -47,6 +47,60 @@ modification. Installed npm dependencies, temporary app views, and native source
 stay inside the exported delivery directory. npm and Gradle may also use their
 normal user-level download caches.
 
+`backend_origin` must be a canonical HTTPS origin using a public hostname or
+globally routable IP address. Ordinary delivery rejects loopback, private,
+link-local, reserved and multicast addresses, IPv4-mapped IPv6 aliases,
+single-label names, and local/internal hostname suffixes. This validation is
+deterministic and does not resolve DNS; the execution host still owns checks on
+resolved destinations and reachability. Local test addressing is confined to
+the reference acceptance tooling's explicit override, not a manifest option.
+
+## Source admission
+
+One export policy checks every captured `app/` and `workflows/` file before either
+archive is constructed or the output directory is written. Verification of an
+extracted delivery applies that policy again, independently of inventory hashes.
+Known environment, credential, signing and developer files are rejected,
+including developer JSON/YAML, credential stores and developer IDE directories.
+Virtual environments and type-checker caches under app or workflow inputs are
+rejected; other installed dependencies and local build caches remain outside
+the captured input.
+
+Recognizable credential literals in configuration and Python/JavaScript
+assignments are rejected, including hardcoded environment lookup defaults.
+The policy parses JSON, YAML and TOML values, carrying credential context
+through nested objects and lists. Literal values in that context are refused
+even when a nested scalar uses an unfamiliar payload label such as
+`literalValue`; descriptive metadata fields and names-only references remain
+portable. Direct credential lists may contain descriptive objects, but literal
+scalar entries are refused.
+It inspects env-style text and checks XML and
+property-list fields. Credential elements and elements identified by a
+credential `name` or `key` reject literal-bearing `content` and default/value
+attributes on themselves or nested payload elements. Descriptive XML child
+fields and names-only references remain portable. Credential query values in URLs
+are checked in text and parsed configuration, including encoded query syntax.
+Statically joined Python credential assignments are checked too.
+A documented `postgresql://user:pass@host:port/dbname` placeholder is permitted.
+Declare runtime secret names in the canonical `app/security/secrets.yaml`
+contract and resolve them through the configured secret backend. Environment
+handles, named vault references, runtime lookups and empty/example placeholders
+are supported. Diagnostics identify the path and rule without echoing values.
+These checks do not establish that arbitrary source or media contains no hidden
+or obfuscated secrets; operators remain responsible for the source they export.
+
+Because the web build publishes `app/brand/`, that directory accepts only the
+canonical `theme_config.json` and public PNG, JPEG, GIF, WebP, ICO, SVG, WOFF,
+WOFF2 and TTF assets. Other configuration, scripts, documents and media types
+are rejected there. Binary assets must match their type signature; SVG files
+must have an SVG root. Accepted bytes are preserved, and recognizable plaintext
+credentials in assets are also rejected. The policy checks sensitive SVG
+elements and attributes and bounded PNG `tEXt`, `zTXt` and `iTXt` metadata.
+XML carried in PNG text metadata and encoded SVG metadata is checked too.
+This is admission checking, not a media sanitizer; pixels, arbitrary binary
+metadata and deliberately obscured values are outside its proof. Move developer
+configuration out of the exported app/workflow inputs.
+
 ## Output and provenance
 
 ```text
@@ -96,6 +150,7 @@ failed build records failure. Compilation alone reports
 | Concern | Owner |
 | --- | --- |
 | Specification, source validation, portable export | `factory_app/workflows/AppGenerator/tools/android_delivery.py` |
+| Shared app/workflow export admission | `factory_app/workflows/AppGenerator/tools/android_export_policy.py` |
 | Local command | `mozaiks_cli/commands/package.py` |
 | Declared native facade and pinned package inputs | `factory_app/build_context/mobile/` |
 | Build execution and APK receipt | Exported `mobile/build.mjs` |
