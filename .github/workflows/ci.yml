@@ -31,7 +31,7 @@ jobs:
 
     services:
       mongodb:
-        image: mongo:7
+        image: quay.io/mongodb/mongodb-community-server:7.0-ubi8
         ports:
           - 27017:27017
         options: >-
@@ -480,7 +480,7 @@ jobs:
     services:
       # Throwaway MongoDB server for the installed first-run smoke below.
       mongodb:
-        image: mongo:7
+        image: quay.io/mongodb/mongodb-community-server:7.0-ubi8
         ports:
           - 27017:27017
         options: >-
@@ -626,7 +626,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       mongodb:
-        image: mongo:7
+        image: quay.io/mongodb/mongodb-community-server:7.0-ubi8
         ports:
           - 27017:27017
         options: >-

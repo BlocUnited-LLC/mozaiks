@@ -45,7 +45,7 @@ jobs:
           npx playwright install --with-deps chromium
       - name: Pull disposable local service images
         run: |
-          docker pull mongo:7
+          docker pull quay.io/mongodb/mongodb-community-server:7.0-ubi8
           docker pull quay.io/keycloak/keycloak:26.0
       - name: Build community and run eight real browser journeys
         shell: python

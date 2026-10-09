@@ -27,7 +27,7 @@ WORKSPACE = Path(__file__).resolve().parents[1]
 REPO = WORKSPACE.parents[2]
 EVIDENCE_ROOT = REPO / ".local/evidence/community-env"
 LABEL = "io.mozaiks.community-acceptance"
-IMAGES = {"mongo": "mongo:7", "identity": "quay.io/keycloak/keycloak:26.0"}
+IMAGES = {"mongo": "quay.io/mongodb/mongodb-community-server:7.0-ubi8", "identity": "quay.io/keycloak/keycloak:26.0"}
 NATIVE_CALLBACK = "org.mozaiks.examples.commonground:/auth/callback"
 NATIVE_ORIGIN = "https://localhost"
 

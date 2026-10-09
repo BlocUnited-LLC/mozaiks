@@ -104,7 +104,8 @@ is needed for community actions.
 
 ## Reproduce local acceptance
 
-The dedicated launcher uses **already installed** Docker images `mongo:7` and
+The dedicated launcher uses **already installed** Docker images
+`quay.io/mongodb/mongodb-community-server:7.0-ubi8` and
 `quay.io/keycloak/keycloak:26.0`, the repository's Python environment and its
 frontend dependencies. It creates separate disposable containers on loopback
 ports; it does not adopt or reset your normal development services. The realm

@@ -45,7 +45,7 @@ jobs:
       actions: read
     services:
       mongodb:
-        image: mongo:7
+        image: quay.io/mongodb/mongodb-community-server:7.0-ubi8
         ports:
           - 27017:27017
         options: >-
