@@ -64,9 +64,9 @@ def _request(files: dict[str, str] | None = None, **overrides: Any) -> CodingWor
 @pytest.mark.parametrize(
     ("files", "acp_enabled", "importable", "kind", "expected", "reason_prefix"),
     [
-        ({_FILE_A: "a", _FILE_B: "b"}, True, True, "app_bundle", "acp", "scoped_patch_within_budget"),
-        ({_FILE_A: "a", _FILE_B: "b"}, True, True, "theme_capture", "acp", "scoped_patch_within_budget"),
-        ({_FILE_A: "a"}, True, True, "app_bundle", "acp", "scoped_patch_within_budget:1"),
+        ({_FILE_A: "a", _FILE_B: "b"}, True, True, "app_bundle", "acp", "multi_file_scope_within_budget"),
+        ({_FILE_A: "a", _FILE_B: "b"}, True, True, "theme_capture", "acp", "multi_file_scope_within_budget"),
+        ({_FILE_A: "a"}, True, True, "app_bundle", "structured_output", "single_file_scope"),
         ({_FILE_A: "a", _FILE_B: "b"}, False, True, "app_bundle", "structured_output", "acp_disabled"),
         ({_FILE_A: "a", _FILE_B: "b"}, True, False, "app_bundle", "structured_output", "acp_extra_not_installed"),
         ({_FILE_A: "a", _FILE_B: "b"}, True, True, "workflow_bundle", "structured_output", "artifact_kind_not_acp_eligible"),
@@ -188,22 +188,22 @@ async def test_multi_file_scope_dispatches_to_acp(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_single_file_scope_dispatches_to_enabled_acp(tmp_path: Path) -> None:
+async def test_single_file_scope_stays_on_structured(tmp_path: Path) -> None:
+    acp = _StubProvider("acp_claude_code", _proposal("acp_claude_code"))
     single = _proposal(
-        "acp_claude_code",
+        "control_plane_coding",
         changed_files=[ProposedFileChange(path=_FILE_A, content="patched-a")],
         owned_paths=[_FILE_A],
     )
-    acp = _StubProvider("acp_claude_code", single)
-    structured = _StubProvider("control_plane_coding", _proposal("control_plane_coding"))
+    structured = _StubProvider("control_plane_coding", single)
 
     result = await _worker(tmp_path, acp=acp, structured=structured).execute(
         _request(files={_FILE_A: "a"}, validation_strategy="local")
     )
 
-    assert acp.calls == 1
-    assert structured.calls == 0
-    assert result.provider == "acp_claude_code"
+    assert acp.calls == 0
+    assert structured.calls == 1
+    assert result.provider == "control_plane_coding"
 
 
 @pytest.mark.asyncio
