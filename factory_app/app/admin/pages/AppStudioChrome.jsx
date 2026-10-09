@@ -334,12 +334,13 @@ export function WorkspaceStudioHero({
   actions = null,
   onAction = null,
   summaryItems = [],
+  summaryClassName,
   children,
 }) {
   return (
     <div className="space-y-4">
       <PageHeader title={title} subtitle={subtitle} actions={actions} onAction={onAction} className="px-1" />
-      {summaryItems.length > 0 ? <SummaryStrip items={summaryItems} /> : null}
+      {summaryItems.length > 0 ? <SummaryStrip items={summaryItems} className={summaryClassName} /> : null}
       {children ? <div>{children}</div> : null}
     </div>
   )
