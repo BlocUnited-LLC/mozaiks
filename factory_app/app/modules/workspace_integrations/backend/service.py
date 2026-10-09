@@ -49,8 +49,8 @@ class WorkspaceIntegrationsService:
         return principal.user_id
 
     async def require_owned_app(self, ctx: ModuleContext, app_id: str) -> None:
-        if not app_id or app_id != ctx.app_id:
-            raise PermissionError("App integration target must match the dispatch app.")
+        if not app_id:
+            raise PermissionError("App integration target is required.")
         owner_id = self._caller_owner_id(ctx)
         record = await self.app_registry.get_app_record(app_id=app_id, owner_user_id=owner_id)
         if not isinstance(record.get("app"), dict):

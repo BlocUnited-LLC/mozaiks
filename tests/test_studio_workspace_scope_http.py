@@ -303,6 +303,7 @@ def studio(monkeypatch):
     for module in loaded:
         executor.register_loaded_module(module)
     app = FastAPI()
+    app.state.loaded_app_id = json.loads((STUDIO_APP / "app.json").read_text(encoding="utf-8"))["appId"]
     app.state.module_action_surfaces = {module.name: module.action_api_surface_map for module in loaded}
     app.state.executor_registry = SimpleNamespace(module_executor=executor)
     app.include_router(module_router.router)
@@ -414,7 +415,7 @@ def test_an_unverified_get_query_cannot_choose_a_connector_workspace(studio) -> 
 
 
 def test_a_dispatch_without_persistence_fails_closed(studio) -> None:
-    # A blank app id leaves the action without a persistence context, so without a principal.
+    # A blank request app id cannot override the host's loaded app identity.
     studio.authenticated()
     response = _connector(
         studio.client(), "list_workspace_connectors", studio.token(workspace=OWN), context={"app_id": " "},
