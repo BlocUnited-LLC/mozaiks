@@ -52,6 +52,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- E2B preview template builds stage only committed files from a clean OSS
+  checkout, reject linked source entries and Dockerfiles outside that commit,
+  and report the source commit and staged-context digest alongside the build ID.
+  Ignored local files and junctions cannot enter the provider upload.
+
 - Existing previews continue to use their recorded Docker or E2B provider
   after the configured provider changes, so a restarted worker can stop them
   and release capacity without routing cleanup to the wrong sandbox.
@@ -157,11 +162,6 @@ This project follows a practical pre-1.0 changelog format:
   configuration, so inherited remote Docker contexts cannot receive app files.
   Build validation also excludes explicitly forwarded interactive-preview
   environment values.
-
-- E2B preview template builds now stage only committed files from a clean OSS
-  checkout, reject linked source entries and Dockerfiles outside that commit,
-  and report the source commit and staged-context digest alongside the build ID.
-  Ignored local files and junctions cannot enter the provider upload.
 
 - Android source export and delivery verification now reject literal values
   under credential objects even when nested payload fields use unfamiliar names.

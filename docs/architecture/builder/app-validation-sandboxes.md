@@ -285,12 +285,14 @@ same checkout. The resulting name or ID belongs in `E2B_TEMPLATE` or
 `SANDBOX_TEMPLATE`; credentials remain in the operator environment. The helper
 does not run automatically during app generation or CI.
 
-The staged upload is built from the commit's declared framework, frontend,
-`logs` package, and packaging paths. Files ignored by Git, including local
-`.env` values, `node_modules`, generated Tailwind source junctions, caches,
-build output, browser reports, and runtime logs, are never read. Tracked links
-are rejected. Uncommitted changes or untracked files require a fresh clean
-checkout before the paid build. Dry-run mode does not stage or upload files.
+The staged upload is built from tracked files in the commit's declared
+framework, frontend, `logs` package, and packaging paths. Tracked screenshot
+fixtures under `web_shell/logs` are included. Files ignored by Git, including
+local `.env` values, `node_modules`, generated Tailwind source junctions,
+caches, build output, browser reports, and runtime logs, are not staged.
+Tracked links are rejected. Uncommitted changes or untracked files require a
+fresh clean checkout before the paid build. Dry-run mode does not stage or
+upload files.
 
 Only explicitly configured `MOZAIKS_PREVIEW_ENV_<NAME>` values become preview
 environment variables. Factory API keys, credentials, and database URLs are not
