@@ -434,6 +434,10 @@ test('draft preview preserves workspace branding, opens separately, and follows 
     assert.deepEqual([...activeSessions], ['sandbox-artifact-11-registry-b']);
     await page.clock.runFor(1);
     await expect.poll(async () => (await state()).version).toBe('artifact-12');
+    // The new session is visible before its sync completes and start is sent.
+    await expect.poll(() => requests.slice(beforeReplacement).includes(
+      '/api/sandbox/sandbox-artifact-12-registry-b/start'
+    ), {timeout:5000}).toBe(true);
     assert.deepEqual(requests.slice(beforeReplacement), [
       stop11, stop11,
       '/api/artifacts/artifact-12/sandbox?build_registry_id=registry-b',
