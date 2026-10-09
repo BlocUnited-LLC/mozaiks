@@ -63,7 +63,7 @@ def _git_output(*args: str) -> bytes:
 
 def _context_digest(context_root: Path) -> str:
     digest = hashlib.sha256()
-    for path in sorted(context_root.rglob("*")):
+    for path in sorted(context_root.rglob("*"), key=lambda item: item.relative_to(context_root).as_posix()):
         if not path.is_file():
             continue
         relative_path = path.relative_to(context_root).as_posix()
@@ -86,13 +86,21 @@ def _stage_preview_context(dockerfile: Path) -> tuple[tempfile.TemporaryDirector
         dockerfile_path = dockerfile.relative_to(REPO_ROOT.resolve()).as_posix()
     except ValueError as exc:
         raise ValueError("E2B preview Dockerfile must be tracked in this checkout") from exc
-    selected_paths = (*_PREVIEW_CONTEXT_FILES, *_PREVIEW_CONTEXT_DIRECTORIES, dockerfile_path)
+    dockerfile_in_context = dockerfile_path in _PREVIEW_CONTEXT_FILES or any(
+        dockerfile_path.startswith(f"{directory}/") for directory in _PREVIEW_CONTEXT_DIRECTORIES
+    )
+    selected_paths = (*_PREVIEW_CONTEXT_FILES, *_PREVIEW_CONTEXT_DIRECTORIES)
+    if not dockerfile_in_context:
+        selected_paths += (dockerfile_path,)
     context = tempfile.TemporaryDirectory(prefix="mozaiks-e2b-preview-")
     context_root = Path(context.name)
     try:
         with tempfile.TemporaryFile() as archive_file:
             result = subprocess.run(
-                ["git", "-C", str(REPO_ROOT), "archive", "--format=tar", source_sha, *selected_paths],
+                [
+                    "git", "-C", str(REPO_ROOT), "-c", "core.autocrlf=false",
+                    "archive", "--format=tar", source_sha, *selected_paths,
+                ],
                 check=False, stdout=archive_file, stderr=subprocess.PIPE,
             )
             if result.returncode:
@@ -107,13 +115,13 @@ def _stage_preview_context(dockerfile: Path) -> tuple[tempfile.TemporaryDirector
                     ):
                         raise RuntimeError("E2B preview source contains an unsafe path or link")
                     relative_path = name.as_posix()
-                    if relative_path == dockerfile_path:
-                        destination = context_root / "Dockerfile.preview"
-                    elif relative_path in _PREVIEW_CONTEXT_FILES or any(
+                    if relative_path in _PREVIEW_CONTEXT_FILES or any(
                         relative_path == directory or relative_path.startswith(f"{directory}/")
                         for directory in _PREVIEW_CONTEXT_DIRECTORIES
                     ):
                         destination = context_root.joinpath(*name.parts)
+                    elif relative_path == dockerfile_path:
+                        destination = context_root / "Dockerfile.preview"
                     elif member.isdir() and dockerfile_path.startswith(f"{relative_path}/"):
                         continue
                     else:
@@ -131,6 +139,8 @@ def _stage_preview_context(dockerfile: Path) -> tuple[tempfile.TemporaryDirector
                             shutil.copyfileobj(source_file, staged_file)
                     else:
                         raise RuntimeError("E2B preview source contains a non-file entry")
+        if dockerfile_in_context:
+            shutil.copyfile(context_root / dockerfile_path, context_root / "Dockerfile.preview")
         for relative_path in _PREVIEW_CONTEXT_FILES:
             if not (context_root / relative_path).is_file():
                 raise RuntimeError(f"E2B preview source is missing {relative_path}")

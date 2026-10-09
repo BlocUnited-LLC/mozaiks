@@ -1,3 +1,4 @@
+import hashlib
 import subprocess
 import sys
 from pathlib import Path
@@ -191,6 +192,46 @@ def test_staging_rejects_dockerfile_outside_commit(preview_repo: Path, tmp_path:
     dockerfile.write_text("FROM python:3.12-slim\n", encoding="utf-8")
     with pytest.raises(ValueError, match="tracked in this checkout"):
         builder._stage_preview_context(dockerfile)
+
+
+def test_staging_uses_committed_blob_bytes_with_windows_autocrlf(preview_repo: Path) -> None:
+    dockerfile = preview_repo / "infra" / "docker" / "Dockerfile.preview"
+    _git(preview_repo, "config", "core.autocrlf", "true")
+    committed = subprocess.run(
+        ["git", "-C", str(preview_repo), "show", "HEAD:infra/docker/Dockerfile.preview"],
+        check=True, capture_output=True,
+    ).stdout
+
+    context, _, digest = builder._stage_preview_context(dockerfile)
+    with context as staged:
+        context_root = Path(staged)
+        assert (context_root / "Dockerfile.preview").read_bytes() == committed
+        assert digest == builder._context_digest(context_root)
+
+
+def test_staging_keeps_alternate_dockerfile_in_selected_source(preview_repo: Path) -> None:
+    dockerfile = preview_repo / "web_shell" / "Dockerfile.custom"
+    dockerfile.write_text("FROM python:3.12-slim\nCOPY web_shell /app/web_shell\n", encoding="utf-8")
+    _git(preview_repo, "add", "-A")
+    _git(preview_repo, "commit", "-q", "-m", "alternate Dockerfile")
+
+    context, _, _ = builder._stage_preview_context(dockerfile)
+    with context as staged:
+        context_root = Path(staged)
+        assert (context_root / "web_shell" / "Dockerfile.custom").read_bytes() == dockerfile.read_bytes()
+        assert (context_root / "Dockerfile.preview").read_bytes() == dockerfile.read_bytes()
+
+
+def test_context_digest_uses_posix_path_order_on_every_platform(tmp_path: Path) -> None:
+    files = {"README.md": b"readme\n", "__init__.py": b"module\n"}
+    digest = hashlib.sha256()
+    for relative_path, content in files.items():
+        (tmp_path / relative_path).write_bytes(content)
+        digest.update(relative_path.encode("utf-8") + b"\0")
+        digest.update(len(content).to_bytes(8, "big"))
+        digest.update(content)
+
+    assert builder._context_digest(tmp_path) == digest.hexdigest()
 
 
 def test_staging_rejects_a_tracked_link(preview_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
