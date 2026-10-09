@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -16,6 +15,9 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+    resolve_templates_for_pack,
+)
 from mozaiksai.core.auth.adapters import registry as auth_registry
 from mozaiksai.core.auth.adapters.jwt_adapter import GenericJWTAdapter, JWTAdapterConfig
 from mozaiksai.core.auth.config import clear_auth_config_cache
@@ -27,7 +29,7 @@ from mozaiksai.hosts.routers import modules as module_router
 APP_ID = "generated-messaging-app"
 OWN = "workspace-own"
 FOREIGN = "workspace-foreign"
-TEMPLATE = Path(__file__).resolve().parents[1] / "factory_app/build_context/messaging/templates/modules/messages"
+PACK = Path(__file__).resolve().parents[1] / "factory_app/build_context/messaging"
 
 
 def _matches(row, query):
@@ -114,7 +116,12 @@ def runtime(tmp_path, monkeypatch):
     monkeypatch.setattr(ModuleExecutor, "_emit_dispatch_audit", AsyncMock())
 
     app_root = tmp_path / "app"
-    shutil.copytree(TEMPLATE, app_root / "modules/messages")
+    emitted = resolve_templates_for_pack(PACK, "messaging")
+    for file in emitted:
+        if file["filename"].startswith("modules/messages/"):
+            path = app_root / file["filename"]
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(file["content"], encoding="utf-8")
     loaded = ModuleLoader(str(app_root)).load("messages")
     database = defaultdict(lambda: defaultdict(_Collection))
     executor = ModuleExecutor(persistence_client=database, persistence_database="generated_messaging_test")
@@ -140,8 +147,12 @@ def runtime(tmp_path, monkeypatch):
         return [row for name, collection in database["generated_messaging_test"].items()
                 if name.endswith("threads") and not name.endswith("thread_reads") for row in collection.rows]
 
+    def rows(suffix):
+        return [row for name, collection in database["generated_messaging_test"].items()
+                if name.endswith(suffix) for row in collection.rows]
+
     yield SimpleNamespace(client=TestClient(app, raise_server_exceptions=False), token=token,
-                          hooks=hooks, threads=threads)
+                          hooks=hooks, threads=threads, rows=rows)
     clear_auth_config_cache()
     auth_registry.reset_auth_adapter()
 
@@ -151,6 +162,13 @@ def _create(runtime, token, *, params=None, context=None):
     if context is not None:
         body["context"] = context
     return runtime.client.post("/api/modules/messages/create_thread", json=body, headers=token)
+
+
+def _action(runtime, token, action, *, params=None, context=None):
+    body = {"params": params or {}}
+    if context is not None:
+        body["context"] = context
+    return runtime.client.post(f"/api/modules/messages/{action}", json=body, headers=token)
 
 
 @pytest.mark.parametrize(("params", "context"), [
@@ -168,6 +186,63 @@ def test_bound_signed_token_rejects_foreign_workspace_param(runtime):
                        params={"scope_type": "workspace", "scope_id": FOREIGN})
     assert response.status_code == 403, response.text
     assert runtime.threads() == []
+
+
+def test_verified_membership_allows_own_workspace_and_rejects_conflicts(runtime):
+    runtime.hooks.register_bundle(
+        {"module_scope_resolver": lambda **_scope: {"verified_workspace_id": OWN}}, source="test",
+    )
+    token = runtime.token()
+    own = _create(runtime, token, params={"scope_type": "workspace"})
+    assert own.status_code == 200, own.text
+    assert own.json()["thread"]["scope_id"] == OWN
+
+    for params, context in [
+        ({"scope_type": "workspace", "scope_id": FOREIGN}, None),
+        ({"scope_type": "workspace"}, {"workspace_id": FOREIGN}),
+        ({"scope_type": "workspace"}, {"tenant_id": "unverified-tenant"}),
+    ]:
+        refused = _create(runtime, token, params=params, context=context)
+        assert refused.status_code == 403, refused.text
+    assert len(runtime.threads()) == 1
+
+
+def test_unbound_token_cannot_read_or_mutate_participant_thread_in_foreign_workspace(runtime):
+    foreign = _create(runtime, runtime.token(workspace=FOREIGN), params={"scope_type": "workspace"})
+    assert foreign.status_code == 200, foreign.text
+    thread_id = foreign.json()["thread"]["thread_id"]
+    token = runtime.token()
+    context = {"workspace_id": FOREIGN}
+
+    listed = _action(runtime, token, "list_threads", params={"scope_type": "workspace"}, context=context)
+    assert listed.status_code == 403, listed.text
+    read = _action(runtime, token, "get_thread", params={"thread_id": thread_id}, context=context)
+    assert read.status_code == 200, read.text
+    assert read.json()["thread"] is None
+    sent = _action(runtime, token, "send_message", params={"thread_id": thread_id, "body": "unauthorized"},
+                   context=context)
+    assert sent.status_code == 200, sent.text
+    assert sent.json()["success"] is False
+    marked = _action(runtime, token, "mark_thread_read", params={"thread_id": thread_id}, context=context)
+    assert marked.status_code == 200, marked.text
+    assert marked.json()["success"] is False
+    assert runtime.rows("messages") == []
+    assert runtime.rows("thread_reads") == []
+
+
+def test_local_development_keeps_explicit_workspace_selection(runtime, monkeypatch):
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("AUTH_ANON_ACCESS", "local")
+    monkeypatch.delenv("AUTH_PROVIDER")
+    clear_auth_config_cache()
+    auth_registry.reset_auth_adapter()
+    with TestClient(runtime.client.app, client=("127.0.0.1", 50000), base_url="http://localhost:8000") as local:
+        created = local.post("/api/modules/messages/create_thread", json={
+            "context": {"workspace_id": OWN},
+            "params": {"scope_type": "workspace"},
+        })
+    assert created.status_code == 200, created.text
+    assert created.json()["thread"]["scope_id"] == OWN
 
 
 def test_app_scope_uses_loaded_app_and_rejects_foreign_scope(runtime):

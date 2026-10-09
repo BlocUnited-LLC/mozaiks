@@ -50,6 +50,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
+- Generated messaging modules now require a verified workspace for workspace
+  conversations. A signed caller cannot select another workspace through
+  dispatch context or `scope_id`.
+
 - Studio workspace connector actions (list, save, health check and delete) and
   workspace-scoped message threads act only on the caller's verified
   workspace: the workspace the validated token is bound to, or a membership a
