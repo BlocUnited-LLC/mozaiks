@@ -7,12 +7,15 @@ operations and require an explicit --confirm-paid-build acknowledgement.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
+import subprocess
 import sys
+import tarfile
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from dotenv import load_dotenv
@@ -36,23 +39,6 @@ _PREVIEW_CONTEXT_DIRECTORIES = (
 )
 
 
-def _ignore_preview_context(directory: str, names: list[str]) -> set[str]:
-    # Apply the local-output exclusions before E2B receives the staged context.
-    # Keep the logs Python package; only its runtime output directories are data.
-    ignored = shutil.ignore_patterns(
-        ".git", ".local", ".codex-worktrees", "node_modules",
-        ".venv", ".release-venv", ".release-local-venv", ".pkg-venv",
-        "__pycache__", "*.py[cod]", ".pytest_cache", ".mypy_cache", ".ruff_cache",
-        "*.egg-info", ".vite", ".mozaiks-tailwind-sources", "build", "dist", "coverage", ".coverage*",
-        "playwright-report*", "test-results", ".logs", "*.log", "*_debug.txt",
-        ".env", ".env.*",
-    )(directory, names)
-    ignored.discard(".env.example")
-    if Path(directory) == REPO_ROOT / "logs":
-        ignored.update({"logs", "agent_outputs", "workflow_converter"}.intersection(names))
-    return ignored
-
-
 def _build_log(entry: Any) -> None:
     message = getattr(entry, "message", None) or getattr(entry, "text", None) or str(entry)
     # E2B build logs can contain Unicode symbols; keep Windows consoles from
@@ -62,27 +48,101 @@ def _build_log(entry: Any) -> None:
     print(safe_message, flush=True)
 
 
-def _stage_preview_context(dockerfile: Path) -> tempfile.TemporaryDirectory[str]:
+def _git_output(*args: str) -> bytes:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), *args],
+            check=False, capture_output=True,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError("Git is required to build an E2B preview template") from exc
+    if result.returncode:
+        raise RuntimeError("Cannot read the committed E2B preview source from Git")
+    return result.stdout
+
+
+def _context_digest(context_root: Path) -> str:
+    digest = hashlib.sha256()
+    for path in sorted(context_root.rglob("*")):
+        if not path.is_file():
+            continue
+        relative_path = path.relative_to(context_root).as_posix()
+        digest.update(relative_path.encode("utf-8") + b"\0")
+        digest.update(path.stat().st_size.to_bytes(8, "big"))
+        with path.open("rb") as staged_file:
+            for chunk in iter(lambda: staged_file.read(1024 * 1024), b""):
+                digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _stage_preview_context(dockerfile: Path) -> tuple[tempfile.TemporaryDirectory[str], str, str]:
+    root = Path(_git_output("rev-parse", "--show-toplevel").decode().strip()).resolve()
+    if root != REPO_ROOT.resolve():
+        raise RuntimeError("E2B preview source must be a Git checkout root")
+    if _git_output("status", "--porcelain=v1", "--untracked-files=all"):
+        raise RuntimeError("E2B preview source must be a clean committed checkout")
+    source_sha = _git_output("rev-parse", "--verify", "HEAD^{commit}").decode().strip()
+    try:
+        dockerfile_path = dockerfile.relative_to(REPO_ROOT.resolve()).as_posix()
+    except ValueError as exc:
+        raise ValueError("E2B preview Dockerfile must be tracked in this checkout") from exc
+    selected_paths = (*_PREVIEW_CONTEXT_FILES, *_PREVIEW_CONTEXT_DIRECTORIES, dockerfile_path)
     context = tempfile.TemporaryDirectory(prefix="mozaiks-e2b-preview-")
     context_root = Path(context.name)
-    for relative_path in _PREVIEW_CONTEXT_FILES:
-        source = REPO_ROOT / relative_path
-        if not source.is_file():
-            context.cleanup()
-            raise FileNotFoundError(f"E2B preview context file not found: {source}")
-        shutil.copy2(source, context_root / relative_path)
-    for relative_path in _PREVIEW_CONTEXT_DIRECTORIES:
-        source = REPO_ROOT / relative_path
-        if not source.is_dir():
-            context.cleanup()
-            raise FileNotFoundError(f"E2B preview context directory not found: {source}")
-        shutil.copytree(
-            source,
-            context_root / relative_path,
-            ignore=_ignore_preview_context,
-        )
-    shutil.copy2(dockerfile, context_root / "Dockerfile.preview")
-    return context
+    try:
+        with tempfile.TemporaryFile() as archive_file:
+            result = subprocess.run(
+                ["git", "-C", str(REPO_ROOT), "archive", "--format=tar", source_sha, *selected_paths],
+                check=False, stdout=archive_file, stderr=subprocess.PIPE,
+            )
+            if result.returncode:
+                raise RuntimeError("Cannot archive the committed E2B preview source")
+            archive_file.seek(0)
+            with tarfile.open(fileobj=archive_file, mode="r:") as archive:
+                for member in archive:
+                    name = PurePosixPath(member.name)
+                    if (
+                        name.is_absolute() or ".." in name.parts or "\\" in member.name
+                        or member.issym() or member.islnk()
+                    ):
+                        raise RuntimeError("E2B preview source contains an unsafe path or link")
+                    relative_path = name.as_posix()
+                    if relative_path == dockerfile_path:
+                        destination = context_root / "Dockerfile.preview"
+                    elif relative_path in _PREVIEW_CONTEXT_FILES or any(
+                        relative_path == directory or relative_path.startswith(f"{directory}/")
+                        for directory in _PREVIEW_CONTEXT_DIRECTORIES
+                    ):
+                        destination = context_root.joinpath(*name.parts)
+                    elif member.isdir() and dockerfile_path.startswith(f"{relative_path}/"):
+                        continue
+                    else:
+                        raise RuntimeError("E2B preview archive contains a path outside its source set")
+                    if not destination.resolve().is_relative_to(context_root.resolve()):
+                        raise RuntimeError("E2B preview source contains an unsafe path")
+                    if member.isdir():
+                        destination.mkdir(parents=True, exist_ok=True)
+                    elif member.isfile():
+                        destination.parent.mkdir(parents=True, exist_ok=True)
+                        source_file = archive.extractfile(member)
+                        if source_file is None:
+                            raise RuntimeError("Cannot read an E2B preview source file")
+                        with source_file, destination.open("wb") as staged_file:
+                            shutil.copyfileobj(source_file, staged_file)
+                    else:
+                        raise RuntimeError("E2B preview source contains a non-file entry")
+        for relative_path in _PREVIEW_CONTEXT_FILES:
+            if not (context_root / relative_path).is_file():
+                raise RuntimeError(f"E2B preview source is missing {relative_path}")
+        for relative_path in _PREVIEW_CONTEXT_DIRECTORIES:
+            if not (context_root / relative_path).is_dir():
+                raise RuntimeError(f"E2B preview source is missing {relative_path}/")
+        if not (context_root / "Dockerfile.preview").is_file():
+            raise RuntimeError("E2B preview source is missing its Dockerfile")
+        return context, source_sha, _context_digest(context_root)
+    except Exception:
+        context.cleanup()
+        raise
 
 
 def build_template(
@@ -119,7 +179,7 @@ def build_template(
     except ImportError as exc:
         raise RuntimeError("Install the E2B extra before building: pip install 'mozaiks[e2b]'") from exc
 
-    context = _stage_preview_context(dockerfile)
+    context, source_sha, context_sha256 = _stage_preview_context(dockerfile)
     try:
         context_root = Path(context.name)
         template = Template(file_context_path=context_root).from_dockerfile(
@@ -140,6 +200,8 @@ def build_template(
         "template_id": getattr(result, "template_id", None),
         "build_id": getattr(result, "build_id", None),
         "dockerfile": str(dockerfile),
+        "source_sha": source_sha,
+        "context_sha256": context_sha256,
     }
 
 

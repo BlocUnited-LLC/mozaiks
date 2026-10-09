@@ -158,6 +158,11 @@ This project follows a practical pre-1.0 changelog format:
   Build validation also excludes explicitly forwarded interactive-preview
   environment values.
 
+- E2B preview template builds now stage only committed files from a clean OSS
+  checkout, reject linked source entries and Dockerfiles outside that commit,
+  and report the source commit and staged-context digest alongside the build ID.
+  Ignored local files and junctions cannot enter the provider upload.
+
 - Android source export and delivery verification now reject literal values
   under credential objects even when nested payload fields use unfamiliar names.
   Descriptive metadata and names-only references remain exportable.

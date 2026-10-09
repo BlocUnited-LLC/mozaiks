@@ -1,3 +1,4 @@
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -8,6 +9,13 @@ from scripts import build_e2b_preview_template as builder
 from scripts.build_e2b_preview_template import _build_log, build_template
 
 
+def _git(root: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(root), *args],
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+
+
 @pytest.fixture
 def preview_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     root = tmp_path / "repo"
@@ -16,6 +24,16 @@ def preview_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         (root / name).write_text("source\n", encoding="utf-8")
     for name in builder._PREVIEW_CONTEXT_DIRECTORIES:
         (root / name).mkdir()
+        (root / name / ".keep").write_text("source\n", encoding="utf-8")
+    dockerfile = root / "infra" / "docker" / "Dockerfile.preview"
+    dockerfile.parent.mkdir(parents=True)
+    dockerfile.write_text("FROM python:3.12-slim\nCOPY pyproject.toml /app/\n", encoding="utf-8")
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "test@example.invalid")
+    _git(root, "config", "user.name", "Test")
+    _git(root, "config", "core.autocrlf", "false")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "fixture")
     monkeypatch.setattr(builder, "REPO_ROOT", root)
     return root
 
@@ -57,8 +75,7 @@ def test_e2b_template_name_is_closed_and_lowercase(tmp_path: Path) -> None:
 def test_e2b_template_build_uses_stable_minimal_copy_context(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, preview_repo: Path,
 ) -> None:
-    dockerfile = tmp_path / "Dockerfile.preview"
-    dockerfile.write_text("FROM python:3.12-slim\nCOPY pyproject.toml /app/\n", encoding="utf-8")
+    dockerfile = preview_repo / "infra" / "docker" / "Dockerfile.preview"
     captured: dict[str, object] = {}
 
     class FakeTemplate:
@@ -75,6 +92,7 @@ def test_e2b_template_build_uses_stable_minimal_copy_context(
             captured["has_dockerfile"] = (context_root / "Dockerfile.preview").is_file()
             captured["has_pyproject"] = (context_root / "pyproject.toml").is_file()
             captured["has_git"] = (context_root / ".git").exists()
+            captured["context_sha256"] = builder._context_digest(context_root)
             return SimpleNamespace(template_id="template-id", build_id="build-id")
 
     monkeypatch.setitem(sys.modules, "e2b", SimpleNamespace(Template=FakeTemplate))
@@ -94,6 +112,8 @@ def test_e2b_template_build_uses_stable_minimal_copy_context(
     assert captured["has_dockerfile"] is True
     assert captured["has_pyproject"] is True
     assert captured["has_git"] is False
+    assert result["source_sha"] == _git(preview_repo, "rev-parse", "HEAD")
+    assert result["context_sha256"] == captured["context_sha256"]
     assert not context_root.exists()
 
 
@@ -141,11 +161,16 @@ def test_staging_excludes_local_data_and_preserves_source_assets(preview_repo: P
         path = preview_repo / relative_path
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(content)
-    dockerfile = preview_repo / "Dockerfile.preview"
-    dockerfile.write_text("FROM python:3.12-slim\n", encoding="utf-8")
+    (preview_repo / ".gitignore").write_text("\n".join(local_files) + "\n", encoding="utf-8")
+    _git(preview_repo, "add", "-A")
+    _git(preview_repo, "commit", "-q", "-m", "tracked source")
+    dockerfile = preview_repo / "infra" / "docker" / "Dockerfile.preview"
 
-    with builder._stage_preview_context(dockerfile) as context:
-        context_root = Path(context)
+    context, source_sha, digest = builder._stage_preview_context(dockerfile)
+    with context as staged:
+        context_root = Path(staged)
+        assert source_sha == _git(preview_repo, "rev-parse", "HEAD")
+        assert digest == builder._context_digest(context_root)
         for relative_path, content in source_files.items():
             assert (context_root / relative_path).read_bytes() == content
         for relative_path in local_files:
@@ -153,6 +178,36 @@ def test_staging_excludes_local_data_and_preserves_source_assets(preview_repo: P
 
     # Staging never deletes the operator's source files or local outputs.
     assert all((preview_repo / path).is_file() for path in local_files)
+
+
+def test_staging_rejects_uncommitted_files(preview_repo: Path) -> None:
+    (preview_repo / "web_shell" / "new-local-file.txt").write_text("private", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="clean committed checkout"):
+        builder._stage_preview_context(preview_repo / "infra" / "docker" / "Dockerfile.preview")
+
+
+def test_staging_rejects_dockerfile_outside_commit(preview_repo: Path, tmp_path: Path) -> None:
+    dockerfile = tmp_path / "Dockerfile.preview"
+    dockerfile.write_text("FROM python:3.12-slim\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="tracked in this checkout"):
+        builder._stage_preview_context(dockerfile)
+
+
+def test_staging_rejects_a_tracked_link(preview_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    link = preview_repo / "web_shell" / "linked"
+    link.write_text("../private", encoding="utf-8")
+    blob = _git(preview_repo, "hash-object", "-w", str(link))
+    _git(preview_repo, "update-index", "--add", "--cacheinfo", f"120000,{blob},web_shell/linked")
+    _git(preview_repo, "commit", "-q", "-m", "tracked link")
+    original_git_output = builder._git_output
+
+    # Some Windows Git installations materialize a link as a plain text file;
+    # the archive must still reject its tracked link entry.
+    monkeypatch.setattr(builder, "_git_output", lambda *args: (
+        b"" if args[0] == "status" else original_git_output(*args)
+    ))
+    with pytest.raises(RuntimeError, match="unsafe path or link"):
+        builder._stage_preview_context(preview_repo / "infra" / "docker" / "Dockerfile.preview")
 
 
 def test_e2b_build_log_replaces_symbols_unsupported_by_windows_console(
