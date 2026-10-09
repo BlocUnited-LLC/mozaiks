@@ -11,20 +11,24 @@ App owners can distinguish a real day-30 return rate from page views, repeat
 clicks, or a snapshot called “retention.” An explicit unavailable state keeps
 early or incomplete data from appearing as a misleading zero or percentage.
 The join stays in the customer app: a host can receive aggregate counts and
-coverage evidence without receiving person or session IDs. This supports
+coverage evidence without receiving person or session IDs. Explicit deployment
+environment scope keeps test activity out of live evidence. This supports
 trustworthy progress reporting while limiting the personal data shared with a
 hosting operator.
 
 ## Contract
 
-For one UTC `cohort_date` and exact `(app_id, tenant_id, workspace_id)` scope:
+For one UTC `cohort_date` and exact
+`(app_id, environment, tenant_id, workspace_id)` scope:
 
 - **Denominator:** distinct stable end-user IDs whose *first* eligibility
   timestamp is in `[cohort_date 00:00, next day 00:00)` UTC. The app that owns
   account or membership records decides and documents eligibility; it must
   exclude operators, test users, service identities, and other ineligible
-  actors. A missing tenant or workspace ID means a genuinely app-wide scope,
-  never a wildcard over separate scopes.
+  actors. `environment` is required and cannot be an empty or `default`
+  placeholder; the app must stamp its actual deployment environment on every
+  row and coverage assertion. A missing tenant or workspace ID means a
+  genuinely app-wide scope, never a wildcard over separate scopes.
 - **Numerator:** denominator IDs with at least one qualifying successful
   action during `[cohort_date + 30 days, cohort_date + 31 days)` UTC. The
   observation must have validated-token provenance and `actor_kind=end_user`.
@@ -35,10 +39,10 @@ For one UTC `cohort_date` and exact `(app_id, tenant_id, workspace_id)` scope:
   reconciled coverage across their respective windows. A late-arrival policy
   belongs to the source: its `complete_through` watermark must advance only
   after late events are accounted for. Coverage must name the same exact app,
-  tenant, and workspace scope as the input rows; its watermark cannot be in
-  the future relative to `as_of`. Gaps, absent authority, unmatured days,
-  conflicting first eligibility, malformed identity or timestamp, and mixed
-  scopes yield `status=unavailable` with no counts.
+  environment, tenant, and workspace scope as the input rows; its watermark
+  cannot be in the future relative to `as_of`. Gaps, absent authority,
+  unmatured days, conflicting first eligibility, malformed identity or
+  timestamp, and mixed scopes yield `status=unavailable` with no counts.
 - **Zero:** with a nonempty denominator and complete observation, zero
   qualifying actions yields an available `0%`. An empty cohort is unavailable.
 

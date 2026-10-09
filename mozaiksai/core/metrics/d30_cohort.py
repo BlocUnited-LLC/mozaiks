@@ -16,6 +16,7 @@ from typing import Literal
 @dataclass(frozen=True)
 class CohortScope:
     app_id: str
+    environment: str
     tenant_id: str | None = None
     workspace_id: str | None = None
 
@@ -83,6 +84,10 @@ def _valid_scope(scope: CohortScope) -> bool:
         and isinstance(scope.app_id, str)
         and bool(scope.app_id.strip())
         and scope.app_id == scope.app_id.strip()
+        and isinstance(scope.environment, str)
+        and bool(scope.environment.strip())
+        and scope.environment == scope.environment.strip()
+        and scope.environment.lower() != "default"
         and all(
             value is None or (isinstance(value, str) and bool(value.strip()) and value == value.strip())
             for value in (scope.tenant_id, scope.workspace_id)
