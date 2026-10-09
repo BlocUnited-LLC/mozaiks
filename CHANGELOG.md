@@ -23,6 +23,12 @@ This project follows a practical pre-1.0 changelog format:
   root-owned staging, non-root runtime health, and confirmed cleanup without
   a public preview URL or mutable sync.
 
+### Changed
+
+- Package CI now installs the optional ACP and E2B extras from the built wheel
+  and verifies their dependencies, imports, and E2B adapter teardown tests
+  without starting providers.
+
 ### Fixed
 
 - CI and operator reference container builds resolve public base images from a
