@@ -49,8 +49,27 @@ _SUPPORT_NOTIFICATION_MATCHES: tuple[dict[str, Any], ...] = (
 async def _verified_notification_scope(
     request: Request, principal: UserPrincipal, app_id: str,
 ) -> tuple[str | None, str | None]:
-    """Read the host's membership assertion, never request-selected workspace metadata."""
-    if not principal.is_authenticated or not principal.workspace_id:
+    """Read one current host membership; a query selector is never authority."""
+    if not principal.is_authenticated:
+        return None, None
+    requested_values = request.query_params.getlist("workspace_id")
+    if len(requested_values) > 1 or (requested_values and not requested_values[0].strip()):
+        return None, None
+    requested_workspace_id = requested_values[0] if requested_values else None
+    hooks = get_platform_hooks()
+    if hooks.has_notification_scope_resolver:
+        return await hooks.call_notification_scope(
+            principal=principal,
+            app_id=app_id,
+            requested_workspace_id=requested_workspace_id,
+            request=request,
+        )
+    # Compatibility for hosts that have not adopted the read-only hook. An
+    # existing token-bound workspace can still be checked through module scope.
+    # Claimless tokens must never trigger a first-membership fallback there.
+    if not principal.workspace_id or (
+        requested_workspace_id and requested_workspace_id != principal.workspace_id
+    ):
         return None, None
     try:
         scope = await get_platform_hooks().call_module_scope(
@@ -217,6 +236,7 @@ async def list_notifications(
         status: "all" | "unread" | "read"  (default: "all")
         limit:  1–200  (default: 50)
         app_id: optional assertion that must match the loaded host app ID
+        workspace_id: optional selector; the host must verify its current membership
     """
     bounded_limit = max(1, min(int(limit), 200))
     query: dict[str, Any] = {}

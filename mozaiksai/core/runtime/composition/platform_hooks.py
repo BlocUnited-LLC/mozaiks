@@ -69,6 +69,14 @@ Bundle keys (all optional):
         also receives anonymous visitors (principal.is_authenticated is False),
         who all share one user id: never return a verified key for them.
 
+    notification_scope_resolver
+                          async (*, principal, app_id, requested_workspace_id,
+                                  request) -> Optional[Dict[str, str]]
+        Read-only membership assertion for notification reads and mutations.
+        Return verified_workspace_id and verified_tenant_id from one current
+        membership, or None. A request selector is never authority by itself.
+        The runtime rejects missing, conflicting, or ambiguous assertions.
+
     workflow_ordering     (workflow_names: List[str]) -> List[str]
         Reorder the workflow list returned to the frontend (e.g. by journey
         step sequence).
@@ -158,6 +166,7 @@ class PlatformExtensionBundle:
     chat_session_fields: Callable | None = None
     module_permission_resolver: Callable | None = None
     module_scope_resolver: Callable | None = None
+    notification_scope_resolver: Callable | None = None
     workflow_ordering: Callable | None = None
     workflow_name_resolver: Callable | None = None
     before_module_execution: Callable | None = None
@@ -178,6 +187,7 @@ _BUNDLE_KEYS = (
     "chat_session_fields",
     "module_permission_resolver",
     "module_scope_resolver",
+    "notification_scope_resolver",
     "workflow_ordering",
     "workflow_name_resolver",
     "before_module_execution",
@@ -206,6 +216,7 @@ def _normalize_bundle(bundle: Any) -> PlatformExtensionBundle:
             chat_session_fields=bundle.get("chat_session_fields"),
             module_permission_resolver=bundle.get("module_permission_resolver"),
             module_scope_resolver=bundle.get("module_scope_resolver"),
+            notification_scope_resolver=bundle.get("notification_scope_resolver"),
             workflow_ordering=bundle.get("workflow_ordering"),
             workflow_name_resolver=bundle.get("workflow_name_resolver"),
             before_module_execution=bundle.get("before_module_execution"),
@@ -230,6 +241,7 @@ def _normalize_bundle(bundle: Any) -> PlatformExtensionBundle:
         chat_session_fields=getattr(bundle, "chat_session_fields", None),
         module_permission_resolver=getattr(bundle, "module_permission_resolver", None),
         module_scope_resolver=getattr(bundle, "module_scope_resolver", None),
+        notification_scope_resolver=getattr(bundle, "notification_scope_resolver", None),
         workflow_ordering=getattr(bundle, "workflow_ordering", None),
         workflow_name_resolver=getattr(bundle, "workflow_name_resolver", None),
         before_module_execution=getattr(bundle, "before_module_execution", None),
@@ -266,6 +278,7 @@ class PlatformHookRegistry:
         self._chat_session_fields_hooks: list[Callable] = []
         self._module_permission_resolver_hooks: list[Callable] = []
         self._module_scope_resolver_hooks: list[Callable] = []
+        self._notification_scope_resolver_hooks: list[Callable] = []
         self._workflow_ordering_hooks: list[Callable] = []
         self._workflow_name_resolver_hooks: list[Callable] = []
         self._before_module_execution_hooks: list[Callable] = []
@@ -335,6 +348,7 @@ class PlatformHookRegistry:
             "chat_session_fields": self._chat_session_fields_hooks,
             "module_permission_resolver": self._module_permission_resolver_hooks,
             "module_scope_resolver": self._module_scope_resolver_hooks,
+            "notification_scope_resolver": self._notification_scope_resolver_hooks,
             "workflow_ordering": self._workflow_ordering_hooks,
             "workflow_name_resolver": self._workflow_name_resolver_hooks,
             "before_module_execution": self._before_module_execution_hooks,
@@ -503,6 +517,66 @@ class PlatformHookRegistry:
                     ) from exc
                 logger.warning("PLATFORM_HOOKS_MODULE_PERMISSIONS_ERROR: %s", exc)
         return current
+
+    async def call_notification_scope(
+        self,
+        *,
+        principal: Any,
+        app_id: str,
+        requested_workspace_id: str | None,
+        request: Any = None,
+    ) -> tuple[str | None, str | None]:
+        """Return one verified (tenant, workspace) pair, or no owner scope.
+
+        Notification authority cannot be composed from multiple extensions or
+        inherited from ordinary module dispatch. The host resolver must verify
+        the current membership; token and query workspace values are only
+        selectors and must agree with its assertion.
+        """
+        if len(self._notification_scope_resolver_hooks) != 1:
+            return None, None
+        if not getattr(principal, "is_authenticated", False):
+            return None, None
+        token_workspace_id = getattr(principal, "workspace_id", None)
+        if token_workspace_id is not None and (
+            not isinstance(token_workspace_id, str)
+            or not token_workspace_id
+            or token_workspace_id.strip() != token_workspace_id
+        ):
+            return None, None
+        if requested_workspace_id is not None and (
+            not isinstance(requested_workspace_id, str)
+            or not requested_workspace_id
+            or requested_workspace_id.strip() != requested_workspace_id
+        ):
+            return None, None
+        if token_workspace_id and requested_workspace_id and token_workspace_id != requested_workspace_id:
+            return None, None
+        selector = token_workspace_id or requested_workspace_id
+        try:
+            hook = self._notification_scope_resolver_hooks[0]
+            result = hook(
+                principal=principal,
+                app_id=app_id,
+                requested_workspace_id=selector,
+                request=request,
+            )
+            if inspect.isawaitable(result):
+                result = await result
+        except Exception as exc:
+            logger.warning("PLATFORM_HOOKS_NOTIFICATION_SCOPE_ERROR: %s", exc)
+            return None, None
+        if not isinstance(result, dict):
+            return None, None
+        workspace_id = result.get("verified_workspace_id")
+        tenant_id = result.get("verified_tenant_id")
+        if not all(isinstance(value, str) and value.strip() == value and value for value in (
+            workspace_id, tenant_id,
+        )):
+            return None, None
+        if selector and workspace_id != selector:
+            return None, None
+        return tenant_id, workspace_id
 
     async def call_module_scope(
         self,
@@ -735,6 +809,10 @@ class PlatformHookRegistry:
         return bool(self._module_scope_resolver_hooks)
 
     @property
+    def has_notification_scope_resolver(self) -> bool:
+        return bool(self._notification_scope_resolver_hooks)
+
+    @property
     def has_startup(self) -> bool:
         return bool(self._startup_hooks)
 
@@ -761,6 +839,7 @@ class PlatformHookRegistry:
             "chat_session_fields_hooks": len(self._chat_session_fields_hooks),
             "module_permission_resolver_hooks": len(self._module_permission_resolver_hooks),
             "module_scope_resolver_hooks": len(self._module_scope_resolver_hooks),
+            "notification_scope_resolver_hooks": len(self._notification_scope_resolver_hooks),
             "workflow_ordering_hooks": len(self._workflow_ordering_hooks),
             "workflow_name_resolver_hooks": len(self._workflow_name_resolver_hooks),
             "before_module_execution_hooks": len(self._before_module_execution_hooks),

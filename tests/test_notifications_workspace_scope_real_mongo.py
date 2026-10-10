@@ -210,6 +210,73 @@ def _ids(response) -> set[str]:
     return {row["notification_id"] for row in response.json()["notifications"]}
 
 
+def test_claimless_token_uses_only_one_current_host_membership(notification_http):
+    memberships = {WORKSPACE_A}
+
+    def current_membership(*, principal, requested_workspace_id, **_kwargs):
+        if principal.user_id != USER_ID:
+            return None
+        matches = memberships & ({requested_workspace_id} if requested_workspace_id else memberships)
+        if len(matches) != 1:
+            return None
+        workspace = next(iter(matches))
+        return {
+            "verified_tenant_id": TENANT_A if workspace == WORKSPACE_A else TENANT_B,
+            "verified_workspace_id": workspace,
+        }
+
+    notification_http.hooks.register_bundle(
+        {"notification_scope_resolver": current_membership}, source="read-only-membership",
+    )
+    client = notification_http.client
+    claimless = notification_http.token(None)
+    assert _ids(client.get("/api/notifications", headers=claimless)) == {
+        "support-a", "reply-a", "direct-message", "app-wide",
+    }
+    assert client.get("/api/notifications/count", headers=claimless).json()["count"] == 4
+    assert client.post("/api/notifications/support-b/read", headers=claimless).json()["success"] is False
+    assert client.post("/api/notifications/mark-all-read", headers=claimless).json()["marked_count"] == 4
+    assert notification_http.collection.find_one({"notification_id": "support-b"})["status"] == "unread"
+
+    memberships.add(WORKSPACE_B)
+    assert _ids(client.get("/api/notifications", headers=claimless)) == {
+        "direct-message", "app-wide",
+    }
+    assert client.get("/api/notifications/count", headers=claimless).json()["count"] == 0
+    assert client.delete("/api/notifications", headers=claimless).json()["cleared_count"] == 2
+    assert notification_http.collection.find_one({"notification_id": "support-a"}) is not None
+    assert notification_http.collection.find_one({"notification_id": "support-b"}) is not None
+
+
+def test_claimless_selector_is_checked_for_every_notification_mutation(notification_http):
+    def current_membership(*, principal, requested_workspace_id, **_kwargs):
+        if principal.user_id != USER_ID or requested_workspace_id not in {WORKSPACE_A, WORKSPACE_B}:
+            return None
+        return {
+            "verified_tenant_id": TENANT_A if requested_workspace_id == WORKSPACE_A else TENANT_B,
+            "verified_workspace_id": requested_workspace_id,
+        }
+
+    notification_http.hooks.register_bundle(
+        {"notification_scope_resolver": current_membership}, source="read-only-membership",
+    )
+    client = notification_http.client
+    claimless = notification_http.token(None, roles=["owner"])
+    selected_b = f"?workspace_id={WORKSPACE_B}"
+    assert _ids(client.get("/api/notifications" + selected_b, headers=claimless)) == {
+        "support-b", "reply-b", "direct-message", "app-wide",
+    }
+    assert client.get("/api/notifications/count" + selected_b, headers=claimless).json()["count"] == 4
+    assert client.post("/api/notifications/support-a/read" + selected_b, headers=claimless).json()["success"] is False
+    assert client.post("/api/notifications/support-b/read" + selected_b, headers=claimless).json()["success"] is True
+    assert client.post("/api/notifications/mark-all-read" + selected_b, headers=claimless).json()["marked_count"] == 3
+    assert client.delete("/api/notifications" + selected_b, headers=claimless).json()["cleared_count"] == 4
+    assert notification_http.collection.find_one({"notification_id": "support-a"})["status"] == "unread"
+    assert notification_http.collection.find_one({"notification_id": "reply-a"})["status"] == "unread"
+    assert _ids(client.get("/api/notifications?workspace_id=workspace-a&workspace_id=workspace-b", headers=claimless)) == set()
+    assert _ids(client.get("/api/notifications" + selected_b, headers=notification_http.token(WORKSPACE_A))) == set()
+
+
 def _seed_role_notifications(notification_http):
     records = [
         _role_record("role-tenant-a", ownerless=True, tenant_id=TENANT_A),
@@ -701,7 +768,9 @@ def test_same_user_workspace_switch_scopes_support_alerts(notification_http):
     expected_b = {"support-b", "reply-b", "direct-message", "app-wide"}
 
     assert _ids(client.get("/api/notifications", headers=a)) == expected_a
-    assert _ids(client.get("/api/notifications?workspace_id=workspace-b", headers=a)) == expected_a
+    assert _ids(client.get("/api/notifications?workspace_id=workspace-b", headers=a)) == {
+        "direct-message", "app-wide",
+    }
     assert _ids(client.get("/api/notifications", headers=b)) == expected_b
     assert _ids(client.get("/api/notifications", headers=notification_http.token(None))) == {
         "direct-message", "app-wide",

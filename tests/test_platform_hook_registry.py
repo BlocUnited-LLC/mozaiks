@@ -19,11 +19,51 @@ Covers:
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
 from mozaiksai.core.runtime.composition.platform_hooks import PlatformHookRegistry
+
+
+@pytest.mark.asyncio
+async def test_notification_scope_requires_one_consistent_host_assertion():
+    principal = SimpleNamespace(is_authenticated=True, workspace_id=None)
+    hooks = PlatformHookRegistry()
+    async def call(selector=None):
+        return await hooks.call_notification_scope(
+            principal=principal, app_id="app", requested_workspace_id=selector,
+        )
+    assert await call() == (None, None)
+    hooks.register_bundle({"notification_scope_resolver": lambda **_: {
+        "verified_workspace_id": "workspace-a", "verified_tenant_id": "tenant-a",
+    }}, source="host")
+    assert await call() == ("tenant-a", "workspace-a")
+    assert await call("workspace-b") == (None, None)
+    principal.workspace_id = "workspace-b"
+    assert await call("workspace-a") == (None, None)
+    principal.workspace_id = None
+    hooks.register_bundle({"notification_scope_resolver": lambda **_: {
+        "verified_workspace_id": "workspace-b", "verified_tenant_id": "tenant-b",
+    }}, source="other-host")
+    assert await call() == (None, None)
+
+
+@pytest.mark.asyncio
+async def test_notification_scope_rejects_missing_malformed_or_failed_host_result():
+    principal = SimpleNamespace(is_authenticated=True, workspace_id=None)
+    for resolver in (
+        lambda **_: None,
+        lambda **_: {"verified_workspace_id": ["workspace-a"], "verified_tenant_id": "tenant-a"},
+        lambda **_: {"verified_workspace_id": "workspace-a"},
+        lambda **_: (_ for _ in ()).throw(RuntimeError("unavailable")),
+    ):
+        hooks = PlatformHookRegistry()
+        hooks.register_bundle({"notification_scope_resolver": resolver}, source="host")
+        assert await hooks.call_notification_scope(
+            principal=principal, app_id="app", requested_workspace_id=None,
+        ) == (None, None)
 
 # ---------------------------------------------------------------------------
 # Fixture: fresh registry (bypasses singleton for unit tests)

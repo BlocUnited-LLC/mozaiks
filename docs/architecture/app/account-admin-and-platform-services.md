@@ -212,6 +212,17 @@ define the canonical subscription model.
 - module contracts use `contracts/notifications.yaml` to declare what should
   happen when named events occur
 - optional Python hooks determine audiences, rendering, or delivery details
+- the shared host bell reads owner-scoped records only after the host's
+  `notification_scope_resolver` asserts one current tenant/workspace membership
+  for the signed user. A `workspace_id` query value or token claim selects a
+  candidate; neither is membership authority. With no selector, hosts must
+  return a scope only when exactly one active membership exists. Missing,
+  ambiguous, conflicting, or failed resolution hides owner-scoped records.
+  The resolver is read-only and separate from module dispatch or account setup.
+- bell list, count, read, mark-all-read, and clear apply the same scope. Direct
+  user recipients still require the matching owner scope when the record has
+  tenant/workspace ownership. Token roles and permissions alone do not expose
+  broad role or permission audiences.
 
 AI can personalize content on top of a notification system. It should not be
 the thing that makes the notification system exist.
