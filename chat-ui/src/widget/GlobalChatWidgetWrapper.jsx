@@ -5,14 +5,16 @@
  * when the user is in widget mode (navigating outside of ChatPage).
  * 
  * This component should be rendered at the root level, INSIDE the ChatUIProvider,
- * so it has access to the chat context.
- * 
+ * so it has access to the chat context, and AFTER the routed shell so the
+ * assistant panel follows the page controls and the mobile bottom bar that
+ * opens it in keyboard tab order.
+ *
  * Usage:
  * ```jsx
  * <ChatUIProvider>
  *   <Router>
- *     <GlobalChatWidgetWrapper />
  *     <Routes>...</Routes>
+ *     <GlobalChatWidgetWrapper />
  *   </Router>
  * </ChatUIProvider>
  * ```
