@@ -9,6 +9,8 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { build } from 'esbuild';
 import { chromium, expect } from '@playwright/test';
+import postcss from 'postcss';
+import tailwindcss from '@tailwindcss/postcss';
 
 const shell = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const compiled = await build({
@@ -493,6 +495,10 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
       builder.onLoad({filter:/.*/, namespace:'fixture'}, args => ({contents:stubs[args.path], loader:'jsx', resolveDir:shell}));
     }}],
   });
+  const responsiveCss = await postcss([tailwindcss()]).process(
+    `@import "tailwindcss" source(none);\n@source "${path.join(root, 'factory_app/workflows/AppGenerator/ui/AppWorkbench.js').replaceAll('\\', '/')}";`,
+    { from: path.join(shell, 'styles.css') },
+  );
   let scenario;
   let accepted = false;
   const requests = [];
@@ -567,6 +573,65 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
   t.after(() => new Promise(resolve => {server.closeAllConnections(); server.close(resolve);}));
   const browser = await chromium.launch({headless:true});
   t.after(() => browser.close());
+  await t.test('mobile workbench panes use the available width in Split and Code', async () => {
+    scenario = {status:'planned', validation:'passed', saved:true};
+    const page = await browser.newPage({viewport:{width:390,height:664}});
+    const paneLayout = async () => page.getByTestId('app-workbench-panes').locator(':scope > div').evaluateAll(elements => (
+      elements.map(element => {
+        const {x,y,width} = element.getBoundingClientRect();
+        return {x,y,width};
+      })
+    ));
+    const capture = async name => {
+      if (!process.env.MOZAIKS_TEST_SCREENSHOTS) return;
+      await fs.mkdir(process.env.MOZAIKS_TEST_SCREENSHOTS, {recursive:true});
+      await page.getByTestId('app-workbench-panes').scrollIntoViewIfNeeded();
+      await page.screenshot({path:path.join(process.env.MOZAIKS_TEST_SCREENSHOTS, `${name}.png`),fullPage:false});
+    };
+    try {
+      await page.goto(`http://127.0.0.1:${server.address().port}`);
+      await page.addStyleTag({content:responsiveCss.css});
+      await page.getByRole('button', {name:'Split', exact:true}).click();
+      let panes = await paneLayout();
+      assert.equal(panes.length, 3);
+      assert.ok(panes.every(pane => pane.width >= 300), JSON.stringify(panes));
+      assert.ok(panes[0].y < panes[1].y && panes[1].y < panes[2].y, JSON.stringify(panes));
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 390);
+      await capture('mobile-390-split');
+
+      await page.getByRole('button', {name:'Code', exact:true}).click();
+      panes = await paneLayout();
+      assert.equal(panes.length, 2);
+      assert.ok(panes.every(pane => pane.width >= 300), JSON.stringify(panes));
+      assert.ok(panes[0].y < panes[1].y, JSON.stringify(panes));
+      await capture('mobile-390-code');
+
+      await page.getByRole('button', {name:'Split', exact:true}).click();
+      for (const width of [640, 720, 768, 900]) {
+        await page.setViewportSize({width,height:900});
+        panes = await paneLayout();
+        assert.equal(panes.length, 3);
+        assert.ok(panes.every(pane => pane.width >= 300), JSON.stringify({width,panes}));
+        assert.ok(panes[0].y < panes[1].y && panes[1].y < panes[2].y, JSON.stringify({width,panes}));
+        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
+        if (width === 720 || width === 900) await capture(`intermediate-${width}-split`);
+      }
+
+      // A wide window can still give the chat artifact only half the canvas.
+      await page.evaluate(() => { document.getElementById('root').style.width = '50%'; });
+      await page.setViewportSize({width:1440,height:900});
+      panes = await paneLayout();
+      assert.ok(panes.every(pane => pane.width >= 300), JSON.stringify(panes));
+      assert.ok(panes[0].y < panes[1].y && panes[1].y < panes[2].y, JSON.stringify(panes));
+      await capture('desktop-1440-half-canvas-split-stacked');
+
+      await page.evaluate(() => { document.getElementById('root').style.width = '100%'; });
+      panes = await paneLayout();
+      assert.ok(panes.every(pane => pane.width >= 240), JSON.stringify(panes));
+      assert.ok(panes.every(pane => Math.abs(pane.y - panes[0].y) < 1), JSON.stringify(panes));
+      await capture('desktop-1440-full-canvas-split');
+    } finally { await page.close(); }
+  });
   await t.test('Redesign theme keeps saved bundle identity and exact theme file scope', async () => {
     scenario = {decision:'apply_proposed_scope'};
     requests.length = 0;
