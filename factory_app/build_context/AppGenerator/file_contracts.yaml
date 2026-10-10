@@ -369,7 +369,7 @@ backend_helper_files:
     startup_service:
       required_stub: backend/{worker_file}.py
       service_class: "{ServiceClass}"
-      note: Must be declared in python_stubs before backend implementation generates it.
+      note: Must be declared in python_stubs before backend implementation generates it; profile is null for the ordinary host or worker for an explicitly separate worker process.
 
   event_pipeline_conventions:
     description: >

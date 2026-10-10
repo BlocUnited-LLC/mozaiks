@@ -1037,6 +1037,7 @@ class ModuleRuntimeExtension(ModuleContractModel):
     kind: Literal["api_router", "startup_service"]
     entrypoint: str
     prefix: str | None = None
+    profile: Literal["worker"] | None = None
 
     @field_validator("entrypoint", mode="before")
     @classmethod
@@ -1069,6 +1070,8 @@ class ModuleRuntimeExtension(ModuleContractModel):
             raise ValueError("startup_service runtime extensions must not declare prefix")
         if self.kind == "api_router" and self.prefix is not None and not self.prefix.startswith("/"):
             raise ValueError("api_router runtime extension prefix must start with /")
+        if self.kind == "api_router" and self.profile is not None:
+            raise ValueError("api_router runtime extensions must not declare profile")
         return self
 
 

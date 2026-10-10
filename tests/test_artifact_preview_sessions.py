@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from datetime import timedelta
 from unittest.mock import AsyncMock
 
@@ -664,6 +665,35 @@ async def test_cleanup_expires_previews_but_shutdown_preserves_live_session(monk
     assert (await restarted.status(live.sandbox_id)).status == "running"
     terminated = [kwargs["session_id"] for kind, kwargs in adapter.calls if kind == "terminate_session"]
     assert terminated == [expired.session_id]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("profile,expected", [
+    (None, ["entered", "exited"]),
+    ("host", ["entered", "exited"]),
+    ("worker", []),
+])
+async def test_studio_preview_maintenance_runs_only_in_host_profile(monkeypatch, profile, expected):
+    from mozaiksai.hosts import studio
+
+    events = []
+
+    @asynccontextmanager
+    async def preview_lifespan(_app):
+        events.append("entered")
+        try:
+            yield
+        finally:
+            events.append("exited")
+
+    if profile is None:
+        monkeypatch.delenv("MOZAIKS_STARTUP_SERVICE_PROFILE", raising=False)
+    else:
+        monkeypatch.setenv("MOZAIKS_STARTUP_SERVICE_PROFILE", profile)
+    monkeypatch.setattr(studio, "preview_sessions_lifespan", preview_lifespan)
+    async with studio._studio_preview_sessions_lifespan(None):
+        assert events == ([] if profile == "worker" else ["entered"])
+    assert events == expected
 
 
 @pytest.mark.asyncio

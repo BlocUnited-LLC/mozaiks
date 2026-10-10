@@ -14,6 +14,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- Module startup services can opt into a separate `worker` process profile;
+  existing services stay on the ordinary host. Invalid worker selection aborts
+  startup before serving requests. Studio preview maintenance stays on the
+  ordinary host when a worker process is selected.
 - Prepared the E2B adapter for private sealed candidate sessions with an exact
   template build reference, denied internet egress, token-gated port access,
   no provider preview URL, and no reconnect that could resume a paused session.

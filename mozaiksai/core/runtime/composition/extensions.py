@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import inspect
+import os
 from collections.abc import Iterable
 from typing import Any
 
@@ -15,6 +16,21 @@ from logs.logging_config import get_workflow_logger
 logger = get_workflow_logger("runtime_extensions")
 
 _RUN_LEVEL_TRIGGERS = {"on_start", "on_complete", "on_fail"}
+_STARTUP_SERVICE_PROFILES = {"host", "worker"}
+
+
+class StartupServiceProfileError(ValueError):
+    """The selected process profile cannot start its declared services."""
+
+
+def resolve_startup_service_profile() -> str:
+    """Select one finite service profile; absence preserves ordinary host behavior."""
+    profile = os.environ.get("MOZAIKS_STARTUP_SERVICE_PROFILE", "host")
+    if profile not in _STARTUP_SERVICE_PROFILES:
+        raise StartupServiceProfileError(
+            "MOZAIKS_STARTUP_SERVICE_PROFILE must be host or worker"
+        )
+    return profile
 
 
 # ---------------------------------------------------------------------------
@@ -101,7 +117,9 @@ def mount_module_routers(app: FastAPI, loaded_modules: Iterable[Any]) -> int:
     return mounted
 
 
-async def start_module_services(loaded_modules: Iterable[Any]) -> list[Any]:
+async def start_module_services(
+    loaded_modules: Iterable[Any], *, profile: str | None = None
+) -> list[Any]:
     """Start ``startup_service`` extensions declared in already-loaded module manifests.
 
     Uses the module's registered ``sys.modules`` package root to resolve
@@ -113,7 +131,11 @@ async def start_module_services(loaded_modules: Iterable[Any]) -> list[Any]:
     Returns list of service instances that were started (suitable for passing
     to ``stop_services`` on shutdown).
     """
-    started: list[Any] = []
+    selected_profile = resolve_startup_service_profile() if profile is None else profile
+    if not isinstance(selected_profile, str) or selected_profile not in _STARTUP_SERVICE_PROFILES:
+        raise StartupServiceProfileError("Startup service profile must be host or worker")
+
+    selected: list[tuple[str, Any]] = []
     for mod in loaded_modules:
         manifests = getattr(mod, "manifests", None)
         rt_ext = (
@@ -127,28 +149,53 @@ async def start_module_services(loaded_modules: Iterable[Any]) -> list[Any]:
         for ext in rt_ext.extensions:
             if ext.kind != "startup_service":
                 continue
-            try:
-                qualified = _qualify_module_entrypoint(module_name, ext.entrypoint)
-                cls = _load_entrypoint(qualified)
-                svc = cls() if callable(cls) and not inspect.iscoroutinefunction(cls) else cls
-                start_fn = getattr(svc, "start", None)
-                if callable(start_fn):
-                    res = start_fn()
-                    if inspect.isawaitable(res):
-                        await res
-                started.append(svc)
-                logger.info(
-                    "MODULE_EXTENSIONS_SERVICE_STARTED: %s (module=%s)",
-                    ext.entrypoint,
-                    module_name,
-                )
-            except Exception as exc:
-                logger.warning(
-                    "MODULE_EXTENSIONS_SERVICE_FAILED: %s (module=%s) error=%s",
-                    ext.entrypoint,
-                    module_name,
-                    exc,
-                )
+            declared_profile = getattr(ext, "profile", None)
+            if declared_profile is not None and declared_profile != "worker":
+                raise StartupServiceProfileError("Invalid declared startup service profile")
+            if declared_profile is None:
+                declared_profile = "host"
+            if declared_profile == selected_profile:
+                selected.append((module_name, ext))
+
+    if selected_profile == "worker" and not selected:
+        raise StartupServiceProfileError("Worker profile has no declared startup service")
+
+    started: list[Any] = []
+    for module_name, ext in selected:
+        svc: Any = None
+        try:
+            qualified = _qualify_module_entrypoint(module_name, ext.entrypoint)
+            cls = _load_entrypoint(qualified)
+            svc = cls() if callable(cls) and not inspect.iscoroutinefunction(cls) else cls
+            start_fn = getattr(svc, "start", None)
+            if selected_profile == "worker" and not callable(start_fn):
+                raise StartupServiceProfileError("Worker startup service must have a callable start method")
+            if callable(start_fn):
+                res = start_fn()
+                if inspect.isawaitable(res):
+                    await res
+            started.append(svc)
+            logger.info(
+                "MODULE_EXTENSIONS_SERVICE_STARTED: %s (module=%s)",
+                ext.entrypoint,
+                module_name,
+            )
+        except Exception as exc:
+            logger.warning(
+                "MODULE_EXTENSIONS_SERVICE_FAILED: %s (module=%s) error=%s",
+                ext.entrypoint,
+                module_name,
+                exc,
+            )
+            if selected_profile == "worker":
+                if svc is not None:
+                    await stop_services([svc])
+                await stop_services(started)
+                if isinstance(exc, StartupServiceProfileError):
+                    raise
+                raise StartupServiceProfileError(
+                    "Worker startup service could not start"
+                ) from exc
     return started
 
 
