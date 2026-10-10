@@ -161,12 +161,8 @@ def _notification_visibility_filter(principal: UserPrincipal) -> list[dict[str, 
     visibility: list[dict[str, Any]] = [
         {"audience.user_ids": principal.user_id},
     ]
-    roles = [role for role in principal.roles if role]
-    if roles:
-        visibility.append({"audience.roles": {"$in": roles}})
-    permissions = [scope for scope in principal.scopes if scope]
-    if permissions:
-        visibility.append({"audience.permissions": {"$in": permissions}})
+    # Token-wide roles and permissions do not prove a grant in this record's
+    # workspace. Broad audiences need an exact-membership grant before reads.
     visibility.append(
         {
             "$and": [
@@ -211,7 +207,7 @@ async def list_notifications(
     List platform notifications visible to the authenticated principal.
 
     Returns notifications from the platform_notifications collection filtered by
-    audience roles and the loaded host app ID.
+    direct or app-wide audience and the loaded host app ID.
 
     Safe fields only — source_event (which may contain provider IDs) is excluded.
 

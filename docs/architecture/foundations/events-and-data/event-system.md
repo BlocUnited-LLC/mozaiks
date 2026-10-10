@@ -147,12 +147,14 @@ support alerts without a workspace owner stay hidden. App-wide alerts and
 ordinary direct messages retain their existing audience visibility. A token
 without a workspace binding sees those app-wide notifications but no support
 alerts; the shared shell does not currently select a workspace for its bell.
-Role- or permission-targeted alerts with tenant or workspace ownership also
-require each present owner to match the host-verified scope. Broad-audience
-alerts with no owner or malformed ownership stay hidden, even when they also
-name the caller directly. Hosted customer alerts and app-wide announcements
-need trusted recipient IDs or a separately reviewed generic audience contract;
-a broad token role or permission cannot grant access to another workspace.
+Role- or permission-targeted alerts remain hidden until a host can supply a
+read-only grant for the exact workspace and tenant. A token-wide role or
+permission and a verified membership without that grant are insufficient.
+Alerts that also name the caller directly remain visible only when each
+present owner matches the host-verified scope. Broad-audience alerts with no
+owner or malformed ownership stay hidden, even when they also name the caller
+directly. Hosted customer alerts and app-wide announcements need trusted
+recipient IDs or a separately reviewed generic audience contract.
 New notifications omit absent tenant/workspace owners and skip creation when
 an explicitly supplied owner has an invalid type or conflicts across nested
 and top-level event fields. Older records with present

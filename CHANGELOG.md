@@ -102,6 +102,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
+- Notification reads and mutations no longer treat token-wide roles or
+  permissions as grants for workspace audiences. Broad-only alerts remain
+  hidden until the host can verify a grant for the exact membership; direct
+  recipients and app-wide alerts keep their existing visibility rules.
+
 - Android source export and delivery verification now reject literal values
   under credential objects even when nested payload fields use unfamiliar names.
   Descriptive metadata and names-only references remain exportable.
@@ -127,9 +132,8 @@ This project follows a practical pre-1.0 changelog format:
   the caller's token-bound workspace to match a host-verified membership.
   Earlier support alerts without a workspace owner are hidden from notification
   reads and bulk actions; app-wide alerts and ordinary direct messages remain
-  available. Role- or permission-targeted alerts with tenant or workspace
-  ownership require the matching verified scope, and ownerless broad-audience
-  alerts are hidden. New alerts use the event's normalized owner and reject
+  available. Mixed direct and broad alerts require the matching verified scope,
+  and ownerless broad-audience alerts are hidden. New alerts use the event's normalized owner and reject
   malformed or conflicting owner fields. All
   notification reads and mutations are limited to the app loaded by the host,
   including when a token has no app claim.

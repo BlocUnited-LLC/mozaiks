@@ -47,7 +47,7 @@ def _record(
     workspace_id: str | list[str] | None = None,
     related_type: str | None = None, ownerless: bool = False,
 ) -> dict:
-    audience = {"permissions": ["workspace_support.read"]} if module_id == "workspace_support" else (
+    audience = {"permissions": ["workspace_support.read"], "user_ids": [USER_ID]} if module_id == "workspace_support" else (
         {"user_ids": [USER_ID]} if module_id == "messages" else {}
     )
     record = {
@@ -271,18 +271,16 @@ def _seed_role_notifications(notification_http):
     asyncio.run(produce())
 
 
-def test_owned_role_alerts_require_exact_verified_workspace_and_tenant(notification_http):
+def test_broad_role_alerts_wait_for_exact_membership_grants(notification_http):
     _seed_role_notifications(notification_http)
     client = notification_http.client
     a = notification_http.token(WORKSPACE_A, roles=["owner"])
     b = notification_http.token(WORKSPACE_B, roles=["owner"])
     expected_a = {
         "support-a", "reply-a", "direct-message", "app-wide",
-        "role-a", "role-tenant-a", "role-workspace-a",
     }
     expected_b = {
-        "support-b", "reply-b", "direct-message", "app-wide", "role-announcement-b",
-        "role-b", "role-tenant-b", "role-workspace-b", "role-and-recipient-b",
+        "support-b", "reply-b", "direct-message", "app-wide", "role-and-recipient-b",
     }
     assert _ids(client.get("/api/notifications", headers=a)) == expected_a
     assert _ids(client.get("/api/notifications", headers=b)) == expected_b
@@ -292,13 +290,57 @@ def test_owned_role_alerts_require_exact_verified_workspace_and_tenant(notificat
     assert _ids(client.get("/api/notifications", headers=notification_http.token(WORKSPACE_A))) == {
         "support-a", "reply-a", "direct-message", "app-wide",
     }
-    assert client.get("/api/notifications/count", headers=a).json() == {"count": 7, "unread_count": 7}
-    assert client.get("/api/notifications/count", headers=b).json() == {"count": 9, "unread_count": 9}
+    assert client.get("/api/notifications/count", headers=a).json() == {"count": 4, "unread_count": 4}
+    assert client.get("/api/notifications/count", headers=b).json() == {"count": 5, "unread_count": 5}
+
+
+@pytest.mark.parametrize("audience", [
+    {"roles": ["owner"]},
+    {"permissions": ["workspace_support.read"]},
+])
+def test_workspace_membership_cannot_promote_token_wide_grant(notification_http, monkeypatch, audience):
+    hooks = PlatformHookRegistry()
+
+    def verified_membership(*, principal, requested_scope, **_kwargs):
+        memberships = {
+            "owner-a": (WORKSPACE_A, TENANT_A),
+            "viewer-b": (WORKSPACE_B, TENANT_B),
+        }
+        membership = memberships.get(principal.user_id)
+        if not membership or requested_scope.get("workspace_id") != membership[0]:
+            return {}
+        return {"verified_workspace_id": membership[0], "verified_tenant_id": membership[1]}
+
+    hooks.register_bundle({"module_scope_resolver": verified_membership}, source="exact-membership")
+    monkeypatch.setattr(notification_router, "get_platform_hooks", lambda: hooks)
+    broad = _role_record("workspace-b-broad", workspace_id=WORKSPACE_B, tenant_id=TENANT_B)
+    broad["audience"] = audience
+    direct = _record(
+        "workspace-b-direct", module_id="messages", event_type="domain.messages.message_sent",
+        workspace_id=WORKSPACE_B,
+    )
+    direct["audience"] = {"user_ids": ["viewer-b"]}
+    notification_http.collection.insert_many([broad, direct])
+
+    client = notification_http.client
+    owner_a = notification_http.token(WORKSPACE_A, roles=["owner"], user_id="owner-a")
+    viewer_b = notification_http.token(WORKSPACE_B, roles=["owner"], user_id="viewer-b")
+    assert _ids(client.get("/api/notifications", headers=owner_a)) == {"app-wide"}
+    assert _ids(client.get("/api/notifications", headers=viewer_b)) == {
+        "app-wide", "workspace-b-direct",
+    }
+    assert client.get("/api/notifications/count", headers=viewer_b).json() == {
+        "count": 2, "unread_count": 2,
+    }
+    assert client.post("/api/notifications/workspace-b-broad/read", headers=viewer_b).json()["success"] is False
+    assert client.post("/api/notifications/mark-all-read", headers=viewer_b).json()["marked_count"] == 2
+    assert client.delete("/api/notifications", headers=viewer_b).json()["cleared_count"] == 2
+    assert notification_http.collection.find_one({"notification_id": "workspace-b-broad"})["status"] == "unread"
 
 
 @pytest.mark.parametrize("event_shape", ["structured", "flat"])
 @pytest.mark.parametrize("audience", [{"roles": ["owner"]}, {"permissions": ["workspace_support.read"]}])
-def test_generated_workspace_alert_without_tenant_reaches_only_verified_member(
+def test_generated_workspace_broad_alert_keeps_owner_but_waits_for_grant(
     notification_http, event_shape, audience,
 ):
     notification_id = f"generated-{event_shape}-{'role' if 'roles' in audience else 'permission'}"
@@ -342,17 +384,17 @@ def test_generated_workspace_alert_without_tenant_reaches_only_verified_member(
     member_a = notification_http.token(WORKSPACE_A, roles=["owner"])
     member_b = notification_http.token(WORKSPACE_B, roles=["owner"])
     unbound = notification_http.token(None, roles=["owner"])
-    assert notification_id in _ids(client.get("/api/notifications", headers=member_a))
-    assert client.get("/api/notifications/count", headers=member_a).json()["count"] == before + 1
+    assert notification_id not in _ids(client.get("/api/notifications", headers=member_a))
+    assert client.get("/api/notifications/count", headers=member_a).json()["count"] == before
     assert notification_id not in _ids(client.get("/api/notifications", headers=member_b))
     assert notification_id not in _ids(client.get("/api/notifications", headers=unbound))
     assert client.post(f"/api/notifications/{notification_id}/read", headers=member_b).json()["success"] is False
-    assert client.post(f"/api/notifications/{notification_id}/read", headers=member_a).json()["success"] is True
+    assert client.post(f"/api/notifications/{notification_id}/read", headers=member_a).json()["success"] is False
     assert client.get("/api/notifications/count", headers=member_a).json()["count"] == before
 
 
 @pytest.mark.parametrize("event_shape", ["structured", "flat"])
-def test_generated_tenant_alert_without_workspace_requires_verified_tenant(
+def test_generated_tenant_broad_alert_keeps_owner_but_waits_for_grant(
     notification_http, event_shape,
 ):
     notification_id = f"tenant-only-{event_shape}"
@@ -389,7 +431,7 @@ def test_generated_tenant_alert_without_workspace_requires_verified_tenant(
     client = notification_http.client
     member_a = notification_http.token(WORKSPACE_A, roles=["owner"])
     member_b = notification_http.token(WORKSPACE_B, roles=["owner"])
-    assert notification_id in _ids(client.get("/api/notifications", headers=member_a))
+    assert notification_id not in _ids(client.get("/api/notifications", headers=member_a))
     assert notification_id not in _ids(client.get("/api/notifications", headers=member_b))
     assert notification_id not in _ids(client.get(
         "/api/notifications", headers=notification_http.token(None, roles=["owner"]),
@@ -430,7 +472,7 @@ def test_malformed_generated_owner_never_broadens_role_alert(
 
 @pytest.mark.parametrize("nested_owner", ["", None])
 @pytest.mark.parametrize("owner_key", ["tenant_id", "workspace_id"])
-def test_generated_owner_fallback_matches_provenance_and_member_scope(
+def test_generated_owner_fallback_matches_provenance_and_stays_hidden(
     notification_http, owner_key, nested_owner,
 ):
     event_type = "hosted.hosting.app.deployed"
@@ -471,9 +513,9 @@ def test_generated_owner_fallback_matches_provenance_and_member_scope(
 
     member_a = notification_http.token(WORKSPACE_A, roles=["owner"])
     member_b = notification_http.token(WORKSPACE_B, roles=["owner"])
-    assert (notification_id in _ids(notification_http.client.get(
+    assert notification_id not in _ids(notification_http.client.get(
         "/api/notifications", headers=member_a,
-    ))) is (owner_key == "workspace_id")
+    ))
     assert notification_id not in _ids(notification_http.client.get(
         "/api/notifications", headers=member_b,
     ))
@@ -515,7 +557,7 @@ def test_present_null_owners_do_not_authorize_a_broad_alert(notification_http):
         ).json()["success"] is False
 
 
-def test_owned_role_alert_mutations_deny_foreign_and_ambiguous_owners(notification_http):
+def test_broad_role_alert_mutations_require_membership_grants(notification_http):
     _seed_role_notifications(notification_http)
     client = notification_http.client
     a = notification_http.token(WORKSPACE_A, roles=["owner"])
@@ -525,12 +567,12 @@ def test_owned_role_alert_mutations_deny_foreign_and_ambiguous_owners(notificati
     }
     for notification_id in foreign:
         assert client.post(f"/api/notifications/{notification_id}/read", headers=a).json()["success"] is False
-    assert client.post("/api/notifications/role-a/read", headers=a).json()["success"] is True
-    assert client.post("/api/notifications/mark-all-read", headers=a).json()["marked_count"] == 6
+    assert client.post("/api/notifications/role-a/read", headers=a).json()["success"] is False
+    assert client.post("/api/notifications/mark-all-read", headers=a).json()["marked_count"] == 4
     assert notification_http.collection.count_documents({"notification_id": {"$in": list(foreign)},
                                                          "status": "unread"}) == len(foreign)
-    assert client.delete("/api/notifications", headers=a).json()["cleared_count"] == 7
-    assert notification_http.collection.count_documents({"notification_id": {"$in": list(foreign)}}) == len(foreign)
+    assert client.delete("/api/notifications", headers=a).json()["cleared_count"] == 4
+    assert notification_http.collection.count_documents({"module_id": "hosting", "status": "unread"}) == 11
 
 
 def test_unbound_owner_role_cannot_read_or_mutate_owned_alerts(notification_http):
@@ -548,7 +590,7 @@ def test_unbound_owner_role_cannot_read_or_mutate_owned_alerts(notification_http
     assert notification_http.collection.count_documents({"module_id": "hosting", "status": "unread"}) == 11
 
 
-def test_tenant_owned_role_alert_requires_verified_tenant(notification_http, monkeypatch):
+def test_workspace_only_membership_does_not_authorize_broad_role(notification_http, monkeypatch):
     _seed_role_notifications(notification_http)
     hooks = PlatformHookRegistry()
     hooks.register_bundle({
@@ -557,10 +599,10 @@ def test_tenant_owned_role_alert_requires_verified_tenant(notification_http, mon
     monkeypatch.setattr(notification_router, "get_platform_hooks", lambda: hooks)
     a = notification_http.token(WORKSPACE_A, roles=["owner"])
     assert _ids(notification_http.client.get("/api/notifications", headers=a)) == {
-        "support-a", "reply-a", "direct-message", "app-wide", "role-workspace-a",
+        "support-a", "reply-a", "direct-message", "app-wide",
     }
     assert notification_http.client.post("/api/notifications/role-a/read", headers=a).json()["success"] is False
-    assert notification_http.client.post("/api/notifications/role-workspace-a/read", headers=a).json()["success"] is True
+    assert notification_http.client.post("/api/notifications/role-workspace-a/read", headers=a).json()["success"] is False
 
 
 def test_direct_recipient_derivation_never_turns_missing_target_app_wide(notification_http):
@@ -601,7 +643,7 @@ def test_direct_recipient_derivation_never_turns_missing_target_app_wide(notific
     ))
 
 
-def test_permission_audience_requires_verified_owner_for_reads_and_mutations(notification_http):
+def test_permission_audience_requires_exact_grant_for_reads_and_mutations(notification_http):
     def permission_record(notification_id, *, workspace_id=None, tenant_id=None, ownerless=False):
         record = _record(
             notification_id, module_id="infra_assurance",
@@ -629,27 +671,26 @@ def test_permission_audience_requires_verified_owner_for_reads_and_mutations(not
     b = notification_http.token(WORKSPACE_B)
     unbound = notification_http.token(None)
     assert _ids(client.get("/api/notifications", headers=a)) == {
-        "support-a", "reply-a", "direct-message", "app-wide", "permission-a",
+        "support-a", "reply-a", "direct-message", "app-wide",
     }
     assert _ids(client.get("/api/notifications", headers=b)) == {
-        "support-b", "reply-b", "direct-message", "app-wide", "permission-b",
-        "permission-tenant-b", "permission-and-recipient-b",
+        "support-b", "reply-b", "direct-message", "app-wide", "permission-and-recipient-b",
     }
     assert _ids(client.get("/api/notifications", headers=unbound)) == {"direct-message", "app-wide"}
-    assert client.get("/api/notifications/count", headers=a).json() == {"count": 5, "unread_count": 5}
-    assert client.get("/api/notifications/count", headers=b).json() == {"count": 7, "unread_count": 7}
+    assert client.get("/api/notifications/count", headers=a).json() == {"count": 4, "unread_count": 4}
+    assert client.get("/api/notifications/count", headers=b).json() == {"count": 5, "unread_count": 5}
     for notification_id in (
         "permission-b", "permission-tenant-b", "permission-ownerless", "permission-mismatch",
         "permission-and-recipient-b",
     ):
         assert client.post(f"/api/notifications/{notification_id}/read", headers=a).json()["success"] is False
         assert client.post(f"/api/notifications/{notification_id}/read", headers=unbound).json()["success"] is False
-    assert client.post("/api/notifications/permission-a/read", headers=a).json()["success"] is True
+    assert client.post("/api/notifications/permission-a/read", headers=a).json()["success"] is False
     assert client.post("/api/notifications/mark-all-read", headers=a).json()["marked_count"] == 4
-    assert client.delete("/api/notifications", headers=a).json()["cleared_count"] == 5
+    assert client.delete("/api/notifications", headers=a).json()["cleared_count"] == 4
     assert notification_http.collection.count_documents({
-        "notification_id": {"$regex": "^permission-(?!a$)"}, "status": "unread",
-    }) == 5
+        "notification_id": {"$regex": "^permission-"}, "status": "unread",
+    }) == 6
 
 
 def test_same_user_workspace_switch_scopes_support_alerts(notification_http):

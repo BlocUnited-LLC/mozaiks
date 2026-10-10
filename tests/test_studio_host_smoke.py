@@ -215,8 +215,6 @@ def test_notification_count_query_uses_platform_notification_intents():
     assert query["app_id"] == "app_1"
     assert query["$or"] == [
         {"audience.user_ids": "user_1"},
-        {"audience.roles": {"$in": ["admin"]}},
-        {"audience.permissions": {"$in": ["notifications.read"]}},
         {
             "$and": [
                 {"$or": [{"audience.user_ids": {"$exists": False}}, {"audience.user_ids": []}]},
