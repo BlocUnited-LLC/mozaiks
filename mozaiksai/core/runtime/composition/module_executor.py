@@ -34,7 +34,7 @@ from collections import Counter
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
 from logs.logging_config import get_workflow_logger
@@ -76,6 +76,9 @@ from mozaiksai.core.runtime.persistence.request_scope import (
     bind_persistence_principal,
     current_persistence_principal,
 )
+
+if TYPE_CHECKING:
+    from mozaiksai.core.events.unified_event_dispatcher import EventDispatchOutcome
 
 logger = get_workflow_logger("module_executor")
 
@@ -1053,14 +1056,21 @@ class ModuleExecutor:
         self,
         request: ModuleRequest,
         rejected_events: list[ModuleEventRejection],
-    ) -> Callable[[str, dict[str, Any]], Awaitable[ModuleEventRejection | None]] | None:
+    ) -> Callable[..., Awaitable[EventDispatchOutcome | ModuleEventRejection | None]] | None:
         if self._event_emitter is None:
             return None
 
-        async def emit_module_event(event_type: str, payload: dict[str, Any]) -> ModuleEventRejection | None:
-            """Return None once the event is on the bus, or the rejection that kept it off."""
+        async def emit_module_event(
+            event_type: str, payload: dict[str, Any], *, event_id: str | None = None
+        ) -> EventDispatchOutcome | ModuleEventRejection | None:
+            """Return the bus receipt, or the rejection that kept the event off it."""
             event_type_text = str(event_type or "").strip()
-            event_id = f"evt_{uuid4().hex}"
+            if event_id is not None and (
+                not isinstance(event_id, str)
+                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", event_id) is None
+            ):
+                raise ValueError("event_id must be a nonempty, bounded event identifier")
+            event_id = event_id or f"evt_{uuid4().hex}"
             rejection = self._event_rejection(request, event_id, event_type_text, payload)
             if rejection is not None:
                 # An event that breaks its contract is dropped and named, never
@@ -1114,8 +1124,8 @@ class ModuleExecutor:
 
             result = self._event_emitter(event_type_text, envelope)  # type: ignore[misc]
             if inspect.isawaitable(result):
-                await result
-            return None
+                result = await result
+            return cast("EventDispatchOutcome | ModuleEventRejection | None", result)
 
         return emit_module_event
 

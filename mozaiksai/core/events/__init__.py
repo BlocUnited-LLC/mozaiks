@@ -38,8 +38,10 @@ from .unified_event_dispatcher import (
     BusinessLogEvent,
     BusinessLogHandler,
     EventCategory,
+    EventDispatchOutcome,
     # Event handlers
     EventHandler,
+    EventListenerOutcome,
     EventType,
     ToolCallRequestEvent,
     ToolCallRequestHandler,
@@ -58,6 +60,8 @@ __all__ = [
     
     # Event categories and types
     "EventCategory", 
+    "EventDispatchOutcome",
+    "EventListenerOutcome",
     "EventType",
     "BusinessLogEvent",
     "ToolCallRequestEvent",
