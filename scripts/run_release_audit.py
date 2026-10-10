@@ -18,6 +18,8 @@ Returns 0 when all checks pass.  Returns non-zero on the first failure.
 
 Usage::
 
+    docker pull public.ecr.aws/docker/library/mongo:7
+    docker tag public.ecr.aws/docker/library/mongo:7 mongo:7
     docker run --rm -d --name mozaiks-release-audit-mongo -p 127.0.0.1:27018:27017 mongo:7
     python scripts/run_release_audit.py --mongo-uri mongodb://127.0.0.1:27018
 
