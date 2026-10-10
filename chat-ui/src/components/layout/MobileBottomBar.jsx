@@ -7,7 +7,7 @@ import { deriveShellActionContext, isShellItemVisible, resolveShellActions } fro
 import { useChatUI } from "../../context/ChatUIContext";
 import { useAppEventBus } from "../../ui/hooks/useAppEventBus.js";
 import { fetchNotificationCount } from "./notificationApi.js";
-import ShellNavigationIcon from "./ShellNavigationIcon.jsx";
+import ShellNavigationIcon, { hasNamedIcon } from "./ShellNavigationIcon.jsx";
 import "./header-styles.css";
 
 const buildAutoItems = ({ headerPages, header, notifications, profile, actionContext }) => {
@@ -184,7 +184,7 @@ const MobileBottomBar = ({ route = null, shellMode = null }) => {
           >
             <span className="shell-mobile-bottom-glyph" aria-hidden="true">
               <ShellNavigationIcon
-                icon={item.icon || (item.iconLabel ? null : item.id)}
+                icon={item.icon || (!item.iconLabel && hasNamedIcon(item.id) ? item.id : null)}
                 fallback={(item.iconLabel || item.label || item.id || "?").slice(0, 1).toUpperCase()}
               />
               {showBadge && <span className="shell-mobile-bottom-badge">{notificationCount > 9 ? "9+" : notificationCount}</span>}

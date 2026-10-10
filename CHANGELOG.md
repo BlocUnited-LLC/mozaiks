@@ -93,7 +93,8 @@ This project follows a practical pre-1.0 changelog format:
   covering search and filter controls. Shells without a bottom bar keep the
   floating Assistant launcher, and desktop behavior remains the same.
 - Mobile app navigation shows recognizable icons for the default Create, Alerts,
-  and Account actions while retaining configured app icons and labels.
+  and Account actions while retaining configured app icons and labels. An item
+  whose id is a path or URL shows its initial letter instead of a blank glyph.
 - Existing previews continue to use their recorded Docker or E2B provider
   after the configured provider changes, so a restarted worker can stop them
   and release capacity without routing cleanup to the wrong sandbox.
