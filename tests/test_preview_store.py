@@ -149,7 +149,7 @@ async def test_cross_worker_deduplication_and_immutable_identity(storage):
         )
 
 
-async def test_sealed_reservation_binds_digest_and_image_without_changing_legacy_identity(storage):
+async def test_sealed_reservation_binds_digest_and_runtime_ref_without_changing_ordinary_identity(storage):
     store = _store(storage)
     old = await _reserve(store, "ordinary")
     assert "sealed_archive_sha256" not in old
@@ -157,18 +157,32 @@ async def test_sealed_reservation_binds_digest_and_image_without_changing_legacy
         "app_id": "host", "user_id": "owner", "artifact_id": "candidate",
         "target_app_id": "target", "build_registry_id": "build", "provider": "docker",
         "sealed_archive_sha256": "sha256:" + "a" * 64,
-        "sealed_image_id": "sha256:" + "b" * 64,
+        "sealed_runtime_ref": "sha256:" + "b" * 64,
     }
     limits = dict(max_sessions=2, max_owner_sessions=1, max_pending=20, queue_seconds=15, ttl_seconds=300)
     reservation = await store.reserve(identity, **limits)
     assert reservation["sealed_archive_sha256"] == identity["sealed_archive_sha256"]
     assert (await store.reserve(identity, **limits))["sandbox_id"] == reservation["sandbox_id"]
     with pytest.raises(ValueError, match="identity changed"):
-        await store.reserve({**identity, "sealed_image_id": "sha256:" + "c" * 64}, **limits)
+        await store.reserve({**identity, "sealed_runtime_ref": "sha256:" + "c" * 64}, **limits)
     with pytest.raises(ValueError, match="identity changed"):
         await store.reserve({key: value for key, value in identity.items() if not key.startswith("sealed_")}, **limits)
-    with pytest.raises(ValueError, match="exact archive/image"):
+    with pytest.raises(ValueError, match="exact archive digest"):
         await store.reserve({**identity, "sealed_archive_sha256": "bad"}, **limits)
+    with pytest.raises(ValueError, match="provider runtime reference"):
+        await store.reserve({**identity, "sealed_runtime_ref": "preview:latest"}, **limits)
+    with pytest.raises(ValueError, match="provider runtime reference"):
+        await store.reserve({**identity, "provider": "unknown"}, **limits)
+    with pytest.raises(ValueError, match="complete immutable identity"):
+        await store.reserve({**identity, "sealed_image_id": identity["sealed_runtime_ref"]}, **limits)
+
+    e2b_identity = {
+        **identity, "artifact_id": "candidate-e2b", "provider": "e2b",
+        "sealed_runtime_ref": "preview:f47ac10b-58cc-4372-a567-0e02b2c3d479",
+    }
+    assert (await store.reserve(e2b_identity, **limits))["sealed_runtime_ref"] == e2b_identity["sealed_runtime_ref"]
+    with pytest.raises(ValueError, match="provider runtime reference"):
+        await store.reserve({**e2b_identity, "sealed_runtime_ref": identity["sealed_runtime_ref"]}, **limits)
 
 
 async def test_atomic_queue_bound_and_configuration_agreement(storage):

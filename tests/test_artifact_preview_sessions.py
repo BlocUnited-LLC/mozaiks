@@ -42,16 +42,17 @@ MANIFEST = '{"appId":"preview-app","appName":"Preview","authRequired":false}'
 
 
 class FakeSandboxAdapter:
-    def __init__(self, *, preview_url="https://preview.example"):
+    def __init__(self, *, preview_url="https://preview.example", provider="docker"):
         self.calls = []
         self.preview_url = preview_url
+        self.provider = provider
         self.install_result = SandboxRunResult(success=True, exit_code=0)
         self.background_result = SandboxRunResult(success=True, exit_code=0)
         self.command_results = {}
 
     async def create_session(self, **kwargs):
         self.calls.append(("create_session", kwargs))
-        return SandboxSessionInfo(session_id=f"sess-{len(self.calls)}", provider="docker")
+        return SandboxSessionInfo(session_id=f"sess-{len(self.calls)}", provider=self.provider)
 
     async def write_files(self, **kwargs):
         self.calls.append(("write_files", kwargs))
@@ -731,7 +732,7 @@ async def test_generic_router_hides_sealed_sessions_even_from_same_owner(api_cli
     state = await manager.create_sealed_candidate(
         "candidate-a", app_id="factory", user_id="tester", target_app_id="preview-app",
         build_registry_id="appreg-a", archive_bytes=archive,
-        archive_sha256=archive_digest(archive), image_id="sha256:" + "a" * 64,
+        archive_sha256=archive_digest(archive), sealed_runtime_ref="sha256:" + "a" * 64,
     )
     assert client.get(RECOVER_URL).json() == {"sessions": []}
     assert client.get(f"/api/sandbox/{state.sandbox_id}/status").status_code == 404

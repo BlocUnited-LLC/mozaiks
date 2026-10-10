@@ -34,6 +34,7 @@ __pycache__/
 **/.vite/
 chat-ui/dist/
 web_shell/dist/
+web_shell/.mozaiks-tailwind-sources
 web_shell/playwright-report/
 web_shell/playwright-report-visual/
 web_shell/test-results/

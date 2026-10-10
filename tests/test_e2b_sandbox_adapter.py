@@ -15,9 +15,11 @@ E2BSandboxAdapter = _sandbox_mod.E2BSandboxAdapter
 class _FakeFiles:
     def __init__(self) -> None:
         self.writes = []
+        self.write_options = []
 
-    def write(self, path, data):  # noqa: ANN001
+    def write(self, path, data, *, user=None, request_timeout=None):  # noqa: ANN001
         self.writes.append((path, data))
+        self.write_options.append({"user": user, "request_timeout": request_timeout})
         return {"path": path}
 
     def read(self, path, file_format="text"):  # noqa: ANN001
@@ -27,7 +29,14 @@ class _FakeFiles:
 
 
 class _FakeCommands:
-    def run(self, *, cmd, background=None, envs=None, cwd=None, timeout=None):  # noqa: ANN001
+    def __init__(self) -> None:
+        self.calls = []
+
+    def run(self, *, cmd, background=None, envs=None, cwd=None, timeout=None, user=None, request_timeout=None):  # noqa: ANN001
+        self.calls.append({
+            "cmd": cmd, "background": background, "envs": envs, "cwd": cwd,
+            "timeout": timeout, "user": user, "request_timeout": request_timeout,
+        })
         if background:
             class _Handle:
                 pid = 321
@@ -185,6 +194,7 @@ async def test_reconnect_preserves_the_remaining_provider_deadline(monkeypatch):
         end_at=datetime.now(UTC) + timedelta(seconds=45), metadata={"purpose": "artifact_preview"},
     )
     factory.connect.return_value = _FakeSandbox()
+    factory.connect.return_value.details.metadata = {"purpose": "artifact_preview"}
     monkeypatch.setattr(_sandbox_mod, "Sandbox", factory)
     adapter = E2BSandboxAdapter()
     await adapter.read_file(session_id="sbx_123", path="/tmp/file")
@@ -284,6 +294,128 @@ async def test_sealed_e2b_session_confirms_network_isolation_and_hides_provider_
         await reconnected.run_command(session_id=session.session_id, command="true", envs={"TOKEN": "secret"})
     factory.connect.assert_not_called()
     sandbox.commands.run.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sealed_e2b_staging_uses_root_only_for_upload_and_sandbox_for_runtime(monkeypatch):
+    from unittest.mock import Mock
+
+    from mozaiksai.core.sandbox.sealed_stage import ARCHIVE_PATH, MANIFEST_PATH
+
+    sandbox = _FakeSandbox()
+    sandbox.details.allow_internet_access = False
+    sandbox.details.network = {"allow_public_traffic": False}
+    sandbox.details.metadata = {"purpose": "sealed_candidate_preview"}
+    factory = Mock()
+    factory.create.return_value = sandbox
+    monkeypatch.setattr(_sandbox_mod, "Sandbox", factory)
+    adapter = E2BSandboxAdapter()
+    session = await adapter.create_session(template=_EXACT_BUILD, metadata={"purpose": "sealed_candidate_preview"})
+
+    await adapter.stage_sealed_files(session_id=session.session_id, files={"app/app.json": b'{"appId":"preview"}'})
+
+    assert [path for path, _ in sandbox.files.writes] == [str(ARCHIVE_PATH), str(MANIFEST_PATH)]
+    assert [option["user"] for option in sandbox.files.write_options] == ["root", "root"]
+    assert all(option["request_timeout"] for option in sandbox.files.write_options)
+    assert len(sandbox.commands.calls) == 2
+    assert all(call["user"] == "root" for call in sandbox.commands.calls)
+    assert sandbox.commands.calls[0]["cmd"].startswith("mkdir -m 0700 -- ")
+    assert sandbox.commands.calls[1]["cmd"] == "python -m mozaiksai.core.sandbox.sealed_stage"
+
+    result = await adapter.run_command(session_id=session.session_id, command="true")
+    assert result.success
+    assert sandbox.commands.calls[-1]["user"] == "sandbox"
+    assert sandbox.timeout is None
+    with pytest.raises(ValueError, match="file reads"):
+        await adapter.read_file(session_id=session.session_id, path="/workspace/app/app.json")
+    with pytest.raises(ValueError, match="lifetime"):
+        await adapter.extend_session(session_id=session.session_id, timeout_seconds=900)
+    with pytest.raises(ValueError, match="lifetime"):
+        await adapter.connect(session_id=session.session_id, timeout_seconds=900)
+    with pytest.raises(ValueError, match="environment"):
+        await adapter.run_command(session_id=session.session_id, command="true", envs={"TOKEN": "secret"})
+    factory.connect.assert_not_called()
+    assert sandbox.timeout is None
+
+
+@pytest.mark.asyncio
+async def test_sealed_e2b_staging_failure_discards_uploaded_bytes(monkeypatch):
+    from unittest.mock import Mock
+
+    sandbox = _FakeSandbox()
+    sandbox.details.allow_internet_access = False
+    sandbox.details.network = {"allow_public_traffic": False}
+    sandbox.details.metadata = {"purpose": "sealed_candidate_preview"}
+    original_run = sandbox.commands.run
+
+    def stage_failure(**kwargs):
+        if kwargs["cmd"] == "python -m mozaiksai.core.sandbox.sealed_stage":
+            return SimpleNamespace(exit_code=1, error=None)
+        return original_run(**kwargs)
+
+    sandbox.commands.run = Mock(side_effect=stage_failure)
+    factory = Mock()
+    factory.create.return_value = sandbox
+    monkeypatch.setattr(_sandbox_mod, "Sandbox", factory)
+    adapter = E2BSandboxAdapter()
+    session = await adapter.create_session(template=_EXACT_BUILD, metadata={"purpose": "sealed_candidate_preview"})
+    with pytest.raises(RuntimeError, match="staging failed"):
+        await adapter.stage_sealed_files(session_id=session.session_id, files={"app/app.json": b"{}"})
+    assert sandbox.commands.run.call_args.kwargs["cmd"] == "python -m mozaiksai.core.sandbox.sealed_stage --cleanup"
+    assert sandbox.commands.run.call_args.kwargs["user"] == "root"
+    factory.connect.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sealed_e2b_stage_failure_kills_by_id_without_reconnect(monkeypatch):
+    from unittest.mock import Mock
+
+    from mozaiksai.core.semantics.archive import archive_digest
+    from tests.test_artifact_preview_sessions import _manager
+    from tests.test_sealed_candidate_preview import APP_JSON, IDENTITY, _archive
+
+    sandbox = _FakeSandbox()
+    sandbox.details.allow_internet_access = False
+    sandbox.details.network = {"allow_public_traffic": False}
+    sandbox.details.metadata = {"purpose": "sealed_candidate_preview"}
+    original_run = sandbox.commands.run
+
+    def stage_failure(**kwargs):
+        if kwargs["cmd"] == "python -m mozaiksai.core.sandbox.sealed_stage":
+            return SimpleNamespace(exit_code=1, error=None)
+        return original_run(**kwargs)
+
+    sandbox.commands.run = Mock(side_effect=stage_failure)
+    factory = Mock()
+    factory.create.return_value = sandbox
+    factory.kill.return_value = True
+    monkeypatch.setattr(_sandbox_mod, "Sandbox", factory)
+    adapter = E2BSandboxAdapter()
+    manager = _manager(adapter, provider="e2b")
+    manager._queue_seconds = 5
+    data = _archive(**{"app/app.json": APP_JSON})
+    with pytest.raises(RuntimeError, match="staging failed"):
+        await manager.create_sealed_candidate(
+            **IDENTITY, archive_bytes=data, archive_sha256=archive_digest(data), sealed_runtime_ref=_EXACT_BUILD,
+        )
+    factory.kill.assert_called_once_with(sandbox.sandbox_id)
+    factory.connect.assert_not_called()
+    assert not any(call["user"] == "sandbox" for call in sandbox.commands.calls)
+
+
+@pytest.mark.asyncio
+async def test_sealed_e2b_rejects_missing_provider_session_id_before_cache(monkeypatch):
+    from unittest.mock import Mock
+
+    sandbox = _FakeSandbox(sandbox_id="")
+    factory = Mock()
+    factory.create.return_value = sandbox
+    monkeypatch.setattr(_sandbox_mod, "Sandbox", factory)
+    adapter = E2BSandboxAdapter()
+    with pytest.raises(RuntimeError, match="provider session ID"):
+        await adapter.create_session(template=_EXACT_BUILD, metadata={"purpose": "sealed_candidate_preview"})
+    assert sandbox.killed
+    assert not adapter._sessions
 
 
 @pytest.mark.asyncio

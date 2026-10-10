@@ -19,10 +19,11 @@ from bson import BSON
 from pymongo.errors import DuplicateKeyError
 
 from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE, PlatformCollections
+from mozaiksai.core.sandbox.sealed_runtime_ref import is_sealed_runtime_ref
 
 _LEDGER_ID = "artifact-previews"
 _IDENTITY_FIELDS = ("app_id", "user_id", "artifact_id", "target_app_id", "build_registry_id", "provider")
-_SEALED_IDENTITY_FIELDS = ("sealed_archive_sha256", "sealed_image_id")
+_SEALED_IDENTITY_FIELDS = ("sealed_archive_sha256", "sealed_runtime_ref")
 _STATE_FIELDS = {
     "session_id", "status", "preview_url", "last_error", "last_access_at",
     "manifest", "paths", "has_requirements", "health_checked_at",
@@ -126,11 +127,11 @@ class MongoPreviewStore:
         ):
             raise ValueError("Preview requires its complete immutable identity")
         if fields & set(_SEALED_IDENTITY_FIELDS):
-            if identity["provider"] != "docker" or any(
-                re.fullmatch(r"sha256:[0-9a-f]{64}", identity[name]) is None
-                for name in _SEALED_IDENTITY_FIELDS
+            if (
+                re.fullmatch(r"sha256:[0-9a-f]{64}", identity["sealed_archive_sha256"]) is None
+                or not is_sealed_runtime_ref(identity["provider"], identity["sealed_runtime_ref"])
             ):
-                raise ValueError("Sealed preview requires Docker and exact archive/image SHA-256 identities")
+                raise ValueError("Sealed preview requires an exact archive digest and provider runtime reference")
         if queue_seconds <= 0 or ttl_seconds <= 0 or max_sessions + max_pending > _MAX_RESERVATIONS:
             raise ValueError("Preview queue and lifetime must be positive and bounded")
         now = self._now()

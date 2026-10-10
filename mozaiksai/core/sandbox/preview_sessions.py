@@ -28,6 +28,8 @@ from mozaiksai.core.sandbox.preview_store import (
     PreviewLeaseLostError,
     PreviewOperationBusy,
 )
+from mozaiksai.core.sandbox.sealed_limits import MAX_FILE_BYTES, MAX_FILES, MAX_TOTAL_BYTES
+from mozaiksai.core.sandbox.sealed_runtime_ref import is_sealed_runtime_ref
 from mozaiksai.core.semantics.archive import read_archive_manifest
 
 logger = get_core_logger("artifact_preview_sessions")
@@ -38,9 +40,9 @@ _PREVIEW_PORT = 3000
 _ENV_PREFIX = "MOZAIKS_PREVIEW_ENV_"
 _SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SEALED_ARCHIVE_MAX_BYTES = 80_000_000
-_SEALED_TOTAL_FILE_MAX_BYTES = 64_000_000
-_SEALED_ARCHIVE_MAX_FILES = 2_000
-_SEALED_FILE_MAX_BYTES = 8_000_000
+_SEALED_TOTAL_FILE_MAX_BYTES = MAX_TOTAL_BYTES
+_SEALED_ARCHIVE_MAX_FILES = MAX_FILES
+_SEALED_FILE_MAX_BYTES = MAX_FILE_BYTES
 
 
 @runtime_checkable
@@ -179,7 +181,7 @@ class PreviewSessionState:
     created_at: datetime
     expires_at: datetime
     sealed_archive_sha256: str | None = None
-    sealed_image_id: str | None = None
+    sealed_runtime_ref: str | None = None
     phase: str = "active"
     session_id: str | None = None
     status: str = "starting"
@@ -224,6 +226,7 @@ class ArtifactPreviewSessionManager:
         self._template = os.getenv("SANDBOX_TEMPLATE") or None
         self._startup_timeout_seconds = startup_timeout_seconds
         self._allocation_timeout_seconds = 60
+        self._sealed_stage_timeout_seconds = 180
         self._health_interval_seconds = 10
         self._poll_seconds = 0.1
 
@@ -236,6 +239,9 @@ class ArtifactPreviewSessionManager:
 
     def _workdir(self, provider: str) -> str:
         return sandbox_workspace_root(provider)
+
+    def _app_root(self, state: PreviewSessionState) -> str:
+        return "/workspace/app" if state.sealed_archive_sha256 is not None else self._workdir(state.provider) + "/app"
 
     def _adapter(self, provider: str) -> SandboxPort:
         if self._provider_resolver is None:
@@ -322,21 +328,23 @@ class ArtifactPreviewSessionManager:
 
     async def create_sealed_candidate(
         self, artifact_id: str, *, app_id: str, user_id: str, target_app_id: str,
-        build_registry_id: str, archive_bytes: bytes, archive_sha256: str, image_id: str,
+        build_registry_id: str, archive_bytes: bytes, archive_sha256: str, sealed_runtime_ref: str,
     ) -> PreviewSessionState:
         """Internal, offline candidate boot. The caller has authenticated this owner/build."""
         if not all(is_valid_artifact_id(value) for value in (artifact_id, app_id, target_app_id, build_registry_id)) or not user_id:
             raise ValueError("Invalid preview identity")
-        if not isinstance(image_id, str) or not _SHA256_RE.fullmatch(image_id):
-            raise ValueError("Sealed preview requires a trusted image ID")
+        if not any(is_sealed_runtime_ref(provider, sealed_runtime_ref) for provider in ("docker", "e2b")):
+            raise ValueError("Sealed preview requires an exact provider runtime reference")
         files = _sealed_archive_files(archive_bytes, archive_sha256, target_app_id)
         provider, adapter = self._selected_provider()
-        if provider != "docker" or not isinstance(adapter, _SealedCandidateStager):
-            raise RuntimeError("Sealed preview requires the local Docker sandbox adapter")
+        if not is_sealed_runtime_ref(provider, sealed_runtime_ref):
+            raise ValueError("Sealed runtime reference does not match the selected provider")
+        if not isinstance(adapter, _SealedCandidateStager):
+            raise RuntimeError("Sealed preview requires a sandbox adapter with immutable staging")
         identity = dict(
             artifact_id=artifact_id, app_id=app_id, user_id=user_id,
             target_app_id=target_app_id, build_registry_id=build_registry_id, provider=provider,
-            sealed_archive_sha256=archive_sha256, sealed_image_id=image_id,
+            sealed_archive_sha256=archive_sha256, sealed_runtime_ref=sealed_runtime_ref,
         )
         return await self._create(identity, cast(SandboxPort, adapter), sealed_files=files)
 
@@ -396,7 +404,7 @@ class ArtifactPreviewSessionManager:
         try:
             async with asyncio.timeout(self._allocation_timeout_seconds):
                 info = await adapter.create_session(
-                    template=allocation["sealed_image_id"] if sealed_files is not None else self._template,
+                    template=allocation["sealed_runtime_ref"] if sealed_files is not None else self._template,
                     timeout_seconds=self._ttl_minutes * 60,
                     envs={} if sealed_files is not None else preview_resource_environment(),
                     metadata={
@@ -416,10 +424,16 @@ class ArtifactPreviewSessionManager:
         try:
             if sealed_files is not None:
                 assert isinstance(adapter, _SealedCandidateStager)
-                await adapter.stage_sealed_files(session_id=info.session_id, files=sealed_files)
+                if info.provider != allocation["provider"] or not isinstance(info.session_id, str) or not info.session_id:
+                    raise RuntimeError("Sealed preview provider session did not match its reservation")
+                remaining = self._ttl_minutes * 60 - (time.monotonic() - started)
+                if remaining <= 0:
+                    raise TimeoutError("Sealed preview provider lifetime expired before staging")
+                async with asyncio.timeout(min(self._sealed_stage_timeout_seconds, remaining)):
+                    await adapter.stage_sealed_files(session_id=info.session_id, files=sealed_files)
                 result = await adapter.run_command(
                     session_id=info.session_id, background=True, timeout_seconds=15,
-                    command=(f"{_RUNTIME} start --app-root /workspace/app "
+                    command=(f"{_RUNTIME} start --app-root {shlex.quote(self._app_root(state))} "
                              "--preview-url http://127.0.0.1:3000 > /tmp/mozaiks-sealed-start.log 2>&1"),
                 )
                 if not result.success:
@@ -427,7 +441,8 @@ class ArtifactPreviewSessionManager:
                 deadline = time.monotonic() + self._startup_timeout_seconds
                 while True:
                     result = await adapter.run_command(
-                        session_id=info.session_id, command=f"{_RUNTIME} check --app-root /workspace/app",
+                        session_id=info.session_id,
+                        command=f"{_RUNTIME} check --app-root {shlex.quote(self._app_root(state))}",
                         timeout_seconds=10,
                     )
                     if result.success:
@@ -437,7 +452,10 @@ class ArtifactPreviewSessionManager:
                     await asyncio.sleep(1)
                 state.status = "running"
                 state.health_checked_at = _utcnow()
-            state.expires_at = _utcnow() + timedelta(seconds=self._ttl_minutes * 60 - (time.monotonic() - started))
+            remaining = self._ttl_minutes * 60 - (time.monotonic() - started)
+            if remaining <= 0:
+                raise TimeoutError("Preview provider lifetime expired before admission")
+            state.expires_at = _utcnow() + timedelta(seconds=remaining)
             saved = await self._store.attach_session(sandbox_id, token, state.payload(), expires_at=state.expires_at)
         except (Exception, asyncio.CancelledError):
             try:
@@ -686,7 +704,7 @@ class ArtifactPreviewSessionManager:
                 if not url:
                     return await self._fail(state, "Preview provider did not publish the frontend port", token)
                 command = (
-                    f"{_RUNTIME} start --app-root {shlex.quote(self._workdir(state.provider) + '/app')} "
+                    f"{_RUNTIME} start --app-root {shlex.quote(self._app_root(state))} "
                     f"--preview-url {shlex.quote(url)} > /tmp/mozaiks-preview-start.log 2>&1"
                 )
                 result = await adapter.run_command(
@@ -713,7 +731,7 @@ class ArtifactPreviewSessionManager:
         while True:
             result = await adapter.run_command(
                 session_id=self._session_id(state),
-                command=f"{_RUNTIME} check --port {port} --app-root {shlex.quote(self._workdir(state.provider) + '/app')}",
+                command=f"{_RUNTIME} check --port {port} --app-root {shlex.quote(self._app_root(state))}",
                 timeout_seconds=10,
             )
             if result.success:
@@ -745,7 +763,7 @@ class ArtifactPreviewSessionManager:
                 try:
                     result = await self._adapter(state.provider).run_command(
                         session_id=self._session_id(state),
-                        command=f"{_RUNTIME} check --app-root {shlex.quote(self._workdir(state.provider) + '/app')}",
+                        command=f"{_RUNTIME} check --app-root {shlex.quote(self._app_root(state))}",
                         timeout_seconds=10,
                     )
                 except Exception:

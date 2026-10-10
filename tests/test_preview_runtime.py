@@ -61,6 +61,8 @@ def test_preview_uses_disposable_database_and_same_origin_api(app_root, monkeypa
         "MOZAIKS_HOST", "VITE_MOZAIKS_HOST", "PLATFORM_PATH", "MOZAIKS_APP_WORKSPACE_PATH",
         "MOZAIKS_WORKFLOWS_PATH", "MOZAIKS_APP_DATABASE_NAME", "MOZAIKS_APP_DATA_DATABASE_NAME",
         "VITE_API_URL", "VITE_CORE_URL", "VITE_WS_URL", "MOZAIKS_BACKEND_URL",
+        "MOZAIKS_PREVIEW_VITE_CACHE_DIR",
+        "MOZAIKS_PREVIEW_TAILWIND_SOURCE_DIR",
     ):
         monkeypatch.setenv(name, "must-not-use-host-setting")
     monkeypatch.setenv("AUTH_AUDIENCE", "preview-app-api")
@@ -81,6 +83,8 @@ def test_preview_uses_disposable_database_and_same_origin_api(app_root, monkeypa
     assert env["CORS_ORIGINS"] == "http://localhost:12345"
     assert env["MOZAIKS_BACKEND_URL"] == "http://127.0.0.1:8000"
     assert env["PYTHON_DOTENV_DISABLED"] == "1"
+    assert env["MOZAIKS_PREVIEW_VITE_CACHE_DIR"] == "/tmp/mozaiks-preview/vite-cache"
+    assert env["MOZAIKS_PREVIEW_TAILWIND_SOURCE_DIR"] == "/tmp/mozaiks-preview/tailwind-sources"
 
 
 def test_authenticated_preview_rejects_browser_client_as_api_audience(app_root, monkeypatch):

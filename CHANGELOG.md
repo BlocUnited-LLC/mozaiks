@@ -14,10 +14,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
-- Prepared the E2B adapter for private sealed candidate sessions with an exact
-  template build reference, denied internet egress, token-gated port access,
-  no provider preview URL, and no reconnect that could resume a paused session.
-  The sealed candidate manager still selects Docker.
+- Added private, bounded E2B sealed candidate staging through an exact template
+  build reference. The preview manager now accepts either a pinned Docker image
+  or E2B build, verifies source before allocation, and boots the framework
+  runtime without a public URL. E2B browser preview and live provider acceptance
+  remain separate rollout steps.
 - Internal offline sealed candidate boot over the existing preview session
   ledger: canonical archive and pinned Docker image identities, bounded
   root-owned staging, non-root runtime health, and confirmed cleanup without
@@ -53,6 +54,11 @@ This project follows a practical pre-1.0 changelog format:
 - Generated messaging modules now require a verified workspace for workspace
   conversations. A signed caller cannot select another workspace through
   dispatch context or `scope_id`.
+
+- Sealed E2B source is verified against per-file hashes before and after
+  root-owned extraction, then the runtime UID cannot replace the workspace or
+  extend its provider lifetime. Failed staging and restarted-session cleanup
+  kill by provider ID without reconnecting a paused sandbox.
 
 - Studio workspace connector actions (list, save, health check and delete) and
   workspace-scoped message threads act only on the caller's verified
