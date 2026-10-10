@@ -10,16 +10,22 @@ const callback = `${callbackUri}?state=one&code=example`;
 function fixture(overrides = {}) {
   const listeners = new Map();
   const opened = [];
+  const closed = [];
   const removed = [];
   async function addListener(name, listener) {
     listeners.set(name, listener);
     return { remove: async () => { removed.push(name); listeners.delete(name); } };
   }
   const App = { addListener, ...overrides.App };
-  const Browser = { addListener, open: async value => { opened.push(value); }, ...overrides.Browser };
+  const Browser = {
+    addListener,
+    open: async value => { opened.push(value); },
+    close: async () => { closed.push(true); },
+    ...overrides.Browser,
+  };
   return {
     transport: createNativeAuthorizationTransport({ App, Browser, timeoutMs: overrides.timeoutMs ?? 1000 }),
-    emit: (name, value) => listeners.get(name)?.(value), opened, removed, listeners,
+    emit: (name, value) => listeners.get(name)?.(value), opened, closed, removed, listeners,
   };
 }
 
@@ -42,8 +48,51 @@ test('opens the external browser after listeners and accepts only the exact call
   f.emit('appUrlOpen', { url: callback });
   f.emit('appUrlOpen', { url: callback });
   assert.equal(await result, callback);
+  assert.equal(f.closed.length, 1);
   assert.equal(f.listeners.size, 0);
   assert.deepEqual(f.removed.sort(), ['appUrlOpen', 'browserFinished']);
+});
+
+test('requests controller close after a callback before the next browser request', async () => {
+  let controllerOpen = false;
+  let closeCount = 0;
+  const f = fixture({ Browser: {
+    open: async value => {
+      if (controllerOpen) return; // Model reuse of a controller still open.
+      controllerOpen = true;
+      f.opened.push(value);
+    },
+    close: async () => {
+      closeCount += 1;
+      controllerOpen = false;
+      f.emit('browserFinished');
+    },
+  } });
+  const first = f.transport.open(request);
+  await tick();
+  f.emit('appUrlOpen', { url: callback });
+  assert.equal(await first, callback);
+  assert.equal(closeCount, 1);
+  const second = f.transport.open({ ...request, url: 'https://identity.example/authorize?state=two' });
+  await tick();
+  assert.equal(f.opened.length, 2);
+  f.emit('appUrlOpen', { url: `${callbackUri}?state=two&code=next` });
+  assert.equal(await second, `${callbackUri}?state=two&code=next`);
+  assert.equal(closeCount, 2);
+  assert.equal(f.listeners.size, 0);
+});
+
+test('holds the JS attempt while native close is still pending', async () => {
+  let finishClose;
+  const f = fixture({ Browser: { close: () => new Promise(resolve => { finishClose = resolve; }) } });
+  const first = f.transport.open(request);
+  await tick();
+  f.emit('appUrlOpen', { url: callback });
+  await tick();
+  await assert.rejects(f.transport.open(request), /already in progress/);
+  finishClose();
+  assert.equal(await first, callback);
+  assert.equal(f.listeners.size, 0);
 });
 
 test('rejects overlapping opens without disturbing the active one', async () => {
@@ -63,11 +112,27 @@ test('browser cancellation removes listeners and permits a fresh attempt', async
   f.emit('browserFinished');
   await failed;
   assert.equal(f.listeners.size, 0);
+  assert.equal(f.closed.length, 1);
   const retried = f.transport.open(request);
   await tick();
   f.emit('appUrlOpen', { url: callback });
   assert.equal(await retried, callback);
   assert.equal(f.opened.length, 2);
+});
+
+test('failed native browser close preserves the callback and releases the JS attempt', async () => {
+  const f = fixture({ Browser: { close: async () => { throw new Error('Native close failed'); } } });
+  const first = f.transport.open(request);
+  await tick();
+  f.emit('appUrlOpen', { url: callback });
+  assert.equal(await first, callback);
+  assert.equal(f.listeners.size, 0);
+  const second = f.transport.open(request);
+  await tick();
+  f.emit('appUrlOpen', { url: callback });
+  assert.equal(await second, callback);
+  assert.equal(f.opened.length, 2);
+  assert.deepEqual(f.removed.sort(), ['appUrlOpen', 'appUrlOpen', 'browserFinished', 'browserFinished']);
 });
 
 test('browser open failure removes listeners and releases the active attempt', async () => {

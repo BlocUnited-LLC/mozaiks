@@ -193,6 +193,11 @@ Browser source remains intact. The build creates a temporary app view with the
 native browser adapter, which delegates OAuth and PKCE to the shared auth
 implementation. Android opens the system browser and returns to the callback
 derived from the package identifier and the app's canonical callback route.
+The native transport requests closure of the Android browser controller after
+each callback or cancelled attempt before permitting another sign-in. The pinned
+Browser plugin resolves that call when it dispatches the close intent; Android
+finishes the controller asynchronously. The shared adapter still validates
+callback URI, state, PKCE, and token claims.
 
 Authenticated delivery requires a separate public OIDC client registered for
 that exact native callback. Set these public values on the app backend:

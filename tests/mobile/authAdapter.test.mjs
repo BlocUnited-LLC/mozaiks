@@ -78,7 +78,7 @@ function grant(url) {
 function nativeHost(launchUrl) {
   const appListeners = new Map();
   const browserListeners = new Map();
-  const host = { launchUrl, callback: null, handled: [], opens: 0, removed: 0, cancel: false };
+  const host = { launchUrl, callback: null, handled: [], opens: 0, closes: 0, removed: 0, cancel: false };
   const listen = (listeners, name, listener) => {
     listeners.set(name, listener);
     return Promise.resolve({ remove: async () => { listeners.delete(name); host.removed += 1; } });
@@ -97,6 +97,7 @@ function nativeHost(launchUrl) {
         host.callback = grant(url);
         appListeners.get('appUrlOpen')({ url: host.callback });
       },
+      async close() { host.closes += 1; browserListeners.get('browserFinished')?.(); },
     },
     createSharedAuthAdapter(input) {
       const adapter = createAuthAdapter(input);
@@ -117,7 +118,18 @@ test('warm native login stores only a SHA256 delivery receipt and cleans its lis
   assert.ok(!storage.get(receiptKey).includes('fixture-authorization-code'));
   assert.ok(!storage.get(receiptKey).includes('fixture-native-access-token'));
   assert.equal(host.removed, 2);
+  assert.equal(host.closes, 1);
   assert.equal(requests.filter(request => request.method === 'POST').length, 1);
+});
+
+test('native browser close failure does not discard a valid OAuth callback', async () => {
+  const host = nativeHost();
+  host.dependencies.Browser.close = async () => { throw new Error('Native close failed'); };
+  const adapter = await createNativeAppAuthAdapter(options(), host.dependencies);
+  await adapter.login();
+  assert.equal(adapter.getAccessToken(), 'fixture-native-access-token');
+  assert.equal(storage.get(receiptKey), digest(host.callback));
+  assert.equal(host.removed, 2);
 });
 
 test('WebView reload ignores the retained callback receipt and preserves the authenticated session', async () => {

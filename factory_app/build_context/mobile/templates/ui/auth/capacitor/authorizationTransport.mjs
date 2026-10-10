@@ -42,8 +42,15 @@ export function createNativeAuthorizationTransport({ App, Browser, timeoutMs = 1
       } finally {
         disposed = true;
         clearTimeout(timer);
-        try { await Promise.all(handles.map(handle => handle.remove())); }
-        finally { active = false; }
+        // The Android Custom Tab can leave BrowserControllerActivity in the
+        // task after its deep link returns to the app. A later open with
+        // CLEAR_TOP can otherwise reach that activity without launching a tab.
+        try {
+          // A failed close must not discard a callback that OAuth has already
+          // validated. Listener cleanup is attempted even when close fails.
+          try { await Browser.close(); } catch { /* best effort */ }
+          await Promise.allSettled(handles.map(handle => handle.remove()));
+        } finally { active = false; }
       }
     },
   };
