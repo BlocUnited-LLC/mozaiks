@@ -39,6 +39,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- On a phone, the Studio Apps page shows the first app above the fixed bottom
+  navigation: the summary tiles stay hidden below 768px, a paginated list keeps
+  a compact `On this page` count, and each app name is an accessible
+  `Open <name>` button that works by tap, Tab and Enter. Desktop keeps its
+  metrics strip and clickable rows.
 - Android sign-in and sign-out now request external browser controller closure
   after a native callback or cancelled attempt.
 - CI and operator reference container builds resolve public base images from a
