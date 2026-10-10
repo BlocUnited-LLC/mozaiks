@@ -600,6 +600,12 @@ This project follows a practical pre-1.0 changelog format:
   Typed page names cannot traverse into app config, and schema persistence
   confines every rendered artifact to the generated app root.
 
+- Studio support requests now bind queue reads, replies, status changes, and
+  deletion to the caller's verified workspace. Linked support conversations
+  are available through those scoped request actions, not generic messaging
+  actions. Older requests without a verified owner remain inaccessible until
+  their ownership is reviewed.
+
 - Resuming an AppReview chat now restores scoped persisted workflow state to the
   durable AG2 channel under replay validation. Router-owned build checks no
   longer fail as if the user tried to rewrite them, while live user context
