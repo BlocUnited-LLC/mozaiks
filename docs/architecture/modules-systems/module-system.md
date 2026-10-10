@@ -678,8 +678,9 @@ Only `profile: worker` is an explicit manifest value; omit `profile` (or use
 null in generated contracts) for the ordinary host. A worker service must
 expose a callable `start()` method. The profile selector does not skip
 platform `on_startup` hooks, data migrations, event registration, or route
-mounting. Operators must keep those safe to run in both processes or gate
-them through their owning contracts. Keep the worker host private and bound
+mounting. Studio's preview-session maintenance runs only in the host profile;
+other process work must be safe in both processes or gated by its owner.
+Keep the worker host private and bound
 to loopback; the service profile alone does not create a no-listener daemon.
 
 Keep `profile` absent for existing app services and all `api_router` entries.

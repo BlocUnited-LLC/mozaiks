@@ -115,6 +115,7 @@ from mozaiksai.core.runtime.app.studio_summary import (
     load_build_state_from_db,
     save_build_state_to_db,
 )
+from mozaiksai.core.runtime.composition.extensions import resolve_startup_service_profile
 from mozaiksai.core.sandbox.preview_sessions import preview_sessions_lifespan
 from mozaiksai.core.secrets.contract import is_secret_contract_path, validate_secret_contract_text
 from mozaiksai.core.session.build_binding import (
@@ -178,7 +179,18 @@ def _register_management_auth_posture_check(target_app) -> None:
 
 
 _register_management_auth_posture_check(app)
-register_app_lifespan(app, preview_sessions_lifespan)
+
+
+@asynccontextmanager
+async def _studio_preview_sessions_lifespan(app_instance):
+    if resolve_startup_service_profile() == "worker":
+        yield
+        return
+    async with preview_sessions_lifespan(app_instance):
+        yield
+
+
+register_app_lifespan(app, _studio_preview_sessions_lifespan)
 logger = get_workflow_logger("studio_app")
 
 _BUNDLE_MAX_TEXT_FILES = 200
