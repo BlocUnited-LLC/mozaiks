@@ -47,6 +47,7 @@ let device;
 let browser;
 let page;
 let postId;
+let priorAuthorizationState;
 const privateValues = [];
 const started = Date.now();
 try {
@@ -235,6 +236,7 @@ try {
   await page.screenshot({ path: path.join(evidence, '04-native-signed-out.png') });
 
   stage('provider-session-cleared');
+  priorAuthorizationState = latestAuthorizationState;
   const before = observed.authorizations;
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect.poll(() => observed.authorizations, { timeout: 45_000 }).toBeGreaterThan(before);
@@ -251,6 +253,36 @@ try {
   // filled credentials. The first line is redacted before it leaves memory.
   proof.failure_type = error?.name || 'Error';
   proof.failure_message = safeFailureMessage(error, privateValues);
+  if (device && proof.stage === 'provider-session-cleared') {
+    // Classify activities without retaining dumpsys text: Android intents can
+    // contain callback codes or OAuth state.
+    proof.activity_failure = await device.shell('dumpsys activity activities').then(output => {
+      const lines = output.toString().split('\n');
+      const resumed = lines.filter(line => /(?:topResumedActivity|mResumedActivity)/.test(line));
+      return {
+        browser_controller_present: lines.some(line => line.includes('BrowserControllerActivity')),
+        native_top_resumed: resumed.some(line => line.includes(`${appId}/.MainActivity`)),
+        chrome_top_resumed: resumed.some(line => line.includes('com.android.chrome/')),
+      };
+    }).catch(() => ({ probe: 'unavailable' }));
+  }
+  if (browser && proof.stage === 'provider-session-cleared') {
+    // Categorize Chrome pages without retaining URLs, OAuth state, or inputs.
+    // This distinguishes a browser launch failure from a missed CDP request.
+    proof.browser_failure = await Promise.resolve().then(() => Promise.all(browser.pages().slice(-12).map(async candidate => {
+      let url;
+      try { url = new URL(candidate.url()); } catch { return { kind: 'other' }; }
+      const provider = url.origin === new URL(proof.issuer).origin;
+      const authorization = provider && url.pathname === '/realms/common-ground/protocol/openid-connect/auth';
+      return {
+        kind: authorization ? 'provider_authorization' : provider ? 'provider_other' : 'other',
+        fresh_state: authorization && Boolean(url.searchParams.get('state'))
+          && url.searchParams.get('state') !== priorAuthorizationState,
+        credential_prompt: authorization
+          && await candidate.getByLabel('Username or email', { exact: true }).isVisible().catch(() => false),
+      };
+    }))).catch(() => [{ kind: 'unavailable' }]);
+  }
   if (page && new URL(page.url()).origin === origin) {
     proof.bootstrap_failure = await page.evaluate(inspectBootstrapFailure).catch(() => ({ probe: 'unavailable' }));
     proof.failure_ui = await page.evaluate(async targetPost => ({

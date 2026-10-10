@@ -73,7 +73,8 @@ These APKs are disposable test artifacts.
 1. Bundled WebView origin and rejection of an anonymous create action.
 2. External-browser sign-in, native callback return, and authenticated identity.
 3. UI post creation, backend read, WebView reload, and author deletion.
-4. External-browser logout, rejected anonymous writes, and a fresh credential prompt.
+4. External-browser logout, rejected anonymous writes, and a fresh credential prompt
+   after a second Android browser launch.
 
 The workflow retains sanitized proof, screenshots, packaging receipts, service
 provenance, and the exact APK identified by the device proof's SHA-256 digest.
