@@ -20,6 +20,7 @@ import {
 
 // The shell already uses these icon hints for workspace and admin navigation.
 const ICONS = {
+  alerts: RiNotification3Line,
   analytics: RiBarChart2Line,
   apps: RiAppsFill,
   workspace: RiAppsFill,
@@ -45,10 +46,15 @@ const ICONS = {
 
 const ICON_FILE_RE = /\.(svg|png|jpe?g|gif|webp|ico)$/i;
 
+// A navigation item id may stand in for a missing icon hint only when it names
+// one of the icons above. Ids derived from a path or href must never reach the
+// asset branch below, where they would become a mask URL that blanks the glyph.
+export const hasNamedIcon = (id) => (
+  typeof id === 'string' && Object.prototype.hasOwnProperty.call(ICONS, id)
+);
+
 export default function ShellNavigationIcon({ icon, fallback }) {
-  const NamedIcon = typeof icon === 'string' && Object.prototype.hasOwnProperty.call(ICONS, icon)
-    ? ICONS[icon]
-    : null;
+  const NamedIcon = hasNamedIcon(icon) ? ICONS[icon] : null;
   if (NamedIcon) return <NamedIcon aria-hidden="true" className="shell-mobile-bottom-icon" />;
 
   const source = typeof icon === 'string' && icon

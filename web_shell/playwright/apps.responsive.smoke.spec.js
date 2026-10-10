@@ -1422,6 +1422,33 @@ test('assistant bottom action leaves mobile controls tappable and opens the chat
   }
 });
 
+test('mobile shell navigation shows a letter for a page whose id is its path', async ({ page, isMobile }, testInfo) => {
+  test.skip(!isMobile, 'Mobile bottom bar only');
+  await page.route('**/api/shell-config', async (route) => {
+    await route.fulfill({ json: {
+      ...composedShellConfig,
+      // No id, so the auto-built bottom bar item falls back to the path as its id.
+      header: { ...composedShellConfig.header, pages: [{ label: 'Docs', path: '/docs' }] },
+    } });
+  });
+  await page.goto('/apps');
+  await page.getByRole('dialog', { name: /Onboarding step 1 of 3/i })
+    .getByRole('button', { name: 'Skip tour' }).click();
+  const navigation = page.getByRole('navigation', { name: 'Mobile app navigation' });
+  const docs = navigation.getByRole('button', { name: 'Docs' });
+  await expect(docs).toBeVisible();
+  await expect(docs.locator('.shell-mobile-bottom-glyph')).toHaveText('D');
+  await expect(docs.locator('.shell-mobile-bottom-icon')).toHaveCount(0);
+  await expect(navigation.getByRole('button', { name: 'Alerts' }).locator('svg.shell-mobile-bottom-icon')).toHaveCount(1);
+  await expectNoHorizontalOverflow(page);
+  if (process.env.MOBILE_NAV_QA_DIR) {
+    fs.mkdirSync(process.env.MOBILE_NAV_QA_DIR, { recursive: true });
+    await page.screenshot({
+      path: path.join(process.env.MOBILE_NAV_QA_DIR, `${testInfo.project.name}-path-id-letter.png`),
+    });
+  }
+});
+
 test('assistant launcher remains on mobile shells without a bottom bar', async ({ page, isMobile }) => {
   test.skip(!isMobile, 'Mobile shell fallback only');
   await page.route('**/api/shell-config', async (route) => {
