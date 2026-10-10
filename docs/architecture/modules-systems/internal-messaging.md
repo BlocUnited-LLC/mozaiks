@@ -119,6 +119,10 @@ with no verified workspace cannot create, list or open workspace threads. Local
 development (authentication off, development access) keeps using the dispatch
 workspace. A dispatch workspace or tenant that conflicts with the verified
 principal is refused before a thread read, write, or event emission.
+Generated messaging modules apply this rule through the authenticated
+persistence principal, including host-verified membership. App conversations
+remain bound to the loaded app. The generated module permits explicit
+workspace selection only with local development dispatch authority.
 The profile support panel groups tickets by `subject_app_id`, keeping the
 authenticated runtime `app_id` separate from the app the ticket concerns. If a
 listed ticket has no accessible linked message thread, its `error` field tells
