@@ -796,18 +796,16 @@ async def test_execute_plan_rejects_model_write_to_read_only_page_binding(read_o
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("operator,docker_available,local_available,expected", [
-    (None, True, True, "docker"),
-    (None, False, True, "local"),
-    (None, False, False, "skip"),
-    ("local", True, True, "local"),
-    ("docker", False, True, "docker"),
-    ("skip", True, True, "skip"),
-    ("e2b", True, True, "e2b"),
-    ("invalid", True, True, None),
+@pytest.mark.parametrize("operator,docker_available,expected", [
+    (None, True, "docker"),
+    (None, False, "skip"),
+    ("docker", False, "docker"),
+    ("skip", True, "skip"),
+    ("e2b", True, "e2b"),
+    ("invalid", True, None),
 ])
 async def test_surface_finalization_reuses_validation_and_saves_complete_target_bundle(
-    monkeypatch, tmp_path, operator, docker_available, local_available, expected,
+    monkeypatch, tmp_path, operator, docker_available, expected,
 ):
     import zipfile
 
@@ -823,7 +821,6 @@ async def test_surface_finalization_reuses_validation_and_saves_complete_target_
     else:
         monkeypatch.setenv("MOZAIKS_APP_VALIDATION_STRATEGY", operator)
     monkeypatch.setattr(app_validation_strategy, "docker_app_validation_available", lambda: docker_available)
-    monkeypatch.setattr(app_validation_strategy, "local_app_validation_available", lambda: local_available)
     validation_status = "skipped" if expected == "skip" else "passed"
 
     async def validate(**kwargs):

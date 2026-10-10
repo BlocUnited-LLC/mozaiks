@@ -1,34 +1,27 @@
-"""Runtime smoke gate: boot a generated app bundle and use it as two people.
+"""Runtime smoke gates: boot an app bundle and use it as two people.
 
-The static acceptance checks read files. This gate runs the bundle: it loads
-it with the platform host's ``AppLoader``, applies its declared indexes and
-migrations to a disposable database on the host's configured Mongo, mounts its
-API router extensions, and calls its module actions through the real module
-router over an in-process ASGI client as synthetic signed-in principals.
+Production generated-app acceptance uses a contained Docker app with private
+MongoDB and a separate source-free observer. The direct host child path remains
+for trusted repository fixtures. Both paths load through the platform's
+``AppLoader``, apply declared indexes and migrations, and exercise module
+actions as synthetic signed-in principals.
 
 Every check is derived from the bundle's own contracts: ``data/contract.json``
 collections and their canonical action ids, ``module.yaml`` schemas, gates and
 surfaces, ``config/subscriptions.yaml`` plans and assignment store, and the
 token scopes ``config/auth.yaml`` grants. Nothing is configured per app.
 
-Generated code never runs in the factory process. ``run_app_runtime_smoke``
-(the parent, called by acceptance) creates the disposable database, starts
-``python -m`` this module as a child process and drops the database however
-the child ends. The child's environment holds only what a Python process needs
-to start on this OS (no host secrets, provider keys or Mongo URI; the database
-URI arrives on stdin), it is killed at a hard total time limit, and it streams
-each check result back as one JSON line so a killed run still reports what it
-finished. Inside the child the composed app is dispatched in enforce mode with
-its own (empty) platform hook registry, an in-memory audit log, a local event
-recorder and no usage metering; module persistence, entitlement reads and
-migration history all use the disposable database. Startup services are not
-started: they run outside module dispatch with their own clients.
+The trusted-fixture child path starts this module with a restricted environment,
+uses a disposable host database and enforces a hard time limit. Production
+acceptance never invokes that path. Both paths dispatch in enforce mode with an
+empty platform hook registry, in-memory audit and no usage metering. Startup
+services are not started because they run outside module dispatch with their
+own clients.
 
-An emitted event that breaks its declared contract does not fail the action
-that emitted it: the runtime reports the action as succeeded and names the
-rejected event on its dispatch result. The gate reads that result and records
-each distinct rejected event (per action, event type and reason) as its own
-failed check.
+The direct trusted-fixture smoke records an event rejected by the runtime as
+its own failed check. The contained external observer cannot see that internal
+rejection. Generated-app acceptance records this limit in its versioned scope
+without claiming the candidate made no invalid emission attempt.
 """
 from __future__ import annotations
 
@@ -38,6 +31,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -58,9 +52,12 @@ from anyio import CancelScope
 from fastapi import FastAPI, Request
 from httpx import TimeoutException
 
+from mozaiksai.core.adapters.local_docker_cli import _docker_cli_env, _docker_prefix
+
 logger = logging.getLogger(__name__)
 
 SMOKE_CONTRACT_VERSION = "1.0"
+GENERATED_ACCEPTANCE_SCOPE_VERSION = "2.0"
 SMOKE_TIMEOUT_SECONDS = 60.0
 _CHILD_MODULE = "factory_app.workflows.AppGenerator.tools.app_runtime_smoke"
 _EVENT_PREFIX = "@@mozaiks-runtime-smoke@@ "
@@ -68,6 +65,9 @@ _SMOKE_DATABASE_PREFIX = "mozaiks_runtime_smoke_"
 _CONTAINED_APP_ROOT = PurePosixPath("/workspace/app")
 _CONTAINED_PLAN_ROOT = PurePosixPath("/workspace/plan")
 _CONTAINED_IMAGE = "mozaiks-sandbox:local"
+_GENERATED_IMAGE_ENV = "MOZAIKS_APP_RUNTIME_IMAGE_ID"
+_GENERATED_LOAD_TIMEOUT_SECONDS = 90
+_GENERATED_LOAD_RESULT_LIMIT = 128 * 1024
 _MAX_IMPORTED_SOURCE_BYTES = 64_000_000
 _MAX_IMPORTED_SOURCE_FILES = 4096
 _CONTAINER_STARTUP_SECONDS = 20.0
@@ -145,11 +145,13 @@ class _ChildProcess:
         self.cancelled = False
 
     def run(self, app_root: Path, request: dict[str, Any], timeout_seconds: float) -> _ChildRun:
+        environment = child_environment()
+        environment["USERPROFILE" if os.name == "nt" else "HOME"] = str(app_root.parent)
         self.process = subprocess.Popen(
             [sys.executable, "-m", _CHILD_MODULE],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding="utf-8", errors="replace",
-            env=child_environment(), cwd=str(app_root.parent),
+            env=environment, cwd=str(app_root.parent),
         )
         if self.cancelled:  # the gate was cancelled while the process was being created
             self.process.kill()
@@ -288,13 +290,16 @@ def _copy_probe_plan(staged_root: Path, plan_root: Path) -> None:
             shutil.copyfile(source, target)
 
 
-def _container_removed(name: str) -> bool:
+def _container_removed(name: str, *, config_dir: str) -> bool:
     """Force removal and verify that Docker no longer knows the container."""
+    command = _docker_prefix(config_dir)
+    environment = _docker_cli_env()
     try:
-        subprocess.run(["docker", "rm", "-f", name], capture_output=True, timeout=10, check=False)
+        subprocess.run([*command, "rm", "-f", name], capture_output=True, timeout=10,
+                       check=False, env=environment)
         remaining = subprocess.run(
-            ["docker", "ps", "-a", "--filter", f"name=^/{name}$", "--format", "{{.Names}}"],
-            capture_output=True, text=True, timeout=5, check=False,
+            [*command, "ps", "-a", "--filter", f"name=^/{name}$", "--format", "{{.Names}}"],
+            capture_output=True, text=True, timeout=5, check=False, env=environment,
         )
     except (OSError, subprocess.TimeoutExpired):
         return False
@@ -307,17 +312,23 @@ class _ContainedDockerProcess:
     def __init__(self) -> None:
         self.name = f"mozaiks-imported-smoke-{uuid4().hex[:20]}"
         self.probe_name = f"{self.name}-observer"
+        self._config = tempfile.TemporaryDirectory(prefix="mozaiks-smoke-docker-cli-")
+        self._docker_command = _docker_prefix(self._config.name)
+        self._docker_environment = _docker_cli_env()
         self.app_process: subprocess.Popen[bytes] | None = None
         self.probe_process: subprocess.Popen[bytes] | None = None
         self.cancelled = False
         self.run_started = threading.Event()
         self.registration_done = threading.Event()
 
+    def close(self) -> None:
+        self._config.cleanup()
+
     def run(self, app_root: Path, plan_root: Path, image: str, timeout_seconds: float,
             observer_nonce: str) -> _ChildRun:
         database_name = f"{_SMOKE_DATABASE_PREFIX}{observer_nonce[:20]}"
         app_command = [
-            "docker", "create", "--log-driver=none", "--name", self.name,
+            *self._docker_command, "create", "--log-driver=none", "--name", self.name,
             "--network=none", "--read-only", "--init", "--cap-drop=ALL",
             "--security-opt=no-new-privileges", "--pids-limit=128",
             "--memory=1g", "--memory-swap=1g", "--cpus=1",
@@ -330,7 +341,7 @@ class _ContainedDockerProcess:
             image, "python", "-m", _CHILD_MODULE, "--contained-serve", database_name, observer_nonce,
         ]
         probe_command = [
-            "docker", "create", "--log-driver=none", "--name", self.probe_name,
+            *self._docker_command, "create", "--log-driver=none", "--name", self.probe_name,
             f"--network=container:{self.name}", "--read-only", "--init", "--cap-drop=ALL",
             "--security-opt=no-new-privileges", "--pids-limit=128",
             "--memory=1g", "--memory-swap=1g", "--cpus=1",
@@ -374,6 +385,7 @@ class _ContainedDockerProcess:
                 created = subprocess.run(
                     command, stdin=subprocess.DEVNULL, capture_output=True,
                     timeout=_CONTAINER_STARTUP_SECONDS, check=False,
+                    env=self._docker_environment,
                 )
                 if created.returncode == 0:
                     return True
@@ -389,8 +401,9 @@ class _ContainedDockerProcess:
         try:
             if register(app_command) and not self.cancelled:
                 self.app_process = subprocess.Popen(
-                    ["docker", "start", "--attach", self.name],
+                    [*self._docker_command, "start", "--attach", self.name],
                     stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    env=self._docker_environment,
                 )
                 attach(self.app_process, 0)
                 # Docker needs the app container running before a second container
@@ -398,8 +411,9 @@ class _ContainedDockerProcess:
                 deadline = time.monotonic() + _CONTAINER_STARTUP_SECONDS
                 while time.monotonic() < deadline and not self.cancelled:
                     inspected = subprocess.run(
-                        ["docker", "inspect", "--format", "{{.State.Running}}", self.name],
+                        [*self._docker_command, "inspect", "--format", "{{.State.Running}}", self.name],
                         capture_output=True, text=True, timeout=5, check=False,
+                        env=self._docker_environment,
                     )
                     if inspected.returncode == 0 and inspected.stdout.strip() == "true":
                         break
@@ -410,8 +424,9 @@ class _ContainedDockerProcess:
                     creation_error = "Contained app did not start"
                 if not creation_error and not self.cancelled and register(probe_command):
                     self.probe_process = subprocess.Popen(
-                        ["docker", "start", "--attach", self.probe_name],
+                        [*self._docker_command, "start", "--attach", self.probe_name],
                         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                        env=self._docker_environment,
                     )
                     attach(self.probe_process, 2)
             self.registration_done.set()
@@ -426,8 +441,8 @@ class _ContainedDockerProcess:
         finally:
             self.registration_done.set()
             app_exited = self.app_process is not None and self.app_process.poll() is not None
-            cleanup_failed = not _container_removed(self.probe_name)
-            cleanup_failed = not _container_removed(self.name) or cleanup_failed
+            cleanup_failed = not _container_removed(self.probe_name, config_dir=self._config.name)
+            cleanup_failed = not _container_removed(self.name, config_dir=self._config.name) or cleanup_failed
             for reader in readers:
                 reader.join(timeout=5)
             if any(reader.is_alive() for reader in readers):
@@ -452,8 +467,8 @@ class _ContainedDockerProcess:
                     process.kill()
                     process.wait(timeout=5)
         finally:
-            _container_removed(self.probe_name)
-            _container_removed(self.name)
+            _container_removed(self.probe_name, config_dir=self._config.name)
+            _container_removed(self.name, config_dir=self._config.name)
 
 
 def preflight_contained_imported_smoke(
@@ -469,10 +484,11 @@ def preflight_contained_imported_smoke(
         raise RuntimeError("contained validator image identity is unconfigured")
     selected_image = image or os.environ.get("DOCKER_SANDBOX_IMAGE") or _CONTAINED_IMAGE
     try:
-        inspected = subprocess.run(
-            ["docker", "image", "inspect", "--format", "{{.Id}}", selected_image],
-            capture_output=True, text=True, timeout=5, check=False,
-        )
+        with tempfile.TemporaryDirectory(prefix="mozaiks-smoke-docker-cli-") as config_dir:
+            inspected = subprocess.run(
+                [*_docker_prefix(config_dir), "image", "inspect", "--format", "{{.Id}}", selected_image],
+                capture_output=True, text=True, timeout=5, check=False, env=_docker_cli_env(),
+            )
     except (OSError, subprocess.TimeoutExpired):
         raise RuntimeError("contained Docker image is unavailable") from None
     image_id = inspected.stdout.strip() if inspected.returncode == 0 else ""
@@ -525,12 +541,15 @@ async def run_contained_imported_app_runtime_smoke(
             with CancelScope(shield=True):
                 await asyncio.to_thread(child.kill)
             raise
+        finally:
+            child.close()
         result = _child_result(run, mongo_uri="", timeout_seconds=timeout_seconds, started=started)
         events = _events(run.stdout)
-        boot = [event for event in events if event.get("event") == "outcome"
+        boot = [index for index, event in enumerate(events) if event.get("event") == "outcome"
                 and event.get("check") == "boot.http_ready" and event.get("status") == "passed"]
-        done = [event for event in events if event.get("event") == "done"]
+        done = [index for index, event in enumerate(events) if event.get("event") == "done"]
         valid_receipt = (bool(events) and len(boot) == 1 and len(done) == 1
+                         and boot[0] < done[0] == len(events) - 1
                          and all(event.get("observer_nonce") == observer_nonce for event in events))
         if result["status"] == "passed" and not valid_receipt:
             result = _summary([*result["results"], {
@@ -545,7 +564,277 @@ async def run_contained_imported_app_runtime_smoke(
             result["observer_origin"] = "trusted_external_probe_v1"
             result["observer_run_id"] = observer_nonce
             result["observed_boot"] = {"check": "boot.http_ready", "status": "passed"}
+            result["observer_completion_verified"] = True
+            result["observer_cleanup_verified"] = not run.cleanup_failed
         return _imported_observer_scope(result)
+
+
+def _preflight_generated_image() -> str:
+    """Resolve a locally inspected image ID before generated bytes are staged."""
+    image_id = os.environ.get(_GENERATED_IMAGE_ENV, "").strip()
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", image_id):
+        raise RuntimeError(f"{_GENERATED_IMAGE_ENV} must name an immutable local image ID")
+
+    # The local-only CLI owner is being integrated separately. Its absence must
+    # keep this draft's generated acceptance path closed.
+    from mozaiksai.core.adapters.docker_sandbox import docker_available
+
+    if not docker_available():
+        raise RuntimeError("contained Docker validation is unavailable")
+    with tempfile.TemporaryDirectory(prefix="mozaiks-docker-cli-") as config_dir:
+        try:
+            inspected = subprocess.run(
+                [*_docker_prefix(config_dir), "image", "inspect", "--format", "{{.Id}}", image_id],
+                capture_output=True, text=True, timeout=5, check=False, env=_docker_cli_env(),
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            raise RuntimeError("contained Docker image is unavailable") from None
+    if inspected.returncode != 0 or inspected.stdout.strip() != image_id:
+        raise RuntimeError("contained Docker image is unavailable")
+    return image_id
+
+
+def _generated_source_digests(files: Mapping[str, str]) -> dict[str, str]:
+    if not files or len(files) > _MAX_IMPORTED_SOURCE_FILES:
+        raise ValueError("generated app exceeds the contained source limit")
+    digests: dict[str, str] = {}
+    total = 0
+    for raw_path, content in files.items():
+        if not isinstance(raw_path, str) or not isinstance(content, str):
+            raise ValueError("generated app contains invalid source content")
+        path = PurePosixPath(raw_path.replace("\\", "/"))
+        if (not raw_path or path.is_absolute() or ":" in raw_path or "\x00" in raw_path
+                or any(part == ".." for part in path.parts) or str(path) == "."
+                or str(path) in digests):
+            raise ValueError("generated app contains an unsafe source path")
+        data = content.encode("utf-8")
+        total += len(data)
+        if total > _MAX_IMPORTED_SOURCE_BYTES:
+            raise ValueError("generated app exceeds the contained source limit")
+        digests[str(path)] = hashlib.sha256(data).hexdigest()
+    if "app.json" not in digests:
+        raise ValueError("generated app has no app.json")
+    return digests
+
+
+def _source_content_sha256(digests: Mapping[str, str]) -> str:
+    return hashlib.sha256(json.dumps(
+        digests, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+
+
+def generated_acceptance_scope() -> dict[str, Any]:
+    """The narrower claim made only by contained generated-app acceptance."""
+    return {
+        "version": GENERATED_ACCEPTANCE_SCOPE_VERSION,
+        "excluded_observer_checks": ["event_rejection"],
+    }
+
+
+def generated_smoke_evidence_issue(
+    result: Mapping[str, Any], files: Mapping[str, str], expected_image_id: str,
+) -> str | None:
+    """Check the host-owned observer evidence before applying the generated scope."""
+    try:
+        expected_source_digest = _source_content_sha256(_generated_source_digests(files))
+    except (UnicodeError, ValueError):
+        return "generated source identity could not be verified"
+    if result.get("status") != "passed" or result.get("passed") is not True:
+        return "the external observer did not pass"
+    if result.get("observer_unverified_checks") != ["event_rejection"]:
+        return "the external observer's unverified checks differ from the generated scope"
+    if (not re.fullmatch(r"sha256:[0-9a-f]{64}", expected_image_id)
+            or result.get("validator_image_id") != expected_image_id):
+        return "the external observer image identity does not match the pinned image"
+    if result.get("source_content_sha256") != expected_source_digest:
+        return "the external observer source identity does not match the generated snapshot"
+    if (result.get("observer_origin") != "trusted_external_probe_v1"
+            or not re.fullmatch(r"[0-9a-f]{32}", str(result.get("observer_run_id") or ""))
+            or result.get("observed_boot") != {"check": "boot.http_ready", "status": "passed"}
+            or result.get("observer_completion_verified") is not True):
+        return "the external observer boot and completion receipts were not verified"
+    if result.get("observer_cleanup_verified") is not True:
+        return "the external observer container cleanup was not verified"
+    outcomes = result.get("results")
+    checks = result.get("checks")
+    if (not isinstance(outcomes, list) or not outcomes
+            or not all(isinstance(row, dict) and row.get("status") in {"passed", "not_run"}
+                       for row in outcomes)
+            or sum(row.get("check") == "boot.http_ready" and row.get("status") == "passed"
+                   for row in outcomes) != 1
+            or not isinstance(checks, list) or len(checks) != 1
+            or not isinstance(checks[0], dict) or checks[0].get("id") != "app_runtime_smoke"
+            or checks[0].get("status") != "passed" or checks[0].get("passed") is not True
+            or result.get("failed_tests") != []):
+        return "the external observer runtime checks did not all complete successfully"
+    details = checks[0].get("details")
+    if (not isinstance(details, dict) or details.get("status") != "passed"
+            or details.get("check_count") != sum(row["status"] == "passed" for row in outcomes)
+            or details.get("failed_check_count") != 0
+            or details.get("not_run_check_count") != sum(row["status"] == "not_run" for row in outcomes)):
+        return "the external observer runtime check summary does not match its outcomes"
+    return None
+
+
+def _generated_scope_pending(result: dict[str, Any], reason: str) -> dict[str, Any]:
+    """Retain observer evidence while refusing an incomplete generated claim."""
+    result.pop("acceptance_scope", None)
+    result["status"] = "pending"
+    result["passed"] = None
+    result["skipped_reason"] = reason
+    result["checks"] = [{
+        "id": "app_runtime_smoke", "status": "pending", "passed": None,
+        "message": f"Contained runtime acceptance awaits {reason}.",
+        "details": {"status": "pending", "blocking": True},
+    }]
+    return result
+
+
+def apply_generated_acceptance_scope(
+    result: dict[str, Any], files: Mapping[str, str], expected_image_id: str,
+) -> dict[str, Any]:
+    """Admit only the exact generated scope on a fully verified observer run."""
+    if result.get("status") != "passed":
+        result.pop("acceptance_scope", None)
+        return result
+    issue = generated_smoke_evidence_issue(result, files, expected_image_id)
+    if not issue and ("acceptance_scope" in result
+                      and result["acceptance_scope"] != generated_acceptance_scope()):
+        issue = "the generated acceptance scope differs from the approved contract"
+    if issue:
+        return _generated_scope_pending(result, issue)
+    result["acceptance_scope"] = generated_acceptance_scope()
+    return result
+
+
+def _stage_generated_source(root: Path, files: Mapping[str, str]) -> None:
+    for path, content in files.items():
+        target = root / PurePosixPath(path.replace("\\", "/"))
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8", newline="")
+
+
+def _generated_load_unavailable(reason: str) -> dict[str, Any]:
+    return {
+        "contract_version": "1.0", "status": "skipped", "passed": None,
+        "skipped_reason": reason,
+        "checks": [{
+            "id": "app_runtime_load", "status": "skipped", "passed": None,
+            "message": f"Contained AppLoader check unavailable: {reason}.",
+            "details": {"blocking": True},
+        }],
+        "failed_tests": [], "warnings": [], "details": {},
+    }
+
+
+async def run_contained_generated_app_runtime_load(files: dict[str, str]) -> dict[str, Any]:
+    """Collect AppLoader repair diagnostics in Docker; the smoke remains the authority."""
+    files = dict(files)
+    try:
+        digests = _generated_source_digests(files)
+        image_id = await asyncio.to_thread(_preflight_generated_image)
+    except (ImportError, RuntimeError, UnicodeError, ValueError) as exc:
+        return _generated_load_unavailable(str(exc) if not isinstance(exc, ImportError)
+                                           else "fixed-local Docker validation is unavailable")
+
+    from mozaiksai.core.adapters.docker_sandbox import DockerSandboxAdapter
+
+    adapter = DockerSandboxAdapter(image=image_id, default_timeout_seconds=_GENERATED_LOAD_TIMEOUT_SECONDS + 30)
+    session_id: str | None = None
+    result: dict[str, Any] | None = None
+    failure: str | None = None
+    try:
+        creation = asyncio.create_task(adapter.create_session(
+            timeout_seconds=_GENERATED_LOAD_TIMEOUT_SECONDS + 30,
+            metadata={"purpose": "app_runtime_diagnostic"},
+            envs={"PYTHON_DOTENV_DISABLED": "1"},
+        ))
+        try:
+            session = await asyncio.shield(creation)
+        except BaseException:
+            with CancelScope(shield=True):
+                try:
+                    created = await creation
+                except Exception:
+                    pass
+                else:
+                    await adapter.terminate_session(session_id=created.session_id)
+            raise
+        session_id = session.session_id
+        staged_files: dict[str, str | bytes] = dict(files)
+        await adapter.write_files(session_id=session_id, files=staged_files, cwd="/workspace/app")
+        execution = await adapter.run_command(
+            session_id=session_id,
+            command=(
+                "python -m factory_app.workflows.AppGenerator.tools.app_runtime_load_probe "
+                "--app-root /workspace/app --output /workspace/app-runtime-load.json "
+                "> /workspace/app-runtime-load.log 2>&1"
+            ),
+            cwd="/workspace", timeout_seconds=_GENERATED_LOAD_TIMEOUT_SECONDS,
+        )
+        if not execution.success:
+            failure = "contained AppLoader worker did not complete"
+        else:
+            output = await adapter.run_command(
+                session_id=session_id,
+                command=f"head -c {_GENERATED_LOAD_RESULT_LIMIT + 1} /workspace/app-runtime-load.json",
+                cwd="/workspace", timeout_seconds=10,
+            )
+            if not output.success or len(output.stdout.encode("utf-8")) > _GENERATED_LOAD_RESULT_LIMIT:
+                failure = "contained AppLoader worker returned no bounded result"
+            else:
+                decoded = json.loads(output.stdout)
+                if (not isinstance(decoded, dict) or decoded.get("contract_version") != "1.0"
+                        or not isinstance(decoded.get("passed"), bool)
+                        or not isinstance(decoded.get("checks"), list)
+                        or not isinstance(decoded.get("failed_tests"), list)
+                        or not isinstance(decoded.get("details"), dict)):
+                    failure = "contained AppLoader worker returned an invalid result"
+                else:
+                    result = decoded
+    except Exception as exc:
+        logger.warning("APP_RUNTIME_LOAD_CONTAINMENT_FAILED: %s", type(exc).__name__)
+        failure = "contained AppLoader worker could not complete"
+    finally:
+        if session_id is not None:
+            with CancelScope(shield=True):
+                try:
+                    removed = await adapter.terminate_session(session_id=session_id)
+                except Exception:
+                    removed = False
+            if not removed:
+                failure = "contained AppLoader worker removal could not be confirmed"
+    if failure or result is None:
+        return _generated_load_unavailable(failure or "contained AppLoader worker returned no result")
+    # This flag is host-owned: candidate Python can forge the diagnostic JSON,
+    # but it cannot attest that the host removed its worker afterward.
+    result["worker_containment_verified"] = True
+    result["validator_image_id"] = image_id
+    result["source_content_sha256"] = _source_content_sha256(digests)
+    return result
+
+
+async def run_contained_generated_app_runtime_smoke(files: dict[str, str]) -> dict[str, Any]:
+    """Stage generated bytes only after image preflight, then use the external probe."""
+    started = time.monotonic()
+    files = dict(files)
+    try:
+        digests = _generated_source_digests(files)
+        image_id = await asyncio.to_thread(_preflight_generated_image)
+    except (ImportError, RuntimeError, UnicodeError, ValueError) as exc:
+        reason = str(exc) if not isinstance(exc, ImportError) else "fixed-local Docker validation is unavailable"
+        return _contained_unavailable(reason, started=started)
+    try:
+        with tempfile.TemporaryDirectory(prefix="mozaiks-generated-smoke-") as temporary:
+            app_root = Path(temporary) / "app"
+            _stage_generated_source(app_root, files)
+            result = await run_contained_imported_app_runtime_smoke(
+                app_root, expected_source_sha256=digests,
+                image=image_id, expected_image_id=image_id,
+            )
+    except OSError:
+        return _contained_unavailable("generated app source staging failed", started=started)
+    return apply_generated_acceptance_scope(result, files, image_id)
 
 
 def _redact(text: str, mongo_uri: str) -> str:

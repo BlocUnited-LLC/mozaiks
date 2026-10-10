@@ -255,7 +255,7 @@ class StructuredOutputCodingProvider:
             (
                 '{"summary":"...","owned_paths":["..."],'
                 '"updated_files":[{"path":"relative/path","content":"full file content"}],'
-                '"validation_strategy":"e2b|docker|local|skip",'
+                '"validation_strategy":"e2b|docker|skip",'
                 '"validation_commands":["..."],"start_preview":false,'
                 '"needs_human_review":false,"rationale":"..."}'
             ),

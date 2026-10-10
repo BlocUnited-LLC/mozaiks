@@ -78,7 +78,7 @@ async def test_build_failure_after_passed_acceptance_uses_existing_repair_or_end
     acceptance = {key: passed_check for key in (
         "bundle_scan", "agent_backend", "module_wiring", "module_implementation",
         "module_runtime_quality", "functional_completeness", "workflow_integration",
-        "app_runtime_load", "app_runtime_smoke",
+        "app_runtime_load", "app_runtime_load_worker", "app_runtime_smoke",
     )}
     acceptance.update(status="passed", passed=True, skipped_checks=[],
                       bundle_repair={"status": "passed", "target_agent": None})

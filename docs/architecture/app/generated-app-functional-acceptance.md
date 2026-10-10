@@ -147,35 +147,33 @@ enabled, crashed on every write and denied paying users. `app_runtime_smoke`
 (`factory_app/workflows/AppGenerator/tools/app_runtime_smoke.py`) runs the
 bundle instead.
 
-**Process boundary.** Generated code never runs in the factory process.
-Acceptance writes the bundle to a temporary `app/` root and the gate starts
-`python -m factory_app.workflows.AppGenerator.tools.app_runtime_smoke`:
+**Process boundary.** Generated Python runs in disposable Docker containers,
+never in Studio or a host Python child. Before staging any generated source,
+the gate checks that local Docker can inspect the exact image ID in
+`MOZAIKS_APP_RUNTIME_IMAGE_ID`. A missing or mismatched ID makes acceptance
+`skipped` and blocks export. The AppLoader diagnostic probe runs as a non-root
+user in a read-only container with no network, published ports, or Docker log
+stream. Its only writable locations are size-limited temporary filesystems. Candidate Python can
+write the probe's JSON, so `app_runtime_load_passed` and the loader check supply
+repair diagnostics only; neither is promotion evidence. The host sets the
+separate `app_runtime_load_worker` check only after the bounded worker returns
+and its removal is confirmed. The runtime smoke uses a private MongoDB container
+and a source-free observer; that smoke and the host-owned worker check govern
+acceptance. Unconfirmed container cleanup blocks export.
+Build the local validator with
+`docker build -f infra/docker/Dockerfile.preview -t mozaiks-sandbox:local .`,
+then set `MOZAIKS_APP_RUNTIME_IMAGE_ID` to the full value from
+`docker image inspect --format '{{.Id}}' mozaiks-sandbox:local`. The gate never
+pulls an image automatically.
 
-- The child's environment holds only what a Python process needs to start on
-  the operating system: `PATH`, `SYSTEMROOT`, temp directories, locale. It also
-  gets `PYTHONPATH` for the factory's own code and `PYTHON_DOTENV_DISABLED=1`.
-  No host secret, provider key, `MOZAIKS_*` setting or `MONGO_URI` is passed.
-- The disposable database URI and name arrive on stdin.
-- If loading the runtime still adds an environment variable (a `.env` file
-  read), the child refuses to run generated code. Mozaiks requires
-  python-dotenv 1.2 or later, which honors `PYTHON_DOTENV_DISABLED`.
-- The parent kills the child at a hard total limit (60 s by default) and drops
-  the database whether the child finished, crashed, timed out or the gate was
-  cancelled.
-- The child streams each check result as one JSON line, so a killed run still
-  reports every check it finished. The timeout failure names the action that
-  was running.
-- Every message is redacted of the database URI before it is returned.
-
-**Boot.** The child loads the bundle with `AppLoader.load()` and applies the
-declared indexes and data migrations to the disposable database
-(`mozaiks_runtime_smoke_*` on the host's configured Mongo). It registers modules
+**Boot.** The contained app loads the bundle with `AppLoader.load()` and applies the
+declared indexes and data migrations to its private disposable database. It registers modules
 with `ModuleExecutor.register_loaded_module`, the same call the platform host
 makes, and mounts the `api_router` extensions. **Startup services are not
 started.** They run outside module dispatch with their own clients and
 credentials, so the smoke cannot keep them inside the disposable database. They
 are reported `not_run`, and only the deployed app starts them. Requests go
-through the real module router over an in-process ASGI client inside the child:
+through the real module router over an in-process ASGI client inside the contained app:
 no port.
 
 **Two-user CRUD.** For every collection whose canonical create action
@@ -210,7 +208,7 @@ every signed-in user. That is reported once per action. The call is then
 repeated for the same user with exactly the missing permissions, so the defects
 behind it are reported in the same pass.
 
-**Dispatch collaborators.** Inside the child, the composed app is dispatched in
+**Dispatch collaborators.** Inside the contained app, the composed app is dispatched in
 enforce mode through a `ModuleDispatchEnvironment` dependency override:
 
 - an empty `PlatformHookRegistry`, an in-memory audit log, local event
@@ -220,8 +218,8 @@ enforce mode through a `ModuleDispatchEnvironment` dependency override:
 
 The host's auth mode, platform hooks, audit log, usage metering and system
 database are never used. A hosted factory may register module scope, permission,
-policy and audit hooks. With the database dropped, nothing the smoke wrote
-remains on the host's Mongo.
+policy and audit hooks. Generated-app smoke does not receive the host's Mongo
+URI or write to the host database.
 
 ### Imported-source runtime smoke
 
@@ -229,8 +227,8 @@ An imported Genesis can contain arbitrary Python. Its proposed acceptance path u
 `run_contained_imported_app_runtime_smoke(app_root, expected_source_sha256=...)`
 on the exact staged app bytes. The caller supplies every verified source-file
 digest; the runner checks the copied mount bytes and rejects missing or extra
-files. This is a separate opt-in backend; ordinary generated-app acceptance
-continues to use the child-process smoke described above.
+files. Generated-app acceptance now delegates to this contained runner after
+its own image preflight; imported Genesis callers still opt in separately.
 
 Before staging imported source, a caller can use
 `preflight_contained_imported_smoke()` to require a reachable local Docker
@@ -270,9 +268,39 @@ distinguish a rejected emit from no emit. Contained results declare
 `observer_unverified_checks: [event_rejection]`, including when their observed
 checks pass. A's reported rejection list is not trusted evidence. The ordinary
 in-process smoke detects rejected events, but imported Genesis acceptance must
-stay closed until this invariant has a trusted check or an explicit acceptance
-contract excludes it. `observer_origin` attests the source of the bounded
-observations, not parity with every in-process smoke check.
+stay closed under its separate admission contract. `observer_origin` attests
+the source of the bounded observations, not parity with every in-process smoke
+check.
+
+### Generated-app contained acceptance scope 2.0
+
+[ADR 0020](../../adr/0020-generated-app-contained-runtime-acceptance-scope.md)
+defines the narrower generated-app claim. Its only
+`acceptance_scope.excluded_observer_checks` value is `event_rejection`.
+The generated result retains `observer_unverified_checks: [event_rejection]`;
+that field is never cleared or described as independently verified. The
+platform-wired action emitter rejects invalid declared events before dispatch,
+as proven by framework tests. The contained observer does not establish that a
+particular candidate attempted no rejected `ctx.emit` or emitted every event
+needed by its intended behavior. Required downstream event effects need their
+own external acceptance checks.
+
+The generated gate attaches `acceptance_scope: {version: "2.0",
+excluded_observer_checks: [event_rejection]}` only after the host checks all
+supported external outcomes, one matching boot and completion receipt, the
+trusted observer origin and run ID, exact generated-source digest, locally
+preflighted immutable validator image ID, and confirmed removal of both
+containers. Its contained AppLoader worker must also have host-confirmed
+cleanup and matching source/image identity. A missing, altered, or extra
+unverified check leaves the generated gate pending and issues no snapshot
+digest. Imported Genesis does not use this generated scope.
+
+Build validation is a separate required gate. Generated apps can select only
+`docker`, explicit `e2b`, or `skip`; `skip` blocks promotion. The Docker build
+path inspects the same immutable local image ID before staging source and runs
+offline as a non-root user with a read-only image and bounded writable space.
+Candidate package scripts never run through a host npm subprocess. A passing
+runtime scope cannot override a failed or skipped build.
 
 The preview image must be rebuilt after changing this smoke module:
 `docker build -f infra/docker/Dockerfile.preview -t mozaiks-sandbox:local .`.
@@ -307,8 +335,9 @@ the file each one names:
 | Index or alias defect | `data/contract.json` |
 | Plan or assignment defect | `config/subscriptions.yaml` |
 
-With no configured database, or an unreachable one, the check reports
-`skipped` with the reason (`passed: null`, `status: "skipped"`). Acceptance
+When Docker or the pinned image is unavailable, the check reports `skipped`
+with the reason (`passed: null`, `status: "skipped"`). The generated smoke
+starts its own disposable MongoDB; host `MONGO_URI` is not a prerequisite. Acceptance
 lists it in `validation_evidence.skipped` and `skipped_checks` with that reason.
 It is neither completed nor failed. The aggregate acceptance remains `pending`
 with `passed: false` until required checks complete; an actual contract failure
@@ -333,22 +362,15 @@ gate. Actions on the `internal` and `admin_internal` surfaces are out of scope:
 signed-in users cannot call them over HTTP. `public` and `public_readonly`
 actions are called like any other, as a signed-in user.
 
-**Known follow-ups.** These are not handled by the gate yet:
+**Known follow-ups.** Pack-owned permissions outside `config/auth.yaml`
+default scopes (commerce) are reported as ungrantable. Failures on code-rendered
+files without an owning task remain blocked for repair. Only the exact
+generated-app scope above permits the one known unverified observer check;
+other unverified checks remain pending. The Docker validator image must be
+built and pinned by the operator; the gate never downloads one on demand.
 
-- Outbound calls to unconfigured integrations run in the child and fail or wait
-  until the time limit.
-- Pack-owned permissions outside `config/auth.yaml` default scopes (commerce)
-  are reported as ungrantable.
-- The host's Mongo credentials are not yet scoped to the disposable database.
-- Stale `mozaiks_runtime_smoke_*` databases left by a killed factory process are
-  not swept.
-- Failures on code-rendered files (no owning task) are blocked for repair rather
-  than routed.
-- Generated code runs as the factory's operating-system user without a
-  filesystem sandbox.
-
-**Proof.** `tests/test_app_runtime_smoke.py` runs the gate through the child
-process on real Mongo against two recorded bundles
+**Proof.** `tests/test_app_runtime_smoke.py` exercises the retained trusted-fixture
+child path on real Mongo against two recorded bundles
 (`tests/fixtures/runtime_smoke_*.json`):
 
 - The 93a7 replay fails for its known reasons: null index name, migration
@@ -356,8 +378,18 @@ process on real Mongo against two recorded bundles
   crash on every create and on a missing id, and paying users denied. With the
   create crash repaired, the stored record shows the wrong id and owner fields.
 - The fdfa818e run replayed at c8b9ea2e passes every check.
-- Further tests cover the hard timeout, the child environment, startup services
-  and the no-subscriptions case.
+- Further tests cover the trusted fixture's hard timeout, child environment,
+  startup services and the no-subscriptions case.
+
+`tests/test_app_acceptance_isolation.py` verifies that generated acceptance
+delegates to the contained loader and smoke runners, blocks when the image is
+unavailable, and admits only the exact generated scope with trusted observer
+evidence. Its opt-in real Docker test loads the recorded good bundle and
+observes its HTTP boot with a pinned local image even when ambient Docker
+host, context, and config settings
+point elsewhere. The independently unverified rejected-event check remains
+visible in the accepted scope; the contained invalid-emission fixture shows
+why that check cannot be claimed as verified.
 
 The suite-wide conftest gives every other test no smoke database, so acceptance
 tests that do not opt in report `skipped`.
@@ -856,10 +888,11 @@ Parent validation and source-index checks cannot certify a new candidate.
 
 Execution strategy comes from operator policy and the request, never a model's
 suggestion. `skip` runs neither acceptance nor build execution and cannot activate
-the candidate. Acceptance uses the existing local runtime load and smoke process;
-Docker/E2B isolates the subsequent compilation stage, not the whole acceptance
-pipeline. This entrypoint proves explicit bundle correctness. It does not replay
-Genesis task execution or manufacture task evidence from a refinement request.
+the candidate. Acceptance uses the pinned local Docker image for AppLoader
+diagnostics and the contained runtime smoke; Docker or E2B can separately isolate
+the compilation stage. This entrypoint proves explicit bundle correctness. It
+does not replay Genesis task execution or manufacture task evidence from a
+refinement request.
 
 Saved archives use the same canonical identity and digest checks as normal builds.
 The existing Studio lifecycle registers the exact candidate for review; explicit

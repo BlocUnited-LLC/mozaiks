@@ -176,10 +176,12 @@ async def validate_generated_app_candidate(
     No prior validation result, model context, or generated repair is admitted.
     Selected pack contracts must come from the caller's trusted build record.
     The caller retains responsibility for scope, lineage, review and promotion.
-    Acceptance includes the existing local runtime load/smoke; the selected
-    Docker/E2B/local strategy controls the subsequent build execution.
+    Acceptance uses the contained runtime worker and external observer. The
+    selected Docker/E2B strategy controls subsequent build execution; skip
+    leaves the candidate unverified.
     """
     from factory_app.workflows.AppGenerator.tools.app_validation import (
+        _bounded_validation_timeout,
         _trim_validation_result,
         run_app_bundle_acceptance_gate,
         validate_app_build,
@@ -199,6 +201,12 @@ async def validate_generated_app_candidate(
         "app_validation_result": {"validation_status": "pending", "validation_strategy": strategy},
         "errors": [],
     }
+    try:
+        timeout_seconds = _bounded_validation_timeout(timeout_seconds)
+    except ValueError as exc:
+        result["validation_status"] = "failed"
+        result["errors"] = [str(exc)]
+        return result
     invalid = [
         str(path) for path, content in snapshot.items()
         if not is_safe_app_path(path) or str(PurePosixPath(path)) != path

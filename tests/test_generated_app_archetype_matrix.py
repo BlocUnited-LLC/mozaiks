@@ -845,7 +845,7 @@ async def _materialize_spec(spec: _ArchetypeSpec, tmp_path: Path) -> tuple[dict[
         )
     assert gate["status"] == "pending", f"MATERIALIZATION_GAP {spec.archetype_id}: {gate}"
     assert gate["validation_evidence"]["failed"] == []
-    assert gate["validation_evidence"]["skipped"] == ["app_runtime_smoke"]
+    assert gate["validation_evidence"]["skipped"] == ["app_runtime_load_worker", "app_runtime_smoke"]
 
     for page in spec.plan.get("pages", []):
         route = str(page.get("route") or "")

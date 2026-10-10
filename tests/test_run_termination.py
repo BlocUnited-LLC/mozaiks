@@ -525,7 +525,11 @@ async def test_failed_build_with_no_approved_owner_ends_once_without_user_pause(
     from mozaiksai.core import adapters
 
     sandbox = _FailingBuildSandbox()
-    monkeypatch.setattr(adapters, "get_sandbox_adapter", lambda strategy: sandbox)
+    monkeypatch.setattr(
+        validate_app_bundle_from_request.__globals__["app_runtime_smoke"],
+        "_preflight_generated_image", lambda: "sha256:" + "a" * 64,
+    )
+    monkeypatch.setattr(adapters, "DockerSandboxAdapter", lambda *, image: sandbox)
     run = await _run_appgenerator_validation(
         _appgen_bundle(_basic_crud_files()), chat_id="appgen-unowned-build",
         validation_request={"validation_strategy": "docker", "start_dev_server": False},
@@ -596,7 +600,6 @@ async def test_unverified_validation_ends_once_without_user_pause_or_export(
 
     monkeypatch.delenv("MOZAIKS_APP_VALIDATION_STRATEGY", raising=False)
     monkeypatch.setattr(app_validation_strategy, "docker_app_validation_available", lambda: False)
-    monkeypatch.setattr(app_validation_strategy, "local_app_validation_available", lambda: False)
     if case == "required_check_pending":
         runtime_smoke_passed.return_value = {
             "status": "skipped", "passed": None, "failed_tests": [], "checks": [],
@@ -881,7 +884,6 @@ async def test_design_docs_exhausted_save_reports_its_last_rejection() -> None:
 
 @pytest.mark.asyncio
 async def test_owned_build_failure_routes_to_approved_agent_then_stops_identical_failed_repair(monkeypatch):
-    from factory_app.workflows.AppGenerator.tools import app_validation
     from mozaiksai.core import adapters
     from mozaiksai.core.workflow.context.frozen import detach
 
@@ -892,12 +894,17 @@ async def test_owned_build_failure_routes_to_approved_agent_then_stops_identical
     acceptance = {key: {"passed": True} for key in (
         "bundle_scan", "agent_backend", "module_wiring", "module_implementation",
         "module_runtime_quality", "functional_completeness", "workflow_integration",
-        "app_runtime_load", "app_runtime_smoke",
+        "app_runtime_load", "app_runtime_load_worker", "app_runtime_smoke",
     )}
     acceptance.update(status="passed", passed=True, skipped_checks=[],
                       bundle_repair={"status": "passed", "target_agent": None})
-    monkeypatch.setattr(app_validation, "save_auth_scaffold", AsyncMock())
-    monkeypatch.setattr(app_validation, "run_app_bundle_acceptance_gate", AsyncMock(return_value=acceptance))
+    # The runner below calls the function imported at collection time. Workflow
+    # reloads may replace the package module before this test starts.
+    validation_globals = validate_app_bundle_from_request.__globals__
+    monkeypatch.setitem(validation_globals, "save_auth_scaffold", AsyncMock())
+    monkeypatch.setitem(
+        validation_globals, "run_app_bundle_acceptance_gate", AsyncMock(return_value=acceptance),
+    )
 
     class Sandbox(_FailingBuildSandbox):
         async def run_command(self, **kwargs):
@@ -906,7 +913,11 @@ async def test_owned_build_failure_routes_to_approved_agent_then_stops_identical
                 "in ../../../workspace/app/ui/pages/custom/focus.jsx\n"
             ))
 
-    monkeypatch.setattr(adapters, "get_sandbox_adapter", lambda strategy: Sandbox())
+    monkeypatch.setattr(
+        validation_globals["app_runtime_smoke"],
+        "_preflight_generated_image", lambda: "sha256:" + "a" * 64,
+    )
+    monkeypatch.setattr(adapters, "DockerSandboxAdapter", lambda *, image: Sandbox())
     repaired = []
 
     def record_unchanged_repair(agent_name, bridge):

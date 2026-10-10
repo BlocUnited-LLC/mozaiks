@@ -7,7 +7,6 @@ the generated app in an iframe without requiring E2B credentials.
 Resolution order (see app_validation_strategy.py):
   e2b    -> E2BSandboxAdapter  (requires E2B_API_KEY)
   docker -> DockerSandboxAdapter (requires Docker daemon)
-  local  -> subprocess on host (npm must be available, no preview URL)
   skip   -> no validation
 """
 
@@ -36,6 +35,36 @@ _DEFAULT_IMAGE = os.getenv("DOCKER_SANDBOX_IMAGE", "mozaiks-sandbox:local")
 _DEFAULT_WORKDIR = "/workspace"
 _DEFAULT_TIMEOUT_SECONDS = int(os.getenv("DOCKER_SANDBOX_TIMEOUT") or "300")
 _IMAGE_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_MAX_DOCKER_OUTPUT_BYTES = 1_048_576
+
+
+class _DockerOutputLimitExceeded(Exception):
+    pass
+
+
+async def _read_bounded_output(stream: asyncio.StreamReader) -> bytes:
+    output = bytearray()
+    while chunk := await stream.read(min(65_536, _MAX_DOCKER_OUTPUT_BYTES - len(output) + 1)):
+        if len(output) + len(chunk) > _MAX_DOCKER_OUTPUT_BYTES:
+            raise _DockerOutputLimitExceeded
+        output.extend(chunk)
+    return bytes(output)
+
+
+async def _discard_output(stream: asyncio.StreamReader) -> None:
+    while await stream.read(65_536):
+        pass
+
+
+async def _write_stdin(stream: asyncio.StreamWriter, data: bytes) -> None:
+    try:
+        for offset in range(0, len(data), 65_536):
+            stream.write(data[offset:offset + 65_536])
+            await stream.drain()
+    except (BrokenPipeError, ConnectionResetError):
+        pass
+    finally:
+        stream.close()
 
 
 def _preview_ports() -> list[int]:
@@ -95,12 +124,34 @@ class DockerSandboxAdapter:
                 stderr=asyncio.subprocess.PIPE,
                 env=_docker_cli_env(),
             )
+            assert proc.stdout is not None and proc.stderr is not None
+            stdout_task = asyncio.create_task(_read_bounded_output(proc.stdout))
+            stderr_task = asyncio.create_task(_read_bounded_output(proc.stderr))
+            tasks = [
+                stdout_task,
+                stderr_task,
+                asyncio.create_task(proc.wait()),
+            ]
+            if input_data is not None:
+                assert proc.stdin is not None
+                tasks.append(asyncio.create_task(_write_stdin(proc.stdin, input_data)))
             try:
-                stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(input_data), timeout=timeout)
-            except TimeoutError as exc:
-                proc.kill()
-                await proc.communicate()
-                raise RuntimeError(f"Docker command timed out after {timeout}s") from exc
+                await asyncio.wait_for(asyncio.gather(*tasks), timeout=timeout)
+            except BaseException as exc:
+                if proc.returncode is None:
+                    proc.kill()
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                await asyncio.gather(
+                    _discard_output(proc.stdout), _discard_output(proc.stderr), proc.wait(),
+                )
+                if isinstance(exc, TimeoutError):
+                    raise RuntimeError(f"Docker command timed out after {timeout}s") from exc
+                if isinstance(exc, _DockerOutputLimitExceeded):
+                    raise RuntimeError("Docker command output exceeded 1 MiB per stream") from exc
+                raise
+            stdout_b, stderr_b = stdout_task.result(), stderr_task.result()
             rc = int(proc.returncode or 0)
             return rc, stdout_b.decode("utf-8", errors="replace"), stderr_b.decode("utf-8", errors="replace")
 
@@ -130,8 +181,9 @@ class DockerSandboxAdapter:
         # get_preview_url's `docker port` lookup can resolve a URL. Without
         # -p at create time no binding ever exists and docker previews are
         # structurally dead.
-        sealed_candidate = bool(metadata and metadata.get("purpose") == "sealed_candidate_preview")
-        offline_validation = bool(metadata and metadata.get("purpose") == "app_validation") or sealed_candidate
+        purpose = (metadata or {}).get("purpose")
+        sealed_candidate = purpose == "sealed_candidate_preview"
+        offline_validation = purpose in {"app_validation", "app_runtime_diagnostic", "sealed_candidate_preview"}
         if sealed_candidate:
             if not _IMAGE_ID_RE.fullmatch(image) or envs:
                 raise ValueError("Sealed preview requires a pinned local image ID and no environment overrides")
@@ -145,6 +197,20 @@ class DockerSandboxAdapter:
                 port_args += ["-p", f"127.0.0.1:0:{container_port}"]
 
         # Run a long-lived idle container so we can exec into it
+        # Generated source and build scripts get only bounded, disposable
+        # writable space. The image filesystem stays read-only.
+        build_cache_args = ([
+            "--tmpfs", "/opt/mozaiks/web_shell/node_modules/.vite-temp:rw,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=0750",
+            "--tmpfs", "/opt/mozaiks/web_shell/.mozaiks-tailwind-sources:rw,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=0750",
+        ] if purpose == "app_validation" else [])
+        contained_args = ([
+            "--read-only", "--user", "10001:10001", "--memory-swap=2g",
+            "--log-driver=none",
+            "--tmpfs", f"/workspace:rw,nosuid,nodev,size={'512m' if purpose == 'app_validation' else '128m'},uid=10001,gid=10001,mode=0750",
+            *build_cache_args,
+            "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m,mode=1777",
+            "--tmpfs", "/home/sandbox:rw,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=0750",
+        ] if purpose in {"app_validation", "app_runtime_diagnostic"} else [])
         rc, stdout, stderr = await self._run([
             "docker", "run", "-d", "--rm",
             "--init", "--cap-drop=ALL", "--security-opt=no-new-privileges",
@@ -157,6 +223,7 @@ class DockerSandboxAdapter:
                "--tmpfs", "/opt/mozaiks/web_shell/node_modules/.vite-temp:rw,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=0700",
                "--tmpfs", "/opt/mozaiks/web_shell/node_modules/.vite:rw,nosuid,nodev,size=64m,uid=10001,gid=10001,mode=0700"]
               if sealed_candidate else []),
+            *contained_args,
             *(["--network", "none"] if offline_validation else []),
             "-w", _DEFAULT_WORKDIR,
             *label_args,
@@ -384,6 +451,8 @@ class DockerSandboxAdapter:
             ["docker", "stop", session_id],
             timeout=15.0,
         )
+        # A successful stop is not evidence that an --rm container is gone.
+        # Acceptance must confirm absence before recording worker cleanup.
         attempts = 3 if stop_rc == 0 else 1
         for attempt in range(attempts):
             rc, stdout, _ = await self._run(
@@ -396,6 +465,8 @@ class DockerSandboxAdapter:
                 return True
             if attempt < attempts - 1:
                 await asyncio.sleep(0.1)
+        # A stopped container can linger despite --rm. Force removal and
+        # require one final host-side absence check before returning success.
         await self._run(["docker", "rm", "-f", session_id], timeout=15.0)
         rc, stdout, _ = await self._run(
             ["docker", "ps", "--all", "--quiet", "--no-trunc", "--filter", f"id={session_id}"],

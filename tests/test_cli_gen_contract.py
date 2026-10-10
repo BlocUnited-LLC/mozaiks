@@ -21,13 +21,13 @@ def test_gen_parser_accepts_validation_strategy() -> None:
             "--prompt",
             "Build a finance operations workspace with approval routing.",
             "--validation-strategy",
-            "local",
+            "docker",
         ]
     )
 
     assert args.command == "gen"
     assert args.mode == "app"
-    assert args.validation_strategy == "local"
+    assert args.validation_strategy == "docker"
 
 
 def test_gen_command_threads_validation_strategy_into_context() -> None:

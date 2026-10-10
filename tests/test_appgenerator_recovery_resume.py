@@ -130,7 +130,7 @@ async def test_readiness_user_reply_materializes_auth_before_real_validation(con
         acceptance = validations[0]["app_bundle_acceptance_result"]
         assert acceptance["status"] == "pending"
         assert acceptance["validation_evidence"]["failed"] == []
-        assert acceptance["validation_evidence"]["skipped"] == ["app_runtime_smoke"]
+        assert acceptance["validation_evidence"]["skipped"] == ["app_runtime_load_worker", "app_runtime_smoke"]
         assert validations[0]["integration_tests_passed"] is False
         assert validations[0]["app_validation_result"]["validation_status"] == "pending"
         assert speakers == ["IntegrationReadinessAgent", "AppValidationAgent"]

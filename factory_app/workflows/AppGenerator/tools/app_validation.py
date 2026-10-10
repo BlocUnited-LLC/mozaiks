@@ -3,7 +3,7 @@ App validation tool for generated applications.
 
 This tool can:
 - resolve generated files from an explicit `files` mapping or the current admitted artifacts
-- validate the generated app with an explicit strategy: `e2b`, `docker`, `local`, or `skip`
+- validate the generated app with an explicit strategy: `e2b`, `docker`, or `skip`
 - run build/test commands
 - optionally start a preview server (e2b and docker strategies expose a URL)
 """
@@ -19,8 +19,6 @@ import os
 import posixpath
 import re
 import shlex
-import subprocess
-import sys
 import tempfile
 import zipfile
 
@@ -65,7 +63,6 @@ from mozaiksai.core.artifacts.content_store import ContentNotFoundError
 from mozaiksai.core.runtime.app.auth_contract import AppAuthContractError
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
-    local_app_validation_available,
     resolve_app_validation_strategy,
 )
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
@@ -76,12 +73,8 @@ from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
 )
 
 # Set on a validation result that failed because the validation environment
-# (sandbox provider, local toolchain) was unavailable, not because of the app.
+# (sandbox provider) was unavailable, not because of the app.
 INFRASTRUCTURE_FAILURE = "infrastructure_failure"
-
-
-def _local_validation_available() -> bool:
-    return local_app_validation_available()
 
 
 def _base_result(*, strategy: str, status: str) -> dict[str, Any]:
@@ -114,16 +107,14 @@ def _safe_relpath(raw: str) -> str | None:
 
 
 def _is_safe_build_command(command: str) -> bool:
-    """Return True when *command* looks like a safe build/test shell command.
+    """Reject shell syntax outside the bounded sandbox build commands.
 
     Blocks shell metacharacters that enable command chaining or substitution:
     ``;``, ``&&``, ``||``, ``|``, backtick, ``$(…)``, and output redirection
     (``>`` / ``<``).  Also rejects commands that contain null bytes.
 
-    This is defence-in-depth against prompt-injection attacks where a
-    compromised or confused agent emits shell payloads inside
-    ``validation_commands``.  Legitimate build commands (``npm install``,
-    ``npm run build``, ``python -m pytest``, etc.) never need these characters.
+    A package script can still execute arbitrary code; all candidate commands
+    run only inside the selected disposable sandbox.
     """
     if not command or "\x00" in command:
         return False
@@ -161,42 +152,6 @@ def _read_package_scripts_from_text(package_text: str) -> dict[str, Any]:
         pkg = {}
     scripts = pkg.get("scripts") if isinstance(pkg, dict) else {}
     return scripts if isinstance(scripts, dict) else {}
-
-
-def _read_package_scripts_from_dir(root: Path) -> dict[str, Any]:
-    package_path = root / "package.json"
-    if not package_path.exists():
-        return {}
-    try:
-        return _read_package_scripts_from_text(package_path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-
-
-async def _run_local_command(
-    *,
-    command: str,
-    cwd: Path,
-    timeout_seconds: int,
-    env: dict[str, str] | None = None,
-) -> tuple[int, str, str]:
-    process = await asyncio.create_subprocess_shell(
-        command,
-        cwd=str(cwd),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        env=env,
-    )
-    try:
-        stdout_bytes, stderr_bytes = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)
-    except TimeoutError as exc:
-        process.kill()
-        await process.communicate()
-        raise RuntimeError(f"Command timed out after {timeout_seconds}s: {command}") from exc
-
-    stdout = stdout_bytes.decode("utf-8", errors="replace") if stdout_bytes else ""
-    stderr = stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else ""
-    return int(process.returncode or 0), stdout, stderr
 
 
 def _strip_ansi(value: str) -> str:
@@ -907,12 +862,10 @@ def _canonical_workspace_files(files: dict[str, str]) -> dict[str, str]:
     return staged
 
 
-def _canonical_build_steps(root: str, shell: str, *, sandbox: bool) -> list[tuple[str, str]]:
-    join = shlex.join if sandbox or os.name != "nt" else subprocess.list2cmdline
-    python = "python" if sandbox else sys.executable
+def _canonical_build_steps(root: str, shell: str) -> list[tuple[str, str]]:
     return [
-        (join([python, "-m", "compileall", "-q", "."]), root),
-        (join(["node", f"{shell}/node_modules/vite/bin/vite.js", "build", "--outDir", f"{root}/build"]), shell),
+        (shlex.join(["python", "-m", "compileall", "-q", "."]), root),
+        (shlex.join(["node", f"{shell}/node_modules/vite/bin/vite.js", "build", "--outDir", f"{root}/build"]), shell),
     ]
 
 
@@ -925,7 +878,17 @@ def _canonical_build_environment(root: str) -> dict[str, str]:
         "VITE_MOZAIKS_HOST": "platform",
         "PYTHON_DOTENV_DISABLED": "1",
         "CI": "1",
+        "MOZAIKS_REQUIRE_TAILWIND_SOURCE_LINKS": "1",
     }
+
+
+_MAX_APP_BUILD_TIMEOUT_SECONDS = 120
+
+
+def _bounded_validation_timeout(timeout_seconds: int) -> int:
+    if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, int) or timeout_seconds < 1:
+        raise ValueError("App build timeout must be a positive integer")
+    return min(timeout_seconds, _MAX_APP_BUILD_TIMEOUT_SECONDS)
 
 
 async def _run_sandbox_validation(
@@ -944,14 +907,24 @@ async def _run_sandbox_validation(
     identity is recorded on the result so the run that produced a validation
     outcome is durable evidence rather than an ephemeral local variable.
     """
-    from mozaiksai.core.adapters import get_sandbox_adapter
+    from mozaiksai.core.adapters import DockerSandboxAdapter, get_sandbox_adapter
     from mozaiksai.core.sandbox.preview_sessions import (
         sandbox_resource_environment,
         sandbox_workspace_root,
     )
 
     try:
-        adapter = get_sandbox_adapter(strategy)
+        timeout_seconds = _bounded_validation_timeout(timeout_seconds)
+    except ValueError as exc:
+        return {**_base_result(strategy=strategy, status="failed"), "errors": [str(exc)]}
+
+    image_id: str | None = None
+    try:
+        if strategy == "docker":
+            image_id = await asyncio.to_thread(app_runtime_smoke._preflight_generated_image)
+            adapter = DockerSandboxAdapter(image=image_id)
+        else:
+            adapter = get_sandbox_adapter(strategy)
     except Exception as exc:
         logger.error("sandbox_adapter_unavailable strategy=%s exception=%s", strategy, type(exc).__name__)
         return {
@@ -961,6 +934,8 @@ async def _run_sandbox_validation(
         }
 
     result = _base_result(strategy=strategy, status="passed")
+    if image_id is not None:
+        result["sandbox_image_id"] = image_id
     session_id: str | None = None
     try:
         canonical = "app.json" in resolved_files
@@ -969,7 +944,7 @@ async def _run_sandbox_validation(
         resource_env = sandbox_resource_environment() if canonical else {}
         build_env = _canonical_build_environment(root) if root is not None else {}
         steps = (
-            _canonical_build_steps(root, resource_env["MOZAIKS_WEB_SHELL_PATH"], sandbox=True)
+            _canonical_build_steps(root, resource_env["MOZAIKS_WEB_SHELL_PATH"])
             if root is not None else [(cmd, None) for cmd in commands]
         )
         if strategy == "e2b" and os.getenv("E2B_TIMEOUT"):
@@ -1093,99 +1068,6 @@ async def _run_sandbox_validation(
             if not result["sandbox_terminated"]:
                 result.update(success=False, validation_status="failed", **{INFRASTRUCTURE_FAILURE: True})
                 result["errors"].append("Sandbox cleanup could not be confirmed; retry cleanup using the recorded session ID.")
-
-
-async def _run_local_validation(
-    *,
-    resolved_files: dict[str, str],
-    commands: list[str],
-    start_dev_server: bool,
-    timeout_seconds: int,
-) -> dict[str, Any]:
-    if not _local_validation_available():
-        return {
-            **_base_result(strategy="local", status="failed"),
-            "errors": ["Local validation requested but npm is not available on this runtime host"],
-            INFRASTRUCTURE_FAILURE: True,
-        }
-
-    result = _base_result(strategy="local", status="passed")
-    env = os.environ.copy()
-    env.setdefault("CI", "1")
-
-    try:
-        with tempfile.TemporaryDirectory(prefix="mozaiks-app-validation-") as temp_dir:
-            root = Path(temp_dir)
-            canonical = "app.json" in resolved_files
-            _write_files_to_dir(root, _canonical_workspace_files(resolved_files) if canonical else resolved_files)
-            if canonical:
-                from mozaiksai.resources import resolve_web_shell_root
-
-                shell = resolve_web_shell_root()
-                if shell is None or not (shell / "node_modules/vite/bin/vite.js").is_file():
-                    raise ValueError("Install shared web shell dependencies before local app validation")
-                env.update(_canonical_build_environment(root.as_posix()))
-                steps = _canonical_build_steps(root.as_posix(), shell.as_posix(), sandbox=False)
-            else:
-                steps = [(cmd, str(root)) for cmd in commands]
-
-            for cmd, cwd in steps:
-                if not _is_safe_build_command(cmd):
-                    if canonical:
-                        raise ValueError("Invalid canonical build command configuration")
-                    result["warnings"].append(
-                        f"Skipped unsafe validation command (contains shell metacharacters): {cmd!r}"
-                    )
-                    continue
-                exit_code, stdout, stderr = await _run_local_command(
-                    command=cmd,
-                    cwd=Path(cwd),
-                    timeout_seconds=timeout_seconds,
-                    env=env,
-                )
-                _append_command_output(result, command=cmd, stdout=stdout, stderr=stderr)
-                if exit_code != 0:
-                    result["success"] = False
-                    result["validation_status"] = "failed"
-                    result["errors"].append(f"{cmd} failed: {stderr or stdout}")
-                    break
-                if stderr and "warning" in stderr.lower():
-                    result["warnings"].append(stderr)
-
-            result["parsed_errors"] = parse_build_errors(
-                result.get("build_output", ""),
-                app_root=(root / "app").as_posix() if canonical else None,
-                cwd=cwd if canonical else None,
-            )
-
-            if not canonical and result["validation_status"] == "passed":
-                scripts = _read_package_scripts_from_dir(root)
-                if "test" in scripts:
-                    exit_code, stdout, stderr = await _run_local_command(
-                        command="npm test -- --watchAll=false",
-                        cwd=root,
-                        timeout_seconds=timeout_seconds,
-                        env=env,
-                    )
-                    result["test_results"] = stdout
-                    if exit_code != 0:
-                        result["warnings"].append(f"Tests failed: {stderr or stdout}")
-
-            if start_dev_server and result["validation_status"] == "passed":
-                result["warnings"].append(
-                    "Local validation does not start a preview server; preview_url is null."
-                )
-
-            return result
-    except Exception as exc:
-        return {
-            **result,
-            "success": False,
-            "validation_status": "failed",
-            "errors": [f"Local validation error: {exc}"],
-            "preview_url": None,
-            INFRASTRUCTURE_FAILURE: True,
-        }
 
 
 def _trim_validation_result(result: dict[str, Any]) -> dict[str, Any]:
@@ -1379,151 +1261,13 @@ def _runtime_quality_result(generated_files: dict[str, str]) -> dict[str, Any]:
 
 
 async def _app_runtime_load_result(generated_files: dict[str, str]) -> dict[str, Any]:
-    failed_tests: list[dict[str, Any]] = []
-    warnings: list[str] = []
-    details: dict[str, Any] = {
-        "app_name": None,
-        "module_names": [],
-        "failed_module_names": [],
-        "page_names": [],
-        "workflow_names": [],
-        "subscriptions_loaded": False,
-    }
-
-    if not generated_files:
-        failed_tests.append(
-            {
-                "test": "app_runtime_load",
-                "error": "No generated files were available for runtime app loading.",
-                "fix_suggestion": "Assemble a complete app bundle with app.json before validation or export.",
-            }
-        )
-    else:
-        from mozaiksai.core.runtime.app.loader import AppLoader
-
-        with tempfile.TemporaryDirectory(prefix="mozaiks-app-runtime-load-") as tmp:
-            app_root = Path(tmp) / "app"
-            _write_files_to_dir(app_root, generated_files)
-            # Ensure every Python package directory under app_root has an
-            # __init__.py so Python treats them as regular packages, not
-            # namespace packages.  Namespace packages aggregate paths from all
-            # sys.path entries; regular packages resolve from the first match.
-            # Missing __init__.py files lead to import failures when sys.path
-            # has stale entries left by previous AppLoader.load() calls in the
-            # same process (common in test suites).
-            # Process bottom-up (reverse sorted) so parent directories like
-            # `services/` inherit the marker from child packages that already
-            # contain .py files (e.g. `services/integrations/`).
-            for dir_path in sorted(app_root.rglob("*"), reverse=True):
-                if not dir_path.is_dir() or dir_path == app_root:
-                    continue
-                init_file = dir_path / "__init__.py"
-                if init_file.exists():
-                    continue
-                has_py = any(f.suffix == ".py" for f in dir_path.iterdir() if f.is_file())
-                has_pkg_child = any(
-                    (child / "__init__.py").exists()
-                    for child in dir_path.iterdir()
-                    if child.is_dir()
-                )
-                if has_py or has_pkg_child:
-                    init_file.write_text("", encoding="utf-8")
-            # Snapshot global import state so this call is test-isolated.
-            _modules_before = dict(sys.modules)
-            try:
-                loaded = await AppLoader.load(str(app_root))
-                details = {
-                    "app_name": loaded.definition.name,
-                    "module_names": [module.name for module in loaded.modules],
-                    "failed_module_names": list(loaded.failed_module_names),
-                    "page_names": [page.name for page in loaded.definition.pages],
-                    "workflow_names": [workflow.name for workflow in loaded.definition.workflows],
-                    "subscriptions_loaded": loaded.subscriptions_config is not None,
-                }
-                for module_name in loaded.failed_module_names:
-                    error = (loaded.module_load_errors.get(module_name) or "AppLoader could not load module.").replace(str(app_root), "app")
-                    undeclared_event = error.startswith("module.yaml action ") and " emits undeclared event " in error
-                    failed_tests.append(
-                        {
-                            "test": "app_runtime_module_load",
-                            "module": module_name,
-                            "path": (
-                                f"modules/{module_name}/contracts/events.yaml" if undeclared_event
-                                else f"modules/{module_name}/backend/handler.py"
-                            ),
-                            "error": error,
-                            "fix_suggestion": (
-                                "Declare the action's custom event in module_contract.events_yaml under its exact "
-                                "domain.-prefixed type, with version, producer, and payload contract, and emit that "
-                                "type. Canonical create/update/delete events are declared and emitted by code."
-                                if undeclared_event else
-                                "Fix the module contract, companion manifests, handler entrypoint, "
-                                "or app-owned service imports so AppLoader.load() can load every module."
-                            ),
-                        }
-                    )
-            except Exception as exc:
-                failed_tests.append(
-                    {
-                        "test": "app_runtime_load",
-                        "error": f"AppLoader.load() failed: {exc}",
-                        "fix_suggestion": (
-                            "Ensure app.json, modules/*/module.yaml, contracts/*.yaml, "
-                            "backend handlers, and app-level service imports are loadable."
-                        ),
-                    }
-                )
-            finally:
-                # Remove only this validation workspace's imports. Other
-                # workflows can legitimately import modules while load awaits.
-                roots = {str(app_root.resolve()), str(app_root.parent.resolve())}
-                sys.path[:] = [entry for entry in sys.path if entry not in roots]
-                for key, value in list(sys.modules.items()):
-                    filename = getattr(value, "__file__", None)
-                    if isinstance(filename, str) and Path(filename).is_relative_to(app_root):
-                        if key in _modules_before:
-                            sys.modules[key] = _modules_before[key]
-                        else:
-                            sys.modules.pop(key, None)
-                for key, value in _modules_before.items():
-                    if key not in sys.modules and (
-                        key == "services" or key.startswith(("services.", "mozaiks_runtime_module_"))
-                    ):
-                        sys.modules[key] = value
-
-    passed = not failed_tests
-    return {
-        "contract_version": "1.0",
-        "passed": passed,
-        "checks": [
-            _check_result(
-                check_id="app_runtime_load",
-                passed=passed,
-                message=(
-                    "Generated app bundle loads through AppLoader."
-                    if passed
-                    else f"{len(failed_tests)} app runtime load issue(s) found."
-                ),
-                details={
-                    **details,
-                    "failed_test_count": len(failed_tests),
-                },
-            )
-        ],
-        "failed_tests": failed_tests,
-        "warnings": warnings,
-        "details": details,
-    }
+    """Get nonauthoritative AppLoader repair diagnostics from a contained worker."""
+    return await app_runtime_smoke.run_contained_generated_app_runtime_load(generated_files)
 
 
 async def _app_runtime_smoke_result(generated_files: dict[str, str]) -> dict[str, Any]:
-    """Boot the bundle in the runtime smoke's child process; generated code never runs here."""
-    with tempfile.TemporaryDirectory(prefix="mozaiks-app-runtime-smoke-", ignore_cleanup_errors=True) as tmp:
-        app_root = Path(tmp) / "app"
-        _write_files_to_dir(app_root, generated_files)
-        return await app_runtime_smoke.run_app_runtime_smoke(
-            app_root, mongo_uri=app_runtime_smoke.resolve_smoke_mongo_uri(),
-        )
+    """Observe generated app behavior without host Python or host Mongo access."""
+    return await app_runtime_smoke.run_contained_generated_app_runtime_smoke(generated_files)
 
 
 async def _agent_backend_integration_result(context_variables: Any | None) -> dict[str, Any]:
@@ -2202,6 +1946,38 @@ async def run_app_bundle_acceptance_gate(
     )
     app_runtime_load_result = await _app_runtime_load_result(generated_files)
     runtime_smoke_result = await _app_runtime_smoke_result(generated_files)
+    runtime_smoke_result = app_runtime_smoke.apply_generated_acceptance_scope(
+        runtime_smoke_result, generated_files,
+        os.environ.get("MOZAIKS_APP_RUNTIME_IMAGE_ID", "").strip(),
+    )
+    load_worker_verified = (
+        app_runtime_load_result.get("worker_containment_verified") is True
+        and app_runtime_load_result.get("validator_image_id") == runtime_smoke_result.get("validator_image_id")
+        and app_runtime_load_result.get("source_content_sha256") == runtime_smoke_result.get("source_content_sha256")
+        and bool(app_runtime_load_result.get("validator_image_id"))
+        and bool(app_runtime_load_result.get("source_content_sha256"))
+    )
+    load_worker_result = {
+        "contract_version": "1.0",
+        "status": "passed" if load_worker_verified else "skipped",
+        "passed": load_worker_verified if load_worker_verified else None,
+        "skipped_reason": (
+            None if load_worker_verified else
+            app_runtime_load_result.get("skipped_reason") or
+            "contained AppLoader worker source, image, or cleanup was not verified"
+        ),
+        "checks": [{
+            "id": "app_runtime_load_worker",
+            "status": "passed" if load_worker_verified else "skipped",
+            "passed": load_worker_verified if load_worker_verified else None,
+            "message": (
+                "Contained AppLoader worker completed and was removed."
+                if load_worker_verified else "Contained AppLoader worker could not be verified."
+            ),
+            "details": {"blocking": not load_worker_verified},
+        }],
+        "failed_tests": [],
+    }
 
     completeness_result = {
         "passed": not planned_diagnostics,
@@ -2234,12 +2010,16 @@ async def run_app_bundle_acceptance_gate(
         "functional_completeness": functional_result,
         "workflow_integration": workflow_integration_result,
         "app_runtime_load": app_runtime_load_result,
+        "app_runtime_load_worker": load_worker_result,
         "app_runtime_smoke": runtime_smoke_result,
     }
-    acceptance_status, validation_evidence = _acceptance_readiness(subresults)
+    # Candidate Python executes in the loader worker and can forge its JSON.
+    # Only the host-confirmed worker boundary and external smoke are evidence.
+    required_subresults = {name: value for name, value in subresults.items() if name != "app_runtime_load"}
+    acceptance_status, validation_evidence = _acceptance_readiness(required_subresults)
     skipped = validation_evidence["skipped"]
     skipped_checks = [
-        {"id": name, "reason": subresults[name].get("skipped_reason") or "skipped"} for name in skipped
+        {"id": name, "reason": required_subresults[name].get("skipped_reason") or "skipped"} for name in skipped
     ]
     acceptance_passed = acceptance_status == "passed"
 
@@ -2265,6 +2045,13 @@ async def run_app_bundle_acceptance_gate(
                     }
                 )
 
+    loader_diagnostic_check = _result_check(
+        app_runtime_load_result, default_id="app_runtime_load",
+        default_message="AppLoader repair diagnostic completed.",
+    )
+    loader_diagnostic_check["details"] = {
+        **loader_diagnostic_check.get("details", {}), "blocking": False,
+    }
     result = {
         "contract_version": "1.0",
         "status": acceptance_status,
@@ -2279,7 +2066,8 @@ async def run_app_bundle_acceptance_gate(
             _result_check(runtime_quality_result, default_id="module_runtime_quality", default_message="Module runtime quality check completed."),
             _result_check(functional_result, default_id="functional_completeness", default_message="Functional completeness check completed."),
             _result_check(workflow_integration_result, default_id="workflow_integration", default_message="Workflow integration check completed."),
-            _result_check(app_runtime_load_result, default_id="app_runtime_load", default_message="App runtime load check completed."),
+            loader_diagnostic_check,
+            _result_check(load_worker_result, default_id="app_runtime_load_worker", default_message="Contained AppLoader worker checked."),
             _result_check(runtime_smoke_result, default_id="app_runtime_smoke", default_message="App runtime smoke completed."),
         ],
         "validation_evidence": validation_evidence,
@@ -2307,7 +2095,7 @@ async def run_app_bundle_acceptance_gate(
     recovery_request = prepare_task_recovery(context_variables)
     bundle_repair = _prepare_bundle_repair(
         {"passed": acceptance_passed, "diagnostics": repair_diagnostics},
-        context_variables, select_repairs=recovery_request is None,
+        context_variables, select_repairs=recovery_request is None and not acceptance_passed,
     )
     result["bundle_repair"] = bundle_repair
     result["task_recovery_request"] = recovery_request
@@ -2352,13 +2140,6 @@ async def validate_app_build(
     validation_strategy: str | None = None,
     context_variables: Any | None = None,
 ) -> dict[str, Any]:
-    try:
-        env_timeout = os.getenv("E2B_TIMEOUT")
-        if env_timeout and timeout_seconds == 120:
-            timeout_seconds = int(env_timeout)
-    except Exception:
-        pass
-
     workflow_name = "AppGenerator"
     chat_id = None
     app_id = None
@@ -2371,6 +2152,13 @@ async def validate_app_build(
         pass
 
     wf_logger = get_workflow_logger(workflow_name=workflow_name, chat_id=chat_id, app_id=app_id)
+    try:
+        timeout_seconds = _bounded_validation_timeout(timeout_seconds)
+    except ValueError as exc:
+        result = {**_base_result(strategy="skip", status="failed"), "errors": [str(exc)]}
+        _persist_validation_context(context_variables=context_variables, result=result)
+        return result
+
     resolved_files, chat_id, app_id = await _resolve_files(
         files=files,
         context_variables=context_variables,
@@ -2408,17 +2196,6 @@ async def validate_app_build(
         result = _base_result(strategy="skip", status="skipped")
         result["strategy_reason"] = strategy_reason
         result["warnings"].append(f"App validation did not execute: {strategy_reason}.")
-        _persist_validation_context(context_variables=context_variables, result=result)
-        return result
-
-    if strategy == "local":
-        result = await _run_local_validation(
-            resolved_files=resolved_files,
-            commands=list(commands),
-            start_dev_server=bool(start_dev_server),
-            timeout_seconds=timeout_seconds,
-        )
-        result["strategy_reason"] = strategy_reason
         _persist_validation_context(context_variables=context_variables, result=result)
         return result
 
@@ -2659,7 +2436,7 @@ async def validate_app_bundle_from_request(
         validation = await validate_app_build(
             files=materialized_files, commands=commands,
             start_dev_server=bool(request.get("start_dev_server", True)),
-            timeout_seconds=int(request.get("timeout_seconds") or 120),
+            timeout_seconds=request.get("timeout_seconds", 120),
             validation_strategy=request.get("validation_strategy"), context_variables=context_variables,
         )
     else:
@@ -2705,6 +2482,7 @@ async def validate_app_bundle_from_request(
         "functional_completeness": functional_result,
         "workflow_integration": workflow_integration_result,
         "app_runtime_load": app_runtime_load_result,
+        "app_runtime_load_worker": acceptance_result["app_runtime_load_worker"],
         "app_runtime_smoke": runtime_smoke_result,
         "bundle_repair": bundle_repair,
         "skipped_checks": acceptance_result["skipped_checks"],
@@ -2732,6 +2510,7 @@ async def validate_app_bundle_from_request(
         "generated_app_functional_completeness_result": functional_result,
         "workflow_integration_validation_result": workflow_integration_result,
         "app_runtime_load_result": app_runtime_load_result,
+        "app_runtime_load_worker_result": acceptance_result["app_runtime_load_worker"],
         "app_runtime_smoke_result": runtime_smoke_result,
         "bundle_repair": bundle_repair,
         "integration_tests_passed": combined_passed,

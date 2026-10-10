@@ -93,6 +93,17 @@ This project follows a practical pre-1.0 changelog format:
   after the configured provider changes, so a restarted worker can stop them
   and release capacity without routing cleanup to the wrong sandbox.
 
+### Security
+
+- Contain generated AppLoader repair diagnostics in a read-only, offline Docker
+  worker with bounded writable space. The host confirms worker removal and
+  excludes candidate-written diagnostic JSON from promotion evidence.
+- Remove host-local generated build validation. Docker builds require a pinned
+  local image ID and run offline as non-root in a read-only container; missing
+  sandbox capability blocks promotion.
+- Require generated Tailwind source links for build validation so missing UI
+  classes fail the build, and bound app build timeouts and Docker CLI output.
+
 ## 0.2.0 - 2026-10-09
 
 ### Added
@@ -202,6 +213,9 @@ This project follows a practical pre-1.0 changelog format:
   Build validation also excludes explicitly forwarded interactive-preview
   environment values.
 
+- Generated AppGenerator acceptance now loads candidate Python only inside a
+  pinned local Docker validator. Missing Docker or image evidence blocks export
+  before source staging; the host child smoke remains limited to trusted fixtures.
 - Android source export and delivery verification now reject literal values
   under credential objects even when nested payload fields use unfamiliar names.
   Descriptive metadata and names-only references remain exportable.
@@ -246,6 +260,12 @@ This project follows a practical pre-1.0 changelog format:
   author the trusted boot receipt or pass/fail checks. Rejected emitted events
   remain outside the observer's verified scope and cannot authorize imported
   Genesis acceptance yet.
+
+- Generated-app contained runtime acceptance now records scope version 2.0:
+  the trusted observer's HTTP and Mongo checks may pass while
+  `event_rejection` remains explicitly unverified. Source, image, receipt,
+  and cleanup evidence must match before the narrower generated scope passes.
+  Host build-command isolation remains a separate prerequisite.
 
 - Scoped connector vault keys now separate app and workspace credentials, and
   older unqualified records fail closed. Self-hosters must inventory existing

@@ -463,7 +463,7 @@ async def test_partial_output_requires_complete_assembled_bundle_for_acceptance(
         assert result["acceptance"]["status"] == "pending"
         evidence = result["acceptance"]["validation_evidence"]
         assert evidence["failed"] == []
-        assert evidence["skipped"] == ["app_runtime_smoke"]
+        assert evidence["skipped"] == ["app_runtime_load_worker", "app_runtime_smoke"]
         assert "workflow_integration" in evidence["completed"]
         assert "snapshot_digest" not in result["acceptance"]
         assert result["app_validation_result"]["validation_status"] == "pending"

@@ -1983,7 +1983,6 @@ models:
     values:
     - e2b
     - docker
-    - local
     - skip
   AppValidation:
     type: model
@@ -2040,7 +2039,7 @@ models:
         description: Set false for canonical apps; interactive preview sessions are managed separately.
       timeout_seconds:
         type: int
-        description: Maximum validation runtime in seconds.
+        description: Positive validation timeout in seconds, capped at 120 by the runtime.
       commands:
         type: optional_list
         items: str

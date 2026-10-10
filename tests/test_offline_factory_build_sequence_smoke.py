@@ -21,6 +21,8 @@ from tests.import_utils import import_module_directly
 
 _pack_config = import_module_directly("mozaiksai.core.workflow.pack.config")
 
+from tests._generated_acceptance_fixtures import stub_contained_generated_runtime
+
 
 def _real_factory_lineage_smoke_enabled() -> bool:
     raw = str(os.getenv("RUN_REAL_FACTORY_ARTIFACT_LINEAGE_SMOKE") or "")
@@ -118,12 +120,9 @@ def completed_validation_boundaries(monkeypatch):
     from scripts.smoke_factory_artifact_lineage import validate_app_bundle_from_request
 
     validator_globals = validate_app_bundle_from_request.__globals__
-    smoke = AsyncMock(return_value={
-        "status": "passed", "passed": True, "failed_tests": [], "checks": [],
-    })
-    build = AsyncMock(return_value=app_validation._base_result(strategy="local", status="passed"))
-    monkeypatch.setattr(validator_globals["app_runtime_smoke"], "run_app_runtime_smoke", smoke)
-    monkeypatch.setitem(validator_globals, "_run_local_validation", build)
+    smoke = stub_contained_generated_runtime(monkeypatch, validator_globals)
+    build = AsyncMock(return_value=app_validation._base_result(strategy="docker", status="passed"))
+    monkeypatch.setitem(validator_globals, "_run_sandbox_validation", build)
     return smoke, build
 
 
@@ -314,7 +313,7 @@ async def test_offline_lineage_cannot_export_or_register_app_when_runtime_valida
     monkeypatch.setattr(app_runtime_smoke, "resolve_smoke_mongo_uri", lambda: None)
     build = AsyncMock(side_effect=AssertionError("Incomplete acceptance must not reach a build."))
     register = AsyncMock(side_effect=AssertionError("Incomplete acceptance must not register an app artifact."))
-    monkeypatch.setattr(app_validation, "_run_local_validation", build)
+    monkeypatch.setattr(app_validation, "_run_sandbox_validation", build)
     monkeypatch.setattr(generate_and_download, "_register_app_bundle_artifact_version", register)
 
     result = await run_offline_factory_artifact_lineage_smoke()
@@ -325,7 +324,7 @@ async def test_offline_lineage_cannot_export_or_register_app_when_runtime_valida
     acceptance = result["appgenerator_acceptance"]
     assert acceptance["status"] == "pending"
     assert acceptance["validation_evidence"]["failed"] == []
-    assert acceptance["validation_evidence"]["skipped"] == ["app_runtime_smoke"]
+    assert acceptance["validation_evidence"]["skipped"] == ["app_runtime_load_worker", "app_runtime_smoke"]
     assert "workflow_integration" in acceptance["validation_evidence"]["completed"]
     assert "snapshot_digest" not in acceptance
     build.assert_not_awaited()

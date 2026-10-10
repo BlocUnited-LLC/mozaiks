@@ -128,7 +128,7 @@ def _proposal(provider_id: str, status: str = "completed", **fields: Any) -> Sta
                 ProposedFileChange(path=_FILE_B, content="patched-b"),
             ],
             owned_paths=[_FILE_A, _FILE_B],
-            validation_strategy_hint="local",
+            validation_strategy_hint="docker",
         )
     defaults.update(fields)
     return StagedPatchProposal(**defaults)
@@ -149,7 +149,7 @@ async def _passing_validation(**kwargs):  # noqa: ANN003
     return {
         "validation_status": "passed",
         "app_bundle_acceptance_result": {"status": "passed", "passed": True},
-        "app_validation_result": {"validation_status": "passed", "validation_strategy": "local"},
+        "app_validation_result": {"validation_status": "passed", "validation_strategy": "docker"},
     }
 
 
@@ -176,7 +176,7 @@ async def test_multi_file_scope_dispatches_to_acp(tmp_path: Path) -> None:
     structured = _StubProvider("control_plane_coding", _proposal("control_plane_coding"))
 
     result = await _worker(tmp_path, acp=acp, structured=structured).execute(
-        _request(validation_strategy="local")
+        _request(validation_strategy="docker")
     )
 
     assert acp.calls == 1
@@ -198,7 +198,7 @@ async def test_single_file_scope_stays_on_structured(tmp_path: Path) -> None:
     structured = _StubProvider("control_plane_coding", single)
 
     result = await _worker(tmp_path, acp=acp, structured=structured).execute(
-        _request(files={_FILE_A: "a"}, validation_strategy="local")
+        _request(files={_FILE_A: "a"}, validation_strategy="docker")
     )
 
     assert acp.calls == 0
@@ -213,7 +213,7 @@ async def test_operational_acp_failure_falls_back_to_structured(tmp_path: Path, 
     structured = _StubProvider("control_plane_coding", _proposal("control_plane_coding"))
 
     result = await _worker(tmp_path, acp=acp, structured=structured).execute(
-        _request(validation_strategy="local")
+        _request(validation_strategy="docker")
     )
 
     assert acp.calls == 1
@@ -237,7 +237,7 @@ async def test_scope_rejection_never_falls_back(tmp_path: Path) -> None:
     structured = _StubProvider("control_plane_coding", _proposal("control_plane_coding"))
 
     result = await _worker(tmp_path, acp=acp, structured=structured).execute(
-        _request(validation_strategy="local")
+        _request(validation_strategy="docker")
     )
 
     assert acp.calls == 1
@@ -253,7 +253,7 @@ async def test_acp_disabled_config_never_dispatches_to_acp(tmp_path: Path) -> No
     structured = _StubProvider("control_plane_coding", _proposal("control_plane_coding"))
 
     result = await _worker(tmp_path, acp=acp, structured=structured, acp_enabled=False).execute(
-        _request(validation_strategy="local")
+        _request(validation_strategy="docker")
     )
 
     assert acp.calls == 0

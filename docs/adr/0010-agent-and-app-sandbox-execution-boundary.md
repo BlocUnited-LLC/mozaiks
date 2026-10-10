@@ -50,7 +50,11 @@ and build registry; it must have a deadline and confirmed teardown.
 - Use `sandbox_shell: true` in a workflow agent declaration only when that
   agent needs AG2 shell access for its own bounded assignment.
 - Select generated-app validation with the existing
-  `app_validation_strategy` contract: `e2b`, `docker`, `local`, or `skip`.
+  `app_validation_strategy` contract: `e2b`, `docker`, or `skip`.
+  Host-local build execution is excluded because generated package scripts
+  and frontend configuration can execute candidate code. Docker validation
+  must resolve an immutable local image ID before staging source, run offline
+  with bounded writable space, and confirm teardown.
 - Configure provider details through environment and provider adapters. Do not
   generate provider SDK code, credentials, or Jinja-rendered runtime policy
   into an app bundle.

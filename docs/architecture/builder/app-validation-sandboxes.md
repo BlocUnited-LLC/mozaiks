@@ -1,7 +1,7 @@
 # App Validation Sandboxes
 
 How generated apps are built, validated, and previewed before deploy — the
-four strategies, every environment variable, and hosted activation. The
+three strategies, every environment variable, and hosted activation. The
 ownership boundary against AG2's agent-level execution is defined in
 [ag2-ownership-boundary.md](../workflows/ag2-ownership-boundary.md)
 (Sandbox Execution Boundary).
@@ -10,13 +10,13 @@ ownership boundary against AG2's agent-level execution is defined in
 
 Resolution precedence: explicit `MOZAIKS_APP_VALIDATION_STRATEGY` environment
 setting → tool argument → `app_validation_strategy` context variable → automatic (`docker` when a
-daemon is reachable → `local` when npm exists → `skip`). E2B is never selected
+daemon is reachable → `skip`). E2B is never selected
 automatically: Docker is the default when available. E2B is selected only when
 the workflow or operator explicitly selects it. Build validation uses
 `MOZAIKS_APP_VALIDATION_STRATEGY=e2b`; artifact preview uses the separate
 `MOZAIKS_PREVIEW_PROVIDER=e2b`. Both require `E2B_API_KEY`.
 An operator setting is authoritative: generated tool arguments cannot bypass it
-by selecting `skip`, `local`, or another provider. Invalid operator values fail.
+by selecting `skip` or another provider. Invalid operator values fail.
 `AppValidationAgent` copies a supplied context strategy; otherwise its nullable
 request defers to this resolver. It does not infer `skip` from a test-like brief.
 
@@ -24,7 +24,6 @@ request defers to this resolver. It does not infer `skip` from a test-like brief
 |----------|-----------|-------------|------|--------------|
 | `e2b` | Hosted e2b cloud sandbox | separate Studio session | per sandbox-minute (COGS) | Hosted product — browser-only users |
 | `docker` | Local Docker container | separate Studio session | free | OSS self-hosters / local dev |
-| `local` | Current machine (npm) | no | free | Quick local checks without Docker |
 | `skip` | — | no | — | Deterministic tests only; unverified build blocks export and promotion |
 
 Readiness requires both deterministic acceptance and build execution to pass.
@@ -56,6 +55,20 @@ ignores inherited `DOCKER_HOST`, `DOCKER_CONTEXT`, Docker CLI config, and model
 credentials.
 One-shot `app_validation` sessions have no network and publish no ports; the
 validation tool sets that purpose itself even when supplied other metadata.
+Before candidate files are staged, build validation requires a locally inspected
+immutable image ID in `MOZAIKS_APP_RUNTIME_IMAGE_ID` and runs that exact image.
+No image is pulled automatically. The Docker image filesystem is read-only;
+generated files and build output are confined to bounded disposable tmpfs space
+as a non-root user. A missing image, unavailable sandbox or unconfirmed cleanup
+fails build validation and blocks promotion. Generated package scripts never
+execute as host npm subprocesses.
+Canonical builds also mount a 16 MiB writable Tailwind source-link directory in
+the read-only shared shell. Link setup is required for validation: a failed link
+fails the build instead of silently omitting generated UI classes from CSS.
+App build requests are limited to 120 seconds per command and session; larger
+values are capped, and nonpositive values fail before allocation. The Docker CLI
+adapter captures at most 1 MiB from each output stream and terminates commands
+that exceed the limit, so candidate output cannot grow host memory without bound.
 Validation receives only the fixed nonsecret sandbox resource paths. Explicit
 `MOZAIKS_PREVIEW_ENV_*` values are reserved for interactive preview sessions and
 are never forwarded into build validation.
@@ -67,8 +80,7 @@ candidate previews.
 Canonical app bundles do not own an npm project. Build validation stages bundle
 members into the existing standalone workspace layout, compiles generated Python,
 and builds the packaged shared web shell against that app workspace. Agent-provided
-commands cannot replace these checks. The same checks run for Docker, E2B, and
-explicit local validation; local validation requires installed shared shell dependencies.
+commands cannot replace these checks. The same checks run for Docker and E2B.
 Compilation does not bind or invent app identity before export. Static acceptance
 still checks schemas, references, module implementation, and runtime loading.
 Interactive runtime/browser acceptance is a separate step, not implied by a build.
@@ -204,7 +216,7 @@ These identities do not change the management shell's branding.
 - Provider resolution mirrors the validation ladder's preview-capable rungs:
   e2b only when `MOZAIKS_PREVIEW_PROVIDER=e2b` and its key are configured,
   otherwise local Docker. With neither, the create call returns 503 with a
-  clear message (`local`/`skip` builds have no live preview).
+  clear message (`skip` builds have no live preview).
 
 The canonical supervisor runs the existing platform host, shared web shell,
 and a private MongoDB in the sandbox. App files mount under `app/`, workflows
@@ -432,7 +444,8 @@ artifact storage, provider limits, and expected traffic before broad rollout.
 
 | Variable | Default | Used by |
 |----------|---------|---------|
-| `MOZAIKS_APP_VALIDATION_STRATEGY` | auto | strategy resolution (`e2b`/`docker`/`local`/`skip`); `e2b` must be explicit |
+| `MOZAIKS_APP_VALIDATION_STRATEGY` | auto | strategy resolution (`e2b`/`docker`/`skip`); `e2b` must be explicit |
+| `MOZAIKS_APP_RUNTIME_IMAGE_ID` | unset | immutable locally inspected Docker image ID for generated runtime acceptance and build validation |
 | `E2B_API_KEY` | unset | makes the e2b strategy available; never selects it automatically |
 | `E2B_TEMPLATE` | provider default | e2b adapter template |
 | `E2B_TIMEOUT` | `300` (seconds) | e2b adapter session/default validation timeout |

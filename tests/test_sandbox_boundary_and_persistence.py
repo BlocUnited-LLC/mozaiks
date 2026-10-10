@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from factory_app.workflows.AppGenerator.tools import app_validation as app_validation_module
 from factory_app.workflows.AppGenerator.tools.app_validation import (
     _run_sandbox_validation,
 )
@@ -90,6 +91,57 @@ async def test_docker_validation_session_has_no_network_or_published_ports(monke
 
 
 @pytest.mark.asyncio
+async def test_app_runtime_diagnostic_has_bounded_writable_space(monkeypatch):
+    monkeypatch.setenv("SANDBOX_PREVIEW_PORT", "invalid-preview-port")
+    adapter = DockerSandboxAdapter()
+    captured: dict[str, list[str]] = {}
+
+    async def fake_run(args, timeout: float = 60.0):
+        captured["args"] = list(args)
+        return 0, "diagnostic-container\n", ""
+
+    with patch.object(adapter, "_run", side_effect=fake_run):
+        session = await adapter.create_session(metadata={"purpose": "app_runtime_diagnostic"})
+
+    args = captured["args"]
+    assert session.session_id == "diagnostic-container"
+    assert args[args.index("--network") + 1] == "none"
+    assert "-p" not in args
+    assert "--read-only" in args
+    assert "--log-driver=none" in args
+    assert args[args.index("--user") + 1] == "10001:10001"
+    assert "--memory-swap=2g" in args
+    tmpfs = [args[i + 1] for i, arg in enumerate(args) if arg == "--tmpfs"]
+    assert any(mount.startswith("/workspace:") and "size=128m" in mount for mount in tmpfs)
+    assert any(mount.startswith("/tmp:") and "size=64m" in mount for mount in tmpfs)
+    assert any(mount.startswith("/home/sandbox:") and "size=16m" in mount for mount in tmpfs)
+
+
+@pytest.mark.asyncio
+async def test_docker_termination_requires_confirmed_absence():
+    adapter = DockerSandboxAdapter()
+    responses = [(0, "container-id\n", ""), (0, "container-id\n", ""),
+                 (0, "container-id\n", ""), (0, "container-id\n", ""),
+                 (0, "container-id\n", ""), (0, "container-id\n", "")]
+
+    async def fake_run(args, timeout: float = 60.0):
+        return responses.pop(0)
+
+    with patch.object(adapter, "_run", side_effect=fake_run):
+        assert await adapter.terminate_session(session_id="container-id") is False
+
+    responses = [(0, "container-id\n", ""), (0, "container-id\n", ""), (0, "", "")]
+    with patch.object(adapter, "_run", side_effect=fake_run):
+        assert await adapter.terminate_session(session_id="container-id") is True
+
+    responses = [(0, "container-id\n", ""), (0, "container-id\n", ""),
+                 (0, "container-id\n", ""), (0, "container-id\n", ""),
+                 (0, "container-id\n", ""), (0, "", "")]
+    with patch.object(adapter, "_run", side_effect=fake_run):
+        assert await adapter.terminate_session(session_id="container-id") is True
+
+
+@pytest.mark.asyncio
 async def test_docker_commands_ignore_remote_context_and_host_credentials(monkeypatch):
     monkeypatch.setenv("DOCKER_CONTEXT", "remote")
     monkeypatch.setenv("DOCKER_HOST", "tcp://remote.example:2375")
@@ -101,7 +153,9 @@ async def test_docker_commands_ignore_remote_context_and_host_credentials(monkey
 
     process = AsyncMock()
     process.returncode = 0
-    process.communicate.return_value = (b"ok", b"")
+    process.stdout.read.side_effect = [b"ok", b""]
+    process.stderr.read.return_value = b""
+    process.wait.return_value = 0
     with patch("asyncio.create_subprocess_exec", return_value=process) as launch:
         rc, stdout, stderr = await DockerSandboxAdapter._run(["docker", "info"])
     assert (rc, stdout, stderr) == (0, "ok", "")
@@ -209,14 +263,15 @@ async def test_sandbox_validation_persists_session_identity_and_metadata():
 
 
 @pytest.mark.asyncio
-async def test_validation_caller_cannot_change_sandbox_purpose():
+async def test_validation_caller_cannot_change_sandbox_purpose(monkeypatch):
     fake = _FakeAdapter()
-    with patch("mozaiksai.core.adapters.get_sandbox_adapter", return_value=fake):
-        await _run_sandbox_validation(
-            strategy="docker", resolved_files={"app.json": "{}"}, commands=[],
-            start_dev_server=False, timeout_seconds=60,
-            session_metadata={"purpose": "artifact_preview", "app_id": "app-1"},
-        )
+    monkeypatch.setattr(app_validation_module.app_runtime_smoke, "_preflight_generated_image", lambda: "sha256:" + "a" * 64)
+    monkeypatch.setattr("mozaiksai.core.adapters.DockerSandboxAdapter", lambda *, image: fake)
+    await _run_sandbox_validation(
+        strategy="docker", resolved_files={"app.json": "{}"}, commands=[],
+        start_dev_server=False, timeout_seconds=60,
+        session_metadata={"purpose": "artifact_preview", "app_id": "app-1"},
+    )
     assert fake.create_kwargs["metadata"] == {"purpose": "app_validation", "app_id": "app-1"}
 
 
@@ -243,11 +298,12 @@ async def test_validation_does_not_receive_preview_forwarded_environment(monkeyp
     assert "OPENAI_API_KEY" not in sandbox_resource_environment()
     assert preview_resource_environment()["OPENAI_API_KEY"] == "operator-preview-secret"
     fake = _FakeAdapter()
-    with patch("mozaiksai.core.adapters.get_sandbox_adapter", return_value=fake):
-        await _run_sandbox_validation(
-            strategy="docker", resolved_files={"app.json": "{}"}, commands=[],
-            start_dev_server=False, timeout_seconds=60,
-        )
+    monkeypatch.setattr(app_validation_module.app_runtime_smoke, "_preflight_generated_image", lambda: "sha256:" + "a" * 64)
+    monkeypatch.setattr("mozaiksai.core.adapters.DockerSandboxAdapter", lambda *, image: fake)
+    await _run_sandbox_validation(
+        strategy="docker", resolved_files={"app.json": "{}"}, commands=[],
+        start_dev_server=False, timeout_seconds=60,
+    )
     assert "OPENAI_API_KEY" not in fake.create_kwargs["envs"]
 
 

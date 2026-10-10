@@ -254,7 +254,7 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
     assert models["CiSecretRequirements"]["fields"]["optional"]["items"] == "CiSecretRequirement"
     assert models["CiSecretRequirements"]["fields"]["workflow_inputs"]["items"] == "CiWorkflowInputRequirement"
     assert models["DeploymentTemplateManifest"]["fields"]["validation_status"]["values"] == ["pending", "valid", "invalid"]
-    assert models["AppValidationStrategy"]["values"] == ["e2b", "docker", "local", "skip"]
+    assert models["AppValidationStrategy"]["values"] == ["e2b", "docker", "skip"]
     assert models["AppValidation"]["fields"]["validation_strategy"]["type"] == "AppValidationStrategy"
     assert models["AppValidation"]["fields"]["validation_status"]["values"] == ["passed", "failed", "skipped"]
     admin_panel_fields = models["ModuleAdminPanel"]["fields"]

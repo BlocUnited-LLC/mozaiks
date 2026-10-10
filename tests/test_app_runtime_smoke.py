@@ -266,6 +266,7 @@ async def test_imported_smoke_without_docker_is_pending_not_a_pass(monkeypatch):
     assert result["skipped_reason"] == "contained Docker validation is unavailable"
     assert result["checks"][0]["details"]["blocking"] is True
     assert result["observer_unverified_checks"] == ["event_rejection"]
+    assert "acceptance_scope" not in result
 
 
 def test_imported_smoke_preflight_requires_docker_and_pinned_image(monkeypatch):
@@ -294,7 +295,11 @@ def test_imported_smoke_preflight_returns_exact_immutable_image_id(monkeypatch):
 
     monkeypatch.setattr(app_runtime_smoke.subprocess, "run", inspect)
     assert preflight_contained_imported_smoke(image="trusted:local", expected_image_id=image_id) == image_id
-    assert commands == [["docker", "image", "inspect", "--format", "{{.Id}}", "trusted:local"]]
+    assert len(commands) == 1
+    assert commands[0][0] == "docker"
+    assert commands[0][1] == "--config"
+    assert commands[0][3] == "--host"
+    assert commands[0][-5:] == ["image", "inspect", "--format", "{{.Id}}", "trusted:local"]
 
 
 async def test_imported_smoke_requires_pinned_validator_image(monkeypatch, tmp_path):
@@ -332,6 +337,36 @@ async def test_imported_smoke_rejects_changed_validator_tag_before_staging(monke
     )
     assert result["status"] == "skipped"
     assert result["skipped_reason"] == "contained Docker image is unavailable"
+
+
+@pytest.mark.parametrize("receipt_order", ["done_before_boot", "outcome_after_done"])
+async def test_imported_smoke_requires_ordered_completion_receipt(monkeypatch, receipt_order):
+    image_id = "sha256:" + "a" * 64
+    monkeypatch.setattr(app_runtime_smoke, "preflight_contained_imported_smoke", lambda **_kwargs: image_id)
+
+    class ReorderedObserver:
+        def run(self, _app_root, _plan_root, _image, _timeout, nonce):
+            boot = {"event": "outcome", "observer_nonce": nonce,
+                    "check": "boot.http_ready", "status": "passed"}
+            done = {"event": "done", "observer_nonce": nonce}
+            events = ([done, boot] if receipt_order == "done_before_boot" else
+                      [boot, done, {"event": "outcome", "observer_nonce": nonce,
+                                    "check": "crud.items.a_create", "status": "passed"}])
+            stdout = "".join(
+                app_runtime_smoke._EVENT_PREFIX + json.dumps(event) + "\n" for event in events
+            )
+            return app_runtime_smoke._ChildRun(stdout, "", 0, False, contained=True)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(app_runtime_smoke, "_ContainedDockerProcess", ReorderedObserver)
+    result = await _contained_smoke(_good())
+
+    assert result["status"] == "failed"
+    assert _by_check(result)["smoke.observer"]["status"] == "failed"
+    assert "observer_origin" not in result
+    assert result["observer_unverified_checks"] == ["event_rejection"]
 
 
 async def test_imported_smoke_rejects_hardlinked_host_file(tmp_path):
@@ -465,14 +500,14 @@ async def test_imported_smoke_cancellation_waits_for_container_registration(monk
     removed = []
 
     def create(command, **_kwargs):
-        assert command[:2] == ["docker", "create"]
+        assert command[0] == "docker" and "create" in command
         entered.set()
         assert release.wait(timeout=5)
         return SimpleNamespace(returncode=0)
 
     monkeypatch.setattr(app_runtime_smoke.subprocess, "run", create)
     monkeypatch.setattr(app_runtime_smoke.subprocess, "Popen", lambda *_args, **_kwargs: pytest.fail("cancelled container started"))
-    monkeypatch.setattr(app_runtime_smoke, "_container_removed", lambda name: removed.append(name) or True)
+    monkeypatch.setattr(app_runtime_smoke, "_container_removed", lambda name, **_kwargs: removed.append(name) or True)
     child = app_runtime_smoke._ContainedDockerProcess()
     running = asyncio.create_task(asyncio.to_thread(
         child.run, tmp_path, tmp_path, "sha256:" + "a" * 64, 1.0, "a" * 32,
@@ -487,6 +522,7 @@ async def test_imported_smoke_cancellation_waits_for_container_registration(monk
     assert result.contained is True
     assert result.returncode is None
     assert removed and set(removed) == {child.name, child.probe_name}
+    child.close()
 
 
 @pytest.mark.skipif(
@@ -747,8 +783,11 @@ async def test_acceptance_reports_a_skipped_smoke_explicitly_and_consistently():
     smoke_check = next(check for check in result["checks"] if check["id"] == "app_runtime_smoke")
     assert (smoke_check["passed"], smoke_check["status"]) == (None, "skipped")
     assert result["app_runtime_smoke"]["passed"] is None
-    assert result["skipped_checks"] == [{"id": "app_runtime_smoke", "reason": "no database configured"}]
-    assert result["validation_evidence"]["skipped"] == ["app_runtime_smoke"]
+    assert result["skipped_checks"] == [
+        {"id": "app_runtime_load_worker", "reason": "contained AppLoader worker source, image, or cleanup was not verified"},
+        {"id": "app_runtime_smoke", "reason": "no database configured"},
+    ]
+    assert result["validation_evidence"]["skipped"] == ["app_runtime_load_worker", "app_runtime_smoke"]
     assert "app_runtime_smoke" not in result["validation_evidence"]["completed"]
     assert "app_runtime_smoke" not in result["validation_evidence"]["failed"]
     # What the build UI reads carries the skip too.
@@ -761,8 +800,8 @@ async def test_skipped_validation_evidence_is_canonical():
 
     evidence = normalize_validation_evidence(result["validation_evidence"])
 
-    assert evidence.skipped == ["app_runtime_smoke"]
-    assert evidence.skipped_names() == {"app_runtime_smoke"}
+    assert evidence.skipped == ["app_runtime_load_worker", "app_runtime_smoke"]
+    assert evidence.skipped_names() == {"app_runtime_load_worker", "app_runtime_smoke"}
     assert "app_runtime_smoke" not in evidence.completed_names() | evidence.failed_names()
 
 
@@ -811,6 +850,7 @@ async def test_generated_code_runs_without_any_host_secret_in_its_environment(mo
     assert visible <= {
         *app_runtime_smoke._CHILD_ENVIRONMENT,
         "PYTHONPATH", "PYTHON_DOTENV_DISABLED", "PYTHONUTF8", "PYTHONIOENCODING", "PYTHONDONTWRITEBYTECODE",
+        "USERPROFILE" if os.name == "nt" else "HOME",
     }
     assert mongo.uri not in json.dumps(result)
 
@@ -989,6 +1029,33 @@ async def test_contained_smoke_names_its_unverified_rejected_event_check():
     assert result["status"] == "passed", result["results"]
     assert result["observer_origin"] == "trusted_external_probe_v1"
     assert result["observer_unverified_checks"] == ["event_rejection"]
+    assert "acceptance_scope" not in result
+    assert not any(row["check"].startswith("event.") for row in result["results"])
+
+
+@pytest.mark.skipif(
+    not os.getenv("MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE"),
+    reason="set MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE to a freshly built local preview image",
+)
+async def test_generated_scope_preserves_invalid_emission_as_unverified(monkeypatch):
+    image = os.environ["MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE"]
+    inspected = subprocess.run(
+        ["docker", "image", "inspect", "--format", "{{.Id}}", image],
+        capture_output=True, text=True, check=True, timeout=5,
+    )
+    monkeypatch.setenv("MOZAIKS_APP_RUNTIME_IMAGE_ID", inspected.stdout.strip())
+
+    result = await app_runtime_smoke.run_contained_generated_app_runtime_smoke(
+        _created_event_without_owner(_good()),
+    )
+
+    assert result["status"] == "passed", result
+    assert result["observer_unverified_checks"] == ["event_rejection"]
+    assert result["acceptance_scope"] == {
+        "version": "2.0", "excluded_observer_checks": ["event_rejection"],
+    }
+    assert result["observer_completion_verified"] is True
+    assert result["observer_cleanup_verified"] is True
     assert not any(row["check"].startswith("event.") for row in result["results"])
 
 
@@ -1201,7 +1268,11 @@ async def test_acceptance_fails_the_dead_bundle_and_routes_smoke_diagnostics_to_
 
     assert "app_runtime_smoke" in result["validation_evidence"]["failed"]
     assert result["app_runtime_smoke"]["status"] == "failed"
-    assert result["skipped_checks"] == []
+    assert result["skipped_checks"] == [{
+        "id": "app_runtime_load_worker",
+        "reason": "contained AppLoader worker source, image, or cleanup was not verified",
+    }]
+    assert result["validation_evidence"]["skipped"] == ["app_runtime_load_worker"]
     smoke_errors = [error for error in result["bundle_repair"]["errors"] if error.startswith("app_runtime_smoke: ")]
     assert len(smoke_errors) == len(result["app_runtime_smoke"]["failed_tests"])
     assert any("indexes[0].name is required" in error for error in smoke_errors)

@@ -578,7 +578,7 @@ async def test_typed_plan_materializes_validates_loads_and_serves_same_bundle(
     )
     assert acceptance["status"] == "pending", acceptance
     assert acceptance["validation_evidence"]["failed"] == []
-    assert acceptance["validation_evidence"]["skipped"] == ["app_runtime_smoke"]
+    assert acceptance["validation_evidence"]["skipped"] == ["app_runtime_load_worker", "app_runtime_smoke"]
     assert context_one.get("generated_files") == files_one
 
     app_root = tmp_path / "app"
