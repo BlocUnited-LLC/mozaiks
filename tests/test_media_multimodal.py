@@ -309,6 +309,25 @@ async def test_media_asset_store_detects_output_format_metadata(tmp_path) -> Non
     assert asset.filename.endswith(".webp")
 
 
+@pytest.mark.asyncio
+async def test_media_asset_store_persists_generated_video_metadata(tmp_path) -> None:
+    asset_store = MediaAssetStore(
+        client=_Client(_Collection()),
+        content_store=LocalMediaContentStore(root=tmp_path),
+    )
+    binary_result = SimpleNamespace(
+        data=b"video-bytes",
+        metadata={"media_type": "video/mp4", "filename": "preview.mp4"},
+    )
+
+    asset = await asset_store.persist_generated_binary_result(binary_result, app_id="app_1")
+
+    assert asset.kind is MediaKind.VIDEO
+    assert asset.media_type == "video/mp4"
+    assert asset.filename == "preview.mp4"
+    assert await asset_store.get_asset_content(asset) == b"video-bytes"
+
+
 def test_generated_media_artifact_payload_builds_preview_and_actions() -> None:
     from mozaiksai.core.media.types import GeneratedMediaAsset, MediaSource
 

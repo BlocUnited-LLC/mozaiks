@@ -12,6 +12,7 @@ const formatBytes = (value) => {
 };
 
 const isImageAsset = (asset) => String(asset?.media_type || '').startsWith('image/');
+const isVideoAsset = (asset) => String(asset?.media_type || '').startsWith('video/');
 
 const AssetPreview = ({ asset }) => {
   const previewUrl = asset?.preview_url;
@@ -22,6 +23,19 @@ const AssetPreview = ({ asset }) => {
         alt={asset?.display_name || asset?.filename || 'Generated media'}
         className="h-full w-full object-contain"
       />
+    );
+  }
+  if (isVideoAsset(asset) && previewUrl) {
+    return (
+      <video
+        controls
+        playsInline
+        preload="metadata"
+        aria-label={asset?.display_name || asset?.filename || 'Generated video'}
+        className="h-full w-full object-contain"
+      >
+        <source src={previewUrl} type={asset.media_type} />
+      </video>
     );
   }
   const Icon = isImageAsset(asset) ? FiImage : FiFile;
