@@ -463,6 +463,11 @@
   color: var(--color-text-primary);
 }
 
+.shell-mobile-bottom-item:focus-visible {
+  outline: 2px solid var(--color-primary-light);
+  outline-offset: -2px;
+}
+
 .shell-mobile-bottom-glyph {
   position: relative;
   display: inline-flex;
@@ -474,6 +479,14 @@
   background: transparent;
   font-size: 0.78rem;
   font-weight: 700;
+}
+
+.shell-mobile-bottom-icon {
+  display: block;
+  width: 1.35rem;
+  height: 1.35rem;
+  flex: none;
+  stroke-width: 1.9;
 }
 
 .shell-mobile-bottom-label {

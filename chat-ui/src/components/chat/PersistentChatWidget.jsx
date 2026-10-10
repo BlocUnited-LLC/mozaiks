@@ -64,6 +64,8 @@ const PersistentChatWidget = ({
     setAskMessages,
     unreadChatCount,
     setUnreadChatCount,
+    isChatOverlayOpen: isExpanded,
+    setIsChatOverlayOpen: setIsExpanded,
     api,
     auth,
     user,
@@ -71,7 +73,6 @@ const PersistentChatWidget = ({
   } = useChatUI();
   const navigate = useNavigate();
 
-  const [isExpanded, setIsExpanded] = useState(false);
   const [wsEnabled, setWsEnabled] = useState(false);
   const [inSupportMode, setInSupportMode] = useState(false);
   const [supportMessage, setSupportMessage] = useState('');
@@ -563,7 +564,7 @@ const PersistentChatWidget = ({
   // ─── Minimized state ────────────────────────────────────────────────────────
   if (!isExpanded) {
     return (
-      <div className="fixed right-0 bottom-6 z-50 widget-safe-bottom">
+      <div className="fixed right-0 bottom-6 z-50 widget-safe-bottom widget-floating-launcher">
         <button
           type="button"
           onClick={() => { setIsExpanded(true); setUnreadChatCount(0); }}
@@ -616,7 +617,7 @@ const PersistentChatWidget = ({
       </button>
 
       {/* Chat panel */}
-      <div className="pointer-events-auto w-[26rem] max-w-[calc(100vw-2.5rem)] h-[50vh] md:h-[70vh] min-h-[360px] bg-gradient-to-br from-gray-900/95 via-slate-900/95 to-black/95 backdrop-blur-xl border border-[rgba(var(--color-primary-light-rgb),0.3)] rounded-2xl rounded-tr-none shadow-2xl overflow-hidden flex flex-col">
+      <div id="mozaiks-assistant-panel" className="pointer-events-auto w-[26rem] max-w-[calc(100vw-2.5rem)] h-[50vh] md:h-[70vh] min-h-[360px] bg-gradient-to-br from-gray-900/95 via-slate-900/95 to-black/95 backdrop-blur-xl border border-[rgba(var(--color-primary-light-rgb),0.3)] rounded-2xl rounded-tr-none shadow-2xl overflow-hidden flex flex-col">
 
         {/* Header */}
         <div className="flex-shrink-0 bg-[rgba(0,0,0,0.6)] border-b border-[rgba(var(--color-primary-light-rgb),0.2)] backdrop-blur-xl">
@@ -744,7 +745,7 @@ const PersistentChatWidget = ({
         {/* Body */}
         {!inSupportMode && wsEnabled && ['error', 'disconnected'].includes(wsStatus) && (
           <div role="status" className="flex-shrink-0 px-3 py-2 text-xs text-gray-200">
-            The assistant is disconnected. Your messages are waiting.
+            The assistant is disconnected.{hasPendingCurrentSends ? ' Your messages are waiting.' : ''}
             <button type="button" onClick={retryConnection} className="ml-2 underline">Retry connection</button>
           </div>
         )}

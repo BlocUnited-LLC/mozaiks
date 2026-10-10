@@ -1,12 +1,15 @@
 import React from 'react';
 import {
+  RiAddCircleLine,
   RiAppsFill,
   RiBarChart2Line,
   RiCustomerServiceFill,
   RiDashboardFill,
   RiFileList3Fill,
   RiHistoryFill,
+  RiHome4Line,
   RiMoneyDollarCircleFill,
+  RiNotification3Line,
   RiPlugLine,
   RiPulseLine,
   RiServerFill,
@@ -17,8 +20,16 @@ import {
 
 // The shell already uses these icon hints for workspace and admin navigation.
 const ICONS = {
+  alerts: RiNotification3Line,
   analytics: RiBarChart2Line,
   apps: RiAppsFill,
+  workspace: RiAppsFill,
+  home: RiHome4Line,
+  create: RiAddCircleLine,
+  'create-app': RiAddCircleLine,
+  notifications: RiNotification3Line,
+  profile: RiUser3Fill,
+  account: RiUser3Fill,
   billing: RiMoneyDollarCircleFill,
   chart: RiFileList3Fill,
   dashboard: RiDashboardFill,
@@ -35,11 +46,16 @@ const ICONS = {
 
 const ICON_FILE_RE = /\.(svg|png|jpe?g|gif|webp|ico)$/i;
 
+// A navigation item id may stand in for a missing icon hint only when it names
+// one of the icons above. Ids derived from a path or href must never reach the
+// asset branch below, where they would become a mask URL that blanks the glyph.
+export const hasNamedIcon = (id) => (
+  typeof id === 'string' && Object.prototype.hasOwnProperty.call(ICONS, id)
+);
+
 export default function ShellNavigationIcon({ icon, fallback }) {
-  const NamedIcon = typeof icon === 'string' && Object.prototype.hasOwnProperty.call(ICONS, icon)
-    ? ICONS[icon]
-    : null;
-  if (NamedIcon) return <NamedIcon aria-hidden="true" size="1.25em" />;
+  const NamedIcon = hasNamedIcon(icon) ? ICONS[icon] : null;
+  if (NamedIcon) return <NamedIcon aria-hidden="true" className="shell-mobile-bottom-icon" />;
 
   const source = typeof icon === 'string' && icon
     ? icon.startsWith('/') || icon.startsWith('http')
@@ -50,7 +66,7 @@ export default function ShellNavigationIcon({ icon, fallback }) {
     return (
       <span
         aria-hidden="true"
-        className="inline-block h-5 w-5 bg-current"
+        className="shell-mobile-bottom-icon bg-current"
         style={{
           mask: `url(${source}) center / contain no-repeat`,
           WebkitMask: `url(${source}) center / contain no-repeat`,

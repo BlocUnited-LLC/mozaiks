@@ -103,8 +103,10 @@ export default function MozaiksApp({
             endpointUrl={consoleBridgeEndpointUrl}
             metadata={consoleBridgeMetadata}
           />
-          <GlobalChatWidgetWrapper />
           {children || <AppShell />}
+          {/* After the shell, so the assistant panel follows the page controls
+              and the mobile bottom bar that opens it in keyboard tab order. */}
+          <GlobalChatWidgetWrapper />
         </Router>
       </ChatUIProvider>
     </NavigationProvider>
