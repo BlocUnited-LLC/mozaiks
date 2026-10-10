@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from factory_app.workflows.AppGenerator.tools import app_validation as app_validation_module
 from factory_app.workflows.AppGenerator.tools.app_validation import (
     _run_sandbox_validation,
 )
@@ -264,7 +265,7 @@ async def test_sandbox_validation_persists_session_identity_and_metadata():
 @pytest.mark.asyncio
 async def test_validation_caller_cannot_change_sandbox_purpose(monkeypatch):
     fake = _FakeAdapter()
-    monkeypatch.setattr("factory_app.workflows.AppGenerator.tools.app_runtime_smoke._preflight_generated_image", lambda: "sha256:" + "a" * 64)
+    monkeypatch.setattr(app_validation_module.app_runtime_smoke, "_preflight_generated_image", lambda: "sha256:" + "a" * 64)
     monkeypatch.setattr("mozaiksai.core.adapters.DockerSandboxAdapter", lambda *, image: fake)
     await _run_sandbox_validation(
         strategy="docker", resolved_files={"app.json": "{}"}, commands=[],
@@ -297,7 +298,7 @@ async def test_validation_does_not_receive_preview_forwarded_environment(monkeyp
     assert "OPENAI_API_KEY" not in sandbox_resource_environment()
     assert preview_resource_environment()["OPENAI_API_KEY"] == "operator-preview-secret"
     fake = _FakeAdapter()
-    monkeypatch.setattr("factory_app.workflows.AppGenerator.tools.app_runtime_smoke._preflight_generated_image", lambda: "sha256:" + "a" * 64)
+    monkeypatch.setattr(app_validation_module.app_runtime_smoke, "_preflight_generated_image", lambda: "sha256:" + "a" * 64)
     monkeypatch.setattr("mozaiksai.core.adapters.DockerSandboxAdapter", lambda *, image: fake)
     await _run_sandbox_validation(
         strategy="docker", resolved_files={"app.json": "{}"}, commands=[],
