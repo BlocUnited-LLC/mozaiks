@@ -210,7 +210,9 @@ def test_notification_count_query_uses_platform_notification_intents():
         app_id="app_1",
     )
 
-    query = notifications_router._notification_query_for_principal(principal, "app_1", None, None)
+    query = notifications_router._notification_query_for_principal(
+        principal, "app_1", None, status="unread",
+    )
     assert query["status"] == "unread"
     assert query["app_id"] == "app_1"
     assert query["$or"] == [

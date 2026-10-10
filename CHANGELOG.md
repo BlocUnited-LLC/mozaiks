@@ -18,6 +18,10 @@ This project follows a practical pre-1.0 changelog format:
   existing services stay on the ordinary host. Invalid worker selection aborts
   startup before serving requests. Studio preview maintenance stays on the
   ordinary host when a worker process is selected.
+- Added an optional read-only notification membership resolver for hosted
+  inboxes. It verifies one current app/user/tenant/workspace membership and
+  its role and permission grants across all notification routes; missing or
+  ambiguous membership fails closed.
 - Prepared the E2B adapter for private sealed candidate sessions with an exact
   template build reference, denied internet egress, token-gated port access,
   no provider preview URL, and no reconnect that could resume a paused session.

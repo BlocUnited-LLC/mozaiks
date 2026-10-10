@@ -140,18 +140,27 @@ Current implementation:
 Platform notification records retain the workspace ID from their module event
 provenance. Every notification HTTP query uses the app ID loaded by the host;
 token and optional request app IDs must match it. The routes require a
-token-bound workspace and matching host-verified membership before showing or
-changing first-party workspace support alerts, including messages linked to
-support requests. Older support alerts without a workspace owner stay hidden.
+matching host-verified membership before showing or changing first-party
+workspace support alerts, including messages linked to support requests.
+Hosts without a notification resolver also require a token-bound workspace.
+Older support alerts without a workspace owner stay hidden.
 Every alert with a tenant or workspace owner, including direct-user and
 empty-audience alerts, requires a matching host-verified owner scope; revoking
 that membership hides it. Personal direct and app-wide alerts with neither
 owner retain their existing audience visibility. A token without a workspace
-binding sees those ownerless notifications but no owned alerts; the shared
-shell does not currently select a workspace for its bell.
-Role- or permission-targeted alerts remain hidden until a host can supply a
-read-only grant for the exact workspace and tenant. A token-wide role or
-permission and a verified membership without that grant are insufficient.
+binding sees only ownerless notifications unless the host registers
+`notification_scope_resolver`. That read-only hook receives the authenticated
+principal and host-loaded app ID and must return exactly one current
+membership with matching app and user IDs, tenant and workspace IDs, and
+membership roles and permissions. The inbox uses its result on count, list,
+read, mark-all-read, and clear-all routes. An absent, ambiguous, revoked, or
+malformed membership supplies no owned scope or broad-audience grants. A
+token-wide role or permission is never an inbox grant. Without the hook, a
+host-verified token-bound membership can still expose direct owned alerts,
+but cannot grant role or permission alerts.
+The token's OIDC `tid` may identify the identity-provider directory rather
+than the app's tenant, so the host must derive the app tenant from its current
+membership record.
 Alerts that also name the caller directly remain visible only when each
 present owner matches the host-verified scope. Broad-audience alerts with no
 owner or malformed ownership stay hidden, even when they also name the caller

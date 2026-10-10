@@ -210,6 +210,185 @@ def _ids(response) -> set[str]:
     return {row["notification_id"] for row in response.json()["notifications"]}
 
 
+def _register_notification_memberships(notification_http, monkeypatch, memberships):
+    """Synthetic host lookup; JWT validation, HTTP and Mongo queries are real."""
+    hooks = PlatformHookRegistry()
+
+    async def current_membership(*, principal, app_id):
+        candidates = [row for row in memberships if row["user_id"] == principal.user_id
+                      and row["status"] == "active"
+                      and (not principal.workspace_id
+                           or row["workspace_id"] == principal.workspace_id)]
+        if len(candidates) != 1:
+            return None
+        row = candidates[0]
+        return {
+            "app_id": app_id, "user_id": row["user_id"],
+            "tenant_id": row["tenant_id"], "workspace_id": row["workspace_id"],
+            "roles": row["roles"], "permissions": row["permissions"],
+        }
+
+    hooks.register_bundle({"notification_scope_resolver": current_membership}, source="current-member")
+    monkeypatch.setattr(notification_router, "get_platform_hooks", lambda: hooks)
+    return hooks
+
+
+def _notification_member(workspace_id, tenant_id, *, roles=None, permissions=None, status="active"):
+    return {
+        "user_id": USER_ID, "workspace_id": workspace_id, "tenant_id": tenant_id,
+        "roles": roles or [], "permissions": permissions or [], "status": status,
+    }
+
+
+def _seed_verified_grant_records(notification_http):
+    notification_http.collection.insert_many([
+        _role_record("grant-role-a", workspace_id=WORKSPACE_A, tenant_id=TENANT_A),
+        _role_record("grant-role-b", workspace_id=WORKSPACE_B, tenant_id=TENANT_B),
+        {**_role_record("grant-viewer-b", workspace_id=WORKSPACE_B, tenant_id=TENANT_B),
+         "audience": {"roles": ["viewer"]}},
+        {**_role_record("grant-permission-a", workspace_id=WORKSPACE_A, tenant_id=TENANT_A),
+         "audience": {"permissions": ["support.read"]}},
+        {**_role_record("grant-permission-b", workspace_id=WORKSPACE_B, tenant_id=TENANT_B),
+         "audience": {"permissions": ["support.read"]}},
+        _role_record("grant-ownerless-broad", ownerless=True),
+        _role_record("grant-owner-array", workspace_id=[WORKSPACE_A, WORKSPACE_B], tenant_id=TENANT_A),
+        {**_record("grant-direct-a", module_id="messages", event_type="domain.messages.message_sent",
+                    workspace_id=WORKSPACE_A), "tenant_id": TENANT_A},
+        {**_record("grant-empty-a", module_id="billing", event_type="domain.billing.updated",
+                    workspace_id=WORKSPACE_A), "tenant_id": TENANT_A},
+        {**_record("grant-tenant-a", module_id="billing", event_type="domain.billing.updated",
+                    ownerless=True), "tenant_id": TENANT_A},
+        {**_record("grant-direct-b", module_id="messages", event_type="domain.messages.message_sent",
+                    workspace_id=WORKSPACE_B), "tenant_id": TENANT_B},
+        {**_record("grant-foreign-app", module_id="billing", event_type="domain.billing.updated",
+                    ownerless=True), "app_id": "foreign-app"},
+    ])
+
+
+def test_claimless_single_member_grants_all_five_routes_without_foreign_access(
+    notification_http, monkeypatch,
+):
+    _seed_verified_grant_records(notification_http)
+    _register_notification_memberships(notification_http, monkeypatch, [
+        _notification_member(WORKSPACE_A, TENANT_A, roles=["owner"], permissions=["support.read"]),
+    ])
+    client = notification_http.client
+    headers = notification_http.token(None, roles=["global-owner"])
+    expected = {
+        "support-a", "reply-a", "direct-message", "app-wide", "grant-role-a",
+        "grant-permission-a", "grant-direct-a", "grant-empty-a", "grant-tenant-a",
+    }
+    response = client.get("/api/notifications", headers=headers)
+    assert _ids(response) == expected
+    for row in response.json()["notifications"]:
+        assert not {"source_event", "tenant_id", "workspace_id", "audience"} & set(row)
+    assert client.get("/api/notifications/count", headers=headers).json() == {
+        "count": len(expected), "unread_count": len(expected),
+    }
+    for foreign in ("grant-role-b", "grant-permission-b", "grant-direct-b",
+                    "grant-ownerless-broad", "grant-owner-array", "grant-foreign-app"):
+        assert client.post(f"/api/notifications/{foreign}/read", headers=headers).json()["success"] is False
+    assert client.post("/api/notifications/grant-role-a/read", headers=headers).json()["success"] is True
+    assert client.post("/api/notifications/mark-all-read", headers=headers).json()["marked_count"] == len(expected) - 1
+    assert client.delete("/api/notifications", headers=headers).json()["cleared_count"] == len(expected)
+    assert notification_http.collection.count_documents({"notification_id": {"$in": [
+        "grant-role-b", "grant-permission-b", "grant-direct-b", "grant-ownerless-broad",
+        "grant-owner-array", "grant-foreign-app",
+    ]}}) == 6
+
+
+@pytest.mark.parametrize("memberships", [[], [
+    _notification_member(WORKSPACE_A, TENANT_A, roles=["owner"]),
+    _notification_member(WORKSPACE_B, TENANT_B, roles=["owner"]),
+]])
+def test_claimless_zero_or_multiple_memberships_hide_owned_alerts(
+    notification_http, monkeypatch, memberships,
+):
+    _seed_verified_grant_records(notification_http)
+    _register_notification_memberships(notification_http, monkeypatch, memberships)
+    headers = notification_http.token(None, roles=["owner"])
+    client = notification_http.client
+    assert _ids(client.get("/api/notifications", headers=headers)) == {"direct-message", "app-wide"}
+    assert client.get("/api/notifications/count", headers=headers).json()["count"] == 2
+    assert client.post("/api/notifications/grant-direct-a/read", headers=headers).json()["success"] is False
+    assert client.post("/api/notifications/mark-all-read", headers=headers).json()["marked_count"] == 2
+    assert client.delete("/api/notifications", headers=headers).json()["cleared_count"] == 2
+    assert notification_http.collection.count_documents({"notification_id": "grant-role-a"}) == 1
+
+
+def test_token_bound_member_uses_its_exact_grants_and_revocation_is_immediate(
+    notification_http, monkeypatch,
+):
+    _seed_verified_grant_records(notification_http)
+    memberships = [
+        _notification_member(WORKSPACE_A, TENANT_A, roles=["owner"]),
+        _notification_member(WORKSPACE_B, TENANT_B, roles=["viewer"]),
+    ]
+    _register_notification_memberships(notification_http, monkeypatch, memberships)
+    headers = notification_http.token(WORKSPACE_B, roles=["owner"])
+    before = _ids(notification_http.client.get("/api/notifications", headers=headers))
+    assert "grant-viewer-b" in before
+    assert "grant-role-b" not in before  # token-global owner is not a B-membership owner
+    assert "grant-role-a" not in before
+    assert "grant-direct-b" in before
+    memberships[1]["status"] = "suspended"
+    assert _ids(notification_http.client.get("/api/notifications", headers=headers)) == {
+        "direct-message", "app-wide",
+    }
+    assert notification_http.client.post(
+        "/api/notifications/grant-direct-b/read", headers=headers,
+    ).json()["success"] is False
+
+
+@pytest.mark.parametrize("failure", ["missing", "error", "invalid", "duplicate"])
+def test_notification_hook_failure_never_falls_back_to_module_scope(
+    notification_http, failure,
+):
+    # The fixture's older module-scope hook would verify workspace A. Once a
+    # notification-specific resolver is registered, its failure must not grant
+    # any owner-bearing alert through that older path.
+    hooks = notification_http.hooks
+
+    def broken(**_kwargs):
+        raise RuntimeError("membership backend unavailable")
+
+    if failure == "error":
+        hook = broken
+    elif failure == "invalid":
+        hook = lambda **_kwargs: {  # noqa: E731
+            "app_id": APP_ID, "user_id": USER_ID, "tenant_id": TENANT_B,
+            "workspace_id": WORKSPACE_B, "roles": ["owner"], "permissions": [],
+        }
+    else:
+        hook = lambda **_kwargs: None  # noqa: E731
+    hooks.register_bundle({"notification_scope_resolver": hook}, source="candidate")
+    if failure == "duplicate":
+        hooks.register_bundle({"notification_scope_resolver": hook}, source="duplicate")
+
+    headers = notification_http.token(WORKSPACE_A, roles=["owner"])
+    client = notification_http.client
+    assert _ids(client.get("/api/notifications", headers=headers)) == {"direct-message", "app-wide"}
+    assert client.get("/api/notifications/count", headers=headers).json()["count"] == 2
+    assert client.post("/api/notifications/support-a/read", headers=headers).json()["success"] is False
+    assert client.post("/api/notifications/mark-all-read", headers=headers).json()["marked_count"] == 2
+    assert client.delete("/api/notifications", headers=headers).json()["cleared_count"] == 2
+    assert notification_http.collection.count_documents({"notification_id": "support-a"}) == 1
+
+
+def test_oidc_directory_tid_does_not_replace_internal_membership_tenant(notification_http, monkeypatch):
+    _seed_verified_grant_records(notification_http)
+    _register_notification_memberships(notification_http, monkeypatch, [
+        _notification_member(WORKSPACE_A, TENANT_A, roles=["owner"]),
+    ])
+    headers = notification_http.token(WORKSPACE_A, tenant_id="entra-directory", roles=["owner"])
+    visible = _ids(notification_http.client.get("/api/notifications", headers=headers))
+    assert "grant-role-a" in visible
+    assert "grant-role-b" not in visible
+    assert notification_http.client.post(
+        "/api/notifications/grant-role-a/read", headers=headers,
+    ).json()["success"] is True
+
+
 def _seed_role_notifications(notification_http):
     records = [
         _role_record("role-tenant-a", ownerless=True, tenant_id=TENANT_A),
