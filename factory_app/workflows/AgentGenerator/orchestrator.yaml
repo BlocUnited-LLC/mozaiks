@@ -6,7 +6,9 @@ workflow_startup_mode: AgentDriven
 orchestration_pattern: ag2_network
 initial_message: InterviewAgent, check the approved app context for actual AI
   requirements. Ordinary deterministic modules and pages do not require an AI
-  workflow. If no AI work is requested, emit NEXT immediately. Otherwise ask
-  only a missing question that changes the required AI workflow design.
+  workflow. If no AI work is requested, return WorkflowInterviewResult with
+  outcome ready and a brief confirmation in agent_message. Otherwise ask
+  only a missing question that changes the required AI workflow design,
+  using agent_message and outcome needs_input in WorkflowInterviewResult.
 initial_agent: InterviewAgent
 

@@ -784,6 +784,9 @@ This project follows a practical pre-1.0 changelog format:
   renderer as standalone app saves.
 - AG2 knowledge-store writes are serialized per session so a delayed earlier
   snapshot cannot overwrite the active channel state needed after restart.
+- AgentGenerator interview questions and confirmations now appear in chat.
+  Its startup guidance consistently uses typed readiness instead of routing
+  markers or instructions that contradict the required structured output.
 
 - Chat replies arriving together or immediately after a server restart now
   reach the existing workflow channel instead of being saved without delivery.

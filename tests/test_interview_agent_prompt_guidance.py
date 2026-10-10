@@ -32,6 +32,8 @@ def test_agentgenerator_prompt_avoids_checklist_interrogation() -> None:
     assert 'do not ask the user to restate it' in source
     assert 'Do NOT force explicit monetization, integration, dataset, review, or startup-mode questions just to satisfy a checklist.' in source
     assert 'Usually no more than 3 targeted questions.' in source
+    assert 'Return WorkflowInterviewResult with natural conversation in `agent_message` and readiness in `outcome`.' in source
+    assert 'no structured outputs' not in source.lower()
 
 
 def test_theme_capture_prompt_prefers_evidence_over_generic_questionnaire() -> None:
@@ -50,4 +52,7 @@ def test_interview_orchestrators_use_guidance_language() -> None:
     assert 'guide the user to a concrete app direction' in value_orchestrator
     assert 'guide the user through only the missing deterministic' in app_orchestrator
     assert 'only a missing question that changes the required AI workflow design' in agent_orchestrator
-    assert 'NEXT' in agent_orchestrator
+    assert 'WorkflowInterviewResult' in agent_orchestrator
+    assert 'outcome ready' in agent_orchestrator
+    assert 'outcome needs_input' in agent_orchestrator
+    assert 'NEXT' not in agent_orchestrator

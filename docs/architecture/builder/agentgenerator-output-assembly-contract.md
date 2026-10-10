@@ -18,6 +18,14 @@
 
 ## How This Works
 
+`InterviewAgent` emits `WorkflowInterviewResult`: `agent_message` contains the
+user-facing question or confirmation, and `outcome` is `needs_input` or `ready`.
+`record_workflow_interview` accepts the explicit `agent_message` argument so the
+existing auto-tool event displays it in chat, checks it against the validated
+output, and records the typed readiness value. Chat text and routing markers
+are not readiness authority. An app without AI requirements returns `ready`
+with a brief confirmation instead of asking for an invented workflow.
+
 AgentGenerator first validates and reviews the workflow partition:
 
 1. `PatternAgent` emits `PatternSelection`. Its tool validates the typed selection against the canonical DesignDocs workflow surface map before writing `workflows_spec`. Module pricing selections are validated by the subscription designer and AppGenerator with their data contract; AgentGenerator does not revalidate them.
