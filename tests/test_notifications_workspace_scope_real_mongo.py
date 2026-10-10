@@ -179,7 +179,7 @@ def notification_http(monkeypatch):
             "source_event": {"payload": {"related_type": "workspace_support.request"}},
         },
         _record("direct-message", module_id="messages", event_type="domain.messages.message_sent",
-                workspace_id=WORKSPACE_B),
+                ownerless=True),
         _record("app-wide", module_id="billing", event_type="domain.billing.updated", ownerless=True),
     ])
 
@@ -714,6 +714,62 @@ def test_same_user_workspace_switch_scopes_support_alerts(notification_http):
     assert _ids(client.get("/api/notifications", headers=notification_http.token("not-a-membership"))) == {
         "direct-message", "app-wide",
     }
+
+
+def test_revoked_membership_hides_owned_direct_notification_on_all_routes(notification_http, monkeypatch):
+    owned = _record(
+        "direct-revoked", module_id="messages", event_type="domain.messages.message_sent",
+        workspace_id=WORKSPACE_B,
+    )
+    owned["tenant_id"] = TENANT_B
+    notification_http.collection.insert_one(owned)
+    client = notification_http.client
+    revoked_b = notification_http.token(WORKSPACE_B)
+    assert "direct-revoked" in _ids(client.get("/api/notifications", headers=revoked_b))
+
+    hooks = PlatformHookRegistry()
+
+    def active_a_only(*, requested_scope, **_kwargs):
+        if requested_scope.get("workspace_id") == WORKSPACE_A:
+            return {"verified_workspace_id": WORKSPACE_A, "verified_tenant_id": TENANT_A}
+        return {}
+
+    hooks.register_bundle({"module_scope_resolver": active_a_only}, source="current-membership")
+    monkeypatch.setattr(notification_router, "get_platform_hooks", lambda: hooks)
+
+    assert _ids(client.get("/api/notifications", headers=revoked_b)) == {"direct-message", "app-wide"}
+    assert client.get("/api/notifications/count", headers=revoked_b).json() == {
+        "count": 2, "unread_count": 2,
+    }
+    assert client.post("/api/notifications/direct-revoked/read", headers=revoked_b).json()["success"] is False
+    assert client.post("/api/notifications/mark-all-read", headers=revoked_b).json()["marked_count"] == 2
+    assert client.delete("/api/notifications", headers=revoked_b).json()["cleared_count"] == 2
+    assert notification_http.collection.find_one({"notification_id": "direct-revoked"})["status"] == "unread"
+
+
+def test_workspace_owned_empty_audience_requires_matching_member_on_all_routes(notification_http):
+    owned = _record(
+        "owned-empty-a", module_id="billing", event_type="domain.billing.updated",
+        workspace_id=WORKSPACE_A,
+    )
+    owned["tenant_id"] = TENANT_A
+    notification_http.collection.insert_one(owned)
+
+    client = notification_http.client
+    assert "owned-empty-a" in _ids(client.get(
+        "/api/notifications", headers=notification_http.token(WORKSPACE_A),
+    ))
+    member_b = notification_http.token(WORKSPACE_B)
+    assert _ids(client.get("/api/notifications", headers=member_b)) == {
+        "support-b", "reply-b", "direct-message", "app-wide",
+    }
+    assert client.get("/api/notifications/count", headers=member_b).json() == {
+        "count": 4, "unread_count": 4,
+    }
+    assert client.post("/api/notifications/owned-empty-a/read", headers=member_b).json()["success"] is False
+    assert client.post("/api/notifications/mark-all-read", headers=member_b).json()["marked_count"] == 4
+    assert client.delete("/api/notifications", headers=member_b).json()["cleared_count"] == 4
+    assert notification_http.collection.find_one({"notification_id": "owned-empty-a"})["status"] == "unread"
 
 
 def test_support_notification_mutations_require_verified_workspace(notification_http):

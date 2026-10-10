@@ -177,8 +177,10 @@ This project follows a practical pre-1.0 changelog format:
 
 - Notification reads and mutations no longer treat token-wide roles or
   permissions as grants for workspace audiences. Broad-only alerts remain
-  hidden until the host can verify a grant for the exact membership; direct
-  recipients and app-wide alerts keep their existing visibility rules.
+  hidden until the host can verify a grant for the exact membership. Every
+  tenant- or workspace-owned alert now requires a matching verified scope,
+  including direct-user and empty-audience records. Ownerless personal direct
+  and app-wide alerts keep their existing visibility rules.
 
 - Production Compose now requires a separately managed Keycloak realm import
   and validates public HTTPS browser callbacks before Keycloak starts; the

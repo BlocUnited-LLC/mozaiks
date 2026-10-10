@@ -224,13 +224,12 @@ def test_notification_count_query_uses_platform_notification_intents():
         },
     ]
     assert query["$and"][1] == {
-        "$or": [
-            {"$and": [
-                {"$or": [{"audience.roles": {"$exists": False}}, {"audience.roles": []}]},
-                {"$or": [{"audience.permissions": {"$exists": False}},
-                         {"audience.permissions": []}]},
-            ]},
-        ]
+        "$and": [
+            {"workspace_id": {"$exists": False}},
+            {"tenant_id": {"$exists": False}},
+            {"$or": [{"audience.roles": {"$exists": False}}, {"audience.roles": []}]},
+            {"$or": [{"audience.permissions": {"$exists": False}}, {"audience.permissions": []}]},
+        ],
     }
 
 

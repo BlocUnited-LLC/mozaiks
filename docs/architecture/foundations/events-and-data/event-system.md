@@ -142,11 +142,13 @@ provenance. Every notification HTTP query uses the app ID loaded by the host;
 token and optional request app IDs must match it. The routes require a
 token-bound workspace and matching host-verified membership before showing or
 changing first-party workspace support alerts, including messages linked to
-support requests. Older
-support alerts without a workspace owner stay hidden. App-wide alerts and
-ordinary direct messages retain their existing audience visibility. A token
-without a workspace binding sees those app-wide notifications but no support
-alerts; the shared shell does not currently select a workspace for its bell.
+support requests. Older support alerts without a workspace owner stay hidden.
+Every alert with a tenant or workspace owner, including direct-user and
+empty-audience alerts, requires a matching host-verified owner scope; revoking
+that membership hides it. Personal direct and app-wide alerts with neither
+owner retain their existing audience visibility. A token without a workspace
+binding sees those ownerless notifications but no owned alerts; the shared
+shell does not currently select a workspace for its bell.
 Role- or permission-targeted alerts remain hidden until a host can supply a
 read-only grant for the exact workspace and tenant. A token-wide role or
 permission and a verified membership without that grant are insufficient.

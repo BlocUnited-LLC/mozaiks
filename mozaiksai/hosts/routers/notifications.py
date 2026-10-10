@@ -86,19 +86,21 @@ def _notification_workspace_filter(workspace_id: str | None) -> dict[str, Any]:
     return {"$or": [app_wide, {"$expr": {"$eq": ["$workspace_id", workspace_id]}}]}
 
 
-def _notification_broad_audience_scope_filter(
+def _notification_owner_scope_filter(
     tenant_id: str | None, workspace_id: str | None,
 ) -> dict[str, Any]:
-    # A token role or permission alone is not authority over another tenant's
-    # alert. Older broad-audience alerts without an owner stay hidden.
-    visible: list[dict[str, Any]] = [
-        {"$and": [
+    # Every owner-bearing record needs a current verified membership, including
+    # direct recipients and empty audiences. Ownerless broad audiences stay hidden.
+    ownerless: dict[str, Any] = {
+        "$and": [
+            {"workspace_id": {"$exists": False}},
+            {"tenant_id": {"$exists": False}},
             {"$or": [{"audience.roles": {"$exists": False}}, {"audience.roles": []}]},
             {"$or": [{"audience.permissions": {"$exists": False}}, {"audience.permissions": []}]},
-        ]},
-    ]
+        ],
+    }
     if not workspace_id:
-        return {"$or": visible}
+        return ownerless
 
     workspace_owner = {
         "$or": [
@@ -114,14 +116,14 @@ def _notification_broad_audience_scope_filter(
                 {"$expr": {"$eq": ["$tenant_id", tenant_id]}},
             ]
         }
-    visible.append({
-        "$and": [
+    return {"$or": [
+        ownerless,
+        {"$and": [
             {"$or": [{"workspace_id": {"$exists": True}}, {"tenant_id": {"$exists": True}}]},
             workspace_owner,
             tenant_owner,
-        ]
-    })
-    return {"$or": visible}
+        ]},
+    ]}
 
 
 def _notification_scope_filters(
@@ -129,7 +131,7 @@ def _notification_scope_filters(
 ) -> list[dict[str, Any]]:
     return [
         _notification_workspace_filter(workspace_id),
-        _notification_broad_audience_scope_filter(tenant_id, workspace_id),
+        _notification_owner_scope_filter(tenant_id, workspace_id),
     ]
 
 
