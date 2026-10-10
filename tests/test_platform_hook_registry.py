@@ -19,11 +19,15 @@ Covers:
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
-from mozaiksai.core.runtime.composition.platform_hooks import PlatformHookRegistry
+from mozaiksai.core.runtime.composition.platform_hooks import (
+    PlatformExtensionBundle,
+    PlatformHookRegistry,
+)
 
 # ---------------------------------------------------------------------------
 # Fixture: fresh registry (bypasses singleton for unit tests)
@@ -591,3 +595,104 @@ class TestSingletonReset:
         PlatformHookRegistry.reset()
         inst2 = PlatformHookRegistry.get_instance()
         assert inst1 is not inst2
+
+
+def _notification_principal(*, workspace_id=None, tenant_id=None):
+    return SimpleNamespace(
+        is_authenticated=True, user_id="member", workspace_id=workspace_id,
+        tenant_id=tenant_id,
+        roles=["global-owner"], scopes=["global.read"],
+    )
+
+
+def _notification_membership(**overrides):
+    return {
+        "app_id": "loaded-app", "user_id": "member", "tenant_id": "tenant-a",
+        "workspace_id": "workspace-a", "roles": ["viewer", "viewer"],
+        "permissions": ["support.read", "support.read"], **overrides,
+    }
+
+
+@pytest.mark.asyncio
+async def test_notification_scope_accepts_one_sync_or_async_host_assertion():
+    seen = []
+
+    def sync_hook(**kwargs):
+        seen.append(kwargs)
+        return _notification_membership()
+
+    async def async_hook(**kwargs):
+        seen.append(kwargs)
+        return _notification_membership()
+
+    for bundle in (
+        {"notification_scope_resolver": sync_hook},
+        PlatformExtensionBundle(notification_scope_resolver=async_hook),
+        SimpleNamespace(notification_scope_resolver=sync_hook),
+    ):
+        registry = _with_bundle(bundle)
+        principal = _notification_principal()
+        assert registry.has_notification_scope_resolver
+        assert registry.summary()["notification_scope_resolver_hooks"] == 1
+        assert await registry.call_notification_scope(
+            principal=principal, app_id="loaded-app",
+        ) == _notification_membership(roles=["viewer"], permissions=["support.read"])
+        assert seen.pop() == {"principal": principal, "app_id": "loaded-app"}
+
+
+@pytest.mark.asyncio
+async def test_notification_scope_absent_error_duplicate_and_anonymous_fail_closed():
+    principal = _notification_principal()
+    assert await _fresh().call_notification_scope(principal=principal, app_id="loaded-app") is None
+
+    def broken(**_kwargs):
+        raise RuntimeError("membership store unavailable")
+
+    registry = _with_bundle({"notification_scope_resolver": broken})
+    assert await registry.call_notification_scope(principal=principal, app_id="loaded-app") is None
+
+    hook = MagicMock(return_value=_notification_membership())
+    registry = _with_bundle({"notification_scope_resolver": hook})
+    registry.register_bundle({"notification_scope_resolver": hook}, source="duplicate")
+    assert await registry.call_notification_scope(principal=principal, app_id="loaded-app") is None
+    hook.assert_not_called()
+
+    registry = _with_bundle({"notification_scope_resolver": hook})
+    principal.is_authenticated = False
+    assert await registry.call_notification_scope(principal=principal, app_id="loaded-app") is None
+    hook.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid", [
+    None,
+    "not a mapping",
+    _notification_membership(app_id="another-app"),
+    _notification_membership(user_id="another-user"),
+    _notification_membership(workspace_id="another-workspace"),
+    _notification_membership(tenant_id=42),
+    _notification_membership(roles="owner"),
+    _notification_membership(roles=["", "viewer"]),
+    _notification_membership(permissions=["global.read", 9]),
+    _notification_membership(extra="unexpected"),
+])
+async def test_notification_scope_rejects_invalid_host_assertions(invalid):
+    principal = _notification_principal(workspace_id="workspace-a")
+    registry = _with_bundle({"notification_scope_resolver": lambda **_: invalid})
+    assert await registry.call_notification_scope(principal=principal, app_id="loaded-app") is None
+
+
+@pytest.mark.asyncio
+async def test_notification_scope_rejects_token_bound_foreign_workspace():
+    registry = _with_bundle({"notification_scope_resolver": lambda **_: _notification_membership()})
+    assert await registry.call_notification_scope(
+        principal=_notification_principal(workspace_id="workspace-b"), app_id="loaded-app",
+    ) is None
+
+
+@pytest.mark.asyncio
+async def test_notification_scope_does_not_confuse_oidc_directory_with_app_tenant():
+    registry = _with_bundle({"notification_scope_resolver": lambda **_: _notification_membership()})
+    assert await registry.call_notification_scope(
+        principal=_notification_principal(tenant_id="oidc-directory-b"), app_id="loaded-app",
+    ) == _notification_membership(roles=["viewer"], permissions=["support.read"])

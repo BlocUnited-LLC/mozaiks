@@ -48,12 +48,19 @@ _SUPPORT_NOTIFICATION_MATCHES: tuple[dict[str, Any], ...] = (
 
 async def _verified_notification_scope(
     request: Request, principal: UserPrincipal, app_id: str,
-) -> tuple[str | None, str | None]:
+) -> dict[str, Any] | None:
     """Read the host's membership assertion, never request-selected workspace metadata."""
-    if not principal.is_authenticated or not principal.workspace_id:
-        return None, None
+    if not principal.is_authenticated:
+        return None
+    hooks = get_platform_hooks()
+    if hooks.has_notification_scope_resolver:
+        return await hooks.call_notification_scope(principal=principal, app_id=app_id)
+    # Existing self-hosted membership hooks can still verify a token-bound
+    # workspace, but their module permissions are not notification grants.
+    if not principal.workspace_id:
+        return None
     try:
-        scope = await get_platform_hooks().call_module_scope(
+        scope = await hooks.call_module_scope(
             principal=principal,
             module_name="workspace_support",
             action_name="list_support_requests",
@@ -70,11 +77,19 @@ async def _verified_notification_scope(
         )
     except ModuleScopeResolutionError:
         logger.warning("NOTIFICATION_WORKSPACE_VERIFICATION_FAILED")
-        return None, None
+        return None
     verified_workspace_id = scope.get("_verified_workspace_id")
-    if verified_workspace_id != principal.workspace_id:
-        return None, None
-    return scope.get("_verified_tenant_id"), verified_workspace_id
+    if (scope.get("app_id") != app_id or scope.get("user_id") != principal.user_id
+            or verified_workspace_id != principal.workspace_id):
+        return None
+    return {
+        "app_id": app_id,
+        "user_id": principal.user_id,
+        "tenant_id": scope.get("_verified_tenant_id"),
+        "workspace_id": verified_workspace_id,
+        "roles": [],
+        "permissions": [],
+    }
 
 
 def _notification_workspace_filter(workspace_id: str | None) -> dict[str, Any]:
@@ -136,11 +151,17 @@ def _notification_scope_filters(
 
 
 def _notification_query_for_principal(
-    principal: UserPrincipal, app_id: str,
-    tenant_id: str | None, workspace_id: str | None,
+    principal: UserPrincipal, app_id: str, scope: dict[str, Any] | None,
+    *, status: str | None = None, notification_id: str | None = None,
 ) -> dict[str, Any]:
-    query: dict[str, Any] = {"app_id": app_id, "status": "unread"}
-    query["$or"] = _notification_visibility_filter(principal)
+    tenant_id = scope["tenant_id"] if scope else None
+    workspace_id = scope["workspace_id"] if scope else None
+    query: dict[str, Any] = {"app_id": app_id}
+    if status in {"read", "unread"}:
+        query["status"] = status
+    if notification_id is not None:
+        query["notification_id"] = notification_id
+    query["$or"] = _notification_visibility_filter(principal, scope)
     query["$and"] = _notification_scope_filters(tenant_id, workspace_id)
     return query
 
@@ -158,13 +179,20 @@ def _notification_app_id(
     return loaded_app_id
 
 
-def _notification_visibility_filter(principal: UserPrincipal) -> list[dict[str, Any]]:
+def _notification_visibility_filter(
+    principal: UserPrincipal, scope: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     """Return the $or visibility filter for platform_notifications queries."""
     visibility: list[dict[str, Any]] = [
         {"audience.user_ids": principal.user_id},
     ]
-    # Token-wide roles and permissions do not prove a grant in this record's
-    # workspace. Broad audiences need an exact-membership grant before reads.
+    # Only the current host-verified membership can grant a broad audience.
+    # The owner filter below still hides ownerless broad and foreign records.
+    if scope:
+        if scope["roles"]:
+            visibility.append({"audience.roles": {"$in": scope["roles"]}})
+        if scope["permissions"]:
+            visibility.append({"audience.permissions": {"$in": scope["permissions"]}})
     visibility.append(
         {
             "$and": [
@@ -186,10 +214,10 @@ async def notifications_count_fallback(
     try:
         from mozaiksai.core.core_config import get_mongo_client
 
-        tenant_id, workspace_id = await _verified_notification_scope(request, principal, app_id)
+        scope = await _verified_notification_scope(request, principal, app_id)
         collection = get_mongo_client()["mozaiks"]["platform_notifications"]
         unread_count = await collection.count_documents(
-            _notification_query_for_principal(principal, app_id, tenant_id, workspace_id)
+            _notification_query_for_principal(principal, app_id, scope, status="unread")
         )
         return {"count": int(unread_count), "unread_count": int(unread_count)}
     except Exception as exc:
@@ -219,20 +247,13 @@ async def list_notifications(
         app_id: optional assertion that must match the loaded host app ID
     """
     bounded_limit = max(1, min(int(limit), 200))
-    query: dict[str, Any] = {}
-    if status in ("unread", "read"):
-        query["status"] = status
-
     host_app_id = _notification_app_id(request, principal, app_id)
-    query["app_id"] = host_app_id
-
-    query["$or"] = _notification_visibility_filter(principal)
 
     try:
         from mozaiksai.core.core_config import get_mongo_client
 
-        tenant_id, workspace_id = await _verified_notification_scope(request, principal, host_app_id)
-        query["$and"] = _notification_scope_filters(tenant_id, workspace_id)
+        scope = await _verified_notification_scope(request, principal, host_app_id)
+        query = _notification_query_for_principal(principal, host_app_id, scope, status=status)
         collection = get_mongo_client()["mozaiks"]["platform_notifications"]
         cursor = (
             collection.find(query, _NOTIFICATION_SAFE_PROJECTION)
@@ -263,14 +284,11 @@ async def mark_notification_read(
     try:
         from mozaiksai.core.core_config import get_mongo_client
 
-        tenant_id, workspace_id = await _verified_notification_scope(request, principal, app_id)
+        scope = await _verified_notification_scope(request, principal, app_id)
         collection = get_mongo_client()["mozaiks"]["platform_notifications"]
-        match_query: dict[str, Any] = {
-            "notification_id": notification_id,
-            "app_id": app_id,
-            "$or": _notification_visibility_filter(principal),
-            "$and": _notification_scope_filters(tenant_id, workspace_id),
-        }
+        match_query = _notification_query_for_principal(
+            principal, app_id, scope, notification_id=notification_id,
+        )
         result = await collection.update_one(match_query, {"$set": {"status": "read"}})
         return {"success": result.modified_count > 0, "notification_id": notification_id}
     except Exception as exc:
@@ -289,11 +307,9 @@ async def mark_all_notifications_read(
     try:
         from mozaiksai.core.core_config import get_mongo_client
 
-        tenant_id, workspace_id = await _verified_notification_scope(request, principal, host_app_id)
+        scope = await _verified_notification_scope(request, principal, host_app_id)
         collection = get_mongo_client()["mozaiks"]["platform_notifications"]
-        query: dict[str, Any] = {"app_id": host_app_id, "status": "unread"}
-        query["$or"] = _notification_visibility_filter(principal)
-        query["$and"] = _notification_scope_filters(tenant_id, workspace_id)
+        query = _notification_query_for_principal(principal, host_app_id, scope, status="unread")
         result = await collection.update_many(query, {"$set": {"status": "read"}})
         return {"success": True, "marked_count": result.modified_count}
     except Exception as exc:
@@ -312,11 +328,9 @@ async def clear_all_notifications(
     try:
         from mozaiksai.core.core_config import get_mongo_client
 
-        tenant_id, workspace_id = await _verified_notification_scope(request, principal, host_app_id)
+        scope = await _verified_notification_scope(request, principal, host_app_id)
         collection = get_mongo_client()["mozaiks"]["platform_notifications"]
-        query: dict[str, Any] = {"app_id": host_app_id}
-        query["$or"] = _notification_visibility_filter(principal)
-        query["$and"] = _notification_scope_filters(tenant_id, workspace_id)
+        query = _notification_query_for_principal(principal, host_app_id, scope)
         result = await collection.delete_many(query)
         return {"success": True, "cleared_count": result.deleted_count}
     except Exception as exc:
