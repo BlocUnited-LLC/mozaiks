@@ -999,6 +999,7 @@ test('standalone shell identifies drafts through loading and navigation without 
             export class WebSocketApiAdapter {}
             export const LoginPage = () => null;
             export const AuthCallbackPage = () => null;
+            export const themeProvider = {initializeTheme: async () => {}};
             export const loadShellAuth = () => new Promise(resolve => {
               window.finishBootstrap = () => resolve({authAdapter:{}, shellConfig:{appName:'Bakery'}});
             });

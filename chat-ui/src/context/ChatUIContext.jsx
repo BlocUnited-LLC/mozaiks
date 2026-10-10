@@ -373,10 +373,10 @@ export const ChatUIProvider = ({
 
   if (loading || navigation?.loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 to-blue-900">
-        <div className="text-white text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mx-auto mb-4"></div>
-          <p className="techfont">Initializing ChatUI...</p>
+      <div className="flex items-center justify-center min-h-screen bg-[var(--color-background)] text-[var(--color-text-primary)]">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-current mx-auto mb-4"></div>
+          <p role="status">Loading app…</p>
         </div>
       </div>
     );
