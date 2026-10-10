@@ -68,9 +68,9 @@ test('Apps shows a real app before the mobile bottom navigation', async ({ page 
   const viewport = page.viewportSize();
   if (viewport.width < 768) {
     await expect(main.getByLabel('Summary metrics')).toBeHidden();
-    const firstAppName = main.locator('article').first().getByText('Campaign Revision Workbench', { exact: true });
-    await expect(firstAppName).toBeVisible();
-    const appNameBox = await firstAppName.boundingBox();
+    const firstAppOpen = main.locator('article').first().getByRole('button', { name: 'Open Campaign Revision Workbench' });
+    await expect(firstAppOpen).toBeVisible();
+    const appNameBox = await firstAppOpen.boundingBox();
     const bottomNavBox = await page.getByRole('navigation', { name: 'Mobile app navigation' }).boundingBox();
     expect(appNameBox).not.toBeNull();
     expect(bottomNavBox).not.toBeNull();
@@ -86,5 +86,11 @@ test('Apps shows a real app before the mobile bottom navigation', async ({ page 
       path: path.join(process.env.UI_QA_SCREENSHOT_DIR, `${testInfo.project.name}-apps-first-viewport.png`),
       fullPage: false,
     });
+  }
+  if (viewport.width < 768) {
+    const firstAppOpen = main.locator('article').first().getByRole('button', { name: 'Open Campaign Revision Workbench' });
+    await firstAppOpen.focus();
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(/\/chat\?/);
   }
 });
