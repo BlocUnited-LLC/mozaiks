@@ -1422,6 +1422,46 @@ test('assistant bottom action leaves mobile controls tappable and opens the chat
   }
 });
 
+test('assistant panel follows the bottom bar in keyboard tab order', async ({ page, isMobile }, testInfo) => {
+  test.skip(!isMobile, 'Mobile bottom bar only');
+  await page.goto('/apps');
+  await page.getByRole('dialog', { name: /Onboarding step 1 of 3/i })
+    .getByRole('button', { name: 'Skip tour' }).click();
+  const navigation = page.getByRole('navigation', { name: 'Mobile app navigation' });
+  const panel = page.locator('#mozaiks-assistant-panel');
+  const focusInsidePanel = () => page.evaluate(() => Boolean(document.activeElement?.closest('#mozaiks-assistant-panel')));
+
+  const assistant = navigation.getByRole('button', { name: 'Open assistant' });
+  await assistant.focus();
+  await page.keyboard.press('Enter');
+  await expect(panel).toBeVisible();
+  const closeAssistant = navigation.getByRole('button', { name: 'Close assistant' });
+  await expect(closeAssistant).toBeFocused();
+  // The panel is rendered after the bar that opens it, so Tab reaches the
+  // assistant widget next instead of wrapping to the top of the document.
+  expect(await navigation.evaluate((element) => Boolean(
+    element.compareDocumentPosition(document.getElementById('mozaiks-assistant-panel')) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ))).toBe(true);
+  await page.keyboard.press('Tab');
+  await expect(page.getByTitle('Minimize', { exact: true })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect.poll(focusInsidePanel).toBe(true);
+  if (process.env.MOBILE_NAV_QA_DIR) {
+    fs.mkdirSync(process.env.MOBILE_NAV_QA_DIR, { recursive: true });
+    await page.screenshot({
+      path: path.join(process.env.MOBILE_NAV_QA_DIR, `${testInfo.project.name}-assistant-panel-focus.png`),
+    });
+  }
+  // Shift+Tab walks straight back to the tab that opened the panel.
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Shift+Tab');
+  await expect(closeAssistant).toBeFocused();
+  expect(await focusInsidePanel()).toBe(false);
+  await page.keyboard.press('Enter');
+  await expect(panel).toHaveCount(0);
+  await expect(assistant).toBeFocused();
+});
+
 test('mobile shell navigation shows a letter for a page whose id is its path', async ({ page, isMobile }, testInfo) => {
   test.skip(!isMobile, 'Mobile bottom bar only');
   await page.route('**/api/shell-config', async (route) => {
