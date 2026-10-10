@@ -125,6 +125,57 @@ Current implementation:
   `app.services.adapters.*` class for provider or hosted-product integration
   mechanics while keeping durable facts and public actions module-owned.
 
+`ctx.emit(...)` returns an `EventDispatchOutcome` when the runtime bus is wired.
+Its listener entries identify synchronous callback success, a returned
+`success: false`, or a raised exception. The platform router's listener result
+is a `ModuleEventDeliveryOutcome` with payload-free results for each declared
+reaction; arbitrary callback return values are not exposed to the producer.
+A handler, service adapter, or capability returning `False` or a mapping with
+`success: false` is a failed reaction;
+an exception from a capability callback also becomes a failed reaction;
+the same failure is recorded in the reaction audit and does not leave an
+in-memory idempotency key blocking a later retry. The durable reaction ledger
+still enforces its lease, delay, and attempt budget. Existing emitters that
+ignore the return keep best-effort behavior, and a module action whose write
+already committed is not changed to a failed action by downstream delivery.
+
+Code that must acknowledge one specific downstream effect checks
+`required_module_reaction(receipt, module_id=..., reaction_id=...)` from
+`mozaiksai.core.runtime.composition.module_event_router`. The handler must
+return `ModuleReactionEffectAck(effect_id=...)` only after confirming its
+module-owned durable record, and the reaction must complete in the durable
+idempotency store. A plain `None`, `True`, or `success: true` return means the
+handler was invoked, not that an effect was confirmed. Notification, service
+adapter, and capability targets do not supply this module-owned effect ACK.
+The helper returns `missing`
+when no listener or matching reaction reported a result, and `skipped` or
+`failed` for an attempted reaction that did not report delivery. `completed`
+means the exact scoped event/reaction idempotency identity was previously
+completed; the stored effect reference is returned on replay. Its audit
+still says `skipped` and records the completed reason. An active lease, retry
+delay, dead letter, permission denial, or nonmatching condition is never
+accepted as `completed`. Without a durable ledger `required.success` remains
+false even if the handler returned an effect ACK. An event
+rejected before dispatch still returns `ModuleEventRejection` through
+`ctx.emit`; the helper treats that as failed. `required.success` requires an
+`ok` or `completed` status, a durable completion, and the explicit effect
+reference. That reference is a module claim, not independent proof of its
+business state. Producers must verify the canonical consumer record for
+high-consequence actions and keep their own outbox and recovery boundary.
+They must persist and reuse the original `event_id` on replay by calling
+`ctx.emit(event_type, payload, event_id=outbox_event_id)`. A new event ID
+cannot inherit another event's completion evidence. The outbox must also keep
+the payload immutable for that ID; the reaction ledger keys by event identity
+and does not compare replay payloads.
+
+For a declared notification reaction, `ok` requires the notification store to
+accept the record. A store exception or explicit failure produces a failed,
+retryable reaction receipt and no `notification.created` signal. An implicit
+notification rule has no reaction receipt and cannot bypass a skipped declared
+notification reaction. `platform.reaction.*_dispatched` and notification UI
+signals are secondary publications: a publisher exception is logged but does
+not change the adapter or stored notification's delivery outcome.
+
 ### Module Event/Reaction Contract
 
 - `contracts/events.yaml` declares the event types a module may emit.

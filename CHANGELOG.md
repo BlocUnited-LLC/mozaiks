@@ -613,6 +613,22 @@ This project follows a practical pre-1.0 changelog format:
 - The 0.2.0 publication gate now requires a release-note bullet in its dated
   changelog section and a strict documentation build before upload.
 
+- Module event producers can now inspect whether each declared reaction ran,
+  returned a failure, raised, or was skipped. A required reaction ACK needs an
+  explicit module-owned effect reference and durable idempotency completion;
+  a no-op handler or best-effort listener result cannot acknowledge it. Producers
+  can reuse a persisted event ID when retrying an outbox event. Bare `False`
+  and `success: false` returns are failures;
+  failed reactions no longer remain suppressed by a same-process idempotency
+  key. A verified prior completion is distinct from active, retryable, and
+  dead-letter skips, allowing partial multi-consumer delivery to converge
+  when the original event identity is re-delivered. Capability callback
+  exceptions are reported as failed reactions, and same-process completion
+  checks are scoped by app, tenant, and workspace. Declared notification
+  reactions report storage failures rather than acknowledging a missing
+  notification; secondary platform event publications remain best-effort.
+  Existing best-effort emitters continue to work.
+
 - Handler reactions now receive the fields of flat events,
   including host webhook events, instead of an empty payload.
 

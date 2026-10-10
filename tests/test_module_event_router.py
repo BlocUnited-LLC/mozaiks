@@ -28,6 +28,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from mozaiksai.core.events.unified_event_dispatcher import UnifiedEventDispatcher
 from mozaiksai.core.runtime.composition.module_event_provenance import (
     normalize_module_event_provenance,
     normalize_module_reaction_provenance,
@@ -391,6 +392,48 @@ class TestRegister:
         router.register(dispatcher)
         registered_handler = dispatcher.register_handler.call_args.args[1]
         assert inspect.iscoroutinefunction(registered_handler)
+
+    def test_register_is_idempotent_and_unregister_preserves_other_listeners(self):
+        mod = _loaded_module("m1", reactions=[_reaction_model("a.event")])
+        router = _router([mod])
+        dispatcher = UnifiedEventDispatcher(taxonomy_advisory=True)
+
+        def ordinary_listener(_envelope):
+            return None
+
+        dispatcher.register_handler("a.event", ordinary_listener)
+        assert router.register(dispatcher) == 1
+        assert router.register(dispatcher) == 0
+        assert len(dispatcher._event_handlers["a.event"]) == 2
+        assert router.unregister() == 1
+        assert dispatcher._event_handlers["a.event"] == [ordinary_listener]
+        assert router.unregister() == 0
+        assert router.register(dispatcher) == 1
+        assert router.unregister() == 1
+
+    def test_partial_registration_rolls_back_even_when_register_appends_then_raises(self):
+        mod = _loaded_module(
+            "m1",
+            reactions=[_reaction_model("a.event"), _reaction_model("b.event")],
+        )
+        router = _router([mod])
+
+        class FailingDispatcher(UnifiedEventDispatcher):
+            def register_handler(self, handler_or_event_type, handler=None):
+                super().register_handler(handler_or_event_type, handler)
+                if handler_or_event_type == "b.event":
+                    raise RuntimeError("registration failed")
+
+        dispatcher = FailingDispatcher(taxonomy_advisory=True)
+        with pytest.raises(RuntimeError, match="registration failed"):
+            router.register(dispatcher)
+        assert dispatcher._event_handlers.get("a.event", []) == []
+        assert dispatcher._event_handlers.get("b.event", []) == []
+        assert router.unregister() == 0
+
+        replacement = UnifiedEventDispatcher(taxonomy_advisory=True)
+        assert router.register(replacement) == 2
+        assert router.unregister() == 2
 
 
 class TestStaticReactionValidation:
