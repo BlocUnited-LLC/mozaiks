@@ -48,11 +48,12 @@ dispatch:
    localhost browser callback is a local-development seed. Confirm production
    Compose requires the separate operator-owned import and its validator; do
    not put deployment domains or secrets in the packaged realm.
-7. Have the repository operator configure the GitHub `pypi` environment
-   with at least one required reviewer, **admin bypass disabled**, and
-   deployments limited to protected branches. Verify the live result before
-   dispatch. The workflow fails if those conditions are removed. This is the
-   single human approval gate for public upload.
+7. Verify the live GitHub `pypi` environment has at least one required
+   reviewer, **admin bypass disabled**, and deployments limited to protected
+   branches. These protections were present on 2026-10-09; verify them again
+   before dispatch. The workflow fails if they are removed. This is the human
+   approval gate for public upload. The separate `release` environment also
+   has a required reviewer, but the current workflow does not use it.
 8. Have the PyPI project owner verify that `mozaiks` trusts
    `BlocUnited-LLC/mozaiks`, `.github/workflows/release.yml`, and the
    `pypi` GitHub environment for OIDC publication. PyPI account settings
@@ -71,13 +72,21 @@ not validate hosted acceptance; the operator must verify item 2 before use.
 
 ### Local candidate audit
 
-Run this from a clean checkout of the final candidate:
+Run this from PowerShell or a POSIX shell in a clean checkout of the final
+candidate:
 
-```bash
+```text
+docker pull public.ecr.aws/docker/library/mongo:7
+docker tag public.ecr.aws/docker/library/mongo:7 mongo:7
 docker run --rm -d --name mozaiks-release-audit-mongo -p 127.0.0.1:27018:27017 mongo:7
 python scripts/run_release_audit.py --mongo-uri mongodb://127.0.0.1:27018
 docker stop mozaiks-release-audit-mongo
 ```
+
+The first two commands pull MongoDB through the same public mirror used by CI
+and tag it locally for the audit command; they avoid anonymous Docker Hub
+limits. If the local pull fails transiently, rerun it. CI uses the bounded
+retry helper `scripts/ci/pull_public_image.sh`.
 
 The audit script is `scripts/run_release_audit.py`. Its first-run smoke starts
 both platform and Studio hosts and checks readiness and shell configuration

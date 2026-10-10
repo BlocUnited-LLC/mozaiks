@@ -37,6 +37,10 @@ def _run_changelog_gate(tmp_path: Path, changelog: str) -> subprocess.CompletedP
 
 def test_release_requires_explicit_main_candidate_and_successful_push_ci() -> None:
     assert set(EVENTS) == {"workflow_dispatch"}
+    assert "services" not in JOBS["build"]
+    assert _step("build", "Start MongoDB from public mirror")["run"] == (
+        "bash scripts/ci/mongo_service.sh start"
+    )
     inputs = EVENTS["workflow_dispatch"]["inputs"]
     assert inputs["candidate_sha"]["required"] is True
     assert inputs["release_target"]["options"] == ["testpypi", "pypi"]
