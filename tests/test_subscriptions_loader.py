@@ -714,6 +714,42 @@ def test_capabilities_for_plan_free_has_no_capabilities() -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_v2_rejects_conflicting_root_and_product_wallet_definitions() -> None:
+    with pytest.raises(ValidationError, match="conflicting root/product definitions"):
+        SubscriptionsConfig.model_validate({
+            "schema_version": "mozaiks.subscriptions.v2",
+            "label": "Multi-product SaaS",
+            "default_product_id": "ai",
+            "token_wallets": [{"wallet_id": "ai_tokens", "scope": "user"}],
+            "products": [{
+                "product_id": "ai", "label": "AI", "default_plan_id": "free",
+                "token_wallets": [{"wallet_id": "ai_tokens", "scope": "tenant"}],
+                "plans": [{"plan_id": "free", "label": "Free"}],
+            }],
+        })
+
+
+def test_v2_rejects_two_auto_debit_wallets_for_one_usage_meter() -> None:
+    with pytest.raises(ValidationError, match="multiple auto-debit token wallets"):
+        SubscriptionsConfig.model_validate({
+            "schema_version": "mozaiks.subscriptions.v2",
+            "label": "Multi-product SaaS",
+            "default_product_id": "ai",
+            "products": [
+                {
+                    "product_id": product_id, "label": product_id,
+                    "default_plan_id": "free",
+                    "token_wallets": [{
+                        "wallet_id": f"{product_id}_tokens", "scope": "user",
+                        "usage_meter_id": "ai_tokens", "auto_debit_usage": True,
+                    }],
+                    "plans": [{"plan_id": "free", "label": "Free"}],
+                }
+                for product_id in ("ai", "other")
+            ],
+        })
+
+
 def test_app_load_result_has_subscriptions_config_field() -> None:
     """AppLoadResult must expose subscriptions_config for platform.py wiring."""
     from mozaiksai.core.runtime.app.loader import AppLoadResult

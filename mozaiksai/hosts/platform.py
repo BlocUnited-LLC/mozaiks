@@ -1833,7 +1833,9 @@ def _serialize_subscription_usage_limits(config: Any) -> dict[str, Any]:
         )
     token_wallets = [
         wallet.model_dump()
-        for wallet in getattr(config, "token_wallets", []) or []
+        for wallet in getattr(
+            config, "effective_token_wallets", getattr(config, "token_wallets", [])
+        ) or []
     ]
     usage_charge_policies = [
         policy.model_dump()
@@ -1867,15 +1869,19 @@ async def _current_user_token_wallet_summary(
     workspace_id: str | None = None,
     ensure_allowances: bool = False,
 ) -> dict[str, Any]:
-    if config is None or not getattr(config, "token_wallets", None):
+    if config is None or not getattr(
+        config, "effective_token_wallets", getattr(config, "token_wallets", None)
+    ):
         return {
             "wallets": [],
             "source": "none",
         }
 
+    from mozaiksai.core.tokens.plan_resolution import resolve_v2_wallet_plans
     from mozaiksai.core.tokens.wallet import get_token_wallet_ledger
 
     plan_id = getattr(config, "default_plan_id", None)
+    wallet_plans = None
     try:
         adapter = ConfiguredEntitlementAdapter(config=config)
         resolved_plan_id = await adapter.current_plan_id(
@@ -1886,6 +1892,15 @@ async def _current_user_token_wallet_summary(
         )
         if resolved_plan_id:
             plan_id = resolved_plan_id
+        if config.products:
+            wallet_plans = await resolve_v2_wallet_plans(
+                config=config,
+                entitlements=adapter,
+                app_id=app_id,
+                user_id=user_id,
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
+            )
     except Exception as exc:
         logger.debug("TOKEN_WALLET_PLAN_RESOLUTION_SKIPPED: %s", exc)
 
@@ -1897,6 +1912,7 @@ async def _current_user_token_wallet_summary(
         tenant_id=tenant_id,
         plan_id=plan_id,
         ensure_allowances=ensure_allowances,
+        wallet_plans=wallet_plans,
     )
 
 

@@ -73,6 +73,10 @@ class _Ledger:
         self.ensure_calls.append(kwargs)
         return [SimpleNamespace(status="applied")]
 
+    async def ensure_resolved_wallet_allowances(self, **kwargs):
+        self.ensure_calls.append(kwargs)
+        return [SimpleNamespace(status="applied")]
+
     async def query_balance(self, **kwargs):
         self.query_calls.append(kwargs)
         return {"balance": self.balance}
@@ -355,7 +359,37 @@ async def test_v2_depleted_wallet_uses_owning_product_plan(
         "/pricing" if expected_action == "upgrade" else None
     )
     assert decision.top_up_product_ids == ()
-    assert ledger.ensure_calls == []
+    assert ledger.ensure_calls == []  # Paid v2 grants belong to billing fulfillment.
+
+
+@pytest.mark.asyncio
+async def test_v2_chat_guard_checks_only_ai_token_meter() -> None:
+    config = SubscriptionsConfig.model_validate({
+        "schema_version": "mozaiks.subscriptions.v2",
+        "label": "Metered products",
+        "default_product_id": "ai",
+        "products": [
+            {
+                "product_id": product_id, "label": product_id,
+                "default_plan_id": "free",
+                "token_wallets": [{
+                    "wallet_id": wallet_id, "scope": "user",
+                    "usage_meter_id": meter_id, "auto_debit_usage": True,
+                }],
+                "plans": [{"plan_id": "free", "label": "Free"}],
+            }
+            for product_id, wallet_id, meter_id in (
+                ("ai", "ai_tokens", "ai_tokens"),
+                ("tools", "tool_credits", "tool_calls"),
+            )
+        ],
+    })
+    ledger = _Ledger(balance=50)
+    decision = await TokenUsageGuard(config=config, ledger=ledger).check(
+        app_id="app_1", user_id="user_1", required_tokens=25
+    )
+    assert decision.allowed is True
+    assert [call["wallet_id"] for call in ledger.query_calls] == ["ai_tokens"]
 
 
 @pytest.mark.asyncio

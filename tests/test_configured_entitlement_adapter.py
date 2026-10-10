@@ -500,3 +500,47 @@ async def test_current_plan_id_can_resolve_a_nonprimary_v2_product() -> None:
         "app_id": "app-1", "tenant_id": None, "workspace_id": None,
         "user_id": "user-1",
     }]
+
+
+@pytest.mark.asyncio
+async def test_current_product_plan_returns_active_paid_allowance_snapshot() -> None:
+    config = SubscriptionsConfig.model_validate({
+        "schema_version": "mozaiks.subscriptions.v2",
+        "label": "Multi-product SaaS",
+        "default_product_id": "platform",
+        "products": [
+            {"product_id": "platform", "label": "Platform",
+             "default_plan_id": "builder",
+             "plans": [{"plan_id": "builder", "label": "Builder"}]},
+            {"product_id": "ai", "label": "AI",
+             "default_plan_id": "ai_starter",
+             "assignment_store": {
+                 "data_alias": "billing.ai", "user_id_field": "user_id",
+                 "active_statuses": ["active"],
+             },
+             "plans": [
+                 {"plan_id": "ai_starter", "label": "Starter"},
+                 {"plan_id": "ai_pro", "label": "Pro"},
+             ]},
+        ],
+    })
+    ai = FakeCollection([{
+        "app_id": "app-1", "user_id": "user-1", "tenant_id": None,
+        "workspace_id": None, "plan_id": "ai_pro", "status": "active",
+        "token_allowances": [
+            {"wallet_id": "ai_tokens", "amount": 350, "cadence": "monthly"}
+        ],
+    }])
+    adapter = ConfiguredEntitlementAdapter(
+        config=config, collection_resolver=lambda alias: ai,
+    )
+    selection = await adapter.current_product_plan(
+        app_id="app-1", user_id="user-1", product_id="ai"
+    )
+    assert selection is not None
+    assert selection.source == "active_assignment"
+    assert selection.plan_id == "ai_pro"
+    assert selection.allowances_snapshot[0]["amount"] == 350
+    assert await adapter.current_product_plan(
+        app_id="app-1", user_id="user-1", product_id="unknown"
+    ) is None

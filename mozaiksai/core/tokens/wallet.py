@@ -27,6 +27,7 @@ from mozaiksai.core.runtime.app.subscriptions_loader import (
     TokenAllowanceDef,
     TokenWalletDef,
 )
+from mozaiksai.core.tokens.plan_resolution import WalletPlanResolution
 
 logger = get_core_logger("token_wallet")
 
@@ -999,6 +1000,7 @@ class TokenWalletLedger:
         app_id: str,
         plan_id: str | None = None,
         plan_label: str | None = None,
+        product_id: str | None = None,
         token_allowances: list[TokenAllowanceDef | dict[str, Any]] | None = None,
         user_id: str | None = None,
         tenant_id: str | None = None,
@@ -1041,6 +1043,27 @@ class TokenWalletLedger:
         for allowance in allowances:
             if allowance.amount <= 0 or allowance.cadence == "manual":
                 continue
+            allowance_product_id = product_id
+            shared_wallet = False
+            if config.products:
+                declared_products = {product.product_id for product in config.products}
+                if allowance_product_id and allowance_product_id not in declared_products:
+                    raise ValueError("token allowance product_id is not declared")
+                owners = {
+                    product.product_id
+                    for product in config.products
+                    if any(wallet.wallet_id == allowance.wallet_id for wallet in product.token_wallets)
+                    or any(
+                        item.wallet_id == allowance.wallet_id
+                        for plan in product.plans
+                        for item in plan.token_allowances
+                    )
+                }
+                if owners and allowance_product_id and allowance_product_id not in owners:
+                    raise ValueError("token allowance wallet belongs to a different product")
+                shared_wallet = len(owners) > 1
+                if shared_wallet and not allowance_product_id:
+                    raise ValueError("product_id is required for a shared token wallet allowance")
             wallet = config.token_wallet_by_id(allowance.wallet_id)
             preferred_scope = wallet.scope if wallet is not None else None
             if preferred_scope == "tenant" and not tenant_id:
@@ -1059,7 +1082,9 @@ class TokenWalletLedger:
                     amount=allowance.amount,
                     operation="allocation",
                     idempotency_key=(
-                        f"subscription_allowance:{resolved_plan_id}:{allowance.wallet_id}:"
+                        "subscription_allowance:"
+                        + (f"{allowance_product_id}:" if shared_wallet else "")
+                        + f"{resolved_plan_id}:{allowance.wallet_id}:"
                         f"{allowance.cadence}:{period_key}"
                     ),
                     user_id=user_id,
@@ -1071,9 +1096,53 @@ class TokenWalletLedger:
                         "plan_id": resolved_plan_id,
                         "cadence": allowance.cadence,
                         "period_key": period_key,
+                        **({"product_id": product_id} if product_id else {}),
                     },
                     subject_key=subject_key,
                     subject_revision=subject_revision,
+                )
+            )
+        return results
+
+    async def ensure_resolved_wallet_allowances(
+        self,
+        *,
+        config: SubscriptionsConfig,
+        app_id: str,
+        wallet_plans: Mapping[str, WalletPlanResolution],
+        user_id: str | None = None,
+        tenant_id: str | None = None,
+    ) -> list[TokenWalletEntryResult]:
+        """Sync only default-plan v2 grants through the existing ledger key.
+
+        Active paid assignments are credited by billing fulfillment from their
+        stored allowance snapshots. Runtime sync must not mint next month's
+        paid grant before its renewal succeeds. Both paths retain the existing
+        plan/wallet/cadence/period key for compatibility.
+        """
+        results: list[TokenWalletEntryResult] = []
+        for wallet_id, selection in wallet_plans.items():
+            if (
+                selection.wallet_id != wallet_id
+                or selection.status != "resolved"
+                or selection.grant_authority != "runtime_default"
+                or not selection.product_id
+                or not selection.plan_id
+                or not selection.allowances
+            ):
+                continue
+            if any(allowance.wallet_id != wallet_id for allowance in selection.allowances):
+                raise ValueError("resolved wallet plan contains a different wallet allowance")
+            results.extend(
+                await self.ensure_plan_allowances(
+                    config=config,
+                    app_id=app_id,
+                    plan_id=selection.plan_id,
+                    plan_label=selection.plan_label,
+                    product_id=selection.product_id,
+                    token_allowances=list(selection.allowances),
+                    user_id=user_id,
+                    tenant_id=tenant_id,
                 )
             )
         return results
@@ -1087,10 +1156,25 @@ class TokenWalletLedger:
         tenant_id: str | None = None,
         plan_id: str | None = None,
         ensure_allowances: bool = True,
+        wallet_plans: Mapping[str, WalletPlanResolution] | None = None,
     ) -> dict[str, Any]:
-        if config is None or not config.token_wallets:
+        if config is None or not config.effective_token_wallets:
             return {"wallets": [], "source": "none"}
-        if ensure_allowances:
+        if config.products:
+            resolved_wallet_plans = wallet_plans or {}
+            if ensure_allowances:
+                await self.ensure_resolved_wallet_allowances(
+                    config=config,
+                    app_id=app_id,
+                    wallet_plans=resolved_wallet_plans,
+                    user_id=user_id,
+                    tenant_id=tenant_id,
+                )
+            plan = None
+        else:
+            resolved_wallet_plans = {}
+            plan = config.plan_by_id(plan_id)
+        if ensure_allowances and plan is not None:
             await self.ensure_plan_allowances(
                 config=config,
                 app_id=app_id,
@@ -1098,9 +1182,8 @@ class TokenWalletLedger:
                 user_id=user_id,
                 tenant_id=tenant_id,
             )
-        plan = config.plan_by_id(plan_id)
         wallets = []
-        for wallet in config.token_wallets:
+        for wallet in config.effective_token_wallets:
             balance = await self.query_balance(
                 app_id=app_id,
                 wallet_id=wallet.wallet_id,
@@ -1108,27 +1191,41 @@ class TokenWalletLedger:
                 tenant_id=tenant_id,
                 preferred_scope=wallet.scope,
             )
-            allowances = [
-                allowance.model_dump()
-                for allowance in plan.token_allowances
-                if allowance.wallet_id == wallet.wallet_id
-            ]
-            wallets.append(
-                {
-                    "wallet_id": wallet.wallet_id,
-                    "label": wallet.label or wallet.wallet_id,
-                    "unit": wallet.unit,
-                    "scope": wallet.scope,
-                    "usage_meter_id": wallet.usage_meter_id,
-                    "auto_debit_usage": wallet.auto_debit_usage,
-                    "allow_negative_balance": wallet.allow_negative_balance,
-                    "balance": balance,
-                    "plan_allowances": allowances,
-                }
-            )
+            selection = resolved_wallet_plans.get(wallet.wallet_id)
+            if selection is not None and selection.status == "resolved":
+                allowances = [allowance.model_dump() for allowance in selection.allowances]
+            elif plan is not None:
+                allowances = [
+                    allowance.model_dump()
+                    for allowance in plan.token_allowances
+                    if allowance.wallet_id == wallet.wallet_id
+                ]
+            else:
+                allowances = []
+            wallet_summary = {
+                "wallet_id": wallet.wallet_id,
+                "label": wallet.label or wallet.wallet_id,
+                "unit": wallet.unit,
+                "scope": wallet.scope,
+                "usage_meter_id": wallet.usage_meter_id,
+                "auto_debit_usage": wallet.auto_debit_usage,
+                "allow_negative_balance": wallet.allow_negative_balance,
+                "balance": balance,
+                "plan_allowances": allowances,
+            }
+            if config.products:
+                wallet_summary.update(
+                    product_id=selection.product_id if selection else None,
+                    plan_id=selection.plan_id if selection else None,
+                    plan_label=selection.plan_label if selection else None,
+                    plan_resolution=selection.status if selection else "unresolved",
+                    allowance_source=selection.allowance_source if selection else None,
+                    grant_authority=selection.grant_authority if selection else None,
+                )
+            wallets.append(wallet_summary)
         return {
             "wallets": wallets,
-            "plan_id": plan.plan_id,
+            "plan_id": plan.plan_id if plan is not None else plan_id,
             "source": "token_wallet_ledger",
         }
 
