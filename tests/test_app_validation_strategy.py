@@ -804,6 +804,46 @@ async def test_runtime_import_failure_uses_stable_bounded_bundle_repair(repair) 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("environment", ["production", "staging", "preview"])
+async def test_deployed_acceptance_blocks_runtime_checks_without_host_execution(monkeypatch, environment) -> None:
+    from scripts.smoke_appgenerator_live_acceptance import (
+        build_appgenerator_acceptance_files,
+        default_workflow_integration,
+    )
+
+    module = importlib.import_module("factory_app.workflows.AppGenerator.tools.app_validation")
+    monkeypatch.setenv("ENV", environment)
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
+
+    async def forbidden(_files):
+        pytest.fail("Deployed acceptance executed candidate Python on the host")
+
+    monkeypatch.setattr(module, "_app_runtime_load_result", forbidden)
+    monkeypatch.setattr(module, "_app_runtime_smoke_result", forbidden)
+    integration = default_workflow_integration()
+    files = build_appgenerator_acceptance_files(integration)
+    context = _Context({
+        "generated_workflow_name": integration["workflow_name"],
+        "generated_workflow_capability_id": integration["capability_id"],
+        "generated_workflow_startup_mode": integration["startup_mode"],
+        "generated_workflow_trigger_events": integration["trigger_events"],
+    })
+    _accept_support_tasks(context, files)
+
+    result = await module.run_app_bundle_acceptance_gate(files=files, context_variables=context)
+
+    assert result["status"] == "pending"
+    assert result["passed"] is False
+    assert result["validation_evidence"]["skipped"] == ["app_runtime_load", "app_runtime_smoke"]
+    for check_id in ("app_runtime_load", "app_runtime_smoke"):
+        check = result[check_id]
+        assert check["status"] == "pending"
+        assert check["passed"] is False
+        assert check["checks"][0]["id"] == check_id
+        assert next(item for item in result["checks"] if item["id"] == check_id)["details"]["blocking"] is True
+
+
+@pytest.mark.asyncio
 async def test_runtime_validation_cleanup_preserves_concurrent_workflow_imports(monkeypatch) -> None:
     from types import ModuleType, SimpleNamespace
 

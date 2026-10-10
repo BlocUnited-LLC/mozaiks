@@ -62,6 +62,7 @@ from factory_app.workflows.AppGenerator.tools.task_integrity import (
 )
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.artifacts.content_store import ContentNotFoundError
+from mozaiksai.core.environment import resolve_environment
 from mozaiksai.core.runtime.app.auth_contract import AppAuthContractError
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
@@ -1348,6 +1349,19 @@ def _acceptance_readiness(subresults: dict[str, dict[str, Any]]) -> tuple[str, d
     return status, {"completed": completed, "failed": failed, "skipped": skipped}
 
 
+def _deployed_runtime_check_pending(check_id: str) -> dict[str, Any]:
+    reason = "Deployed generated-app runtime checks require an isolated acceptance runner."
+    return {
+        "contract_version": "1.0",
+        "status": "pending",
+        "passed": False,
+        "skipped_reason": reason,
+        "checks": [_check_result(check_id=check_id, passed=False, message=reason)],
+        "failed_tests": [],
+        "warnings": [],
+    }
+
+
 def _runtime_quality_result(generated_files: dict[str, str]) -> dict[str, Any]:
     from .module_runtime_quality import audit_module_runtime_quality
 
@@ -2200,8 +2214,15 @@ async def run_app_bundle_acceptance_gate(
         generated_files,
         context_variables,
     )
-    app_runtime_load_result = await _app_runtime_load_result(generated_files)
-    runtime_smoke_result = await _app_runtime_smoke_result(generated_files)
+    if resolve_environment().is_deployed:
+        # Both the in-process AppLoader and the local smoke child execute
+        # candidate Python on the host. Keep both gates blocking until an
+        # isolated runner is available; the later build strategy cannot fix it.
+        app_runtime_load_result = _deployed_runtime_check_pending("app_runtime_load")
+        runtime_smoke_result = _deployed_runtime_check_pending("app_runtime_smoke")
+    else:
+        app_runtime_load_result = await _app_runtime_load_result(generated_files)
+        runtime_smoke_result = await _app_runtime_smoke_result(generated_files)
 
     completeness_result = {
         "passed": not planned_diagnostics,
