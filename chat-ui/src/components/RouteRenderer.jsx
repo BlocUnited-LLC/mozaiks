@@ -24,31 +24,7 @@ import { useTheme } from '../styles/useTheme';
 import { getChatBackgroundSrc } from '../styles/brandAssets';
 import { getUserRoles, roleMatches } from '../navigation/shellActions';
 import { safeReturnPath } from '../auth/authAdapter.js';
-
-/**
- * Core chat routes; the root fallback yields to an owner-declared root page.
- * Only ChatPage is a true core route. All platform modules/adapters
- * (including AdminPortal) are registered through explicit extension barrels and routed
- * through navigation entries.
- */
-const CORE_ROUTES = [
-  {
-    path: '/',
-    component: 'ChatPage',
-    meta: { title: 'Chat', requiresAuth: true },
-  },
-  {
-    // Wildcard so /chat/:appId/:workflow also matches
-    path: '/chat/*',
-    component: 'ChatPage',
-    meta: { title: 'Chat', requiresAuth: true },
-  },
-  {
-    path: '/app/*',
-    component: 'ChatPage',
-    meta: { title: 'Chat', requiresAuth: true },
-  },
-];
+import { getShellRoutes } from '../navigation/shellRoutes';
 
 const resolveRouteAppId = (config, user) => {
   return (
@@ -538,15 +514,11 @@ const RouteRenderer = ({
 }) => {
   const { pages, loading, landing_spot } = useNavigation();
   const landingSpot = landing_spot || '/';
-  // Transition/workflow routes can own a path without a registered component.
-  const routablePages = useMemo(() => (
-    (pages || []).filter(page => page.path && (page.component || page.transition || page.workflow))
-  ), [pages]);
-  const hasDeclaredRootPage = routablePages.some(page => page.path === '/');
+  const { coreRoutes, pageRoutes } = useMemo(() => getShellRoutes(pages), [pages]);
 
-  // Preserve the explicit chat paths; a declared root uses the normal route wrapper.
+  // Keep the launcher and router on one declared-route selection policy.
   const coreRouteElements = useMemo(() => {
-    return CORE_ROUTES.filter(route => route.path !== '/' || !hasDeclaredRootPage).map((route, index) => {
+    return coreRoutes.map((route, index) => {
       const { path, component: componentName } = route;
       if (!hasComponent(componentName)) {
         console.warn(`⚠️ [RouteRenderer] Core component "${componentName}" not found in registry for route "${path}"`);
@@ -570,17 +542,11 @@ const RouteRenderer = ({
         />
       );
     }).filter(Boolean);
-  }, [hasDeclaredRootPage, isAuthenticated, onAuthRequired, LoadingFallback]);
+  }, [coreRoutes, isAuthenticated, onAuthRequired, LoadingFallback]);
 
   // Build extra route elements from backend-composed navigation (beyond core shell)
   const extraRouteElements = useMemo(() => {
-    if (routablePages.length === 0) return [];
-
-    // Root pages are app-owned; explicit core chat paths remain reserved.
-    const corePaths = new Set(CORE_ROUTES.map(r => r.path));
-    const extraRoutes = routablePages.filter(r => r.path === '/' || !corePaths.has(r.path));
-
-    return extraRoutes.map((route, index) => {
+    return pageRoutes.map((route, index) => {
       const { path, component: componentName, transition, workflow } = route;
 
       // Transition routes — no registered component needed; TransitionScreen handles rendering.
@@ -678,7 +644,7 @@ const RouteRenderer = ({
           />
       );
     });
-  }, [routablePages, isAuthenticated, onAuthRequired, LoadingFallback]);
+  }, [pageRoutes, isAuthenticated, onAuthRequired, LoadingFallback]);
 
   // Show loading state while navigation config is loading
   if (loading) {

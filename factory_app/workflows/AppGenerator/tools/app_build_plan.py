@@ -8,6 +8,7 @@ from typing import Annotated, Any
 from pydantic import Field
 
 from mozaiksai.core.runtime.app.paths import (
+    APP_AUTH_CONFIG_PATH,
     APP_PROVENANCE_PATH,
     APP_SECURITY_SECRETS_PATH,
     disallowed_legacy_app_paths,
@@ -1696,6 +1697,13 @@ def _validate_build_tasks(build_tasks: list[dict[str, Any]], managed_capability_
         owned_paths = _normalized_owned_paths(task)
         surface_kind_raw = task.get("surface_kind")
         normalized_capability_pack_id = str(capability_pack_id or "").strip()
+
+        if APP_AUTH_CONFIG_PATH in owned_paths:
+            raise ValueError(
+                f"Build task '{task_id}' cannot own {APP_AUTH_CONFIG_PATH}. "
+                "The admitted app baseline or save_auth_scaffold owns auth; "
+                "a generated task cannot grant permissions to itself or later tasks."
+            )
 
         deployment_artifact_paths = _deployment_contract_artifact_paths(owned_paths)
         if deployment_artifact_paths:

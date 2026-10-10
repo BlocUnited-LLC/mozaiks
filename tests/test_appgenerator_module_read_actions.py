@@ -603,6 +603,7 @@ async def test_import_only_handler_recovery_requires_explicit_workspace_subclass
 @pytest.mark.asyncio
 async def test_app_wide_authored_read_survives_task_assembly_and_repeated_materialization(monkeypatch):
     contract = _contract("app_wide")
+    auth = {"config/auth.yaml": yaml.safe_dump({"frontend": {"default_scopes": ["tasks.audit"]}})}
     output = _closed(contract=contract)
     actions = output["module_contract"]["module_yaml"]["actions"]
     actions[:] = [action for action in actions if action["id"] in {"create_task", "list_tasks"}]
@@ -635,7 +636,7 @@ async def test_app_wide_authored_read_survives_task_assembly_and_repeated_materi
     }]
     plan = {**_plan(), "build_tasks": tasks}
     bridge = ContextVariablesBridge({
-        "app_build_plan": plan, "data_contract": contract, "app_task_batch_items": tasks,
+        "app_build_plan": plan, "data_contract": contract, "app_task_batch_items": tasks, "generated_files": auth,
     })
 
     async def run(_runner, request):
@@ -662,7 +663,9 @@ async def test_app_wide_authored_read_survives_task_assembly_and_repeated_materi
     )
     results = snapshot["app_task_batch_results"]
     assert snapshot["app_task_batch_status"] == "completed", results
-    accepted = [results["contract"], results["service"]]
+    accepted = [results["contract"], results["service"], {"code_files": [
+        {"filename": path, "content": source} for path, source in auth.items()
+    ]}]
     task_files = {path: source for candidate in accepted for path, source in extract_code_file_map_from_payload(candidate).items()}
     compiled_read = next(action for action in yaml.safe_load(task_files[MANIFEST])["actions"] if action["id"] == "list_tasks")
     original_read.pop("entitlement_gate", None)
@@ -671,7 +674,10 @@ async def test_app_wide_authored_read_survives_task_assembly_and_repeated_materi
         assert source.rstrip() in task_files[path]
         assert "async def get_tasks" in task_files[path]
         assert "async def list_tasks" not in task_files[path]
-    assembled = _merge_code_files(accepted, app_build_plan=plan, data_contract=contract)
+    assembled = _merge_code_files(
+        accepted, app_build_plan=plan, data_contract=contract,
+        context_variables={"generated_files": auth},
+    )
     assembled_files = {item["filename"]: item["content"] for item in assembled}
     assembled_read = next(
         action for action in yaml.safe_load(assembled_files[MANIFEST])["actions"] if action["id"] == "list_tasks"
@@ -683,4 +689,7 @@ async def test_app_wide_authored_read_survives_task_assembly_and_repeated_materi
     assert {path: source for path, source in assembled_files.items() if path not in {MANIFEST, schemas_path}} == {
         path: source for path, source in task_files.items() if path != MANIFEST
     }
-    assert _merge_code_files([{"code_files": assembled}], app_build_plan=plan, data_contract=contract) == assembled
+    assert _merge_code_files(
+        [{"code_files": assembled}], app_build_plan=plan, data_contract=contract,
+        context_variables={"generated_files": auth},
+    ) == assembled

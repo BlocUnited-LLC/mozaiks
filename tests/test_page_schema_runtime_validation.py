@@ -101,6 +101,13 @@ def test_valid_page_schema_serves() -> None:
     assert page.sections[0].primitive == "PageHeader"
 
 
+@pytest.mark.parametrize("name", ["../../config/auth", "..\\..\\config\\auth", "config/auth", "C:auth", ".", " "])
+def test_page_name_must_be_a_file_basename(name: str) -> None:
+    with pytest.raises(PageSchemaValidationError) as rejected:
+        validate_page_schema(_valid_page(name=name))
+    assert any(item.location == "$.name" for item in rejected.value.diagnostics)
+
+
 def test_structured_action_maps_compile_and_modal_targets_resolve():
     page = _valid_page()
     page["sections"][0]["config"]["actions"] = [{

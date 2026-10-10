@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
+
 import pytest
 
 from tests.import_utils import import_module_directly
@@ -49,6 +52,17 @@ class _FakeSandbox:
         self.connection_config = type("_Cfg", (), {"debug": False})()
         self.timeout = None
         self.killed = False
+        self.details = SimpleNamespace(
+            state="running",
+            allow_internet_access=True,
+            network={"allow_public_traffic": True},
+            lifecycle={"on_timeout": "kill", "auto_resume": False},
+            metadata={},
+            template_id="template-123",
+        )
+
+    def get_info(self):
+        return self.details
 
     def get_host(self, port):  # noqa: ANN001
         return f"preview-{port}.example"
@@ -71,6 +85,7 @@ async def test_e2b_adapter_uses_real_sdk_shape(monkeypatch) -> None:
             created.template = template
             created.timeout = timeout
             created.metadata = metadata
+            created.details.metadata = metadata or {}
             created.envs = envs
             return created
 
@@ -80,6 +95,12 @@ async def test_e2b_adapter_uses_real_sdk_shape(monkeypatch) -> None:
             connected.timeout = timeout
             return connected
 
+        @staticmethod
+        def kill(session_id):  # noqa: ANN001
+            assert session_id == created.sandbox_id
+            created.kill()
+            return True
+
     monkeypatch.setattr(_sandbox_mod, "Sandbox", _SandboxFactory)
 
     adapter = E2BSandboxAdapter(default_template="mozaiks-runtime-v1", default_timeout_seconds=120)
@@ -87,6 +108,7 @@ async def test_e2b_adapter_uses_real_sdk_shape(monkeypatch) -> None:
     session = await adapter.create_session(metadata={"app_id": "app-1"}, envs={"A": "1"})
     assert session.session_id == "sbx_123"
     assert session.provider == "e2b"
+    assert created.metadata == {"purpose": "artifact_preview", "app_id": "app-1"}
 
     write_result = await adapter.write_files(
         session_id="sbx_123",
@@ -120,6 +142,7 @@ async def test_e2b_adapter_uses_real_sdk_shape(monkeypatch) -> None:
 
     extended = await adapter.extend_session(session_id="sbx_123", timeout_seconds=900)
     assert extended.session_id == "sbx_123"
+    assert extended.metadata["sandbox_domain"] == "sandbox.example"
     assert created.timeout == 900
 
     terminated = await adapter.terminate_session(session_id="sbx_123")
@@ -131,10 +154,19 @@ async def test_e2b_adapter_uses_real_sdk_shape(monkeypatch) -> None:
 async def test_ordinary_io_does_not_renew_the_provider_timeout(monkeypatch):
     from unittest.mock import Mock
     factory = Mock()
-    factory.create.return_value = _FakeSandbox()
+    sandbox = _FakeSandbox()
+
+    def create(**kwargs):
+        sandbox.details.metadata = kwargs["metadata"]
+        return sandbox
+
+    factory.create.side_effect = create
     monkeypatch.setattr(_sandbox_mod, "Sandbox", factory)
     adapter = E2BSandboxAdapter(default_timeout_seconds=60)
     session = await adapter.create_session()
+    assert factory.create.call_args.kwargs["metadata"] == {"purpose": "artifact_preview"}
+    assert await adapter.get_preview_url(session_id=session.session_id, port=3000) == "https://preview-3000.example"
+    assert (await adapter.write_files(session_id=session.session_id, files={"hello.txt": "hello"}))["count"] == 1
     for _ in range(3):
         await adapter.run_command(session_id=session.session_id, command="true")
         await adapter.get_preview_url(session_id=session.session_id, port=3000)
@@ -149,7 +181,9 @@ async def test_reconnect_preserves_the_remaining_provider_deadline(monkeypatch):
     from unittest.mock import Mock
 
     factory = Mock()
-    factory.get_info.return_value = SimpleNamespace(end_at=datetime.now(UTC) + timedelta(seconds=45))
+    factory.get_info.return_value = SimpleNamespace(
+        end_at=datetime.now(UTC) + timedelta(seconds=45), metadata={"purpose": "artifact_preview"},
+    )
     factory.connect.return_value = _FakeSandbox()
     monkeypatch.setattr(_sandbox_mod, "Sandbox", factory)
     adapter = E2BSandboxAdapter()
@@ -183,5 +217,142 @@ async def test_cancelled_allocation_waits_for_creation_and_kills_the_sandbox(mon
     release.set()
     with pytest.raises(asyncio.CancelledError):
         await task
+    assert sandbox.killed
+    assert not adapter._sessions
+
+
+_EXACT_BUILD = "preview:f47ac10b-58cc-4372-a567-0e02b2c3d479"
+
+
+@pytest.mark.asyncio
+async def test_sealed_e2b_session_requires_exact_build_and_no_environment(monkeypatch):
+    from unittest.mock import Mock
+
+    factory = Mock()
+    monkeypatch.setattr(_sandbox_mod, "Sandbox", factory)
+    adapter = E2BSandboxAdapter()
+    with pytest.raises(ValueError, match="exact template build"):
+        await adapter.create_session(template="preview:production", metadata={"purpose": "sealed_candidate_preview"})
+    with pytest.raises(ValueError, match="environment"):
+        await adapter.create_session(
+            template=_EXACT_BUILD, metadata={"purpose": "sealed_candidate_preview"}, envs={"TOKEN": "secret"},
+        )
+    with pytest.raises(ValueError, match="purpose"):
+        await adapter.create_session(metadata={"purpose": "unknown"})
+    factory.create.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sealed_e2b_session_confirms_network_isolation_and_hides_provider_host(monkeypatch):
+    from unittest.mock import Mock
+
+    sandbox = _FakeSandbox()
+    sandbox.details = SimpleNamespace(
+        state="running",
+        end_at=datetime.now(UTC) + timedelta(seconds=45),
+        allow_internet_access=False,
+        network={"allow_public_traffic": False},
+        lifecycle={"on_timeout": "kill", "auto_resume": False},
+        metadata={"purpose": "sealed_candidate_preview"},
+        template_id="verified-template-id",
+    )
+    factory = Mock()
+    factory.create.return_value = sandbox
+    monkeypatch.setattr(_sandbox_mod, "Sandbox", factory)
+    adapter = E2BSandboxAdapter()
+    session = await adapter.create_session(template=_EXACT_BUILD, metadata={"purpose": "sealed_candidate_preview"})
+    assert session.metadata == {
+        "template": _EXACT_BUILD, "purpose": "sealed_candidate_preview", "template_id": "verified-template-id",
+    }
+    assert factory.create.call_args.kwargs["allow_internet_access"] is False
+    assert factory.create.call_args.kwargs["network"] == {"allow_public_traffic": False}
+    assert factory.create.call_args.kwargs["lifecycle"] == {"on_timeout": "kill", "auto_resume": False}
+    sandbox.get_host = Mock(side_effect=AssertionError("sealed host must remain private"))
+    assert await adapter.get_preview_url(session_id=session.session_id, port=3000) is None
+    with pytest.raises(ValueError, match="mutable file writes"):
+        await adapter.write_files(session_id=session.session_id, files={"app/app.json": b"changed"})
+    assert adapter._sessions[session.session_id] is sandbox
+
+    reconnected = E2BSandboxAdapter()
+    factory.get_info.return_value = sandbox.details
+    with pytest.raises(RuntimeError, match="cannot reconnect"):
+        await reconnected.get_preview_url(session_id=session.session_id, port=3000)
+    with pytest.raises(RuntimeError, match="cannot reconnect"):
+        await reconnected.connect(session_id=session.session_id)
+    sandbox.commands.run = Mock(wraps=sandbox.commands.run)
+    with pytest.raises(RuntimeError, match="cannot reconnect"):
+        await reconnected.run_command(session_id=session.session_id, command="true", envs={"TOKEN": "secret"})
+    factory.connect.assert_not_called()
+    sandbox.commands.run.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kill_result", [True, False])
+@pytest.mark.parametrize("metadata", [
+    {"purpose": "sealed_candidate_preview"}, {}, {"purpose": "unknown"}, None,
+])
+async def test_paused_sealed_session_never_reconnects_and_teardown_kills_by_id(
+    monkeypatch, kill_result, metadata,
+):
+    from unittest.mock import Mock
+
+    factory = Mock()
+    factory.get_info.return_value = SimpleNamespace(
+        state="paused", metadata=metadata,
+        end_at=datetime.now(UTC) + timedelta(seconds=45),
+    )
+    factory.kill.return_value = kill_result
+    monkeypatch.setattr(_sandbox_mod, "Sandbox", factory)
+    adapter = E2BSandboxAdapter()
+    with pytest.raises(RuntimeError, match="cannot reconnect"):
+        await adapter.connect(session_id="sbx_paused")
+    factory.connect.assert_not_called()
+    assert await adapter.terminate_session(session_id="sbx_paused") is True
+    factory.kill.assert_called_once_with("sbx_paused")
+    factory.connect.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sealed_teardown_keeps_cleanup_handle_when_provider_kill_fails(monkeypatch):
+    from unittest.mock import Mock
+
+    factory = Mock()
+    factory.kill.side_effect = RuntimeError("provider unavailable")
+    monkeypatch.setattr(_sandbox_mod, "Sandbox", factory)
+    adapter = E2BSandboxAdapter()
+    adapter._sessions["sbx_123"] = _FakeSandbox()
+    with pytest.raises(RuntimeError, match="provider unavailable"):
+        await adapter.terminate_session(session_id="sbx_123")
+    assert "sbx_123" in adapter._sessions
+    factory.connect.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("egress,ingress,purpose,on_timeout,auto_resume", [
+    (True, False, "sealed_candidate_preview", "kill", False),
+    (False, True, "sealed_candidate_preview", "kill", False),
+    (False, False, "artifact_preview", "kill", False),
+    (False, False, "sealed_candidate_preview", "pause", False),
+    (False, False, "sealed_candidate_preview", "kill", True),
+])
+async def test_sealed_e2b_allocation_fails_closed_when_provider_attestation_disagrees(
+    monkeypatch, egress, ingress, purpose, on_timeout, auto_resume,
+):
+    from unittest.mock import Mock
+
+    sandbox = _FakeSandbox()
+    sandbox.details = SimpleNamespace(
+        allow_internet_access=egress,
+        network={"allow_public_traffic": ingress},
+        lifecycle={"on_timeout": on_timeout, "auto_resume": auto_resume},
+        metadata={"purpose": purpose},
+        template_id="verified-template-id",
+    )
+    factory = Mock()
+    factory.create.return_value = sandbox
+    monkeypatch.setattr(_sandbox_mod, "Sandbox", factory)
+    adapter = E2BSandboxAdapter()
+    with pytest.raises(RuntimeError, match="did not confirm"):
+        await adapter.create_session(template=_EXACT_BUILD, metadata={"purpose": "sealed_candidate_preview"})
     assert sandbox.killed
     assert not adapter._sessions

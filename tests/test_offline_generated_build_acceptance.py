@@ -16,6 +16,7 @@ from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import sc
 from factory_app.workflows.AppGenerator.tools.materialize_app_config_contracts import (
     materialize_app_config_contracts,
 )
+from factory_app.workflows.AppGenerator.tools.render_auth_scaffold import materialize_auth_scaffold
 from mozaiksai.core.runtime.app.loader import AppLoader
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.frozen import detach
@@ -228,6 +229,7 @@ def _generated_saas_build_files() -> dict[str, str]:
                 "appId": "analytics-saas",
                 "appName": "Analytics SaaS",
                 "version": "1.0.0",
+                "authRequired": True,
                 "startup": {"landing_spot": "/reports"},
             }
         ),
@@ -436,7 +438,7 @@ class EntitlementDispatchService:
         return {"deactivated": True}
 """,
     }
-    return materialize_data_contract(
+    generated = materialize_data_contract(
         files,
         data_contract={"version": "1", "surfaces": [], "shared_collections": []},
         subscription_contract={
@@ -444,6 +446,12 @@ class EntitlementDispatchService:
             "subscription_config_file": yaml.safe_load(files["config/subscriptions.yaml"]),
         },
     )
+    auth_scaffold = materialize_auth_scaffold(generated)
+    auth_config = yaml.safe_load(auth_scaffold["config/auth.yaml"])
+    auth_config["frontend"]["default_scopes"].append("reports.read")
+    auth_scaffold["config/auth.yaml"] = yaml.safe_dump(auth_config, sort_keys=False)
+    generated.update(auth_scaffold)
+    return generated
 
 
 def _write_files(root: Path, files: dict[str, str]) -> None:
@@ -484,7 +492,8 @@ async def _admit_offline_fixture(monkeypatch, context, files, *, module_actions,
         "app.json", "config/ai.json", "config/shell.json", "ui/route_manifest.json", f"ui/pages/{page}.yaml",
     ], [task_id for module_id in module_actions for task_id in (f"{module_id}.contract", f"{module_id}.services")], surface_kind="ui_only")
     plan = {
-        "app_kind": "saas" if saas else "internal_app", "auth_strategy": "public", "roles": [], "entities": [],
+        "app_kind": "saas" if saas else "internal_app", "auth_strategy": "basic-login" if saas else "public",
+        "roles": [], "entities": [],
         "pages": [{"name": page.title(), "route": f"/{page}", "purpose": "Use the declared module actions."}],
         "capability_packs": [{
             "capability_pack_id": module_id, "surface_id": module_id, "surface_kind": "module",
@@ -535,7 +544,7 @@ async def _admit_offline_fixture(monkeypatch, context, files, *, module_actions,
     admitted_files = {file["filename"]: file["content"] for key, output in accepted.items()
                       if not key.startswith("_") for file in output["code_files"]}
     # No task owns config/subscriptions.yaml; assembly writes it from the approved contract.
-    assembly_owned = {"config/subscriptions.yaml"} if saas else set()
+    assembly_owned = {"config/subscriptions.yaml", "config/auth.yaml", "ui/auth/authAdapter.js"} if saas else set()
     assert set(admitted_files) == set(files) - assembly_owned
     for file in materialize_app_config_contracts(
         app_id=str(context.get("app_id")), app_build_plan=detach(context.get("app_build_plan")),
@@ -543,6 +552,9 @@ async def _admit_offline_fixture(monkeypatch, context, files, *, module_actions,
     ):
         if file["filename"] in assembly_owned:
             admitted_files[file["filename"]] = file["content"]
+    if saas:
+        admitted_files["config/auth.yaml"] = files["config/auth.yaml"]
+        admitted_files["ui/auth/authAdapter.js"] = files["ui/auth/authAdapter.js"]
     assert set(admitted_files) == set(files)
     context.set("generated_files", admitted_files)
     return admitted_files, accepted

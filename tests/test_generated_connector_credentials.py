@@ -283,12 +283,16 @@ def usage_caller(request, monkeypatch):
 
     monkeypatch.delenv("MOZAIKS_CLOUD_USAGE_API_KEY", raising=False)
     monkeypatch.setenv("MOZAIKS_CLOUD_USAGE_REPORTING", "1")
+    monkeypatch.setenv("MOZAIKS_CLOUD_APP_ID", "app-a")
     monkeypatch.setenv("MOZAIKS_APP_ID", "app-a")
     monkeypatch.setitem(sys.modules, "app.services.integrations.mozaiks_cloud_usage_client", usage)
     metrics = Mock(return_value=SimpleNamespace(usage_rollup=AsyncMock(return_value=[{"page_views": 2}])))
     monkeypatch.setattr(app_metrics, "AppMetrics", metrics)
 
     async def invoke(*, app_id="app-a"):
+        if not str(app_id or "").strip():
+            monkeypatch.delenv("MOZAIKS_CLOUD_APP_ID", raising=False)
+            monkeypatch.setenv("MOZAIKS_APP_ID", "")
         if request.param == "status":
             return await CloudUsageReporterHandler().get_reporter_status(SimpleNamespace(app_id=app_id))
         monkeypatch.setenv("MOZAIKS_APP_ID", app_id or "")
@@ -331,8 +335,16 @@ async def test_usage_callers_keep_app_identity(
 async def test_usage_callers_without_identity_refuse_environment_fallback(
     usage_caller, connector_backend, captured_requests, app_id,
 ):
-    with pytest.raises(ValueError, match="is required"):
-        await usage_caller.invoke(app_id=app_id)
+    result = await usage_caller.invoke(app_id=app_id)
+    if usage_caller.kind == "report_once":
+        assert result == {"sent": 0, "reason": "app_identity_missing"}
+    else:
+        assert result == {
+            "enabled": True,
+            "configured": False,
+            "reporting": False,
+            "reason": "app_identity_missing",
+        }
     connector_backend.lookup.assert_not_awaited()
     connector_backend.secret.assert_not_awaited()
     usage_caller.metrics.assert_not_called()

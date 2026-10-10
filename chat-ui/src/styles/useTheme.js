@@ -1,33 +1,33 @@
 import { useState, useEffect } from 'react';
 import {
   getTheme,
+  getCachedTheme,
   applyTheme,
   DEFAULT_THEME,
   getCurrentAppId,
 } from './themeProvider';
 
 export function useTheme(appId = null) {
-  const [theme, setTheme] = useState(DEFAULT_THEME);
-  const [loading, setLoading] = useState(true);
+  const resolvedAppId = appId || getCurrentAppId();
+  const [result, setResult] = useState(null);
+  const theme = getCachedTheme(resolvedAppId)
+    || (result?.appId === resolvedAppId ? result.theme : null);
 
   useEffect(() => {
     let cancelled = false;
 
     async function loadTheme() {
       try {
-        const eid = appId || getCurrentAppId();
-        const loadedTheme = await getTheme(eid);
-        if (!cancelled) {
-          setTheme(loadedTheme);
+        const loadedTheme = await getTheme(resolvedAppId);
+        if (!cancelled && getCachedTheme(resolvedAppId) === loadedTheme) {
           applyTheme(loadedTheme);
-          setLoading(false);
+          setResult({ appId: resolvedAppId, theme: loadedTheme });
         }
       } catch (error) {
         console.error('❌ [useTheme] Failed to load theme:', error);
         if (!cancelled) {
-          setTheme(DEFAULT_THEME);
           applyTheme(DEFAULT_THEME);
-          setLoading(false);
+          setResult({ appId: resolvedAppId, theme: DEFAULT_THEME });
         }
       }
     }
@@ -37,9 +37,9 @@ export function useTheme(appId = null) {
     return () => {
       cancelled = true;
     };
-  }, [appId]);
+  }, [resolvedAppId]);
 
-  return { theme, loading };
+  return { theme: theme || DEFAULT_THEME, loading: !theme };
 }
 
 export default useTheme;

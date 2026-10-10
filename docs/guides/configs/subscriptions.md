@@ -195,6 +195,32 @@ pricing_catalog:
 | Non-token add-ons | `add_on_products[]` |
 | Pricing-page grouping | `pricing_catalog.groups[]` or `products[].pricing_catalog_group` |
 
+Token wallets may be declared at the root for a shared balance or inside one
+product. Repeated declarations of the same wallet ID must agree on the wallet
+definition. The token summary reports each wallet's governing `product_id`,
+`plan_id`, `plan_resolution`, `allowance_source`, and `grant_authority`; its
+top-level `plan_id` remains the primary product plan for older clients. A wallet
+referenced by more than one product has no single governing plan, so its plan
+allowances are marked ambiguous and automatic grants are skipped.
+An active assignment without a stored allowance snapshot is marked
+`missing_snapshot`; the summary does not substitute a catalog amount.
+Explicit grants into a shared wallet must identify their product. The ledger
+keeps the existing idempotency key for single-owner wallets and includes the
+product in the key for shared wallets. In v2, each usage meter may have only one
+auto-debit wallet. `chat.usage_delta` and its token preflight use the `ai_tokens`
+meter; wallets for other meters are not charged by chat usage.
+
+The runtime may materialize default-plan token allowances. For an active v2
+subscription assignment, billing fulfillment owns token credits from the stored
+allowance snapshot, including renewals. `POST /api/me/tokens/sync` and LLM
+usage preflight show the paid plan but do not mint another paid credit. The
+wallet balance and ledger entries show what has actually been granted. V1
+single-product allowance behavior is unchanged.
+
+Token wallet `depleted_balance` routes must be app-local paths beginning with a
+single `/`. Protocol-relative paths such as `//provider.example/billing` are
+invalid because browsers treat them as external destinations.
+
 ## Module Gate Example
 
 ```yaml

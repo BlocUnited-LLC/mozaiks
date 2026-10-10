@@ -47,7 +47,7 @@ Main actions:
 
 | Action | Responsibility |
 |--------|----------------|
-| `list_integrations` | Return catalog entries, environment-derived status, notes, and app usage counts. |
+| `list_integrations` | Return catalog entries, environment-derived status, notes, and usage counts for apps owned by the caller. |
 | `get_integration` | Return one catalog entry with safe setup metadata. |
 | `set_integration_note` | Save an operator note. |
 | `save_workspace_connector` | Save a workspace-scoped connector and vault secret reference. |
@@ -59,6 +59,26 @@ Main actions:
 | `list_app_integration_needs` | Return app requirements with live workspace setup overlay. |
 
 No action returns raw secret values.
+
+Workspace connector actions act only on the caller's verified workspace: the
+workspace the validated token is bound to (`AUTH_WORKSPACE_ID_CLAIM`, default
+`workspace_id`), or a membership the host's `module_scope_resolver` hook
+asserted with `verified_workspace_id`. The optional `workspace_id` argument must
+name that workspace; any other workspace is refused, and a workspace or tenant
+selected by the request never chooses one. A signed-in caller with no verified
+workspace cannot use the connector actions, and `list_app_integration_needs`
+returns declarations without a connector overlay when no scope was requested.
+A requested workspace or tenant without verified identity is refused. With
+authentication off and development access, the action uses the requested workspace, then the
+dispatch workspace or tenant, then `demo-workspace`.
+
+Workspace, app-catalog and declaration actions refuse a dispatch workspace or
+tenant that conflicts with the verified principal before storage or events.
+App declaration actions require the selected app to have an app registry record owned by the caller;
+the selected app may differ from Studio's loaded app. Module dispatch remains
+bound to the loaded host app. Catalog usage counts are
+limited to the caller's registry-owned apps. The AppGenerator tool writes
+declarations through the service directly under its build authorization.
 
 The connector vault uses the same explicit app or workspace scope as the
 metadata record. A workspace connector is never selected by an app ID alone.

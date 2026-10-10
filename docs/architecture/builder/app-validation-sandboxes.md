@@ -51,6 +51,19 @@ All sandbox strategies route through the `SandboxPort` seam
 Sandboxes are **ephemeral workspaces, never truth stores** — outcomes
 persist into build records; the sandbox itself is disposable.
 
+The Docker adapter connects only to the local daemon. Its CLI subprocess
+ignores inherited `DOCKER_HOST`, `DOCKER_CONTEXT`, Docker CLI config, and model
+credentials.
+One-shot `app_validation` sessions have no network and publish no ports; the
+validation tool sets that purpose itself even when supplied other metadata.
+Validation receives only the fixed nonsecret sandbox resource paths. Explicit
+`MOZAIKS_PREVIEW_ENV_*` values are reserved for interactive preview sessions and
+are never forwarded into build validation.
+Canonical compilation and the shared shell build use dependencies already in
+the preview image. Interactive Studio preview sessions remain separate and
+network-capable, so this isolation does not authorize private repository
+candidate previews.
+
 Canonical app bundles do not own an npm project. Build validation stages bundle
 members into the existing standalone workspace layout, compiles generated Python,
 and builds the packaged shared web shell against that app workspace. Agent-provided
@@ -85,6 +98,44 @@ acceptance, and application preview is not an agent shell. The authoritative
 decision and configuration matrix is [ADR 0010](../../adr/0010-agent-and-app-sandbox-execution-boundary.md).
 
 ## Live preview sessions (AppWorkbench)
+
+The internal sealed candidate path is an offline boot check before an
+interactive review surface exists. A trusted host passes a canonical archive,
+its exact digest, owner/build identity, and a local `sha256:` preview image ID
+to `ArtifactPreviewSessionManager.create_sealed_candidate`. The archive accepts
+only `app/`, `workflows/`, and root `requirements.txt` files. The input ZIP is
+limited to 80,000,000 bytes; its files are limited to 2,000 entries,
+64,000,000 total bytes, and 8,000,000 bytes each, matching App Zero's
+candidate preparation limits. It is validated before Docker allocation.
+`requirements.txt` is staged as identity-bound read-only source and is never
+installed at runtime. The trusted caller must attest the local image's build
+source and installed dependencies against the candidate's framework pin and
+provenance before claiming exact candidate behavior. Source is staged once,
+read-only to the app UID. Docker has no network or published ports, and the
+manager returns health and identity without a preview URL. This does not
+provide a browser preview or authorize promotion. It boots the framework
+platform host; authenticated apps need a future preview-scoped OIDC setup, and
+hosted product entrypoints need a trusted fixed host selection before their
+behavior can be claimed. A trusted caller must verify the owner and build
+identity before stopping the session through the existing manager. Generic
+preview routes hide sealed sessions. Boot health is a point-in-time result:
+repeated create calls can return the cached active state. An authorized caller
+must use `status()` and account for its ten-second health-check interval before
+reporting a session as currently live.
+
+The E2B adapter also recognizes the internal sealed candidate purpose. It
+requires a specific `template:build_id` reference and rejects guest environment
+values at creation and command execution,
+requests denied internet egress, token-gated port access, and kill-on-timeout,
+confirms those settings through E2B's session information, and withholds the
+provider URL. After a worker restart, every sealed session is refused on
+reconnect because E2B's connect operation may resume it after inspection.
+Teardown kills by ID without resuming the sandbox. Missing provider purpose
+metadata also fails closed. A future owner proxy must keep
+E2B's traffic token server-side. The manager remains Docker-only until E2B has equivalent
+immutable staging, product-host boot, private owner-authorized proxying, and
+live acceptance evidence. Ordinary E2B artifact previews retain their existing
+interactive behavior and must not be used for private repository candidates.
 
 Beyond one-shot validation, the Studio host mounts an artifact preview session
 API so the AppWorkbench can boot and restart a saved generated bundle on demand.
@@ -239,18 +290,23 @@ build:
 python scripts/build_e2b_preview_template.py --name mozaiks-preview --confirm-paid-build
 ```
 
-The helper consumes `infra/docker/Dockerfile.preview`, requires
-`E2B_API_KEY`, and prints build progress and template/build identifiers. The
-resulting name or ID belongs in `E2B_TEMPLATE` or `SANDBOX_TEMPLATE`; credentials remain in
-the operator environment. The helper does not run automatically during app
-generation or CI.
+The helper consumes the committed `infra/docker/Dockerfile.preview`, requires
+`E2B_API_KEY` and a clean Git checkout, and prints build progress, template/build
+identifiers, the OSS source SHA, and a SHA-256 digest of the staged context. Save
+those values together and compare the source SHA with the App Zero OSS pin used
+for live acceptance. An alternate `--dockerfile` must also be tracked in the
+same checkout. The resulting name or ID belongs in `E2B_TEMPLATE` or
+`SANDBOX_TEMPLATE`; credentials remain in the operator environment. The helper
+does not run automatically during app generation or CI.
 
-The staged upload includes only the framework source and packaging files.
-It excludes local `.env` files (retaining `.env.example`), `node_modules`,
-virtual environments, generated Tailwind source links, caches, build output,
-browser reports, and runtime logs.
-The `logs` Python package remains included; its generated output directories
-are excluded.
+The staged upload is built from tracked files in the commit's declared
+framework, frontend, `logs` package, and packaging paths. Tracked screenshot
+fixtures under `web_shell/logs` are included. Files ignored by Git, including
+local `.env` values, `node_modules`, generated Tailwind source junctions,
+caches, build output, browser reports, and runtime logs, are not staged.
+Tracked links are rejected. Uncommitted changes or untracked files require a
+fresh clean checkout before the paid build. Dry-run mode does not stage or
+upload files.
 
 Only explicitly configured `MOZAIKS_PREVIEW_ENV_<NAME>` values become preview
 environment variables. Factory API keys, credentials, and database URLs are not
@@ -303,6 +359,12 @@ provider-published hostname via Vite's
 `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS`, not arbitrary hosts or all provider
 subdomains. Explicit `E2B_TIMEOUT` caps one-shot validation even when a tool
 requests a longer timeout.
+
+`MOZAIKS_PREVIEW_PROVIDER` selects the provider for new sessions. Existing
+sessions, including sealed candidates, use their persisted provider for status,
+operations, and cleanup after a worker restart or provider switch. Missing
+credentials leave the old session recorded for cleanup retry; they do not route
+it to the newly selected provider or release its capacity.
 
 `MongoPreviewStore` owns immutable host/user/artifact/build/target bindings in
 the framework system database. `PreviewCoordination` holds bounded admission

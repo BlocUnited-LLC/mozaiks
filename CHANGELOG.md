@@ -14,6 +14,79 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- Prepared the E2B adapter for private sealed candidate sessions with an exact
+  template build reference, denied internet egress, token-gated port access,
+  no provider preview URL, and no reconnect that could resume a paused session.
+  The sealed candidate manager still selects Docker.
+- Internal offline sealed candidate boot over the existing preview session
+  ledger: canonical archive and pinned Docker image identities, bounded
+  root-owned staging, non-root runtime health, and confirmed cleanup without
+  a public preview URL or mutable sync.
+
+### Changed
+
+- Package CI now installs the optional ACP and E2B extras from the built wheel
+  and verifies their dependencies, imports, and E2B adapter teardown tests
+  without starting providers.
+
+### Fixed
+
+- CI and operator reference container builds resolve public base images from a
+  public mirror, avoiding anonymous Docker Hub pull limits during release checks.
+- Restored the assistant launcher on declared app home pages and other custom
+  routes, while keeping it hidden on full chat pages, declared chat aliases and
+  sign-in surfaces. The widget uses the app's name and offers workflow access
+  only when a resumable session or declared start page exists. Standalone Ask
+  connections work in apps without workflows. Saved widget conversations load
+  through the authenticated transcript API before queued input is sent, with
+  explicit history/connection retry and app/user isolation. New conversations
+  use the server acknowledgement instead of a fabricated local ID.
+
+- App shells load their configured brand before rendering, without briefly
+  showing another theme. Chat drafts and live artifact iframes now survive
+  resizing between desktop and mobile layouts and reopening the artifact panel.
+  Mobile drawer transitions move keyboard focus into the visible artifact and
+  return it to the prior conversation control on close.
+
+### Security
+
+- Generated messaging modules now require a verified workspace for workspace
+  conversations. A signed caller cannot select another workspace through
+  dispatch context or `scope_id`.
+
+- Studio workspace connector actions (list, save, health check and delete) and
+  workspace-scoped message threads act only on the caller's verified
+  workspace: the workspace the validated token is bound to, or a membership a
+  host scope hook verified (`verified_workspace_id`). A workspace or tenant
+  named by the request no longer selects one, a request naming another
+  workspace is refused, and a signed-in caller with no verified workspace is
+  refused instead of falling back to its tenant or a shared demo workspace.
+  The per-app integrations view overlays connector status only from that
+  workspace. Local runs with `AUTH_ENABLED=false` keep their existing
+  workspace selection. Deployments whose tokens carry no workspace claim need
+  `AUTH_WORKSPACE_ID_CLAIM` or a host membership hook to use these actions.
+
+- Studio refuses workspace connector, app-catalog, declaration, and message
+  actions when a selected dispatch workspace or tenant conflicts with verified
+  membership, preventing misleading workspace event provenance. App integration
+  declarations now require an app registry record owned by the caller, and
+  catalog usage counts include only that caller's registered apps.
+
+### Fixed
+
+- E2B preview template builds stage only committed files from a clean OSS
+  checkout, reject linked source entries and Dockerfiles outside that commit,
+  and report the source commit and staged-context digest alongside the build ID.
+  Ignored local files and junctions cannot enter the provider upload.
+
+- Existing previews continue to use their recorded Docker or E2B provider
+  after the configured provider changes, so a restarted worker can stop them
+  and release capacity without routing cleanup to the wrong sandbox.
+
+## 0.2.0 - 2026-10-09
+
+### Added
+
 - An optional runtime-only Mozaiks Cloud usage API key for generated usage
   reporters, leaving deployment and domain client credentials and ordinary
   deployment secret manifests unchanged.
@@ -107,6 +180,16 @@ This project follows a practical pre-1.0 changelog format:
   hidden until the host can verify a grant for the exact membership; direct
   recipients and app-wide alerts keep their existing visibility rules.
 
+- Production Compose now requires a separately managed Keycloak realm import
+  and validates public HTTPS browser callbacks before Keycloak starts; the
+  packaged localhost realm remains for local development.
+
+- Canonical Docker build validation now runs without container networking or
+  published ports. The Docker adapter uses the local daemon with a clean CLI
+  configuration, so inherited remote Docker contexts cannot receive app files.
+  Build validation also excludes explicitly forwarded interactive-preview
+  environment values.
+
 - Android source export and delivery verification now reject literal values
   under credential objects even when nested payload fields use unfamiliar names.
   Descriptive metadata and names-only references remain exportable.
@@ -186,6 +269,9 @@ This project follows a practical pre-1.0 changelog format:
 
 - Studio app-scoped management routes now verify that the signed-in caller
   owns the selected app before returning data or applying changes.
+
+- Code review loads Monaco and its workers locally, using the patched DOMPurify
+  dependency for editor markup with sanitizer hooks isolated from chat rendering.
 
 - Patched DOMPurify and source-map-js in the shipped frontend dependency locks,
   including Monaco's nested DOMPurify dependency.
@@ -369,6 +455,10 @@ This project follows a practical pre-1.0 changelog format:
 ### Changed
 
 - Enabled refinement checkpoints now require named profiles with non-empty models; inline capability model settings and unknown capability fields are rejected.
+- Manual release runs now require the exact current main SHA and its successful
+  CI run, support a separate TestPyPI rehearsal, and publish to PyPI before
+  creating the matching GitHub release.
+
 - Refinement scope and contract-surface selection now use the planning model
   profile. Contract-surface regeneration has its own explicit generation
   profile and fails before the agent call if no model is configured; structured
@@ -490,8 +580,49 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Generated token recovery now stays on the current page with administrator-
+  contact guidance when no safe local route is configured; AppGenerator guidance
+  no longer navigates to a null recovery route.
+
+- Generated module API clients now treat explicit token depletion on HTTP 402
+  as a token-wallet denial, while a bodyless 402 remains an entitlement fallback.
+
+- Module HTTP actions now preserve token-wallet denial codes and recovery
+  metadata: depleted balances return 402 and missing usage scope returns 403,
+  instead of both becoming generic execution failures.
+
+- Subscription token-recovery routes now reject protocol-relative destinations
+  such as `//provider.example/billing` at app load, including optional top-up,
+  upgrade, and administrator-contact routes.
+
+- Zero-second OIDC discovery and JWKS cache TTLs now always refetch, including
+  when consecutive checks observe the same clock tick.
+
+- The 0.2.0 publication gate now requires a release-note bullet in its dated
+  changelog section and a strict documentation build before upload.
+
 - Handler reactions now receive the fields of flat events,
   including host webhook events, instead of an empty payload.
+
+- Android export from an installed distribution now reads an embedded exact
+  source revision verified against wheel metadata; ordinary wheel installs no
+  longer fail because they have no VCS `direct_url.json`.
+- AppGenerator rejects generated action permissions that do not resolve against
+  the approved auth contract during task admission, repair, and assembly.
+  A model-authored module contract remains subject to this check even if its
+  plan mislabels the module as a framework or operator pack.
+  Diagnostics identify the action and declared scope choices; valid restrictions
+  remain intact. Authenticated generation resolves early defaults from the
+  canonical auth scaffold instead of waiting for its file to be materialized.
+  Generated tasks cannot own or emit auth edits to approve their own permissions.
+  Typed page names cannot traverse into app config, and schema persistence
+  confines every rendered artifact to the generated app root.
+
+- Studio support requests now bind queue reads, replies, status changes, and
+  deletion to the caller's verified workspace. Linked support conversations
+  are available through those scoped request actions, not generic messaging
+  actions. Older requests without a verified owner remain inaccessible until
+  their ownership is reviewed.
 
 - Resuming an AppReview chat now restores scoped persisted workflow state to the
   durable AG2 channel under replay validation. Router-owned build checks no
@@ -510,8 +641,9 @@ This project follows a practical pre-1.0 changelog format:
   Ordinary delivery manifests also reject local/internal backend destinations;
   deliberate local test origins remain confined to explicit acceptance tooling.
 
-- Pin shared-shell text checkouts to LF so installed Android framework resources
-  have identical provenance on Windows and Linux. Binary assets stay unchanged.
+- Normalize verified installed shared-shell text to the committed LF form so
+  Windows VCS wheels and Linux Android builders use the same framework digest.
+  Binary assets stay unchanged.
 
 - Android apps can use a separately registered public sign-in client on the
   same backend as the browser app. Native sign-in requires the configured
@@ -640,6 +772,12 @@ This project follows a practical pre-1.0 changelog format:
   renderer as standalone app saves.
 - AG2 knowledge-store writes are serialized per session so a delayed earlier
   snapshot cannot overwrite the active channel state needed after restart.
+
+- Chat replies arriving together or immediately after a server restart now
+  reach the existing workflow channel instead of being saved without delivery.
+  If recovery cannot accept a reply, WebSocket and HTTP callers receive an
+  explicit error. A reply accepted by the AG2 channel remains delivered even
+  if its run then fails; an uncertain delivery asks the user to check the chat.
 
 - A copied `.env.example` now imports the hosts and points the local shell's
   API proxy at the backend; `mozaiks context index` passes its workspace key.
@@ -1379,6 +1517,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Changed
 
+- Trusted isolated ACP-only workers can supply their approved adapter and
+  budget directly to the coding provider without inventing a structured-output
+  model profile. Normal refinement coding still resolves its named model
+  profile and fallback through the full policy.
 - Workflow agents can declare `pending_turn_replay: block` to stop automatic
   replay of uncertain AG2 pending turns. Existing agents default to `allow`;
   AppGenerator artifact workers now block replay. Deploy the runtime and Factory
@@ -1428,8 +1570,6 @@ This project follows a practical pre-1.0 changelog format:
   Workspaces scaffolded without `AUTH_ANON_ROLES` add
   `AUTH_ANON_ROLES=admin,user` to `.env` to keep the admin pages on their own
   machine; the refusal says so.
-
-## 0.2.0 - 2026-09-18
 
 ### Fixed
 

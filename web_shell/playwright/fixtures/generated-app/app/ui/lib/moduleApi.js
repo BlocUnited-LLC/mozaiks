@@ -64,25 +64,42 @@ export function isInsufficientTokensError(err) {
     err?.error_code === 'INSUFFICIENT_TOKENS' ||
     err?.code === 'INSUFFICIENT_TOKENS' ||
     err?.data?.error_code === 'INSUFFICIENT_TOKENS' ||
+    err?.data?.code === 'INSUFFICIENT_TOKENS' ||
+    err?.data?.detail?.error_code === 'INSUFFICIENT_TOKENS' ||
+    err?.data?.detail?.code === 'INSUFFICIENT_TOKENS' ||
     err?.data?.extra_data?.error_code === 'INSUFFICIENT_TOKENS'
   )
 }
 
+function appLocalRoute(value) {
+  if (typeof value !== 'string') return null
+  const route = value.trim()
+  if (!route.startsWith('/') || route.startsWith('//') || route.includes(String.fromCharCode(92))) return null
+  for (const char of route) {
+    const code = char.charCodeAt(0)
+    if (code < 32 || code === 127) return null
+  }
+  return route
+}
+
 export function insufficientTokensRecoveryPath(err, fallback = '/billing') {
   const metadata = tokenRecoveryMetadata(err)
+  if (metadata.recovery_action === 'contact_admin') {
+    return appLocalRoute(metadata.contact_route)
+  }
   return (
-    metadata.top_up_route ||
-    metadata.billing_route ||
-    metadata.upgrade_route ||
-    metadata.contact_route ||
-    fallback
+    appLocalRoute(metadata.top_up_route) ||
+    appLocalRoute(metadata.billing_route) ||
+    appLocalRoute(metadata.upgrade_route) ||
+    appLocalRoute(metadata.contact_route) ||
+    appLocalRoute(fallback)
   )
 }
 
 export function isEntitlementRequiredError(err) {
-  // HTTP 402 is the canonical signal — the backend maps ENTITLEMENT_REQUIRED to
-  // it in one place. Checking status as well as error_code means a denial is
-  // still recognised if the body is unreadable or reshaped in transit.
+  // Token depletion can also use HTTP 402. Its explicit code takes precedence;
+  // status remains a fallback when an entitlement body is unreadable.
+  if (isInsufficientTokensError(err)) return false
   return (
     err?.status === 402 ||
     err?.error_code === 'ENTITLEMENT_REQUIRED' ||
@@ -95,10 +112,10 @@ export function isEntitlementRequiredError(err) {
 export function entitlementUpgradePath(err, fallback = '/pricing') {
   const metadata = tokenRecoveryMetadata(err)
   return (
-    metadata.upgrade_route ||
-    metadata.billing_route ||
-    metadata.pricing_route ||
-    fallback
+    appLocalRoute(metadata.upgrade_route) ||
+    appLocalRoute(metadata.billing_route) ||
+    appLocalRoute(metadata.pricing_route) ||
+    appLocalRoute(fallback)
   )
 }
 

@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 import yaml
@@ -14,7 +16,10 @@ from factory_app.app.modules.workspace_integrations.backend.policy import (
     derive_status,
     is_catalog_only_mode,
 )
-from factory_app.app.modules.workspace_integrations.backend.repo import WorkspaceIntegrationsRepo
+from factory_app.app.modules.workspace_integrations.backend.repo import (
+    IntegrationDeclarationsRepo,
+    WorkspaceIntegrationsRepo,
+)
 from factory_app.app.modules.workspace_integrations.backend.schemas import (
     CATALOG_BY_ID,
     DECLARATIONS_ENTITY,
@@ -26,6 +31,9 @@ from factory_app.app.modules.workspace_integrations.backend.schemas import (
 from factory_app.app.modules.workspace_integrations.backend.service import (
     WorkspaceIntegrationsService,
 )
+from mozaiksai.core.runtime.composition.module_authority import ModuleDispatchAuthority
+from mozaiksai.core.runtime.composition.module_context import ModuleContext
+from mozaiksai.core.runtime.persistence.adapter import PersistencePrincipal
 
 
 def _workspace() -> Path:
@@ -282,8 +290,10 @@ class _FakeUsageDeclarationsRepo:
     def __init__(self, usage_counts: dict[str, int] | None = None) -> None:
         self.usage_counts = usage_counts or {}
         self.requested_catalog_ids: list[str] | None = None
+        self.requested_app_ids: list[str] | None = None
 
-    async def get_catalog_usage_counts(self, *, catalog_ids: list[str] | None = None) -> dict[str, int]:
+    async def get_catalog_usage_counts(self, *, app_ids: list[str], catalog_ids: list[str] | None = None) -> dict[str, int]:
+        self.requested_app_ids = app_ids
         self.requested_catalog_ids = catalog_ids
         if not catalog_ids:
             return self.usage_counts
@@ -294,6 +304,14 @@ class _FakeCtx:
     user_id = "user_1"
     tenant_id = None
     workspace_id = None
+    dispatch_authority = None
+    persistence = None
+
+
+class _FakeOwnedAppRegistry:
+    async def list_apps(self, *, owner_user_id: str) -> dict[str, Any]:
+        assert owner_user_id == "user_1"
+        return {"apps": [{"app_id": "app_1"}, {"app_id": "app_2"}]}
 
 
 class _FakeConnectorActionService:
@@ -314,17 +332,31 @@ class _FakeConnectorActionService:
 
 
 @pytest.mark.asyncio
-async def test_handler_workspace_connector_actions_default_to_context_workspace() -> None:
-    ctx = _FakeCtx()
-    ctx.workspace_id = "workspace_123"
+async def test_handler_workspace_connector_actions_use_the_verified_workspace() -> None:
+    # Dispatch scope names one workspace; the verified principal is bound to another.
+    ctx = ModuleContext(
+        app_id="studio",
+        user_id="user_1",
+        tenant_id=None,
+        workspace_id="workspace_verified",
+        dispatch_authority=ModuleDispatchAuthority(
+            kind="authenticated_user", permission_mode="enforce", reason="test"
+        ),
+        persistence=SimpleNamespace(principal=PersistencePrincipal("user_1", "workspace_verified")),  # type: ignore[arg-type]
+    )
     service = _FakeConnectorActionService()
     module = WorkspaceIntegrationsModule(service=service)  # type: ignore[arg-type]
 
     await module.list_workspace_connectors(ctx)
-    await module.check_workspace_connector_health(ctx, service="openai")
+    await module.check_workspace_connector_health(ctx, service="openai", workspace_id="workspace_verified")
     await module.delete_workspace_connector(ctx, service="openai")
+    with pytest.raises(PermissionError):
+        await module.list_workspace_connectors(ctx, workspace_id="workspace_123")
+    ctx.workspace_id = "workspace_123"
+    with pytest.raises(PermissionError):
+        await module.list_workspace_connectors(ctx)
 
-    assert service.workspace_ids == ["workspace_123", "workspace_123", "workspace_123"]
+    assert service.workspace_ids == ["workspace_verified", "workspace_verified", "workspace_verified"]
 
 
 class _WrapperStyleCollection:
@@ -373,16 +405,45 @@ async def test_service_list_integrations_returns_all_catalog_entries() -> None:
 @pytest.mark.asyncio
 async def test_service_list_integrations_includes_app_usage_count() -> None:
     declarations_repo = _FakeUsageDeclarationsRepo({"mozaikspay": 2})
-    service = WorkspaceIntegrationsService(repo=_FakeRepo(), declarations_repo=declarations_repo)  # type: ignore[arg-type]
+    service = WorkspaceIntegrationsService(
+        repo=_FakeRepo(), declarations_repo=declarations_repo, app_registry=_FakeOwnedAppRegistry(),
+    )  # type: ignore[arg-type]
 
-    result = await service.list_integrations(_FakeCtx())
+    ctx = ModuleContext(app_id="app_1", persistence=SimpleNamespace(
+        principal=PersistencePrincipal("user_1", "workspace_1"),
+    ))
+    result = await service.list_integrations(ctx)
 
     mozaikspay = next(item for item in result["integrations"] if item["id"] == "mozaikspay")
     openai = next(item for item in result["integrations"] if item["id"] == "openai")
     assert mozaikspay["app_usage_count"] == 2
     assert openai["app_usage_count"] == 0
     assert result["summary"]["used"] == 1
+    assert declarations_repo.requested_app_ids == ["app_1", "app_2"]
     assert declarations_repo.requested_catalog_ids == [entry["id"] for entry in INTEGRATIONS_CATALOG]
+
+
+@pytest.mark.asyncio
+async def test_catalog_usage_aggregation_requires_an_owned_app_filter() -> None:
+    repo = IntegrationDeclarationsRepo()
+    cursor = SimpleNamespace(to_list=AsyncMock(return_value=[]))
+    collection = SimpleNamespace(aggregate=lambda pipeline: cursor)
+    aggregate = AsyncMock(return_value=collection)
+    repo._collection = aggregate
+
+    assert await repo.get_catalog_usage_counts(app_ids=[]) == {}
+    aggregate.assert_not_awaited()
+
+    pipeline: list[dict[str, Any]] = []
+
+    def capture(value):
+        pipeline.extend(value)
+        return cursor
+
+    collection.aggregate = capture
+    assert await repo.get_catalog_usage_counts(app_ids=["app_1"], catalog_ids=["openai"]) == {}
+    assert pipeline[0]["$match"]["app_id"] == {"$in": ["app_1"]}
+    assert pipeline[0]["$match"]["catalog_id"] == {"$in": ["openai"]}
 
 
 @pytest.mark.asyncio

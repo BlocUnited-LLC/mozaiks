@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from mozaiksai.core.core_config import get_mongo_client
 from mozaiksai.core.ports.entitlement import EntitlementResult
@@ -18,6 +19,16 @@ from mozaiksai.core.runtime.persistence.app_data import collection_name_for_alia
 from mozaiksai.core.runtime.persistence.mongo import DEFAULT_APP_DATABASE_NAME
 
 CollectionResolver = Callable[[str], Any]
+
+
+@dataclass(frozen=True)
+class ProductPlanSelection:
+    """Effective v2 plan and allowance snapshot, without exposing the assignment."""
+
+    product_id: str
+    plan_id: str | None
+    source: Literal["default_plan", "active_assignment", "unavailable"]
+    allowances_snapshot: Any | None = None
 
 
 def _default_database_name() -> str:
@@ -176,51 +187,51 @@ class ConfiguredEntitlementAdapter:
         user_id: str | None = None,
         tenant_id: str | None = None,
         workspace_id: str | None = None,
+        product_id: str | None = None,
     ) -> str | None:
-        """Return the effective active plan id for this scope.
+        """Return the effective active plan id for this scope and product.
 
-        The default plan is returned when no assignment store exists or no
-        active assignment is found. Active assignment plan IDs are returned as
-        stored so operator-authored catalogs can snapshot plans that are not in
-        the static app config fallback.
+        In a v2 catalog, omitting product_id selects the primary product. An
+        explicit product_id selects only that product; an unknown id returns
+        None. The product's default plan is returned when no active assignment
+        is found. Active assignment IDs are returned as stored so operator-
+        authored catalogs can snapshot plans absent from static config.
         """
 
         app_id = str(app_id or "").strip()
         if not self._config or not app_id:
             return None
 
-        # v2: return the primary (default) product's active plan
+        # v2: use an explicit product when requested, otherwise the primary.
         if self._config.products:
             primary_product = None
-            if self._config.default_product_id:
+            requested_product_id = str(product_id or "").strip()
+            if requested_product_id:
+                for p in self._config.products:
+                    if p.product_id == requested_product_id:
+                        primary_product = p
+                        break
+                if primary_product is None:
+                    return None
+            elif self._config.default_product_id:
                 for p in self._config.products:
                     if p.product_id == self._config.default_product_id:
                         primary_product = p
                         break
-            if primary_product is None and self._config.products:
-                primary_product = self._config.products[0]
             if primary_product is None:
+                primary_product = self._config.products[0]
+            selection = await self.current_product_plan(
+                app_id=app_id,
+                user_id=user_id,
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
+                product_id=primary_product.product_id,
+            )
+            if selection is None:
                 return None
-            store = primary_product.assignment_store
-            if store is None:
-                return primary_product.default_plan_id
-            try:
-                record = await self._find_assignment(
-                    store, app_id=app_id, user_id=user_id,
-                    tenant_id=tenant_id, workspace_id=workspace_id,
-                )
-                if not record:
-                    return primary_product.default_plan_id
-                status = str(_field_value(record, store.status_field, "") or "").strip().lower()
-                if status not in {s.lower() for s in store.active_statuses}:
-                    return primary_product.default_plan_id
-                parsed_expiry = _parse_datetime(self._expires_at(record, store))
-                if parsed_expiry is not None and parsed_expiry <= datetime.now(UTC):
-                    return primary_product.default_plan_id
-                plan_id = str(_field_value(record, store.plan_id_field, primary_product.default_plan_id) or "").strip()
-                return plan_id or primary_product.default_plan_id
-            except Exception:
-                return primary_product.default_plan_id
+            return selection.plan_id or (
+                None if requested_product_id else primary_product.default_plan_id
+            )
 
         # v1: existing behavior
         store = self._config.assignment_store
@@ -250,6 +261,67 @@ class ConfiguredEntitlementAdapter:
             return plan_id or self._config.default_plan_id
         except Exception:
             return self._config.default_plan_id
+
+    async def current_product_plan(
+        self,
+        *,
+        app_id: str,
+        product_id: str,
+        user_id: str | None = None,
+        tenant_id: str | None = None,
+        workspace_id: str | None = None,
+    ) -> ProductPlanSelection | None:
+        """Read an explicit v2 product plan and its active assignment once."""
+        if not self._config or not self._config.products or not str(app_id or "").strip():
+            return None
+        product = next(
+            (item for item in self._config.products if item.product_id == product_id),
+            None,
+        )
+        if product is None:
+            return None
+        store = product.assignment_store
+        default = ProductPlanSelection(
+            product_id=product.product_id,
+            plan_id=product.default_plan_id,
+            source="default_plan",
+        )
+        if store is None:
+            return default
+        try:
+            record = await self._find_assignment(
+                store,
+                app_id=app_id,
+                user_id=user_id,
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
+            )
+            if not record:
+                return default
+            status = str(_field_value(record, store.status_field, "") or "").strip().lower()
+            if status not in {value.lower() for value in store.active_statuses}:
+                return default
+            parsed_expiry = _parse_datetime(self._expires_at(record, store))
+            if parsed_expiry is not None and parsed_expiry <= datetime.now(UTC):
+                return default
+            plan_id = str(
+                _field_value(record, store.plan_id_field, product.default_plan_id) or ""
+            ).strip() or product.default_plan_id
+            allowances_snapshot = _field_value(record, "token_allowances")
+            if allowances_snapshot is None:
+                plan_snapshot = _field_value(record, store.plan_snapshot_field)
+                if isinstance(plan_snapshot, Mapping):
+                    allowances_snapshot = plan_snapshot.get("token_allowances")
+            return ProductPlanSelection(
+                product_id=product.product_id,
+                plan_id=plan_id,
+                source="active_assignment",
+                allowances_snapshot=allowances_snapshot,
+            )
+        except Exception:
+            return ProductPlanSelection(
+                product_id=product.product_id, plan_id=None, source="unavailable"
+            )
 
     def _check_default_plan(self, capability_id: str) -> EntitlementResult:
         if self._config is None:

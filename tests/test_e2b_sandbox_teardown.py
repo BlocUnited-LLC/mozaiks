@@ -1,8 +1,7 @@
 """Teardown with real SDK exceptions and mocked provider calls only.
 
-Verified against e2b 2.14.0 / e2b-code-interpreter 2.4.1:
-SandboxApi._cls_connect raises NotFoundException on HTTP 404;
-SandboxApi._cls_kill returns False on HTTP 404 and raises for other errors.
+The adapter kills by session ID without reconnecting, because reconnect can
+resume a paused sandbox before teardown.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -21,38 +20,36 @@ sdk_errors = pytest.importorskip("e2b.exceptions")
 
 @pytest.fixture
 def sdk(monkeypatch):
-    sandbox = SimpleNamespace(sandbox_id="provider-session", kill=Mock(return_value=True))
+    sandbox = SimpleNamespace(sandbox_id="provider-session")
     factory = SimpleNamespace(
-        create=Mock(return_value=sandbox), connect=Mock(return_value=sandbox),
+        create=Mock(return_value=sandbox), connect=Mock(return_value=sandbox), kill=Mock(return_value=True),
         get_info=Mock(return_value=SimpleNamespace(end_at=datetime.now(UTC) + timedelta(seconds=60))),
     )
     monkeypatch.setattr(e2b_sandbox, "Sandbox", factory)
     return factory, sandbox
 
 
-@pytest.mark.parametrize("stage", ["connect", "kill"])
 @pytest.mark.asyncio
-async def test_confirmed_not_found_is_successful_teardown(sdk, stage):
-    factory, sandbox = sdk
-    operation = factory.connect if stage == "connect" else sandbox.kill
-    operation.side_effect = sdk_errors.NotFoundException("Sandbox expired")
+async def test_confirmed_not_found_is_successful_teardown(sdk):
+    factory, _ = sdk
+    factory.kill.side_effect = sdk_errors.NotFoundException("Sandbox expired")
 
     assert await e2b_sandbox.E2BSandboxAdapter().terminate_session(session_id="provider-session") is True
-    if stage == "connect":
-        sandbox.kill.assert_not_called()
+    factory.kill.assert_called_once_with("provider-session")
+    factory.connect.assert_not_called()
 
 
 @pytest.mark.parametrize("kill_result", [True, False])
 @pytest.mark.asyncio
 async def test_sdk_kill_success_or_404_both_confirm_absence(sdk, kill_result):
-    _, sandbox = sdk
-    sandbox.kill.return_value = kill_result
+    factory, _ = sdk
+    factory.kill.return_value = kill_result
 
     assert await e2b_sandbox.E2BSandboxAdapter().terminate_session(session_id="provider-session") is True
-    sandbox.kill.assert_called_once_with()
+    factory.kill.assert_called_once_with("provider-session")
+    factory.connect.assert_not_called()
 
 
-@pytest.mark.parametrize("stage", ["connect", "kill"])
 @pytest.mark.parametrize("error_type", [
     sdk_errors.AuthenticationException,
     sdk_errors.TimeoutException,
@@ -61,21 +58,23 @@ async def test_sdk_kill_success_or_404_both_confirm_absence(sdk, kill_result):
     LookupError,
 ])
 @pytest.mark.asyncio
-async def test_unconfirmed_absence_errors_propagate_unchanged(sdk, stage, error_type):
-    factory, sandbox = sdk
+async def test_unconfirmed_absence_errors_propagate_unchanged(sdk, error_type):
+    factory, _ = sdk
     error = error_type("not found in an unrelated error message")
-    operation = factory.connect if stage == "connect" else sandbox.kill
-    operation.side_effect = error
+    factory.kill.side_effect = error
 
     with pytest.raises(error_type) as raised:
         await e2b_sandbox.E2BSandboxAdapter().terminate_session(session_id="provider-session")
 
     assert raised.value is error
+    factory.kill.assert_called_once_with("provider-session")
+    factory.connect.assert_not_called()
 
 
 async def _expired_preview(monkeypatch):
     adapter = e2b_sandbox.E2BSandboxAdapter()
     manager = _manager(adapter, provider="e2b")
+    manager._queue_seconds = 5
     identity = dict(app_id="factory", user_id="owner", target_app_id="target", build_registry_id="registry")
     state = await manager.create_or_reuse("artifact", **identity)
     after_deadline = state.expires_at + timedelta(seconds=1)
@@ -90,7 +89,7 @@ async def _expired_preview(monkeypatch):
 async def test_expired_provider_session_does_not_block_manager_recovery(sdk, operation, monkeypatch):
     factory, _ = sdk
     manager, state, socket, identity = await _expired_preview(monkeypatch)
-    sdk[1].kill.side_effect = sdk_errors.NotFoundException("Sandbox already expired")
+    factory.kill.side_effect = sdk_errors.NotFoundException("Sandbox already expired")
 
     if operation == "status":
         with pytest.raises(KeyError, match="expired"):
@@ -110,7 +109,7 @@ async def test_provider_outage_keeps_manager_cleanup_state(sdk, error_type, monk
     factory, _ = sdk
     manager, state, socket, identity = await _expired_preview(monkeypatch)
     error = error_type("Provider is unavailable")
-    sdk[1].kill.side_effect = error
+    factory.kill.side_effect = error
 
     with pytest.raises(error_type) as raised:
         await manager.create_or_reuse("artifact", **identity)

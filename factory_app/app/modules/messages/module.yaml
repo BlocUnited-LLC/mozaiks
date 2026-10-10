@@ -16,7 +16,7 @@ permissions:
 
 actions:
   - id: create_thread
-    description: Create a message thread for an app conversation or support request.
+    description: Create a direct or group message thread. Support threads are created by workspace_support.
     handler_method: create_thread
     input_schema:
       type: object
@@ -29,7 +29,7 @@ actions:
             type: string
         thread_type:
           type: string
-          enum: [group, direct, support]
+          enum: [group, direct]
           default: group
         scope_type:
           type: string
@@ -38,13 +38,13 @@ actions:
           description: Whether the conversation belongs to one app or to workspace-level social context.
         scope_id:
           type: string
-          description: Optional explicit scope id. Defaults to ctx.app_id for app scope or ctx.workspace_id for workspace scope.
+          description: Optional explicit scope id. Defaults to ctx.app_id for app scope or the caller's verified workspace for workspace scope; any other id is refused.
         subject_app_id:
           type: string
-          description: The app this conversation is about. Support threads should set this to the supported app id.
+          description: The app this conversation is about; workspace_support supplies it for linked support threads.
         related_type:
           type: string
-          description: Optional owning entity type such as workspace_support.request.
+          description: Optional owning entity type; workspace_support.request is reserved for workspace_support.
         related_id:
           type: string
           description: Optional owning entity id.
@@ -74,7 +74,7 @@ actions:
           enum: [open, resolved, archived]
         thread_type:
           type: string
-          enum: [group, direct, support]
+          enum: [group, direct]
         scope_type:
           type: string
           enum: [app, workspace]

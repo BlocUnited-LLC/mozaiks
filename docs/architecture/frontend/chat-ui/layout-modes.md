@@ -17,7 +17,7 @@ Layout modes control the visual split between the chat panel and the artifact pa
 
 ## `full`
 
-The default state for `ask` mode. The artifact panel does not exist. The user is having a conversation with no visual output. This is also the starting state for a new workflow session before the first artifact event arrives — the chat occupies the full width and the artifact panel slides in when the first `artifact.created` event fires.
+The default state for `ask` mode. The artifact panel is hidden. An artifact that has never been opened is not mounted; an already-opened artifact stays mounted while hidden so its iframe and local interaction state survive reopening. The chat occupies the full width before the first visible workflow artifact.
 
 `ask` mode is locked to `full`. Requesting any other layout while in `ask` mode is silently ignored by the reducer.
 
@@ -27,7 +27,8 @@ The default state for `ask` mode. The artifact panel does not exist. The user is
 
 The default state for `workflow` mode. The screen is divided 50/50 between the chat panel on the left and the artifact panel on the right. This is the layout where most of the workflow interaction happens — the user can read agent output in the chat and see the live artifact update on the right simultaneously.
 
-There are no fixed pixel breakpoints for the 50/50 split — it is a CSS flex proportion set via `--chat-width` and `--artifact-width` CSS custom properties that `FluidChatLayout` writes on the root element.
+On desktop, `FluidChatLayout` sets each panel's width to 50%. Below 768px,
+the artifact uses the mobile drawer presentation instead of side-by-side columns.
 
 ---
 
@@ -35,7 +36,8 @@ There are no fixed pixel breakpoints for the 50/50 split — it is a CSS flex pr
 
 Set when the user wants the artifact to take up as much space as possible. The chat panel collapses to a 10% sidebar — narrow enough to show agent status indicators without taking up reading space. The artifact gets 90%.
 
-The user typically requests this by clicking a "maximize artifact" toggle in the `ArtifactActionsBar`. The chat input is still accessible in the 10% sidebar, so the user can send messages without switching modes.
+The user expands the conversation to use its composer. The minimized rail
+does not replace or reset the mounted conversation.
 
 ---
 
@@ -64,7 +66,9 @@ The reducer enforces the rules:
 - `view` → sets `previousLayoutMode` so the UI can return to `split` or `minimized` on dismiss
 - Invalid mode strings → silently ignored, current mode preserved
 
-`FluidChatLayout` reads the current `layoutMode` from context and applies the corresponding CSS custom properties. All resizing is a CSS transition — React does not re-render the layout tree when modes change.
+`ChatPage` passes the current `layoutMode` to `FluidChatLayout`. React updates
+layout props and CSS widths; the chat and artifact retain their component
+identity across presentation changes.
 
 ---
 
@@ -76,5 +80,18 @@ When entering `view` mode, the reducer saves the current mode to `previousLayout
 
 ## Layout on mobile
 
-On small screens, `FluidChatLayout` and `MobileArtifactDrawer` handle the layout differently — the split/minimized paradigm does not apply because the screen is too narrow for side-by-side panels. Instead, the artifact is presented as a bottom sheet drawer that overlays the chat. The `layoutMode` state is still set the same way; the visual implementation of `split` and `minimized` differs between desktop and mobile.
+`FluidChatLayout` owns one persistent chat/artifact composition at every screen
+width. `MobileArtifactDrawer` changes presentation inside that composition;
+crossing the 768px breakpoint must not replace the artifact subtree or reload
+an iframe. No DOM reparenting or second hidden preview is used.
+
+On small screens the artifact appears in a drawer over the conversation.
+Opening the drawer moves keyboard focus to its visible Collapse control;
+closing it restores the prior trigger or composer after the conversation is
+interactive again. If that control is disabled or hidden, focus moves to the
+visible conversation pane or its desktop Expand control after a resize.
+Collapsing it preserves the preview while removing its controls from pointer,
+keyboard and accessibility navigation. Returning to the conversation preserves
+an unsent message. Changing or removing the actual artifact may replace its
+content; resizing or toggling its presentation must not.
 

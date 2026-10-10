@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import io
 import json
 import os
 import re
 import shlex
 import time
-from collections.abc import AsyncIterator
+import zipfile
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
-from typing import Any
+from typing import Any, Protocol, cast, runtime_checkable
 from urllib.parse import urlsplit
 
 from logs.logging_config import get_core_logger
@@ -25,6 +28,7 @@ from mozaiksai.core.sandbox.preview_store import (
     PreviewLeaseLostError,
     PreviewOperationBusy,
 )
+from mozaiksai.core.semantics.archive import read_archive_manifest
 
 logger = get_core_logger("artifact_preview_sessions")
 _ARTIFACT_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,128}$")
@@ -32,6 +36,63 @@ _SANDBOX_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,128}$")
 _RUNTIME = "python -m mozaiksai.core.sandbox.preview_runtime"
 _PREVIEW_PORT = 3000
 _ENV_PREFIX = "MOZAIKS_PREVIEW_ENV_"
+_SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_SEALED_ARCHIVE_MAX_BYTES = 80_000_000
+_SEALED_TOTAL_FILE_MAX_BYTES = 64_000_000
+_SEALED_ARCHIVE_MAX_FILES = 2_000
+_SEALED_FILE_MAX_BYTES = 8_000_000
+
+
+@runtime_checkable
+class _SealedCandidateStager(Protocol):
+    async def stage_sealed_files(self, *, session_id: str, files: dict[str, bytes]) -> None: ...
+
+
+def _sealed_archive_files(data: bytes, digest: str, target_app_id: str) -> dict[str, bytes]:
+    """Bound and verify a canonical app archive before allocating a provider."""
+    if not isinstance(data, bytes) or len(data) > _SEALED_ARCHIVE_MAX_BYTES:
+        raise ValueError("Sealed preview archive exceeds its byte limit")
+    if not isinstance(digest, str) or not _SHA256_RE.fullmatch(digest) or digest != f"sha256:{hashlib.sha256(data).hexdigest()}":
+        raise ValueError("Sealed preview archive digest does not match")
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            infos = archive.infolist()
+            if len(infos) > _SEALED_ARCHIVE_MAX_FILES or sum(info.file_size for info in infos) > _SEALED_TOTAL_FILE_MAX_BYTES or any(
+                info.file_size > _SEALED_FILE_MAX_BYTES or info.compress_type != zipfile.ZIP_STORED
+                for info in infos
+            ):
+                raise ValueError("Sealed preview archive exceeds its file limits")
+    except zipfile.BadZipFile as exc:
+        raise ValueError("Sealed preview requires a canonical archive") from exc
+    manifest = read_archive_manifest(data)
+    paths = [entry.path for entry in manifest.entries]
+    if "app/app.json" not in paths or any(
+        path != "requirements.txt" and not path.startswith(("app/", "workflows/"))
+        for path in paths
+    ):
+        raise ValueError("Sealed preview archive contains unsupported paths")
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        files = {path: archive.read(path) for path in paths}
+
+    def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result = dict(pairs)
+        if len(result) != len(pairs):
+            raise ValueError("Duplicate app manifest key")
+        return result
+
+    def reject_constant(_value: str) -> None:
+        raise ValueError("Non-JSON app manifest constant")
+
+    try:
+        raw_manifest = files["app/app.json"].decode("utf-8")
+        app_manifest = json.loads(
+            raw_manifest, object_pairs_hook=unique_object, parse_constant=reject_constant,
+        )
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise ValueError("Sealed preview requires a canonical app.json") from exc
+    if not isinstance(app_manifest, dict) or app_manifest.get("appId") != target_app_id:
+        raise ValueError("Sealed preview appId does not match the owned target")
+    return files
 
 
 def is_valid_artifact_id(value: str) -> bool:
@@ -55,11 +116,18 @@ def sandbox_workspace_root(provider: str) -> str:
 
 
 def sandbox_resource_environment() -> dict[str, str]:
-    # Dockerfile ENV is build-time only in E2B; credentials require explicit opt-in.
     return {
         "MOZAIKS_WEB_SHELL_PATH": "/opt/mozaiks/web_shell",
         "MOZAIKS_CHAT_UI_PATH": "/opt/mozaiks/chat-ui",
         "MOZAIKS_FACTORY_APP_PATH": "/opt/mozaiks/factory_app",
+        "VITE_MOZAIKS_PREVIEW": "true",
+    }
+
+
+def preview_resource_environment() -> dict[str, str]:
+    # Interactive previews explicitly opt in to forwarded environment values.
+    return {
+        **sandbox_resource_environment(),
         **{name[len(_ENV_PREFIX):]: value for name, value in os.environ.items() if name.startswith(_ENV_PREFIX)},
         "VITE_MOZAIKS_PREVIEW": "true",
     }
@@ -75,9 +143,11 @@ def _safe_relpath(raw: str) -> str | None:
     return str(path)
 
 
-def resolve_preview_provider(env: dict[str, str] | None = None) -> tuple[str, SandboxPort]:
+def resolve_preview_provider(
+    env: dict[str, str] | None = None, *, provider: str | None = None,
+) -> tuple[str, SandboxPort]:
     env_map = os.environ if env is None else env
-    requested = str(env_map.get("MOZAIKS_PREVIEW_PROVIDER", "")).strip().lower()
+    requested = str(provider if provider is not None else env_map.get("MOZAIKS_PREVIEW_PROVIDER", "")).strip().lower()
     if requested == "e2b":
         if not str(env_map.get("E2B_API_KEY", "")).strip():
             raise RuntimeError(
@@ -86,7 +156,7 @@ def resolve_preview_provider(env: dict[str, str] | None = None) -> tuple[str, Sa
         from mozaiksai.core.adapters.e2b_sandbox import get_e2b_sandbox
 
         return "e2b", get_e2b_sandbox()
-    if requested not in {"", "docker"}:
+    if requested not in ({"docker"} if provider is not None else {"", "docker"}):
         raise ValueError(
             f"Unsupported preview provider {requested!r}; expected 'docker' or 'e2b'"
         )
@@ -108,6 +178,8 @@ class PreviewSessionState:
     provider: str
     created_at: datetime
     expires_at: datetime
+    sealed_archive_sha256: str | None = None
+    sealed_image_id: str | None = None
     phase: str = "active"
     session_id: str | None = None
     status: str = "starting"
@@ -135,13 +207,13 @@ class ArtifactPreviewSessionManager:
     """Studio preview lifecycle; Mongo owns identity, admission and operation leases."""
 
     def __init__(
-        self, *, provider_resolver: Any | None = None,
+        self, *, provider_resolver: Callable[[], tuple[str, SandboxPort]] | None = None,
         startup_timeout_seconds: float = 120, store: MongoPreviewStore | None = None,
     ) -> None:
         self._store = store if store is not None else MongoPreviewStore()
         self._ws_clients: dict[str, set[Any]] = {}
         self._ws_status: dict[str, dict[str, Any]] = {}
-        self._provider_resolver = provider_resolver or resolve_preview_provider
+        self._provider_resolver = provider_resolver
         self._ttl_minutes = self._positive_setting("SANDBOX_TTL_MINUTES", 30)
         self._max_sessions = self._positive_setting("SANDBOX_MAX_SESSIONS", 20)
         self._max_owner_sessions = self._positive_setting("SANDBOX_MAX_OWNER_SESSIONS", 2)
@@ -166,10 +238,17 @@ class ArtifactPreviewSessionManager:
         return sandbox_workspace_root(provider)
 
     def _adapter(self, provider: str) -> SandboxPort:
+        if self._provider_resolver is None:
+            # Selection controls new allocations; durable provider identity
+            # controls every operation on a session that already exists.
+            return resolve_preview_provider(provider=provider)[1]
         resolved_provider, adapter = self._provider_resolver()
         if resolved_provider != provider:
-            raise RuntimeError("Preview provider changed; restore the provider to stop its existing previews")
+            raise RuntimeError("Preview adapter does not match the stored provider")
         return adapter
+
+    def _selected_provider(self) -> tuple[str, SandboxPort]:
+        return (self._provider_resolver or resolve_preview_provider)()
 
     @staticmethod
     def _is_expired(state: PreviewSessionState) -> bool:
@@ -234,11 +313,37 @@ class ArtifactPreviewSessionManager:
     ) -> PreviewSessionState:
         if not all(is_valid_artifact_id(value) for value in (artifact_id, app_id, target_app_id, build_registry_id)) or not user_id:
             raise ValueError("Invalid preview identity")
-        provider, adapter = self._provider_resolver()
+        provider, adapter = self._selected_provider()
         identity = dict(
             artifact_id=artifact_id, app_id=app_id, user_id=user_id,
             target_app_id=target_app_id, build_registry_id=build_registry_id, provider=provider,
         )
+        return await self._create(identity, adapter)
+
+    async def create_sealed_candidate(
+        self, artifact_id: str, *, app_id: str, user_id: str, target_app_id: str,
+        build_registry_id: str, archive_bytes: bytes, archive_sha256: str, image_id: str,
+    ) -> PreviewSessionState:
+        """Internal, offline candidate boot. The caller has authenticated this owner/build."""
+        if not all(is_valid_artifact_id(value) for value in (artifact_id, app_id, target_app_id, build_registry_id)) or not user_id:
+            raise ValueError("Invalid preview identity")
+        if not isinstance(image_id, str) or not _SHA256_RE.fullmatch(image_id):
+            raise ValueError("Sealed preview requires a trusted image ID")
+        files = _sealed_archive_files(archive_bytes, archive_sha256, target_app_id)
+        provider, adapter = self._selected_provider()
+        if provider != "docker" or not isinstance(adapter, _SealedCandidateStager):
+            raise RuntimeError("Sealed preview requires the local Docker sandbox adapter")
+        identity = dict(
+            artifact_id=artifact_id, app_id=app_id, user_id=user_id,
+            target_app_id=target_app_id, build_registry_id=build_registry_id, provider=provider,
+            sealed_archive_sha256=archive_sha256, sealed_image_id=image_id,
+        )
+        return await self._create(identity, cast(SandboxPort, adapter), sealed_files=files)
+
+    async def _create(
+        self, identity: dict[str, str], adapter: SandboxPort, *,
+        sealed_files: dict[str, bytes] | None = None,
+    ) -> PreviewSessionState:
         await self.cleanup()
         reservation = await self._store.reserve(
             identity, max_sessions=self._max_sessions, max_owner_sessions=self._max_owner_sessions,
@@ -256,7 +361,7 @@ class ArtifactPreviewSessionManager:
                     state = PreviewSessionState.from_record(record)
                     if state.status == "error" or self._is_expired(state):
                         await self.stop(sandbox_id)
-                        return await self.create_or_reuse(artifact_id, **{k: v for k, v in identity.items() if k not in {"artifact_id", "provider"}})
+                        return await self._create(identity, adapter, sealed_files=sealed_files)
                     return state
                 allocation = None
                 if record["phase"] == "queued":
@@ -269,7 +374,7 @@ class ArtifactPreviewSessionManager:
                         await self._store.abandon_queued(sandbox_id)
                         raise PreviewCapacityError("Preview queue expired; try again") from exc
                 if allocation is not None:
-                    return await self._allocate(allocation, adapter)
+                    return await self._allocate(allocation, adapter, sealed_files=sealed_files)
                 if time.monotonic() >= wait_deadline:
                     await self._store.abandon_queued(sandbox_id)
                     raise PreviewCapacityError("Preview capacity is busy; stop an existing preview or try again shortly")
@@ -279,17 +384,24 @@ class ArtifactPreviewSessionManager:
             await self._store.abandon_queued(sandbox_id)
             raise
 
-    async def _allocate(self, allocation: dict[str, Any], adapter: SandboxPort) -> PreviewSessionState:
+    async def _allocate(
+        self, allocation: dict[str, Any], adapter: SandboxPort, *,
+        sealed_files: dict[str, bytes] | None = None,
+    ) -> PreviewSessionState:
         sandbox_id = allocation["sandbox_id"]
+        if sealed_files is not None and not isinstance(adapter, _SealedCandidateStager):
+            raise RuntimeError("Sealed preview adapter lost immutable staging capability")
         token = allocation["allocation_token"]
         started = time.monotonic()
         try:
             async with asyncio.timeout(self._allocation_timeout_seconds):
                 info = await adapter.create_session(
-                    template=self._template, timeout_seconds=self._ttl_minutes * 60,
-                    envs=sandbox_resource_environment(),
+                    template=allocation["sealed_image_id"] if sealed_files is not None else self._template,
+                    timeout_seconds=self._ttl_minutes * 60,
+                    envs={} if sealed_files is not None else preview_resource_environment(),
                     metadata={
-                        "purpose": "artifact_preview", "manager_sandbox_id": sandbox_id,
+                        "purpose": "sealed_candidate_preview" if sealed_files is not None else "artifact_preview",
+                        "manager_sandbox_id": sandbox_id,
                         **{name: allocation[name] for name in ("artifact_id", "app_id", "user_id", "target_app_id", "build_registry_id")},
                     },
                 )
@@ -300,9 +412,32 @@ class ArtifactPreviewSessionManager:
             raise
         state = PreviewSessionState.from_record({
             **allocation, "phase": "active", "session_id": info.session_id,
-            "expires_at": _utcnow() + timedelta(seconds=self._ttl_minutes * 60 - (time.monotonic() - started)),
         })
         try:
+            if sealed_files is not None:
+                assert isinstance(adapter, _SealedCandidateStager)
+                await adapter.stage_sealed_files(session_id=info.session_id, files=sealed_files)
+                result = await adapter.run_command(
+                    session_id=info.session_id, background=True, timeout_seconds=15,
+                    command=(f"{_RUNTIME} start --app-root /workspace/app "
+                             "--preview-url http://127.0.0.1:3000 > /tmp/mozaiks-sealed-start.log 2>&1"),
+                )
+                if not result.success:
+                    raise RuntimeError("Sealed preview runtime failed to start")
+                deadline = time.monotonic() + self._startup_timeout_seconds
+                while True:
+                    result = await adapter.run_command(
+                        session_id=info.session_id, command=f"{_RUNTIME} check --app-root /workspace/app",
+                        timeout_seconds=10,
+                    )
+                    if result.success:
+                        break
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError("Sealed preview runtime did not become healthy")
+                    await asyncio.sleep(1)
+                state.status = "running"
+                state.health_checked_at = _utcnow()
+            state.expires_at = _utcnow() + timedelta(seconds=self._ttl_minutes * 60 - (time.monotonic() - started))
             saved = await self._store.attach_session(sandbox_id, token, state.payload(), expires_at=state.expires_at)
         except (Exception, asyncio.CancelledError):
             try:
@@ -459,7 +594,9 @@ class ArtifactPreviewSessionManager:
         return next_files, deleted_paths, paths, manifest, has_requirements
 
     async def sync(self, sandbox_id: str, files: list[dict[str, str | bytes]], deleted: list[str]) -> None:
-        await self._ensure_alive(sandbox_id)
+        state = await self._ensure_alive(sandbox_id)
+        if state.sealed_archive_sha256:
+            raise ValueError("Sealed candidate source cannot be synchronized")
         async with self._operation(sandbox_id, "sync") as (state, token):
             if state.status == "error":
                 raise ValueError("Preview failed; recreate the preview before syncing files")
@@ -521,7 +658,9 @@ class ArtifactPreviewSessionManager:
         return await self._save(state, token)
 
     async def start(self, sandbox_id: str) -> PreviewSessionState:
-        await self._ensure_alive(sandbox_id)
+        state = await self._ensure_alive(sandbox_id)
+        if state.sealed_archive_sha256:
+            raise ValueError("Sealed candidate runtime cannot be restarted through artifact preview")
         async with self._operation(sandbox_id, "start") as (state, token):
             if state.status == "error":
                 return state

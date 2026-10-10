@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from mozaiksai.core.runtime.app.entitlements import ProductPlanSelection
 from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
 from mozaiksai.hosts.platform import (
     _current_user_token_wallet_summary,
@@ -179,3 +180,64 @@ async def test_current_user_token_wallet_summary_uses_ledger(monkeypatch):
 
     assert payload["wallets"][0]["balance"]["balance"] == 900
     assert payload["source"] == "token_wallet_ledger"
+
+
+@pytest.mark.asyncio
+async def test_current_user_token_wallet_summary_resolves_v2_wallet_product(monkeypatch):
+    config = SubscriptionsConfig.model_validate({
+        "schema_version": "mozaiks.subscriptions.v2",
+        "label": "Multi-product SaaS",
+        "default_product_id": "platform",
+        "token_wallets": [{"wallet_id": "ai_tokens", "scope": "user"}],
+        "products": [
+            {
+                "product_id": "platform", "label": "Platform",
+                "default_plan_id": "builder",
+                "plans": [{"plan_id": "builder", "label": "Builder"}],
+            },
+            {
+                "product_id": "ai", "label": "AI",
+                "default_plan_id": "ai_starter",
+                "plans": [
+                    {"plan_id": "ai_starter", "label": "Starter"},
+                    {"plan_id": "ai_pro", "label": "Pro", "token_allowances": [
+                        {"wallet_id": "ai_tokens", "amount": 500, "cadence": "monthly"}
+                    ]},
+                ],
+            },
+        ],
+    })
+
+    class _Entitlements:
+        def __init__(self, *, config):
+            assert config is not None
+
+        async def current_plan_id(self, *, product_id=None, **kwargs):
+            return "ai_pro" if product_id == "ai" else "builder"
+
+        async def current_product_plan(self, *, product_id, **kwargs):
+            assert product_id == "ai"
+            return ProductPlanSelection(
+                "ai", "ai_pro", "active_assignment",
+                [{"wallet_id": "ai_tokens", "amount": 350, "cadence": "monthly"}],
+            )
+
+    class _Ledger:
+        async def wallet_summaries_for_config(self, **kwargs):
+            selected = kwargs["wallet_plans"]["ai_tokens"]
+            assert kwargs["plan_id"] == "builder"
+            assert selected.product_id == "ai"
+            assert selected.plan_id == "ai_pro"
+            assert selected.allowances[0].amount == 350
+            assert selected.grant_authority == "billing_fulfillment"
+            assert kwargs["ensure_allowances"] is True
+            return {"wallets": [{"wallet_id": "ai_tokens"}], "source": "token_wallet_ledger"}
+
+    monkeypatch.setattr("mozaiksai.hosts.platform.ConfiguredEntitlementAdapter", _Entitlements)
+    monkeypatch.setattr(
+        "mozaiksai.core.tokens.wallet.get_token_wallet_ledger", lambda: _Ledger()
+    )
+    payload = await _current_user_token_wallet_summary(
+        config, app_id="app_1", user_id="user_1", ensure_allowances=True
+    )
+    assert payload["wallets"][0]["wallet_id"] == "ai_tokens"

@@ -41,17 +41,6 @@ jobs:
       name: staging
       url: ${{ vars.APP_URL }}
 
-    services:
-      mongo:
-        image: mongo:7
-        ports:
-          - 27017:27017
-        options: >-
-          --health-cmd "mongosh --eval \"db.adminCommand('ping')\""
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
     steps:
       - uses: actions/checkout@v4
 
@@ -102,6 +91,9 @@ jobs:
           push: false
           load: true
           tags: "{{APP_NAME}}:staging-readiness-${{ github.sha }}"
+          build-contexts: |
+            node:20-slim=docker-image://public.ecr.aws/docker/library/node:20-slim
+            python:3.11-slim=docker-image://public.ecr.aws/docker/library/python:3.11-slim
           build-args: |
             VITE_OIDC_AUTHORITY=${{ vars.VITE_OIDC_AUTHORITY || secrets.VITE_OIDC_AUTHORITY }}
             VITE_OIDC_CLIENT_ID=${{ vars.VITE_OIDC_CLIENT_ID || secrets.VITE_OIDC_CLIENT_ID || '{{APP_NAME}}' }}

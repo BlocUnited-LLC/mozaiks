@@ -233,7 +233,17 @@ def test_token_top_up_product_price_currency_must_be_three_letter_code() -> None
         )
 
 
-def test_depleted_balance_routes_must_be_app_local() -> None:
+@pytest.mark.parametrize(
+    ("route_field", "route"),
+    [
+        ("billing_route", "https://provider.example/billing"),
+        ("billing_route", "//provider.example/billing"),
+        ("top_up_route", "///provider.example/top-up"),
+        ("upgrade_route", "//provider.example/upgrade?next=/app"),
+        ("contact_route", "//provider.example/contact"),
+    ],
+)
+def test_depleted_balance_routes_must_be_app_local(route_field: str, route: str) -> None:
     with pytest.raises(ValidationError, match="app-local path"):
         SubscriptionsConfig.model_validate(
             {
@@ -245,7 +255,7 @@ def test_depleted_balance_routes_must_be_app_local() -> None:
                         "wallet_id": "ai_tokens",
                         "depleted_balance": {
                             "recovery_action": "top_up",
-                            "billing_route": "https://provider.example/billing",
+                            route_field: route,
                         },
                     }
                 ],
@@ -702,6 +712,42 @@ def test_capabilities_for_plan_free_has_no_capabilities() -> None:
 # ---------------------------------------------------------------------------
 # AppLoadResult carries subscriptions_config
 # ---------------------------------------------------------------------------
+
+
+def test_v2_rejects_conflicting_root_and_product_wallet_definitions() -> None:
+    with pytest.raises(ValidationError, match="conflicting root/product definitions"):
+        SubscriptionsConfig.model_validate({
+            "schema_version": "mozaiks.subscriptions.v2",
+            "label": "Multi-product SaaS",
+            "default_product_id": "ai",
+            "token_wallets": [{"wallet_id": "ai_tokens", "scope": "user"}],
+            "products": [{
+                "product_id": "ai", "label": "AI", "default_plan_id": "free",
+                "token_wallets": [{"wallet_id": "ai_tokens", "scope": "tenant"}],
+                "plans": [{"plan_id": "free", "label": "Free"}],
+            }],
+        })
+
+
+def test_v2_rejects_two_auto_debit_wallets_for_one_usage_meter() -> None:
+    with pytest.raises(ValidationError, match="multiple auto-debit token wallets"):
+        SubscriptionsConfig.model_validate({
+            "schema_version": "mozaiks.subscriptions.v2",
+            "label": "Multi-product SaaS",
+            "default_product_id": "ai",
+            "products": [
+                {
+                    "product_id": product_id, "label": product_id,
+                    "default_plan_id": "free",
+                    "token_wallets": [{
+                        "wallet_id": f"{product_id}_tokens", "scope": "user",
+                        "usage_meter_id": "ai_tokens", "auto_debit_usage": True,
+                    }],
+                    "plans": [{"plan_id": "free", "label": "Free"}],
+                }
+                for product_id in ("ai", "other")
+            ],
+        })
 
 
 def test_app_load_result_has_subscriptions_config_field() -> None:

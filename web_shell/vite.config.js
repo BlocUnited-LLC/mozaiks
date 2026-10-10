@@ -268,6 +268,16 @@ export default defineConfig(({ mode }) => {
   cacheDir: path.join(__dirname, 'node_modules', '.vite-apps', createHash('sha256').update(platformAppDir).digest('hex').slice(0, 16)),
   plugins: [
     {
+      name: 'monaco-patched-sanitizer',
+      enforce: 'pre',
+      resolveId(source, importer) {
+        const sanitizer = path.resolve(__dirname, 'node_modules/monaco-editor/esm/vs/base/browser/domSanitize.js').replace(/\\/g, '/');
+        if (source === './dompurify/dompurify.js' && importer?.split('?', 1)[0].replace(/\\/g, '/') === sanitizer) {
+          return path.resolve(chatUiSrcRoot, 'utils/monacoDomPurify.js');
+        }
+      },
+    },
+    {
       name: 'mozaiks-app-extensions',
       resolveId(id) {
         if (id === '@platform/extensions') return '\0mozaiks-app-extensions';
@@ -427,13 +437,8 @@ export default defineConfig(({ mode }) => {
             return 'vendor-auth';
           }
 
-          if (
-            id.includes('/node_modules/@monaco-editor/') ||
-            id.includes('/node_modules/monaco-editor/')
-          ) {
-            return 'vendor-monaco';
-          }
-
+          // Monaco follows CodeEditorPane's lazy boundary. A forced vendor chunk
+          // pulls its sanitizer into the eager shared dependency graph.
           return undefined;
         },
       },
@@ -441,6 +446,9 @@ export default defineConfig(({ mode }) => {
   },
 
   optimizeDeps: {
+    // Keep Monaco's copied sanitizer import visible to the exact resolver above
+    // in dev as well as production, instead of prebundling its vendored copy.
+    exclude: ['monaco-editor'],
     rolldownOptions: {
       // Vite 8 uses Rolldown for dependency scanning before normal plugins run.
       // Several first-party UI files intentionally use JSX in .js modules, so

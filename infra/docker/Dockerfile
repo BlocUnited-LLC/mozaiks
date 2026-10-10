@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # Mozaiks OSS Repo Host Image
 # ============================
 # Builds the installable `mozaiks` package and serves the first-party

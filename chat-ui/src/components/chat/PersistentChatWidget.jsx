@@ -20,7 +20,6 @@ import {
   supportWarn,
 } from '../../utils/supportLinks';
 import {
-  getStoredActiveChatId,
   getStoredActiveWorkflowName,
   getStoredWorkflowChatId,
   setStoredActiveChatId,
@@ -49,7 +48,6 @@ import {
  * - On next page load the widget resumes the same general chat via chat.enter_general_mode
  */
 const PersistentChatWidget = ({
-  chatId,
   workflowName,
   pageContext = null,
   pagePath = null,
@@ -57,7 +55,6 @@ const PersistentChatWidget = ({
 }) => {
   const {
     setConversationMode,
-    activeChatId,
     activeWorkflowName,
     setActiveChatId,
     setActiveWorkflowName,
@@ -88,11 +85,15 @@ const PersistentChatWidget = ({
   const [widgetIdentity, setWidgetIdentity] = useState({
     appId: resolvedAppId,
     userId: resolvedUserId,
+    sourceAppId: resolvedAppId,
+    sourceUserId: resolvedUserId,
   });
-  const effectiveAppId = widgetIdentity.appId || resolvedAppId;
-  const effectiveUserId = widgetIdentity.userId || resolvedUserId;
+  const identityMatches = widgetIdentity.sourceAppId === resolvedAppId && widgetIdentity.sourceUserId === resolvedUserId;
+  const effectiveAppId = resolvedAppId || (identityMatches ? widgetIdentity.appId : null);
+  const effectiveUserId = resolvedUserId || (identityMatches ? widgetIdentity.userId : null);
   const { theme: chatTheme } = useTheme(resolvedAppId);
   const brandLogoSrc = getBrandLogoSrc(chatTheme);
+  const assistantName = config?.appName || chatTheme?.branding?.name || 'Assistant';
 
   useEffect(() => {
     let cancelled = false;
@@ -110,6 +111,8 @@ const PersistentChatWidget = ({
       setWidgetIdentity({
         appId: scope.appId || resolvedAppId,
         userId: scope.userId || resolvedUserId,
+        sourceAppId: resolvedAppId,
+        sourceUserId: resolvedUserId,
       });
     });
 
@@ -123,20 +126,46 @@ const PersistentChatWidget = ({
     if (isExpanded && !wsEnabled) setWsEnabled(true);
   }, [isExpanded, wsEnabled]);
 
+  const pendingWidgetSendsRef = useRef([]);
+  const [pendingSendCount, setPendingSendCount] = useState(0);
+  const clearPendingSends = useCallback(() => {
+    pendingWidgetSendsRef.current = [];
+    setPendingSendCount(0);
+  }, []);
+  useEffect(clearPendingSends, [clearPendingSends, effectiveAppId, effectiveUserId]);
+
   // Widget's own WS connection in ask/general mode.
-  const { send: wsSend, status: wsStatus, isAgentTyping, generalModeReady } = useWidgetAskWS({
+  const {
+    send: wsSend, status: wsStatus, isAgentTyping, generalModeReady,
+    historyStatus, retryHistory, retryConnection, startNewConversation, selectingNew, getQueueScope,
+  } = useWidgetAskWS({
     api,
     appId: effectiveAppId,
     userId: effectiveUserId,
     workflowName: null,
     activeGeneralChatId,
     setActiveGeneralChatId,
-    onAgentMessage: (msg) => setAskMessages(prev => [...prev, msg]),
+    messages: askMessages,
+    setMessages: setAskMessages,
+    getPendingMessageIds: (gid, pendingScope) => pendingWidgetSendsRef.current
+      .filter(message => message.generalChatId === pendingScope || message.generalChatId === gid)
+      .map(message => message.id),
+    onConversationAcknowledged: (gid, pendingScope) => {
+      pendingWidgetSendsRef.current = pendingWidgetSendsRef.current.map(message =>
+        message.generalChatId === pendingScope ? { ...message, generalChatId: gid } : message);
+      setAskMessages(previous => {
+        const ids = new Set(previous.map(message => message.id));
+        return [...previous, ...pendingWidgetSendsRef.current
+          .filter(message => message.generalChatId === gid && !ids.has(message.id))
+          .map(message => message.optimistic)];
+      });
+    },
     enabled: wsEnabled,
     pageContext,
     pagePath,
   });
-  const pendingWidgetSendsRef = useRef([]);
+  const hasPendingCurrentSends = pendingSendCount > 0 && pendingWidgetSendsRef.current.some(message =>
+    message.generalChatId === getQueueScope());
 
   // Server-known workflow session (survives cleared localStorage) so the
   // "Back to workspace" logo button stays reliable across pages and reloads.
@@ -168,15 +197,17 @@ const PersistentChatWidget = ({
     if (wsStatus !== 'connected' || !generalModeReady || pendingWidgetSendsRef.current.length === 0) {
       return;
     }
-    const pending = [...pendingWidgetSendsRef.current];
-    pendingWidgetSendsRef.current = [];
-    pending.forEach((text) => {
-      const sent = wsSend(text);
+    const gid = getQueueScope();
+    const pending = pendingWidgetSendsRef.current.filter(message => message.generalChatId === gid);
+    pendingWidgetSendsRef.current = pendingWidgetSendsRef.current.filter(message => message.generalChatId !== gid);
+    pending.forEach((message) => {
+      const sent = wsSend(message.text);
       if (!sent) {
-        pendingWidgetSendsRef.current.push(text);
+        pendingWidgetSendsRef.current.push(message);
       }
     });
-  }, [generalModeReady, wsSend, wsStatus]);
+    setPendingSendCount(pendingWidgetSendsRef.current.length);
+  }, [generalModeReady, getQueueScope, wsSend, wsStatus]);
 
   // Every in-progress workflow session this user owns. The widget is ask-only,
   // so this list is the user's route back into any build they have running —
@@ -209,7 +240,12 @@ const PersistentChatWidget = ({
         workflowName: storedWorkflowNameForWidget,
       })
     : null;
-  const hasActiveWorkflow = !!(activeChatId || chatId || storedWorkflowChatIdForWidget || serverWorkflowSession);
+  const resumableWorkflow = storedWorkflowChatIdForWidget
+    ? { workflow_name: storedWorkflowNameForWidget, chat_id: storedWorkflowChatIdForWidget }
+    : serverWorkflowSession
+      ? { workflow_name: serverWorkflowSession.workflowName, chat_id: serverWorkflowSession.chatId }
+      : null;
+  const hasWorkflowAccess = workflowSessions.length > 0 || Boolean(resumableWorkflow) || Boolean(freshStartPath);
 
   // Unread badge: count new messages that arrive while the widget is collapsed
   const prevAskLenRef = useRef(null);
@@ -247,15 +283,17 @@ const PersistentChatWidget = ({
     const text = message && typeof message === 'object' ? message.content : message;
     if (!text?.trim()) return;
     const wantsHumanSupport = shouldOfferHumanSupport(text);
+    const id = `opt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
     // Optimistic — show the user's message immediately
-    setAskMessages(prev => [...prev, {
-      id: `opt_${Date.now()}`,
+    const optimistic = {
+      id,
       sender: 'user',
       agentName: 'You',
       content: text,
       timestamp: new Date().toISOString(),
-    }]);
+    };
+    setAskMessages(prev => [...prev, optimistic]);
 
     if (wantsHumanSupport) {
       const transcriptSnapshot = buildSupportConversationTranscript(
@@ -302,24 +340,20 @@ const PersistentChatWidget = ({
     if (wsStatus === 'connected' && generalModeReady) {
       const sent = wsSend(text);
       if (!sent) {
-        pendingWidgetSendsRef.current.push(text);
+        pendingWidgetSendsRef.current.push({ id, text, optimistic, generalChatId: getQueueScope() });
+        setPendingSendCount(pendingWidgetSendsRef.current.length);
         setWsEnabled(true);
       }
     } else {
-      pendingWidgetSendsRef.current.push(text);
+      pendingWidgetSendsRef.current.push({ id, text, optimistic, generalChatId: getQueueScope() });
+      setPendingSendCount(pendingWidgetSendsRef.current.length);
       setWsEnabled(true);
     }
   };
 
   // Start a fresh ask conversation
   const handleNewConversation = () => {
-    const newId = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
-      ? `ask_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`
-      : `ask_${Date.now()}`;
-    setAskMessages([]);
-    supportCueInjectedRef.current = false;
-    pendingWidgetSendsRef.current = [];
-    setActiveGeneralChatId(newId);
+    if (startNewConversation()) supportCueInjectedRef.current = false;
   };
 
   // Navigate to full ask ChatPage
@@ -333,32 +367,11 @@ const PersistentChatWidget = ({
     navigate(`/chat?${params.toString()}`);
   };
 
-  // Navigate into a workflow session. With no explicit target this resolves the
-  // session this browser last used; `target` carries an explicit pick from the
-  // session list so the user can reach any build they have running.
-  const handleBackToWorkspace = (target = null) => {
-    const resolvedWorkflowName = target?.workflow_name
-      || workflowName
-      || activeWorkflowName
-      || getStoredActiveWorkflowName()
-      || serverWorkflowSession?.workflowName
-      || null;
-    const scopedWorkflowChatId = target
-      ? null
-      : (resolvedWorkflowName
-        ? getStoredWorkflowChatId({
-            appId: effectiveAppId || resolvedAppId,
-            userId: effectiveUserId || resolvedUserId,
-            workflowName: resolvedWorkflowName,
-          })
-        : null);
-    const resolvedChatId = target?.chat_id
-      || scopedWorkflowChatId
-      || chatId
-      || activeChatId
-      || getStoredActiveChatId()
-      || serverWorkflowSession?.chatId
-      || null;
+  // Resume only a complete session from the scoped cache or the owned server list.
+  const handleBackToWorkspace = (target = resumableWorkflow) => {
+    const resolvedWorkflowName = target?.workflow_name;
+    const resolvedChatId = target?.chat_id;
+    if (!resolvedWorkflowName || !resolvedChatId) return;
 
     if (resolvedChatId) {
       setActiveChatId(resolvedChatId);
@@ -387,10 +400,7 @@ const PersistentChatWidget = ({
     navigate(`/chat?${params.toString()}`);
   };
 
-  // The workspace button is always available: the widget is ask-only, so it is
-  // the user's only route back into a workflow from a non-chat page. One
-  // running session goes straight there, several open a picker, and none sends
-  // the user to the workflow surface to start one.
+  // Workflow access requires a resumable session or an app-declared entrypoint.
   const workflowAccessLabel = workflowSessions.length > 1
     ? `Go to a workflow (${workflowSessions.length} running)`
     : workflowSessions.length === 1
@@ -406,20 +416,17 @@ const PersistentChatWidget = ({
       handleBackToWorkspace(workflowSessions[0]);
       return;
     }
-    if (hasActiveWorkflow) {
+    if (resumableWorkflow) {
       handleBackToWorkspace();
       return;
     }
-    setIsExpanded(false);
     if (freshStartPath) {
       // Start where the app declares builds begin. Routing to bare workflow
       // mode instead would resolve a workflow from stored client state, which
       // lands the user in whichever workflow this browser last touched.
+      setIsExpanded(false);
       navigate(freshStartPath);
-      return;
     }
-    setConversationMode('workflow');
-    navigate('/chat?mode=workflow');
   };
 
   // Support form handlers
@@ -560,7 +567,7 @@ const PersistentChatWidget = ({
         <button
           type="button"
           onClick={() => { setIsExpanded(true); setUnreadChatCount(0); }}
-          className="group relative flex flex-col items-center gap-2 rounded-l-2xl border-2 border-r-0 border-primary/70 bg-card px-2 py-5 shadow-[0_8px_28px_rgba(0,0,0,0.45)] ring-1 ring-primary/25 transition-all duration-200 hover:border-primary hover:bg-muted md:px-2.5"
+          className="group relative flex min-w-11 flex-col items-center gap-1 rounded-l-2xl border-2 border-r-0 border-primary/70 bg-card px-2 py-2 shadow-[0_8px_28px_rgba(0,0,0,0.45)] ring-1 ring-primary/25 transition-all duration-200 hover:border-primary hover:bg-muted md:gap-2 md:px-2.5 md:py-5"
           title="Open assistant"
           aria-label="Open assistant"
         >
@@ -568,7 +575,7 @@ const PersistentChatWidget = ({
             src={brandLogoSrc}
             alt=""
             aria-hidden="true"
-            className="h-7 w-7 transition-transform group-hover:scale-110 md:h-9 md:w-9"
+            className="h-5 w-5 transition-transform group-hover:scale-110 md:h-9 md:w-9"
             onError={applyBrandImageFallback}
           />
           <svg
@@ -629,13 +636,13 @@ const PersistentChatWidget = ({
               </span>
               <span className="text-left min-w-0 flex-1">
                 <span className="block text-sm sm:text-lg font-bold text-white tracking-tight truncate">
-                  {inSupportMode ? 'Help & Support' : 'mozaiksai'}
+                  {inSupportMode ? 'Help & Support' : assistantName}
                 </span>
                 <span className="block text-[10px] sm:text-xs text-gray-400 truncate flex items-center gap-1.5">
                   {inSupportMode ? 'Talk to an operator' : (
                     <>
                       <span className={`inline-block w-1.5 h-1.5 rounded-full ${connectionDot}`} />
-                  {wsStatus === 'connected' && generalModeReady ? 'Ask anything' : wsStatus === 'connecting' || (wsStatus === 'connected' && !generalModeReady) ? 'Connecting…' : 'Ask mode'}
+                  {historyStatus === 'error' ? 'History unavailable' : generalModeReady ? 'Ask anything' : historyStatus === 'loading' ? 'Loading conversation…' : wsStatus === 'connecting' || (wsStatus === 'connected' && !generalModeReady) ? 'Connecting…' : 'Ask mode'}
                     </>
                   )}
                 </span>
@@ -658,9 +665,8 @@ const PersistentChatWidget = ({
                 <span role="img" aria-label="Get help from an operator">🛟</span>
               </button>
 
-              {/* Workflow access — always available; the widget never enters
-                  workflow mode itself, so this is the way back into a build. */}
-              {!inSupportMode && (
+              {/* The widget stays in Ask mode; declared targets open full workflows. */}
+              {!inSupportMode && hasWorkflowAccess && (
                 <button
                   onClick={handleWorkflowAccess}
                   className="group relative p-2 rounded-lg bg-gradient-to-r from-[rgba(var(--color-primary-rgb),0.1)] to-[rgba(var(--color-secondary-rgb),0.1)] border border-[rgba(var(--color-primary-light-rgb),0.3)] hover:border-[rgba(var(--color-primary-light-rgb),0.6)] transition-all duration-300 backdrop-blur-sm"
@@ -720,6 +726,7 @@ const PersistentChatWidget = ({
               <button
                 type="button"
                 onClick={handleNewConversation}
+                disabled={wsStatus !== 'connected' || selectingNew || hasPendingCurrentSends}
                 className="text-[11px] text-[var(--color-primary-light)] hover:text-white transition-colors opacity-60 hover:opacity-100 flex items-center gap-1"
               >
                 <span>+</span>
@@ -735,6 +742,18 @@ const PersistentChatWidget = ({
         )}
 
         {/* Body */}
+        {!inSupportMode && wsEnabled && ['error', 'disconnected'].includes(wsStatus) && (
+          <div role="status" className="flex-shrink-0 px-3 py-2 text-xs text-gray-200">
+            The assistant is disconnected. Your messages are waiting.
+            <button type="button" onClick={retryConnection} className="ml-2 underline">Retry connection</button>
+          </div>
+        )}
+        {!inSupportMode && wsStatus === 'connected' && historyStatus === 'error' && (
+          <div role="status" className="flex-shrink-0 px-3 py-2 text-xs text-gray-200">
+            Couldn’t load this conversation. Your messages will wait until it’s available.
+            <button type="button" onClick={retryHistory} className="ml-2 underline">Retry history</button>
+          </div>
+        )}
         {inSupportMode ? (
           <div className="flex flex-1 flex-col overflow-hidden">
             {supportSent ? (

@@ -409,6 +409,9 @@ class AG2NetworkRunnerResult:
     wal: list[dict[str, Any]] = field(default_factory=list)
     error: str | None = None
     live_run: Any | None = None
+    # Set only after the live channel accepts this specific user message.
+    # Run settlement can fail after admission, so status alone is not enough.
+    input_accepted: bool | None = None
 
 
 class AG2NetworkRunner:
@@ -994,6 +997,7 @@ class _AG2LiveWorkflowRun:
                     app_id=self.app_id,
                     channel_id=self.channel_id,
                     error="live_ag2_channel_closed",
+                    input_accepted=False,
                 )
 
             ended = await self._ended_result()
@@ -1015,6 +1019,7 @@ class _AG2LiveWorkflowRun:
                     app_id=self.app_id,
                     channel_id=self.channel_id,
                     error="ag2_network_stale_build_context",
+                    input_accepted=False,
                 )
 
             prior_wal = await self._hub.read_wal(self.channel_id)
@@ -1039,6 +1044,7 @@ class _AG2LiveWorkflowRun:
                 return ended
 
             result = await self._wait_for_settlement(seen_envelope_ids=seen_envelope_ids)
+            result.input_accepted = True
             result.wal = list(result.wal[self._wal_cursor :])
             self._wal_cursor += len(result.wal)
             if result.status is RunStatus.PAUSED:
@@ -1079,6 +1085,7 @@ class _AG2LiveWorkflowRun:
             close_reason=str(metadata.close_reason or "") or None,
             error=CHANNEL_TERMINAL_ERROR,
         )
+        result.input_accepted = False
         result.wal = list(result.wal[self._wal_cursor :])
         self._wal_cursor += len(result.wal)
         await self.close()

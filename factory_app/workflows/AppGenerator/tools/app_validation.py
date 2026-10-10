@@ -979,7 +979,7 @@ async def _run_sandbox_validation(
             timeout_seconds = min(timeout_seconds, configured_timeout)
         session = await adapter.create_session(
             timeout_seconds=timeout_seconds,
-            metadata=session_metadata or {"purpose": "app_validation"},
+            metadata={**(session_metadata or {}), "purpose": "app_validation"},
             **({"envs": {**resource_env, **build_env}} if canonical else {}),
         )
         session_id = session.session_id

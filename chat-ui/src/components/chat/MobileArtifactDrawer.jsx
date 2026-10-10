@@ -5,6 +5,10 @@ const MobileArtifactDrawer = ({
   onStateChange = () => {},
   onClose = () => {},
   artifactContent = null,
+  isMobile = true,
+  collapseButtonRef = null,
+  artifactPaneRef = null,
+  desktopWidth = '100%',
   hasUnseenChat = false,
   hasUnseenArtifact = false,
   viewMode = false,
@@ -30,37 +34,44 @@ const MobileArtifactDrawer = ({
     if (typeof onClose === 'function') onClose();
   };
 
-  const expandedStyle = !viewMode && isExpanded
-    ? { height: 'calc(100dvh - env(safe-area-inset-top, 0px) - var(--shell-header-height, 4rem))' }
-    : undefined;
-
-  // Mount on first open, then retain the live artifact while it is collapsed.
+  // One owner retains the mounted artifact across both visibility and width changes.
   if (!isVisible && !artifactVisited) return null;
 
   return (
     <div
-      className="absolute inset-x-0 bottom-0 z-40 pointer-events-none"
+      ref={artifactPaneRef}
+      tabIndex={-1}
+      className={isMobile
+        ? 'absolute inset-0 z-40 min-h-0 pointer-events-none'
+        : 'relative flex flex-col min-w-0 min-h-0 h-full self-stretch transition-all duration-500 ease-in-out pt-0'}
       hidden={!isVisible}
       inert={!isVisible}
       aria-hidden={!isVisible}
-      style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)', display: isVisible ? undefined : 'none' }}
+      style={{
+        ...(isMobile ? { paddingBottom: 'env(safe-area-inset-bottom, 0px)' } : { width: desktopWidth }),
+        display: isVisible ? undefined : 'none',
+      }}
     >
       <div
-        className="w-full rounded-t-3xl bg-[rgba(3,6,15,0.96)] backdrop-blur-2xl border border-[rgba(var(--color-primary-light-rgb),0.35)] border-b-0 shadow-[0_-12px_40px_rgba(2,6,23,0.65)] flex flex-col pointer-events-auto overflow-hidden"
-        style={expandedStyle}
+        className={isMobile
+          ? 'h-full min-h-0 w-full rounded-t-3xl bg-[rgba(3,6,15,0.96)] backdrop-blur-2xl border border-[rgba(var(--color-primary-light-rgb),0.35)] border-b-0 shadow-[0_-12px_40px_rgba(2,6,23,0.65)] flex flex-col pointer-events-auto overflow-hidden'
+          : 'flex flex-1 flex-col min-h-0 h-full'}
       >
         {/* Drag handle / collapse tap target */}
-        <button
+        {isMobile && <button
+          ref={collapseButtonRef}
           type="button"
           onClick={handleCollapse}
           className="flex items-center justify-center pt-3 pb-2 w-full flex-shrink-0"
           aria-label="Collapse artifact workspace"
         >
           <div className="w-10 h-1 rounded-full bg-white/25" />
-        </button>
+        </button>}
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto px-3 pb-4">
+        <div className={isMobile
+          ? 'flex flex-1 flex-col min-h-0 overflow-hidden px-3 pb-4'
+          : 'flex flex-1 flex-col min-h-0 h-full overflow-visible pt-0'}>
           {artifactContent ?? (
             <div className="h-full flex items-center justify-center text-white/30 text-sm">
               No artifact yet

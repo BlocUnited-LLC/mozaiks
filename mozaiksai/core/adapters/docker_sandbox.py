@@ -19,6 +19,7 @@ import os
 import re
 import shutil
 import tarfile
+import tempfile
 from pathlib import PurePosixPath
 
 _ENV_KEY_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$", re.IGNORECASE)
@@ -27,11 +28,14 @@ from typing import Any
 from logs.logging_config import get_core_logger
 from mozaiksai.core.ports.sandbox import SandboxRunResult, SandboxSessionInfo
 
+from .local_docker_cli import _docker_cli_env, _docker_prefix
+
 logger = get_core_logger("docker_sandbox")
 
 _DEFAULT_IMAGE = os.getenv("DOCKER_SANDBOX_IMAGE", "mozaiks-sandbox:local")
 _DEFAULT_WORKDIR = "/workspace"
 _DEFAULT_TIMEOUT_SECONDS = int(os.getenv("DOCKER_SANDBOX_TIMEOUT") or "300")
+_IMAGE_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 def _preview_ports() -> list[int]:
@@ -46,16 +50,18 @@ def _preview_ports() -> list[int]:
 
 
 def docker_available() -> bool:
-    """Return True if the Docker CLI is installed and the daemon is reachable."""
+    """Return True only for the local Docker daemon used by this adapter."""
     if not shutil.which("docker"):
         return False
     try:
         import subprocess
-        result = subprocess.run(
-            ["docker", "info"],
-            capture_output=True,
-            timeout=5,
-        )
+        with tempfile.TemporaryDirectory(prefix="mozaiks-docker-cli-") as config_dir:
+            result = subprocess.run(
+                [*_docker_prefix(config_dir), "info"],
+                capture_output=True,
+                timeout=5,
+                env=_docker_cli_env(),
+            )
         return result.returncode == 0
     except Exception:
         return False
@@ -79,20 +85,24 @@ class DockerSandboxAdapter:
 
     @staticmethod
     async def _run(args: list[str], *, timeout: float = 30.0, input_data: bytes | None = None) -> tuple[int, str, str]:
-        proc = await asyncio.create_subprocess_exec(
-            *args,
-            stdin=asyncio.subprocess.PIPE if input_data is not None else None,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(input_data), timeout=timeout)
-        except TimeoutError as exc:
-            proc.kill()
-            await proc.communicate()
-            raise RuntimeError(f"Docker command timed out after {timeout}s") from exc
-        rc = int(proc.returncode or 0)
-        return rc, stdout_b.decode("utf-8", errors="replace"), stderr_b.decode("utf-8", errors="replace")
+        if not args or args[0] != "docker":
+            raise ValueError("Docker adapter accepts Docker CLI commands only")
+        with tempfile.TemporaryDirectory(prefix="mozaiks-docker-cli-") as config_dir:
+            proc = await asyncio.create_subprocess_exec(
+                *_docker_prefix(config_dir), *args[1:],
+                stdin=asyncio.subprocess.PIPE if input_data is not None else None,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=_docker_cli_env(),
+            )
+            try:
+                stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(input_data), timeout=timeout)
+            except TimeoutError as exc:
+                proc.kill()
+                await proc.communicate()
+                raise RuntimeError(f"Docker command timed out after {timeout}s") from exc
+            rc = int(proc.returncode or 0)
+            return rc, stdout_b.decode("utf-8", errors="replace"), stderr_b.decode("utf-8", errors="replace")
 
     # ------------------------------------------------------------------
     # SandboxPort implementation
@@ -120,15 +130,34 @@ class DockerSandboxAdapter:
         # get_preview_url's `docker port` lookup can resolve a URL. Without
         # -p at create time no binding ever exists and docker previews are
         # structurally dead.
+        sealed_candidate = bool(metadata and metadata.get("purpose") == "sealed_candidate_preview")
+        offline_validation = bool(metadata and metadata.get("purpose") == "app_validation") or sealed_candidate
+        if sealed_candidate:
+            if not _IMAGE_ID_RE.fullmatch(image) or envs:
+                raise ValueError("Sealed preview requires a pinned local image ID and no environment overrides")
+            inspected, _, _ = await self._run(["docker", "image", "inspect", image], timeout=10)
+            if inspected != 0:
+                raise RuntimeError("Pinned sealed preview image is unavailable locally")
+            label_args += ["--label", "mozaiks.preview.sealed=true"]
         port_args: list[str] = []
-        for container_port in _preview_ports():
-            port_args += ["-p", f"127.0.0.1:0:{container_port}"]
+        if not offline_validation:
+            for container_port in _preview_ports():
+                port_args += ["-p", f"127.0.0.1:0:{container_port}"]
 
         # Run a long-lived idle container so we can exec into it
         rc, stdout, stderr = await self._run([
             "docker", "run", "-d", "--rm",
             "--init", "--cap-drop=ALL", "--security-opt=no-new-privileges",
             "--pids-limit=512", "--memory=2g", "--cpus=2",
+            *(["--pull=never", "--read-only", "--user=10001:10001",
+               "--memory-swap=2g", "--log-driver=none",
+               "--tmpfs", "/workspace:rw,nosuid,nodev,size=128m,uid=0,gid=10001,mode=0750",
+               "--tmpfs", "/workspace/logs:rw,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=0700",
+               "--tmpfs", "/tmp:rw,nosuid,nodev,size=256m,uid=10001,gid=10001,mode=0700",
+               "--tmpfs", "/opt/mozaiks/web_shell/node_modules/.vite-temp:rw,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=0700",
+               "--tmpfs", "/opt/mozaiks/web_shell/node_modules/.vite:rw,nosuid,nodev,size=64m,uid=10001,gid=10001,mode=0700"]
+              if sealed_candidate else []),
+            *(["--network", "none"] if offline_validation else []),
             "-w", _DEFAULT_WORKDIR,
             *label_args,
             *env_args,
@@ -145,6 +174,39 @@ class DockerSandboxAdapter:
             provider="docker",
             metadata={**(metadata or {}), "image": image},
         )
+
+    async def stage_sealed_files(
+        self, *, session_id: str, files: dict[str, bytes],
+    ) -> None:
+        """Stage verified files as root; the preview app UID can read but not edit them."""
+        rc, marker, _ = await self._run(
+            ["docker", "inspect", "--format", "{{index .Config.Labels \"mozaiks.preview.sealed\"}}", session_id],
+            timeout=10,
+        )
+        if rc != 0 or marker.strip() != "true":
+            raise RuntimeError("Target is not a sealed preview session")
+        archive_bytes = io.BytesIO()
+        with tarfile.open(fileobj=archive_bytes, mode="w") as archive:
+            for rel_path, content in files.items():
+                if _safe_relpath(rel_path) != rel_path or (
+                    rel_path != "requirements.txt" and not rel_path.startswith(("app/", "workflows/"))
+                ):
+                    raise ValueError("Invalid sealed preview file path")
+                member = tarfile.TarInfo(rel_path)
+                member.size = len(content)
+                member.mode = 0o444
+                archive.addfile(member, io.BytesIO(content))
+        chmod_args = ["docker", "exec", "-u", "0", session_id, "chmod", "-R", "a-w", "/workspace/app", "/workspace/workflows"]
+        if "requirements.txt" in files:
+            chmod_args.append("/workspace/requirements.txt")
+        for args, input_data in (
+            (["docker", "exec", "-u", "0", session_id, "mkdir", "-p", "/workspace/app", "/workspace/workflows"], None),
+            (["docker", "exec", "-u", "0", "-i", session_id, "tar", "--no-same-owner", "-xf", "-", "-C", "/workspace"], archive_bytes.getvalue()),
+            (chmod_args, None),
+        ):
+            rc, _, _ = await self._run(args, input_data=input_data, timeout=30)
+            if rc != 0:
+                raise RuntimeError("Sealed preview source staging failed")
 
     async def connect(
         self,
@@ -238,22 +300,24 @@ class DockerSandboxAdapter:
 
         if background:
             # Docker detaches the process; its own launch result still matters.
-            proc = await asyncio.create_subprocess_exec(
-                "docker", "exec", "-d",
-                *env_args,
-                "-w", workdir,
-                session_id,
-                "sh", "-c", command,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            try:
-                returncode = await asyncio.wait_for(proc.wait(), timeout=float(timeout_seconds or 60))
-            except TimeoutError:
-                proc.kill()
-                await proc.wait()
-                return SandboxRunResult(success=False, error="sandbox_timeout")
-            return SandboxRunResult(success=returncode == 0, exit_code=returncode)
+            with tempfile.TemporaryDirectory(prefix="mozaiks-docker-cli-") as config_dir:
+                proc = await asyncio.create_subprocess_exec(
+                    *_docker_prefix(config_dir), "exec", "-d",
+                    *env_args,
+                    "-w", workdir,
+                    session_id,
+                    "sh", "-c", command,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                    env=_docker_cli_env(),
+                )
+                try:
+                    returncode = await asyncio.wait_for(proc.wait(), timeout=float(timeout_seconds or 60))
+                except TimeoutError:
+                    proc.kill()
+                    await proc.wait()
+                    return SandboxRunResult(success=False, error="sandbox_timeout")
+                return SandboxRunResult(success=returncode == 0, exit_code=returncode)
 
         try:
             rc, stdout, stderr = await self._run(
@@ -316,12 +380,23 @@ class DockerSandboxAdapter:
         return SandboxSessionInfo(session_id=session_id, provider="docker")
 
     async def terminate_session(self, *, session_id: str) -> bool:
-        rc, _, _ = await self._run(
+        stop_rc, _, _ = await self._run(
             ["docker", "stop", session_id],
             timeout=15.0,
         )
-        if rc == 0:
-            return True
+        attempts = 3 if stop_rc == 0 else 1
+        for attempt in range(attempts):
+            rc, stdout, _ = await self._run(
+                ["docker", "ps", "--all", "--quiet", "--no-trunc", "--filter", f"id={session_id}"],
+                timeout=15.0,
+            )
+            if rc != 0:
+                return False
+            if not stdout.strip():
+                return True
+            if attempt < attempts - 1:
+                await asyncio.sleep(0.1)
+        await self._run(["docker", "rm", "-f", session_id], timeout=15.0)
         rc, stdout, _ = await self._run(
             ["docker", "ps", "--all", "--quiet", "--no-trunc", "--filter", f"id={session_id}"],
             timeout=15.0,

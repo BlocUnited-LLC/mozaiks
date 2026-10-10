@@ -202,6 +202,18 @@ stack but hardened for a real server:
 - No default passwords — all secrets must be set explicitly
 - Keycloak runs in production mode (faster, no dev-mode warnings)
 - You must set `KC_HOSTNAME` to your actual domain
+- Keycloak requires a separate operator-owned realm import with HTTPS browser
+  callbacks and origins. The included local realm cannot pass the production check.
+
+Copy `factory_app/app/brand/realm-export.json` to a file **outside this repository**.
+In that copy, replace the `mozaiks-studio` client's local `redirectUris` and
+`webOrigins` with the exact HTTPS callback and origin for your deployed browser.
+Set `MOZAIKS_PROD_REALM_IMPORT_PATH` to the absolute path of that JSON file in
+the Compose `--env-file`. Keep the file private if it contains provider secrets.
+Set `KC_HOSTNAME` to the public Keycloak hostname and configure the browser's
+`VITE_OIDC_*` values and backend `AUTH_AUDIENCE` for those clients. The
+`keycloak-realm-check` service rejects missing imports, localhost or wildcard
+callbacks, non-HTTPS origins, and a local Keycloak hostname before Keycloak starts.
 
 ```bash
 cd infra/compose
@@ -220,7 +232,14 @@ Required environment variables for production (set these in `.env`):
 | `KC_ADMIN_PASSWORD` | Keycloak admin password |
 | `KC_DB_PASSWORD` | Password for Keycloak's internal Postgres database |
 | `KC_HOSTNAME` | Your public domain (e.g. `mozaiks.yourdomain.com`) |
+| `MOZAIKS_PROD_REALM_IMPORT_PATH` | Absolute path to the operator-owned Keycloak realm JSON, outside this repository. |
 | `AUTH_AUDIENCE` | `mozaiks-api` for the included realm, or your dedicated API audience. Compose requires this value and the runtime verifies it on every token. |
+
+Keycloak's `--import-realm` applies the file only when the realm does not already
+exist in its database. On an existing deployment, inspect and update the live
+Keycloak client redirects and origins through the Keycloak administration path;
+changing the JSON file alone does not migrate that realm. Verify an actual
+browser login and the expected token audience before opening access.
 
 !!! tip "Put Mozaiks behind a reverse proxy"
     In production, put a reverse proxy (nginx, Caddy, Traefik) in front of port
@@ -355,14 +374,15 @@ what — so Mozaiks doesn't have to build any of that itself.
 
 ### What Mozaiks pre-configures
 
-The Docker Compose stack imports the Mozaiks realm from
-`factory_app/app/brand/realm-export.json`. That file is a repo-local Keycloak
-seed for the OSS compose stack. It includes a public `mozaiks-studio` browser
-client and a separate `mozaiks-api` audience client. For a deployed browser, change
-the registered callback and web origin to your actual browser URL, and configure
-the public `VITE_OIDC_*` settings alongside backend auth settings. Generated apps carry provider-neutral
-auth behavior in `app/config/auth.yaml`; provider-specific realm export or
-social-login setup remains an operator/host concern.
+Local Compose imports `factory_app/app/brand/realm-export.json`. It is a
+repo-local Keycloak seed with a public `mozaiks-studio` browser client, a
+separate `mozaiks-api` audience client, and localhost browser callbacks.
+Production Compose imports only the operator-owned file named by
+`MOZAIKS_PROD_REALM_IMPORT_PATH`, after validating its HTTPS callbacks and
+origins. Configure public `VITE_OIDC_*` settings alongside backend auth settings.
+Generated apps carry provider-neutral auth behavior in `app/config/auth.yaml`;
+provider-specific realm export or social-login setup remains an operator/host
+concern.
 
 ### Token audience
 

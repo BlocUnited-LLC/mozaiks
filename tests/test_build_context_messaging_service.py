@@ -7,6 +7,8 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
+from mozaiksai.core.runtime.persistence.adapter import PersistencePrincipal
+
 BACKEND = (
     Path(__file__).parent.parent
     / "factory_app"
@@ -103,7 +105,9 @@ class _FakeCollection:
 
 
 class _FakePersistence:
-    def __init__(self, app_id="app_1"):
+    def __init__(self, app_id="app_1", *, principal: PersistencePrincipal | None):
+        self.app_id = app_id
+        self.principal = principal
         self.collections = {
             ("messages", "threads"): _FakeCollection(app_id=app_id),
             ("messages", "messages"): _FakeCollection(app_id=app_id),
@@ -124,7 +128,10 @@ def _ctx(user_id="user_1", app_id="app_1", workspace_id="workspace_1"):
         app_id=app_id,
         workspace_id=workspace_id,
         user_id=user_id,
-        persistence=_FakePersistence(app_id=app_id),
+        persistence=_FakePersistence(
+            app_id=app_id,
+            principal=PersistencePrincipal(user_id=user_id, workspace_id=workspace_id),
+        ),
         emit=emit,
         emitted=emitted,
     )
@@ -270,8 +277,19 @@ async def test_workspace_thread_can_be_messaged_from_current_workspace() -> None
 async def test_create_thread_rejects_scope_id_outside_current_context() -> None:
     ctx = _ctx(app_id="app_1", workspace_id="workspace_1")
 
-    with pytest.raises(PermissionError, match="app message scope"):
+    with pytest.raises(PermissionError, match="app message scope must match"):
         await MessageService().create_thread(ctx, scope_type="app", scope_id="other_app")
 
-    with pytest.raises(PermissionError, match="workspace message scope"):
+    with pytest.raises(PermissionError, match="workspace message scope must match"):
         await MessageService().create_thread(ctx, scope_type="workspace", scope_id="other_workspace")
+
+
+@pytest.mark.asyncio
+async def test_workspace_scope_rejects_unverified_context() -> None:
+    ctx = _ctx(workspace_id="workspace_1")
+    ctx.persistence.principal = None
+
+    with pytest.raises(PermissionError, match="workspace message scope requires a verified identity"):
+        await MessageService().create_thread(ctx, scope_type="workspace", scope_id="workspace_1")
+
+    assert ctx.persistence.collections[("messages", "threads")].rows == []

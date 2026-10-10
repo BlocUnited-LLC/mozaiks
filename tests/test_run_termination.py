@@ -214,6 +214,7 @@ def test_max_turns_close_after_a_user_bound_packet_settles_once_as_failed(transp
     # The reply that used the last turn ends the run; the next one reaches no agent.
     assert len(validator.ask_calls) == 2
     assert ending["run_status"] == "failed"
+    assert ending["input_accepted"] is True
     # Only the reply's own turn is projected, once.
     assert transport_path.persistence.assistant_messages == ["Running validation checks."]
     assert len(transport_path.of_type("chat.stream_end")) == 1

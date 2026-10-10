@@ -26,6 +26,8 @@ from logs.logging_config import get_core_logger
 from mozaiksai.core.core_config import get_mongo_client
 from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE, RuntimeCollections
 from mozaiksai.core.runtime.app.subscriptions_loader import (
+    PlanDef,
+    SubscriptionAssignmentStoreDef,
     SubscriptionsConfig,
     TokenAllowanceDef,
     UsageLimitDef,
@@ -222,6 +224,8 @@ def _command_document(command: BillingFulfillmentCommand) -> dict[str, Any]:
     document = command.model_dump(mode="json")
     if command.subject_revision is None:
         document.pop("subject_revision", None)
+    if command.product_id is None:
+        document.pop("product_id", None)
     return document
 
 
@@ -280,7 +284,9 @@ def _resolve_document_path(document: Mapping[str, Any], path: str) -> Any:
     return current
 
 
-def _subject_identity(app_id: str, query: Mapping[str, Any]) -> str:
+def _subject_identity(
+    app_id: str, query: Mapping[str, Any], *, product_id: str | None = None
+) -> str:
     """Type-preserving digest of an entitlement subject.
 
     The assignment `_id` string-formats scope values, so a null scope and the
@@ -291,6 +297,8 @@ def _subject_identity(app_id: str, query: Mapping[str, Any]) -> str:
     in the first place. This digest carries each value's type alongside it.
     """
     parts = [["app_id", type(app_id).__name__, app_id]]
+    if product_id is not None:
+        parts.append(["product_id", "str", product_id])
     for key in sorted(query):
         value = query[key]
         parts.append([str(key), type(value).__name__, value])
@@ -335,6 +343,7 @@ class BillingFulfillmentCommand(BaseModel):
     user_id: str | None = None
     tenant_id: str | None = None
     workspace_id: str | None = None
+    product_id: str | None = None
     plan_id: str | None = None
     plan_label: str | None = None
     status: str | None = None
@@ -370,6 +379,7 @@ class BillingFulfillmentCommand(BaseModel):
         "user_id",
         "tenant_id",
         "workspace_id",
+        "product_id",
         "plan_id",
         "plan_label",
         "status",
@@ -494,6 +504,14 @@ class _ResolvedPlan(BaseModel):
     capabilities: list[str] = Field(default_factory=list)
     token_allowances: list[TokenAllowanceDef] = Field(default_factory=list)
     usage_limits: list[UsageLimitDef] = Field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class _SubscriptionTarget:
+    product_id: str | None
+    assignment_store: SubscriptionAssignmentStoreDef | None
+    default_plan_id: str | None
+    plans: tuple[PlanDef, ...]
 
 
 class BillingFulfillmentPreEffectError(RuntimeError):
@@ -962,7 +980,23 @@ class BillingFulfillmentService:
             ]
 
         effects: list[BillingFulfillmentEffectResult] = []
-        plan = self._resolve_plan(command)
+        target, target_error = self._resolve_subscription_target(command)
+        if target is None:
+            assert target_error is not None
+            return [
+                BillingFulfillmentEffectResult(
+                    effect="assignment_cancel"
+                    if command.event_type == "subscription_cancelled"
+                    else "assignment_upsert",
+                    status="rejected",
+                    reason=target_error,
+                    details={"product_id": command.product_id, "plan_id": command.plan_id},
+                ),
+                BillingFulfillmentEffectResult(
+                    effect="plan_allowances", status="skipped", reason=target_error
+                ),
+            ]
+        plan = self._resolve_plan(command, target)
         if command.event_type in _SUBSCRIPTION_PLAN_EVENTS and plan is None:
             effects.append(
                 BillingFulfillmentEffectResult(
@@ -981,7 +1015,7 @@ class BillingFulfillmentService:
             )
             return effects
 
-        if self._fencing_enabled(command):
+        if self._fencing_enabled(command, target):
             # Ordering authority is established BEFORE the assignment commits.
             # Doing it afterwards leaves a window in which the assignment is
             # already the authoritative revision while some wallet still
@@ -990,8 +1024,8 @@ class BillingFulfillmentService:
             # be in flight. Claiming first makes the transition atomic in the
             # only sense that matters: either this revision owns every
             # applicable wallet head and may commit, or it does not commit.
-            await self._ensure_fenced_subject_prerequisites()
-            if not await self._claim_wallet_subject_revision(command):
+            await self._ensure_fenced_subject_prerequisites(target)
+            if not await self._claim_wallet_subject_revision(command, target):
                 # A newer revision already owns a wallet head, so this command
                 # has been overtaken. Its assignment must not apply.
                 return [
@@ -1012,7 +1046,7 @@ class BillingFulfillmentService:
                     ),
                 ]
 
-        assignment = await self._apply_assignment(command, plan=plan)
+        assignment = await self._apply_assignment(command, target=target, plan=plan)
         effects.append(assignment)
         if assignment.reason == SUBJECT_IDENTITY_COLLISION_REASON:
             # The assignment could not prove which subject it belongs to, so
@@ -1038,6 +1072,15 @@ class BillingFulfillmentService:
                 )
             )
             return effects
+        if assignment.status != "applied":
+            effects.append(
+                BillingFulfillmentEffectResult(
+                    effect="plan_allowances",
+                    status="skipped",
+                    reason=assignment.reason or "assignment_not_applied",
+                )
+            )
+            return effects
         if command.event_type == "subscription_cancelled":
             effects.append(
                 BillingFulfillmentEffectResult(
@@ -1048,21 +1091,124 @@ class BillingFulfillmentService:
             )
             return effects
 
-        effects.append(await self._apply_plan_allowances(command, plan=plan))
+        if target.product_id is not None and target.assignment_store is not None:
+            status = command.status or "active"
+            if status not in target.assignment_store.active_statuses:
+                effects.append(
+                    BillingFulfillmentEffectResult(
+                        effect="plan_allowances",
+                        status="skipped",
+                        reason="inactive_subscription",
+                    )
+                )
+                return effects
+            if command.expires_at is not None:
+                expiry = command.expires_at
+                expiry = (
+                    expiry.replace(tzinfo=UTC)
+                    if expiry.tzinfo is None
+                    else expiry.astimezone(UTC)
+                )
+                if expiry <= _now():
+                    effects.append(
+                        BillingFulfillmentEffectResult(
+                            effect="plan_allowances",
+                            status="skipped",
+                            reason="expired",
+                        )
+                    )
+                    return effects
+
+        effects.append(await self._apply_plan_allowances(command, target=target, plan=plan))
         return effects
 
-    def _resolve_plan(self, command: BillingFulfillmentCommand) -> _ResolvedPlan | None:
-        if self._config is None or not command.plan_id:
+    def _resolve_subscription_target(
+        self, command: BillingFulfillmentCommand
+    ) -> tuple[_SubscriptionTarget | None, str | None]:
+        config = self._config
+        if config is None:
+            return None, "subscriptions_config_missing"
+        if config.schema_version == "mozaiks.subscriptions.v1":
+            if command.product_id is not None:
+                return None, "unknown_product"
+            return _SubscriptionTarget(
+                product_id=None,
+                assignment_store=config.assignment_store,
+                default_plan_id=config.default_plan_id,
+                plans=tuple(config.plans),
+            ), None
+
+        if command.product_id is not None:
+            matches = [p for p in config.products if p.product_id == command.product_id]
+            if not matches:
+                return None, "unknown_product"
+        elif command.plan_id:
+            matches = [
+                p for p in config.products
+                if any(plan.plan_id == command.plan_id for plan in p.plans)
+            ]
+            if not matches:
+                return None, "unknown_plan"
+            if len(matches) != 1:
+                return None, "ambiguous_plan"
+        else:
+            return None, "unknown_product"
+
+        product = matches[0]
+        if command.plan_id and not any(
+            plan.plan_id == command.plan_id for plan in product.plans
+        ):
+            return None, "unknown_plan"
+        store = product.assignment_store
+        if store is not None and any(
+            other.product_id != product.product_id
+            and other.assignment_store is not None
+            and other.assignment_store.data_alias == store.data_alias
+            for other in config.products
+        ):
+            return None, "shared_assignment_store"
+        return _SubscriptionTarget(
+            product_id=product.product_id,
+            assignment_store=store,
+            default_plan_id=product.default_plan_id,
+            plans=tuple(product.plans),
+        ), None
+
+    def _resolve_plan(
+        self, command: BillingFulfillmentCommand, target: _SubscriptionTarget
+    ) -> _ResolvedPlan | None:
+        if target.product_id is None and not command.plan_id:
             return None
-        for plan in self._config.plans:
-            if plan.plan_id == command.plan_id:
+        plan_id = command.plan_id or target.default_plan_id
+        if not plan_id:
+            return None
+        for plan in target.plans:
+            if plan.plan_id == plan_id:
+                # V2 callers may carry the paid assignment's persisted snapshot,
+                # which can differ from today's catalog. V1 remains catalog-first.
+                snapshot = target.product_id is not None
+                supplied = command.model_fields_set
                 return _ResolvedPlan(
                     plan_id=plan.plan_id,
-                    label=plan.label,
-                    capabilities=list(plan.capabilities),
-                    token_allowances=list(plan.token_allowances),
-                    usage_limits=list(plan.usage_limits),
+                    label=command.plan_label if snapshot and command.plan_label else plan.label,
+                    capabilities=(
+                        list(command.granted_capabilities)
+                        if snapshot and "granted_capabilities" in supplied
+                        else list(plan.capabilities)
+                    ),
+                    token_allowances=(
+                        list(command.token_allowances)
+                        if snapshot and "token_allowances" in supplied
+                        else list(plan.token_allowances)
+                    ),
+                    usage_limits=(
+                        list(command.usage_limits)
+                        if snapshot and "usage_limits" in supplied
+                        else list(plan.usage_limits)
+                    ),
                 )
+        if target.product_id is not None:
+            return None
         has_command_snapshot = bool(
             command.plan_label
             or command.granted_capabilities
@@ -1072,34 +1218,36 @@ class BillingFulfillmentService:
         if not has_command_snapshot:
             return None
         return _ResolvedPlan(
-            plan_id=command.plan_id,
-            label=command.plan_label or command.plan_id,
+            plan_id=plan_id,
+            label=command.plan_label or plan_id,
             capabilities=list(command.granted_capabilities),
             token_allowances=list(command.token_allowances),
             usage_limits=list(command.usage_limits),
         )
 
-    async def _collection(self) -> Any | None:
-        if self._config is None or self._config.assignment_store is None:
+    async def _collection(self, target: _SubscriptionTarget) -> Any | None:
+        if target.assignment_store is None:
             return None
-        store = self._config.assignment_store
+        store = target.assignment_store
         if self._collection_resolver is not None:
             return self._collection_resolver(store.data_alias)
         collection_name = collection_name_for_alias(store.data_alias)
         client = get_mongo_client()
         return client[_default_database_name()][collection_name]
 
-    async def _ensure_fenced_subject_prerequisites(self) -> None:
+    async def _ensure_fenced_subject_prerequisites(
+        self, target: _SubscriptionTarget
+    ) -> None:
         """Validate subject uniqueness before any authority is claimed."""
-        if self._config is None or self._config.assignment_store is None:
+        if target.assignment_store is None:
             return
-        collection = await self._collection()
+        collection = await self._collection(target)
         if collection is None:
             return
-        await self._ensure_subject_uniqueness(collection, self._config.assignment_store)
+        await self._ensure_subject_uniqueness(collection, target.assignment_store)
 
     async def _claim_wallet_subject_revision(
-        self, command: BillingFulfillmentCommand
+        self, command: BillingFulfillmentCommand, target: _SubscriptionTarget
     ) -> bool:
         """Claim the ordering head on every wallet this subject could touch.
 
@@ -1115,10 +1263,10 @@ class BillingFulfillmentService:
         through. Retry is safe: equal revisions succeed, so heads already
         claimed do not block a second attempt.
         """
-        subject_key = self._subject_key(command)
+        subject_key = self._subject_key(command, target)
         if subject_key is None or self._config is None or command.subject_revision is None:
             return True
-        for wallet in self._config.token_wallets or []:
+        for wallet in self._config.effective_token_wallets:
             scope = getattr(wallet, "scope", None)
             if scope == "tenant" and not command.tenant_id:
                 continue
@@ -1148,7 +1296,9 @@ class BillingFulfillmentService:
                 return False
         return True
 
-    def _fencing_enabled(self, command: BillingFulfillmentCommand) -> bool:
+    def _fencing_enabled(
+        self, command: BillingFulfillmentCommand, target: _SubscriptionTarget | None = None
+    ) -> bool:
         """One decision governs the whole command.
 
         Fencing is on only when the caller supplies ordering authority AND the
@@ -1159,27 +1309,35 @@ class BillingFulfillmentService:
         """
         if command.subject_revision is None:
             return False
-        store = self._config.assignment_store if self._config is not None else None
+        if target is None:
+            target, _ = self._resolve_subscription_target(command)
+        store = target.assignment_store if target is not None else None
         return store is not None and store.revision_field is not None
 
-    def _subject_key(self, command: BillingFulfillmentCommand) -> str | None:
+    def _subject_key(
+        self, command: BillingFulfillmentCommand, target: _SubscriptionTarget | None = None
+    ) -> str | None:
         """Opaque entitlement-subject identity shared by every fenced effect.
 
         Derived from the same assignment query the assignment fence uses, so
         the two commit boundaries order against exactly the same subject even
         though a wallet balance is scoped more coarsely (it drops workspace).
         """
-        if not self._fencing_enabled(command):
+        if target is None:
+            target, _ = self._resolve_subscription_target(command)
+        if target is None or not self._fencing_enabled(command, target):
             return None
-        query = self._assignment_query(command)
+        query = self._assignment_query(command, target)
         if not query:
             return None
-        return _subject_identity(command.app_id, query)
+        return _subject_identity(command.app_id, query, product_id=target.product_id)
 
-    def _assignment_query(self, command: BillingFulfillmentCommand) -> dict[str, Any]:
-        if self._config is None or self._config.assignment_store is None:
+    def _assignment_query(
+        self, command: BillingFulfillmentCommand, target: _SubscriptionTarget
+    ) -> dict[str, Any]:
+        if target.assignment_store is None:
             return {}
-        store = self._config.assignment_store
+        store = target.assignment_store
         query: dict[str, Any] = {store.app_id_field: command.app_id}
         if store.tenant_id_field:
             query[store.tenant_id_field] = command.tenant_id
@@ -1193,36 +1351,39 @@ class BillingFulfillmentService:
         self,
         command: BillingFulfillmentCommand,
         *,
+        target: _SubscriptionTarget,
         plan: _ResolvedPlan | None,
     ) -> BillingFulfillmentEffectResult:
-        if self._config is None or self._config.assignment_store is None:
+        if target.assignment_store is None:
             return BillingFulfillmentEffectResult(
                 effect="assignment_cancel" if command.event_type == "subscription_cancelled" else "assignment_upsert",
-                status="skipped",
+                status="rejected" if target.product_id is not None else "skipped",
                 reason="assignment_store_missing",
             )
 
-        store = self._config.assignment_store
-        collection = await self._collection()
+        store = target.assignment_store
+        collection = await self._collection(target)
         if collection is None:
             return BillingFulfillmentEffectResult(
                 effect="assignment_cancel" if command.event_type == "subscription_cancelled" else "assignment_upsert",
-                status="skipped",
+                status="rejected" if target.product_id is not None else "skipped",
                 reason="assignment_store_missing",
             )
 
         now = _now()
-        query = self._assignment_query(command)
+        query = self._assignment_query(command, target)
         assignment_id = _assignment_id(command.app_id, query)
         status = command.status or ("cancelled" if command.event_type == "subscription_cancelled" else "active")
-        plan_id = command.plan_id or self._config.default_plan_id
+        plan_id = command.plan_id or target.default_plan_id
         if plan_id is None:
             return BillingFulfillmentEffectResult(
                 effect="assignment_cancel" if command.event_type == "subscription_cancelled" else "assignment_upsert",
                 status="skipped",
                 reason="plan_id_missing",
             )
-        plan_label = command.plan_label or plan_id
+        plan_label = (
+            plan.label if target.product_id is not None and plan is not None else None
+        ) or command.plan_label or plan_id
         capabilities = list(plan.capabilities if plan is not None else command.granted_capabilities)
         token_allowances = list(plan.token_allowances if plan is not None else command.token_allowances)
         usage_limits = list(plan.usage_limits if plan is not None else command.usage_limits)
@@ -1254,6 +1415,13 @@ class BillingFulfillmentService:
                 updates[store.expires_at_field] = None
         if store.capabilities_field:
             updates[store.capabilities_field] = _capability_entries(capabilities)
+        if target.product_id is not None:
+            # The product entitlement reader prefers this field over the
+            # configured plan_snapshot_field. Always replace it, including an
+            # explicitly empty paid snapshot, so stale allowances cannot win.
+            updates["token_allowances"] = [
+                allowance.model_dump() for allowance in token_allowances
+            ]
         if store.plan_snapshot_field:
             updates[store.plan_snapshot_field] = _plan_snapshot(
                 plan_id=plan_id,
@@ -1527,6 +1695,7 @@ class BillingFulfillmentService:
         self,
         command: BillingFulfillmentCommand,
         *,
+        target: _SubscriptionTarget,
         plan: _ResolvedPlan | None,
     ) -> BillingFulfillmentEffectResult:
         if self._config is None:
@@ -1552,6 +1721,7 @@ class BillingFulfillmentService:
             results = await self._ledger.ensure_plan_allowances(
                 config=self._config,
                 app_id=command.app_id,
+                product_id=target.product_id,
                 plan_id=plan.plan_id,
                 plan_label=plan.label,
                 token_allowances=[
@@ -1565,7 +1735,7 @@ class BillingFulfillmentService:
                 # effects order identically. The ledger fences its own commit:
                 # the assignment having been applied earlier in this call is
                 # not authority any more once we have awaited.
-                subject_key=self._subject_key(command),
+                subject_key=self._subject_key(command, target),
                 subject_revision=command.subject_revision,
             )
         except Exception as exc:

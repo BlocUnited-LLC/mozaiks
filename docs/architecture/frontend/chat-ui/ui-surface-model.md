@@ -64,6 +64,17 @@ The reducer also tracks widget visibility separately from route ownership:
 `GlobalChatWidgetWrapper` suppresses widget rendering on primary chat routes and
 enables it on other routes.
 
+`navigation/shellRoutes.js` selects the routes shared by `RouteRenderer` and the
+widget wrapper. A declared routable `/` replaces the default `ChatPage`; an
+explicit non-root `landing_spot` still redirects `/` first. The wrapper uses
+React Router's matching precedence to suppress the launcher on the selected
+`ChatPage`, including declared chat aliases. Custom app pages retain the
+launcher, including root pages and static routes that outrank the core
+`/chat/*` or `/app/*` fallback. Route authorization remains in `RouteWrapper`.
+The wrapper hides during authentication loading, on login/callback surfaces,
+and when the selected page requires a user or role the viewer lacks. Explicit
+public pages (`meta.requiresAuth: false`) keep their launcher without a user.
+
 ## Event-driven surface changes
 
 Frontend surfaces are not changed by ad hoc component logic alone. The reducer
@@ -84,10 +95,11 @@ Current implementation:
 - `ChatUIContext` survives route changes
 - `ChatPage` restores cached `askMessages` and `workflowMessages`
 - artifact state is cached for restoration
-- the widget reads the same shared caches instead of opening a second session
+- the widget shares the selected general conversation and message cache, using
+  its own Ask carrier connection to restore that conversation from the server
 
-That is why a user can leave `/chat`, browse elsewhere, and still reopen the
-same run from the widget.
+A user can leave `/chat`, browse elsewhere, and reopen the same general
+conversation in the widget. Workflow sessions remain in full ChatPage.
 
 ## Widget contract
 
@@ -114,6 +126,10 @@ read-only module actions whose results ground the ask agent's answers in live
 page data. The client only ever names the page; the declarations and dispatch
 are server-side.
 
+The platform host resolves a workflow name only for workflow transport. An
+explicit Ask carrier does not require any app-local workflow to exist; its
+authentication, app scope and general-mode checks still apply.
+
 Both schema-native `AppPageMeta` and custom-route metadata support the same
 `AppAskContextAction` declarations. App loading checks declared module/action
 references and ask eligibility; Factory acceptance checks the actual saved
@@ -128,21 +144,50 @@ for this artifact validation. No user permissions or identity are added by it.
 
 The expanded widget keeps a fixed header:
 
-- left button (brand + "mozaiksai"): opens the full ask chat page
+- left button (app display name, then theme brand name, then "Assistant"):
+  opens the full ask chat page
 - support button (🛟): opens the operator support form
 - right logo button (same brand logo as the collapsed toggle): returns to the
-  active workflow workspace when one exists — resolved from stored session
-  keys or the server's `/api/session/state` snapshot
+  active workflow workspace when one exists — resolved from app/user-scoped
+  session storage or the server's owned session snapshot/list. With no session,
+  it opens the app's declared `meta.freshStart` entrypoint. Apps declaring neither
+  a resumable session nor an entrypoint omit this button; unscoped storage does
+  not authorize a guessed workflow destination.
 
 The compose affordance for ask mode lives in the sub-header as `+ New conversation`.
+It sends the existing `chat.start_general_chat` command and changes the visible
+conversation only after `chat.general_session_created` acknowledges its server ID.
+Older queued input must finish before starting another conversation; input typed
+while the new acknowledgement is pending waits for the new conversation.
+
+### Saved Ask history
+
+`useWidgetAskWS` restores the server-acknowledged general conversation through
+the authenticated `fetchGeneralChatTranscript` API. The widget and full ChatPage
+share `session/generalTranscript.js` for message presentation. Carrier storage is
+scoped by app and user; a stored general ID is only a request to the server, not
+authority to display another user's transcript.
+
+Queued input waits for successful history restoration. A missing, unavailable or
+wrong-scope response shows **History unavailable** with **Retry history**, distinct
+from a valid empty conversation. A closed socket offers **Retry connection**.
+Late responses from an old identity, connection or selected conversation cannot
+replace the current messages. Minimize/reopen keeps the same connection and does
+not reload history. Live additions and optimistic messages survive a pending
+restore; overlaps use the persisted ID forwarded as `metadata.general_message_id`,
+never equal text or the carrier's transport sequence. Unscoped stream chunks are
+ignored; accepted sends remain visibly pending until their scoped completions.
+Queued drafts stay in the existing in-memory queue under their acknowledged
+conversation ID. Switching conversations hides those drafts and holds their
+delivery until that same conversation is selected again. Changing app/user
+clears the queue; no new draft persistence is introduced.
 
 ### Route suppression
 
-`GlobalChatWidgetWrapper` returns `null` on:
-
-- `/chat`
-- `/chat/*`
-- `/app/:id/:workflow`
+`GlobalChatWidgetWrapper` returns `null` for the selected full `ChatPage` route,
+including the default root fallback, core `/chat/*` and `/app/*` fallbacks, and
+declared chat aliases. A more specific declared app page uses its own widget.
+Unresolved routes and authentication surfaces also suppress the launcher.
 
 That keeps the widget from competing with the full chat surface.
 

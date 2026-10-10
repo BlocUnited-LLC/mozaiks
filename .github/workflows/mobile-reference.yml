@@ -155,7 +155,7 @@ jobs:
           npm ci --prefix web_shell
       - name: Pull disposable local service images
         run: |
-          docker pull mongo:7
+          bash scripts/ci/mongo_service.sh pull
           docker pull quay.io/keycloak/keycloak:26.0
       - name: Enable Android hardware acceleration
         run: |

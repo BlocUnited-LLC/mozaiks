@@ -130,6 +130,17 @@ class DockerACPProofProvider:
 class _ArtifactStore:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
+        self.parent = BuildRecord(
+            id="av_parent", app_id="proof", build_family="app_bundle",
+            build_key="app_bundle", version_number=1,
+            lineage_root_id="av_parent",
+            commit_metadata={"metadata": {"capability_packs": []}},
+        )
+
+    async def get_build_record(self, *, app_id: str, build_record_id: str) -> BuildRecord | None:
+        if app_id == self.parent.app_id and build_record_id == self.parent.id:
+            return self.parent
+        return None
 
     async def create_build_record(self, **kwargs: Any) -> BuildRecord:
         self.calls.append(kwargs)

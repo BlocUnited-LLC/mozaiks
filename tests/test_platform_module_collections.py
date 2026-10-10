@@ -11,16 +11,25 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import httpx
+import jwt
 import pytest
+from cryptography.hazmat.primitives.asymmetric import rsa
+from fastapi import FastAPI
 
+from mozaiksai.core.auth.adapters import registry as auth_registry
+from mozaiksai.core.auth.adapters.jwt_adapter import GenericJWTAdapter, JWTAdapterConfig
+from mozaiksai.core.auth.config import clear_auth_config_cache
 from mozaiksai.core.runtime.app.loader import AppLoader, AppLoadError
 from mozaiksai.core.runtime.composition.module_authority import ModuleDispatchAuthority
 from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, ModuleRequest
+from mozaiksai.core.runtime.composition.platform_hooks import PlatformHookRegistry
 from mozaiksai.core.runtime.persistence import (
     DataContractLoadError,
     MongoPersistenceContext,
@@ -35,6 +44,7 @@ from mozaiksai.core.runtime.persistence.intent_loader import (
 )
 from mozaiksai.core.runtime.persistence.mongo import MongoPersistenceCollection
 from mozaiksai.core.runtime.persistence.ownership import CollectionOwnership
+from mozaiksai.hosts.routers import modules as module_router
 from mozaiksai.resources import resolve_factory_app_root
 from tests.test_runtime_persistence_mongo import FakeMongoClient
 
@@ -336,7 +346,7 @@ def test_factory_declares_each_studio_collection_with_complete_ownership():
         ("user_onboarding", "status"): ("platform", "per_user", "user_id"),
         ("workspace_integrations", "integration_notes"): ("platform", "app_wide", None),
         ("workspace_support", "feedback"): ("platform", "app_wide", None),
-        ("workspace_support", "requests"): ("platform", "app_wide", None),
+        ("workspace_support", "requests"): ("platform", "per_workspace", "owner_workspace_id"),
     }
     # Indexes stay with the factory migrations; mounting a module creates none in a workspace.
     assert all(row["indexes"] == [] for surface in contract["surfaces"] for row in surface["collections"])
@@ -656,6 +666,226 @@ async def test_studio_pages_load_in_a_fresh_scaffold_and_keep_users_apart(tmp_pa
     assert other_app["requests"] == []
     assert ok(await run("tasks", "own"))
     assert (await run("tasks", "support")).error_code == "PERMISSION_DENIED"
+
+
+async def test_support_queue_uses_verified_workspace_and_excludes_older_requests(tmp_path, monkeypatch, mongo):
+    active = app_root(tmp_path, "my-app", SCAFFOLD_CONTRACT)
+    loaded = await AppLoader.load(str(active), module_defaults_path=str(FACTORY))
+    executor = executor_for(loaded, monkeypatch, client=mongo.client, database=mongo.database)
+
+    async def run(action, params, *, user, workspace):
+        return await executor.execute(ModuleRequest(
+            module="workspace_support", action=action, params=params, app_id="my-app", user_id=user,
+            authority=authority(user, "workspace_support.read", "workspace_support.manage"),
+            persistence_principal=PersistencePrincipal(user, workspace) if workspace else None,
+        ))
+
+    async def run_messages(action, params, *, workspace):
+        return await executor.execute(ModuleRequest(
+            module="messages", action=action, params=params, app_id="my-app", user_id="requester-a",
+            authority=authority("requester-a", "messages.read", "messages.write"),
+            persistence_principal=PersistencePrincipal("requester-a", workspace),
+        ))
+
+    created = await run("create_support_request", {"message": "help"}, user="requester-a", workspace="ws-a")
+    assert created.success, (created.error_code, created.error)
+    request_id = created.data["request_id"]
+    thread_id = created.data["message_thread_id"]
+    collection_name = executor._build_persistence_context(ModuleRequest(
+        module="workspace_support", action="list_support_requests", app_id="my-app", authority=authority(),
+    )).collection_name("workspace_support", "requests")
+    raw = mongo.client[mongo.database][collection_name]
+    stored = await raw.find_one({"request_id": request_id})
+    assert stored["owner_workspace_id"] == "ws-a"
+    assert stored["workspace_id"] == "ws-a"
+
+    messages_context = executor._build_persistence_context(ModuleRequest(
+        module="messages", action="get_thread", app_id="my-app", authority=authority(),
+    ))
+    database = mongo.client[mongo.database]
+    threads = database[messages_context.collection_name("messages", "threads")]
+    messages = database[messages_context.collection_name("messages", "messages")]
+    reads = database[messages_context.collection_name("messages", "thread_reads")]
+    assert (await threads.find_one({"thread_id": thread_id}))["scope_type"] == "app"
+
+    await raw.insert_many([
+        {"app_id": "my-app", "request_id": "older-unbound", "user_id": "requester-a", "status": "open"},
+        {"app_id": "my-app", "request_id": "older-requested", "workspace_id": "ws-a",
+         "user_id": "requester-a", "status": "open", "message_thread_id": "older-thread"},
+    ])
+    await threads.insert_one({
+        "app_id": "my-app", "thread_id": "older-thread", "scope_type": "app", "scope_id": "my-app",
+        "thread_type": "support", "related_type": "workspace_support.request",
+        "related_id": "older-requested", "participant_ids": ["requester-a"], "status": "open",
+    })
+    await messages.insert_one({
+        "app_id": "my-app", "message_id": "older-message", "thread_id": "older-thread",
+        "body": "older support message", "is_deleted": False,
+    })
+
+    for workspace in ("ws-a", "ws-b"):
+        listed = await run_messages("list_threads", {}, workspace=workspace)
+        assert listed.success and listed.data["threads"] == []
+        linked = await run_messages("list_threads", {"related_type": "workspace_support.request"}, workspace=workspace)
+        assert linked.success and linked.data["threads"] == []
+        for linked_thread in (thread_id, "older-thread"):
+            fetched = await run_messages("get_thread", {"thread_id": linked_thread}, workspace=workspace)
+            assert fetched.success and fetched.data["thread"] is None and fetched.data["messages"] == []
+            sent = await run_messages("send_message", {"thread_id": linked_thread, "body": "generic reply"},
+                                      workspace=workspace)
+            assert sent.success and sent.data["success"] is False
+            read = await run_messages("mark_thread_read", {"thread_id": linked_thread}, workspace=workspace)
+            assert read.success and read.data["success"] is False
+    assert await messages.count_documents({"thread_id": thread_id}) == 1
+    assert await messages.count_documents({"thread_id": "older-thread"}) == 1
+    assert await reads.count_documents({}) == 0
+
+    reserved = await run_messages("create_thread", {"thread_type": "support"}, workspace="ws-a")
+    assert reserved.success is False and reserved.error_code == "INVALID_PARAMS"
+    forged_link = await run_messages("create_thread", {"related_type": "workspace_support.request"},
+                                     workspace="ws-a")
+    assert forged_link.success is False and forged_link.error_code == "PERMISSION_DENIED"
+
+    ordinary = await run_messages("create_thread", {"thread_type": "direct"}, workspace="ws-b")
+    assert ordinary.success
+    ordinary_id = ordinary.data["thread"]["thread_id"]
+    ordinary_send = await run_messages("send_message", {"thread_id": ordinary_id, "body": "ordinary"},
+                                       workspace="ws-b")
+    assert ordinary_send.success and ordinary_send.data["success"] is True
+    ordinary_list = await run_messages("list_threads", {}, workspace="ws-b")
+    assert ordinary_list.success and [row["thread_id"] for row in ordinary_list.data["threads"]] == [ordinary_id]
+    ordinary_get = await run_messages("get_thread", {"thread_id": ordinary_id}, workspace="ws-b")
+    assert ordinary_get.success and ordinary_get.data["messages"][0]["body"] == "ordinary"
+    ordinary_read = await run_messages("mark_thread_read", {"thread_id": ordinary_id}, workspace="ws-b")
+    assert ordinary_read.success and ordinary_read.data["success"] is True
+
+    for scope in ("user", "app", "workspace"):
+        own = await run("list_support_requests", {"scope": scope}, user="requester-a", workspace="ws-a")
+        assert own.success and [row["request_id"] for row in own.data["requests"]] == [request_id]
+        assert own.data["requests"][0]["messages"][0]["content"] == "help"
+        other = await run("list_support_requests", {"scope": scope}, user="requester-a", workspace="ws-b")
+        assert other.success and other.data["requests"] == []
+
+    for target in (request_id, "older-unbound", "older-requested"):
+        for action, params in (
+            ("add_support_message", {"request_id": target, "message": "reply", "sender_role": "operator"}),
+            ("update_support_request_status", {"request_id": target, "status": "resolved"}),
+            ("delete_support_request", {"request_id": target}),
+        ):
+            denied = await run(action, params, user="operator-b", workspace="ws-b")
+            assert denied.success and denied.data["success"] is False
+            if target != request_id:
+                older_denied = await run(action, params, user="operator-a", workspace="ws-a")
+                assert older_denied.success and older_denied.data["success"] is False
+
+    for action, params in (
+        ("create_support_request", {"message": "unbound"}),
+        ("list_support_requests", {"scope": "workspace"}),
+    ):
+        unbound = await run(action, params, user="operator-unbound", workspace=None)
+        assert unbound.error_code == "PERMISSION_DENIED"
+
+    assert (await raw.find_one({"request_id": request_id}))["status"] == "open"
+    assert await raw.count_documents({"request_id": {"$in": ["older-unbound", "older-requested"]}}) == 2
+    replied = await run("add_support_message", {"request_id": request_id, "message": "reply", "sender_role": "operator"},
+                        user="operator-a", workspace="ws-a")
+    assert replied.success and replied.data["success"] is True
+    resolved = await run("update_support_request_status", {"request_id": request_id, "status": "resolved"},
+                         user="operator-a", workspace="ws-a")
+    assert resolved.success and resolved.data["success"] is True
+    deleted = await run("delete_support_request", {"request_id": request_id}, user="operator-a", workspace="ws-a")
+    assert deleted.success and deleted.data["success"] is True
+    assert deleted.data["message_thread_id"] == thread_id
+    assert await raw.find_one({"request_id": request_id}) is None
+
+
+async def test_signed_http_support_threads_require_scoped_ticket_actions(tmp_path, monkeypatch, mongo):
+    active = app_root(tmp_path, "my-app", SCAFFOLD_CONTRACT)
+    loaded = await AppLoader.load(str(active), module_defaults_path=str(FACTORY))
+    executor = executor_for(loaded, monkeypatch, client=mongo.client, database=mongo.database)
+    app = FastAPI()
+    app.state.loaded_app_id = "my-app"
+    app.state.executor_registry = SimpleNamespace(module_executor=executor)
+    app.state.module_action_surfaces = {item.name: item.action_api_surface_map for item in loaded.modules}
+    app.include_router(module_router.router)
+
+    for name in auth_registry._ALL_AUTH_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+    for name, value in {
+        "ENV": "test", "ENVIRONMENT": "test", "AUTH_ENABLED": "true", "AUTH_PROVIDER": "jwt",
+        "AUTH_ISSUER": "https://auth.test", "AUTH_AUDIENCE": "studio-api",
+        "AUTH_JWKS_URL": "https://auth.test/jwks",
+    }.items():
+        monkeypatch.setenv(name, value)
+    clear_auth_config_cache()
+    auth_registry.reset_auth_adapter()
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    jwk = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(key.public_key()))
+    jwk.update({"kid": "support-thread-test", "alg": "RS256", "use": "sig"})
+    adapter = GenericJWTAdapter(config=JWTAdapterConfig(
+        jwks_url="https://auth.test/jwks", issuer="https://auth.test", audience="studio-api",
+    ))
+    monkeypatch.setattr(adapter, "_get_jwks_client_async", AsyncMock(return_value=SimpleNamespace(
+        get_signing_key=AsyncMock(return_value=jwk),
+    )))
+    monkeypatch.setattr("mozaiksai.core.auth.dependencies.get_auth_adapter", lambda: adapter)
+    monkeypatch.setattr(module_router, "record_action_invocation", lambda **_: None)
+    hooks = PlatformHookRegistry()
+    monkeypatch.setattr(module_router, "get_platform_hooks", lambda: hooks)
+    monkeypatch.setattr("mozaiksai.core.runtime.composition.module_executor.get_platform_hooks", lambda: hooks)
+
+    def headers(workspace: str) -> dict[str, str]:
+        claims = {
+            "sub": "same-user", "iss": "https://auth.test", "aud": "studio-api",
+            "exp": int(time.time()) + 300, "app_id": "my-app", "workspace_id": workspace,
+            "scp": "messages.read messages.write workspace_support.read workspace_support.manage",
+        }
+        return {"Authorization": "Bearer " + jwt.encode(
+            claims, key, algorithm="RS256", headers={"kid": "support-thread-test", "typ": "at+jwt"},
+        )}
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        async def call(module: str, action: str, workspace: str, params: dict | None = None):
+            return await client.post(
+                f"/api/modules/{module}/{action}", json={"params": params or {}}, headers=headers(workspace),
+            )
+
+        try:
+            created = await call("workspace_support", "create_support_request", "ws-a", {"message": "help"})
+            assert created.status_code == 200, created.text
+            thread_id = created.json()["message_thread_id"]
+            assert thread_id
+
+            for workspace in ("ws-a", "ws-b"):
+                listed = await call("messages", "list_threads", workspace)
+                assert listed.status_code == 200 and listed.json()["threads"] == []
+                fetched = await call("messages", "get_thread", workspace, {
+                    "thread_id": thread_id, "allow_support_thread": True,
+                })
+                assert fetched.status_code == 200 and fetched.json()["thread"] is None
+                sent = await call("messages", "send_message", workspace, {
+                    "thread_id": thread_id, "body": "generic reply", "allow_support_thread": True,
+                })
+                assert sent.status_code == 200 and sent.json()["success"] is False
+                read = await call("messages", "mark_thread_read", workspace, {"thread_id": thread_id})
+                assert read.status_code == 200 and read.json()["success"] is False
+
+            own = await call("workspace_support", "list_support_requests", "ws-a")
+            other = await call("workspace_support", "list_support_requests", "ws-b")
+            assert own.status_code == other.status_code == 200
+            assert own.json()["requests"][0]["messages"][0]["content"] == "help"
+            assert other.json()["requests"] == []
+            reply = await call("workspace_support", "add_support_message", "ws-a", {
+                "request_id": created.json()["request_id"], "message": "ticket reply",
+            })
+            assert reply.status_code == 200 and reply.json()["success"] is True
+            forged = await call("messages", "create_thread", "ws-a", {
+                "related_type": "workspace_support.request", "allow_support_thread": True,
+            })
+            assert forged.status_code == 403
+        finally:
+            clear_auth_config_cache()
+            auth_registry.reset_auth_adapter()
 
 
 async def test_owned_upsert_with_the_owner_in_its_filter_succeeds_on_mongo(mongo):

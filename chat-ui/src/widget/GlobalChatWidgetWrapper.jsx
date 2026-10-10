@@ -18,21 +18,12 @@
  * ```
  */
 import React, { useEffect, useMemo } from 'react';
-import { useLocation } from 'react-router-dom';
+import { matchRoutes, useLocation } from 'react-router-dom';
 import { useChatUI } from '../context/ChatUIContext';
 import { useNavigation } from '../providers/NavigationProvider';
 import PersistentChatWidget from '../components/chat/PersistentChatWidget';
-
-/**
- * Match a route pattern (e.g. /apps/:appId/overview) against a concrete pathname.
- * Returns true if every segment matches (param segments start with :).
- */
-function matchRoutePattern(pattern, pathname) {
-  const patternParts = pattern.split('/').filter(Boolean);
-  const pathParts = pathname.split('/').filter(Boolean);
-  if (patternParts.length !== pathParts.length) return false;
-  return patternParts.every((part, i) => part.startsWith(':') || part === pathParts[i]);
-}
+import { getShellRoutes } from '../navigation/shellRoutes';
+import { getUserRoles, roleMatches } from '../navigation/shellActions';
 
 /**
  * GlobalChatWidgetWrapper
@@ -47,21 +38,26 @@ function matchRoutePattern(pattern, pathname) {
  */
 const GlobalChatWidgetWrapper = () => {
   const location = useLocation();
-  const { pages } = useNavigation();
+  const { pages, loading, landing_spot, navigation } = useNavigation();
   const {
+    user,
+    loading: authLoading,
     isInWidgetMode,
     setIsInWidgetMode,
     isWidgetVisible,
     setIsWidgetVisible,
-    activeChatId,
     activeWorkflowName,
-    conversationMode,
   } = useChatUI();
 
   const matchedPage = useMemo(() => {
-    if (!Array.isArray(pages) || !location.pathname) return null;
-    return pages.find((p) => p.path && matchRoutePattern(p.path, location.pathname)) || null;
-  }, [pages, location.pathname]);
+    if (loading || (location.pathname === '/' && landing_spot && landing_spot !== '/')) return null;
+    const { coreRoutes, pageRoutes } = getShellRoutes(pages);
+    const matches = matchRoutes(
+      [...coreRoutes, ...pageRoutes].map(route => ({ path: route.path, handle: route })),
+      location.pathname,
+    );
+    return matches?.[matches.length - 1]?.route.handle || null;
+  }, [pages, loading, landing_spot, location.pathname]);
   const pageContext = matchedPage?.meta?.ai_context || null;
 
   // The declared fresh-start entrypoint (extension_registry.json entrypoints[]
@@ -77,28 +73,32 @@ const GlobalChatWidgetWrapper = () => {
   // page's declared ask-context actions server-side.
   const pagePath = matchedPage?.path || null;
 
-  // Determine if we're on the primary chat routes (don't show widget there)
-  const pathSegments = location.pathname.split('/').filter(Boolean);
-  const isPrimaryChatRoute =
-    pathSegments.length === 0 ||
-    pathSegments[0] === 'chat' ||
-    (pathSegments[0] === 'app' && pathSegments.length >= 3); // /app/:appId/:workflow pattern
+  // RouteRenderer gives transition/workflow entries precedence over component.
+  const isPrimaryChatRoute = matchedPage?.component === 'ChatPage'
+    && !matchedPage.transition && !matchedPage.workflow;
+  const authRoutes = navigation?.auth?.contract?.routes;
+  const isAuthRoute = ['LoginPage', 'AuthCallbackPage'].includes(matchedPage?.component)
+    || [authRoutes?.login, authRoutes?.callback].some(path => path && path === matchedPage?.path);
+  const meta = matchedPage?.meta || {};
+  const canViewPage = !authLoading && (meta.requiresAuth === false || Boolean(user))
+    && roleMatches(meta.requiresRole || meta.requiredRole || meta.roles, getUserRoles(user));
+  const isAppRoute = Boolean(matchedPage) && !isPrimaryChatRoute && !isAuthRoute && canViewPage;
 
   // Ensure widget mode is active on non-chat routes.
   // This keeps the persistent widget available across module/admin/discovery pages
   // without requiring each page to call useWidgetMode().
   useEffect(() => {
-    if (isPrimaryChatRoute) return;
+    if (!isAppRoute) return;
     if (!isInWidgetMode) {
       setIsInWidgetMode(true);
     }
     if (!isWidgetVisible) {
       setIsWidgetVisible(true);
     }
-  }, [isPrimaryChatRoute, isInWidgetMode, isWidgetVisible, setIsInWidgetMode, setIsWidgetVisible]);
+  }, [isAppRoute, isInWidgetMode, isWidgetVisible, setIsInWidgetMode, setIsWidgetVisible]);
 
-  // Don't render anything on primary chat routes
-  if (isPrimaryChatRoute) {
+  // Chat and unresolved/redirecting routes have no app-page widget owner.
+  if (!isAppRoute) {
     return null;
   }
 
@@ -110,9 +110,7 @@ const GlobalChatWidgetWrapper = () => {
   return (
     <>
       <PersistentChatWidget
-        chatId={activeChatId}
         workflowName={activeWorkflowName}
-        conversationMode={conversationMode}
         pageContext={pageContext}
         pagePath={pagePath}
         freshStartPath={freshStartPath}

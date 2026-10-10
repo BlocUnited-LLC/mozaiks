@@ -1,4 +1,23 @@
 services:
+  # Validate the operator-owned realm before Keycloak can start. The packaged
+  # local realm contains localhost browser callbacks and is for development.
+  keycloak-realm-check:
+    image: python:3.11.16-slim
+    command: ["python", "/opt/mozaiks/validate_prod_realm_import.py", "/opt/mozaiks/realm-export.json"]
+    network_mode: none
+    read_only: true
+    environment:
+      KC_HOSTNAME: ${KC_HOSTNAME:?Set KC_HOSTNAME to the public Keycloak hostname}
+    volumes:
+      - type: bind
+        source: ${MOZAIKS_PROD_REALM_IMPORT_PATH:?Set MOZAIKS_PROD_REALM_IMPORT_PATH to an operator-owned realm JSON file}
+        target: /opt/mozaiks/realm-export.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - ../../scripts/validate_prod_realm_import.py:/opt/mozaiks/validate_prod_realm_import.py:ro
+    restart: "no"
+
   # ---------------------------------------------------------------------------
   # Keycloak Postgres — user/realm/session persistence
   # ---------------------------------------------------------------------------
@@ -34,14 +53,21 @@ services:
       KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak
       KC_DB_USERNAME: keycloak
       KC_DB_PASSWORD: ${KC_DB_PASSWORD}
-      KC_HOSTNAME: ${KC_HOSTNAME}
+      KC_HOSTNAME: ${KC_HOSTNAME:?Set KC_HOSTNAME to the public Keycloak hostname}
       KC_PROXY_HEADERS: xforwarded
     ports:
       - "8080:8080"
     volumes:
-      - ../../factory_app/app/brand/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+      - type: bind
+        source: ${MOZAIKS_PROD_REALM_IMPORT_PATH:?Set MOZAIKS_PROD_REALM_IMPORT_PATH to an operator-owned realm JSON file}
+        target: /opt/keycloak/data/import/realm-export.json
+        read_only: true
+        bind:
+          create_host_path: false
       - ../../factory_app/app/brand/login-theme:/opt/keycloak/themes/mozaiks/login:ro
     depends_on:
+      keycloak-realm-check:
+        condition: service_completed_successfully
       keycloak-db:
         condition: service_healthy
     restart: unless-stopped

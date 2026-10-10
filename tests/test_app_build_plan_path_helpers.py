@@ -331,3 +331,16 @@ class TestDeploymentContractArtifactPaths:
 
         with pytest.raises(ValueError, match="deployment contract artifact"):
             _validate_build_tasks([task])
+
+    @pytest.mark.parametrize(("task_type", "agent", "path"), [
+        ("api_surface", "ControllerAgent", "config/auth.yaml"),
+        ("page_bundle", "AppSchemaAgent", "config\\auth.yaml"),
+    ])
+    def test_build_tasks_cannot_own_auth_contract(self, task_type, agent, path):
+        task = {
+            "task_id": "generated_auth", "task_type": task_type,
+            "initial_agent": agent, "capability_pack_id": None,
+            "surface_kind": "external_integration", "owned_paths": [path],
+        }
+        with pytest.raises(ValueError, match="generated_auth.*config/auth.yaml"):
+            _validate_build_tasks([task])

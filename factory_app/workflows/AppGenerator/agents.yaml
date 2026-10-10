@@ -160,6 +160,7 @@ agents:
       - Ordinary app-owned CRUD is generated_module, not framework_pack. Framework packs must actually exist in the injected capability_packs registry. Use the approved module surface_id for capability_pack_id and every module task/path. Keep category names such as crud_pack in pack_type only. Generate complete working behavior, not empty stubs.
       - Registered operator packs retain capability_source=operator_pack through planning and template materialization. Use their declared outputs for the approved surfaces; do not relabel them as managed_capability, framework_pack, or generated_module. An unregistered category is not an operator pack.
       - The authentication scaffold step emits config/auth.yaml and the shared auth adapter before runtime validation; do not add duplicate auth provider implementation tasks. Persistent entities use the canonical data contract and ctx.persistence, not a new database service.
+      - No build task may own config/auth.yaml. The admitted baseline or save_auth_scaffold owns it; a model task cannot add scopes that approve its own or a later action permission.
   - id: context
     heading: '[CONTEXT]'
     content: |-
@@ -672,9 +673,11 @@ agents:
           the selected provider adapter. Do not generate `modules/mozaikspay/`,
           app-local token ledgers, provider checkout internals, provider price ids,
           or direct page bindings to hosted internals. Custom routes that
-          trigger token-metered work must detect `INSUFFICIENT_TOKENS`, route to
-          the configured top-up/billing recovery path, and return without
-          retrying the failed action or workflow.
+          trigger token-metered work must detect `INSUFFICIENT_TOKENS` and use
+          a safe app-local recovery route when one is available. If
+          `recovery_action=contact_admin` has no safe contact route, keep the
+          user on the current page with inline administrator-contact guidance.
+          Return without automatically retrying the failed action or workflow.
   - id: brownfield_scope
     heading: '[BROWNFIELD ADOPTION SCOPE]'
     content: |-
@@ -1010,7 +1013,7 @@ agents:
         - call module actions using the named export `import { moduleAction } from '../../lib/moduleApi.js'` from ui/pages/custom/*.jsx; the helper has no default export and assembly includes it before validation. Do NOT hardcode API base URLs or write raw fetch calls directly in page components
         - Workflow/tool UI surfaces must use `useChatUI()` / shipped adapters instead of hardcoded API base URLs; app custom route pages must use the generated `moduleAction` helper above
         - handle module action errors by catching `err.error_code` to branch on specific backend states (e.g. `RECORD_NOT_FOUND`, `VALIDATION_FAILED`, `ALREADY_EXISTS`) — the generated moduleApi.js preserves structured error fields on thrown errors so catch blocks can inspect them without parsing raw response text
-        - for LLM-backed or token-metered actions/workflows, import `isInsufficientTokensError` and `insufficientTokensRecoveryPath` from `../../lib/moduleApi.js`; when `isInsufficientTokensError(err)` is true or `err.error_code === "INSUFFICIENT_TOKENS"`, navigate to `insufficientTokensRecoveryPath(err)` and return without retrying the action automatically
+        - for LLM-backed or token-metered actions/workflows, handle `INSUFFICIENT_TOKENS` by importing `isInsufficientTokensError` and `insufficientTokensRecoveryPath` from `../../lib/moduleApi.js`; when `isInsufficientTokensError(err)` is true, call `insufficientTokensRecoveryPath(err)` and navigate only when it returns a route. If it returns null, stay on the current page and show inline guidance to contact an administrator. In both cases return without automatically retrying the failed action or workflow; never navigate to null.
         - for entitlement-gated module actions, import `isEntitlementRequiredError` and `entitlementUpgradePath` from `../../lib/moduleApi.js`; when `isEntitlementRequiredError(err)` is true, navigate to `entitlementUpgradePath(err)` (defaults to `/pricing`) and return without retrying — do not show a generic error to the user
         - import shared UI primitives from `@mozaiks/chat-ui/ui` for buttons, status pills, cards/panels, metrics/summary strips, collection search, resource lists, loading/error states, and inline empty states
         - compose thin domain wrappers over shared primitives when needed, but never define local visual clones such as `StatusPill`, `MetricTile`, `StatCard`, or `Badge`
@@ -1947,7 +1950,7 @@ agents:
       2. Run `python -c "import yaml,sys; yaml.safe_load(open('/tmp/validate_config_<stem>.yaml'))"` — fix parse errors before continuing.
 
       Cross-reference checks (run after all files parse cleanly):
-      3. Permission consistency — every permission id referenced in `module.yaml.actions[].permissions` and `module.yaml.capabilities[].permissions` must be declared in `module.yaml.permissions[].id`. If any reference is missing, add the declaration or fix the reference before emitting.
+      3. Permission consistency — every permission id referenced in `module.yaml.actions[].permissions` and `module.yaml.capabilities[].permissions` must be declared in `module.yaml.permissions[].id`. A declaration is not an authorization grant. Every generated action permission must also resolve against the admitted `config/auth.yaml` `frontend.default_scopes`. Before auth scaffolding, authenticated apps use the canonical webapp_builder auth template's scopes. Plan roles and auth files emitted by this candidate do not approve new grants. Preserve valid restrictions, api_surface, and entitlement_gate. Repair unknown references only against the approved authorization policy; never remove a custom action permission or substitute an unrelated scope merely to pass. If the policy has no declared scope, revise the authorization contract before retrying. Canonical CRUD normalization remains code-owned.
       4. Notification id consistency — every `notification_id` value in `reactions.yaml` targets must appear as an `id` in `notifications.yaml.notifications[]`. If `notifications.yaml` is absent, create it with the required definitions before emitting.
       5. Emits/events alignment — every custom event type string in `module.yaml.actions[].emits` must appear as a `type` in `events.yaml.events[]`. Conversely, every `events.yaml.events[].type` must appear in at least one action's `emits` list or be a reaction-only event with a documented source. Canonical write events are code-declared and code-emitted. Flag and resolve any orphaned custom declarations before emitting.
 

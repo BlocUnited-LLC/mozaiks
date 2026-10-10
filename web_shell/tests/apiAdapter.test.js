@@ -20,11 +20,12 @@ function fixture({ baseUrl = 'https://runtime.example', platformBase = baseUrl, 
   };
   const context = vm.createContext({
     URL, URLSearchParams, Request, Headers, console, platform,
+    resolveWorkflow: value => value,
     window: { location: new URL(origin) },
     config: { get: key => key === 'api.baseUrl' ? baseUrl : undefined },
     fetch: async (input, options) => { requests.push({ input, options }); return response; },
   });
-  const api = vm.runInContext(`${withoutImports(apiSource)}\n({ authFetch, ApiAdapter });`, context);
+  const api = vm.runInContext(`${withoutImports(apiSource)}\n({ authFetch, ApiAdapter, RestApiAdapter });`, context);
   context.authFetch = api.authFetch;
   const notifications = vm.runInContext(`${withoutImports(notificationSource)}\n({ fetchNotificationCount, clearNotifications });`, context);
   return {
@@ -33,6 +34,22 @@ function fixture({ baseUrl = 'https://runtime.example', platformBase = baseUrl, 
     tokenReads: () => tokenReads,
   };
 }
+
+test('REST workflow input preserves the server delivery outcome on refusal', async () => {
+  const f = fixture();
+  f.response.ok = false;
+  f.response.status = 409;
+  f.response.json = async () => ({ delivery_state: 'refused' });
+  const refused = await new f.RestApiAdapter().sendMessageToWorkflow('Hello', 'app-1', 'user-1', 'AskAgent', 'chat-1');
+  assert.equal(refused.success, false);
+  assert.equal(refused.delivery_state, 'refused');
+
+  f.response.status = 503;
+  f.response.json = async () => ({ delivery_state: 'unknown' });
+  const uncertain = await new f.RestApiAdapter().sendMessageToWorkflow('Hello', 'app-1', 'user-1', 'AskAgent', 'chat-1');
+  assert.equal(uncertain.success, false);
+  assert.equal(uncertain.delivery_state, 'unknown');
+});
 
 test('bundled client backend requests retain the configured prefix and query', async () => {
   const f = fixture({ baseUrl: 'https://runtime.example/gateway/' });

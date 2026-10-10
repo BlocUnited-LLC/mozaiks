@@ -224,6 +224,12 @@ generic message for missing and foreign records. Other `LookupError` subclasses,
 including programming errors such as `KeyError` and `IndexError`, remain server
 errors.
 
+If a module action's token guard raises `TokenUsageDenied`, the executor keeps
+the denial code and recovery metadata. Module HTTP dispatch returns 402 for
+`INSUFFICIENT_TOKENS` or 403 for `TOKEN_USAGE_SCOPE_MISSING`, with the guard's
+metadata under `detail.extra_data`. It does not turn those denials into a
+generic execution failure.
+
 `internal` and `admin_internal` actions are rejected with 404 on the public
 module route, which also fails closed when the surface map was never populated
 by platform assembly. `admin_internal` actions are reachable only through the

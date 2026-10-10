@@ -29,6 +29,11 @@ from mozaiksai.core.sandbox.preview_store import (
     PreviewOperationBusy,
     PreviewRecoveryRequired,
 )
+from mozaiksai.core.semantics.archive import (
+    ArchiveEntry,
+    archive_digest,
+    build_deterministic_archive,
+)
 from mozaiksai.hosts.routers.sandbox import create_sandbox_router
 from tests.helpers.preview_mongo import FakePreviewDatabase
 
@@ -142,6 +147,45 @@ def test_explicit_e2b_selection_requires_api_key():
 def test_preview_provider_rejects_unknown_explicit_value():
     with pytest.raises(ValueError, match="Unsupported preview provider"):
         resolve_preview_provider({"MOZAIKS_PREVIEW_PROVIDER": "modal"})
+
+
+@pytest.mark.asyncio
+async def test_restarted_preview_uses_stored_e2b_provider_after_selection_changes(monkeypatch):
+    import mozaiksai.core.adapters.docker_sandbox as docker_sandbox
+    import mozaiksai.core.adapters.e2b_sandbox as e2b_sandbox
+
+    e2b = FakeSandboxAdapter()
+    docker = FakeSandboxAdapter()
+    monkeypatch.setattr(e2b_sandbox, "get_e2b_sandbox", lambda: e2b)
+    monkeypatch.setattr(docker_sandbox, "docker_available", lambda: True)
+    monkeypatch.setattr(docker_sandbox, "get_docker_sandbox", lambda: docker)
+    monkeypatch.setenv("E2B_API_KEY", "test-key")
+    monkeypatch.setenv("MOZAIKS_PREVIEW_PROVIDER", "e2b")
+
+    database = FakePreviewDatabase()
+    first = ArtifactPreviewSessionManager(store=_store(database))
+    state = await _create(first)
+    await _sync_manifest(first, state)
+    monkeypatch.setenv("MOZAIKS_PREVIEW_PROVIDER", "docker")
+
+    restarted = ArtifactPreviewSessionManager(store=_store(database))
+    await restarted.sync(state.sandbox_id, [{"path": "app.json", "content": MANIFEST}], [])
+    assert any(name == "write_files" for name, _ in e2b.calls)
+    assert docker.calls == []
+
+    # A lost E2B credential cannot release the old reservation or stop a
+    # different provider. Cleanup can retry once the credential returns.
+    monkeypatch.delenv("E2B_API_KEY")
+    await restarted.cleanup(expired_only=False)
+    assert await restarted._store.get(state.sandbox_id) is not None
+    assert docker.calls == []
+    monkeypatch.setenv("E2B_API_KEY", "test-key")
+    await restarted.cleanup(expired_only=False)
+    assert await restarted._store.get(state.sandbox_id) is None
+    assert [name for name, _ in e2b.calls].count("terminate_session") == 1
+
+    await _create(restarted, "next-artifact")
+    assert [name for name, _ in docker.calls].count("create_session") == 1
 
 
 @pytest.mark.parametrize("path", ["/etc/passwd", "C:/outside", "../outside", "a/../../outside", "", ".", "a\x00b"])
@@ -673,6 +717,28 @@ def api_client(monkeypatch):
 
 CREATE_URL = "/api/artifacts/artifact-a/sandbox?build_registry_id=appreg-a"
 RECOVER_URL = "/api/sandbox?build_registry_id=appreg-a"
+
+
+@pytest.mark.asyncio
+async def test_generic_router_hides_sealed_sessions_even_from_same_owner(api_client):
+    client, adapter, _ = api_client
+    manager = preview_sessions._manager
+    adapter.stage_sealed_files = AsyncMock()
+    archive = build_deterministic_archive([
+        ArchiveEntry(path="app/app.json", content=MANIFEST.encode()),
+        ArchiveEntry(path="requirements.txt", content=b"mozaiksai==0.2.0\n"),
+    ])
+    state = await manager.create_sealed_candidate(
+        "candidate-a", app_id="factory", user_id="tester", target_app_id="preview-app",
+        build_registry_id="appreg-a", archive_bytes=archive,
+        archive_sha256=archive_digest(archive), image_id="sha256:" + "a" * 64,
+    )
+    assert client.get(RECOVER_URL).json() == {"sessions": []}
+    assert client.get(f"/api/sandbox/{state.sandbox_id}/status").status_code == 404
+    assert client.post(f"/api/sandbox/{state.sandbox_id}/sync", json={"files": [], "deleted": []}).status_code == 404
+    assert client.post(f"/api/sandbox/{state.sandbox_id}/start").status_code == 404
+    assert client.post(f"/api/sandbox/{state.sandbox_id}/stop").status_code == 404
+    await manager.stop(state.sandbox_id)
 
 
 def test_router_recovers_actual_identity_and_safe_dto_without_provider_calls(api_client):

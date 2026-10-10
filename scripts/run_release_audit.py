@@ -3,15 +3,16 @@
 Chains the following checks:
 
 1. Governance guardrails (source-level)
-2. Build wheel + sdist
-3. Package content guard (artifact-level)
-4. Twine metadata check
-5. Smoke-install the wheel into a clean venv
-6. Verify Factory resources resolve from the install
-7. First run from the install: ``mozaiks init`` -> ``mozaiks serve`` (platform
+2. Strict documentation build
+3. Build wheel + sdist
+4. Package content guard (artifact-level)
+5. Twine metadata check
+6. Smoke-install the wheel into a clean venv
+7. Verify Factory resources resolve from the install
+8. First run from the install: ``mozaiks init`` -> ``mozaiks serve`` (platform
    and studio hosts) -> ``/api/health/ready`` -> ``/api/shell-config``, in a
    scrubbed environment against a throwaway MongoDB server
-8. Offline functional acceptance tests
+9. Offline functional acceptance tests
 
 Returns 0 when all checks pass.  Returns non-zero on the first failure.
 
@@ -63,8 +64,13 @@ def step_governance() -> None:
     _run([sys.executable, "scripts/governance_guardrails.py", "--all", "--errors-only"])
 
 
+def step_docs() -> None:
+    print("\n=== 2. Strict documentation build ===")
+    _run([sys.executable, "-m", "mkdocs", "build", "--strict"])
+
+
 def step_build(skip_build: bool) -> list[Path]:
-    print("\n=== 2. Build distributions ===")
+    print("\n=== 3. Build distributions ===")
     if not skip_build:
         if DIST_DIR.exists():
             shutil.rmtree(DIST_DIR)
@@ -83,17 +89,17 @@ def step_build(skip_build: bool) -> list[Path]:
 
 
 def step_content_guard(artifacts: list[Path]) -> None:
-    print("\n=== 3. Package content guard ===")
+    print("\n=== 4. Package content guard ===")
     _run([sys.executable, "scripts/package_content_guard.py", *[str(a) for a in artifacts]])
 
 
 def step_twine_check(artifacts: list[Path]) -> None:
-    print("\n=== 4. Twine metadata check ===")
+    print("\n=== 5. Twine metadata check ===")
     _run([sys.executable, "-m", "twine", "check", *[str(a) for a in artifacts]])
 
 
 def step_smoke_install(wheels: list[Path]) -> Path:
-    print("\n=== 5. Smoke install into clean venv ===")
+    print("\n=== 6. Smoke install into clean venv ===")
     venv_dir = Path(tempfile.mkdtemp(prefix="mozaiks-release-audit-"))
     print(f"  venv: {venv_dir}")
     venv.create(str(venv_dir), with_pip=True, clear=True)
@@ -107,12 +113,17 @@ def step_smoke_install(wheels: list[Path]) -> Path:
 
     # CLI sanity check.
     _run([str(python), "-m", "mozaiks", "--version"], cwd=venv_dir)
+    # Verify the generic cohort primitive is present in the installed wheel.
+    _run(
+        [str(python), "-c", "from mozaiksai.core.metrics.d30_cohort import calculate_d30_action_cohort"],
+        cwd=venv_dir,
+    )
 
     return python
 
 
 def step_verify_resources(python: Path) -> None:
-    print("\n=== 6. Verify Factory resources resolve from installed package ===")
+    print("\n=== 7. Verify Factory resources resolve from installed package ===")
     verify_script = """
 from pathlib import Path
 from mozaiksai.resources import (
@@ -142,7 +153,7 @@ print("All Factory resources resolve from site-packages.")
 
 
 def step_first_run_smoke(python: Path, mongo_uri: str) -> None:
-    print("\n=== 7. First run from the installed package (init -> serve -> ready -> shell-config) ===")
+    print("\n=== 8. First run from the installed package (init -> serve -> ready -> shell-config) ===")
     # Run outside the checkout so nothing can import the source tree instead of
     # the wheel under test; the script asserts where every package came from.
     # Keep inherited package paths and credentials out of the smoke process.
@@ -187,7 +198,7 @@ def step_offline_acceptance() -> None:
     All tests run against source fixtures, not live LLM APIs.
     A subset of these also runs in CI on every PR.
     """
-    print("\n=== 8. Offline functional acceptance tests ===")
+    print("\n=== 9. Offline functional acceptance tests ===")
 
     # Core offline test suites — no cloud, no LLM required.
     offline_test_markers = [
@@ -263,6 +274,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         step_governance()
+        step_docs()
         artifacts = step_build(args.skip_build)
         wheels = [a for a in artifacts if a.suffix == ".whl"]
         step_content_guard(artifacts)
@@ -270,7 +282,7 @@ def main(argv: list[str] | None = None) -> int:
         python = step_smoke_install(wheels)
         step_verify_resources(python)
         if args.skip_first_run_smoke:
-            print("\n=== 7. First-run smoke SKIPPED (--skip-first-run-smoke): the installed app was never started ===")
+            print("\n=== 8. First-run smoke SKIPPED (--skip-first-run-smoke): the installed app was never started ===")
         else:
             step_first_run_smoke(python, args.mongo_uri)
         if not args.skip_acceptance:
