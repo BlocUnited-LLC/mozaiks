@@ -251,6 +251,23 @@ class UnifiedEventDispatcher:
             return
         raise TypeError("Unsupported handler registration signature")
 
+    def unregister_handler(
+        self,
+        event_type: str,
+        handler: Callable[[dict[str, Any]], Awaitable[Any] | Any],
+    ) -> bool:
+        """Remove one specific listener without disturbing other subscribers."""
+        listeners = self._event_handlers.get(event_type)
+        if not listeners:
+            return False
+        for index, registered in enumerate(listeners):
+            if registered is handler:
+                listeners.pop(index)
+                if not listeners:
+                    del self._event_handlers[event_type]
+                return True
+        return False
+
     def register_runtime_handler(
         self,
         canonical_event_type: str,

@@ -259,6 +259,8 @@ class ModuleEventRouter:
         self._processed_reaction_keys: dict[
             tuple[str, ...], tuple[Literal["claimed", "completed"], str | None]
         ] = {}
+        self._registered_dispatcher: Any | None = None
+        self._registered_handlers: dict[str, Callable[[dict[str, Any]], Awaitable[ModuleEventDeliveryOutcome]]] = {}
         self._index_modules(modules)
         self._validate_reaction_targets()
         self._validate_static_reaction_cycles()
@@ -269,13 +271,40 @@ class ModuleEventRouter:
 
     def register(self, dispatcher: Any) -> int:
         """Register this router with the runtime dispatcher."""
-        count = 0
-        for event_type in self.event_types:
-            dispatcher.register_handler(event_type, self._handler_for(event_type))
-            count += 1
-        if count:
-            logger.info("MODULE_EVENT_ROUTER_READY: %s event type(s)", count)
-        return count
+        if self._registered_dispatcher is dispatcher:
+            return 0
+        if self._registered_dispatcher is not None:
+            raise RuntimeError("Module event router is already registered with another dispatcher")
+        registered: dict[str, Callable[[dict[str, Any]], Awaitable[ModuleEventDeliveryOutcome]]] = {}
+        try:
+            for event_type in self.event_types:
+                handler = self._handler_for(event_type)
+                # Include the current handler in rollback if registration raises
+                # after appending it to the dispatcher's listener list.
+                registered[event_type] = handler
+                dispatcher.register_handler(event_type, handler)
+        except Exception:
+            for event_type, handler in registered.items():
+                dispatcher.unregister_handler(event_type, handler)
+            raise
+        if registered:
+            self._registered_dispatcher = dispatcher
+            self._registered_handlers = registered
+            logger.info("MODULE_EVENT_ROUTER_READY: %s event type(s)", len(registered))
+        return len(registered)
+
+    def unregister(self) -> int:
+        """Detach only the listeners owned by this router."""
+        dispatcher = self._registered_dispatcher
+        if dispatcher is None:
+            return 0
+        removed = sum(
+            bool(dispatcher.unregister_handler(event_type, handler))
+            for event_type, handler in self._registered_handlers.items()
+        )
+        self._registered_dispatcher = None
+        self._registered_handlers = {}
+        return removed
 
     async def handle_event(
         self, event_type: str, envelope: dict[str, Any]

@@ -524,6 +524,10 @@ async def _platform_startup() -> None:
 
 async def _platform_shutdown() -> None:
     global _runtime_services
+    module_event_router = getattr(app.state, "module_event_router", None)
+    if module_event_router is not None:
+        module_event_router.unregister()
+        del app.state.module_event_router
     app.state.loaded_app_root = None
     app.state.loaded_app_id = None
     app.state.loaded_app_name = None
@@ -538,8 +542,8 @@ async def _platform_shutdown() -> None:
 
 @asynccontextmanager
 async def platform_lifespan(_: FastAPI) -> AsyncIterator[None]:
-    await _platform_startup()
     try:
+        await _platform_startup()
         yield
     finally:
         await _platform_shutdown()

@@ -498,3 +498,98 @@ async def test_skipped_explicit_notification_is_not_recreated_by_implicit_rules(
         receipt, module_id="notices", reaction_id="notify.owner"
     ).status == "skipped"
     assert stored == []
+
+
+@pytest.mark.asyncio
+async def test_platform_lifespans_detach_stale_module_router_listeners(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mozaiksai.hosts import platform
+
+    calls = 0
+
+    class Wallet:
+        async def on_payment(self, _ctx: Any, *, payment_id: str) -> dict[str, Any]:
+            nonlocal calls
+            calls += 1
+            return {"success": True, "payment_id": payment_id}
+
+    dispatcher = UnifiedEventDispatcher()
+    missing = object()
+    saved_state = {
+        name: getattr(platform.app.state, name, missing)
+        for name in ("module_event_router", "loaded_app_root", "loaded_app_id", "loaded_app_name")
+    }
+    monkeypatch.setattr(platform, "_runtime_services", [])
+
+    async def start() -> None:
+        router = ModuleEventRouter([_module("wallet", Wallet(), "wallet.credit")])
+        router.register(dispatcher)
+        platform.app.state.module_event_router = router
+
+    monkeypatch.setattr(platform, "_platform_startup", start)
+    envelope = {
+        "id": "evt-pay-1",
+        "type": EVENT_TYPE,
+        "tenant": {"app_id": "app-1", "tenant_id": "tenant-1"},
+        "payload": {"payment_id": "pay-1"},
+    }
+
+    try:
+        for lifespan_number in (1, 2):
+            async with platform.platform_lifespan(platform.app):
+                receipt = await dispatcher.emit(EVENT_TYPE, envelope)
+                assert len(receipt.listeners) == 1
+                assert required_module_reaction(
+                    receipt, module_id="wallet", reaction_id="wallet.credit"
+                ).status == "ok"
+                assert calls == lifespan_number
+            assert (await dispatcher.emit(EVENT_TYPE, envelope)).listeners == ()
+            assert not hasattr(platform.app.state, "module_event_router")
+    finally:
+        for name, value in saved_state.items():
+            if value is missing:
+                if hasattr(platform.app.state, name):
+                    delattr(platform.app.state, name)
+            else:
+                setattr(platform.app.state, name, value)
+
+
+@pytest.mark.asyncio
+async def test_platform_failed_startup_detaches_registered_module_router(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mozaiksai.hosts import platform
+
+    dispatcher = UnifiedEventDispatcher()
+    missing = object()
+    saved_state = {
+        name: getattr(platform.app.state, name, missing)
+        for name in ("module_event_router", "loaded_app_root", "loaded_app_id", "loaded_app_name")
+    }
+    monkeypatch.setattr(platform, "_runtime_services", [])
+
+    async def start_then_fail() -> None:
+        class Wallet:
+            async def on_payment(self, _ctx: Any, *, payment_id: str) -> dict[str, Any]:
+                return {"success": True, "payment_id": payment_id}
+
+        router = ModuleEventRouter([_module("wallet", Wallet(), "wallet.credit")])
+        router.register(dispatcher)
+        platform.app.state.module_event_router = router
+        raise RuntimeError("startup failed after registration")
+
+    monkeypatch.setattr(platform, "_platform_startup", start_then_fail)
+    try:
+        with pytest.raises(RuntimeError, match="startup failed after registration"):
+            async with platform.platform_lifespan(platform.app):
+                pass
+        assert (await dispatcher.emit(EVENT_TYPE, {})).listeners == ()
+        assert not hasattr(platform.app.state, "module_event_router")
+    finally:
+        for name, value in saved_state.items():
+            if value is missing:
+                if hasattr(platform.app.state, name):
+                    delattr(platform.app.state, name)
+            else:
+                setattr(platform.app.state, name, value)
