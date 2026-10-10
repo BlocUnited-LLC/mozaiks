@@ -175,6 +175,13 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
+- Notification reads and mutations no longer treat token-wide roles or
+  permissions as grants for workspace audiences. Broad-only alerts remain
+  hidden until the host can verify a grant for the exact membership. Every
+  tenant- or workspace-owned alert now requires a matching verified scope,
+  including direct-user and empty-audience records. Ownerless personal direct
+  and app-wide alerts keep their existing visibility rules.
+
 - Production Compose now requires a separately managed Keycloak realm import
   and validates public HTTPS browser callbacks before Keycloak starts; the
   packaged localhost realm remains for local development.
@@ -205,6 +212,19 @@ This project follows a practical pre-1.0 changelog format:
   bundle. Claimless tokens cannot choose another execution app through request
   parameters, and declared target-app inputs remain business data. AppGenerator
   now writes the target app ID into assembled bundles before validation and preview.
+
+- Workspace support alerts and messages linked to support requests now require
+  the caller's token-bound workspace to match a host-verified membership.
+  Earlier support alerts without a workspace owner are hidden from notification
+  reads and bulk actions; app-wide alerts and ordinary direct messages remain
+  available. Mixed direct and broad alerts require the matching verified scope,
+  and ownerless broad-audience alerts are hidden. New alerts use the event's normalized owner and reject
+  malformed or conflicting owner fields. All
+  notification reads and mutations are limited to the app loaded by the host,
+  including when a token has no app claim.
+- Direct-recipient notification rules now skip derivation when the field name
+  or its recipient value is missing, blank, or invalid, preventing an empty
+  target from becoming an app-wide alert.
 
 - Repository Docker coding turns now require a trusted local image ID, reject
   changed image tags before source transfer, verify the created container's

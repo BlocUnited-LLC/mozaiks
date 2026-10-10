@@ -945,6 +945,25 @@ class TestHandleEventNotificationTarget:
 
 class TestCreateNotification:
     @pytest.mark.asyncio
+    async def test_notification_stores_workspace_from_event_provenance(self):
+        stored = []
+
+        async def notification_store(record):
+            stored.append(record)
+
+        mod = _loaded_module(
+            "support",
+            notifications=[_notification_rule("support.created", rule_id="alert", module_id="support")],
+        )
+        router = _router([mod], notification_store=notification_store)
+        envelope = _envelope()
+        envelope["tenant"]["workspace_id"] = "workspace-a"
+        envelope["payload"]["workspace_id"] = "forged-workspace"
+        await router.handle_event("support.created", envelope)
+
+        assert stored[0]["workspace_id"] == "workspace-a"
+
+    @pytest.mark.asyncio
     async def test_structured_envelope_uses_payload_for_template(self):
         stored = []
 
@@ -1084,6 +1103,57 @@ class TestCreateNotification:
             _envelope(payload={"recipient_ids": ["user-2", "user-3", "user-2"]}),
         )
         assert stored[0]["audience"]["user_ids"] == ["user-2", "user-3"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {}, {"recipient_id": None}, {"recipient_id": ""}, {"recipient_id": "  "},
+            {"recipient_id": []}, {"recipient_id": ["  "]},
+            {"recipient_id": ["user-2", " "]}, {"recipient_id": 42},
+            {"recipient_id": {"id": "user-2"}},
+        ],
+    )
+    async def test_direct_recipient_rule_skips_invalid_payload(self, payload):
+        stored = []
+        emitted = []
+
+        async def notification_store(record):
+            stored.append(record)
+
+        async def event_emitter(event_type, event):
+            emitted.append((event_type, event))
+
+        router = _router(notification_store=notification_store, event_emitter=event_emitter)
+        await router._create_notification(
+            _notification_rule(
+                "ev.recipient", rule_id="direct-recipient", module_id="m1",
+                audience={"user_id_field": "recipient_id"},
+            ),
+            "ev.recipient",
+            _envelope(payload=payload),
+        )
+        assert stored == []
+        assert emitted == []
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("field", [None, "", "  ", 42])
+    async def test_direct_recipient_rule_skips_invalid_field_name(self, field):
+        stored = []
+
+        async def notification_store(record):
+            stored.append(record)
+
+        router = _router(notification_store=notification_store)
+        await router._create_notification(
+            _notification_rule(
+                "ev.recipient", rule_id="direct-recipient", module_id="m1",
+                audience={"user_id_field": field},
+            ),
+            "ev.recipient",
+            _envelope(payload={"recipient_id": "user-42"}),
+        )
+        assert stored == []
 
     @pytest.mark.asyncio
     async def test_secret_keys_stripped_from_context_fields(self):

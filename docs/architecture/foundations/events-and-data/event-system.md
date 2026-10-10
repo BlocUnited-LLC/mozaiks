@@ -137,6 +137,36 @@ Current implementation:
 - `contracts/subscriptions.yaml` is not supported. Runtime rejects it so
   modules have one reaction-routing source of truth.
 
+Platform notification records retain the workspace ID from their module event
+provenance. Every notification HTTP query uses the app ID loaded by the host;
+token and optional request app IDs must match it. The routes require a
+token-bound workspace and matching host-verified membership before showing or
+changing first-party workspace support alerts, including messages linked to
+support requests. Older support alerts without a workspace owner stay hidden.
+Every alert with a tenant or workspace owner, including direct-user and
+empty-audience alerts, requires a matching host-verified owner scope; revoking
+that membership hides it. Personal direct and app-wide alerts with neither
+owner retain their existing audience visibility. A token without a workspace
+binding sees those ownerless notifications but no owned alerts; the shared
+shell does not currently select a workspace for its bell.
+Role- or permission-targeted alerts remain hidden until a host can supply a
+read-only grant for the exact workspace and tenant. A token-wide role or
+permission and a verified membership without that grant are insufficient.
+Alerts that also name the caller directly remain visible only when each
+present owner matches the host-verified scope. Broad-audience alerts with no
+owner or malformed ownership stay hidden, even when they also name the caller
+directly. Hosted customer alerts and app-wide announcements need trusted
+recipient IDs or a separately reviewed generic audience contract.
+New notifications omit absent tenant/workspace owners and skip creation when
+an explicitly supplied owner has an invalid type or conflicts across nested
+and top-level event fields. Older records with present
+null or malformed owners remain hidden.
+Notification rules declaring `audience.user_id_field` create no record when
+the field name is invalid or the event lacks a nonempty string recipient or
+a list of nonempty string recipients; an unresolved direct target cannot
+become app-wide. A list-valued recipient field must be in a structured event
+`payload`; flat event projections carry scalar fields only.
+
 ### Reaction target reference
 
 ```yaml

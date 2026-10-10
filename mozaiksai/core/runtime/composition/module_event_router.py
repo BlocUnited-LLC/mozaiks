@@ -925,6 +925,7 @@ class ModuleEventRouter:
                 "app_id": str(envelope.get("app_id") or ""),
                 "tenant_id": str(envelope.get("tenant_id") or ""),
             }
+        event_provenance = normalize_module_event_provenance(event_type, envelope)
 
         template = rule.get("template") if isinstance(rule.get("template"), dict) else {}
         if not template and (rule.get("title") or rule.get("body")):
@@ -947,19 +948,31 @@ class ModuleEventRouter:
             context = None
 
         audience = dict(rule.get("audience") if isinstance(rule.get("audience"), dict) else {})
-        user_id_field = str(audience.get("user_id_field") or "").strip()
-        if user_id_field and payload.get(user_id_field):
+        if "user_id_field" in audience:
+            raw_user_id_field = audience["user_id_field"]
+            user_id_field = raw_user_id_field.strip() if isinstance(raw_user_id_field, str) else ""
+            if not user_id_field:
+                logger.warning("NOTIFICATION_RECIPIENT_FIELD_INVALID: rule_id=%s", rule.get("id"))
+                return
             raw_user_ids = payload.get(user_id_field)
-            if isinstance(raw_user_ids, list):
-                target_user_ids = [str(user_id).strip() for user_id in raw_user_ids if str(user_id).strip()]
+            if isinstance(raw_user_ids, str):
+                target_user_ids = [raw_user_ids.strip()] if raw_user_ids.strip() else []
+            elif isinstance(raw_user_ids, list) and raw_user_ids and all(
+                isinstance(user_id, str) and user_id.strip() for user_id in raw_user_ids
+            ):
+                target_user_ids = [user_id.strip() for user_id in raw_user_ids]
             else:
-                target_user_id = str(raw_user_ids).strip()
-                target_user_ids = [target_user_id] if target_user_id else []
-            if target_user_ids:
-                existing_user_ids = audience.get("user_ids")
-                if not isinstance(existing_user_ids, list):
-                    existing_user_ids = []
-                audience["user_ids"] = list(dict.fromkeys([*existing_user_ids, *target_user_ids]))
+                target_user_ids = []
+            if not target_user_ids:
+                logger.warning(
+                    "NOTIFICATION_RECIPIENT_INVALID: rule_id=%s field=%s",
+                    rule.get("id"), user_id_field,
+                )
+                return
+            existing_user_ids = audience.get("user_ids")
+            if not isinstance(existing_user_ids, list):
+                existing_user_ids = []
+            audience["user_ids"] = list(dict.fromkeys([*existing_user_ids, *target_user_ids]))
 
         record = {
             "notification_id": f"ntf_{uuid4().hex}",
@@ -967,8 +980,7 @@ class ModuleEventRouter:
             "module_id": rule.get("module_id"),
             "event_type": event_type,
             "source_event_id": envelope.get("id"),
-            "app_id": tenant.get("app_id"),
-            "tenant_id": tenant.get("tenant_id"),
+            "app_id": event_provenance.app_id,
             "actor": envelope.get("actor") if isinstance(envelope.get("actor"), dict) else None,
             "audience": audience,
             "channels": rule.get("channels") if isinstance(rule.get("channels"), list) else ["in_app"],
@@ -978,11 +990,42 @@ class ModuleEventRouter:
             "created_at": _utc_now(),
             "source_event": envelope,
         }
+        # Store the same owner chosen by event provenance. A malformed or
+        # contradictory supplied owner must never become an unowned alert.
+        for owner_key in ("tenant_id", "workspace_id"):
+            raw_owners = [
+                source[owner_key]
+                for source in (raw_tenant if isinstance(raw_tenant, dict) else {}, envelope)
+                if owner_key in source
+            ]
+            supplied_owners = {
+                owner.strip() for owner in raw_owners
+                if isinstance(owner, str) and owner.strip()
+            }
+            if any(owner is not None and not isinstance(owner, str) for owner in raw_owners) or (
+                len(supplied_owners) > 1
+            ):
+                logger.warning(
+                    "NOTIFICATION_OWNER_INVALID: rule_id=%s field=%s",
+                    rule.get("id"), owner_key,
+                )
+                return
+            normalized_owner = getattr(event_provenance, owner_key)
+            if normalized_owner:
+                record[owner_key] = normalized_owner
         if context is not None:
             record["context"] = context
 
         await self._store_notification(record)
         if self._event_emitter is not None:
+            notification_tenant = {
+                **tenant,
+                "app_id": record["app_id"],
+            }
+            for owner_key in ("tenant_id", "workspace_id"):
+                notification_tenant.pop(owner_key, None)
+                if owner_key in record:
+                    notification_tenant[owner_key] = record[owner_key]
             notification_event = {
                 "id": f"evt_{uuid4().hex}",
                 "type": "notification.created",
@@ -993,7 +1036,7 @@ class ModuleEventRouter:
                     "module_id": rule.get("module_id"),
                     "notification_id": record["notification_id"],
                 },
-                "tenant": tenant,
+                "tenant": notification_tenant,
                 "correlation": envelope.get("correlation") if isinstance(envelope.get("correlation"), dict) else {},
                 "payload": record,
                 "visibility": "internal",
@@ -1008,10 +1051,10 @@ class ModuleEventRouter:
                     "layer": "platform",
                     "module_id": rule.get("module_id"),
                 },
-                "tenant": tenant,
+                "tenant": notification_tenant,
                 "correlation": envelope.get("correlation") if isinstance(envelope.get("correlation"), dict) else {},
                 "payload": {
-                    "app_id": tenant.get("app_id"),
+                    "app_id": record["app_id"],
                     "module_id": rule.get("module_id"),
                 },
                 "visibility": "internal",
