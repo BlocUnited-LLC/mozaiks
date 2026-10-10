@@ -343,6 +343,19 @@ test('connection retry creates a new socket for the last acknowledged ID and ign
   await expect(page.getByRole('log')).toHaveText('Latest history');
 });
 
+test('disconnected assistant only reports waiting messages when input is queued', async t => {
+  const page = await fixture(t, 390);
+  await page.evaluate(() => window.connections[0].callbacks.onClose());
+  const notice = page.getByRole('status').filter({ hasText: 'The assistant is disconnected.' });
+  await expect(notice).toBeVisible();
+  await expect(notice).not.toContainText('Your messages are waiting.');
+  await expect(notice.getByRole('button', { name: 'Retry connection' })).toBeVisible();
+
+  await send(page, 'Question queued while offline');
+  await expect(notice).toContainText('Your messages are waiting.');
+  assert.deepEqual(await submissions(page), []);
+});
+
 test('unmount closes the connection and rejects pending fetch and socket callbacks', async t => {
   const page = await fixture(t);
   await ack(page);

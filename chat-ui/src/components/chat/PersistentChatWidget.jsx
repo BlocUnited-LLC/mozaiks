@@ -745,7 +745,7 @@ const PersistentChatWidget = ({
         {/* Body */}
         {!inSupportMode && wsEnabled && ['error', 'disconnected'].includes(wsStatus) && (
           <div role="status" className="flex-shrink-0 px-3 py-2 text-xs text-gray-200">
-            The assistant is disconnected. Your messages are waiting.
+            The assistant is disconnected.{hasPendingCurrentSends ? ' Your messages are waiting.' : ''}
             <button type="button" onClick={retryConnection} className="ml-2 underline">Retry connection</button>
           </div>
         )}
