@@ -556,6 +556,64 @@ async def test_platform_lifespans_detach_stale_module_router_listeners(
 
 
 @pytest.mark.asyncio
+async def test_platform_shutdown_delivers_events_emitted_while_services_stop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mozaiksai.hosts import platform
+
+    received: list[str] = []
+    stop_receipts: list[EventDispatchOutcome] = []
+
+    class Wallet:
+        async def on_payment(self, _ctx: Any, *, payment_id: str) -> dict[str, Any]:
+            received.append(payment_id)
+            return {"success": True}
+
+    dispatcher = UnifiedEventDispatcher()
+    envelope = {
+        "id": "evt-stop-1", "type": EVENT_TYPE,
+        "tenant": {"app_id": "app-1", "tenant_id": "tenant-1"},
+        "payload": {"payment_id": "pay-during-stop"},
+    }
+    missing = object()
+    saved_state = {
+        name: getattr(platform.app.state, name, missing)
+        for name in ("module_event_router", "loaded_app_root", "loaded_app_id", "loaded_app_name")
+    }
+    monkeypatch.setattr(platform, "_runtime_services", [])
+
+    class Service:
+        async def stop(self) -> None:
+            stop_receipts.append(await dispatcher.emit(EVENT_TYPE, envelope))
+
+    async def start() -> None:
+        router = ModuleEventRouter([_module("wallet", Wallet(), "wallet.credit")])
+        router.register(dispatcher)
+        platform.app.state.module_event_router = router
+        platform._runtime_services = [Service()]
+
+    monkeypatch.setattr(platform, "_platform_startup", start)
+    try:
+        async with platform.platform_lifespan(platform.app):
+            pass
+        assert received == ["pay-during-stop"]
+        assert len(stop_receipts) == 1 and len(stop_receipts[0].listeners) == 1
+        assert required_module_reaction(
+            stop_receipts[0], module_id="wallet", reaction_id="wallet.credit"
+        ).status == "ok"
+        assert (await dispatcher.emit(EVENT_TYPE, envelope)).listeners == ()
+        assert not hasattr(platform.app.state, "module_event_router")
+        assert platform._runtime_services == []
+    finally:
+        for name, value in saved_state.items():
+            if value is missing:
+                if hasattr(platform.app.state, name):
+                    delattr(platform.app.state, name)
+            else:
+                setattr(platform.app.state, name, value)
+
+
+@pytest.mark.asyncio
 async def test_platform_failed_startup_detaches_registered_module_router(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

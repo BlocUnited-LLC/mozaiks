@@ -524,20 +524,23 @@ async def _platform_startup() -> None:
 
 async def _platform_shutdown() -> None:
     global _runtime_services
-    module_event_router = getattr(app.state, "module_event_router", None)
-    if module_event_router is not None:
-        module_event_router.unregister()
-        del app.state.module_event_router
-    app.state.loaded_app_root = None
-    app.state.loaded_app_id = None
-    app.state.loaded_app_name = None
-    if not _runtime_services:
-        return
     try:
-        await stop_services(_runtime_services)
-    except Exception as _shutdown_exc:
-        logger.warning("PLATFORM_RUNTIME_SERVICES_STOP_FAILED: %s", _shutdown_exc)
-    _runtime_services = []
+        if _runtime_services:
+            try:
+                await stop_services(_runtime_services)
+            except Exception as _shutdown_exc:
+                logger.warning("PLATFORM_RUNTIME_SERVICES_STOP_FAILED: %s", _shutdown_exc)
+    finally:
+        # Services may emit while stopping. Keep their module reactions attached
+        # until every stop hook has returned, including on failed startup.
+        _runtime_services = []
+        module_event_router = getattr(app.state, "module_event_router", None)
+        if module_event_router is not None:
+            module_event_router.unregister()
+            del app.state.module_event_router
+        app.state.loaded_app_root = None
+        app.state.loaded_app_id = None
+        app.state.loaded_app_name = None
 
 
 @asynccontextmanager
