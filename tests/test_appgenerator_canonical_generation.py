@@ -373,6 +373,27 @@ class TestStaticContractChecks:
         values = so["models"]["AppBuildTask"]["fields"]["task_type"]["values"]
         assert "module_contract" in values
 
+    def test_startup_service_profile_is_finite_in_generated_contract(self) -> None:
+        from mozaiksai.core.workflow.outputs.structured import build_models_from_config
+
+        models = _read_yaml("factory_app/workflows/AppGenerator/structured_outputs.yaml")["models"]
+        relevant = {
+            name: models[name]
+            for name in ("ModuleStartupServiceProfile", "ModuleRuntimeExtension")
+        }
+        generated = build_models_from_config(relevant)["ModuleRuntimeExtension"]
+        worker = generated.model_validate({
+            "kind": "startup_service", "entrypoint": "backend.worker:Worker",
+            "prefix": None, "profile": "worker",
+        })
+        assert worker.profile.value == "worker"
+        for invalid in ("host", "operator"):
+            with pytest.raises(ValueError, match="profile"):
+                generated.model_validate({
+                    "kind": "startup_service", "entrypoint": "backend.worker:Worker",
+                    "prefix": None, "profile": invalid,
+                })
+
     def test_structured_outputs_has_no_admin_config_or_platform_config_task_type(self) -> None:
         so = _read_yaml("factory_app/workflows/AppGenerator/structured_outputs.yaml")
         values = so["models"]["AppBuildTask"]["fields"]["task_type"]["values"]

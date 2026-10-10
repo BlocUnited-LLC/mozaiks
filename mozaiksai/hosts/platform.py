@@ -50,7 +50,9 @@ from mozaiksai.core.runtime.app.loader import AppLoader, AppLoadError
 from mozaiksai.core.runtime.app.module_loader import ModuleLoadError
 from mozaiksai.core.runtime.composition.executor_registry import ExecutorRegistry
 from mozaiksai.core.runtime.composition.extensions import (
+    StartupServiceProfileError,
     mount_module_routers,
+    resolve_startup_service_profile,
     start_module_services,
     stop_services,
 )
@@ -266,6 +268,7 @@ async def _platform_startup() -> None:
     from mozaiksai.core.auth.adapters.registry import validate_auth_provider_configuration
 
     validate_auth_provider_configuration()
+    startup_service_profile = resolve_startup_service_profile()
 
     app.state.startup_degraded = False
     app.state.startup_degraded_reason = None
@@ -446,6 +449,8 @@ async def _platform_startup() -> None:
                 failed_names = sorted(load_result.failed_module_names)
                 reason = f"MODULE_LOAD_PARTIAL: {len(failed_names)} module(s) failed to load"
                 logger.error("PLATFORM_DEGRADED: %s — %s", reason, ", ".join(failed_names))
+                if startup_service_profile == "worker":
+                    raise StartupServiceProfileError(reason)
                 app.state.startup_degraded = True
                 app.state.startup_degraded_reason = reason
                 app.state.failed_module_names = failed_names
@@ -458,24 +463,36 @@ async def _platform_startup() -> None:
                     logger.info("MODULE_EXTENSIONS_ROUTERS_MOUNTED: %s router(s)", n)
             except Exception as exc:
                 logger.error("MODULE_EXTENSIONS_ROUTER_MOUNT_FAILED: %s", exc)
+                if startup_service_profile == "worker":
+                    raise
                 if not app.state.startup_degraded:
                     app.state.startup_degraded = True
                     app.state.startup_degraded_reason = "MODULE_EXTENSIONS_ROUTER_MOUNT_FAILED"
 
             try:
-                module_services = await start_module_services(load_result.modules)
+                module_services = await start_module_services(
+                    load_result.modules, profile=startup_service_profile
+                )
                 _runtime_services.extend(module_services)
+            except StartupServiceProfileError:
+                raise
             except Exception as exc:
                 logger.error("MODULE_EXTENSIONS_SERVICES_NOT_STARTED: %s", exc)
                 if not app.state.startup_degraded:
                     app.state.startup_degraded = True
                     app.state.startup_degraded_reason = "MODULE_EXTENSIONS_SERVICES_NOT_STARTED"
+        elif startup_service_profile == "worker":
+            raise StartupServiceProfileError("Worker profile has no loaded modules")
 
+    except StartupServiceProfileError:
+        raise
     except DatabaseStartupError:
         raise
     except DatabaseStartupPolicyError:
         raise
     except AppLoadError as exc:
+        if startup_service_profile == "worker":
+            raise
         if str(exc).startswith("app.json not found"):
             logger.debug("APP_LOAD_SKIPPED: app.json not found for platform host")
         else:
@@ -483,12 +500,16 @@ async def _platform_startup() -> None:
             app.state.startup_degraded = True
             app.state.startup_degraded_reason = "APP_LOAD_ERROR"
     except ModuleLoadError as exc:
+        if startup_service_profile == "worker":
+            raise
         # A module contract is invalid — platform starts in degraded state so
         # health checks can surface this rather than hiding it as a warning.
         logger.error("APP_LOAD_FAILED_DEGRADED (ModuleLoadError): %s", exc)
         app.state.startup_degraded = True
         app.state.startup_degraded_reason = "MODULE_LOAD_ERROR"
     except Exception as exc:
+        if startup_service_profile == "worker":
+            raise
         # Unexpected error during app/module setup. Mark degraded so health
         # checks report the problem; do not swallow silently.
         logger.error("APP_LOAD_FAILED_DEGRADED (%s): %s", type(exc).__name__, exc)

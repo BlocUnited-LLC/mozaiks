@@ -26,8 +26,10 @@ from fastapi.routing import APIRouter
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_ext(kind: str, entrypoint: str, prefix: str | None = None) -> Any:
-    ext = SimpleNamespace(kind=kind, entrypoint=entrypoint, prefix=prefix)
+def _make_ext(
+    kind: str, entrypoint: str, prefix: str | None = None, profile: str | None = None
+) -> Any:
+    ext = SimpleNamespace(kind=kind, entrypoint=entrypoint, prefix=prefix, profile=profile)
     return ext
 
 
@@ -225,9 +227,9 @@ class TestMountModuleRouters:
 # ---------------------------------------------------------------------------
 
 class TestStartModuleServices:
-    async def _start(self, loaded_modules):
+    async def _start(self, loaded_modules, *, profile="host"):
         from mozaiksai.core.runtime.composition.extensions import start_module_services
-        return await start_module_services(loaded_modules)
+        return await start_module_services(loaded_modules, profile=profile)
 
     @pytest.mark.asyncio
     async def test_noop_when_no_modules(self):
@@ -350,6 +352,197 @@ class TestStartModuleServices:
         finally:
             sys.modules.pop("mozaiks_runtime_module_mod_a.backend.worker", None)
             sys.modules.pop("mozaiks_runtime_module_mod_b.backend.worker", None)
+
+    @pytest.mark.asyncio
+    async def test_host_profile_starts_existing_services_and_excludes_worker(self):
+        started = []
+
+        class HostService:
+            def start(self):
+                started.append("host")
+
+        class WorkerService:
+            def start(self):
+                started.append("worker")
+
+        key = "mozaiks_runtime_module_tasks.backend.worker"
+        sys.modules[key] = MagicMock(HostService=HostService, WorkerService=WorkerService)
+        try:
+            mod = _make_loaded_module("tasks", [
+                _make_ext("startup_service", "backend.worker:HostService"),
+                _make_ext("startup_service", "backend.worker:WorkerService", profile="worker"),
+            ])
+            services = await self._start([mod])
+            assert len(services) == 1
+            assert isinstance(services[0], HostService)
+            assert started == ["host"]
+        finally:
+            sys.modules.pop(key, None)
+
+    @pytest.mark.asyncio
+    async def test_worker_profile_starts_only_declared_worker_services(self):
+        started = []
+
+        class HostService:
+            def start(self):
+                started.append("host")
+
+        class WorkerService:
+            def start(self):
+                started.append("worker")
+
+        key = "mozaiks_runtime_module_tasks.backend.worker"
+        sys.modules[key] = MagicMock(HostService=HostService, WorkerService=WorkerService)
+        try:
+            mod = _make_loaded_module("tasks", [
+                _make_ext("startup_service", "backend.worker:HostService"),
+                _make_ext("startup_service", "backend.worker:WorkerService", profile="worker"),
+            ])
+            services = await self._start([mod], profile="worker")
+            assert len(services) == 1
+            assert isinstance(services[0], WorkerService)
+            assert started == ["worker"]
+        finally:
+            sys.modules.pop(key, None)
+
+    @pytest.mark.asyncio
+    async def test_invalid_environment_profile_aborts_before_start(self, monkeypatch):
+        from mozaiksai.core.runtime.composition.extensions import (
+            StartupServiceProfileError,
+            start_module_services,
+        )
+
+        monkeypatch.setenv("MOZAIKS_STARTUP_SERVICE_PROFILE", "other")
+        with pytest.raises(StartupServiceProfileError, match="host or worker"):
+            await start_module_services([
+                _make_loaded_module("tasks", [
+                    _make_ext("startup_service", "backend.worker:HostService")
+                ])
+            ])
+
+    @pytest.mark.asyncio
+    async def test_worker_profile_requires_declared_service(self):
+        from mozaiksai.core.runtime.composition.extensions import StartupServiceProfileError
+
+        with pytest.raises(StartupServiceProfileError, match="no declared"):
+            await self._start([], profile="worker")
+
+    @pytest.mark.asyncio
+    async def test_worker_service_requires_callable_start_method(self):
+        from mozaiksai.core.runtime.composition.extensions import StartupServiceProfileError
+
+        key = "mozaiks_runtime_module_tasks.backend.worker"
+        sys.modules[key] = MagicMock(Worker=lambda: SimpleNamespace(start=None))
+        try:
+            mod = _make_loaded_module("tasks", [
+                _make_ext("startup_service", "backend.worker:Worker", profile="worker"),
+            ])
+            with pytest.raises(StartupServiceProfileError, match="callable start method"):
+                await self._start([mod], profile="worker")
+        finally:
+            sys.modules.pop(key, None)
+
+    @pytest.mark.asyncio
+    async def test_malformed_declared_profile_aborts_before_any_service_starts(self):
+        from mozaiksai.core.runtime.composition.extensions import StartupServiceProfileError
+
+        mod = _make_loaded_module("tasks", [
+            _make_ext("startup_service", "backend.worker:HostService"),
+            _make_ext("startup_service", "backend.worker:WorkerService", profile="unexpected"),
+        ])
+        with pytest.raises(StartupServiceProfileError, match="Invalid declared"):
+            await self._start([mod])
+
+    @pytest.mark.asyncio
+    async def test_worker_start_failure_stops_prior_worker_service(self):
+        from mozaiksai.core.runtime.composition.extensions import StartupServiceProfileError
+
+        stopped = []
+
+        class FirstService:
+            def start(self):
+                pass
+
+            def stop(self):
+                stopped.append(True)
+
+        class BrokenService:
+            def start(self):
+                raise RuntimeError("cannot start")
+
+            def stop(self):
+                stopped.append("broken")
+
+        key = "mozaiks_runtime_module_tasks.backend.worker"
+        sys.modules[key] = MagicMock(FirstService=FirstService, BrokenService=BrokenService)
+        try:
+            mod = _make_loaded_module("tasks", [
+                _make_ext("startup_service", "backend.worker:FirstService", profile="worker"),
+                _make_ext("startup_service", "backend.worker:BrokenService", profile="worker"),
+            ])
+            with pytest.raises(StartupServiceProfileError, match="could not start"):
+                await self._start([mod], profile="worker")
+            assert stopped == ["broken", True]
+        finally:
+            sys.modules.pop(key, None)
+
+
+@pytest.mark.asyncio
+async def test_platform_host_starts_only_worker_service_from_real_app_bundle(tmp_path, monkeypatch):
+    from mozaiksai.core.auth.adapters import registry
+    from mozaiksai.core.runtime.app.module_loader import ModuleLoader
+    from mozaiksai.core.runtime.composition.executor_registry import ExecutorRegistry
+    from mozaiksai.hosts import platform
+
+    module_dir = tmp_path / "modules" / "profile_smoke"
+    backend_dir = module_dir / "backend"
+    backend_dir.mkdir(parents=True)
+    (tmp_path / "app.json").write_text('{"appName": "Profile Smoke"}', encoding="utf-8")
+    (module_dir / "module.yaml").write_text(
+        "schema_version: mozaiks.module.v1\n"
+        "module:\n  id: profile_smoke\n  handler: backend.handler:Handler\n",
+        encoding="utf-8",
+    )
+    (backend_dir / "handler.py").write_text("class Handler:\n    pass\n", encoding="utf-8")
+    (module_dir / "runtime_extensions.yaml").write_text(
+        "schema_version: mozaiks.runtime_extensions.v1\n"
+        "extensions:\n"
+        "  - kind: startup_service\n    entrypoint: backend.worker:HostService\n"
+        "  - kind: startup_service\n    entrypoint: backend.worker:WorkerService\n"
+        "    profile: worker\n",
+        encoding="utf-8",
+    )
+    (backend_dir / "worker.py").write_text(
+        "import os\nfrom pathlib import Path\n"
+        "def mark(value):\n"
+        "    with Path(os.environ['MOZAIKS_TEST_STARTUP_EVENTS_PATH']).open('a') as events:\n"
+        "        events.write(value + '\\n')\n"
+        "class HostService:\n"
+        "    def start(self): mark('host')\n"
+        "class WorkerService:\n"
+        "    def start(self): mark('worker')\n"
+        "    def stop(self): mark('stopped')\n",
+        encoding="utf-8",
+    )
+    events_path = tmp_path / "events.txt"
+    monkeypatch.setenv("PLATFORM_PATH", str(tmp_path))
+    monkeypatch.setenv("MOZAIKS_STARTUP_SERVICE_PROFILE", "worker")
+    monkeypatch.setenv("MOZAIKS_TEST_STARTUP_EVENTS_PATH", str(events_path))
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    monkeypatch.setattr(registry, "validate_auth_provider_configuration", lambda: None)
+    monkeypatch.setattr(platform, "executor_registry", ExecutorRegistry())
+    monkeypatch.setattr(platform, "_runtime_services", [])
+    monkeypatch.setattr(platform.app.state, "module_defaults_path", None, raising=False)
+
+    try:
+        await platform._platform_startup()
+        assert platform.app.state.startup_degraded is False
+        assert events_path.read_text(encoding="utf-8") == "worker\n"
+        assert len(platform._runtime_services) == 1
+    finally:
+        await platform._platform_shutdown()
+        ModuleLoader._clear_registered_package("mozaiks_runtime_module_profile_smoke")
+    assert events_path.read_text(encoding="utf-8") == "worker\nstopped\n"
 
 
 # ---------------------------------------------------------------------------

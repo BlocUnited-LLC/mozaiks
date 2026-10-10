@@ -653,6 +653,7 @@ extensions:
 
   - kind: startup_service
     entrypoint: backend.worker:MyService
+    profile: worker
 ```
 
 Two kinds:
@@ -660,6 +661,30 @@ Two kinds:
   module-local generic external webhook receiver or custom inbound callback route.
 - `startup_service` — starts a background service for the process lifetime. Use
   for a module-local audit/event subscriber or polling worker.
+
+Startup services have two finite process profiles: `host` (the default when
+`profile` is omitted or null) and `worker`. The ordinary app host runs only `host`
+services. A separately operated process sets
+`MOZAIKS_STARTUP_SERVICE_PROFILE=worker` and starts only services declared
+with `profile: worker`. That process still loads the app and its module
+contracts; the profile selects startup services only. It does not mount or
+unmount API routers, grant action permissions, or create a background module
+dispatch bypass. An invalid process profile or a worker profile with no
+declared services aborts startup. A worker also aborts if its app or any module
+fails to load. A worker startup failure stops any worker services started
+earlier in that process.
+
+Only `profile: worker` is an explicit manifest value; omit `profile` (or use
+null in generated contracts) for the ordinary host. A worker service must
+expose a callable `start()` method. The profile selector does not skip
+platform `on_startup` hooks, data migrations, event registration, or route
+mounting. Operators must keep those safe to run in both processes or gate
+them through their owning contracts. Keep the worker host private and bound
+to loopback; the service profile alone does not create a no-listener daemon.
+
+Keep `profile` absent for existing app services and all `api_router` entries.
+Configure a separate worker process only when the app has an operational
+boundary and a declared service that belongs there.
 
 Runtime extension rules:
 

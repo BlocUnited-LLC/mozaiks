@@ -2812,6 +2812,10 @@ models:
         items: str
         description: Contract fields that reference this component, e.g. admin_yaml.panels[campaigns.overview].component.
 
+  ModuleStartupServiceProfile:
+    type: literal
+    values: [worker]
+
   ModuleRuntimeExtension:
     type: model
     fields:
@@ -2836,6 +2840,15 @@ models:
         - str
         - 'null'
         description: URL prefix for api_router extensions (e.g. /webhooks/provider). Null for startup_service.
+      profile:
+        type: union
+        variants:
+        - ModuleStartupServiceProfile
+        - 'null'
+        description: >
+          Startup service process profile. Null uses host, preserving ordinary app
+          startup. worker is only for a deliberately separate worker process.
+          Must be null for api_router.
 
   ModuleRuntimeExtensionsManifest:
     type: model
