@@ -347,33 +347,8 @@ class WorkflowBridgeMixin:
             get_live_run = getattr(self, "get_live_ag2_workflow_run", None)
             if callable(get_live_run):
                 live_run = get_live_run(chat_id)
-            if live_run is not None and isinstance(message, str) and message.strip():
-                # Continuing a paused run restarts mutable execution: it needs
-                # the same chat execution lease as a fresh start/resume.
-                try:
-                    async with chat_execution_lease(app_id=app_id, chat_id=chat_id):
-                        return await self._continue_live_ag2_workflow_run(
-                            live_run=live_run,
-                            chat_id=chat_id,
-                            user_id=user_id,
-                            workflow_name=workflow_name,
-                            message=message,
-                            app_id=app_id,
-                        )
-                except LockAcquisitionError as lock_err:
-                    if lock_err.resource != chat_lock_resource(app_id, chat_id):
-                        raise
-                    return await self._reject_chat_locked(chat_id=chat_id, busy=True)
-                except ChatLockAuthorityUnavailableError as lock_err:
-                    if lock_err.resource != chat_lock_resource(app_id, chat_id):
-                        raise
-                    return await self._reject_chat_locked(chat_id=chat_id, busy=False)
-                except ChatLeaseLostError as lock_err:
-                    if lock_err.resource != chat_lock_resource(app_id, chat_id):
-                        raise
-                    return await self._reject_chat_lease_lost(chat_id=chat_id)
-
-            if has_active_session and active_callbacks and not passive_start:
+            has_live_text = live_run is not None and isinstance(message, str) and bool(message.strip())
+            if not has_live_text and has_active_session and active_callbacks and not passive_start:
                 rejection = await self._reject_terminal_session(chat_id=chat_id, app_id=app_id)
                 if rejection is not None:
                     return rejection
@@ -421,8 +396,8 @@ class WorkflowBridgeMixin:
                     else:
                         logger.warning("[SMART_ROUTING] Failed to submit input to existing session, falling back to new workflow")
 
-            # No active session or callback failed - start new workflow
-            logger.debug("[SMART_ROUTING] Starting new workflow for chat %s", chat_id)
+            # Start, restore, and live continuation share one execution lease.
+            logger.debug("[SMART_ROUTING] Resolving workflow execution for chat %s", chat_id)
             starting_new_workflow = True
 
             # Same-chat distributed exclusion: hold the chat execution lease
@@ -437,45 +412,75 @@ class WorkflowBridgeMixin:
                         )
                         if rejection is not None:
                             return rejection
-                    # A process restart removes the in-memory AG2 callback.
-                    # If the chat's run already started and is still in
-                    # progress, persist the user's reply and use AG2's
-                    # process-boundary resume path instead of accidentally
-                    # starting a second run.
+                    # Another request may have opened or ended the channel
+                    # while this request waited for the lease. Resolve its
+                    # current state before persisting or delivering new input.
+                    rejection = await self._reject_terminal_session(chat_id=chat_id, app_id=app_id)
+                    if rejection is not None:
+                        return rejection
                     if (
                         not is_resume_request
                         and isinstance(message, str)
                         and message.strip()
                     ):
-                        pm = self._get_or_create_persistence_manager()
-                        has_resumable_run = getattr(pm, "chat_has_resumable_run", None)
-                        if callable(has_resumable_run) and await has_resumable_run(
-                            chat_id,
-                            app_id,
-                            workflow_name,
-                        ):
-                            await self._apply_user_text_context_updates(
-                                chat_id=chat_id,
-                                workflow_name=workflow_name,
-                                app_id=app_id,
-                                user_input=message,
-                            )
-                            append_user_message = getattr(pm, "append_run_user_message", None)
-                            if append_user_message is not None:
-                                await append_user_message(
+                        live_run = get_live_run(chat_id) if callable(get_live_run) else None
+                        if live_run is None:
+                            pm = self._get_or_create_persistence_manager()
+                            has_resumable_run = getattr(pm, "chat_has_resumable_run", None)
+                            if callable(has_resumable_run) and await has_resumable_run(
+                                chat_id, app_id, workflow_name,
+                            ):
+                                # Recovery restores AG2's persisted channel and
+                                # settles pending turns. The incoming text is a
+                                # separate delivery, never a history-only write.
+                                recovered = await self._launch_workflow_run_locked(
                                     chat_id=chat_id,
+                                    user_id=user_id,
+                                    workflow_name=workflow_name,
+                                    message=None,
                                     app_id=app_id,
-                                    content=message,
-                                    metadata={"source": "workflow_user", "user_id": user_id},
+                                    initial_agent_name_override=initial_agent_name_override,
+                                    is_resume_request=True,
+                                    emit_execution_started=_emit_execution_started,
+                                    emit_execution_completed=_emit_execution_completed,
                                 )
-                            await self.process_incoming_user_message(
+                                if recovered.get("status") != "success":
+                                    return recovered
+                                live_run = get_live_run(chat_id) if callable(get_live_run) else None
+                                if (
+                                    recovered.get("run_status") != "paused"
+                                    or live_run is None
+                                ):
+                                    rejection = await self._reject_terminal_session(
+                                        chat_id=chat_id, app_id=app_id,
+                                    )
+                                    if rejection is not None:
+                                        # Recovery has already announced its
+                                        # outcome. Refusing this new input must
+                                        # not advance the journey a second time.
+                                        return {**rejection, "outcome_announced": True}
+                                    await self.send_error(
+                                        error_message="This workflow could not accept your message after recovery. Please retry.",
+                                        error_code="WORKFLOW_EXECUTION_FAILED",
+                                        chat_id=chat_id,
+                                    )
+                                    return {
+                                        **recovered,
+                                        "status": "error",
+                                        "outcome_announced": True,
+                                        "error_code": "WORKFLOW_EXECUTION_FAILED",
+                                        "message": "Workflow recovery did not accept this input.",
+                                    }
+                        if live_run is not None:
+                            starting_new_workflow = False
+                            return await self._continue_live_ag2_workflow_run(
+                                live_run=live_run,
                                 chat_id=chat_id,
                                 user_id=user_id,
-                                content=message,
-                                source="http",
+                                workflow_name=workflow_name,
+                                message=message,
+                                app_id=app_id,
                             )
-                            message = None
-                            is_resume_request = True
                     return await self._launch_workflow_run_locked(
                         chat_id=chat_id,
                         user_id=user_id,
@@ -879,7 +884,10 @@ class WorkflowBridgeMixin:
                 message,
                 context_updates=context_updates,
             )
-        input_refused = runner_result.error == CHANNEL_TERMINAL_ERROR
+        input_refused = (
+            runner_result.error == CHANNEL_TERMINAL_ERROR
+            and getattr(runner_result, "input_accepted", None) is not True
+        )
         if runner_result.status is RunStatus.FAILED:
             await pm.mark_chat_failed(chat_id, app_id=app_id)
         manager = getattr(self, "_derived_context_managers", {}).get(chat_id)
@@ -992,6 +1000,7 @@ class WorkflowBridgeMixin:
             return {
                 "status": "error", "chat_id": chat_id, "route": "terminal_session",
                 "run_status": "failed", "error_code": "WORKFLOW_SESSION_TERMINAL",
+                "input_accepted": False,
                 "outcome_announced": True,
                 **({"reason": reason} if reason else {}),
             }
@@ -1006,6 +1015,7 @@ class WorkflowBridgeMixin:
                 else "Live AG2 workflow channel failed."
             ),
             "route": "live_ag2_network",
+            "input_accepted": getattr(runner_result, "input_accepted", None),
             "run_status": (
                 "failed"
                 if run_failed

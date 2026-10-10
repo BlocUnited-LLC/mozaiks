@@ -400,7 +400,8 @@ export class WebSocketApiAdapter extends ApiAdapter {
         return result;
       } else {
         console.error('❌ Failed to send message:', response.status, response.statusText);
-        return { success: false, error: `HTTP ${response.status}` };
+        const refusal = await response.json().catch(() => null);
+        return { success: false, error: `HTTP ${response.status}`, delivery_state: refusal?.delivery_state };
       }
     } catch (error) {
       console.error('❌ Failed to send message to workflow:', error);
@@ -755,7 +756,8 @@ export class RestApiAdapter extends ApiAdapter {
         return result;
       } else {
         console.error('❌ Failed to send message:', response.status, response.statusText);
-        return { success: false, error: `HTTP ${response.status}` };
+        const refusal = await response.json().catch(() => null);
+        return { success: false, error: `HTTP ${response.status}`, delivery_state: refusal?.delivery_state };
       }
     } catch (error) {
       console.error('❌ Failed to send message to workflow:', error);

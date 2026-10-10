@@ -356,13 +356,20 @@ async def test_handle_user_input_from_api_resumes_persisted_session_after_restar
     persistence_manager.resumable_run = True
     adapter = _FakeAdapter()
     transport = _DummyTransport(persistence_manager)
+    live_run = _FakeLiveRun(result=_LiveRunResult(status=RunStatus.PAUSED))
 
-    async def _noop_apply_context_updates(**_kwargs):  # noqa: ANN003
-        return {}
+    async def _restore_channel(request):  # noqa: ANN001
+        adapter.resume_requests.append(request)
+        assert persistence_manager.run_user_messages == []
+        assert transport.persisted_messages == []
+        transport.register_live_ag2_workflow_run("chat-1", live_run)
+        return SimpleNamespace(status=RunStatus.PAUSED)
 
+    context_updates = AsyncMock(return_value={"target_user": "founders"})
+    monkeypatch.setattr(adapter, "resume", _restore_channel)
     monkeypatch.setattr(_bridge_mod, "get_workflow_lifecycle_hooks", lambda _workflow_name: {})
     monkeypatch.setattr(_ag2_mod, "get_ag2_adapter", lambda: adapter)
-    monkeypatch.setattr(transport, "_apply_user_text_context_updates", _noop_apply_context_updates)
+    monkeypatch.setattr(transport, "_apply_user_text_context_updates", context_updates)
 
     result = await transport.handle_user_input_from_api(
         chat_id="chat-1",
@@ -373,9 +380,14 @@ async def test_handle_user_input_from_api_resumes_persisted_session_after_restar
     )
 
     assert result["status"] == "success"
-    assert result["route"] == "workflow_resume"
+    assert result["route"] == "live_ag2_network"
     assert adapter.run_requests == []
     assert len(adapter.resume_requests) == 1
+    assert live_run.continued == [{
+        "message": "Yes, the indexed readout matches the current app. NEXT",
+        "context_updates": {"target_user": "founders"},
+    }]
+    context_updates.assert_awaited_once()
     assert persistence_manager.run_user_messages == [
         {
             "chat_id": "chat-1",
@@ -392,6 +404,58 @@ async def test_handle_user_input_from_api_resumes_persisted_session_after_restar
             "source": "http",
         }
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("recovery_status", [RunStatus.FAILED, RunStatus.COMPLETED, RunStatus.PAUSED])
+async def test_recovery_without_waiting_channel_refuses_new_message(monkeypatch, recovery_status) -> None:
+    persistence = _FakePersistenceManager()
+    persistence.pending_input_request = None
+    persistence.resumable_run = True
+    transport = _DummyTransport(persistence)
+    adapter = _FakeAdapter()
+    adapter.resume = AsyncMock(return_value=SimpleNamespace(status=recovery_status))
+    context_updates = AsyncMock(return_value={})
+    monkeypatch.setattr(_bridge_mod, "get_workflow_lifecycle_hooks", lambda _name: {})
+    monkeypatch.setattr(_ag2_mod, "get_ag2_adapter", lambda: adapter)
+    monkeypatch.setattr(transport, "_apply_user_text_context_updates", context_updates)
+
+    result = await transport.handle_user_input_from_api(
+        chat_id="chat-1", user_id="user-1", workflow_name="ValueEngine",
+        message="Do not lose this reply", app_id="app-1",
+    )
+
+    assert result["status"] == "error"
+    assert result["error_code"] == "WORKFLOW_EXECUTION_FAILED"
+    adapter.resume.assert_awaited_once()
+    assert adapter.run_requests == []
+    assert persistence.run_user_messages == []
+    assert transport.persisted_messages == []
+    context_updates.assert_not_awaited()
+    assert transport.errors[-1]["error_code"] == "WORKFLOW_EXECUTION_FAILED"
+
+
+@pytest.mark.asyncio
+async def test_explicit_recovery_without_text_does_not_deliver_input(monkeypatch) -> None:
+    persistence = _FakePersistenceManager()
+    persistence.pending_input_request = None
+    transport = _DummyTransport(persistence)
+    adapter = _FakeAdapter()
+    adapter.resume = AsyncMock(return_value=SimpleNamespace(status=RunStatus.PAUSED))
+    monkeypatch.setattr(_bridge_mod, "get_workflow_lifecycle_hooks", lambda _name: {})
+    monkeypatch.setattr(_ag2_mod, "get_ag2_adapter", lambda: adapter)
+
+    result = await transport.handle_user_input_from_api(
+        chat_id="chat-1", user_id="user-1", workflow_name="ValueEngine",
+        message=None, app_id="app-1", initial_agent_name_override="ValueInterviewAgent",
+    )
+
+    assert result["status"] == "success"
+    assert result["route"] == "workflow_resume"
+    adapter.resume.assert_awaited_once()
+    assert adapter.run_requests == []
+    assert persistence.run_user_messages == []
+    assert transport.persisted_messages == []
 
 
 @pytest.mark.asyncio

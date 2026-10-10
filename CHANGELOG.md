@@ -749,6 +749,12 @@ This project follows a practical pre-1.0 changelog format:
 - AG2 knowledge-store writes are serialized per session so a delayed earlier
   snapshot cannot overwrite the active channel state needed after restart.
 
+- Chat replies arriving together or immediately after a server restart now
+  reach the existing workflow channel instead of being saved without delivery.
+  If recovery cannot accept a reply, WebSocket and HTTP callers receive an
+  explicit error. A reply accepted by the AG2 channel remains delivered even
+  if its run then fails; an uncertain delivery asks the user to check the chat.
+
 - A copied `.env.example` now imports the hosts and points the local shell's
   API proxy at the backend; `mozaiks context index` passes its workspace key.
 - Exported app requirements now pin Mozaiks to the version that built the app

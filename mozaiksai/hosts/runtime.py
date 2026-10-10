@@ -1246,7 +1246,38 @@ async def handle_user_input(
         message=message,
         app_id=app_id,
     )
-    return {"status": "Message received and is being processed.", "result": result}
+    if isinstance(result, dict) and (
+        result.get("input_accepted") is True
+        or (result.get("status") == "success" and result.get("input_accepted") is not False)
+    ):
+        message_status = (
+            "Message reached the workflow, but the run failed."
+            if result.get("run_status") == "failed"
+            else "Message received and is being processed."
+        )
+        return {"status": message_status, "delivery_state": "accepted", "result": result}
+
+    refused = isinstance(result, dict) and (
+        result.get("input_accepted") is False
+        or result.get("route") in {"terminal_session", "chat_lock_busy", "chat_lock_unavailable"}
+        or (
+            result.get("route") == "workflow_resume"
+            and result.get("error_code") == "WORKFLOW_EXECUTION_FAILED"
+        )
+    )
+    if refused:
+        return JSONResponse(
+            status_code=409,
+            content={"status": "Message was not accepted.", "delivery_state": "refused", "result": result},
+        )
+    return JSONResponse(
+        status_code=503,
+        content={
+            "status": "Message delivery could not be confirmed. Check this chat before retrying.",
+            "delivery_state": "unknown",
+            "result": result,
+        },
+    )
 
 
 @app.post("/chat/{app_id}/{chat_id}/component_action")
