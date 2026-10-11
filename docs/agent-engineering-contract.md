@@ -49,6 +49,33 @@ temporary, reviewed Markdown file, or use a shell-native literal here-string
 when creating or editing a PR. Preserve Markdown backticks and headings
 through the shell boundary, then inspect the rendered body with `gh pr view`.
 
+## Pull Request Volume, Review, And CI Cost
+
+Open pull requests are shared coordination state. A long list hides what is
+ready, and every push re-runs CI. Keep the list short and every entry live.
+
+- **One pull request per finished piece of work.** Claim a task with one draft
+  pull request, then keep intermediate steps as commits on that branch. Do not
+  open a stack of drafts for the steps of one task.
+- **Close a pull request the same day its change is carried elsewhere.** When a
+  larger pull request lands the same change, close the smaller one with a
+  comment naming the carrier (pull request number and merge SHA). The branch
+  keeps the commits; an open duplicate only misleads the next agent.
+- **Do not rebase just to stay current.** Rebase or update a branch only when it
+  is next to merge or a conflict blocks review. Each update re-runs every check
+  and invalidates any review of the previous head.
+- **Keep expensive optional checks scoped.** Emulator, native-acceptance,
+  visual-regression, and paid-provider jobs run only when their relevant paths
+  change or on explicit request. A required check must still report a status
+  on every pull request: skip work inside the job rather than with a
+  workflow-level path filter, which leaves a required check pending forever.
+- **Nothing merges without an independent review of the exact head.** Do not arm
+  auto-merge. In this repository the required review cannot be satisfied by
+  the single collaborator every agent pushes as, so an armed auto-merge fires
+  only when the review gate is lowered, which is how an unrelated pull request
+  merged unreviewed (see Repository Settings And Merge Authority). Report the
+  reviewed head SHA and let the maintainer merge it.
+
 **Read [ARCHITECTURE.md](../ARCHITECTURE.md) first.** That file is the source of truth for how the system works.
 
 ## Host and Interface Boundaries
