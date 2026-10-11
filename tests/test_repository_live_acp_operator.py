@@ -7,7 +7,10 @@ and receipt can be checked. The entry itself refuses to run under pytest.
 
 from __future__ import annotations
 
+import functools
+import hashlib
 import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +31,8 @@ _EDITED = "# Throwaway\n\nIntro line.\nOne more sentence.\n"
 _WORKER = "sha256:" + "1" * 64
 _GATEWAY = "sha256:" + "2" * 64
 _ENV = {smoke.ENABLE_ENV: "1"}
+_REAL_CHECKOUT_IDENTITY = smoke._checkout_identity
+_REAL_WORK_TREE_WALK = smoke._enclosing_work_tree
 
 
 @pytest.fixture
@@ -40,9 +45,15 @@ def snapshot(tmp_path: Path) -> Path:
 
 
 @pytest.fixture(autouse=True)
-def operator_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
+def operator_terminal(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(smoke, "_attended", lambda: True)
-    monkeypatch.setattr(smoke, "_checkout_identity", lambda: ("a" * 40, False))
+    monkeypatch.setattr(smoke, "_checkout_identity", lambda: ("a" * 40, False, ()))
+    # The host temp root may itself sit inside a git work tree; only markers
+    # this test creates under tmp_path count.
+    monkeypatch.setattr(
+        smoke, "_enclosing_work_tree",
+        functools.partial(_REAL_WORK_TREE_WALK, ceiling=tmp_path),
+    )
 
 
 def _argv(snapshot: Path, output: Path, *extra: str) -> list[str]:
@@ -103,8 +114,76 @@ def test_entry_requires_an_attended_terminal(
 
 
 def test_entry_refuses_a_dirty_checkout(snapshot: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(smoke, "_checkout_identity", lambda: ("a" * 40, True))
+    monkeypatch.setattr(smoke, "_checkout_identity", lambda: ("a" * 40, True, ()))
     assert smoke.run(_argv(snapshot, tmp_path / "out"), environ=_ENV, read_key=_never_prompt) == 2
+
+
+@pytest.mark.parametrize("untracked", [
+    "mozaiksai/control_plane/repository_patch/__init__.py",
+    "mozaiksai/control_plane/notes.txt",
+    "scripts/helper.py",
+    "MozaiksAI/control_plane/__init__.py",
+    "pydantic.py",
+    "zz_hook.pth",
+    "shadow/__init__.py",
+])
+def test_entry_refuses_untracked_files_that_can_shadow_imported_code(
+    snapshot: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], untracked: str,
+) -> None:
+    monkeypatch.setattr(smoke, "_checkout_identity", lambda: ("a" * 40, False, (untracked,)))
+    assert smoke.run(_argv(snapshot, tmp_path / "out"), environ=_ENV, read_key=_never_prompt) == 2
+    err = capsys.readouterr().err
+    assert "untracked files where imported code lives" in err and untracked in err
+
+
+@pytest.mark.parametrize("untracked", ["notes/todo.md", "README.draft.md", "docs/extra/page.md"])
+def test_entry_allows_untracked_files_outside_imported_code(
+    snapshot: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], untracked: str,
+) -> None:
+    monkeypatch.setattr(smoke, "_checkout_identity", lambda: ("a" * 40, False, (untracked,)))
+    assert smoke.run(_argv(snapshot, tmp_path / "out"), environ=_ENV, read_key=lambda _prompt: "") == 2
+    assert "cancelled: no key entered" in capsys.readouterr().err
+
+
+def test_checkout_identity_reports_untracked_files_and_respects_gitignore(tmp_path: Path) -> None:
+    repo = tmp_path / "checkout"
+    (repo / "pkg").mkdir(parents=True)
+
+    def git(*args: str) -> None:
+        subprocess.run(
+            ["git", "-C", str(repo), "-c", "user.name=smoke", "-c", "user.email=smoke@example.invalid",
+             "-c", "commit.gpgsign=false", "-c", "core.autocrlf=false", *args],
+            check=True, capture_output=True,
+        )
+
+    git("init", "-q")
+    (repo / ".gitignore").write_text("ignored.py\nbuild/\n", encoding="utf-8", newline="\n")
+    (repo / "pkg" / "module.py").write_text("VALUE = 1\n", encoding="utf-8", newline="\n")
+    git("add", ".")
+    git("commit", "-q", "-m", "baseline")
+    sha, dirty, untracked = _REAL_CHECKOUT_IDENTITY(repo)
+    assert len(sha) == 40 and not dirty and untracked == ()
+
+    (repo / "ignored.py").write_text("x = 1\n", encoding="utf-8")
+    (repo / "build").mkdir()
+    (repo / "build" / "out.py").write_text("x = 1\n", encoding="utf-8")
+    (repo / "pkg" / "sub").mkdir()
+    (repo / "pkg" / "sub" / "__init__.py").write_text("x = 1\n", encoding="utf-8")
+    _sha, dirty, untracked = _REAL_CHECKOUT_IDENTITY(repo)
+    assert not dirty and untracked == ("pkg/sub/__init__.py",)
+
+    (repo / "pkg" / "module.py").write_text("VALUE = 2\n", encoding="utf-8", newline="\n")
+    _sha, dirty, untracked = _REAL_CHECKOUT_IDENTITY(repo)
+    assert dirty and untracked == ("pkg/sub/__init__.py",)
+
+
+def test_imported_roots_name_the_checkout_packages_this_process_loaded() -> None:
+    roots = smoke._imported_roots()
+    assert {"mozaiksai", "scripts"} <= roots
+    assert smoke._shadows_imports("mozaiksai/control_plane/repository_patch/__init__.py", roots)
+    assert not smoke._shadows_imports("notes/todo.md", roots)
 
 
 @pytest.mark.parametrize("change", [
@@ -141,6 +220,47 @@ def test_entry_limits_read_only_paths(snapshot: Path, tmp_path: Path) -> None:
 
 def test_entry_refuses_output_inside_the_snapshot(snapshot: Path) -> None:
     assert smoke.run(_argv(snapshot, snapshot / "out"), environ=_ENV, read_key=_never_prompt) == 2
+
+
+@pytest.mark.parametrize("marker", ["directory", "file"])
+def test_entry_refuses_a_snapshot_inside_a_git_work_tree(
+    snapshot: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str], marker: str,
+) -> None:
+    # A worktree or submodule carries a .git file; a normal clone a directory.
+    if marker == "directory":
+        (tmp_path / ".git").mkdir()
+    else:
+        (tmp_path / ".git").write_text("gitdir: elsewhere\n", encoding="utf-8")
+    assert smoke.run(_argv(snapshot, tmp_path / "out"), environ=_ENV, read_key=_never_prompt) == 2
+    assert "outside any git working checkout" in capsys.readouterr().err
+
+
+def test_entry_refuses_a_snapshot_inside_this_checkout(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    argv = _argv(smoke._REPO_ROOT, tmp_path / "out")
+    assert smoke.run(argv, environ=_ENV, read_key=_never_prompt) == 2
+    assert "outside this checkout" in capsys.readouterr().err
+
+
+def test_work_tree_walk_finds_this_checkout() -> None:
+    assert _REAL_WORK_TREE_WALK(smoke._REPO_ROOT / "mozaiksai" / "control_plane") == smoke._REPO_ROOT
+
+
+def test_gates_record_must_name_both_image_ids(
+    snapshot: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    record = tmp_path / "gates-run.log"
+    record.write_text(f"worker {_WORKER}\n3 passed\n", encoding="utf-8")
+    argv = _argv(snapshot, tmp_path / "out", "--gates-receipt", str(record))
+    assert smoke.run(argv, environ=_ENV, read_key=_never_prompt) == 2
+    assert "does not name both image IDs" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("value", ["sha256:" + "Z" * 64, "missing-gates.log"])
+def test_gates_receipt_must_be_a_file_or_a_digest(snapshot: Path, tmp_path: Path, value: str) -> None:
+    argv = _argv(snapshot, tmp_path / "out", "--gates-receipt", str(tmp_path / value))
+    assert smoke.run(argv, environ=_ENV, read_key=_never_prompt) == 2
 
 
 def test_entry_refuses_a_linked_snapshot_file(snapshot: Path, tmp_path: Path) -> None:
@@ -197,6 +317,10 @@ def test_successful_smoke_writes_content_free_receipt_and_host_verified_diff(
     assert receipt["repository_patch_digest"].startswith("sha256:")
     assert receipt["usage"] == {"prompt_tokens": 10, "completion_tokens": 4, "total_tokens": 14}
     assert receipt["usage_recorded"] is True and receipt["error_code"] is None
+    assert receipt["cleanup"] == {
+        "verified_by": "executor_cleanup_path", "containers_removed": True, "networks_removed": True,
+    }
+    assert receipt["gates_receipt"] is None
     for forbidden in (_PASTED, "env-key-must-be-ignored", "One more sentence", "Intro line", "# Guide",
                       "Add one sentence"):
         assert forbidden not in receipt_text
@@ -218,7 +342,72 @@ def test_failed_turn_records_only_an_error_code(
     assert receipt["error_code"] == "REPOSITORY_LIVE_GATEWAY_NOT_READY"
     assert receipt["proposal_status"] is None and receipt["repository_patch_digest"] is None
     assert receipt["usage"] is None and receipt["host_verified_diff"] is None
+    assert receipt["cleanup"]["containers_removed"] is True and receipt["cleanup"]["networks_removed"] is True
     assert not (output / "host-verified.diff").exists()
+
+
+@pytest.mark.parametrize(("error", "code", "containers", "networks"), [
+    (RepositoryDockerExecutionError("REPOSITORY_DOCKER_CLEANUP_FAILED"),
+     "REPOSITORY_DOCKER_CLEANUP_FAILED", False, None),
+    (RepositoryDockerExecutionError("REPOSITORY_LIVE_GATEWAY_CLI_CLEANUP_FAILED"),
+     "REPOSITORY_LIVE_GATEWAY_CLI_CLEANUP_FAILED", True, None),
+    (RepositoryDockerExecutionError("REPOSITORY_LIVE_NETWORK_CLEANUP_FAILED"),
+     "REPOSITORY_LIVE_NETWORK_CLEANUP_FAILED", True, False),
+    (RuntimeError("unexpected"), "RuntimeError", None, None),
+])
+def test_receipt_reports_what_the_executor_cleanup_path_confirmed(
+    snapshot: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    error: Exception, code: str, containers: bool | None, networks: bool | None,
+) -> None:
+    async def failing_turn(_request: Any, **_kwargs: Any) -> RepositoryDockerTurn:
+        raise error
+
+    monkeypatch.setattr(smoke, "execute_repository_docker_turn", failing_turn)
+    output = tmp_path / "out"
+    assert smoke.run(_argv(snapshot, output), environ=_ENV, read_key=lambda _prompt: _PASTED) == 1
+    receipt = json.loads((output / "receipt.json").read_text(encoding="utf-8"))
+    assert receipt["error_code"] == code
+    assert receipt["cleanup"] == {
+        "verified_by": "executor_cleanup_path", "containers_removed": containers, "networks_removed": networks,
+    }
+    assert "cleanup NOT confirmed" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(("error", "code"), [
+    (ValueError("REPOSITORY_DOCKER_IMAGE: invalid fixed image reference"), "REPOSITORY_DOCKER_IMAGE"),
+    (RepositoryDockerExecutionError("REPOSITORY_LIVE_WORKER_FAILED"), "REPOSITORY_LIVE_WORKER_FAILED"),
+    (ValueError("PLAINTEXT_FROM_A_LIBRARY leaked detail"), "ValueError"),
+    (ValueError("REPOSITORY_SOMETHING followed by free text"), "ValueError"),
+    (RepositoryDockerExecutionError("Some message"), "RepositoryDockerExecutionError"),
+    (KeyError("REPOSITORY_LIVE_WORKER_FAILED"), "KeyError"),
+])
+def test_error_code_keeps_only_repository_codes(error: BaseException, code: str) -> None:
+    assert smoke._error_code(error) == code
+
+
+def test_receipt_links_the_gates_record_by_digest(
+    snapshot: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_turn(_request: Any, **_kwargs: Any) -> RepositoryDockerTurn:
+        return _turn()
+
+    monkeypatch.setattr(smoke, "execute_repository_docker_turn", fake_turn)
+    record = tmp_path / "gates-run.log"
+    record.write_bytes(f"worker {_WORKER}\ngateway {_GATEWAY}\n3 passed\n".encode("ascii"))
+    output = tmp_path / "out"
+    argv = _argv(snapshot, output, "--gates-receipt", str(record))
+    assert smoke.run(argv, environ=_ENV, read_key=lambda _prompt: _PASTED) == 0
+    receipt = json.loads((output / "receipt.json").read_text(encoding="utf-8"))
+    assert receipt["gates_receipt"] == {
+        "source": "file", "sha256": "sha256:" + hashlib.sha256(record.read_bytes()).hexdigest(),
+    }
+
+    digest = "sha256:" + "3" * 64
+    second = tmp_path / "out-digest"
+    argv = _argv(snapshot, second, "--gates-receipt", digest)
+    assert smoke.run(argv, environ=_ENV, read_key=lambda _prompt: _PASTED) == 0
+    receipt = json.loads((second / "receipt.json").read_text(encoding="utf-8"))
+    assert receipt["gates_receipt"] == {"source": "digest", "sha256": digest}
 
 
 def test_host_verification_failure_withholds_the_diff(

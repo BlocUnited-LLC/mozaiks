@@ -76,7 +76,19 @@ _IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _COMMIT_SHA = re.compile(r"[0-9a-f]{40}\Z")
 _LABEL = re.compile(r"throwaway/[A-Za-z0-9][A-Za-z0-9._-]{0,99}\Z")
 _MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}\Z")
-_ERROR_CODE = re.compile(r"[A-Z][A-Z0-9_]{2,80}")
+_ERROR_CODE = re.compile(r"REPOSITORY_[A-Z0-9_]{2,80}(?=:|\Z)")
+_GATES_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
+MAX_GATES_RECORD_BYTES = 8_388_608
+_IMPORT_ROOTS = frozenset({"mozaiksai", "scripts"})
+_IMPORTABLE_SUFFIXES = (".py", ".pyc", ".pyd", ".so", ".pth")
+# The executor's cleanup path raises one of these when it could not confirm a
+# removal; any other outcome means its finally block removed everything it
+# created. Values: (containers_removed, networks_removed), None = unconfirmed.
+_CLEANUP_FAILURES: dict[str, tuple[bool | None, bool | None]] = {
+    "REPOSITORY_DOCKER_CLEANUP_FAILED": (False, None),
+    "REPOSITORY_LIVE_GATEWAY_CLI_CLEANUP_FAILED": (True, None),
+    "REPOSITORY_LIVE_NETWORK_CLEANUP_FAILED": (True, False),
+}
 _CI_ENV_NAMES = ("CI", "GITHUB_ACTIONS", "TF_BUILD", "BUILDKITE", "GITLAB_CI", "JENKINS_URL")
 _APP_ID = "transport-smoke"
 _OPERATOR = "operator"
@@ -118,6 +130,9 @@ def _parser() -> argparse.ArgumentParser:
                         help=f"turn budget, {MIN_WALL_SECONDS}-{MAX_WALL_SECONDS} seconds")
     parser.add_argument("--output-dir", required=True, type=Path,
                         help="new or empty directory for receipt.json and host-verified.diff")
+    parser.add_argument("--gates-receipt", default=None,
+                        help="saved record of the gates 1-3 run on these image IDs (a file path), "
+                             "or that record's sha256:<64 hex> digest")
     return parser
 
 
@@ -136,14 +151,56 @@ def _require_operator_context(environ: dict[str, str]) -> None:
         raise SmokeRefused("an attended terminal is required for the hidden key prompt")
 
 
-def _checkout_identity() -> tuple[str, bool]:
+def _checkout_identity(root: Path = _REPO_ROOT) -> tuple[str, bool, tuple[str, ...]]:
+    """Return HEAD, whether tracked files changed, and untracked non-ignored paths."""
     def git(*args: str) -> str:
         return subprocess.run(
-            ["git", "-C", str(_REPO_ROOT), *args], capture_output=True, text=True,
-            timeout=30, check=True,
-        ).stdout.strip()
+            ["git", "-C", str(root), *args], capture_output=True, text=True,
+            encoding="utf-8", timeout=60, check=True,
+        ).stdout
 
-    return git("rev-parse", "HEAD"), bool(git("status", "--porcelain", "--untracked-files=no"))
+    fields = iter(git("status", "--porcelain=v1", "-z", "--untracked-files=all").split("\0"))
+    tracked_changes = False
+    untracked: list[str] = []
+    for entry in fields:
+        if not entry:
+            continue
+        status, path = entry[:2], entry[3:]
+        if status == "??":
+            untracked.append(path)
+            continue
+        tracked_changes = True
+        if "R" in status or "C" in status:
+            next(fields, None)  # the rename/copy source path
+    return git("rev-parse", "HEAD").strip(), tracked_changes, tuple(untracked)
+
+
+def _imported_roots() -> set[str]:
+    """Top-level checkout entries that hold code this process has imported."""
+    roots = set(_IMPORT_ROOTS)
+    for module in list(sys.modules.values()):
+        module_file = getattr(module, "__file__", None)
+        if not module_file:
+            continue
+        try:
+            relative = Path(module_file).resolve().relative_to(_REPO_ROOT)
+        except (OSError, ValueError):
+            continue
+        if len(relative.parts) > 1:
+            roots.add(relative.parts[0])
+    return roots
+
+
+def _shadows_imports(path: str, roots: set[str]) -> bool:
+    """Whether an untracked path could be imported in place of tracked code."""
+    parts = PurePosixPath(path).parts
+    if not parts:
+        return False
+    if parts[0].casefold() in {root.casefold() for root in roots}:
+        return True
+    if len(parts) == 1:
+        return path.casefold().endswith(_IMPORTABLE_SUFFIXES)
+    return len(parts) == 2 and parts[1].casefold().startswith("__init__.")
 
 
 def _verify_checkout() -> str:
@@ -153,12 +210,33 @@ def _verify_checkout() -> str:
             raise SmokeRefused(
                 "mozaiksai resolves outside this checkout; set PYTHONPATH to the checkout root",
             )
-    sha, dirty = _checkout_identity()
+    sha, dirty, untracked = _checkout_identity()
     if not _COMMIT_SHA.fullmatch(sha):
         raise SmokeRefused("could not resolve this checkout's commit")
     if dirty:
         raise SmokeRefused("this checkout has uncommitted tracked changes; the receipt must name the code that ran")
+    roots = _imported_roots()
+    shadowing = sorted(path for path in untracked if _shadows_imports(path, roots))
+    if shadowing:
+        shown = ", ".join(shadowing[:3]) + (" ..." if len(shadowing) > 3 else "")
+        raise SmokeRefused(
+            f"this checkout has untracked files where imported code lives ({shown}); "
+            "remove them so the receipt names the code that ran",
+        )
     return sha
+
+
+def _enclosing_work_tree(path: Path, *, ceiling: Path | None = None) -> Path | None:
+    """Return the nearest directory at or above ``path`` holding a ``.git`` entry.
+
+    ``ceiling`` stops the walk at that directory (it is still checked).
+    """
+    for candidate in (path, *path.parents):
+        if ceiling is not None and not candidate.is_relative_to(ceiling):
+            break
+        if (candidate / ".git").exists():
+            return candidate
+    return None
 
 
 def _relative_path(value: str) -> str:
@@ -224,15 +302,23 @@ class SmokePlan:
         for path in read_only:
             if path == edit or path.startswith(f"{edit}/") or edit.startswith(f"{path}/"):
                 raise SmokeRefused("--read-only paths must not overlap --edit")
-        snapshot_dir = args.snapshot_dir.resolve()
+        snapshot_dir: Path = args.snapshot_dir.resolve()
         if not snapshot_dir.is_dir():
             raise SmokeRefused("--snapshot-dir must be an existing directory")
-        output_dir = args.output_dir.resolve()
+        if snapshot_dir.is_relative_to(_REPO_ROOT) or _REPO_ROOT.is_relative_to(snapshot_dir):
+            raise SmokeRefused("--snapshot-dir must be outside this checkout")
+        work_tree = _enclosing_work_tree(snapshot_dir)
+        if work_tree is not None:
+            raise SmokeRefused(
+                f"--snapshot-dir must be outside any git working checkout (found .git at {work_tree})",
+            )
+        output_dir: Path = args.output_dir.resolve()
         if output_dir.is_relative_to(snapshot_dir) or output_dir.is_relative_to(_REPO_ROOT):
             raise SmokeRefused("--output-dir must be outside the snapshot and this checkout")
         if output_dir.exists() and (not output_dir.is_dir() or any(output_dir.iterdir())):
             raise SmokeRefused("--output-dir must be a new or empty directory")
 
+        self.gates_receipt = _gates_receipt(args)
         self.args = args
         self.edit = edit
         self.read_only = read_only
@@ -284,7 +370,27 @@ class SmokePlan:
             raise ValueError("REPOSITORY_SMOKE_PATH_NOT_APPROVED")
 
 
+def _gates_receipt(args: argparse.Namespace) -> dict[str, str] | None:
+    """Digest the gates 1-3 run record so the smoke receipt can link to it."""
+    value = args.gates_receipt
+    if value is None:
+        return None
+    if _GATES_DIGEST.fullmatch(value):
+        return {"source": "digest", "sha256": value}
+    path = Path(value)
+    if path.is_symlink() or not path.is_file():
+        raise SmokeRefused("--gates-receipt must be a regular file or a sha256:<64 hex> digest")
+    raw = path.read_bytes()
+    if not raw or len(raw) > MAX_GATES_RECORD_BYTES:
+        raise SmokeRefused(f"--gates-receipt must be a non-empty file of at most {MAX_GATES_RECORD_BYTES} bytes")
+    for image_id in (args.worker_image_id, args.gateway_image_id):
+        if image_id.encode("ascii") not in raw:
+            raise SmokeRefused("--gates-receipt does not name both image IDs; run the gates on these images")
+    return {"source": "file", "sha256": f"sha256:{hashlib.sha256(raw).hexdigest()}"}
+
+
 def _error_code(exc: BaseException) -> str:
+    """Keep only a repository error code; never free text from an exception."""
     if isinstance(exc, (RepositoryDockerExecutionError, ValueError)):
         match = _ERROR_CODE.match(str(exc))
         if match:
@@ -292,11 +398,33 @@ def _error_code(exc: BaseException) -> str:
     return type(exc).__name__
 
 
+def _cleanup(turn_error: BaseException | None) -> dict[str, Any]:
+    """What the executor's cleanup path confirmed about this turn's containers and networks."""
+    containers: bool | None
+    networks: bool | None
+    if turn_error is None:
+        containers = networks = True
+    else:
+        code = _error_code(turn_error)
+        if code in _CLEANUP_FAILURES:
+            containers, networks = _CLEANUP_FAILURES[code]
+        elif isinstance(turn_error, (RepositoryDockerExecutionError, ValueError)):
+            containers = networks = True
+        else:
+            containers = networks = None
+    return {
+        "verified_by": "executor_cleanup_path",
+        "containers_removed": containers,
+        "networks_removed": networks,
+    }
+
+
 async def _execute(plan: SmokePlan, key: SecretStr, ledger: RuntimeUsageLedger) -> dict[str, Any]:
     args = plan.args
     result: dict[str, Any] = {
         "proposal_status": None, "repository_patch_digest": None, "usage": None,
         "usage_recorded": False, "error_code": None, "diff": None,
+        "cleanup": _cleanup(None),
     }
     try:
         turn = await execute_repository_docker_turn(
@@ -310,6 +438,7 @@ async def _execute(plan: SmokePlan, key: SecretStr, ledger: RuntimeUsageLedger) 
         )
     except Exception as exc:  # noqa: BLE001 - the receipt carries only a code
         result["error_code"] = _error_code(exc)
+        result["cleanup"] = _cleanup(exc)
         return result
     result["proposal_status"] = turn.proposal.status
     result["usage"] = turn.usage.model_dump(mode="json") if turn.usage is not None else None
@@ -371,6 +500,8 @@ def _write_outputs(plan: SmokePlan, oss_sha: str, started: str, result: dict[str
         "usage": result["usage"],
         "usage_recorded": result["usage_recorded"],
         "error_code": result["error_code"],
+        "cleanup": result["cleanup"],
+        "gates_receipt": plan.gates_receipt,
         "host_verified_diff": diff_name,
     }
     path = plan.output_dir / "receipt.json"
@@ -399,6 +530,8 @@ def run(
     print(f"  worker image    {args.worker_image_id}")
     print(f"  gateway image   {args.gateway_image_id}")
     print(f"  wall budget     {args.max_wall_seconds} s")
+    gates = plan.gates_receipt["sha256"] if plan.gates_receipt else "(none; the receipt will not link a gate run)"
+    print(f"  gates record    {gates}")
     print("Use a dedicated key with a verified hard spend limit, and revoke it afterwards.")
     entered = read_key("Paste the provider API key (input hidden), or press Enter to cancel: ").strip()
     if not entered:
@@ -411,6 +544,9 @@ def run(
     result = asyncio.run(_execute(plan, key, ledger))
     receipt = _write_outputs(plan, oss_sha, started, result)
     print(f"receipt: {receipt}")
+    cleanup = result["cleanup"]
+    if not (cleanup["containers_removed"] and cleanup["networks_removed"]):
+        print("cleanup NOT confirmed: inspect and remove mozaiks-acp-* containers and networks", file=sys.stderr)
     if result["diff"] is not None:
         print(f"host-verified diff for review: {plan.output_dir / 'host-verified.diff'}")
     if result["error_code"] is not None:

@@ -20,6 +20,14 @@ The proof and live worker Dockerfiles take `BASE_IMAGE`, `PROOF_IMAGE`, and
 pins the final image IDs, never the tags. See
 [the gateway README](../acp_gateway/README.md) for the gateway image.
 
+**Build once, then reuse the same image IDs.** These builds are not
+bit-reproducible: `Dockerfile.preview` starts from an unpinned base image, and
+an image ID includes build timestamps, so a rebuild of the same commit yields
+different IDs. Build the images once, record the two IDs printed above, and run
+the opt-in gates 1-3 and the operator transport smoke against those same local
+image IDs. Do not rebuild between the gates and the smoke; if you must rebuild,
+run the gates again on the new IDs.
+
 ## Worker contract
 
 Its stdin is a scoped repository request with exact `create_paths` and
@@ -71,13 +79,22 @@ network removed. They are skipped unless explicitly enabled and are not part of
 CI:
 
 ```bash
-MOZAIKS_RUN_REPOSITORY_LIVE_GATES=1 PYTHON_DOTENV_DISABLED=1 PYTHONPATH="$PWD" \
-MOZAIKS_REPOSITORY_LIVE_WORKER_IMAGE_ID="$(docker image inspect --format '{{.Id}}' mozaiks-acp-live-worker:local)" \
-MOZAIKS_REPOSITORY_LIVE_GATEWAY_IMAGE_ID="$(docker image inspect --format '{{.Id}}' mozaiks-acp-model-gateway:local)" \
-python -m pytest -q --no-cov --reruns 0 -s tests/test_repository_live_docker_gates.py
+WORKER_ID="$(docker image inspect --format '{{.Id}}' mozaiks-acp-live-worker:local)"
+GATEWAY_ID="$(docker image inspect --format '{{.Id}}' mozaiks-acp-model-gateway:local)"
+{
+  echo "oss_sha $(git rev-parse HEAD)"
+  echo "worker_image_id $WORKER_ID"
+  echo "gateway_image_id $GATEWAY_ID"
+  MOZAIKS_RUN_REPOSITORY_LIVE_GATES=1 PYTHON_DOTENV_DISABLED=1 PYTHONPATH="$PWD" \
+  MOZAIKS_REPOSITORY_LIVE_WORKER_IMAGE_ID="$WORKER_ID" \
+  MOZAIKS_REPOSITORY_LIVE_GATEWAY_IMAGE_ID="$GATEWAY_ID" \
+  python -m pytest -q --no-cov --reruns 0 -s tests/test_repository_live_docker_gates.py
+} 2>&1 | tee <evidence directory outside the checkout>/gates-run.log
 ```
 
-Afterwards `docker ps -a --filter label=mozaiks.refinement.repository_turn.worker=live`
+Keep `gates-run.log`: it is the gates run record that the smoke receipt links
+to. Afterwards
+`docker ps -a --filter label=mozaiks.refinement.repository_turn.worker=live`
 and `docker network ls --filter name=mozaiks-acp-` must both be empty.
 
 ## Operator transport smoke (one real turn)
@@ -87,12 +104,16 @@ Claude Code turn against a local throwaway snapshot. It is for an operator at a
 terminal, under an accepted ADR 0015 decision; it never runs in CI or under
 pytest, and it writes nothing to GitHub, a database, or the snapshot. It
 refuses unless `MOZAIKS_RUN_REPOSITORY_LIVE_ACP=1` is set, the terminal is
-interactive, the imported `mozaiksai` resolves into the running checkout, and
-that checkout has no uncommitted tracked changes.
+interactive, the imported `mozaiksai` resolves into the running checkout, that
+checkout has no uncommitted tracked changes, and it has no untracked,
+non-ignored file where imported code lives (under `mozaiksai/`, `scripts/`, any
+other checkout package this process imported, or an importable top-level
+module). It also refuses a `--snapshot-dir` inside this checkout or inside any
+git working checkout (a parent directory holding `.git`).
 
-1. Create a throwaway snapshot outside any real checkout, for example with
-   `git archive <commit> | tar -x -C <empty directory>`, and note the 40-hex
-   commit.
+1. Create a throwaway snapshot outside any git working checkout, for example
+   with `git archive <commit> | tar -x -C <empty directory>`, and note the
+   40-hex commit.
 2. Create a dedicated provider key with a verified hard spend limit. Claude
    Code needs an Anthropic API key; Codex needs an OpenAI API key. Do not use
    an OAuth or subscription login: the gateway sends the key only as an API
@@ -112,6 +133,7 @@ python scripts/smoke_repository_live_acp_turn.py \
   --worker-image-id "$(docker image inspect --format '{{.Id}}' mozaiks-acp-live-worker:local)" \
   --gateway-image-id "$(docker image inspect --format '{{.Id}}' mozaiks-acp-model-gateway:local)" \
   --max-wall-seconds 300 \
+  --gates-receipt <evidence directory>/gates-run.log \
   --output-dir <new empty directory outside the snapshot and checkout>
 ```
 
@@ -120,10 +142,27 @@ at most twice. `--max-wall-seconds` must be between 90 and 600. Paste the key
 once at the hidden prompt; it is never read from the environment, arguments,
 or files, and only the gateway container receives it, over stdin.
 
+`--gates-receipt` is optional but expected for the ADR 0015 smoke. Pass the
+saved gates run record; the smoke refuses a record that does not name both
+`--worker-image-id` and `--gateway-image-id`, and the receipt carries its
+SHA-256 digest. If the record is kept elsewhere, pass its `sha256:<64 hex>`
+digest instead; the receipt then marks the link as operator-supplied
+(`"source": "digest"`).
+
 The output directory receives `receipt.json` and, after the host stages and
 finalizes the returned archive, `host-verified.diff`. The receipt holds no
 source or key: the OSS commit, image IDs, adapter, model, approved path,
-proposal status, `repository_patch_digest`, advisory usage (or `null`), and an
-error code when the turn failed closed. A person must read the diff. Then
-revoke the key, compare the receipt usage with the provider console, and check
-that no `mozaiks-acp-*` container or network remains.
+proposal status, `repository_patch_digest`, advisory usage (or `null`), an
+error code when the turn failed closed, the gates record digest
+(`gates_receipt`), and `cleanup`. `cleanup.containers_removed` and
+`cleanup.networks_removed` report what the executor's cleanup path confirmed:
+`true` when it removed (or proved absent) every container and network the turn
+created, `false` when it reported a removal failure, and `null` when it could
+not confirm. Error codes are limited to the `REPOSITORY_*` families; any other
+failure is recorded as its exception type only.
+
+A person must read the diff. Then revoke the key, compare the receipt usage
+with the provider console, and check that no `mozaiks-acp-*` container or
+network remains. Post the receipt, the key revocation, and the gates record
+digest on tracking issue
+[#956](https://github.com/BlocUnited-LLC/mozaiks/issues/956).
