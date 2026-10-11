@@ -25,18 +25,20 @@ supplying source or a synthetic gateway token to the container. The offline port
 current option to run without an approved context is not a live-mode grant.
 App Zero must not launch a parallel Codex or Claude subprocess path.
 
-One manually triggered, operator-only local acceptance turn may run after the
-fixed image, gateway-held credential route, and network preflight pass their
-gates. It may create a draft protected PR after the normal validation gates, but
-cannot itself authorize merge, artifact promotion, or release. Before that
-acceptance turn, one attended
+One manually triggered, operator-only local acceptance turn (gate 4 below)
+may run after the fixed image, gateway-held credential route, and network
+preflight pass their gates. It may create a draft protected PR after the normal
+validation gates, but cannot itself authorize merge, artifact promotion, or
+release. Before that acceptance turn, one attended
 [pre-gate-4 transport smoke](#pre-gate-4-transport-smoke) may run against a
-throwaway local snapshot after gates 1-3 pass. The smoke proves the live
+throwaway local snapshot after gates 1-3 pass, with at most one repeat after a
+failure that occurred before any model output. The smoke proves the live
 transport only; it uses no repository fixture, creates no PR, and does not
 satisfy gate 4. Unattended or customer-facing live execution remains disabled
-until that real-model turn has been reviewed. Multi-tenant live execution remains disabled until a separate
-credential and isolation decision is accepted. This ADR does not enable live
-mode or change the offline executor.
+until the gate-4 acceptance turn has been reviewed; a smoke receipt does not
+lift that restriction. Multi-tenant live execution remains disabled until a
+separate credential and isolation decision is accepted. This ADR does not
+enable live mode or change the offline executor.
 
 ## Reason
 
@@ -98,9 +100,10 @@ review remain required.
    destinations. Network-level egress restriction or a separately accepted
    residual-risk decision is required before unattended or multi-tenant use.
 3. Use a dedicated, revocable model credential for this worker, with restricted
-   API permissions and a verified hard spend limit where the provider supports
-   one. An alert-only budget is not a spend cap. The pre-gate-4 transport smoke
-   requires that provider-side hard limit and must not run without it. Deliver
+   API permissions and a verified provider-side hard spend limit. An
+   alert-only budget is not a spend cap. Neither the pre-gate-4 transport
+   smoke nor the gate-4 acceptance turn runs without that hard limit: if the
+   provider cannot enforce one for the key, the turn does not run. Deliver
    the upstream key from the trusted secret backend only to the separate
    gateway over private stdin.
    The agent receives a random, one-job token that works only at that gateway.
@@ -170,22 +173,27 @@ insufficient.
    closed; advisory token usage cannot become wallet authority.
 4. **Opt-in live acceptance:** after gates 1-3, use the operator-only test path
    and an operator-provided dedicated model key to run one real Codex or Claude
-   ACP turn on a deliberately small private repository fixture. Record the
+   ACP turn on a deliberately small private repository fixture. The key's
+   provider account or workspace must enforce a verified hard spend limit; the
+   gateway's transport budgets and an alert-only budget do not qualify, and if
+   the provider cannot enforce a hard limit for that key, the turn does not
+   run. Record the
    pinned OSS and app commits, image ID,
    configured adapter/model, approved paths, sanitized turn status, candidate
    digest, actual validation result, protected PR number, CI result, and human
    review. Do not publish or tag based on an offline proof. Never run this gate
    in ordinary CI or expose the key to a pull request from untrusted code.
    This gate, with its private repository fixture and protected PR, remains
-   the requirement for every live turn beyond the single pre-gate-4 transport
-   smoke below.
+   the requirement for every live turn beyond the pre-gate-4 transport smoke
+   and its one permitted repeat below.
 
 ### Pre-gate-4 Transport Smoke
 
 Before gate 4, the operator may run exactly one live turn labelled
-**pre-gate-4 transport smoke**. It exists so the first real model call can
-exercise the transport without first building a repository fixture and PR
-publication path. It is allowed only when all of the following hold:
+**pre-gate-4 transport smoke**, repeated at most once under the rule below. It
+exists so the first real model call can exercise the transport without first
+building a repository fixture and PR publication path. It is allowed only when
+all of the following hold:
 
 - **Gates 1-3 pass first** on the exact worker image, gateway image, and OSS
   commit used for the turn.
@@ -202,7 +210,8 @@ publication path. It is allowed only when all of the following hold:
   finalization defined above, and a human reads the host-verified candidate.
 - **Provider-side hard spend limit as the cost ceiling:** the turn uses a
   newly created, dedicated key whose provider account or workspace enforces a
-  verified hard spend limit, and the key is revoked immediately afterwards.
+  verified hard spend limit, and the key is revoked as soon as the smoke
+  ends, after the first attempt or after its one permitted repeat.
   The gateway's request, byte, time, and output-token budgets bound the
   transport but are not a spend cap, and an alert-only budget does not
   qualify. If the provider cannot enforce a hard limit for that key, the smoke
@@ -210,6 +219,16 @@ publication path. It is allowed only when all of the following hold:
 - **Same isolation and credential route:** the gateway-held key, synthetic
   job token, per-turn networks, container limits, and container removal
   described above apply unchanged.
+- **At most one repeat, only after a pre-output failure:** the operator may
+  repeat the smoke once only when the first attempt failed before the model
+  produced any output. Qualifying failures are a provider 5xx, 429, or
+  timeout before the first model response, a gateway or worker start failure,
+  and a Docker daemon error. The repeat uses the same worker image, gateway
+  image, OSS commit, pinned source commit, and key, with a fresh synthetic job
+  token, per-turn networks, and throwaway snapshot. Any failure after model
+  output, and any isolation or verification failure at any point, ends the
+  smoke without a repeat. A second attempt is never repeated, whatever its
+  outcome. Once the smoke has ended, the next live turn must satisfy gate 4.
 
 The smoke proves the transport only: that the fixed images, gateway credential
 route, and per-turn networks can carry one real model-backed turn and that the
@@ -221,15 +240,18 @@ not an App Zero refinement: under
 requires an accepted imported (Genesis) baseline `BuildRecord`, and the smoke
 creates, accepts, or advances no `BuildRecord`.
 
-Record a content-free receipt of the smoke, whether it succeeds or fails, on
-PR #895 and on the issue that tracks live ACP activation. The receipt names the
-OSS commit, the source commit of the snapshot, the worker and gateway image
-IDs, the adapter and model, the approved paths, the sanitized turn status or
-failure code, the candidate digest when one exists, any provider-reported
-usage compared with the provider console, confirmation that the per-turn
-containers and networks were removed, and confirmation that the key was
-revoked. The receipt contains no source content, prompt, model output, or
-credential.
+Record a content-free receipt for each smoke attempt, whether it succeeds or
+fails, on [issue #956](https://github.com/BlocUnited-LLC/mozaiks/issues/956)
+("Live ACP activation: pre-gate-4 transport smoke and gate 4") and on PR #895.
+When the smoke is repeated, both attempts have a receipt. Each receipt names
+whether it is the first attempt or the repeat, the OSS commit, the source
+commit of the snapshot, the worker and gateway image IDs, the adapter and
+model, the approved paths, the sanitized turn status or failure code, the
+candidate digest when one exists, any provider-reported usage compared with
+the provider console, and confirmation that the per-turn containers and
+networks were removed. The receipt for the final attempt also confirms that
+the key was revoked. A receipt contains no source content, prompt, model
+output, or credential.
 
 ## Alternatives Considered
 
