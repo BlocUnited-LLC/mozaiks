@@ -564,7 +564,7 @@ const PersistentChatWidget = ({
   // ─── Minimized state ────────────────────────────────────────────────────────
   if (!isExpanded) {
     return (
-      <div className="fixed right-0 bottom-6 z-50 widget-safe-bottom widget-floating-launcher">
+      <div className="fixed right-0 bottom-6 z-[45] widget-safe-bottom widget-floating-launcher">
         <button
           type="button"
           onClick={() => { setIsExpanded(true); setUnreadChatCount(0); }}
@@ -601,7 +601,7 @@ const PersistentChatWidget = ({
     : 'bg-muted-foreground/40';
 
   return (
-    <div className="fixed right-4 bottom-4 z-50 flex flex-col items-end gap-0 pointer-events-none widget-safe-bottom">
+    <div className="fixed right-4 bottom-4 z-[45] flex flex-col items-end gap-0 pointer-events-none widget-safe-bottom">
       {/* Collapse tab */}
       <button
         type="button"

@@ -104,7 +104,8 @@ This project follows a practical pre-1.0 changelog format:
 - On mobile app shells, Assistant opens from the bottom navigation instead of
   covering search and filter controls, and the opened panel follows the bottom
   bar in keyboard tab order. Shells without a bottom bar keep the floating
-  Assistant launcher, and desktop behavior remains the same.
+  Assistant launcher, and on desktop the open panel stays below the header's
+  notification and profile menus.
 - Mobile app navigation shows recognizable icons for the default Create, Alerts,
   and Account actions while retaining configured app icons and labels. An item
   whose id is a path or URL shows its initial letter instead of a blank glyph.

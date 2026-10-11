@@ -1462,6 +1462,36 @@ test('assistant panel follows the bottom bar in keyboard tab order', async ({ pa
   await expect(assistant).toBeFocused();
 });
 
+test('header menus stay above the open assistant panel on short desktop viewports', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'Desktop header menus and floating assistant only');
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto('/apps');
+  await page.getByRole('dialog', { name: /Onboarding step 1 of 3/i })
+    .getByRole('button', { name: 'Skip tour' }).click();
+  await page.locator('.widget-floating-launcher').getByRole('button', { name: 'Open assistant' }).click();
+  await expect(page.locator('#mozaiks-assistant-panel')).toBeVisible();
+  const header = page.locator('header');
+
+  // The assistant renders after the shell for keyboard order, so it must sit
+  // on a lower layer than the fixed header or it covers the header menus.
+  for (const viewport of [{ width: 1280, height: 720 }, { width: 1366, height: 768 }]) {
+    await page.setViewportSize(viewport);
+    const bell = header.getByTitle('Notifications', { exact: true });
+    await bell.click();
+    // A trial click runs the hit-target check without navigating away.
+    await header.getByRole('button', { name: 'View all notifications' }).click({ trial: true, timeout: 5000 });
+    await bell.click();
+    await expect(header.getByRole('button', { name: 'View all notifications' })).toHaveCount(0);
+
+    const profile = header.getByTitle('Developer', { exact: true });
+    await profile.click();
+    await header.getByRole('button', { name: /^sign out$/i }).click({ trial: true, timeout: 5000 });
+    await profile.click();
+    await expect(header.getByRole('button', { name: /^sign out$/i })).toHaveCount(0);
+    await expect(page.locator('#mozaiks-assistant-panel')).toBeVisible();
+  }
+});
+
 test('mobile shell navigation shows a letter for a page whose id is its path', async ({ page, isMobile }, testInfo) => {
   test.skip(!isMobile, 'Mobile bottom bar only');
   await page.route('**/api/shell-config', async (route) => {

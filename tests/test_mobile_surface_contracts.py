@@ -75,7 +75,10 @@ def test_shell_header_and_widget_stay_mobile_tolerant() -> None:
     assert "max-h-[82dvh]" in layout_source
     assert "top-24 w-[min" not in layout_source
 
-    assert 'fixed right-0 bottom-6 z-50 widget-safe-bottom' in widget_source
+    # The widget renders after the shell for keyboard order, so it sits below
+    # the z-50 header and its menus and above the z-40 mobile bottom bar.
+    assert 'fixed right-0 bottom-6 z-[45] widget-safe-bottom' in widget_source
+    assert 'fixed right-4 bottom-4 z-[45] flex flex-col' in widget_source
     # Routes without a mobile bottom bar keep the high-contrast floating toggle.
     assert 'rounded-l-2xl border-2 border-r-0 border-primary/70 bg-card' in widget_source
     # The compact mobile tab retains a 44px-wide touch target. The desktop
