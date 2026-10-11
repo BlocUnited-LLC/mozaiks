@@ -847,6 +847,9 @@ This project follows a practical pre-1.0 changelog format:
   attached to an approved UI-only surface before repair or scheduling. Planning
   guidance allows browser-only apps without capability packs and distinguishes
   category hints from registered providers while preserving requested page behavior.
+  A selected build-context provider still serves a UI-only surface by its pack
+  ID, its source label is repaired to the registered one, and a page task's
+  kind slip on that surface is relabelled rather than rejected.
 
 - Chat replies arriving together or immediately after a server restart now
   reach the existing workflow channel instead of being saved without delivery.

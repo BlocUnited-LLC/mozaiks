@@ -10,6 +10,7 @@ from factory_app.workflows.AppGenerator.tools.app_plan_review import (
     review_app_build_plan,
     validate_plan_origins,
 )
+from mozaiksai.core.session.build_context import normalize_pack_descriptor
 from mozaiksai.core.workflow.context.frozen import detach
 from tests.test_app_plan_review import _context, _plan
 from tests.test_continuous_deterministic_materialization import _load_models
@@ -231,3 +232,120 @@ def test_source_capability_hint_does_not_register_a_provider(surface_id, source,
     assert "source_capability_packs" in result["error"]
     assert "capability_packs=[]" in result["error"]
     assert plan == original
+
+
+def _real_descriptor(tmp_path, pack_id, source):
+    """The descriptor shape a selected build context actually projects."""
+    return normalize_pack_descriptor(
+        {"pack": {"id": pack_id, "capability_source": source},
+         "capabilities": [{"capability_id": f"{pack_id}.view"}]},
+        context_root=tmp_path / pack_id,
+    )
+
+
+def _selected_ui_context(tmp_path, pack_id, source, surface_id=None):
+    context = _ui_context()
+    surface_id = surface_id or pack_id
+    context.set("design_surface_map", {"surfaces": [{
+        "surface_id": surface_id, "surface_kind": "ui_only", "owner": "app",
+        "primary_entities": [], "source_capability_packs": [pack_id],
+    }]})
+    descriptor = _real_descriptor(tmp_path, pack_id, source)
+    assert "surface_id" not in descriptor and "surface_kind" not in descriptor
+    context.set("capability_packs", [descriptor])
+    return context
+
+
+def _cached_pack(context, pack_id):
+    cached = detach(context.get("app_build_plan"))
+    return next(
+        pack for pack in cached["capability_packs"]
+        if (pack.get("capability_pack_id") or pack.get("id")) == pack_id
+    )
+
+
+@pytest.mark.parametrize("source", ["operator_pack", "framework_pack"])
+def test_selected_real_pack_on_a_ui_only_surface_is_admitted_when_the_plan_omits_it(tmp_path, source):
+    context = _selected_ui_context(tmp_path, "files", source)
+
+    result = review_app_build_plan(AppBuildPlan=_page_plan(), context_variables=context)
+
+    assert result == {"outcome": "ready", "task_count": 1}, result
+    assert _cached_pack(context, "files")["capability_source"] == source
+
+
+@pytest.mark.parametrize("source", ["operator_pack", "framework_pack"])
+def test_selected_real_pack_bound_to_its_ui_only_surface_is_admitted(tmp_path, source):
+    context = _selected_ui_context(tmp_path, "files", source)
+    plan = _page_plan()
+    plan["capability_packs"] = [{
+        **_plan()["capability_packs"][0], "capability_pack_id": "files",
+        "surface_id": "files", "surface_kind": "ui_only", "capability_source": source,
+        "primary_entities": [], "label": "Files", "summary": "Files",
+        "implementation_mode": "declarative_module",
+    }]
+    plan["build_tasks"][0].update(surface_id="files", capability_pack_id="files")
+
+    result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+
+    assert result == {"outcome": "ready", "task_count": 1}, result
+
+
+@pytest.mark.parametrize("wrong_source", ["framework_pack", "managed_capability", "generated_module"])
+def test_selected_ui_provider_with_a_wrong_source_label_is_repaired(tmp_path, wrong_source):
+    context = _selected_ui_context(tmp_path, "files", "operator_pack")
+    plan = _page_plan()
+    plan["capability_packs"] = [{
+        **_plan()["capability_packs"][0], "capability_pack_id": "files",
+        "surface_id": "files", "surface_kind": "ui_only", "capability_source": wrong_source,
+        "primary_entities": [], "label": "Files", "summary": "Files",
+        "implementation_mode": "declarative_module",
+    }]
+
+    result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+
+    assert result == {"outcome": "ready", "task_count": 1}, result
+    assert _cached_pack(context, "files")["capability_source"] == "operator_pack"
+
+
+def test_ui_only_page_task_label_slip_is_repaired():
+    plan = _page_plan()
+    plan["build_tasks"][0].update(surface_id="reports", surface_kind="module")
+    context = _ui_context()
+
+    result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+
+    assert result == {"outcome": "ready", "task_count": 1}, result
+    task = detach(context.get("app_task_batch_items"))[0]
+    assert (task["surface_id"], task["surface_kind"]) == ("reports", "ui_only")
+    assert task["capability_pack_id"] is None
+
+
+def test_label_slip_with_a_backend_path_is_still_rejected():
+    plan = _page_plan()
+    plan["build_tasks"][0].update(surface_id="reports", surface_kind="module")
+    plan["build_tasks"][0]["owned_paths"].append("modules/reports/backend/service.py")
+    original = deepcopy(plan)
+    context = _ui_context()
+
+    result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+
+    _assert_not_queued(context, result)
+    assert "modules/reports/backend/service.py" in result["error"]
+    assert plan == original
+
+
+def test_unselected_provider_rejection_names_its_actual_source():
+    plan = _page_plan()
+    plan["capability_packs"] = [{
+        **_plan()["capability_packs"][0], "capability_pack_id": "ui_pack",
+        "surface_id": "reports", "surface_kind": "module", "capability_source": "operator_pack",
+    }]
+    context = _ui_context()
+
+    result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+
+    _assert_not_queued(context, result)
+    message = next(line for line in result["error"].splitlines() if line.startswith("- ui_pack:"))
+    assert "operator_pack" in message
+    assert "generated_module" not in message
