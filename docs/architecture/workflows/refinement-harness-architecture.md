@@ -185,9 +185,14 @@ offline proof as the default and also offers a trusted-worker-only, opt-in live
 profile. That profile runs a one-shot Codex or Claude ACP worker on a private
 Docker network, with a separate credential-holding model gateway. The approved
 source snapshot and file scope are checked before the worker receives source;
-its archive still requires host staging and finalization. The live profile has
-been exercised only with a local fake gateway, so it is not yet an accepted
-production or default coding path.
+its archive still requires host staging and finalization, and a result that
+copies the job token into returned bytes fails closed. Opt-in real-Docker gates
+(`tests/test_repository_live_docker_gates.py`) exercise network reach, a canary
+credential, and the contract and failure cases with a scripted worker and a
+fake upstream; they are not run in CI. An operator-attended transport smoke
+(`scripts/smoke_repository_live_acp_turn.py`) runs one real turn against a
+local throwaway snapshot. No real-model turn has been reviewed yet, so the live
+profile is not an accepted production or default coding path.
 
 #### Current readiness and promotion boundaries
 

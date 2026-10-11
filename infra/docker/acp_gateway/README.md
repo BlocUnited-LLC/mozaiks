@@ -6,6 +6,22 @@ files, budgets, validation, and promotion. AG2 ACP still drives the coding
 agent. The gateway only carries model API calls from that agent to the selected
 provider.
 
+## Build
+
+Build the image from the repository root of the commit you will run, and pin
+its ID (never the tag) in the trusted launcher:
+
+```bash
+docker build -f infra/docker/Dockerfile.acp-model-gateway -t mozaiks-acp-model-gateway:local .
+docker image inspect --format '{{.Id}}' mozaiks-acp-model-gateway:local
+```
+
+The image is built on a digest-pinned `python:3.13-slim` base and copies only
+`gateway.py`. Build it after the worker images listed in
+[the live worker README](../acp_live/README.md); it does not depend on them.
+
+## Startup contract
+
 The trusted launcher starts this container without a published host port and
 writes **one** newline-terminated JSON object to stdin:
 

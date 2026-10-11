@@ -34,7 +34,11 @@ This project follows a practical pre-1.0 changelog format:
   ACP and Codex or Claude Code. A separate, pinned model gateway holds the API
   key, and the agent receives only scoped source on an isolated network. The
   shipped ACP policy and default offline proof remain unchanged; live use still
-  requires a trusted worker and provider-side spending limits.
+  requires a trusted worker and provider-side spending limits. The host rejects
+  results that copy the gateway job token. Opt-in real-Docker gates (never in
+  CI) cover network reach, a canary credential, and contract and failure cases,
+  and an operator-attended entry runs one transport smoke turn on a local
+  throwaway snapshot with a content-free receipt.
 
 ### Changed
 
