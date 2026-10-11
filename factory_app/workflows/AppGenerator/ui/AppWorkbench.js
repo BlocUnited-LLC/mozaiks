@@ -438,7 +438,7 @@ const AppWorkbench = ({
   };
 
   return (
-    <div className={panelClass}>
+    <div className={`${panelClass} @container`}>
       <div className="px-4 py-3 border-b border-white/10 bg-black/40">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
@@ -469,9 +469,10 @@ const AppWorkbench = ({
           integrationPassed={integrationPassed}
         />
 
-        <div className={['grid gap-4', showSplit ? 'grid-cols-12' : 'grid-cols-12'].join(' ')}>
+        {/* Three columns need enough artifact width to keep files and preview readable. */}
+        <div data-testid="app-workbench-panes" className="grid grid-cols-1 gap-4 @min-[72rem]:grid-cols-12">
           {(showSplit || showCode) && (
-            <div className={showSplit ? 'col-span-3' : 'col-span-4'}>
+            <div className={showSplit ? 'min-w-0 @min-[72rem]:col-span-3' : 'min-w-0 @min-[72rem]:col-span-4'}>
               <FileTreePane
                 filesMap={filesMap}
                 config={config}
@@ -482,7 +483,7 @@ const AppWorkbench = ({
           )}
 
           {(showSplit || showCode) && (
-            <div className={showSplit ? 'col-span-5' : 'col-span-8'}>
+            <div className={showSplit ? 'min-w-0 @min-[72rem]:col-span-5' : 'min-w-0 @min-[72rem]:col-span-8'}>
               <CodeEditorPane
                 config={config}
                 filePath={selectedPath}
@@ -496,7 +497,7 @@ const AppWorkbench = ({
           )}
 
           {(showSplit || showPreview) && (
-            <div className={showSplit ? 'col-span-4' : 'col-span-12'}>
+            <div className={showSplit ? 'min-w-0 @min-[72rem]:col-span-4' : 'min-w-0 @min-[72rem]:col-span-12'}>
               <PreviewPane
                 previewUrl={livePreviewUrl}
                 sandboxStatus={sandboxStatus}
