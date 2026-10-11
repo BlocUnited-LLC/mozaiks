@@ -71,19 +71,26 @@ test('Apps shows a real app before the mobile bottom navigation', async ({ page 
     const firstAppOpen = main.locator('article').first().getByRole('button', { name: 'Open Campaign Revision Workbench' });
     await expect(firstAppOpen).toBeVisible();
     const openButtonBox = await firstAppOpen.boundingBox();
+    const nameBox = await firstAppOpen.getByText('Campaign Revision Workbench', { exact: true }).boundingBox();
     const descriptionBox = await firstAppOpen
       .getByText('Release revision blocked on stakeholder feedback.', { exact: true })
       .boundingBox();
     const bottomNavBox = await page.getByRole('navigation', { name: 'Mobile app navigation' }).boundingBox();
     expect(openButtonBox).not.toBeNull();
+    expect(nameBox).not.toBeNull();
     expect(descriptionBox).not.toBeNull();
     expect(bottomNavBox).not.toBeNull();
+    // The app name is fully visible above the fixed bottom navigation.
+    expect(nameBox.y + nameBox.height).toBeLessThan(bottomNavBox.y);
     // The whole name-and-description block is the tap target: at least 44px
-    // tall, covering the description, and it ends above the bottom navigation.
+    // tall and covering the description. The description may run under the
+    // navigation (its wrapping depends on the platform's fonts), so the
+    // 44px that matters is the part a thumb can reach without scrolling.
     expect(openButtonBox.height).toBeGreaterThanOrEqual(44);
     expect(descriptionBox.y).toBeGreaterThanOrEqual(openButtonBox.y);
     expect(descriptionBox.y + descriptionBox.height).toBeLessThanOrEqual(openButtonBox.y + openButtonBox.height + 0.5);
-    expect(openButtonBox.y + openButtonBox.height).toBeLessThan(bottomNavBox.y);
+    const reachableHeight = Math.min(openButtonBox.y + openButtonBox.height, bottomNavBox.y) - openButtonBox.y;
+    expect(reachableHeight).toBeGreaterThanOrEqual(44);
     await expect(firstAppOpen).toHaveCSS('cursor', 'pointer');
   } else {
     await expect(main.getByLabel('Summary metrics')).toBeVisible();
