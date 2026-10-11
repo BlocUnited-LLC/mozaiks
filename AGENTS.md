@@ -228,6 +228,7 @@ git checkout -b cc/<description>  # cc/ = Claude Code, codex/ = Codex
 # ... work, commit -s ...
 git push -u origin cc/<description>
 gh pr create --draft --title "..." --body-file <file>
+gh pr ready <number>   # once the work is complete and locally verified
 # no --auto: the maintainer merges the exact head an independent reviewer cleared
 ```
 
@@ -239,9 +240,8 @@ regression blocking everyone; fix it first with a small isolated hotfix PR.
 
 **Every commit must carry a DCO sign-off — use `git commit -s`, never plain
 `-m`.** See [DCO.md](DCO.md). A commit without a `Signed-off-by:` trailer
-fails the `dco` check, and that check is *not* in `main`'s required-checks
-list — a merge can go right past a failing `dco` check, so a green
-merge is not proof you signed off. Forgot on the last commit? Fix it
+fails the `dco` check, which branch protection requires, so a missing
+sign-off blocks the merge. Forgot on the last commit? Fix it
 before pushing with `git commit --amend -s --no-edit`; for several unsigned
 commits, `git rebase --signoff origin/main`.
 

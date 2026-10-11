@@ -83,16 +83,16 @@ git checkout -b cc/<short-description>    # cc/ prefix = Claude Code
 # ... do work, commit -s ...
 git push -u origin cc/<short-description>
 gh pr create --draft --title "..." --body-file <file>
+gh pr ready <number>   # once the work is complete and locally verified
 # no --auto: the maintainer merges the exact head an independent reviewer cleared
 ```
 
 **Every commit must be signed off (DCO) — always use `git commit -s`, never
 plain `git commit -m`.** This repo is under the Developer Certificate of
 Origin (see [DCO.md](../../DCO.md)); a commit without a `Signed-off-by:`
-trailer fails the `dco` check. That check is not yet in the `main` branch
-protection required-checks list, so a PR can still merge with a failing
-`dco` check — do not treat a green merge as proof you signed off correctly. If you forgot on the last commit, fix it before pushing (or before
-leaving a PR open) with `git commit --amend -s --no-edit && git push --force-with-lease`;
+trailer fails the `dco` check, which branch protection requires, so a missing
+sign-off blocks the merge. If you forgot on the last commit, fix it before
+pushing (or before leaving a PR open) with `git commit --amend -s --no-edit && git push --force-with-lease`;
 for several unsigned commits use `git rebase --signoff origin/main` first.
 
 Do not arm auto-merge. The required review cannot be satisfied by the single

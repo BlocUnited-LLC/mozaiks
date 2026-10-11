@@ -14,7 +14,8 @@ git log origin/main --oneline -5  # see what recently landed
 
 If an open PR touches the same files you need:
 - If it is nearly done (CI passing), wait for it to merge first.
-- If it is a hard dependency, branch off that PR's branch instead of main.
+- If it is a hard dependency, wait for it to merge, then branch from fresh
+  `origin/main`. Never branch off another open PR; you inherit its bugs.
 
 ## Branch Workflow — Always Use Feature Branches
 
@@ -26,11 +27,16 @@ git checkout -b cc/<short-description>      # cc/ = Claude Code
 #              codex/<short-description>    # codex/ = Codex
 # ... do work, commit ...
 git push -u origin cc/<short-description>
-gh pr create --title "..." --body "..."
-gh pr merge <number> --squash --delete-branch --auto
+gh pr create --draft --title "..." --body-file <file>
+gh pr ready <number>   # once the work is complete and verified locally
+# after an independent reviewer clears this exact head:
+gh pr merge <number> --squash --delete-branch --match-head-commit <reviewed sha>
 ```
 
-Auto-merge fires once required CI checks pass. No human action needed.
+Do not arm auto-merge. Green CI is necessary but not sufficient: an armed
+auto-merge merges whatever head is current, including a push nobody reviewed.
+Open one PR per finished piece of work, and close a PR the day another merged
+PR carries its change.
 
 ## Branch Cleanup
 
@@ -38,7 +44,7 @@ Feature branches are temporary work queues, not permanent project state. Always
 merge with `--delete-branch` so cleanup happens automatically:
 
 ```bash
-gh pr merge <number> --squash --delete-branch --auto
+gh pr merge <number> --squash --delete-branch --match-head-commit <reviewed sha>
 ```
 
 Two structural safety nets should also be in place at the repo level so cleanup
