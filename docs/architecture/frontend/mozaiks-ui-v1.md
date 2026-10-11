@@ -393,7 +393,8 @@ an ADR before any implementation PR may be opened.**
 | 8 | Layout-registry keying (1, #286 wiring series) | UI artifact registries reference `mozaiks.app_layout.v1` kinds once layout wiring lands elsewhere | Drift test: every UI artifact kind maps to a layout family | Revert keying |
 
 Each PR: worktree from fresh `origin/main`, focused tests + full offline suite + ruff
-locally, auto-merge on green, per the multi-agent coordination rules.
+locally, merged after an independent review of the exact head, per the
+multi-agent coordination rules.
 
 ---
 

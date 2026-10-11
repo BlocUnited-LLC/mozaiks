@@ -7,7 +7,7 @@ disable-model-invocation: true
 
 Complete this page task: $ARGUMENTS
 
-**Before starting:** `git fetch origin && gh pr list --state open && git log origin/main --oneline -3` — if another agent has an open PR touching the same files, wait for it to merge or branch off it instead of main.
+**Before starting:** `git fetch origin && gh pr list --state open && git log origin/main --oneline -3` — if another agent has an open PR touching the same files, wait for it to merge, then branch from fresh `origin/main`.
 
 1. Read `AGENTS.md` and `.claude/rules/frontend.md`.
 2. Prefer a declarative page under `app/ui/pages/`.
