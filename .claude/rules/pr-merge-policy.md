@@ -38,7 +38,7 @@ head directly. Do not arm auto-merge:
 
 ```powershell
 gh pr review <number> --approve --body "Reviewed scope and required checks at <sha>; no unresolved risk identified."
-gh pr merge <number> --squash --match-head-commit <reviewed head sha>
+gh pr merge <number> --squash --delete-branch --match-head-commit <reviewed head sha>
 ```
 
 After the merge, record the PR number and final merge SHA in the handoff.

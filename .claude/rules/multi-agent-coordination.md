@@ -19,9 +19,6 @@ your branch too — this is how a single in-progress refactor turns into a
 cascading chain of broken PRs. Instead:
 - Wait for the dependency PR to merge (green CI, actually merged into `main`),
   then branch from fresh `origin/main`.
-- If you truly cannot wait, say so explicitly in your PR description ("stacked
-  on #123, will rebase once it merges") so reviewers know why checks are red,
-  and rebase onto `main` the moment the base PR lands.
 
 **Always work in an isolated worktree, never directly in the shared main
 checkout.** Multiple agents run git commands in the same main checkout folder
@@ -99,6 +96,8 @@ Do not arm auto-merge. The required review cannot be satisfied by the single
 collaborator every agent pushes as, so an armed auto-merge fires only when the
 review gate is lowered, and an unrelated PR once merged unreviewed that way.
 An independent reviewer clears an exact head SHA; the maintainer merges it.
+Pull requests from other authors, such as Dependabot, follow the fast path in
+[pr-merge-policy.md](pr-merge-policy.md).
 The full rule, with the PR-volume and CI-cost rules, is
 [Pull Request Volume, Review, And CI Cost](../../docs/agent-engineering-contract.md#pull-request-volume-review-and-ci-cost).
 

@@ -82,7 +82,10 @@ ready, and every push re-runs CI. Keep the list short and every entry live.
   cannot be satisfied by the single collaborator every agent pushes as, so an
   armed auto-merge fires only when the review gate is lowered, which is how an
   unrelated pull request merged unreviewed (see Repository Settings And Merge
-  Authority). Report the reviewed head SHA and let the maintainer merge it.
+  Authority). For a pull request pushed by the agents' account, report the
+  reviewed head SHA and let the maintainer merge it. Pull requests from other
+  authors, such as Dependabot, follow the fast path in
+  `.claude/rules/pr-merge-policy.md`.
 
 ## Host and Interface Boundaries
 
