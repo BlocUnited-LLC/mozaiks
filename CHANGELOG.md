@@ -12,6 +12,8 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+## 0.2.0 - 2026-10-11
+
 ### Added
 
 - Module startup services can opt into a separate `worker` process profile;
@@ -30,103 +32,6 @@ This project follows a practical pre-1.0 changelog format:
   ledger: canonical archive and pinned Docker image identities, bounded
   root-owned staging, non-root runtime health, and confirmed cleanup without
   a public preview URL or mutable sync.
-
-### Changed
-
-- Package CI now installs the optional ACP and E2B extras from the built wheel
-  and verifies their dependencies, imports, and E2B adapter teardown tests
-  without starting providers.
-
-### Fixed
-
-- On a phone, the Studio Apps page shows the first app above the fixed bottom
-  navigation: the summary tiles stay hidden below 768px, a paginated list keeps
-  a compact `On this page` count, and each app's name-and-description block is
-  an accessible `Open <name>` button, at least 44px tall, that works by tap,
-  Tab and Enter. Desktop keeps its metrics strip and clickable rows.
-- The web shell's Vite build scans `app/admin/` as a Tailwind source, so
-  classes used only by Studio admin pages (card hover tints, the Open button's
-  focus underline) are emitted into the built stylesheet. Linking the admin
-  sources ships every admin-only class: 109 utility classes (113 selectors)
-  that were missing before, including the two-column layout grids on the App
-  Access and App Health pages and the color, border and spacing utilities on
-  the Usage, Integrations and Support pages.
-- Android sign-in and sign-out now request external browser controller closure
-  after a native callback or cancelled attempt.
-- CI and operator reference container builds resolve public base images from a
-  public mirror, avoiding anonymous Docker Hub pull limits during release checks.
-- Restored the assistant launcher on declared app home pages and other custom
-  routes, while keeping it hidden on full chat pages, declared chat aliases and
-  sign-in surfaces. The widget uses the app's name and offers workflow access
-  only when a resumable session or declared start page exists. Standalone Ask
-  connections work in apps without workflows. Saved widget conversations load
-  through the authenticated transcript API before queued input is sent, with
-  explicit history/connection retry and app/user isolation. New conversations
-  use the server acknowledgement instead of a fabricated local ID.
-
-- App shells load their configured brand before rendering, without briefly
-  showing another theme. Chat drafts and live artifact iframes now survive
-  resizing between desktop and mobile layouts and reopening the artifact panel.
-  Mobile drawer transitions move keyboard focus into the visible artifact and
-  return it to the prior conversation control on close.
-
-### Security
-
-- Generated messaging modules now require a verified workspace for workspace
-  conversations. A signed caller cannot select another workspace through
-  dispatch context or `scope_id`.
-
-- Studio workspace connector actions (list, save, health check and delete) and
-  workspace-scoped message threads act only on the caller's verified
-  workspace: the workspace the validated token is bound to, or a membership a
-  host scope hook verified (`verified_workspace_id`). A workspace or tenant
-  named by the request no longer selects one, a request naming another
-  workspace is refused, and a signed-in caller with no verified workspace is
-  refused instead of falling back to its tenant or a shared demo workspace.
-  The per-app integrations view overlays connector status only from that
-  workspace. Local runs with `AUTH_ENABLED=false` keep their existing
-  workspace selection. Deployments whose tokens carry no workspace claim need
-  `AUTH_WORKSPACE_ID_CLAIM` or a host membership hook to use these actions.
-
-- Studio refuses workspace connector, app-catalog, declaration, and message
-  actions when a selected dispatch workspace or tenant conflicts with verified
-  membership, preventing misleading workspace event provenance. App integration
-  declarations now require an app registry record owned by the caller, and
-  catalog usage counts include only that caller's registered apps.
-
-### Fixed
-
-- E2B preview template builds stage only committed files from a clean OSS
-  checkout, reject linked source entries and Dockerfiles outside that commit,
-  and report the source commit and staged-context digest alongside the build ID.
-  Ignored local files and junctions cannot enter the provider upload.
-
-- On mobile app shells, Assistant opens from the bottom navigation instead of
-  covering search and filter controls, and the opened panel follows the bottom
-  bar in keyboard tab order. Shells without a bottom bar keep the floating
-  Assistant launcher, and on desktop the open panel stays below the header's
-  notification and profile menus.
-- Mobile app navigation shows recognizable icons for the default Create, Alerts,
-  and Account actions while retaining configured app icons and labels. An item
-  whose id is a path or URL shows its initial letter instead of a blank glyph.
-- Existing previews continue to use their recorded Docker or E2B provider
-  after the configured provider changes, so a restarted worker can stop them
-  and release capacity without routing cleanup to the wrong sandbox.
-
-### Security
-
-- Contain generated AppLoader repair diagnostics in a read-only, offline Docker
-  worker with bounded writable space. The host confirms worker removal and
-  excludes candidate-written diagnostic JSON from promotion evidence.
-- Remove host-local generated build validation. Docker builds require a pinned
-  local image ID and run offline as non-root in a read-only container; missing
-  sandbox capability blocks promotion.
-- Require generated Tailwind source links for build validation so missing UI
-  classes fail the build, and bound app build timeouts and Docker CLI output.
-
-## 0.2.0 - 2026-10-09
-
-### Added
 
 - An optional runtime-only Mozaiks Cloud usage API key for generated usage
   reporters, leaving deployment and domain client credentials and ordinary
@@ -215,6 +120,37 @@ This project follows a practical pre-1.0 changelog format:
   honor it.
 
 ### Security
+
+- Generated messaging modules now require a verified workspace for workspace
+  conversations. A signed caller cannot select another workspace through
+  dispatch context or `scope_id`.
+
+- Studio workspace connector actions (list, save, health check and delete) and
+  workspace-scoped message threads act only on the caller's verified
+  workspace: the workspace the validated token is bound to, or a membership a
+  host scope hook verified (`verified_workspace_id`). A workspace or tenant
+  named by the request no longer selects one, a request naming another
+  workspace is refused, and a signed-in caller with no verified workspace is
+  refused instead of falling back to its tenant or a shared demo workspace.
+  The per-app integrations view overlays connector status only from that
+  workspace. Local runs with `AUTH_ENABLED=false` keep their existing
+  workspace selection. Deployments whose tokens carry no workspace claim need
+  `AUTH_WORKSPACE_ID_CLAIM` or a host membership hook to use these actions.
+
+- Studio refuses workspace connector, app-catalog, declaration, and message
+  actions when a selected dispatch workspace or tenant conflicts with verified
+  membership, preventing misleading workspace event provenance. App integration
+  declarations now require an app registry record owned by the caller, and
+  catalog usage counts include only that caller's registered apps.
+
+- Contain generated AppLoader repair diagnostics in a read-only, offline Docker
+  worker with bounded writable space. The host confirms worker removal and
+  excludes candidate-written diagnostic JSON from promotion evidence.
+- Remove host-local generated build validation. Docker builds require a pinned
+  local image ID and run offline as non-root in a read-only container; missing
+  sandbox capability blocks promotion.
+- Require generated Tailwind source links for build validation so missing UI
+  classes fail the build, and bound app build timeouts and Docker CLI output.
 
 - Notification reads and mutations no longer treat token-wide roles or
   permissions as grants for workspace audiences. Broad-only alerts remain
@@ -506,6 +442,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Changed
 
+- Package CI now installs the optional ACP and E2B extras from the built wheel
+  and verifies their dependencies, imports, and E2B adapter teardown tests
+  without starting providers.
+
 - Enabled refinement checkpoints now require named profiles with non-empty models; inline capability model settings and unknown capability fields are rejected.
 - Manual release runs now require the exact current main SHA and its successful
   CI run, support a separate TestPyPI rehearsal, and publish to PyPI before
@@ -631,6 +571,54 @@ This project follows a practical pre-1.0 changelog format:
   logger, plus an unreachable duplicate artifact lookup branch.
 
 ### Fixed
+
+- On a phone, the Studio Apps page shows the first app above the fixed bottom
+  navigation: the summary tiles stay hidden below 768px, a paginated list keeps
+  a compact `On this page` count, and each app's name-and-description block is
+  an accessible `Open <name>` button, at least 44px tall, that works by tap,
+  Tab and Enter. Desktop keeps its metrics strip and clickable rows.
+- The web shell's Vite build scans `app/admin/` as a Tailwind source, so
+  classes used only by Studio admin pages (card hover tints, the Open button's
+  focus underline) are emitted into the built stylesheet. Linking the admin
+  sources ships every admin-only class: 109 utility classes (113 selectors)
+  that were missing before, including the two-column layout grids on the App
+  Access and App Health pages and the color, border and spacing utilities on
+  the Usage, Integrations and Support pages.
+- Android sign-in and sign-out now request external browser controller closure
+  after a native callback or cancelled attempt.
+- CI and operator reference container builds resolve public base images from a
+  public mirror, avoiding anonymous Docker Hub pull limits during release checks.
+- Restored the assistant launcher on declared app home pages and other custom
+  routes, while keeping it hidden on full chat pages, declared chat aliases and
+  sign-in surfaces. The widget uses the app's name and offers workflow access
+  only when a resumable session or declared start page exists. Standalone Ask
+  connections work in apps without workflows. Saved widget conversations load
+  through the authenticated transcript API before queued input is sent, with
+  explicit history/connection retry and app/user isolation. New conversations
+  use the server acknowledgement instead of a fabricated local ID.
+
+- App shells load their configured brand before rendering, without briefly
+  showing another theme. Chat drafts and live artifact iframes now survive
+  resizing between desktop and mobile layouts and reopening the artifact panel.
+  Mobile drawer transitions move keyboard focus into the visible artifact and
+  return it to the prior conversation control on close.
+
+- E2B preview template builds stage only committed files from a clean OSS
+  checkout, reject linked source entries and Dockerfiles outside that commit,
+  and report the source commit and staged-context digest alongside the build ID.
+  Ignored local files and junctions cannot enter the provider upload.
+
+- On mobile app shells, Assistant opens from the bottom navigation instead of
+  covering search and filter controls, and the opened panel follows the bottom
+  bar in keyboard tab order. Shells without a bottom bar keep the floating
+  Assistant launcher, and on desktop the open panel stays below the header's
+  notification and profile menus.
+- Mobile app navigation shows recognizable icons for the default Create, Alerts,
+  and Account actions while retaining configured app icons and labels. An item
+  whose id is a path or URL shows its initial letter instead of a blank glyph.
+- Existing previews continue to use their recorded Docker or E2B provider
+  after the configured provider changes, so a restarted worker can stop them
+  and release capacity without routing cleanup to the wrong sandbox.
 
 - Generated token recovery now stays on the current page with administrator-
   contact guidance when no safe local route is configured; AppGenerator guidance
