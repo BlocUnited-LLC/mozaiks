@@ -46,7 +46,11 @@ This project follows a practical pre-1.0 changelog format:
   Tab and Enter. Desktop keeps its metrics strip and clickable rows.
 - The web shell's Vite build scans `app/admin/` as a Tailwind source, so
   classes used only by Studio admin pages (card hover tints, the Open button's
-  focus underline) are emitted into the built stylesheet.
+  focus underline) are emitted into the built stylesheet. Linking the admin
+  sources ships every admin-only class: 109 utility classes (113 selectors)
+  that were missing before, including the two-column layout grids on the App
+  Access and App Health pages and the color, border and spacing utilities on
+  the Usage, Integrations and Support pages.
 - Android sign-in and sign-out now request external browser controller closure
   after a native callback or cancelled attempt.
 - CI and operator reference container builds resolve public base images from a
