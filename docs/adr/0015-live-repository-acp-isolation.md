@@ -28,9 +28,13 @@ App Zero must not launch a parallel Codex or Claude subprocess path.
 One manually triggered, operator-only local acceptance turn may run after the
 fixed image, gateway-held credential route, and network preflight pass their
 gates. It may create a draft protected PR after the normal validation gates, but
-cannot itself authorize merge, artifact promotion, or release. Unattended or
-customer-facing live execution remains disabled until that real-model turn has
-been reviewed. Multi-tenant live execution remains disabled until a separate
+cannot itself authorize merge, artifact promotion, or release. Before that
+acceptance turn, one attended
+[pre-gate-4 transport smoke](#pre-gate-4-transport-smoke) may run against a
+throwaway local snapshot after gates 1-3 pass. The smoke proves the live
+transport only; it uses no repository fixture, creates no PR, and does not
+satisfy gate 4. Unattended or customer-facing live execution remains disabled
+until that real-model turn has been reviewed. Multi-tenant live execution remains disabled until a separate
 credential and isolation decision is accepted. This ADR does not enable live
 mode or change the offline executor.
 
@@ -95,8 +99,10 @@ review remain required.
    residual-risk decision is required before unattended or multi-tenant use.
 3. Use a dedicated, revocable model credential for this worker, with restricted
    API permissions and a verified hard spend limit where the provider supports
-   one. An alert-only budget is not a spend cap. Deliver the upstream key from
-   the trusted secret backend only to the separate gateway over private stdin.
+   one. An alert-only budget is not a spend cap. The pre-gate-4 transport smoke
+   requires that provider-side hard limit and must not run without it. Deliver
+   the upstream key from the trusted secret backend only to the separate
+   gateway over private stdin.
    The agent receives a random, one-job token that works only at that gateway.
    The upstream key must never enter the agent image, environment, command
    line, workspace, proposal, or result JSON. The gateway also must not put it
@@ -170,6 +176,60 @@ insufficient.
    digest, actual validation result, protected PR number, CI result, and human
    review. Do not publish or tag based on an offline proof. Never run this gate
    in ordinary CI or expose the key to a pull request from untrusted code.
+   This gate, with its private repository fixture and protected PR, remains
+   the requirement for every live turn beyond the single pre-gate-4 transport
+   smoke below.
+
+### Pre-gate-4 Transport Smoke
+
+Before gate 4, the operator may run exactly one live turn labelled
+**pre-gate-4 transport smoke**. It exists so the first real model call can
+exercise the transport without first building a repository fixture and PR
+publication path. It is allowed only when all of the following hold:
+
+- **Gates 1-3 pass first** on the exact worker image, gateway image, and OSS
+  commit used for the turn.
+- **Attended and operator-run:** the operator starts the turn by hand on a
+  local machine and watches it to completion. It never runs in ordinary CI,
+  on a schedule, from a pull request, or from a hosted, customer, or
+  agent-originated request.
+- **Throwaway local snapshot only:** the source is a disposable local copy of
+  a pinned commit, created outside any working checkout and deleted after
+  review. There is no repository fixture, Git remote, source-control
+  credential, branch, or PR. Nothing is written to a source-control host,
+  an application database, or the real repository. The host still applies
+  the approved context, snapshot, path grants, staging, and candidate
+  finalization defined above, and a human reads the host-verified candidate.
+- **Provider-side hard spend limit as the cost ceiling:** the turn uses a
+  newly created, dedicated key whose provider account or workspace enforces a
+  verified hard spend limit, and the key is revoked immediately afterwards.
+  The gateway's request, byte, time, and output-token budgets bound the
+  transport but are not a spend cap, and an alert-only budget does not
+  qualify. If the provider cannot enforce a hard limit for that key, the smoke
+  does not run.
+- **Same isolation and credential route:** the gateway-held key, synthetic
+  job token, per-turn networks, container limits, and container removal
+  described above apply unchanged.
+
+The smoke proves the transport only: that the fixed images, gateway credential
+route, and per-turn networks can carry one real model-backed turn and that the
+host can stage and finalize its output. It is not live acceptance and does not
+satisfy gate 4. It does not authorize unattended, customer-facing, or
+multi-tenant execution, any PR, merge, artifact promotion, or release. It is
+not an App Zero refinement: under
+[ADR 0016](0016-existing-app-factory-build-target.md) a Refinement Run still
+requires an accepted imported (Genesis) baseline `BuildRecord`, and the smoke
+creates, accepts, or advances no `BuildRecord`.
+
+Record a content-free receipt of the smoke, whether it succeeds or fails, on
+PR #895 and on the issue that tracks live ACP activation. The receipt names the
+OSS commit, the source commit of the snapshot, the worker and gateway image
+IDs, the adapter and model, the approved paths, the sanitized turn status or
+failure code, the candidate digest when one exists, any provider-reported
+usage compared with the provider console, confirmation that the per-turn
+containers and networks were removed, and confirmation that the key was
+revoked. The receipt contains no source content, prompt, model output, or
+credential.
 
 ## Alternatives Considered
 
@@ -221,6 +281,8 @@ access, validation policy, and PR publication.
 
 ## Validation
 
-This decision claims no live acceptance. Implementation must pass every
-acceptance gate above and may be enabled only after a separate security and
-architecture review of the exact images, gateway, and credential path.
+This decision claims no live acceptance. A pre-gate-4 transport smoke
+receipt is transport evidence only, not live acceptance. Implementation must
+pass every acceptance gate above and may be enabled only after a separate
+security and architecture review of the exact images, gateway, and credential
+path.
