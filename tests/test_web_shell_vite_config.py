@@ -178,6 +178,11 @@ class TestTailwindV4PackagedSourceDetection:
         assert "'.mozaiks-tailwind-sources'" in source
         assert "['chat-ui-src', chatUiSrcRoot]" in source
         assert "['factory-app-ui', path.resolve(factoryAppRoot, 'app/ui')]" in source
+        # Admin pages are imported through app/ui/index.js but live beside it;
+        # without this link a class used only by an admin page (for example a
+        # card's hover:bg-card/50) is missing from the built stylesheet.
+        assert "['factory-app-admin', path.resolve(factoryAppRoot, 'app/admin')]" in source
+        assert "['platform-admin', path.resolve(platformAppDir, 'admin')]" in source
         assert "['factory-workflows', factoryWorkflowsRoot]" in source
         assert "['platform-ui', path.resolve(platformAppDir, 'ui')]" in source
         assert "['platform-workflows', platformWorkflowRoot]" in source

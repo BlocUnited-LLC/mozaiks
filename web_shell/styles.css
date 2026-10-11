@@ -5,8 +5,8 @@
    often copied out of the Python package and built beside large dependency
    trees, so automatic detection can traverse the wrong build context. Keep
    source detection explicit and let vite.config.js populate
-   .mozaiks-tailwind-sources with links to packaged chat UI, Factory UI, active
-   app UI, and workflow UI roots.
+   .mozaiks-tailwind-sources with links to packaged chat UI, Factory UI and
+   admin pages, active app UI and admin pages, and workflow UI roots.
 */
 @source "./";
 @source "./.mozaiks-tailwind-sources";

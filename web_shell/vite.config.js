@@ -224,8 +224,10 @@ export default defineConfig(({ mode }) => {
   const tailwindSourceLinkRoot = ensureTailwindSourceLinks([
     ['chat-ui-src', chatUiSrcRoot],
     ['factory-app-ui', path.resolve(factoryAppRoot, 'app/ui')],
+    ['factory-app-admin', path.resolve(factoryAppRoot, 'app/admin')],
     ['factory-workflows', factoryWorkflowsRoot],
     ['platform-ui', path.resolve(platformAppDir, 'ui')],
+    ['platform-admin', path.resolve(platformAppDir, 'admin')],
     ['platform-workflows', platformWorkflowRoot],
   ]);
   const viteFsAllow = Array.from(new Set([

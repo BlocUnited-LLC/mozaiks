@@ -393,3 +393,22 @@ def test_integrations_page_uses_shared_primitives_for_health_ui() -> None:
     assert "function MetricTile" not in source
     assert "function StatCard" not in source
 
+
+def test_apps_mobile_card_name_block_is_the_tap_target() -> None:
+    source = _read("factory_app/app/admin/pages/AppsPage.jsx")
+    app_cell = source[source.index("function AppCell("):source.index("const TrashIcon")]
+    mobile_item = source[source.index("function AppMobileItem("):source.index("function AppsTable(")]
+    table = source[source.index("function AppsTable("):]
+    # The mobile Open button is the whole name-and-description block: the
+    # aria-label keeps the "Open <name>" name and aria-describedby keeps the
+    # description announced.
+    assert 'aria-label={`Open ${row.name}`}' in app_cell
+    assert "aria-describedby={descriptionId}" in app_cell
+    assert "cursor-pointer" in app_cell
+    assert "min-h-11" in app_cell
+    # The mobile card itself is not clickable, so its inline actions need no
+    # propagation guard; desktop rows stay clickable, so theirs keep it.
+    assert "onClick=" not in mobile_item.split("<div className=\"flex items-start")[0]
+    assert "stopPropagation" not in mobile_item
+    assert "onRowClick={onOpen}" in table
+    assert table.count("e.stopPropagation()") == 3
