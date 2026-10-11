@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 from copy import deepcopy
@@ -21,6 +22,7 @@ from mozaiksai.control_plane import (
     execute_repository_docker_turn,
 )
 from mozaiksai.control_plane import repository_live_docker as live
+from mozaiksai.core.semantics.archive import ArchiveEntry, build_deterministic_archive
 
 _PATH = "app/ui/pages/Dashboard.jsx"
 _BEFORE = "export default function Dashboard() {}\n"
@@ -293,3 +295,180 @@ async def test_gateway_failure_withholds_source_and_cleans_docker_resources(
     assert all(stdin is None for _args, stdin in docker_calls)
     assert "upstream-private-key" not in repr(docker_calls)
     assert len(removed) == 4  # both containers and both unique networks
+
+
+class _FakeGatewayProcess:
+    returncode: int | None = None
+
+    async def wait(self) -> int:
+        self.returncode = 0
+        return 0
+
+    def kill(self) -> None:
+        self.returncode = -9
+
+
+def _install_successful_live_docker(
+    monkeypatch: pytest.MonkeyPatch, *, worker_output: Any, removed: list[str],
+    seen: list[dict[str, Any]] | None = None,
+) -> None:
+    """Fake every Docker step of one live turn; ``worker_output`` sees the stdin payload."""
+    container_ids = iter(["c" * 64, "d" * 64, "e" * 64, "f" * 64])
+
+    async def fake_docker(
+        args: list[str], *, config_dir: str, stdin_bytes: bytes | None,
+        timeout_seconds: int, stdout_limit: int,
+    ) -> bytes:
+        if args[:2] in (["network", "create"], ["network", "connect"]):
+            if seen is not None and args[:2] == ["network", "create"]:
+                seen.append({"network": args[-1]})
+            return b"ok\n"
+        if args[0] == "start":
+            return b""
+        if args[:3] == ["inspect", "--format", "{{.State.Running}}"]:
+            return b"true\n"
+        if args[:3] == ["inspect", "--format", "{{.State.ExitCode}}"]:
+            return b"0\n"
+        if args[0] == "attach":
+            assert stdin_bytes is not None
+            payload = json.loads(stdin_bytes)
+            if seen is not None:
+                seen.append({"job_token": payload["live"]["job_token"]})
+            return worker_output(payload)
+        raise AssertionError(f"unexpected Docker command: {args}")
+
+    async def no_op(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    async def fake_create(*_args: Any, **_kwargs: Any) -> str:
+        return next(container_ids)
+
+    async def fake_gateway(_container_id: str, *, config_dir: str, config: dict[str, str]) -> Any:
+        return _FakeGatewayProcess()
+
+    monkeypatch.setattr(live, "_docker", fake_docker)
+    monkeypatch.setattr(live, "_inspect_image", no_op)
+    monkeypatch.setattr(live, "_inspect_network", no_op)
+    monkeypatch.setattr(live, "_inspect_container", no_op)
+    monkeypatch.setattr(live, "_create_container", fake_create)
+    monkeypatch.setattr(live, "_start_gateway", fake_gateway)
+    monkeypatch.setattr(live, "_remove_container", lambda name, _config_dir: removed.append(name))
+    monkeypatch.setattr(live, "_remove_network", lambda name, _config_dir: removed.append(name))
+
+
+def _update_output(content: str, *, summary: str = "updated") -> bytes:
+    archive = build_deterministic_archive([ArchiveEntry(path=_PATH, content=content.encode("utf-8"))])
+    return json.dumps({
+        "proposal": {
+            "proposal_id": "p-1", "provider_id": "acp", "status": "completed",
+            "summary": summary, "owned_paths": [_PATH],
+            "changed_files": [{"path": _PATH, "op": "update", "content": content}],
+        },
+        "workspace_archive_base64": base64.b64encode(archive).decode("ascii"),
+    }).encode("utf-8")
+
+
+async def _live_turn() -> RepositoryDockerTurn:
+    return await execute_repository_docker_turn(
+        _request(), image=_WORKER_IMAGE, expected_image_id=_WORKER_IMAGE_ID,
+        approved_context=_context(), snapshot=_snapshot(),
+        validate_path=lambda _path: None, live_profile=_profile(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_live_turn_returns_verified_update_and_removes_every_resource(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    removed: list[str] = []
+    _install_successful_live_docker(
+        monkeypatch, worker_output=lambda _payload: _update_output(_BEFORE + "// edited\n"), removed=removed,
+    )
+    turn = await _live_turn()
+    assert turn.proposal.status == "completed"
+    assert [(change.path, change.op) for change in turn.proposal.changed_files] == [(_PATH, "update")]
+    assert len(removed) == 4
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("where", ["source", "proposal_text"])
+async def test_live_turn_rejects_job_token_copied_into_returned_bytes(
+    monkeypatch: pytest.MonkeyPatch, where: str,
+) -> None:
+    removed: list[str] = []
+
+    def copy_token(payload: dict[str, Any]) -> bytes:
+        token = payload["live"]["job_token"]
+        if where == "source":
+            return _update_output(_BEFORE + f"// {token}\n")
+        return _update_output(_BEFORE + "// edited\n", summary=f"token {token}")
+
+    _install_successful_live_docker(monkeypatch, worker_output=copy_token, removed=removed)
+    with pytest.raises(RepositoryDockerExecutionError, match="REPOSITORY_LIVE_TOKEN_IN_OUTPUT"):
+        await _live_turn()
+    assert len(removed) == 4
+
+
+@pytest.mark.asyncio
+async def test_live_turn_cleanup_failure_discards_an_otherwise_valid_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    removed: list[str] = []
+    _install_successful_live_docker(
+        monkeypatch, worker_output=lambda _payload: _update_output(_BEFORE + "// edited\n"), removed=removed,
+    )
+
+    def failing_network_cleanup(name: str, _config_dir: str) -> None:
+        removed.append(name)
+        raise RepositoryDockerExecutionError("REPOSITORY_LIVE_NETWORK_CLEANUP_FAILED")
+
+    monkeypatch.setattr(live, "_remove_network", failing_network_cleanup)
+    with pytest.raises(RepositoryDockerExecutionError, match="REPOSITORY_LIVE_NETWORK_CLEANUP_FAILED"):
+        await _live_turn()
+    assert len(removed) == 4  # the second network is still attempted
+
+
+@pytest.mark.asyncio
+async def test_repeated_live_attempts_never_share_a_token_or_resource(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    removed: list[str] = []
+    seen: list[dict[str, Any]] = []
+    _install_successful_live_docker(
+        monkeypatch, worker_output=lambda _payload: _update_output(_BEFORE + "// edited\n"),
+        removed=removed, seen=seen,
+    )
+    await _live_turn()
+    await _live_turn()
+    tokens = [item["job_token"] for item in seen if "job_token" in item]
+    networks = [item["network"] for item in seen if "network" in item]
+    assert len(tokens) == 2 and len(set(tokens)) == 2
+    assert len(networks) == 4 and len(set(networks)) == 4
+    assert len(removed) == 8 and len(set(removed)) == 8
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("drift", ["changed_source", "create_without_absence_proof", "unapproved_inspection"])
+async def test_live_turn_rejects_drift_or_missing_proof_before_docker(
+    monkeypatch: pytest.MonkeyPatch, drift: str,
+) -> None:
+    from mozaiksai.control_plane import repository_docker_executor as executor
+
+    async def never_docker(*_args: Any, **_kwargs: Any) -> bytes:
+        raise AssertionError("Docker must not run")
+
+    monkeypatch.setattr(executor, "_docker", never_docker)
+    monkeypatch.setattr(live, "_docker", never_docker)
+    request, context = _request(), _context()
+    if drift == "changed_source":
+        request = request.model_copy(update={"files": {_PATH: _BEFORE + "// drifted\n"}})
+    elif drift == "create_without_absence_proof":
+        context = context.model_copy(update={"create_paths": ["app/ui/pages/New.jsx"]})
+    else:
+        request = request.model_copy(update={"read_only_files": {"README.md": "# not approved\n"}})
+    with pytest.raises(ValueError, match="REPOSITORY_PATCH_"):
+        await execute_repository_docker_turn(
+            request, image=_WORKER_IMAGE, expected_image_id=_WORKER_IMAGE_ID,
+            approved_context=context, snapshot=_snapshot(),
+            validate_path=lambda _path: None, live_profile=_profile(),
+        )

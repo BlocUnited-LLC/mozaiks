@@ -8,18 +8,21 @@ Docker transport. It does not approve source, accept a patch, or publish a PR.
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import re
 import secrets
 import subprocess
 import tempfile
 import uuid
+import zipfile
 from typing import Any
 
 from mozaiksai.core.adapters.local_docker_cli import (
     _docker_cli_env,
     _docker_prefix,
 )
+from mozaiksai.core.semantics.archive import ArchiveError, read_archive_manifest
 
 from .repository_docker_executor import (
     _ALLOWED_IMAGE_ENV_NAMES,
@@ -35,6 +38,7 @@ from .repository_docker_executor import (
     _remove_container,
     _strict_json,
 )
+from .repository_patch import _EMPTY_REPOSITORY_ARCHIVE
 
 _NETWORK_NAME = re.compile(r"mozaiks-acp-(?:private|egress)-[0-9a-f]{24}\Z")
 _GATEWAY_ALIAS = "model-gateway"
@@ -247,6 +251,29 @@ async def _start_gateway(container_id: str, *, config_dir: str, config: dict[str
             await process.wait()
 
 
+def _reject_job_token_copy(raw_output: bytes, turn: RepositoryDockerTurn, job_token: str) -> None:
+    """Fail closed when the worker copies its gateway token into returned bytes.
+
+    The token authenticates only one gateway session, but returned source and
+    proposals are reviewed and may be published. Check the raw output, the
+    sanitized proposal, and every decompressed archive entry.
+    """
+    token = job_token.encode("ascii")
+    if token in raw_output or token in turn.proposal.model_dump_json().encode("utf-8"):
+        raise RepositoryDockerExecutionError("REPOSITORY_LIVE_TOKEN_IN_OUTPUT")
+    archive = turn.workspace_archive
+    if archive is None or archive == _EMPTY_REPOSITORY_ARCHIVE:
+        return
+    try:
+        manifest = read_archive_manifest(archive)
+        with zipfile.ZipFile(io.BytesIO(archive)) as opened:
+            leaked = any(token in opened.read(entry.path) for entry in manifest.entries)
+    except (ArchiveError, zipfile.BadZipFile, KeyError, OSError):
+        raise RepositoryDockerExecutionError("REPOSITORY_DOCKER_INVALID_OUTPUT") from None
+    if leaked:
+        raise RepositoryDockerExecutionError("REPOSITORY_LIVE_TOKEN_IN_OUTPUT")
+
+
 async def execute_live_repository_docker_turn(
     *, scoped: dict[str, object], profile: RepositoryLiveACPProfile,
     image: str, expected_image_id: str, selected_paths: set[str],
@@ -408,11 +435,13 @@ async def execute_live_repository_docker_turn(
             )
             if exit_code.strip() != b"0":
                 raise RepositoryDockerExecutionError("REPOSITORY_LIVE_WORKER_FAILED")
-            return _parse_turn_output(
+            turn = _parse_turn_output(
                 raw_output, selected_paths=selected_paths,
                 create_paths=create_paths, delete_paths=delete_paths,
                 max_archive_bytes=max_archive_bytes,
             )
+            _reject_job_token_copy(raw_output, turn, job_token)
+            return turn
         finally:
             cleanup_errors: list[RepositoryDockerExecutionError] = []
             for attempted, name in ((worker_attempted, worker_name), (gateway_attempted, gateway_name)):
