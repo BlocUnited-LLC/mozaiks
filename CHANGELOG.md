@@ -41,9 +41,12 @@ This project follows a practical pre-1.0 changelog format:
 
 - On a phone, the Studio Apps page shows the first app above the fixed bottom
   navigation: the summary tiles stay hidden below 768px, a paginated list keeps
-  a compact `On this page` count, and each app name is an accessible
-  `Open <name>` button that works by tap, Tab and Enter. Desktop keeps its
-  metrics strip and clickable rows.
+  a compact `On this page` count, and each app's name-and-description block is
+  an accessible `Open <name>` button, at least 44px tall, that works by tap,
+  Tab and Enter. Desktop keeps its metrics strip and clickable rows.
+- The web shell's Vite build scans `app/admin/` as a Tailwind source, so
+  classes used only by Studio admin pages (card hover tints, the Open button's
+  focus underline) are emitted into the built stylesheet.
 - Android sign-in and sign-out now request external browser controller closure
   after a native callback or cancelled attempt.
 - CI and operator reference container builds resolve public base images from a

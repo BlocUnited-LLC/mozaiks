@@ -2,7 +2,7 @@
  * AppsPage — curated workspace app directory.
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import {
@@ -45,21 +45,32 @@ function sortByNeedsInput(rows) {
 }
 
 function AppCell({ row, onOpen }) {
+  const descriptionId = useId()
+  if (!onOpen) {
+    return (
+      <div>
+        <div className="font-semibold text-foreground">{row.name}</div>
+        <div className="mt-1 max-w-xl text-sm leading-6 text-muted-foreground">{row.description}</div>
+      </div>
+    )
+  }
+  // The whole name-and-description block is the tap target. The aria-label
+  // keeps the accessible name "Open <name>"; aria-describedby keeps the
+  // description announced instead of being swallowed by that label.
   return (
-    <div>
-      {onOpen ? (
-        <button
-          type="button"
-          onClick={() => onOpen(row)}
-          aria-label={`Open ${row.name}`}
-          className="text-left font-semibold text-foreground underline-offset-4 hover:underline focus-visible:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-        >
-          <span>{row.name}</span>
-          <span aria-hidden="true"> ↗</span>
-        </button>
-      ) : <div className="font-semibold text-foreground">{row.name}</div>}
-      <div className="mt-1 max-w-xl text-sm leading-6 text-muted-foreground">{row.description}</div>
-    </div>
+    <button
+      type="button"
+      onClick={() => onOpen(row)}
+      aria-label={`Open ${row.name}`}
+      aria-describedby={descriptionId}
+      className="group block min-h-11 cursor-pointer text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+    >
+      <span className="block font-semibold text-foreground underline-offset-4 group-hover:underline group-focus-visible:underline">
+        <span>{row.name}</span>
+        <span aria-hidden="true"> ↗</span>
+      </span>
+      <span id={descriptionId} className="mt-1 block max-w-xl text-sm leading-6 text-muted-foreground">{row.description}</span>
+    </button>
   )
 }
 
@@ -86,7 +97,7 @@ function AppMobileItem({ row, onOpen, onDashboard, onDelete }) {
       <div className="mt-3 flex items-center gap-2">
         {row.primaryAction?.kind === 'build' && (
           <ActionButton
-            onClick={(e) => { e.stopPropagation(); onOpen(row) }}
+            onClick={() => onOpen(row)}
             size="sm"
             variant="secondary"
             className="font-semibold"
@@ -96,7 +107,7 @@ function AppMobileItem({ row, onOpen, onDashboard, onDelete }) {
         )}
         {row.dashboardHref && (
           <ActionButton
-            onClick={(e) => { e.stopPropagation(); onDashboard(row) }}
+            onClick={() => onDashboard(row)}
             size="sm"
             variant="outline"
             className="border-primary/35 text-primary hover:bg-primary/10 hover:text-primary"
@@ -105,7 +116,7 @@ function AppMobileItem({ row, onOpen, onDashboard, onDelete }) {
           </ActionButton>
         )}
         {onDelete && <ActionButton
-          onClick={(e) => { e.stopPropagation(); onDelete(row) }}
+          onClick={() => onDelete(row)}
           size="sm"
           variant="ghost"
           className="text-destructive hover:bg-destructive/10 px-2"

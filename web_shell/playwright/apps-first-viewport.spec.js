@@ -70,11 +70,21 @@ test('Apps shows a real app before the mobile bottom navigation', async ({ page 
     await expect(main.getByLabel('Summary metrics')).toBeHidden();
     const firstAppOpen = main.locator('article').first().getByRole('button', { name: 'Open Campaign Revision Workbench' });
     await expect(firstAppOpen).toBeVisible();
-    const appNameBox = await firstAppOpen.boundingBox();
+    const openButtonBox = await firstAppOpen.boundingBox();
+    const descriptionBox = await firstAppOpen
+      .getByText('Release revision blocked on stakeholder feedback.', { exact: true })
+      .boundingBox();
     const bottomNavBox = await page.getByRole('navigation', { name: 'Mobile app navigation' }).boundingBox();
-    expect(appNameBox).not.toBeNull();
+    expect(openButtonBox).not.toBeNull();
+    expect(descriptionBox).not.toBeNull();
     expect(bottomNavBox).not.toBeNull();
-    expect(appNameBox.y + appNameBox.height).toBeLessThan(bottomNavBox.y);
+    // The whole name-and-description block is the tap target: at least 44px
+    // tall, covering the description, and it ends above the bottom navigation.
+    expect(openButtonBox.height).toBeGreaterThanOrEqual(44);
+    expect(descriptionBox.y).toBeGreaterThanOrEqual(openButtonBox.y);
+    expect(descriptionBox.y + descriptionBox.height).toBeLessThanOrEqual(openButtonBox.y + openButtonBox.height + 0.5);
+    expect(openButtonBox.y + openButtonBox.height).toBeLessThan(bottomNavBox.y);
+    await expect(firstAppOpen).toHaveCSS('cursor', 'pointer');
   } else {
     await expect(main.getByLabel('Summary metrics')).toBeVisible();
     await expect(main.getByRole('row', { name: /Campaign Revision Workbench/ }).first()).toBeVisible();
@@ -90,6 +100,10 @@ test('Apps shows a real app before the mobile bottom navigation', async ({ page 
   if (viewport.width < 768) {
     const firstAppOpen = main.locator('article').first().getByRole('button', { name: 'Open Campaign Revision Workbench' });
     await firstAppOpen.focus();
+    // Keyboard focus underlines the name: this class lives only in an admin
+    // page, so it is in the built stylesheet only because app/admin is a
+    // Tailwind source.
+    await expect(firstAppOpen.locator('span').first()).toHaveCSS('text-decoration-line', 'underline');
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL(/\/chat\?/);
   }
