@@ -5,14 +5,16 @@
  * when the user is in widget mode (navigating outside of ChatPage).
  * 
  * This component should be rendered at the root level, INSIDE the ChatUIProvider,
- * so it has access to the chat context.
- * 
+ * so it has access to the chat context, and AFTER the routed shell so the
+ * assistant panel follows the page controls and the mobile bottom bar that
+ * opens it in keyboard tab order.
+ *
  * Usage:
  * ```jsx
  * <ChatUIProvider>
  *   <Router>
- *     <GlobalChatWidgetWrapper />
  *     <Routes>...</Routes>
+ *     <GlobalChatWidgetWrapper />
  *   </Router>
  * </ChatUIProvider>
  * ```
@@ -46,6 +48,8 @@ const GlobalChatWidgetWrapper = () => {
     setIsInWidgetMode,
     isWidgetVisible,
     setIsWidgetVisible,
+    isChatOverlayOpen,
+    setIsChatOverlayOpen,
     activeWorkflowName,
   } = useChatUI();
 
@@ -88,14 +92,19 @@ const GlobalChatWidgetWrapper = () => {
   // This keeps the persistent widget available across module/admin/discovery pages
   // without requiring each page to call useWidgetMode().
   useEffect(() => {
-    if (!isAppRoute) return;
+    if (!isAppRoute) {
+      if (isWidgetVisible) setIsWidgetVisible(false);
+      if (isChatOverlayOpen) setIsChatOverlayOpen(false);
+      return;
+    }
     if (!isInWidgetMode) {
       setIsInWidgetMode(true);
     }
     if (!isWidgetVisible) {
       setIsWidgetVisible(true);
     }
-  }, [isAppRoute, isInWidgetMode, isWidgetVisible, setIsInWidgetMode, setIsWidgetVisible]);
+  }, [isAppRoute, isInWidgetMode, isWidgetVisible, isChatOverlayOpen,
+    setIsInWidgetMode, setIsWidgetVisible, setIsChatOverlayOpen]);
 
   // Chat and unresolved/redirecting routes have no app-page widget owner.
   if (!isAppRoute) {

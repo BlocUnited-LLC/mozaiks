@@ -63,6 +63,7 @@ before(async () => {
         const [navigation,setNavigation]=useState(window.scenario);
         const [isInWidgetMode,setIsInWidgetMode]=useState(false);
         const [isWidgetVisible,setIsWidgetVisible]=useState(false);
+        const [isChatOverlayOpen,setIsChatOverlayOpen]=useState(false);
         const [askMessages,setAskMessages]=useState([]);
         const [unreadChatCount,setUnreadChatCount]=useState(0);
         const navigate=useNavigate();
@@ -70,6 +71,7 @@ before(async () => {
         window.go=navigate;
         const noop=()=>{};
         const chat={isInWidgetMode,setIsInWidgetMode,isWidgetVisible,setIsWidgetVisible,
+          isChatOverlayOpen,setIsChatOverlayOpen,
           askMessages,setAskMessages,unreadChatCount,setUnreadChatCount,
           setConversationMode:noop,setActiveChatId:noop,setActiveWorkflowName:noop,setActiveGeneralChatId:noop,
           activeChatId:null,activeWorkflowName:null,conversationMode:'ask',loading:navigation.authLoading||false,
