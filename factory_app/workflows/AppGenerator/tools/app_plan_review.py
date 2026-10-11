@@ -1276,11 +1276,28 @@ def _label_page_tasks(plan: dict[str, Any], context: Any) -> list[str]:
     determined by what the task owns, so code sets it: for a task under no
     approved surface, or under ``page_bundle`` with another kind. A task owning
     nothing has nothing to label it by and keeps its check.
+
+    A task under an approved ``ui_only`` surface's ID that builds only
+    approved page artifacts keeps that surface and takes its kind: the
+    surface approves page work, so the kind follows from the approval.
     """
     approved = _approved_surface_ids(context)
+    ui_only = _approved_ui_only_surfaces(context)
     repairs: list[str] = []
     for task in plan.get("build_tasks") or []:
         surface_id, surface_kind = str(task.get("surface_id") or ""), task.get("surface_kind")
+        if (
+            surface_id in ui_only
+            and surface_kind != "ui_only"
+            and _normalized_owned_paths(task)
+            and _owns_only_approved_pages(task, context)
+        ):
+            task["surface_kind"] = "ui_only"
+            repairs.append(
+                f"{task.get('task_id')}: surface_kind {surface_kind!r} -> 'ui_only'; approved ui_only "
+                f"surface {surface_id!r} owns page work only"
+            )
+            continue
         if (
             (surface_id == "page_bundle" and surface_kind == "ui_only")
             or surface_id in approved
@@ -1449,14 +1466,114 @@ def _merge_closes_cycle(
     return cyclic(keeper_id)
 
 
+_UI_ONLY_HINT_GUIDANCE = (
+    "source_capability_packs are descriptive hints, not selected provider registrations. "
+    "Use capability_packs=[] when no backend/provider capability is approved, "
+    "and preserve the approved pages and their behavior in page_bundle tasks."
+)
+
+
+def _approved_ui_only_surfaces(context: Any) -> dict[str, dict[str, Any]]:
+    design = detach(context.get("design_surface_map")) or {}
+    return {
+        surface["surface_id"]: surface for surface in design.get("surfaces") or []
+        if surface.get("surface_id") and surface.get("surface_kind") == "ui_only"
+    }
+
+
+def _selected_ui_provider_ids(context: Any) -> set[str]:
+    """Selected build-context packs that may bind an approved UI-only surface.
+
+    A selected pack descriptor (``normalize_pack_descriptor``) carries its
+    identity and registered capability_source, never a surface binding:
+    selection is the registration. The registered source decides, not the
+    plan's label, which ``_repair_selected_pack_sources`` normalizes later.
+    Generated module code and DesignDocs category hints are not providers.
+    """
+    return {
+        pack_id
+        for pack in detach(context.get("capability_packs")) or []
+        if isinstance(pack, dict)
+        and pack.get("capability_source") != "generated_module"
+        and (pack_id := _pack_id_from_descriptor(pack))
+    }
+
+
+def _validate_ui_only_surface_claims(plan: dict[str, Any], context: Any) -> None:
+    """Check raw UI-only claims before a repair can remove or relabel them."""
+    ui_surfaces = _approved_ui_only_surfaces(context)
+    if not ui_surfaces:
+        return
+    selected = _selected_ui_provider_ids(context)
+    approved_pages = _approved_page_inventory(context)
+    page_paths = {
+        path.lower() for path in _required_page_paths({"pages": approved_pages})
+    } | {
+        "brand/theme_config.json", "config/shell.json", "config/asset_manifest.json",
+    }
+    errors: list[str] = []
+    for pack in plan.get("capability_packs") or []:
+        surface_id = str(pack.get("surface_id") or "")
+        pack_id = _pack_id_from_descriptor(pack)
+        if surface_id not in ui_surfaces or pack_id in selected:
+            continue
+        source = pack.get("capability_source") or "unspecified"
+        errors.append(
+            f"{pack_id}: surface {surface_id!r} is approved ui_only and {pack_id!r} is not a "
+            f"selected provider; its {source} capability grants no ownership of that surface "
+            "or of backend modules. " + _UI_ONLY_HINT_GUIDANCE
+        )
+    for task in plan.get("build_tasks") or []:
+        surface_id = str(task.get("surface_id") or "")
+        if surface_id not in ui_surfaces:
+            continue
+        task_id = task.get("task_id")
+        # A page task that builds only approved pages under the UI-only
+        # surface's ID with another kind is a label slip _label_page_tasks
+        # repairs; it claims nothing beyond the approved pages.
+        label_slip = bool(_normalized_owned_paths(task)) and _owns_only_approved_pages(task, context)
+        if task.get("task_type") != "page_bundle" or (
+            task.get("surface_kind") != "ui_only" and not label_slip
+        ):
+            errors.append(
+                f"{task_id}: surface {surface_id!r} is approved ui_only; preserve its kind "
+                "and page_bundle behavior. It grants no module ownership (including modules/ paths). "
+                + _UI_ONLY_HINT_GUIDANCE
+            )
+        claimed_pack = task.get("capability_pack_id")
+        if claimed_pack is not None and str(claimed_pack) not in selected:
+            errors.append(
+                f"{task_id}: approved ui_only surface {surface_id!r} does not select "
+                f"task capability {claimed_pack!r}. " + _UI_ONLY_HINT_GUIDANCE
+            )
+        invalid_paths = [
+            path for path in task.get("owned_paths") or []
+            if not isinstance(path, str) or path.lower() not in page_paths
+        ]
+        if not approved_pages or invalid_paths:
+            errors.append(
+                f"{task_id}: approved ui_only surface {surface_id!r} owns only approved "
+                f"page_bundle artifacts {sorted(page_paths)}; remove backend or unapproved paths "
+                f"{invalid_paths!r} (including modules/ and services/). " + _UI_ONLY_HINT_GUIDANCE
+            )
+    if errors:
+        raise ValueError("Plan surface inventory errors:\n- " + "\n- ".join(errors))
+
+
 def _validate_plan_surface_inventory(plan: dict[str, Any], context: Any) -> None:
     """Reject invented scope before repairs or identity advice can obscure it."""
+    _validate_ui_only_surface_claims(plan, context)
     _validate_page_realizations(plan, context)
     validate_surface_ownership(
         detach(context.get("design_surface_map")) or {},
         context_variables=context, data_contract=detach(context.get("data_contract")),
     )
     approved = _approved_surface_ids(context)
+    ui_hints = {
+        hint for surface in _approved_ui_only_surfaces(context).values()
+        for hint in surface.get("source_capability_packs") or []
+    }
+    errors: list[str] = []
     unapproved: set[str] = set()
     for entries, is_task in (
         (plan.get("capability_packs") or [], False),
@@ -1480,7 +1597,6 @@ def _validate_plan_surface_inventory(plan: dict[str, Any], context: Any) -> None
                 continue
             unapproved.add(surface_id)
     if unapproved:
-        errors = []
         for surface_id in sorted(unapproved):
             message = (
                 f"unapproved surface {surface_id!r}: remove its capability and tasks "
@@ -1490,7 +1606,10 @@ def _validate_plan_surface_inventory(plan: dict[str, Any], context: Any) -> None
             )
             if re.search(r"(?:^|[_-])(?:auth|authentication|login|signin)(?:$|[_-])", surface_id.lower()):
                 message += " Authentication is platform-provided and needs no generated module."
+            if surface_id in ui_hints:
+                message += " " + _UI_ONLY_HINT_GUIDANCE
             errors.append(message)
+    if errors:
         raise ValueError("Plan surface inventory errors:\n- " + "\n- ".join(errors))
 
 
@@ -1749,6 +1868,7 @@ def review_app_build_plan(
     try:
         models, _ = load_workflow_structured_outputs("AppGenerator")
         plan = models["AppBuildPlan"].model_validate(detach(AppBuildPlan)).model_dump(mode="json")
+        _validate_ui_only_surface_claims(plan, context_variables)
         for repair in (
             *_apply_dispatch_path_rules(plan),
             *_label_persistence_tasks(plan, context_variables),
