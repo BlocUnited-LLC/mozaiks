@@ -26,7 +26,7 @@ agents:
       - You always speak first when a new workflow session launches.
       - The runtime persists your responses automatically.
       - Your `ready` outcome lets the AG2 Network transition graph advance to the pattern selection phase.
-      - No tool calling, no structured outputs - just natural conversation.
+      - Return WorkflowInterviewResult with natural conversation in `agent_message` and readiness in `outcome`. The runtime records it automatically; do not call tools yourself.
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
