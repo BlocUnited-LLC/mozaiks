@@ -152,9 +152,11 @@ models:
         - custom_react_page
         description: >
           Persistent app UI surface type, copied exactly from the approved
-          ExperienceSpec page. Declarative pages use shipped primitives; custom
-          React pages implement declared behavior beyond those primitives. Changing
-          this decision requires an updated approved ExperienceSpec.
+          ExperienceSpec page. Declarative pages use shipped primitives and
+          supported shell configuration when they faithfully express the approved
+          composition, visual hierarchy, responsive behavior, and interaction.
+          Custom React pages implement the approved experience when a real primitive
+          gap remains. Changing this decision requires an updated approved ExperienceSpec.
       page_type_hint:
         type: literal
         values:
@@ -179,8 +181,9 @@ models:
           marketplace/catalog listings; wizard for multi-step flows (onboarding, checkout,
           setup); split_view for simultaneous list+detail (inbox, file explorer, chat);
           settings for categorized settings/preferences; landing for public/marketing pages;
-          checkout_success for post-redirect checkout/payment confirmation routes that
-          must use custom_route_bundle.
+          checkout_success for post-redirect checkout/payment confirmation routes.
+          This archetype does not select the rendering surface; copy the approved
+          ExperienceSpec ui_surface exactly.
           Do not default everything to record_list — match the page purpose to the right
           archetype.
       sections_hint:
@@ -190,8 +193,11 @@ models:
           Typed primitive section hints for AppSchemaAgent. Each hint names
           the primitive and provides a partial config scaffold with required
           fields populated. AppSchemaAgent uses these as the base config and
-          extends them with page context. Emit one hint per expected UI
-          section on the page.
+          extends them with page context. For declarative_page, emit one hint
+          per expected UI section and do not leave the list empty. For an
+          approved custom_react_page, preserve only approved primitive hints;
+          use an empty list when ExperienceSpec sections is empty. Carry that
+          custom experience in design_intent instead of fabricating hints.
   AppBuildEntity:
     type: model
     fields:
@@ -5123,8 +5129,10 @@ models:
           split_view: simultaneous list+detail (inbox, file explorer, thread list);
           settings: categorized settings/preferences forms;
           landing: public/marketing/unauthenticated pages;
-          checkout_success: post-redirect checkout/payment confirmation route
-          that must be implemented through custom_route_bundle.
+          checkout_success: post-redirect checkout/payment confirmation route.
+          Page type is structural; emit this declarative page only for an approved
+          declarative_page whose behavior shipped primitives can express. An approved
+          custom_react_page is emitted through custom_route_bundle instead.
       layout:
         type: literal
         values:
@@ -6246,7 +6254,8 @@ models:
           rendered by the platform shell's RouteRenderer using the primitive system.
           In task-batch execution, emit only pages whose ui/pages/*.yaml paths are owned
           by current_build_task; other pages remain owned by other tasks or the baseline.
-          Prefer this declarative lane by default; emit an empty list only when the
+          Prefer this declarative lane when it faithfully expresses the approved
+          experience; emit an empty list only when the
           current scope owns no declarative pages (for example, a manifest-only task
           or pages owned by custom_route_bundle).
       custom_route_bundle:
@@ -6257,8 +6266,9 @@ models:
         description: >
           Rare bounded custom full-page React escape hatch. When present, save_app_schema
           persists ui/route_manifest.json, ui/pages/custom/*.jsx, and a deterministic
-          ui/index.js registry barrel. Use only for persistent pages that the shipped
-          declarative primitives cannot express cleanly.
+          ui/index.js registry barrel. Use only for an approved custom_react_page
+          with a real primitive gap in composition, visual hierarchy, responsive
+          behavior, or interaction. It does not grant additional routes or actions.
       theme_config_patch:
         type: union
         variants:

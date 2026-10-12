@@ -106,5 +106,6 @@ prompt_middleware:
 - agent: ControllerAgent
   filename: hook_file_contract_context.py
   function: inject_cookie_cutter_contracts_context
-
-
+- agent: AppPlanAgent
+  filename: ../_shared/ui_surface_context.py
+  function: inject_ui_surface_context
