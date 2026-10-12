@@ -6,6 +6,7 @@ These are source/contract tests, not live generation or visual-quality scores.
 from __future__ import annotations
 
 import ast
+import asyncio
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
@@ -189,3 +190,194 @@ def test_page_catalog_guidance_preserves_fidelity_without_weakening_bindings() -
         "require backend idempotency",
     ):
         assert clause in strings
+
+
+@pytest.mark.parametrize(("workflow", "agent_name", "hook_name"), [
+    ("DesignDocs", "DesignDocsAgent", "inject_ui_surface_context"),
+    ("AppGenerator", "AppPlanAgent", "inject_ui_surface_context"),
+    ("AppGenerator", "AppSchemaAgent", "inject_primitive_catalog"),
+])
+def test_runtime_composed_prompt_preserves_approved_experience(
+    workflow: str, agent_name: str, hook_name: str,
+) -> None:
+    """Use the agent factory's composer and the registered AG2 prompt runner."""
+    from mozaiksai.core.workflow.agents.factory import (
+        ContextVariablesBridge,
+        _compose_prompt_sections,
+    )
+    from mozaiksai.core.workflow.execution.middleware import (
+        MozaiksPromptMiddleware,
+        _resolve_import,
+        load_prompt_middleware_entries,
+    )
+
+    workflow_dir = ROOT / "factory_app" / "workflows" / workflow
+    config = yaml.safe_load((workflow_dir / "agents.yaml").read_text(encoding="utf-8"))
+    agent_config = next(agent for agent in config["agents"] if agent["name"] == agent_name)
+    base_prompt = _compose_prompt_sections(agent_config["prompt_sections"])
+    context_key, approved_context = {
+        "DesignDocsAgent": ("concept_overview", "Approved planning board at /board"),
+        "AppPlanAgent": ("experience_spec", {
+            "pages": [{
+                "name": "Board", "route": "/board", "layout": "full-width",
+                "intent": "Move tasks across status lanes",
+                "ui_surface": "custom_react_page", "sections": [],
+            }],
+        }),
+        "AppSchemaAgent": ("app_build_plan", {
+            "pages": [{
+                "name": "Board", "route": "/board", "ui_surface": "custom_react_page",
+                "sections_hint": [],
+            }],
+        }),
+    }[agent_name]
+    context_config = yaml.safe_load(
+        (workflow_dir / "context_variables.yaml").read_text(encoding="utf-8")
+    )
+    assert context_key in context_config["agents"][agent_name]["variables"]
+    entries = [
+        entry for entry in load_prompt_middleware_entries(
+            workflow, base_path=str(workflow_dir.parent),
+        )
+        if entry.get("agent") in (agent_name, "all")
+    ]
+    assert sum(
+        entry.get("agent") == agent_name and entry.get("function") == hook_name
+        for entry in entries
+    ) == 1
+    hooks = []
+    for entry in entries:
+        hook, _ = _resolve_import(
+            workflow, entry.get("filename"), entry["function"], workflow_dir,
+        )
+        assert hook is not None, entry
+        hooks.append(hook)
+
+    # The real runner constructs this same prompt capture and passes history to
+    # every registered hook in declaration order. Exercise the whole chain so a
+    # later hook cannot silently replace or remove the surface guidance.
+    runner = object.__new__(MozaiksPromptMiddleware)
+    runner._middleware_functions = hooks
+    runner._agent_name = agent_name
+    runner._base_system_message = base_prompt
+    runner._context_bridge = ContextVariablesBridge({context_key: approved_context})
+    runner._context_exposures = []
+    runner._context_variables = [context_key]
+    prompt = asyncio.run(runner._run_prompt_middleware(SimpleNamespace(variables={})))
+    assert prompt is not None
+    assert prompt == asyncio.run(runner._run_prompt_middleware(SimpleNamespace(variables={})))
+    assert prompt.count(HEADER) == 1
+    assert "/board" in prompt
+    assert runner._context_bridge.snapshot()[context_key] == approved_context
+    for dimension in ("composition", "visual hierarchy", "responsive behavior", "interaction"):
+        assert dimension in base_prompt
+        assert dimension in prompt
+    assert "all approved experience requirements survive" in prompt
+    assert "Prefer declarative_page when shipped primitives express the behavior" not in prompt
+    assert "first try to narrow it into the existing primitives" not in prompt
+
+
+def test_provider_schema_describes_both_approved_page_realizations() -> None:
+    """The model-facing response schema must agree with the composed guidance."""
+    from mozaiksai.core.workflow.outputs.structured import (
+        build_models_from_config,
+        get_provider_response_model,
+    )
+
+    config = yaml.safe_load(
+        (ROOT / "factory_app/workflows/DesignDocs/structured_outputs.yaml").read_text(
+            encoding="utf-8",
+        )
+    )
+    models = build_models_from_config(
+        config["models"], exact_model_ids=frozenset(config["models"]),
+    )
+    wire_schema = get_provider_response_model(models["DesignDocsBundle"]).model_json_schema()
+    experience = wire_schema["properties"]["experience_spec"]["properties"]
+    ui_page = experience["pages"]["items"]["properties"]
+    surface_description = ui_page["ui_surface"]["description"]
+    sections_description = ui_page["sections"]["description"]
+    for dimension in ("composition", "visual hierarchy", "responsive behavior", "interaction"):
+        assert dimension in surface_description
+        assert dimension in sections_description
+    assert "real primitive gap" in surface_description
+    assert "may have no sections" in sections_description
+    assert "grants no additional routes or module actions" in surface_description
+    assert "complete declarative page structure" not in (
+        models["DesignDocsBundle"].model_fields["experience_spec"].description
+    )
+
+
+def test_appgenerator_provider_schema_keeps_the_approved_surface_decision() -> None:
+    from mozaiksai.core.workflow.outputs.structured import (
+        build_models_from_config,
+        get_provider_response_model,
+    )
+
+    config = yaml.safe_load(
+        (ROOT / "factory_app/workflows/AppGenerator/structured_outputs.yaml").read_text(
+            encoding="utf-8",
+        )
+    )
+    models = build_models_from_config(
+        config["models"], exact_model_ids=frozenset(config["models"]),
+    )
+    wire_schema = get_provider_response_model(models["AppBuildPage"]).model_json_schema()
+    surface_description = wire_schema["properties"]["ui_surface"]["description"]
+    hints_description = wire_schema["properties"]["sections_hint"]["description"]
+    for dimension in ("composition", "visual hierarchy", "responsive behavior", "interaction"):
+        assert dimension in surface_description
+        assert dimension in (
+            models["AppSchemaOutput"].model_fields["custom_route_bundle"].description
+        )
+    assert "copied exactly from the approved ExperienceSpec page" in surface_description
+    assert "Changing this decision requires an updated approved ExperienceSpec" in surface_description
+    assert "approved custom_react_page" in (
+        models["AppSchemaOutput"].model_fields["custom_route_bundle"].description
+    )
+    assert "For declarative_page" in hints_description
+    assert "do not leave the list empty" in hints_description
+    assert "use an empty list when ExperienceSpec sections is empty" in hints_description
+    assert "instead of fabricating hints" in hints_description
+
+
+def test_custom_page_without_primitive_sections_keeps_empty_plan_hints() -> None:
+    """The approved custom route needs a page bundle, not fabricated primitives."""
+    from factory_app.workflows.AppGenerator.tools.app_build_plan import _normalize_page_config_hints
+    from factory_app.workflows.AppGenerator.tools.app_plan_review import (
+        _required_page_paths,
+        _validate_page_realizations,
+    )
+    from factory_app.workflows.DesignDocs.tools.save_design_doc import _canonical_experience_spec
+    from mozaiksai.core.workflow.outputs.structured import build_models_from_config
+
+    approved = {
+        "name": "Board", "route": "/board", "ui_surface": "custom_react_page",
+        "layout": "full-width", "intent": "Drag and keyboard-move tasks across status lanes.",
+        "sections": [],
+    }
+    spec = _canonical_experience_spec(
+        {"navigation_model": "Workspace routes", "brand_direction": "Focused", "pages": [approved]},
+        surface_map={},
+    )
+    config = yaml.safe_load(
+        (ROOT / "factory_app/workflows/AppGenerator/structured_outputs.yaml").read_text(
+            encoding="utf-8",
+        )
+    )
+    models = build_models_from_config(
+        config["models"], exact_model_ids=frozenset(config["models"]),
+    )
+    page = models["AppBuildPage"].model_validate({
+        "name": "Board", "route": "/board", "purpose": approved["intent"],
+        "design_intent": approved["intent"], "ui_layout": "full-width",
+        "shell_mode_hint": "workspace", "ui_surface": "custom_react_page",
+        "page_type_hint": "workflow_board", "sections_hint": [],
+    }).model_dump(mode="json")
+    plan = {"pages": [page]}
+    _validate_page_realizations(plan, {"experience_spec": spec})
+    assert _normalize_page_config_hints(plan["pages"])[0]["sections_hint"] == []
+    assert _required_page_paths(plan) == [
+        "app.json", "ui/pages/custom/board.jsx", "ui/route_manifest.json", "ui/index.js",
+    ]
+    assert page["design_intent"] == approved["intent"]
