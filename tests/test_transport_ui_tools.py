@@ -117,8 +117,14 @@ async def test_submit_tool_call_response_ignores_duplicate_resolved_response(cap
 
 
 @pytest.mark.asyncio
-async def test_send_tool_call_event_emits_canonical_tool_call_envelope() -> None:
+async def test_send_tool_call_event_emits_canonical_tool_call_envelope(monkeypatch) -> None:
     transport = _FakeTransport()
+    monkeypatch.setattr(workflow_manager, "_ui_registry", {
+        "PlannerFlow.build_plan_card": {
+            "workflow_name": "PlannerFlow", "tool_id": "build_plan_card",
+            "ui_contract": {"actions_schema": [{"id": "approve"}]},
+        },
+    })
 
     await transport.send_tool_call_event(
         event_id="evt-ui-1",
@@ -146,6 +152,53 @@ async def test_send_tool_call_event_emits_canonical_tool_call_envelope() -> None
     assert event["awaiting_response"] is True
     assert event["agent"] == "PlannerAgent"
     assert event["agent_name"] == "PlannerAgent"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("workflow_name,tool_record", [
+    ("OtherFlow", None),
+    ("PlannerFlow", None),
+    ("PlannerFlow", {"ui_contract": {}}),
+])
+async def test_interactive_event_requires_an_exact_registered_response_contract(
+    monkeypatch, workflow_name, tool_record,
+) -> None:
+    transport = _FakeTransport()
+    registry = {}
+    if tool_record is not None:
+        registry["PlannerFlow.ApprovalCard"] = {
+            "workflow_name": "PlannerFlow", "tool_id": "ApprovalCard", **tool_record,
+        }
+    monkeypatch.setattr(workflow_manager, "_ui_registry", registry)
+
+    with pytest.raises(ValueError, match="registered|actions_schema"):
+        await transport.send_tool_call_event(
+            event_id="evt-unregistered", chat_id="chat-1", tool_name="ApprovalCard",
+            component_name="ApprovalCard", display_type="artifact",
+            payload={"workflow_name": workflow_name, "actions": [{"id": "delete"}]},
+        )
+    assert transport.sent_events == []
+    assert transport._ui_tool_metadata == {}
+
+
+@pytest.mark.asyncio
+async def test_registered_actionless_contract_can_receive_free_form_input(monkeypatch) -> None:
+    transport = _FakeTransport()
+    monkeypatch.setattr(workflow_manager, "_ui_registry", {
+        "PlannerFlow.UserInputRequest": {
+            "workflow_name": "PlannerFlow", "tool_id": "UserInputRequest",
+            "ui_contract": {"actions_schema": []},
+        },
+    })
+    await transport.send_tool_call_event(
+        event_id="evt-input", chat_id="chat-1", tool_name="UserInputRequest",
+        component_name="UserInputRequest", display_type="inline",
+        payload={"workflow_name": "PlannerFlow", "interaction_type": "input_request"},
+    )
+    future = asyncio.get_running_loop().create_future()
+    transport.pending_tool_call_responses["evt-input"] = future
+    assert await transport.submit_tool_call_response("evt-input", {"text": "Plan my app"}) is True
+    assert future.result() == {"text": "Plan my app"}
 
 
 @pytest.mark.asyncio
@@ -301,6 +354,45 @@ async def test_valid_declared_action_waits_for_finalization_before_waking_tool()
         release.set()
     assert await asyncio.wait_for(submission, timeout=2) is True
     assert await future == response
+
+
+@pytest.mark.asyncio
+async def test_conflicting_retry_is_rejected_while_the_first_decision_is_finalizing() -> None:
+    transport = _FakeTransport()
+    transport._ui_tool_metadata["evt-decision"] = {
+        "chat_id": "chat-1", "tool_name": "ApprovalCard", "display": "inline",
+        "interaction_type": "ui_tool", "response_actions": [
+            {"id": "approve", "approved": True},
+            {"id": "delete", "approved": False},
+        ],
+    }
+    future = asyncio.get_running_loop().create_future()
+    transport.pending_tool_call_responses["evt-decision"] = future
+    finalizing = asyncio.Event()
+    release = asyncio.Event()
+
+    async def finalize(**kwargs):
+        finalizing.set()
+        await release.wait()
+
+    transport._finalize_tool_call_response = finalize
+    approve = {"action": "approve", "approved": True}
+    first = asyncio.create_task(transport.submit_tool_call_response("evt-decision", approve))
+    await asyncio.wait_for(finalizing.wait(), timeout=2)
+    retry = asyncio.create_task(transport.submit_tool_call_response("evt-decision", approve))
+    assert await transport.submit_tool_call_response(
+        "evt-decision", {"action": "delete", "approved": False},
+    ) is False
+    assert not retry.done()
+    assert not future.done()
+    release.set()
+    assert await asyncio.wait_for(first, timeout=2) is True
+    assert await asyncio.wait_for(retry, timeout=2) is True
+    assert future.result() == approve
+    assert await transport.submit_tool_call_response("evt-decision", approve) is True
+    assert await transport.submit_tool_call_response(
+        "evt-decision", {"action": "delete", "approved": False},
+    ) is False
 
 
 @pytest.mark.asyncio

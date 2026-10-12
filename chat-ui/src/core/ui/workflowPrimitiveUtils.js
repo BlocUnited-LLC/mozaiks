@@ -69,6 +69,7 @@ export async function sendPrimitiveResponse(onResponse, action, extra = {}) {
   };
 
   payload.action = action.id;
+  payload.status = 'submitted';
   if (typeof action.approved === 'boolean') {
     payload.approved = action.approved;
   }

@@ -54,18 +54,20 @@ class UIToolsMixin:
     # UI TOOL STATE PERSISTENCE
     # ==================================================================================
 
-    def _get_resolved_tool_call_registry(self) -> dict[str, None]:
+    def _get_resolved_tool_call_registry(self) -> dict[str, dict[str, Any] | None]:
         registry = getattr(self, "_resolved_tool_call_ids", None)
         if not isinstance(registry, dict):
             registry = {}
             self._resolved_tool_call_ids = registry
         return registry
 
-    def _mark_tool_call_response_resolved(self, event_id: str) -> None:
+    def _mark_tool_call_response_resolved(
+        self, event_id: str, response_data: dict[str, Any] | None = None,
+    ) -> None:
         if not event_id:
             return
         registry = self._get_resolved_tool_call_registry()
-        registry[event_id] = None
+        registry[event_id] = deepcopy(response_data)
         metadata = self._ui_tool_metadata.get(event_id)
         if metadata:
             # Keep the session binding for authorized, idempotent retries.
@@ -172,16 +174,20 @@ class UIToolsMixin:
             interaction_type = "ui_tool" if awaiting_response else "ui_surface"
 
         response_actions: list[dict[str, Any]] = []
-        if event_id and awaiting_response and workflow_name:
+        if awaiting_response:
+            if not event_id or not workflow_name:
+                raise ValueError("Response-bearing UI tool requires an event and workflow")
             from mozaiksai.core.workflow.workflow_manager import workflow_manager
 
             tool_record = workflow_manager.get_ui_tool_record(
                 tool_name, workflow_name=workflow_name,
             )
-            ui_contract = (tool_record or {}).get("ui_contract") or {}
-            if not isinstance(ui_contract, dict):
-                raise ValueError("UI tool ui_contract must be an object")
-            declared_actions = ui_contract.get("actions_schema") or []
+            if not tool_record:
+                raise ValueError("Response-bearing UI tool is not registered for its workflow")
+            ui_contract = tool_record.get("ui_contract")
+            if not isinstance(ui_contract, dict) or "actions_schema" not in ui_contract:
+                raise ValueError("Response-bearing UI tool requires a declared actions_schema")
+            declared_actions = ui_contract["actions_schema"]
             if not isinstance(declared_actions, list) or any(
                 not isinstance(action, dict) or not isinstance(action.get("id"), str)
                 for action in declared_actions
@@ -545,12 +551,18 @@ class UIToolsMixin:
     async def submit_tool_call_response(self, event_id: str, response_data: dict[str, Any]) -> bool:
         """Submit a trusted in-process response; HTTP/WS use the owner-checked entry point."""
         if self._is_tool_call_response_resolved(event_id):
-            logger.debug("[UI_TOOL] Ignoring duplicate response for already resolved event %s", event_id)
+            if self._get_resolved_tool_call_registry()[event_id] != response_data:
+                return False
+            delivery = getattr(self, "_tool_call_delivery_tasks", {}).get(event_id)
+            if delivery is not None:
+                return await asyncio.shield(delivery)
+            logger.debug("[UI_TOOL] Confirming identical response for resolved event %s", event_id)
             return True
 
         metadata = self._ui_tool_metadata.get(event_id) or {}
         if not self._valid_declared_tool_response(metadata, response_data):
             return False
+        received_response = deepcopy(response_data)
         if metadata.get("workflow_primitive") == "outcome_feedback":
             from pydantic import ValidationError
 
@@ -564,12 +576,14 @@ class UIToolsMixin:
 
         future = self._resolve_tool_call_future(event_id)
         if future is not None and future.done():
-            self._mark_tool_call_response_resolved(event_id)
-            logger.debug("[UI_TOOL] Ignoring duplicate response for completed event %s", event_id)
+            if future.cancelled() or future.exception() is not None or future.result() != response_data:
+                return False
+            self._mark_tool_call_response_resolved(event_id, received_response)
+            logger.debug("[UI_TOOL] Confirming identical response for completed event %s", event_id)
             return True
         metadata = self._ui_tool_metadata.get(event_id)
         if future is not None or metadata is not None:
-            self._mark_tool_call_response_resolved(event_id)
+            self._mark_tool_call_response_resolved(event_id, received_response)
             deliveries = getattr(self, "_tool_call_delivery_tasks", None)
             if deliveries is None:
                 deliveries = self._tool_call_delivery_tasks = {}
@@ -577,7 +591,10 @@ class UIToolsMixin:
                 self._finalize_and_deliver_tool_response(event_id, response_data, metadata),
             )
             deliveries[event_id] = delivery
-            delivery.add_done_callback(lambda _: deliveries.pop(event_id, None))
+            delivery.add_done_callback(
+                lambda finished: deliveries.pop(event_id, None)
+                if deliveries.get(event_id) is finished else None
+            )
             return await asyncio.shield(delivery)
         input_request_text = self._coerce_input_request_response_text(response_data)
         if self._has_pending_input_request(event_id):
@@ -587,7 +604,7 @@ class UIToolsMixin:
             if submitted:
                 if input_chat_id:
                     self._ui_tool_metadata[event_id] = {"chat_id": input_chat_id}
-                self._mark_tool_call_response_resolved(event_id)
+                self._mark_tool_call_response_resolved(event_id, received_response)
             return submitted
 
         logger.warning("[UI_TOOL] No pending event found for %s", event_id)
@@ -628,6 +645,11 @@ class UIToolsMixin:
             None,
         )
         if action is None or not isinstance(action_id, str):
+            return False
+        status = response_data.get("status")
+        if status is not None and status != "submitted" and not (
+            action_id == "cancel" and status == "cancelled"
+        ):
             return False
         expected_approval = action.get("approved")
         if isinstance(expected_approval, bool) and response_data.get("approved") is not expected_approval:

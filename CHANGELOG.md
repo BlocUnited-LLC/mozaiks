@@ -20,9 +20,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
-- Bound interactive workflow replies to the exact workflow tool's declared
-  actions and response schema before delivery, while preserving free-form
-  composer input and workflow-specific review identity checks.
+- Bound interactive workflow replies to a registered tool's declared actions,
+  status, and response schema before delivery; conflicting retries are rejected.
+  Explicitly actionless tools retain free-form input.
 
 ## 0.2.0 - 2026-10-11
 

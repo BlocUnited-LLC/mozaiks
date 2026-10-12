@@ -203,11 +203,16 @@ For a declared `UI_Tool` action, the runtime binds the exact workflow and tool's
 `tools.yaml` action contract when emitting the event. HTTP, WebSocket, and
 in-process replies must name a declared action, match any declared `approved`
 value, and satisfy that action's response schema before they can wake the tool
-or enter the early-response buffer. A rejected reply leaves the review pending.
+or enter the early-response buffer. Response-bearing events require an exact
+registered tool with an explicit `actions_schema`; `[]` declares an actionless
+tool. For a named action, `status` may be `submitted`, or `cancelled` only for
+the `cancel` action. A conflicting retry is rejected, including while the first
+reply is being finalized. An identical in-flight retry waits for the first
+result. A rejected reply leaves the review pending.
 The rendered `payload.actions` may change labels, per-review data, and which
 declared actions are offered; it cannot introduce a new action or change its
-approval or schema meaning. Actionless UI tools and `input_request` composer
-replies retain their existing free-form response behavior. The runtime applies
+approval or schema meaning. Registered actionless UI tools and `input_request`
+composer replies retain their free-form response behavior. The runtime attempts
 derived-context triggers and artifact dismissal before releasing an accepted
 response to the waiting tool. Workflow-specific review identity and persistence
 checks, such as ValueEngine's `review_id` and compare-and-set finish, remain

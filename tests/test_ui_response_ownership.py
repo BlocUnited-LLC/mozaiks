@@ -186,6 +186,21 @@ async def test_http_accepts_valid_declared_action_for_its_session_owner(harness)
     harness.transport._finalize_tool_call_response.assert_awaited_once()
 
 
+async def test_http_rejects_an_approved_action_with_cancellation_status(harness):
+    _pending(harness)
+    harness.transport._ui_tool_metadata["evt-owned"].update({
+        "interaction_type": "ui_tool", "response_actions": [
+            {"id": "download_complete", "approved": True},
+        ],
+    })
+    response = await _http(harness, response_data={
+        "action": "download_complete", "approved": True, "status": "cancelled",
+    })
+    assert response.status_code == 404
+    assert not harness.transport.pending_tool_call_responses["evt-owned"].done()
+    harness.transport._finalize_tool_call_response.assert_not_awaited()
+
+
 async def test_http_input_request_accepts_text_without_an_action(harness):
     _pending(harness, "input")
     response = await _http(harness, response_data={"status": "submitted", "text": "next step"})
@@ -388,6 +403,30 @@ async def test_websocket_accepts_valid_declared_action_for_its_session_owner(har
     assert websocket.send_json.await_args.args[0]["data"]["status"] == "accepted"
     assert harness.transport.pending_tool_call_responses["evt-owned"].result() == reply
     harness.transport._finalize_tool_call_response.assert_awaited_once()
+
+
+async def test_websocket_rejects_an_approved_action_with_cancellation_status(harness, monkeypatch):
+    _pending(harness)
+    harness.transport._ui_tool_metadata["evt-owned"].update({
+        "interaction_type": "ui_tool", "response_actions": [
+            {"id": "download_complete", "approved": True},
+        ],
+    })
+    websocket = SimpleNamespace(state=SimpleNamespace(user=_principal(websocket=True)), send_json=AsyncMock())
+    harness.transport.connections["chat-owner"] = {
+        "websocket": websocket, "user_id": "owner", "app_id": "app-owner", "ws_id": "ws-1",
+    }
+    monkeypatch.setattr(input_handlers.session_registry, "get_active_workflow", lambda _: None)
+
+    await input_handlers.handle_tool_call_response(harness.transport, {
+        "tool_call_id": "evt-owned", "response": {
+            "action": "download_complete", "approved": True, "status": "cancelled",
+        },
+    }, "chat-owner", websocket)
+
+    assert websocket.send_json.await_args.args[0]["data"]["status"] == "rejected"
+    assert not harness.transport.pending_tool_call_responses["evt-owned"].done()
+    harness.transport._finalize_tool_call_response.assert_not_awaited()
 
 
 @pytest.mark.parametrize("switched", [False, True])

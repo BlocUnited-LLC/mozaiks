@@ -156,8 +156,11 @@ async def test_feedback_http_persists_scope_and_response_before_releasing_waiter
     response = await _http(harness, response_data={"status": "submitted", "rating": 2, "helpful": False})
     assert response.status_code == 200
     assert future.result()["rating"] == 2
-    # Changing an answer on a retry cannot replace the recorded receipt.
-    assert (await _http(harness, response_data={"status": "submitted", "rating": 5})).status_code == 200
+    assert (await _http(harness, response_data={
+        "status": "submitted", "rating": 2, "helpful": False,
+    })).status_code == 200
+    # A changed retry cannot be acknowledged as the recorded answer.
+    assert (await _http(harness, response_data={"status": "submitted", "rating": 5})).status_code == 404
     pm.save_workflow_feedback_receipt.assert_awaited_once()
 
 

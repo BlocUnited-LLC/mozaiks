@@ -32,8 +32,10 @@ test('review action availability and labels may vary without changing declared d
 test('review response cannot replace the declared action or approval with per-review data', async () => {
   let response;
   await sendPrimitiveResponse(async (reply) => { response = reply; }, {
-    id: 'request_changes', approved: false, payload: { action: 'approve', approved: true, review_id: 'review-1' },
-  }, { action: 'approve', approved: true, rationale: 'Revise the scope' });
+    id: 'request_changes', approved: false, payload: {
+      action: 'approve', approved: true, status: 'cancelled', review_id: 'review-1',
+    },
+  }, { action: 'approve', approved: true, status: 'cancelled', rationale: 'Revise the scope' });
 
   assert.deepEqual(response, {
     status: 'submitted', action: 'request_changes', approved: false,
@@ -56,6 +58,8 @@ test('the actionless UserInputRequest renderer submits text without an action', 
   const bundle = await build({
     stdin: { contents: entry, resolveDir: shell, loader: 'jsx' }, bundle: true, write: false,
     jsx: 'automatic', loader: { '.js': 'jsx' }, nodePaths: [path.join(shell, 'node_modules')],
+    alias: { react: path.join(shell, 'node_modules/react'), 'react-dom': path.join(shell, 'node_modules/react-dom') },
+    metafile: true,
   });
   const server = http.createServer((req, res) => {
     res.setHeader('Content-Type', req.url === '/fixture.js' ? 'text/javascript' : 'text/html');
@@ -67,9 +71,25 @@ test('the actionless UserInputRequest renderer submits text without an action', 
   const browser = await chromium.launch({ headless: true });
   t.after(() => browser.close());
   const page = await browser.newPage();
+  const pageErrors = [];
+  const consoleErrors = [];
+  const failedRequests = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+  page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()); });
+  page.on('requestfailed', (request) => failedRequests.push(`${request.url()}: ${request.failure()?.errorText}`));
   await page.goto(`http://127.0.0.1:${server.address().port}`);
-  await page.getByPlaceholder('Type your response or press Enter to skip...').fill('A planning board');
-  await page.getByPlaceholder('Type your response or press Enter to skip...').press('Enter');
+  const input = page.getByPlaceholder('Type your response or press Enter to skip...');
+  try {
+    await input.waitFor({ timeout: 8000 });
+  } catch {
+    const reactInputs = Object.keys(bundle.metafile.inputs).filter((name) => /node_modules[/\\](react|react-dom)[/\\]/.test(name));
+    assert.fail(`UserInputRequest did not render: ${JSON.stringify({
+      pageErrors, consoleErrors, failedRequests,
+      body: (await page.locator('body').innerText()).slice(0, 500), reactInputs,
+    })}`);
+  }
+  await input.fill('A planning board');
+  await input.press('Enter');
   await page.waitForFunction(() => window.responses.length === 1);
   const [reply] = await page.evaluate(() => window.responses);
   assert.equal(reply.text, 'A planning board');
