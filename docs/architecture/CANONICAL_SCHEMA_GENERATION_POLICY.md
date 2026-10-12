@@ -111,6 +111,55 @@ Python / JS / React
 
 Schema-native UI and reusable CapabilityPacks should prefer canonical primitives and semantic tokens. Arbitrary custom React/Python remains a supported escape hatch when necessary, but it must register through the same route/module/workflow/runtime contracts and pass the same acceptance gates.
 
+### Experience fidelity, not a universal template
+
+A canonical application contract does not prescribe a single product appearance.
+The builder's own UI is not the required layout of generated applications.
+Consistency is required within an approved app experience, not identical
+navigation, composition, density, or visual hierarchy across unrelated apps.
+
+`declarative_page` is the default when shipped primitives and supported shell
+configuration faithfully express the approved experience. A real primitive gap
+includes lost composition, visual hierarchy, responsive behavior, or interaction;
+it is not limited to missing backend functionality. The same records may need a
+compact operational list in one app and an image-led editorial composition in
+another. A page's category alone does not settle its rendering choice. Narrowing
+or simplifying is valid only when all approved experience requirements survive.
+
+Use the existing `custom_react_page` contract when faithful declarative
+composition is unavailable. Reuse public shared controls and active-app semantic
+tokens where they fit; do not create local primitive clones, invent new surface
+IDs, or mistake a palette swap for a distinct experience. Shell ownership remains
+unchanged: use supported modes/extension contracts, and report unsupported shell
+requirements rather than hiding shell controls or creating a competing router.
+This policy does not claim that an unimplemented shell presentation is available.
+
+Carry the design direction in the existing ExperienceSpec, frontend design
+artifact, and approved theme. Pass page intent/design_intent and task
+acceptance_criteria through the existing agent-context and task mechanisms.
+Implementation must preserve the approved realization and route/file identity;
+a discovered gap requires repair at the owning design/plan boundary, not silent
+conversion of custom JSX into a stock declarative substitute. Refinement must
+retain unaffected design decisions and behavior without re-interviewing the user.
+
+The canonical guidance owner is
+`mozaiksai/core/workflow/ui_surface_taxonomy.py`. DesignDocs and AppPlanAgent
+receive its named prompt section through the shared `ui_surface_context` hook;
+AppSchemaAgent and AgentGenerator use their existing primitive-catalog hooks.
+Repeated injection replaces the section rather than appending conversation
+history. This is guidance, not a semantic validator or approval authority. No
+additional style taxonomy, context store, renderer kind, or runtime evaluator is
+introduced. Custom JSX still requires build, registration and acceptance; it is
+not evaluated directly from a model response in a live browser.
+
+Acceptance must distinguish guidance checks from demonstrated UI quality. In
+addition to existing schema, ownership and materialization tests, representative
+browser journeys should preserve two materially different approved experiences
+for the same underlying tasks and retain each through scoped refinement. Judge
+fidelity to each brief, accessibility and working interactions, not difference
+for its own sake. A prompt assertion, a manually authored example, or a screenshot
+alone does not prove live-model generation or a functional generated application.
+
 ## Community Components
 
 Community Components inherit this policy.

@@ -21,12 +21,12 @@ _UI_SURFACE_CONTRACTS: tuple[UISurfaceContract, ...] = (
         artifact_family="App UI",
         writes=("ui/pages/*.yaml",),
         use_when=(
-            "A persistent app page can be represented with shipped page primitives "
-            "such as PageHeader, ResourceTable, Form, Empty, SummaryStrip, or simple composed sections."
+            "Shipped page primitives and supported shell configuration faithfully express "
+            "the approved composition, visual hierarchy, responsive behavior, and interaction."
         ),
         avoid_when=(
-            "The route needs bespoke interaction choreography, canvas-like editing, "
-            "or a layout that cannot be represented by primitive composition."
+            "Primitive composition would discard an approved experience requirement, "
+            "including bespoke interaction, visual hierarchy, or responsive composition."
         ),
     ),
     UISurfaceContract(
@@ -35,12 +35,14 @@ _UI_SURFACE_CONTRACTS: tuple[UISurfaceContract, ...] = (
         artifact_family="App UI escape hatch",
         writes=("ui/route_manifest.json", "ui/pages/custom/*.jsx", "ui/index.js"),
         use_when=(
-            "A persistent full-page route has a real primitive gap after attempting "
-            "declarative composition."
+            "A persistent full-page route has a real primitive gap: declarative composition "
+            "cannot faithfully express the approved experience. The gap may be "
+            "composition, visual hierarchy, responsive behavior, or interaction."
         ),
         avoid_when=(
-            "The page is a resource list, form, detail view, settings view, empty state, "
-            "or dashboard-like page that can be simplified into shipped primitives."
+            "The approved experience is faithfully covered by shipped composition, or "
+            "only brand token values need to change. A page category alone neither "
+            "requires nor forbids custom React."
         ),
     ),
     UISurfaceContract(
@@ -132,12 +134,34 @@ def format_ui_surface_taxonomy_guidance() -> str:
 
     lines.append("")
     lines.append("Decision rules:")
-    lines.append("- Use `declarative_page` by default for persistent app routes.")
-    lines.append("- Use `custom_react_page` only after a real primitive gap remains.")
+    lines.append("- Use `declarative_page` by default when it faithfully expresses the approved experience.")
+    lines.append("- Use `custom_react_page` for a real primitive gap, not as an unregistered rendering lane.")
     lines.append("- Use `agent_tool` only for live workflow interactions inside chat.")
     lines.append("- Use `transition` only for workflow-sequence routing/choice screens.")
     lines.append("- Do not move shell chrome, profile menus, notifications, or global nav into generated pages.")
     lines.append("- Do not create placeholder dashboards just to fill a surface.")
+    lines.extend([
+        "",
+        "Experience fidelity:",
+        "- Shared runtime contracts do not require a shared product layout. "
+        "The builder UI is not the required appearance of a generated app.",
+        "- A real primitive gap includes loss of approved composition, visual hierarchy, "
+        "responsive behavior, or interaction; it is not limited to missing backend functionality. "
+        "Narrowing a surface is valid only when all approved experience requirements survive.",
+        "- Reuse public shared controls and the active app's semantic theme tokens without "
+        "forcing every app into a sidebar, rounded cards, or a dashboard. "
+        "Do not replace a distinctive approved experience with a stock layout or a palette swap.",
+        "- Carry the design direction in the existing ExperienceSpec and frontend design document. "
+        "Preserve page intent/design_intent and task acceptance_criteria through planning and refinement; "
+        "use supplied approved theme and design context instead of repeating settled questions.",
+        "- Keep the approved ui_surface and exact route/file ownership during implementation. "
+        "A newly discovered gap requires repair of the owning design/plan before changing realization; "
+        "never silently convert a custom page into a declarative placeholder.",
+        "- Use supported shell modes and extension contracts. A missing shell capability is a "
+        "reported framework gap, not permission to hide shell controls or create a second router.",
+        "- Custom JSX is built, validated, and registered before mounting. "
+        "It does not bypass module authorization, context-write rules, or workflow response contracts.",
+    ])
 
     return "\n".join(lines)
 
