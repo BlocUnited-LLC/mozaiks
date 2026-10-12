@@ -571,8 +571,17 @@ async def test_paired_apps_share_real_host_records_and_enforce_user_scope(tmp_pa
             assert _request(task_url + "list_tasks?page=1&page_size=8", token=owner)[1]["total"] == 12
             assert len(_request(task_url + "list_tasks?page=2&page_size=8", token=owner)[1]["items"]) == 4
             assert _request(task_url + "list_tasks?search=Task%2005", token=owner)[1]["total"] == 1
-            assert _request(task_url + "list_tasks", token=other)[1]["total"] == 0
+            other_project = _request(project_url + "create_project", token=other, body={"name": "Other plan"})
+            assert other_project[0] == 200, other_project
+            other_project_id = other_project[1]["item"]["project_id"]
+            other_task = _request(task_url + "create_task", token=other, body={
+                "project_id": other_project_id, "title": "Other task", "status": "todo",
+            })
+            assert other_task[0] == 200, other_task
+            other_task_id = other_task[1]["item"]["task_id"]
+            assert _request(task_url + "list_tasks", token=other)[1]["total"] == 1
             assert _request(task_url + f"get_tasks?id={task_ids[0]}", token=other)[0] == 404
+            assert _request(task_url + f"get_tasks?id={other_task_id}", token=owner)[0] == 404
             assert _request(task_url + "update_task", token=other, body={
                 "task_id": task_ids[0], "status": "done",
             })[0] == 404
@@ -589,7 +598,14 @@ async def test_paired_apps_share_real_host_records_and_enforce_user_scope(tmp_pa
             })
             assert moved[0] == 200 and moved[1]["item"]["status"] == "doing", moved
             assert _request(task_url + f"get_tasks?id={task_ids[0]}", token=owner)[1]["item"]["status"] == "doing"
-            assert _request(task_url + "list_tasks", token=other)[1]["total"] == 0
+            assert _request(task_url + "list_tasks", token=other)[1]["total"] == 1
+            other_moved = _request(task_url + "update_task", token=other, body={
+                "task_id": other_task_id, "status": "done",
+            })
+            assert other_moved[0] == 200 and other_moved[1]["item"]["status"] == "done", other_moved
+            assert _request(task_url + "update_task", token=owner, body={
+                "task_id": other_task_id, "status": "doing",
+            })[0] == 404
     output_root = os.environ.get("MOZAIKS_PAIRED_DEMO_OUTPUT")
     if output_root:
         receipt_path = Path(output_root) / "host-receipt.json"
@@ -602,9 +618,12 @@ async def test_paired_apps_share_real_host_records_and_enforce_user_scope(tmp_pa
             "database_name": database_name,
             "project_id": project_id,
             "task_ids": task_ids,
+            "other_project_id": other_project_id,
+            "other_task_id": other_task_id,
             "presentation_a_seeded_task_count": 12,
             "presentation_b_loaded_task_count": listed[1]["total"],
             "presentation_b_first_task_status": moved[1]["item"]["status"],
+            "presentation_b_other_task_status": other_moved[1]["item"]["status"],
             "cross_owner_read_denied": True,
             "cross_owner_update_denied": True,
             "unauthenticated_read_denied": True,

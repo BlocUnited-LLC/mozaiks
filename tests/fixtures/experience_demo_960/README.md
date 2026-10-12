@@ -10,7 +10,7 @@ From a Python environment with the repository's pinned requirements installed an
 ./scripts/run_paired_experience_demo.ps1 -Python 'C:\path\to\python.exe'
 ```
 
-The script checks the AG2 version against `requirements.txt`, starts a disposable local `mongo:7` container, runs `tests/test_paired_experience_demo_960.py`, then stops that exact container. It writes generated A/B bundles, per-file SHA-256 values, task and runtime version receipts, and a host/API receipt under `.local/evidence/paired-experience-960/` (ignored by Git). The host test uses separate local platform processes, a local JWKS and signed tokens, and a unique database per run. It seeds one project and twelve tasks in A, verifies page 2 and search, then reads and updates those same records in B. It also checks missing auth and cross-user read, update, and owner-forgery denial.
+The script checks the AG2 version against `requirements.txt`, starts a disposable local `mongo:7` container, runs `tests/test_paired_experience_demo_960.py`, then stops that exact container. It writes generated A/B bundles, per-file SHA-256 values, task and runtime version receipts, and a host/API receipt under `.local/evidence/paired-experience-960/` (ignored by Git). The host test uses separate local platform processes, a local JWKS and signed tokens, and a unique database per run. It seeds one project and twelve tasks for one user and one project/task for another in A, verifies page 2 and search, then reads and updates those same records in B. It also checks missing auth and cross-user read, update, and owner-forgery denial.
 
 Without Docker, the scripted admission, assembly, static validation, loader, and same-contract checks run with:
 
