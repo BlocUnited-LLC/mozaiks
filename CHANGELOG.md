@@ -18,6 +18,12 @@ This project follows a practical pre-1.0 changelog format:
   decisions and visual intent through declarative and custom page planning,
   including boards and confirmations.
 
+### Fixed
+
+- Bound interactive workflow replies to the exact workflow tool's declared
+  actions and response schema before delivery, while preserving free-form
+  composer input and workflow-specific review identity checks.
+
 ## 0.2.0 - 2026-10-11
 
 ### Added

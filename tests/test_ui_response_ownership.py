@@ -72,10 +72,12 @@ def _pending(harness, kind="future"):
         transport.pending_tool_call_responses["evt-owned"] = asyncio.get_running_loop().create_future()
 
 
-async def _http(harness, *, event_id="evt-owned", **extra):
+async def _http(harness, *, event_id="evt-owned", response_data=None, **extra):
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=harness.app), base_url="http://test") as client:
         return await client.post("/api/tool-call/respond", json={
-            "event_id": event_id, "response_data": {"action": "approve"}, **extra,
+            "event_id": event_id,
+            "response_data": {"action": "approve"} if response_data is None else response_data,
+            **extra,
         })
 
 
@@ -131,6 +133,76 @@ async def test_http_owner_can_submit_and_retry_without_reapplying(harness, kind)
 
     harness.principal = _principal("attacker")
     assert (await _http(harness)).status_code == 404
+
+
+@pytest.mark.parametrize("reply", [
+    {"action": "delete", "approved": True, "review_id": "review-1"},
+    {"action": "approve", "approved": False, "review_id": "review-1"},
+    {"action": "approve", "approved": True, "review_id": "review-1", "admin": True},
+])
+async def test_http_rejects_undeclared_or_malformed_action_before_resolving(harness, reply):
+    _pending(harness)
+    harness.transport._ui_tool_metadata["evt-owned"].update({
+        "interaction_type": "ui_tool",
+        "response_actions": [{
+            "id": "approve", "approved": True,
+            "payload_schema": {
+                "type": "object", "required": ["action", "approved", "review_id"],
+                "properties": {
+                    "action": {"const": "approve"},
+                    "approved": {"const": True},
+                    "review_id": {"type": "string"},
+                },
+                "additionalProperties": False,
+            },
+        }],
+    })
+
+    response = await _http(harness, response_data=reply)
+
+    assert response.status_code != 200
+    assert not harness.transport.pending_tool_call_responses["evt-owned"].done()
+    assert harness.transport._buffered_tool_call_responses == {}
+    harness.transport._finalize_tool_call_response.assert_not_awaited()
+
+
+async def test_http_accepts_valid_declared_action_for_its_session_owner(harness):
+    _pending(harness)
+    harness.transport._ui_tool_metadata["evt-owned"].update({
+        "interaction_type": "ui_tool", "response_actions": [{
+            "id": "approve", "approved": True,
+            "payload_schema": {
+                "type": "object", "required": ["action", "approved", "review_id"],
+                "properties": {"action": {"const": "approve"}, "approved": {"const": True},
+                               "review_id": {"type": "string"}},
+                "additionalProperties": False,
+            },
+        }],
+    })
+    reply = {"action": "approve", "approved": True, "review_id": "review-1"}
+    response = await _http(harness, response_data=reply)
+    assert response.status_code == 200
+    assert harness.transport.pending_tool_call_responses["evt-owned"].result() == reply
+    harness.transport._finalize_tool_call_response.assert_awaited_once()
+
+
+async def test_http_input_request_accepts_text_without_an_action(harness):
+    _pending(harness, "input")
+    response = await _http(harness, response_data={"status": "submitted", "text": "next step"})
+    assert response.status_code == 200
+    harness.transport.submit_user_input.assert_awaited_once()
+
+
+async def test_http_actionless_input_request_ui_tool_accepts_text_for_owner(harness):
+    _pending(harness)
+    harness.transport._ui_tool_metadata["evt-owned"].update({
+        "tool_name": "UserInputRequest", "interaction_type": "input_request", "response_actions": [],
+    })
+    reply = {"status": "submitted", "user_input": "next step", "text": "next step"}
+    response = await _http(harness, response_data=reply)
+    assert response.status_code == 200
+    assert harness.transport.pending_tool_call_responses["evt-owned"].result() == reply
+    harness.transport._finalize_tool_call_response.assert_awaited_once()
 
 
 @pytest.mark.parametrize("kind", ["unknown", "unbound_future", "ambiguous"])
@@ -269,6 +341,53 @@ async def test_websocket_anonymous_local_identity_still_requires_session_ownersh
     }, "chat-owner", websocket)
     assert websocket.send_json.await_args.args[0]["data"]["status"] == "rejected"
     _unchanged(harness.transport, metadata, {})
+
+
+async def test_websocket_rejects_invalid_declared_action_without_waking_tool(harness, monkeypatch):
+    _pending(harness)
+    harness.transport._ui_tool_metadata["evt-owned"].update({
+        "interaction_type": "ui_tool",
+        "response_actions": [{
+            "id": "approve", "approved": True,
+            "payload_schema": {
+                "type": "object", "required": ["action", "approved"],
+                "properties": {"action": {"const": "approve"}, "approved": {"const": True}},
+                "additionalProperties": False,
+            },
+        }],
+    })
+    websocket = SimpleNamespace(state=SimpleNamespace(user=_principal(websocket=True)), send_json=AsyncMock())
+    harness.transport.connections["chat-owner"] = {
+        "websocket": websocket, "user_id": "owner", "app_id": "app-owner", "ws_id": "ws-1",
+    }
+    monkeypatch.setattr(input_handlers.session_registry, "get_active_workflow", lambda _: None)
+
+    await input_handlers.handle_tool_call_response(harness.transport, {
+        "tool_call_id": "evt-owned", "response": {"action": "approve", "approved": False},
+    }, "chat-owner", websocket)
+
+    assert websocket.send_json.await_args.args[0]["data"]["status"] == "rejected"
+    assert not harness.transport.pending_tool_call_responses["evt-owned"].done()
+    harness.transport._finalize_tool_call_response.assert_not_awaited()
+
+
+async def test_websocket_accepts_valid_declared_action_for_its_session_owner(harness, monkeypatch):
+    _pending(harness)
+    harness.transport._ui_tool_metadata["evt-owned"].update({
+        "interaction_type": "ui_tool", "response_actions": [{"id": "approve", "approved": True}],
+    })
+    websocket = SimpleNamespace(state=SimpleNamespace(user=_principal(websocket=True)), send_json=AsyncMock())
+    harness.transport.connections["chat-owner"] = {
+        "websocket": websocket, "user_id": "owner", "app_id": "app-owner", "ws_id": "ws-1",
+    }
+    monkeypatch.setattr(input_handlers.session_registry, "get_active_workflow", lambda _: None)
+    reply = {"action": "approve", "approved": True}
+    await input_handlers.handle_tool_call_response(harness.transport, {
+        "tool_call_id": "evt-owned", "response": reply,
+    }, "chat-owner", websocket)
+    assert websocket.send_json.await_args.args[0]["data"]["status"] == "accepted"
+    assert harness.transport.pending_tool_call_responses["evt-owned"].result() == reply
+    harness.transport._finalize_tool_call_response.assert_awaited_once()
 
 
 @pytest.mark.parametrize("switched", [False, True])

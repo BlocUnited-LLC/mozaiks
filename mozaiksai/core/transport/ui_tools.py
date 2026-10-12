@@ -20,8 +20,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from copy import deepcopy
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
+
+from jsonschema import Draft7Validator
+from jsonschema.exceptions import SchemaError, ValidationError
 
 from mozaiksai.core.auth import UserPrincipal, WebSocketUser
 from mozaiksai.core.auth.dependencies import is_shared_development_identity
@@ -167,6 +171,33 @@ class UIToolsMixin:
         if not isinstance(interaction_type, str) or not interaction_type.strip():
             interaction_type = "ui_tool" if awaiting_response else "ui_surface"
 
+        response_actions: list[dict[str, Any]] = []
+        if event_id and awaiting_response and workflow_name:
+            from mozaiksai.core.workflow.workflow_manager import workflow_manager
+
+            tool_record = workflow_manager.get_ui_tool_record(
+                tool_name, workflow_name=workflow_name,
+            )
+            ui_contract = (tool_record or {}).get("ui_contract") or {}
+            if not isinstance(ui_contract, dict):
+                raise ValueError("UI tool ui_contract must be an object")
+            declared_actions = ui_contract.get("actions_schema") or []
+            if not isinstance(declared_actions, list) or any(
+                not isinstance(action, dict) or not isinstance(action.get("id"), str)
+                for action in declared_actions
+            ):
+                raise ValueError("UI tool actions_schema must contain named actions")
+            response_actions = deepcopy(declared_actions)
+            if interaction_type != "input_request" and declared_actions and isinstance(payload.get("actions"), list):
+                offered_ids = {
+                    action.get("id") for action in payload["actions"] if isinstance(action, dict)
+                }
+                response_actions = [
+                    action for action in response_actions if action.get("id") in offered_ids
+                ]
+                if not response_actions:
+                    raise ValueError("UI tool offers no declared action")
+
         # Normalise display_type to the UIDisplayMode enum values.
         # Unknown values fall back to "inline" so the frontend always gets a
         # valid mode string even if a workflow passes an unsupported value.
@@ -218,6 +249,8 @@ class UIToolsMixin:
                 "workflow_name": workflow_name,
                 "outcome_id": payload.get("outcome_id"),
                 "feedback_agent_name": payload.get("agent_name"),
+                "interaction_type": interaction_type,
+                "response_actions": response_actions,
             }
 
         # Delegate to core event sender for namespacing and sequence handling
@@ -478,6 +511,8 @@ class UIToolsMixin:
         if self._tool_call_chat_id(event_id) != event_chat_id:
             return False
         metadata = self._ui_tool_metadata.get(event_id) or {}
+        if not self._valid_declared_tool_response(metadata, response_data):
+            return False
         if metadata.get("workflow_primitive") == "outcome_feedback":
             from pydantic import ValidationError
 
@@ -514,6 +549,8 @@ class UIToolsMixin:
             return True
 
         metadata = self._ui_tool_metadata.get(event_id) or {}
+        if not self._valid_declared_tool_response(metadata, response_data):
+            return False
         if metadata.get("workflow_primitive") == "outcome_feedback":
             from pydantic import ValidationError
 
@@ -526,33 +563,22 @@ class UIToolsMixin:
                 return False
 
         future = self._resolve_tool_call_future(event_id)
-        if future is not None:
-            if not future.done():
-                self._complete_tool_call_future(future, response_data)
-                logger.debug("[UI_TOOL] Submitted response for event %s", event_id)
-                metadata = self._ui_tool_metadata.get(event_id)
-                self._mark_tool_call_response_resolved(event_id)
-                await self._finalize_tool_call_response(
-                    event_id=event_id,
-                    response_data=response_data,
-                    metadata=metadata,
-                )
-                return True
-            else:
-                self._mark_tool_call_response_resolved(event_id)
-                logger.debug("[UI_TOOL] Ignoring duplicate response for completed event %s", event_id)
-                return True
-        metadata = self._ui_tool_metadata.get(event_id)
-        if metadata is not None:
-            self._buffered_tool_call_responses[event_id] = response_data
+        if future is not None and future.done():
             self._mark_tool_call_response_resolved(event_id)
-            logger.debug("[UI_TOOL] Buffered early response for event %s", event_id)
-            await self._finalize_tool_call_response(
-                event_id=event_id,
-                response_data=response_data,
-                metadata=metadata,
-            )
+            logger.debug("[UI_TOOL] Ignoring duplicate response for completed event %s", event_id)
             return True
+        metadata = self._ui_tool_metadata.get(event_id)
+        if future is not None or metadata is not None:
+            self._mark_tool_call_response_resolved(event_id)
+            deliveries = getattr(self, "_tool_call_delivery_tasks", None)
+            if deliveries is None:
+                deliveries = self._tool_call_delivery_tasks = {}
+            delivery = asyncio.create_task(
+                self._finalize_and_deliver_tool_response(event_id, response_data, metadata),
+            )
+            deliveries[event_id] = delivery
+            delivery.add_done_callback(lambda _: deliveries.pop(event_id, None))
+            return await asyncio.shield(delivery)
         input_request_text = self._coerce_input_request_response_text(response_data)
         if self._has_pending_input_request(event_id):
             input_chat_id = self._tool_call_chat_id(event_id)
@@ -566,6 +592,54 @@ class UIToolsMixin:
 
         logger.warning("[UI_TOOL] No pending event found for %s", event_id)
         return False
+
+    async def _finalize_and_deliver_tool_response(
+        self, event_id: str, response_data: dict[str, Any], metadata: dict[str, Any] | None,
+    ) -> bool:
+        try:
+            await self._finalize_tool_call_response(
+                event_id=event_id, response_data=response_data, metadata=metadata,
+            )
+        except Exception:
+            logger.exception("[UI_TOOL] Failed to finalize response for %s", event_id)
+            self._get_resolved_tool_call_registry().pop(event_id, None)
+            if metadata is not None:
+                self._ui_tool_metadata[event_id] = metadata
+            return False
+        future = self._resolve_tool_call_future(event_id)
+        if future is not None and not future.done():
+            self._complete_tool_call_future(future, response_data)
+            logger.debug("[UI_TOOL] Submitted response for event %s", event_id)
+        else:
+            self._buffered_tool_call_responses[event_id] = response_data
+            logger.debug("[UI_TOOL] Buffered early response for event %s", event_id)
+        return True
+
+    @staticmethod
+    def _valid_declared_tool_response(metadata: dict[str, Any], response_data: Any) -> bool:
+        actions = metadata.get("response_actions")
+        if not isinstance(actions, list) or not actions:
+            return True
+        if not isinstance(response_data, dict):
+            return False
+        action_id = response_data.get("action")
+        action = next(
+            (item for item in actions if isinstance(item, dict) and item.get("id") == action_id),
+            None,
+        )
+        if action is None or not isinstance(action_id, str):
+            return False
+        expected_approval = action.get("approved")
+        if isinstance(expected_approval, bool) and response_data.get("approved") is not expected_approval:
+            return False
+        schema = action.get("payload_schema")
+        if isinstance(schema, dict) and schema:
+            try:
+                Draft7Validator.check_schema(schema)
+                Draft7Validator(schema).validate(response_data)
+            except (SchemaError, TypeError, ValidationError):
+                return False
+        return True
 
     def _has_pending_input_request(self, event_id: str) -> bool:
         for registry in self._input_request_registries.values():

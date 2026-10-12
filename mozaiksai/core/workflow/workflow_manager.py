@@ -278,11 +278,26 @@ class UnifiedWorkflowManager:
             logger.error("Failed parsing tool config for %s: %s", workflow_name, e, exc_info=True)
 
 
-    def get_ui_tool_record(self, tool_path_or_id: str) -> dict[str, Any] | None:
+    def get_ui_tool_record(
+        self, tool_path_or_id: str, *, workflow_name: str | None = None,
+    ) -> dict[str, Any] | None:
         """Lookup UI tool record by module path or tool id.
 
-        Accepts either the full python path or the tool_id.
+        Accepts either the full python path or the tool_id. A workflow-qualified
+        lookup never falls back to another workflow's tool with the same name.
         """
+        if workflow_name:
+            registry_key = f"{workflow_name}.{tool_path_or_id}"
+            if registry_key in self._ui_registry:
+                return self._ui_registry[registry_key]
+            for rec in self._ui_registry.values():
+                if rec.get('workflow_name') == workflow_name and (
+                    rec.get('path') == tool_path_or_id
+                    or rec.get('tool_id') == tool_path_or_id
+                    or rec.get('fn') == tool_path_or_id
+                ):
+                    return rec
+            return None
         registry_key = self._ui_tool_path_cache.get(tool_path_or_id)
         if registry_key and registry_key in self._ui_registry:
             return self._ui_registry[registry_key]

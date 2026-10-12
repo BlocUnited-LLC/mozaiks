@@ -8,6 +8,7 @@ import threading
 import pytest
 
 from mozaiksai.core.transport.ui_tools import UIToolsMixin
+from mozaiksai.core.workflow.workflow_manager import workflow_manager
 
 
 class _FakeTransport(UIToolsMixin):
@@ -145,4 +146,258 @@ async def test_send_tool_call_event_emits_canonical_tool_call_envelope() -> None
     assert event["awaiting_response"] is True
     assert event["agent"] == "PlannerAgent"
     assert event["agent_name"] == "PlannerAgent"
+
+
+@pytest.mark.asyncio
+async def test_tool_call_binds_actions_from_the_exact_workflow_not_the_render_payload(monkeypatch) -> None:
+    transport = _FakeTransport()
+    monkeypatch.setattr(workflow_manager, "_ui_registry", {
+        "OtherFlow.ApprovalCard": {
+            "workflow_name": "OtherFlow", "tool_id": "ApprovalCard", "fn": "review",
+            "ui_contract": {"actions_schema": [{"id": "reject"}]},
+        },
+        "PlannerFlow.ApprovalCard": {
+            "workflow_name": "PlannerFlow", "tool_id": "ApprovalCard", "fn": "review",
+            "ui_contract": {"actions_schema": [{
+                "id": "approve", "approved": True,
+                "payload_schema": {
+                    "type": "object", "required": ["action", "approved", "review_id"],
+                    "properties": {
+                        "action": {"const": "approve"},
+                        "approved": {"const": True},
+                        "review_id": {"type": "string"},
+                    },
+                    "additionalProperties": False,
+                },
+            }]},
+        },
+    })
+
+    await transport.send_tool_call_event(
+        event_id="evt-bound", chat_id="chat-1", tool_name="ApprovalCard",
+        component_name="ApprovalCard", display_type="artifact",
+        payload={
+            "workflow_name": "PlannerFlow", "actions": [
+                {"id": "approve", "approved": False}, {"id": "reject", "approved": False},
+            ],
+            "ui_contract": {"actions_schema": [{"id": "reject"}]},
+        },
+    )
+
+    assert [action["id"] for action in transport._ui_tool_metadata["evt-bound"]["response_actions"]] == ["approve"]
+    assert transport.sent_events[0][0]["payload"]["actions"][0]["approved"] is False
+
+
+@pytest.mark.asyncio
+async def test_event_limits_reply_to_the_declared_actions_offered_for_this_review(monkeypatch) -> None:
+    transport = _FakeTransport()
+    monkeypatch.setattr(workflow_manager, "_ui_registry", {
+        "PlannerFlow.ApprovalCard": {
+            "workflow_name": "PlannerFlow", "tool_id": "ApprovalCard", "fn": "review",
+            "ui_contract": {"actions_schema": [
+                {"id": "approve", "approved": True},
+                {"id": "request_changes", "approved": False},
+            ]},
+        },
+    })
+    await transport.send_tool_call_event(
+        event_id="evt-limited", chat_id="chat-1", tool_name="ApprovalCard",
+        component_name="ApprovalCard", display_type="artifact",
+        payload={"workflow_name": "PlannerFlow", "actions": [{"id": "request_changes"}]},
+    )
+    assert [action["id"] for action in transport._ui_tool_metadata["evt-limited"]["response_actions"]] == ["request_changes"]
+    future = asyncio.get_running_loop().create_future()
+    transport.pending_tool_call_responses["evt-limited"] = future
+    assert await transport.submit_tool_call_response(
+        "evt-limited", {"action": "approve", "approved": True},
+    ) is False
+    assert not future.done()
+    assert await transport.submit_tool_call_response(
+        "evt-limited", {"action": "request_changes", "approved": False},
+    ) is True
+    assert future.result()["action"] == "request_changes"
+
+
+@pytest.mark.asyncio
+async def test_event_refuses_an_action_projection_with_no_declared_action(monkeypatch) -> None:
+    transport = _FakeTransport()
+    monkeypatch.setattr(workflow_manager, "_ui_registry", {
+        "PlannerFlow.ApprovalCard": {
+            "workflow_name": "PlannerFlow", "tool_id": "ApprovalCard", "fn": "review",
+            "ui_contract": {"actions_schema": [{"id": "approve", "approved": True}]},
+        },
+    })
+    with pytest.raises(ValueError, match="declared action"):
+        await transport.send_tool_call_event(
+            event_id="evt-unknown", chat_id="chat-1", tool_name="ApprovalCard",
+            component_name="ApprovalCard", display_type="artifact",
+            payload={"workflow_name": "PlannerFlow", "actions": [{"id": "reject"}]},
+        )
+    assert "evt-unknown" not in transport._ui_tool_metadata
+    assert transport.sent_events == []
+
+
+def _review_response_actions() -> list[dict]:
+    return [{
+        "id": "approve", "approved": True,
+        "payload_schema": {
+            "type": "object", "required": ["action", "approved", "review_id"],
+            "properties": {
+                "action": {"const": "approve"},
+                "approved": {"const": True},
+                "review_id": {"type": "string"},
+            },
+            "additionalProperties": False,
+        },
+    }]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("response", [
+    {"action": "reject", "approved": False, "review_id": "review-1"},
+    {"action": "approve", "approved": False, "review_id": "review-1"},
+    {"action": "approve", "approved": True, "review_id": "review-1", "extra": "override"},
+    {"action": "approve", "approved": True},
+])
+async def test_invalid_declared_action_cannot_complete_or_buffer_response(response: dict) -> None:
+    transport = _FakeTransport()
+    _FakeTransport._instance = transport
+    transport._ui_tool_metadata["evt-decision"] = {
+        "chat_id": "chat-1", "tool_name": "ApprovalCard", "display": "artifact",
+        "interaction_type": "ui_tool", "response_actions": _review_response_actions(),
+    }
+    future = asyncio.get_running_loop().create_future()
+    transport.pending_tool_call_responses["evt-decision"] = future
+
+    assert await transport.submit_tool_call_response("evt-decision", response) is False
+    assert not future.done()
+    assert transport._buffered_tool_call_responses == {}
+    assert "evt-decision" not in transport._resolved_tool_call_ids
+
+
+@pytest.mark.asyncio
+async def test_valid_declared_action_waits_for_finalization_before_waking_tool() -> None:
+    transport = _FakeTransport()
+    transport._ui_tool_metadata["evt-decision"] = {
+        "chat_id": "chat-1", "tool_name": "ApprovalCard", "display": "inline",
+        "interaction_type": "ui_tool", "response_actions": _review_response_actions(),
+    }
+    future = asyncio.get_running_loop().create_future()
+    transport.pending_tool_call_responses["evt-decision"] = future
+    finalizing = asyncio.Event()
+    release = asyncio.Event()
+
+    async def finalize(**kwargs):
+        finalizing.set()
+        await release.wait()
+
+    transport._finalize_tool_call_response = finalize
+    response = {"action": "approve", "approved": True, "review_id": "review-1"}
+    submission = asyncio.create_task(transport.submit_tool_call_response("evt-decision", response))
+    try:
+        await asyncio.wait_for(finalizing.wait(), timeout=2)
+        assert not future.done()
+    finally:
+        release.set()
+    assert await asyncio.wait_for(submission, timeout=2) is True
+    assert await future == response
+
+
+@pytest.mark.asyncio
+async def test_cancelled_submission_still_finishes_delivery_before_waking_tool() -> None:
+    transport = _FakeTransport()
+    transport._ui_tool_metadata["evt-cancelled-submit"] = {
+        "chat_id": "chat-1", "tool_name": "ApprovalCard", "display": "inline",
+        "interaction_type": "ui_tool", "response_actions": _review_response_actions(),
+    }
+    future = asyncio.get_running_loop().create_future()
+    transport.pending_tool_call_responses["evt-cancelled-submit"] = future
+    finalizing = asyncio.Event()
+    release = asyncio.Event()
+
+    async def finalize(**kwargs):
+        finalizing.set()
+        await release.wait()
+
+    transport._finalize_tool_call_response = finalize
+    response = {"action": "approve", "approved": True, "review_id": "review-1"}
+    submission = asyncio.create_task(transport.submit_tool_call_response("evt-cancelled-submit", response))
+    await asyncio.wait_for(finalizing.wait(), timeout=2)
+    submission.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await submission
+    assert not future.done()
+    release.set()
+    assert await asyncio.wait_for(future, timeout=2) == response
+
+
+@pytest.mark.asyncio
+async def test_early_declared_response_waits_for_finalization_before_buffering() -> None:
+    transport = _FakeTransport()
+    _FakeTransport._instance = transport
+    transport._ui_tool_metadata["evt-early-decision"] = {
+        "chat_id": "chat-1", "tool_name": "ApprovalCard", "display": "inline",
+        "interaction_type": "ui_tool", "response_actions": _review_response_actions(),
+    }
+    finalizing = asyncio.Event()
+    release = asyncio.Event()
+
+    async def finalize(**kwargs):
+        finalizing.set()
+        await release.wait()
+
+    transport._finalize_tool_call_response = finalize
+    response = {"action": "approve", "approved": True, "review_id": "review-1"}
+    submission = asyncio.create_task(transport.submit_tool_call_response("evt-early-decision", response))
+    try:
+        await asyncio.wait_for(finalizing.wait(), timeout=2)
+        waiter = asyncio.create_task(_FakeTransport.wait_for_tool_call_response("evt-early-decision", timeout=2))
+        await asyncio.sleep(0)
+        assert not waiter.done()
+        assert transport._buffered_tool_call_responses == {}
+    finally:
+        release.set()
+    assert await asyncio.wait_for(submission, timeout=2) is True
+    assert await asyncio.wait_for(waiter, timeout=2) == response
+
+
+@pytest.mark.asyncio
+async def test_actionless_ui_tool_response_is_preserved() -> None:
+    transport = _FakeTransport()
+    transport._ui_tool_metadata["evt-actionless"] = {
+        "chat_id": "chat-1", "tool_name": "CustomForm", "display": "inline",
+        "interaction_type": "ui_tool", "response_actions": [],
+    }
+    future = asyncio.get_running_loop().create_future()
+    transport.pending_tool_call_responses["evt-actionless"] = future
+
+    assert await transport.submit_tool_call_response("evt-actionless", {"value": "hello"}) is True
+    assert future.result() == {"value": "hello"}
+
+
+@pytest.mark.asyncio
+async def test_render_payload_cannot_disable_a_declared_action_contract() -> None:
+    transport = _FakeTransport()
+    transport._ui_tool_metadata["evt-false-input"] = {
+        "chat_id": "chat-1", "tool_name": "ApprovalCard", "display": "inline",
+        "interaction_type": "input_request", "response_actions": _review_response_actions(),
+    }
+    future = asyncio.get_running_loop().create_future()
+    transport.pending_tool_call_responses["evt-false-input"] = future
+    assert await transport.submit_tool_call_response("evt-false-input", {"text": "approve"}) is False
+    assert not future.done()
+
+
+@pytest.mark.asyncio
+async def test_actionless_input_request_ui_tool_accepts_text_response() -> None:
+    transport = _FakeTransport()
+    transport._ui_tool_metadata["evt-input-tool"] = {
+        "chat_id": "chat-1", "tool_name": "UserInputRequest", "display": "inline",
+        "interaction_type": "input_request", "response_actions": [],
+    }
+    future = asyncio.get_running_loop().create_future()
+    transport.pending_tool_call_responses["evt-input-tool"] = future
+    response = {"status": "submitted", "text": "Build the app"}
+    assert await transport.submit_tool_call_response("evt-input-tool", response) is True
+    assert future.result() == response
 

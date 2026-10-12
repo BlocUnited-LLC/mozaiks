@@ -9,7 +9,6 @@ export default function WorkflowPlanReview({ payload = {}, onResponse, workflowN
         payload={payload}
         workflowName={workflowName}
         onResponse={respond}
-        onCancel={() => respond({ action: 'cancel', approved: false })}
       />
     </div>
   );
