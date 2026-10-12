@@ -14,8 +14,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Changed
 
-- Factory app planning now preserves each approved page's rendering surface and
-  visual experience, including declarative or custom boards and confirmations.
+- Factory design and app-planning guidance now carries approved page rendering
+  decisions and visual intent through declarative and custom page planning,
+  including boards and confirmations.
 
 ## 0.2.0 - 2026-10-11
 

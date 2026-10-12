@@ -880,7 +880,7 @@ agents:
       - `record_list`: entity browse with DataTable/ResourceTable + filter + actions bar
       - `record_detail`: Form + Panel/SurfaceCard detail zones driven by one primary record
       - `analytics_dashboard`: Grid of Metric/SummaryStrip/SegmentedBar; no primary editable entity
-      - `workflow_board`: kanban, pipeline, or status-lane structure. Use shipped primitives for an approved `declarative_page` when they preserve its behavior; only an approved `custom_react_page` uses `custom_route_bundle`.
+      - `workflow_board`: kanban, pipeline, or status-lane structure. Use shipped primitives for an approved `declarative_page` when they preserve its experience; only an approved `custom_react_page` uses `custom_route_bundle`.
       - `activity_feed`: Timeline as primary section; chronological, no edit-in-place
       - `gallery`: Grid of SurfaceCards with image/thumbnail and action; pagination or infinite scroll
       - `wizard`: multi-step flow with `shell_mode: focused`. Required structure per step: ProgressTracker header (stages list — each stage has `id`, `label`, `state` ∈ {done|active|pending|error}) + at least one Form section with `submit_action` bound to an app-owned module action + ActionButton for navigation. A wizard without a Form section is invalid and will be flagged by the quality gate — the Form is the submission path to the backing module. Always declare `depends_on: [<module_contract_task_id>]` on the wizard page_bundle task so the module action exists before the page schema references it.
