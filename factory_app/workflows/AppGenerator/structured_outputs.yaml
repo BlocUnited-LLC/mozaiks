@@ -181,8 +181,9 @@ models:
           marketplace/catalog listings; wizard for multi-step flows (onboarding, checkout,
           setup); split_view for simultaneous list+detail (inbox, file explorer, chat);
           settings for categorized settings/preferences; landing for public/marketing pages;
-          checkout_success for post-redirect checkout/payment confirmation routes that
-          must use custom_route_bundle.
+          checkout_success for post-redirect checkout/payment confirmation routes.
+          This archetype does not select the rendering surface; copy the approved
+          ExperienceSpec ui_surface exactly.
           Do not default everything to record_list — match the page purpose to the right
           archetype.
       sections_hint:
@@ -5128,8 +5129,10 @@ models:
           split_view: simultaneous list+detail (inbox, file explorer, thread list);
           settings: categorized settings/preferences forms;
           landing: public/marketing/unauthenticated pages;
-          checkout_success: post-redirect checkout/payment confirmation route
-          that must be implemented through custom_route_bundle.
+          checkout_success: post-redirect checkout/payment confirmation route.
+          Page type is structural; emit this declarative page only for an approved
+          declarative_page whose behavior shipped primitives can express. An approved
+          custom_react_page is emitted through custom_route_bundle instead.
       layout:
         type: literal
         values:

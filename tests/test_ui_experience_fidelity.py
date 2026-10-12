@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import json
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
@@ -197,8 +198,9 @@ def test_page_catalog_guidance_preserves_fidelity_without_weakening_bindings() -
     ("AppGenerator", "AppPlanAgent", "inject_ui_surface_context"),
     ("AppGenerator", "AppSchemaAgent", "inject_primitive_catalog"),
 ])
+@pytest.mark.parametrize("board_surface", ["declarative_page", "custom_react_page"])
 def test_runtime_composed_prompt_preserves_approved_experience(
-    workflow: str, agent_name: str, hook_name: str,
+    workflow: str, agent_name: str, hook_name: str, board_surface: str,
 ) -> None:
     """Use the agent factory's composer and the registered AG2 prompt runner."""
     from mozaiksai.core.workflow.agents.factory import (
@@ -215,19 +217,21 @@ def test_runtime_composed_prompt_preserves_approved_experience(
     config = yaml.safe_load((workflow_dir / "agents.yaml").read_text(encoding="utf-8"))
     agent_config = next(agent for agent in config["agents"] if agent["name"] == agent_name)
     base_prompt = _compose_prompt_sections(agent_config["prompt_sections"])
+    board_sections = ([{"primitive": "PageHeader", "intent": "Identify the board"}]
+                      if board_surface == "declarative_page" else [])
     context_key, approved_context = {
         "DesignDocsAgent": ("concept_overview", "Approved planning board at /board"),
         "AppPlanAgent": ("experience_spec", {
             "pages": [{
                 "name": "Board", "route": "/board", "layout": "full-width",
                 "intent": "Move tasks across status lanes",
-                "ui_surface": "custom_react_page", "sections": [],
+                "ui_surface": board_surface, "sections": board_sections,
             }],
         }),
         "AppSchemaAgent": ("app_build_plan", {
             "pages": [{
-                "name": "Board", "route": "/board", "ui_surface": "custom_react_page",
-                "sections_hint": [],
+                "name": "Board", "route": "/board", "ui_surface": board_surface,
+                "page_type_hint": "workflow_board", "sections_hint": board_sections,
             }],
         }),
     }[agent_name]
@@ -275,6 +279,16 @@ def test_runtime_composed_prompt_preserves_approved_experience(
     assert "all approved experience requirements survive" in prompt
     assert "Prefer declarative_page when shipped primitives express the behavior" not in prompt
     assert "first try to narrow it into the existing primitives" not in prompt
+    if agent_name == "AppPlanAgent":
+        assert "checkout_success`" in prompt
+        assert "This structural type does not select the rendering surface" in prompt
+        assert "checkout_success`: post-redirect checkout/payment confirmation route that must use" not in prompt
+    if agent_name == "AppSchemaAgent":
+        assert "A board without that primitive gap may remain declarative" in prompt
+        assert "request design/plan repair" in prompt
+        assert "workflow_board`: custom_route_bundle" not in prompt
+        assert "checkout_success`: custom_route_bundle" not in prompt
+        assert "Post-redirect confirmation page — MUST use" not in prompt
 
 
 def test_provider_schema_describes_both_approved_page_realizations() -> None:
@@ -324,7 +338,10 @@ def test_appgenerator_provider_schema_keeps_the_approved_surface_decision() -> N
     )
     wire_schema = get_provider_response_model(models["AppBuildPage"]).model_json_schema()
     surface_description = wire_schema["properties"]["ui_surface"]["description"]
+    page_type_description = wire_schema["properties"]["page_type_hint"]["description"]
     hints_description = wire_schema["properties"]["sections_hint"]["description"]
+    declarative_page_schema = get_provider_response_model(models["AppPageSchema"]).model_json_schema()
+    declarative_type_description = declarative_page_schema["properties"]["page_type"]["description"]
     for dimension in ("composition", "visual hierarchy", "responsive behavior", "interaction"):
         assert dimension in surface_description
         assert dimension in (
@@ -339,10 +356,18 @@ def test_appgenerator_provider_schema_keeps_the_approved_surface_decision() -> N
     assert "do not leave the list empty" in hints_description
     assert "use an empty list when ExperienceSpec sections is empty" in hints_description
     assert "instead of fabricating hints" in hints_description
+    assert "This archetype does not select the rendering surface" in page_type_description
+    assert "copy the approved ExperienceSpec ui_surface exactly" in page_type_description
+    assert "Page type is structural" in declarative_type_description
+    assert "approved declarative_page" in declarative_type_description
+    assert "approved custom_react_page" in declarative_type_description
+    assert "must use custom_route_bundle" not in page_type_description
+    assert "must be implemented through custom_route_bundle" not in declarative_type_description
 
 
-def test_custom_page_without_primitive_sections_keeps_empty_plan_hints() -> None:
-    """The approved custom route needs a page bundle, not fabricated primitives."""
+@pytest.mark.parametrize("surface", ["declarative_page", "custom_react_page"])
+def test_board_archetype_preserves_approved_plan_surface(surface: str) -> None:
+    """A board's category cannot change its approved page materialization."""
     from factory_app.workflows.AppGenerator.tools.app_build_plan import _normalize_page_config_hints
     from factory_app.workflows.AppGenerator.tools.app_plan_review import (
         _required_page_paths,
@@ -351,10 +376,16 @@ def test_custom_page_without_primitive_sections_keeps_empty_plan_hints() -> None
     from factory_app.workflows.DesignDocs.tools.save_design_doc import _canonical_experience_spec
     from mozaiksai.core.workflow.outputs.structured import build_models_from_config
 
+    custom = surface == "custom_react_page"
+    intent = ("Drag and keyboard-move tasks across status lanes." if custom else
+              "Read tasks grouped by status lane.")
+    sections = [] if custom else [
+        {"primitive": "PageHeader", "intent": "Identify task board"},
+        {"primitive": "Grid", "intent": "Show task cards in status lanes"},
+    ]
     approved = {
-        "name": "Board", "route": "/board", "ui_surface": "custom_react_page",
-        "layout": "full-width", "intent": "Drag and keyboard-move tasks across status lanes.",
-        "sections": [],
+        "name": "Board", "route": "/board", "ui_surface": surface,
+        "layout": "full-width", "intent": intent, "sections": sections,
     }
     spec = _canonical_experience_spec(
         {"navigation_model": "Workspace routes", "brand_direction": "Focused", "pages": [approved]},
@@ -368,16 +399,42 @@ def test_custom_page_without_primitive_sections_keeps_empty_plan_hints() -> None
     models = build_models_from_config(
         config["models"], exact_model_ids=frozenset(config["models"]),
     )
+    hints = [] if custom else [
+        {
+            "primitive": "PageHeader", "data_source": None,
+            "config_hint": '{"title":"Task board"}', "section_id_hint": "board-header",
+            "title_hint": "Task board", "intent": "Identify task board",
+        },
+        {
+            "primitive": "Grid", "data_source": None,
+            "config_hint": json.dumps({
+                "columns": 3,
+                "children": [
+                    {"primitive": "Panel", "config": {"title": lane}}
+                    for lane in ("To do", "In progress", "Done")
+                ],
+            }),
+            "section_id_hint": "status-lanes", "title_hint": "Status lanes",
+            "intent": "Show task cards in status lanes",
+        },
+    ]
     page = models["AppBuildPage"].model_validate({
         "name": "Board", "route": "/board", "purpose": approved["intent"],
         "design_intent": approved["intent"], "ui_layout": "full-width",
-        "shell_mode_hint": "workspace", "ui_surface": "custom_react_page",
-        "page_type_hint": "workflow_board", "sections_hint": [],
+        "shell_mode_hint": "workspace", "ui_surface": surface,
+        "page_type_hint": "workflow_board", "sections_hint": hints,
     }).model_dump(mode="json")
     plan = {"pages": [page]}
     _validate_page_realizations(plan, {"experience_spec": spec})
-    assert _normalize_page_config_hints(plan["pages"])[0]["sections_hint"] == []
-    assert _required_page_paths(plan) == [
+    assert _normalize_page_config_hints(plan["pages"])[0]["sections_hint"] == hints
+    expected_paths = ([
         "app.json", "ui/pages/custom/board.jsx", "ui/route_manifest.json", "ui/index.js",
-    ]
+    ] if custom else ["app.json", "ui/pages/board.yaml"])
+    assert _required_page_paths(plan) == expected_paths
     assert page["design_intent"] == approved["intent"]
+    wrong_surface = "declarative_page" if custom else "custom_react_page"
+    with pytest.raises(ValueError, match="must preserve approved ui_surface"):
+        _validate_page_realizations(
+            {"pages": [{**page, "ui_surface": wrong_surface}]},
+            {"experience_spec": spec},
+        )

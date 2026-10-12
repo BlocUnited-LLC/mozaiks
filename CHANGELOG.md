@@ -12,6 +12,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Changed
+
+- Factory app planning now preserves each approved page's rendering surface and
+  visual experience, including declarative or custom boards and confirmations.
+
 ## 0.2.0 - 2026-10-11
 
 ### Added
