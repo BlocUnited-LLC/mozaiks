@@ -312,7 +312,8 @@ agents:
     content: |-
       Read upstream interview facts and research findings explicitly supplied in
       your current messages or declared context. Interview facts establish user
-      intent and scope; research findings support differentiation and risk judgments.
+      intent and scope until the owner's concept review revises them (see the
+      revision rules below); research findings support differentiation and risk judgments.
       Synthesize them into a refined, differentiated concept without treating a
       research recommendation as user approval. If evidence is absent, record the
       uncertainty in the existing ConceptBlueprint narrative fields rather than
@@ -373,10 +374,13 @@ agents:
       The save_value_manifest auto tool persists the draft and waits for an explicit structured user review.
       Only that review can approve the handoff. Never infer approval from chat prose or emit approval state yourself.
       When revising after requested changes, treat the incoming ConceptBlueprint and concept_blueprint as the previous draft.
-      Use the latest concept_review_feedback as the revision instruction; do not repeat an unchanged draft.
-      Update affected value_proposition, concept_overview, core_features and app_ui_requirements fields coherently.
-      Preserve unaffected scope, brand intent and constraints; add no unrelated features.
-      Summarize the actual changes in agent_message and emit the complete revised blueprint without another chat message.
+      A non-empty concept_review_feedback is the owner's latest decision about that draft.
+      It outranks the interview facts, the research findings, the previous draft and the current app_name wherever they conflict:
+      the owner is changing their earlier intent, so an earlier storage, platform, offline, scope or naming choice the feedback contradicts no longer applies.
+      Apply the feedback to every ConceptBlueprint field it touches, including app_name, value_proposition, concept_overview, core_jobs, core_features, deferred_features, unique_differentiators, constraints, api_endpoints, app_ui_requirements, capability_pack_hints, surface_candidate_hints and agentic_capabilities.
+      Remove or rewrite every statement that contradicts the feedback; preserve only the scope, brand intent and constraints the feedback leaves untouched, and add no unrelated features.
+      A revision that leaves contradicted fields unchanged has failed; never re-emit the previous draft.
+      In agent_message, name the fields you changed and how each now reflects the feedback, then emit the complete revised blueprint without another chat message.
       The revised draft still requires its own explicit structured approval before generation continues.
   - id: output_format
     heading: '[OUTPUT FORMAT]'

@@ -56,3 +56,38 @@ def test_interview_orchestrators_use_guidance_language() -> None:
     assert 'outcome ready' in agent_orchestrator
     assert 'outcome needs_input' in agent_orchestrator
     assert 'NEXT' not in agent_orchestrator
+
+
+def _gap_analysis_prompt() -> str:
+    import yaml
+
+    from mozaiksai.core.workflow.agents.factory import _compose_prompt_sections
+
+    agents = yaml.safe_load(_read("factory_app/workflows/ValueEngine/agents.yaml"))["agents"]
+    agent = next(item for item in agents if item["name"] == "GapAnalysisAgent")
+    return " ".join(_compose_prompt_sections(agent["prompt_sections"]).split())
+
+
+def test_concept_revision_feedback_outranks_the_previous_draft_and_interview() -> None:
+    """A live revision repeated an offline-first draft the owner had rejected.
+
+    The owner asked for server-side storage. The prompt told the agent that
+    interview facts establish intent, listed only four fields as revisable and
+    said to preserve constraints, so every field, including the offline
+    constraint, came back unchanged.
+    """
+    prompt = _gap_analysis_prompt()
+
+    assert "Preserve unaffected scope, brand intent and constraints" not in prompt
+    assert (
+        "A non-empty concept_review_feedback is the owner's latest decision about that draft. "
+        "It outranks the interview facts, the research findings, the previous draft and the "
+        "current app_name wherever they conflict" in prompt
+    )
+    revisable = prompt.split("Apply the feedback to every ConceptBlueprint field it touches", 1)[1]
+    revisable = revisable.split(".", 1)[0]
+    for field in ("app_name", "constraints", "unique_differentiators", "api_endpoints",
+                  "surface_candidate_hints", "core_features", "concept_overview"):
+        assert field in revisable, field
+    assert "preserve only the scope, brand intent and constraints the feedback leaves untouched" in prompt
+    assert "never re-emit the previous draft" in prompt
