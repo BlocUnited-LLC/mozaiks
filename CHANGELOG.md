@@ -578,6 +578,13 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- A transition screen now shows only the transition currently pending. When a
+  run completed and the journey's next choice arrived within milliseconds, a
+  slower response for the finished run could replace the choice screen with a
+  generic completion card whose Continue could not proceed. When resolving a
+  pending transition from the chat page fails, the screen now shows the error
+  with a Retry instead of leaving a button that does nothing.
+
 - On a phone, the Studio Apps page shows the first app above the fixed bottom
   navigation: the summary tiles stay hidden below 768px, a paginated list keeps
   a compact `On this page` count, and each app's name-and-description block is

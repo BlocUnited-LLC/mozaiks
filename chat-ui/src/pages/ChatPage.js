@@ -6301,8 +6301,10 @@ const ChatPage = () => {
 
         throw new Error('Transition resolution returned an unsupported response');
       } catch (err) {
+        // TransitionScreen's resolve funnel turns a rejection into its error
+        // state; returning false here left the user on a dead button.
         console.error('❌ [ChatPage] transition resolution failed:', err);
-        return false;
+        throw err;
       }
     },
     [
