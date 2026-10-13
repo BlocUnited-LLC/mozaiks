@@ -602,6 +602,14 @@ This project follows a practical pre-1.0 changelog format:
   coverage check rejected them as unapproved; pages a selected pack ships now
   count as approved, while a dropped or invented page is still rejected.
 
+- Requesting changes on a ValueEngine concept now produces a revised concept.
+  The concept agent treats the owner's review feedback as overriding the
+  earlier interview, research and draft wherever they conflict, and rewrites
+  every field the feedback touches, including the app name and constraints.
+  Before, a request such as "store customers in the app's backend, not the
+  browser" came back as an unchanged offline-first draft, because the agent was
+  told to keep the draft's constraints.
+
 - On a phone, the Studio Apps page shows the first app above the fixed bottom
   navigation: the summary tiles stay hidden below 768px, a paginated list keeps
   a compact `On this page` count, and each app's name-and-description block is
