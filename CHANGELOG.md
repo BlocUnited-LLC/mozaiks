@@ -22,6 +22,12 @@ This project follows a practical pre-1.0 changelog format:
   decisions and visual intent through declarative and custom page planning,
   including boards and confirmations.
 
+### Fixed
+
+- The shell's Monaco sanitizer replacement resolves the installed dependency
+  through directory junctions, preserving the locked sanitizer in isolated
+  Windows worktrees as well as ordinary installations.
+
 ## 0.2.0 - 2026-10-11
 
 ### Added

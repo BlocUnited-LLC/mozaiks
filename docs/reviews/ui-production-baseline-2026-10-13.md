@@ -31,6 +31,14 @@ separate U0 requirement, not established by this source audit. Consumer pin
 and package integration receipts stay in consumer evidence; this index
 contains no proprietary source.
 
+U0 execution delta: matched complete-dependency runs of `test:factory-contracts`
+on this base and U2 candidate `9f0a8c2f` each produced 240 passes and three
+failures (two Monaco cases and their parent). Vite resolved the dependency
+junction to its physical path, while the existing sanitizer resolver compared
+only the lexical path. The lane therefore includes a narrow correction in the
+existing Vite resolver and its browser test; no dependency pins or sanitizer
+policy change. Subsequent run receipts record the corrected candidate.
+
 ## Findings mapped to source
 
 Paths are relative to the repository root. Findings describe the baseline,
