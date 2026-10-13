@@ -18,9 +18,6 @@ This project follows a practical pre-1.0 changelog format:
   page sections use app spacing, and sidebar pages stack on narrow screens.
   Invalid explicit title roles and layouts report errors instead of silently
   substituting another presentation.
-- Factory design and app-planning guidance now carries approved page rendering
-  decisions and visual intent through declarative and custom page planning,
-  including boards and confirmations.
 
 ### Fixed
 
@@ -458,6 +455,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Changed
 
+- Factory design and app-planning guidance now carries approved page rendering
+  decisions and visual intent through declarative and custom page planning,
+  including boards and confirmations.
+
 - Package CI now installs the optional ACP and E2B extras from the built wheel
   and verifies their dependencies, imports, and E2B adapter teardown tests
   without starting providers.
@@ -594,6 +595,12 @@ This project follows a practical pre-1.0 changelog format:
   generic completion card whose Continue could not proceed. When resolving a
   pending transition from the chat page fails, the screen now shows the error
   with a Retry instead of leaving a button that does nothing.
+
+- AppGenerator planning no longer fails every attempt when a selected
+  capability pack ships its own pages. An app with MozaiksPay selected got
+  the pack's Billing and Usage pages appended after review, and the plan
+  coverage check rejected them as unapproved; pages a selected pack ships now
+  count as approved, while a dropped or invented page is still rejected.
 
 - On a phone, the Studio Apps page shows the first app above the fixed bottom
   navigation: the summary tiles stay hidden below 768px, a paginated list keeps
