@@ -4369,7 +4369,7 @@ models:
       title_font:
         type: union
         variants:
-        - str
+        - AppPageTitleFont
         - 'null'
         description: "Optional title font hint: body or heading."
 
@@ -5720,6 +5720,75 @@ models:
         - 'null'
         description: Optional logo font patch.
 
+  AppPageTitleFont:
+    type: literal
+    values: [body, heading]
+
+  AppPageTitleWeight:
+    type: literal
+    values: [regular, medium, semibold, bold]
+
+  AppPageTitleSize:
+    type: literal
+    values: [sm, md, lg, xl]
+
+  AppPageTitleLineHeight:
+    type: literal
+    values: [tight, normal, relaxed]
+
+  AppPageTitleLetterSpacing:
+    type: literal
+    values: [tight, normal, wide]
+
+  AppPageTitleTextTransform:
+    type: literal
+    values: [none, uppercase, lowercase, capitalize]
+
+  AppPageTitleStylePatch:
+    type: model
+    description: Optional deltas to the app-owned semantic page-title role.
+    fields:
+      font:
+        type: union
+        variants: [AppPageTitleFont, 'null']
+        description: Existing app body or heading font slot; null preserves the captured value.
+      weight:
+        type: union
+        variants: [AppPageTitleWeight, 'null']
+        description: Title weight delta; null preserves the captured value.
+      size:
+        type: union
+        variants: [AppPageTitleSize, 'null']
+        description: Title scale delta; null preserves the captured value.
+      lineHeight:
+        type: union
+        variants: [AppPageTitleLineHeight, 'null']
+        description: Title line-height delta; null preserves the captured value.
+      letterSpacing:
+        type: union
+        variants: [AppPageTitleLetterSpacing, 'null']
+        description: Title tracking delta; null preserves the captured value.
+      textTransform:
+        type: union
+        variants: [AppPageTitleTextTransform, 'null']
+        description: Title casing delta; null preserves the captured value.
+
+  AppPageUiPatch:
+    type: model
+    fields:
+      title:
+        type: union
+        variants: [AppPageTitleStylePatch, 'null']
+        description: Optional page-title role patch; existing page spacing remains unchanged.
+
+  AppThemeUiPatch:
+    type: model
+    fields:
+      page:
+        type: union
+        variants: [AppPageUiPatch, 'null']
+        description: Optional semantic page visual patch.
+
   AppThemeConfigPatch:
     type: model
     fields:
@@ -5741,6 +5810,10 @@ models:
         - AppThemeFontsPatch
         - 'null'
         description: Optional font patch.
+      ui:
+        type: union
+        variants: [AppThemeUiPatch, 'null']
+        description: Optional typed semantic page-title patch.
 
   AppShellLogoPatch:
     type: model

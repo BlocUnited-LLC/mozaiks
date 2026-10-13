@@ -42,11 +42,11 @@ before the U2 candidate changes.
 | F02 | `chat-ui/src/ui/page-renderer/PageFrame.jsx` forces uppercase/heavy/spaced titles; `chat-ui/src/ui/primitives/PageHeader.jsx` has a different fixed title treatment. U2. |
 | F03 | `chat-ui/src/ui/page-renderer/PageRenderer.jsx` has fixed `gap-6`, a non-stacking sidebar and unknown-layout fallback. U2. |
 | F04 | `mozaiksai/core/runtime/app/page_schema.py` already owns the four-value layout contract. Extend closure tests; no new backend enum. |
-| F05 | `chat-ui/src/ui/page-renderer/PrimitiveCatalog.js` exports `DEFAULT_PAGE_RECIPE`. Consumer reach still needs tracing before changing guidance. |
+| F05 | `chat-ui/src/ui/page-renderer/PrimitiveCatalog.js` exports `DEFAULT_PAGE_RECIPE`, but source search found no consumer. The exporter reads only `PRIMITIVE_CATALOG`; Python guidance projects names and schema fields. Universal recipe enforcement is unproven; leave the unused export out of this slice. |
 | F06 | `factory_app/build_context/AppGenerator/shell_presets.yaml` and `mozaiksai/hosts/shell_config.py` distinguish prompt presets from runtime chrome modes. Selection/visual acceptance remains open. |
 | F07 | `mozaiksai/core/workflow/workflow_ui_catalog.py` distinguishes shipped/generated/built-in entries; reuse workflow export tests. |
 | F08 | `web_shell/tests/chatWidgetRoutes.browser.test.js` exercises Ask launchers and full workflow routes independently. Preserve this split. |
-| F09 | `web_shell/playwright/generated-app.generic.acceptance.spec.js` is a mocked declarative render smoke. U4 requires real-host mixed/custom browser evidence. |
+| F09 | `web_shell/playwright/generated-ui/generated-app.generic.acceptance.spec.js` is a mocked declarative render smoke. U4 requires real-host mixed/custom browser evidence. |
 | F10 | `scripts/generated_ui_acceptance.py` ignores skipped test results while collecting failures. Reporter/expected-route acceptance remains open. |
 | F11 | AppGenerator `context_variables.yaml`, `middleware.yaml` and registered build-context assets retain context ownership; U3 tests effective projections. |
 | F12 | #966 owns latest-feedback interpretation. Its reported WAL/prompt evidence is not a live reproduction in this audit. |

@@ -14,6 +14,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Changed
 
+- Shared page titles now follow the validated app-owned `ui.page.title` role;
+  page sections use app spacing, and sidebar pages stack on narrow screens.
+  Invalid explicit title roles and layouts report errors instead of silently
+  substituting another presentation.
 - Factory design and app-planning guidance now carries approved page rendering
   decisions and visual intent through declarative and custom page planning,
   including boards and confirmations.

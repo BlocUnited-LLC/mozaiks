@@ -71,6 +71,7 @@ from mozaiksai.core.runtime.app.paths import (
     noncanonical_app_root_paths,
     unsafe_app_paths,
 )
+from mozaiksai.core.runtime.app.theme_contract import validate_page_title_theme
 from mozaiksai.core.workflow.generator_support.code_files import (
     compile_data_contract,
     data_contract_requires_auth,
@@ -2334,6 +2335,12 @@ def scan_generated_bundle(
         )
     )
     scannable_files_map = filter_layout_scannable_file_map(files_map, layout_report)
+    for theme_path in ("brand/theme_config.json", "app/brand/theme_config.json"):
+        if theme_path in scannable_files_map:
+            try:
+                validate_page_title_theme(json.loads(scannable_files_map[theme_path]))
+            except ValueError as exc:
+                errors.append(f"{theme_path}: {exc}")
     errors.extend(
         _scan_canonical_app_paths(
             scannable_files_map,

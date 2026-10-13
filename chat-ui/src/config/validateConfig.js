@@ -11,6 +11,8 @@
  * @module @mozaiks/chat-ui/config/validateConfig
  */
 
+import { pageTitleStyleErrors } from '../ui/theme/pageTitle.js';
+
 const ICON_FILE_RE = /\.(svg|png|jpe?g|gif|webp|ico)$/i;
 const HEX_COLOR_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 const URL_RE = /^(https?:\/\/|\/)/;
@@ -184,6 +186,7 @@ function validateThemeConfig(config) {
 
   // Chat UI hints
   const ui = config.ui;
+  issues.push(...pageTitleStyleErrors(ui?.page?.title).map(message => ({ level: 'error', file, message })));
   if (ui?.chat?.modes && typeof ui.chat.modes !== 'object') {
     issues.push({ level: 'error', file, message: '"ui.chat.modes" must be an object keyed by chat mode.' });
   }

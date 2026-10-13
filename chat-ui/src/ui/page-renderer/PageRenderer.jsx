@@ -18,18 +18,20 @@ import { SectionRenderer } from './SectionRenderer.jsx';
 import { PageFrame } from './PageFrame.jsx';
 import { usePageData } from './usePageData.js';
 import { normalizeSections } from './schemaUtils.js';
-import { cn } from '../lib/cn.js';
+import { ErrorState } from '../primitives/Surface.jsx';
 
 // ---------------------------------------------------------------------------
 // Layout wrappers
 // ---------------------------------------------------------------------------
 
 const LAYOUT_CLASSES = {
-  'grid':       'grid gap-6 md:grid-cols-2 xl:grid-cols-3',
-  'sidebar':    'flex gap-6',
-  'full-width': 'flex flex-col gap-6',
-  'split':      'grid gap-6 md:grid-cols-2',
+  'grid':       'grid md:grid-cols-2 xl:grid-cols-3',
+  'sidebar':    'flex flex-col md:flex-row',
+  'full-width': 'flex flex-col',
+  'split':      'grid md:grid-cols-2',
 };
+
+const SECTION_SPACING = { gap: 'var(--shell-page-section-gap, 2rem)' };
 
 function SidebarLayout({ sections, sectionData, refetch, onNavigate }) {
   // First section goes in the sidebar; the rest fill the main area.
@@ -37,7 +39,7 @@ function SidebarLayout({ sections, sectionData, refetch, onNavigate }) {
   return (
     <>
       {sidebar && (
-        <aside className="w-64 shrink-0">
+        <aside className="min-w-0 w-full md:w-64 md:shrink-0">
           <SectionRenderer
             section={sidebar}
             pageData={sectionData}
@@ -46,7 +48,7 @@ function SidebarLayout({ sections, sectionData, refetch, onNavigate }) {
           />
         </aside>
       )}
-      <main className="min-w-0 flex-1 flex flex-col gap-6">
+      <main className="min-w-0 flex-1 flex flex-col" style={SECTION_SPACING}>
         {main.map((section) => (
           <SectionRenderer
             key={section.id}
@@ -63,7 +65,7 @@ function SidebarLayout({ sections, sectionData, refetch, onNavigate }) {
 
 function DefaultLayout({ sections, sectionData, refetch, layoutClass, onNavigate }) {
   return (
-    <div className={layoutClass}>
+    <div className={layoutClass} style={SECTION_SPACING}>
       {sections.map((section) => (
         <SectionRenderer
           key={section.id}
@@ -87,11 +89,11 @@ function DefaultLayout({ sections, sectionData, refetch, layoutClass, onNavigate
  * @param {string}         [props.className]
  * @param {(path:string)=>void} [props.onNavigate]
  */
-export function PageRenderer({ schema, className, onNavigate }) {
+function ValidPageRenderer({ schema, className, onNavigate }) {
   const { name, title, layout = 'full-width', sections: rawSections = [] } = schema;
 
   const sections = useMemo(() => normalizeSections(rawSections), [rawSections]);
-  const frameTitle = sections[0]?.primitive === 'PageHeader' ? null : title;
+  const frameTitle = sections.some(section => section.primitive === 'PageHeader') ? null : title;
 
   const { sectionData, refetch } = usePageData(sections);
 
@@ -99,7 +101,7 @@ export function PageRenderer({ schema, className, onNavigate }) {
     return refetch(sectionId, query);
   }, [refetch]);
 
-  const layoutClass = LAYOUT_CLASSES[layout] ?? LAYOUT_CLASSES['full-width'];
+  const layoutClass = LAYOUT_CLASSES[layout];
 
   return (
     <PageFrame
@@ -109,7 +111,7 @@ export function PageRenderer({ schema, className, onNavigate }) {
       className={className}
     >
       {layout === 'sidebar' ? (
-        <div className="flex gap-6">
+        <div className={layoutClass} style={SECTION_SPACING}>
           <SidebarLayout
             sections={sections}
             sectionData={sectionData}
@@ -128,4 +130,12 @@ export function PageRenderer({ schema, className, onNavigate }) {
       )}
     </PageFrame>
   );
+}
+
+export function PageRenderer(props) {
+  const layout = props.schema?.layout === undefined ? 'full-width' : props.schema.layout;
+  if (!Object.hasOwn(LAYOUT_CLASSES, layout)) {
+    return <ErrorState title="Invalid page layout" message={`Unsupported layout: ${String(layout)}`} />;
+  }
+  return <ValidPageRenderer {...props} />;
 }
