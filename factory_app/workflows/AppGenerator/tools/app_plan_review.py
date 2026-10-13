@@ -1742,7 +1742,12 @@ def validate_plan_coverage(plan: dict[str, Any], context: Any) -> None:
     if len(set(planned_routes)) != len(planned_routes):
         errors.append("page routes must be unique")
     expected_pages = {(page["name"], page["route"]) for page in _approved_page_inventory(context)}
-    if expected_pages and {(page["name"], page["route"]) for page in pages} != expected_pages:
+    # A selected pack ships its declared pages from its own templates, so the
+    # cached plan carries them even when the approved design left them out.
+    # Only a page nobody approved and no selected pack ships is invented scope.
+    pack_pages = {(page["name"], page["route"]) for page in pages if planned_page_path(page) in pack_paths}
+    planned_pages = {(page["name"], page["route"]) for page in pages}
+    if expected_pages and (expected_pages - planned_pages or planned_pages - expected_pages - pack_pages):
         errors.append(f"pages must preserve the approved name/route inventory: {sorted(expected_pages)}")
     all_page_paths = _required_page_paths(plan)[1:]
     if len(set(all_page_paths)) != len(all_page_paths):
