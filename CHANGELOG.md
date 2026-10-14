@@ -12,14 +12,6 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
-### Fixed
-
-- Preserve historical large AppContext payloads across discovery refreshes by
-  giving each distinct JSON payload its own content-store key.
-- Existing-app source scans prioritize canonical admin and workflow registries
-  before the file limit, so large app workspaces retain their workflow entry
-  points during brownfield discovery without increasing scan budgets.
-
 ## 0.2.0 - 2026-10-11
 
 ### Added
@@ -583,6 +575,26 @@ This project follows a practical pre-1.0 changelog format:
   logger, plus an unreachable duplicate artifact lookup branch.
 
 ### Fixed
+
+- Preserve historical large AppContext payloads across discovery refreshes by
+  giving each distinct JSON payload its own content-store key.
+- Existing-app source scans prioritize canonical admin and workflow registries
+  before the file limit, so large app workspaces retain their workflow entry
+  points during brownfield discovery without increasing scan budgets.
+- AppGenerator now steers a generated module's backend task that owns
+  `backend/base_handler.py` to the canonical two-file handler: `base_handler.py`
+  holds the custom action dispatch and `backend/handler.py` defines the exact
+  `module.yaml` `module.handler` class as its workspace subclass. Plan review
+  appends this split, the files to author and the code-rendered files to each
+  such business_services task. The handler class comes from the plan, then
+  from the existing `module.yaml` (a revision baseline), and only then from the
+  module-contract naming rule, which the note labels as such and also gives
+  the module's contract task. ServiceAgent's worked example now shows the
+  split; a task that owns only `handler.py` keeps the single handler class. A
+  rejected task attempt now reports a model-authored copy of the code-rendered
+  `policy.py` together with its missing or unowned files and any later Python
+  error, so one correction round can fix them all. A live build had ended after
+  its two attempts each surfaced only one of these problems.
 
 - A transition screen now shows only the transition currently pending. When a
   run completed and the journey's next choice arrived within milliseconds, a

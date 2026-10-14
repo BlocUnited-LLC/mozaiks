@@ -2771,7 +2771,7 @@ models:
     fields:
       path:
         type: str
-        description: Module-local Python stub path such as backend/handler.py, backend/service.py, backend/repo.py, backend/policy.py, backend/schemas.py, or backend/settings.py.
+        description: Module-local Python stub path such as backend/base_handler.py, backend/handler.py, backend/service.py, backend/repo.py, backend/policy.py, backend/schemas.py, or backend/settings.py.
       kind:
         type: literal
         values:
@@ -6356,7 +6356,7 @@ models:
         - notifications_hook
         - admin_hook
         - helper
-        description: Stub family. Must match the declared module_contract.python_stubs entry. policy.py is rendered deterministically from data_contract and must not be emitted as model source.
+        description: Stub family. Must match the declared module_contract.python_stubs entry. backend/base_handler.py and backend/handler.py both use kind handler. policy.py is rendered deterministically from data_contract and must not be emitted as model source.
       purpose:
         type: str
         description: Why this implemented Python stub exists.

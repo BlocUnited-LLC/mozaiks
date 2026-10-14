@@ -1,0 +1,358 @@
+{
+ "build_tasks": [
+  {
+   "acceptance_criteria": [
+    "module.yaml must exist and declare actions: create_customer, update_customer, delete_customer, create_job, update_job, delete_job.",
+    "events.yaml must exist and declare domain.crm.customer_created, domain.crm.customer_updated, domain.crm.customer_deleted, domain.crm.job_created, domain.crm.job_updated, domain.crm.job_deleted.",
+    "no orphaned or missing required contracts; surface ownership must be app-owned.",
+    "admin/settings/profilecontracts must align with design surface_map; panels derived from module actions."
+   ],
+   "capability_pack_id": "crm_core",
+   "context_variables": [],
+   "depends_on": [],
+   "description": "CRM Core canonical module contract with declared actions and events.",
+   "domain_context": null,
+   "execution_target": "backend-foundation",
+   "initial_agent": "ConfigMiddlewareAgent",
+   "initial_message": "Provide module.yaml for crm_core with actions: create_customer, update_customer, delete_customer, create_job, update_job, delete_job; declare domain events: domain.crm.customer_created, domain.crm.customer_updated, domain.crm.customer_deleted, domain.crm.job_created, domain.crm.job_updated, domain.crm.job_deleted; include references to dependent contracts and replication rules.",
+   "integration_needs": [],
+   "owned_paths": [
+    "modules/crm_core/module.yaml",
+    "modules/crm_core/contracts/events.yaml",
+    "modules/crm_core/contracts/reactions.yaml",
+    "modules/crm_core/contracts/notifications.yaml",
+    "modules/crm_core/contracts/policy_hooks.yaml",
+    "modules/crm_core/contracts/settings.yaml",
+    "modules/crm_core/contracts/admin.yaml",
+    "modules/crm_core/contracts/profile.yaml",
+    "modules/crm_core/contracts/relationships.yaml",
+    "modules/crm_core/runtime_extensions.yaml"
+   ],
+   "surface_id": "crm_core",
+   "surface_kind": "module",
+   "task_id": "tt_module_contract_crm_core",
+   "task_type": "module_contract"
+  },
+  {
+   "acceptance_criteria": [
+    "handler.py defines the CRM core actions implementing create/update/delete for Customer and Job.",
+    "service.py and repo.py implement persistence boundaries; policy.py implements simple ownership checks.",
+    "backend files align with module contract stubs and data_model interfaces."
+   ],
+   "capability_pack_id": "crm_core",
+   "context_variables": [],
+   "depends_on": [
+    "tt_module_contract_crm_core",
+    "tt_data_models_crm_core",
+    "tt_persistence_crm_core"
+   ],
+   "description": "CRM Core business services for persistent module.",
+   "domain_context": null,
+   "execution_target": "business-services",
+   "initial_agent": "ServiceAgent",
+   "initial_message": "Implement backend/handler.py, backend/service.py, backend/repo.py, backend/policy.py for CRM Core; use modules/crm_core/backend/schemas.py for DTOs and ensure dependency on module_contract and data_models outputs.",
+   "integration_needs": [],
+   "owned_paths": [
+    "modules/crm_core/backend/handler.py",
+    "modules/crm_core/backend/base_handler.py",
+    "modules/crm_core/backend/service.py",
+    "modules/crm_core/backend/repo.py",
+    "modules/crm_core/backend/policy.py"
+   ],
+   "surface_id": "crm_core",
+   "surface_kind": "module",
+   "task_id": "tt_business_services_crm_core",
+   "task_type": "business_services"
+  }
+ ],
+ "data_contract": {
+  "app_id": "draft-app-ed82179a",
+  "artifact_version_id": null,
+  "policies": {
+   "allow_destructive_migrations": false,
+   "default_scope_field": "app_id"
+  },
+  "shared_collections": [],
+  "surfaces": [
+   {
+    "collections": [
+     {
+      "entity": "Customer",
+      "fields": [
+       {
+        "default": null,
+        "enum": null,
+        "name": "customer_id",
+        "nullable": false,
+        "required": true,
+        "type": "string"
+       },
+       {
+        "default": null,
+        "enum": null,
+        "name": "user_id",
+        "nullable": false,
+        "required": true,
+        "type": "string"
+       },
+       {
+        "default": null,
+        "enum": null,
+        "name": "app_id",
+        "nullable": false,
+        "required": true,
+        "type": "string"
+       },
+       {
+        "default": null,
+        "enum": null,
+        "name": "name",
+        "nullable": false,
+        "required": true,
+        "type": "string"
+       },
+       {
+        "default": null,
+        "enum": null,
+        "name": "phone",
+        "nullable": true,
+        "required": false,
+        "type": "string"
+       },
+       {
+        "default": null,
+        "enum": null,
+        "name": "email",
+        "nullable": true,
+        "required": false,
+        "type": "string"
+       },
+       {
+        "default": null,
+        "enum": null,
+        "name": "address",
+        "nullable": true,
+        "required": false,
+        "type": "string"
+       },
+       {
+        "default": null,
+        "enum": null,
+        "name": "notes",
+        "nullable": true,
+        "required": false,
+        "type": "string"
+       },
+       {
+        "default": null,
+        "enum": null,
+        "name": "created_at",
+        "nullable": false,
+        "required": true,
+        "type": "datetime"
+       },
+       {
+        "default": null,
+        "enum": null,
+        "name": "updated_at",
+        "nullable": false,
+        "required": true,
+        "type": "datetime"
+       }
+      ],
+      "indexes": [
+       {
+        "keys": [
+         {
+          "field": "user_id",
+          "order": 1
+         },
+         {
+          "field": "app_id",
+          "order": 1
+         },
+         {
+          "field": "customer_id",
+          "order": 1
+         }
+        ],
+        "name": "idx_b1c3a469cb910c65",
+        "sparse": null,
+        "unique": true
+       }
+      ],
+      "lifecycle": {
+       "migration_policy": "additive_only",
+       "write_mode": "module_action"
+      },
+      "name": "customers",
+      "owner_field": "user_id",
+      "ownership": {
+       "surface_id": "crm_core",
+       "surface_kind": "module"
+      },
+      "scope": "app",
+      "search_by": "customer_id",
+      "tenancy": "per_user"
+     },
+     {
+      "entity": "Job",
+      "fields": [
+       {
+        "default": null,
+        "enum": null,
+        "name": "job_id",
+        "nullable": false,
+        "required": true,
+        "type": "string"
+       },
+       {
+        "default": null,
+        "enum": null,
+        "name": "user_id",
+        "nullable": false,
+        "required": true,
+        "type": "string"
+       },
+       {
+        "default": null,
+        "enum": null,
+        "name": "app_id",
+        "nullable": false,
+        "required": true,
+        "type": "string"
+       },
+       {
+        "default": null,
+        "enum": null,
+        "name": "customer_id",
+        "nullable": false,
+        "required": true,
+        "type": "string"
+       },
+       {
+        "default": null,
+        "enum": null,
+        "name": "title",
+        "nullable": false,
+        "required": true,
+        "type": "string"
+       },
+       {
+        "default": null,
+        "enum": null,
+        "name": "date",
+        "nullable": false,
+        "required": true,
+        "type": "date"
+       },
+       {
+        "default": "planned",
+        "enum": [
+         "planned",
+         "in_progress",
+         "completed",
+         "cancelled"
+        ],
+        "name": "status",
+        "nullable": false,
+        "required": true,
+        "type": "string"
+       },
+       {
+        "default": null,
+        "enum": null,
+        "name": "price",
+        "nullable": true,
+        "required": false,
+        "type": "number"
+       },
+       {
+        "default": null,
+        "enum": null,
+        "name": "notes",
+        "nullable": true,
+        "required": false,
+        "type": "string"
+       },
+       {
+        "default": null,
+        "enum": null,
+        "name": "created_at",
+        "nullable": false,
+        "required": true,
+        "type": "datetime"
+       },
+       {
+        "default": null,
+        "enum": null,
+        "name": "updated_at",
+        "nullable": false,
+        "required": true,
+        "type": "datetime"
+       }
+      ],
+      "indexes": [
+       {
+        "keys": [
+         {
+          "field": "user_id",
+          "order": 1
+         },
+         {
+          "field": "app_id",
+          "order": 1
+         },
+         {
+          "field": "job_id",
+          "order": 1
+         }
+        ],
+        "name": "idx_8f968cc290bea186",
+        "sparse": null,
+        "unique": true
+       }
+      ],
+      "lifecycle": {
+       "migration_policy": "additive_only",
+       "write_mode": "module_action"
+      },
+      "name": "jobs",
+      "owner_field": "user_id",
+      "ownership": {
+       "surface_id": "crm_core",
+       "surface_kind": "module"
+      },
+      "scope": "app",
+      "search_by": "job_id",
+      "tenancy": "per_user"
+     }
+    ],
+    "surface_id": "crm_core",
+    "surface_kind": "module"
+   }
+  ],
+  "version": "1"
+ },
+ "live_module_handler": "backend.handler:CrmCoreModule",
+ "live_task_failure": {
+  "attempts": 2,
+  "error": "task batch 'app_build_tasks' task 'tt_business_services_crm_core' did not emit required owned_paths: ['modules/crm_core/backend/base_handler.py']",
+  "failure_kind": "output_rejected",
+  "recoverable": false,
+  "rejected_output_paths": [
+   "modules/crm_core/backend/handler.py",
+   "modules/crm_core/backend/repo.py",
+   "modules/crm_core/backend/service.py"
+  ],
+  "worker_agent": "ServiceAgent"
+ },
+ "source": {
+  "build_tasks": "AG2NetworkKnowledge wal.jsonl envelope 38 (AppPlanAgent packet), crm_core module_contract and business_services tasks",
+  "chat_id": "601d2f56-940e-4f28-acf2-342bac8f48c1",
+  "data_contract": "wal.jsonl envelope 0 channel knobs context_vars.data_contract, crm_core surface",
+  "live_module_handler": "ChatSessions.generated_files['modules/crm_core/module.yaml'] module.handler",
+  "live_task_failure": "ChatSessions.app_task_batch_results._failed.tt_business_services_crm_core (final attempt)",
+  "sha": "157b92ec"
+ }
+}

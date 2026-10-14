@@ -156,7 +156,7 @@ agents:
       - Every owned_paths entry is one exact file path, never a pattern: write modules/{module_id}/contracts/events.yaml, not modules/{module_id}/contracts/*.yaml.
       - In a revision, pages and capability_packs are complete retained inventories, not generation requests. Read all baseline ui/pages/*.yaml and module.yaml files before emitting them. A backend-only change must still include every existing page; put only changed files in build_tasks.
       - Product categories such as CRUD are not managed services. An app-owned module in design_surface_map stays app-owned; managed_capability requires an actual registered provider pack from capability_packs.
-      - For a new app, page_bundle tasks must collectively own app.json and every planned ui/pages/*.yaml file, with exactly one task owning app.json. Revision tasks may own only changed pages and preserve app.json from the verified baseline. A page-only page_bundle task emits manifest: null; do not add app.json ownership just to satisfy its output shape. Preserve all approved ExperienceSpec page names and routes. Each generated module needs module_contract, data_models, and business_services tasks; modules with owned primary_entities need handler.py, service.py, repo.py, policy.py, and schemas.py across those tasks. In task initial_message, distinguish final artifact ownership from model implementation: policy.py and schemas.py for modules owning collections are rendered by code. Keep their owned_paths, but never ask a worker to generate their source or placeholder stubs.
+      - For a new app, page_bundle tasks must collectively own app.json and every planned ui/pages/*.yaml file, with exactly one task owning app.json. Revision tasks may own only changed pages and preserve app.json from the verified baseline. A page-only page_bundle task emits manifest: null; do not add app.json ownership just to satisfy its output shape. Preserve all approved ExperienceSpec page names and routes. Each generated module needs module_contract, data_models, and business_services tasks; modules with owned primary_entities need base_handler.py, handler.py, service.py, repo.py, policy.py, and schemas.py across those tasks. In task initial_message, distinguish final artifact ownership from model implementation: policy.py and schemas.py for modules owning collections are rendered by code. Keep their owned_paths, but never ask a worker to generate their source or placeholder stubs.
       - Ordinary app-owned CRUD is generated_module, not framework_pack. Framework packs must actually exist in the injected capability_packs registry. Use the approved module surface_id for capability_pack_id and every module task/path. Keep category names such as crud_pack in pack_type only. Generate complete working behavior, not empty stubs.
       - Registered operator packs retain capability_source=operator_pack through planning and template materialization. Use their declared outputs for the approved surfaces; do not relabel them as managed_capability, framework_pack, or generated_module. An unregistered category is not an operator pack.
       - The authentication scaffold step emits config/auth.yaml and the shared auth adapter before runtime validation; do not add duplicate auth provider implementation tasks. Persistent entities use the canonical data contract and ctx.persistence, not a new database service.
@@ -409,7 +409,7 @@ agents:
           1. one `persistence_contract` task with `initial_agent: DatabaseAgent`, `surface_id: data_contract`, `surface_kind: module`, `capability_pack_id: null`, and `owned_paths: ["data/contract.json"]`; separately approved additive migrations use `data_migrations` tasks with their owning capability;
           2. one `module_contract` task per app-owned module, with `initial_agent: ConfigMiddlewareAgent`, with owned paths only for `modules/{module_id}/module.yaml`, needed `modules/{module_id}/contracts/*.yaml`, and optional `modules/{module_id}/runtime_extensions.yaml`;
           3. one `data_models` task per persistent module, with `initial_agent: ModelAgent`, with owned path `modules/{module_id}/backend/schemas.py`;
-          4. one `business_services` task per persistent module, with `initial_agent: ServiceAgent`, with owned paths for `modules/{module_id}/backend/handler.py`, `modules/{module_id}/backend/service.py`, `modules/{module_id}/backend/repo.py`, `modules/{module_id}/backend/policy.py`, and any optional backend hook files declared by the module contract.
+          4. one `business_services` task per persistent module, with `initial_agent: ServiceAgent`, with owned paths for `modules/{module_id}/backend/base_handler.py`, `modules/{module_id}/backend/handler.py`, `modules/{module_id}/backend/service.py`, `modules/{module_id}/backend/repo.py`, `modules/{module_id}/backend/policy.py`, and any optional backend hook files declared by the module contract.
           5. set `AppCapabilityPack.user_data_scope: true` when the module owns user-scoped records; require the same `module.user_data_scope: true` in the module contract task and include `modules/{module_id}/backend/account_data_handler.py` in the business_services task's owned_paths. The module contract must declare its `account_data_handler` stub. This is internal account lifecycle support, not a customer-data import/export page; do not omit it merely because customer-facing import/export is out of scope.
           Generated module repos use `ctx.persistence.collection(module_id, collection_name)` downstream. Keep removed database adapter APIs, hardcoded database names, and removed model/database artifacts out of the plan.
           Data contracts are an explicit exception for apps that need a canonical app data contract or explicit existing-DB integration. When used, route it through `data/contract.json`; do not generate non-canonical app-level backend, `services/data/` helpers, shared-persistence folders, or a special hosted/platform folder.
@@ -589,7 +589,7 @@ agents:
         - `initial_message` must pass the pack's entities, actions, capability ids, events, subscriptions/reactions, notifications, settings, required stubs, `app_backend_url`, and any `generated_workflow_*` metadata needed downstream.
         - **admin panels are derived from module actions**: include admin panel requirements in `initial_message` for every `module_contract` task. Derive the operator panel spec from the module's declared actions using this mapping: list/query actions (`list_*`, `search_*`) → primary `DataTable` or `ResourceTable` panel; stats/summary actions (`*_stats`, `*_summary`, `*_metrics`) → `SummaryStrip` panel alongside the record table; approval/write/status-change actions (`approve_*`, `reject_*`, `publish_*`, `update_*`) → row-level or toolbar actions inside the primary panel (not separate panels). Section placement from module domain: billing/subscription/payment/invoice entities → `section: billing`; user/account/member/profile entities → `section: access`; request/queue/approval/job entities → `section: operations`; usage/quota/limit/metric entities → `section: usage`; setting/preference/config entities → `section: settings`; all others → `section: overview`. Include this derived spec in `initial_message` so module contract generation emits non-empty `panels[]`. For any stats/summary action, state that values must be repo-backed and trend/change fields must be omitted or null unless the module has a real historical source. Exception: do NOT derive admin panels for `surface_kind` values of `app_policy`, `refinement`, `ui_only`, or `external_integration` — those surfaces are not durable entity modules.
         - Set `initial_agent: ConfigMiddlewareAgent` for this task.
-        - For durable modules, the module contract must declare `python_stubs` for the canonical backend set (`backend/handler.py`, `backend/service.py`, `backend/repo.py`, `backend/policy.py`, `backend/schemas.py`) even though this task only emits YAML. The sibling `data_models` and `business_services` tasks implement model-owned stubs; code renders policy.py from data_contract.
+        - For durable modules, the module contract must declare `python_stubs` for the canonical backend set (`backend/base_handler.py` and `backend/handler.py`, both kind `handler`, `backend/service.py`, `backend/repo.py`, `backend/policy.py`, `backend/schemas.py`) even though this task only emits YAML. The sibling `data_models` and `business_services` tasks implement model-owned stubs; code renders policy.py from data_contract.
         - For generated durable modules, set every `actions[].handler_method` equal to the action `id` unless a non-generated carry-forward contract already requires a different method. This keeps generated module.yaml, handler.py, and page endpoints deterministic.
         - Do NOT generate implementation code here. YAML declares the contract; downstream agents implement only the declared Python and JS stubs.
         - `module_contract` tasks run in the `backend-foundation` phase, before `data-models`.
@@ -597,8 +597,8 @@ agents:
       12c-0. **module backend implementation tasks**:
         - For every durable `module_contract` task, add a `data_models` task with `initial_agent: ModelAgent`, the same `capability_pack_id`, `surface_id`, and `surface_kind: module`, `owned_paths: ["modules/{module_id}/backend/schemas.py"]`, and `depends_on` including the module contract task and the persistence contract task when one exists.
         - For every durable `module_contract` task, add a `business_services` task with `initial_agent: ServiceAgent`, the same `capability_pack_id`, `surface_id`, and `surface_kind: module`, owned paths for `backend/base_handler.py`, `backend/handler.py`, `backend/service.py`, `backend/repo.py`, `backend/policy.py`, plus optional backend hooks declared by the module contract. Do not include `backend/schemas.py` in this task.
-        - **Handler split rule**: every generated module ships two handler files. `base_handler.py` contains the full implementation class (`{PascalModuleId}BaseHandler`) and is always regenerated. `handler.py` is a thin workspace subclass (`{PascalModuleId}Handler({PascalModuleId}BaseHandler)`) that is preserved across regeneration — app operators add overrides and extra actions here. `module.yaml.module.handler` always points at `backend.handler:{PascalModuleId}Handler`. When `build_context/{pack_id}/extensions.yaml` exists, AppGenerator reads it and emits the declared action overrides and extra actions as methods on the `handler.py` subclass rather than leaving it empty.
-        - Every `business_services` task `initial_message` must restate the exact module handler entrypoint class from module.yaml and the complete action method list. Example: `module.handler is backend.handler:TicketsModule; base_handler.py defines class TicketsBaseModule implementing all actions; handler.py defines class TicketsModule(TicketsBaseModule) preserved for workspace extensions.`
+        - **Handler split rule**: every generated module ships two handler files. `base_handler.py` contains the implementation base class (`{PascalModuleId}BaseModule`) holding the custom action methods and is always regenerated. `handler.py` is a thin workspace subclass (`{PascalModuleId}Module({PascalModuleId}BaseModule)`) that is preserved across regeneration — app operators add overrides and extra actions here, and code adds the canonical CRUD methods to it. `module.yaml.module.handler` always points at `backend.handler:{PascalModuleId}Module`. When `build_context/{pack_id}/extensions.yaml` exists, AppGenerator reads it and emits the declared action overrides and extra actions as methods on the `handler.py` subclass rather than leaving it empty.
+        - Every `business_services` task `initial_message` must restate the exact module handler entrypoint class from module.yaml, the complete action method list, the files to author (including base_handler.py), and that policy.py, schemas.py and canonical CRUD methods are code-rendered. Example: `module.handler is backend.handler:TicketsModule; base_handler.py defines class TicketsBaseModule implementing the custom actions; handler.py defines class TicketsModule(TicketsBaseModule) preserved for workspace extensions. Author base_handler.py, handler.py, service.py, repo.py; code renders policy.py, schemas.py and the canonical CRUD methods.` Plan review appends this restatement when it is missing.
         - The service implementation task must depend on the module contract task, the data_models task, and the persistence contract task when one exists.
         - The `initial_message` for both implementation tasks must tell the worker to read `dependency_task_outputs` / `app_task_batch_results` for the completed module contract and data contract before emitting files.
       12c-1. **refinement_harness rule**: For an explicit `surface_kind = refinement` capability, include a `task_type: refinement_harness` build task only when the app needs its own lifecycle/refinement/session harness:
@@ -2374,8 +2374,8 @@ agents:
     heading: '[OBJECTIVE]'
     content: |-
       - Generate only the model-owned backend implementations declared in the supplied module contracts and assigned to current_build_task.owned_paths.
-      - Keep `backend/handler.py` thin and aligned with `module.yaml.actions[].handler_method`.
-      - Implement `backend/handler.py`, `backend/service.py`, `backend/repo.py`, and optional backend hooks when those paths are listed in `current_build_task.owned_paths`.
+      - Keep the handler files thin and aligned with `module.yaml.actions[].handler_method`. When `backend/base_handler.py` is in `current_build_task.owned_paths`, it holds the custom action dispatch in a base class and `backend/handler.py` defines the exact `module.yaml.module.handler` class as its workspace subclass. When it is not owned, `backend/handler.py` defines that class with the dispatch directly; do not create base_handler.py.
+      - Implement `backend/handler.py`, `backend/service.py`, `backend/repo.py`, `backend/base_handler.py`, and optional backend hooks when those paths are listed in `current_build_task.owned_paths`.
       - Emit every model-owned path listed in `current_build_task.owned_paths`. Code renders the canonical create/update/delete and list/get implementations into the owned handler/service/repo files, the owned `backend/policy.py`, and the module's `backend/schemas.py`, all from the approved data_contract. Omit policy.py and schemas.py from python_files and code_files. Missing declared scope requires contract correction, never an invented policy stub.
       - Implement only genuine business logic: the optional write hooks below, declared custom mutations, and declared custom_reads. Never author `create_<entity>`, `update_<entity>`, `delete_<entity>`, `list_<collection>` or `get_<collection>` in any handler, service, or repo class or function; code supplies them and replaces any authored copy.
       - Write hooks are plain module-level `async def` functions in `backend/service.py`, discovered by exact name; the rendered canonical service calls them when present and skips them when absent. For entity `Task`: `before_create_task(ctx, values) -> values`, `after_create_task(ctx, record)`, `before_update_task(ctx, record, changes) -> changes`, `after_update_task(ctx, record, changes)`, `before_delete_task(ctx, record)`, `after_delete_task(ctx, record)`. Task admission rejects a sync hook, a hook with another signature, a hook defined inside a class, or a hook naming an entity the module does not own. A before hook may return the (possibly mutated) payload or None, which means unchanged; the id and managed timestamps it returns are stripped with a logged warning, an update hook cannot change the owner field, and a create hook that sets a foreign owner is rejected by the runtime. Use before hooks for validation (raise `ModuleInputValidationError`) and derived fields; use after hooks for side effects and `await ctx.emit(...)` of custom events declared on that canonical action. The rendered service itself emits the canonical `domain.<entity>.<created|updated|deleted>` event after the after hook returns, with the stored record as payload; a hook emitting it again is removed.
@@ -2421,9 +2421,10 @@ agents:
         or api_surface adapter tasks before backend implementation begins.
 
       **Module implementation structure**:
-      - Required module adapter code goes in `modules/{capability_pack_id}/backend/handler.py`.
+      - Required module adapter code goes in `modules/{capability_pack_id}/backend/handler.py`, and in `backend/base_handler.py` when the task owns it.
       - Durable module logic should be layered across:
-        - `backend/handler.py` — action adapter only
+        - `backend/base_handler.py` — when owned: base class with the custom action dispatch only
+        - `backend/handler.py` — the exact module.handler class: a workspace subclass of that base when base_handler.py is owned, otherwise the dispatch class itself
         - `backend/service.py` — business logic + event publication
         - `backend/repo.py` — persistence
         - `backend/policy.py` — code-rendered optional ownership preflight helpers; omit model source even when this path is assigned to the task
@@ -2435,7 +2436,7 @@ agents:
       - For membership-style modules, implement resource-scoped user class records in the generated module itself. Policy checks must combine `context.user_id`, `context.tenant_id`, `context.workspace_id`, `context.permissions`, and module-owned membership records. Never accept request-body `user_id`, `tenant_id`, `workspace_id`, `class`, `role`, or `permissions` as authorization truth. `list_user_relationships` returns safe routing inventory only, and `authorize_<resource>_route` returns a minimal allowed/status/capabilities summary without raw records, secrets, payment provider fields, or ledger data. If class labels/categories/default weights are needed, load them from `contracts/settings.yaml` or module-owned records instead of hardcoding Python constants.
       - `backend/repo.py` is the only generated backend layer that touches `context.persistence`. `backend/service.py` calls repo methods, and `backend/handler.py` never touches persistence.
       - The runtime executor calls each module action as `handler_method(ctx, **params)`. Every generated handler method must accept runtime context as the first positional parameter after `self` (`ctx` or `context`) and then either `**params` or named parameters matching module.yaml input_schema fields.
-      - When both base_handler.py and handler.py are owned, put model-owned thin action dispatch in a distinctly named base class. Define the exact module.yaml.module.handler class in handler.py as its workspace subclass; an import or re-export alone is invalid. For example, base_handler.py defines TaskBaseHandler, and handler.py imports TaskBaseHandler and defines class TaskHandler(TaskBaseHandler) with a workspace docstring. Use the actual contract's class name in place of TaskHandler. Code adds canonical methods to this concrete workspace class; do not duplicate them in the base.
+      - When both base_handler.py and handler.py are owned, put model-owned thin action dispatch in a distinctly named base class. Define the exact module.yaml.module.handler class in handler.py as its workspace subclass; an import or re-export alone is invalid. For example, base_handler.py defines TaskManagerBaseModule, and handler.py imports TaskManagerBaseModule and defines class TaskManagerModule(TaskManagerBaseModule) with a workspace docstring, as in the output example below. Use the actual contract's class name in place of TaskManagerModule. Code adds canonical methods to this concrete workspace class; do not duplicate them in the base.
       - A workspace subclass may initially contain only its docstring; do not invent identity methods or empty runtime functions to fill a file. Preserve genuine custom action dispatch in the base when repairing the subclass declaration.
       - Generated `backend/repo.py` must use `context.persistence.collection(module_id, collection_name)` with the declared collection `name` from `data_contract` and `data/contract.json`. A declared `entity` value resolves to the same collection; unknown references fail closed. Do not guess a storage name from singular/plural entity wording.
       - Generated module code must not use `ctx.db` or `context.db`, must not import or call `get_mongo_client()`, and must not hardcode database names.
@@ -2450,11 +2451,11 @@ agents:
     heading: '[INSTRUCTIONS]'
     content: |-
       1. Read the accepted prerequisite module.yaml handler entrypoint and every actions[].handler_method. Define that exact handler class and every model-owned method; a class rename alone does not complete missing actions. Code adds the canonical write and read methods. In task batch mode, implement exactly the model-owned backend files listed in `current_build_task.owned_paths`. They must be a subset of `module_contract.python_stubs`.
-      2. For durable module surfaces, make `backend/handler.py` a thin adapter that delegates to service/policy/repo/schemas helpers rather than holding all business logic inline.
+      2. For durable module surfaces, make the handler files thin adapters that delegate to service/policy/repo/schemas helpers rather than holding business logic inline.
       3. Use the code-rendered backend/schemas.py supplied in dependency_task_outputs or admitted code_files/generated_files; it is the one record representation handler, service and repo share.
       4. For persistent modules, generate `backend/repo.py` around `context.persistence.collection(module_id, collection_name)`. If `context.persistence` is unavailable, raise a clear RuntimeError from repo.py. Do not use `ctx.db`, `context.db`, `get_mongo_client()`, `get_database()`, or hardcoded database names.
       5. Do not store API keys, OAuth secrets, refresh tokens, or connector metadata in generated module collections. Generated code should consume platform-managed connector/config surfaces instead.
-      6. Implement each model-owned `handler_method` declared by module.yaml actions on the exact class named in `module.yaml.module.handler`; omit canonical methods supplied by code. Do not singularize/pluralize the class name, and do not add hidden actions.
+      6. Implement each model-owned `handler_method` declared by module.yaml actions so the exact class named in `module.yaml.module.handler` provides it, through its base_handler.py base class when that file is owned; omit canonical methods supplied by code. Do not singularize/pluralize the class name, and do not add hidden actions.
       6a. Handler signatures must match the runtime executor: `async def action_name(self, ctx, **params)` or `async def action_name(self, ctx, field: Type = ...)`. Do not put `context` last.
       7. Put state transitions and event publication in `backend/service.py` when that file is declared.
       8. Put persistence queries/writes in `backend/repo.py` when that file is declared.
@@ -2522,20 +2523,30 @@ agents:
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-
-      Output MUST be a valid JSON object matching `ServiceOutput` and NO additional text:
+      Output MUST be a valid JSON object matching `ServiceOutput` and NO additional text.
+
+      This example is for a task whose `current_build_task.owned_paths` include `backend/base_handler.py`. When base_handler.py is not owned, omit its entries and put the same dispatch methods directly on the module.handler class in handler.py.
 
       ```json
       {
         "python_files": [
           {
-            "path": "modules/task_manager/backend/handler.py",
+            "path": "modules/task_manager/backend/base_handler.py",
             "kind": "handler",
-            "purpose": "Thin action adapters for the declared custom mutation and custom read; code adds canonical methods.",
+            "purpose": "Base class with thin dispatch for the declared custom mutation and custom read.",
             "contract_refs": [
-              "module_yaml.module.handler",
               "module_yaml.actions[*].handler_method"
             ],
-            "content": "class TaskManagerModule:\n    async def complete_task(self, ctx, **params):\n        from . import service\n        return await service.complete_task(ctx, params[\"task_id\"])\n\n    async def summarize_tasks(self, ctx, **params):\n        from . import service\n        return await service.summarize_tasks(ctx)\n"
+            "content": "class TaskManagerBaseModule:\n    async def complete_task(self, ctx, **params):\n        from . import service\n        return await service.complete_task(ctx, params[\"task_id\"])\n\n    async def summarize_tasks(self, ctx, **params):\n        from . import service\n        return await service.summarize_tasks(ctx)\n"
+          },
+          {
+            "path": "modules/task_manager/backend/handler.py",
+            "kind": "handler",
+            "purpose": "The exact module.handler class as the workspace subclass; code adds canonical methods to it.",
+            "contract_refs": [
+              "module_yaml.module.handler"
+            ],
+            "content": "from .base_handler import TaskManagerBaseModule\n\n\nclass TaskManagerModule(TaskManagerBaseModule):\n    \"\"\"Workspace extensions for task_manager; code adds the canonical CRUD methods here.\"\"\"\n"
           },
           {
             "path": "modules/task_manager/backend/service.py",
@@ -2560,8 +2571,12 @@ agents:
         ],
         "code_files": [
           {
+            "filename": "modules/task_manager/backend/base_handler.py",
+            "content": "class TaskManagerBaseModule:\n    async def complete_task(self, ctx, **params):\n        from . import service\n        return await service.complete_task(ctx, params[\"task_id\"])\n\n    async def summarize_tasks(self, ctx, **params):\n        from . import service\n        return await service.summarize_tasks(ctx)\n"
+          },
+          {
             "filename": "modules/task_manager/backend/handler.py",
-            "content": "class TaskManagerModule:\n    async def complete_task(self, ctx, **params):\n        from . import service\n        return await service.complete_task(ctx, params[\"task_id\"])\n\n    async def summarize_tasks(self, ctx, **params):\n        from . import service\n        return await service.summarize_tasks(ctx)\n"
+            "content": "from .base_handler import TaskManagerBaseModule\n\n\nclass TaskManagerModule(TaskManagerBaseModule):\n    \"\"\"Workspace extensions for task_manager; code adds the canonical CRUD methods here.\"\"\"\n"
           },
           {
             "filename": "modules/task_manager/backend/service.py",
@@ -2572,7 +2587,7 @@ agents:
             "content": "async def count_open_tasks(context):\n    persistence = getattr(context, \"persistence\", None)\n    if persistence is None:\n        raise RuntimeError(\"Persistence is not available for this app context.\")\n    return await persistence.collection(\"task_manager\", \"tasks\").count({\"is_completed\": False})\n"
           }
         ],
-        "agent_message": "Implemented the task_manager create hook, the complete_task mutation and the summarize_tasks read with its repo query; canonical CRUD, reads, repository, events, policy and schemas are code-rendered."
+        "agent_message": "Implemented the task_manager base/workspace handler split, the create hook, the complete_task mutation and the summarize_tasks read with its repo query; canonical CRUD, reads, repository, events, policy and schemas are code-rendered."
       }
       ```
 

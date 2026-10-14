@@ -1188,6 +1188,155 @@ def _repair_contract_task_operations(plan: dict[str, Any], context: Any) -> list
     return repairs
 
 
+_HANDLER_ENTRYPOINT = re.compile(r"backend\.handler:([A-Za-z_][A-Za-z0-9_]*)")
+_HANDLER_SPLIT_NOTE = "Handler split (from the approved plan):"
+
+
+def _manifest_handler_class(module_id: str, context: Any) -> str | None:
+    """The module.handler class an existing module.yaml declares (a revision baseline or an earlier write)."""
+    files = detach(context.get("generated_files")) or {}
+    source = files.get(f"modules/{module_id}/module.yaml") if isinstance(files, dict) else None
+    if isinstance(source, dict):
+        source = source.get("content")
+    if not isinstance(source, str):
+        return None
+    try:
+        manifest = yaml.safe_load(source)
+    except yaml.YAMLError:
+        return None
+    entrypoint = str(((manifest or {}).get("module") or {}).get("handler") or "") if isinstance(manifest, dict) else ""
+    match = _HANDLER_ENTRYPOINT.fullmatch(entrypoint)
+    return match.group(1) if match else None
+
+
+def _module_handler_class(module_id: str, context: Any, *messages: str) -> tuple[str, str]:
+    """The module.handler class and where it came from.
+
+    In order: a class a plan message names, the class the existing module.yaml
+    declares, and only then the module-contract naming rule.
+    """
+    for message in messages:
+        match = _HANDLER_ENTRYPOINT.search(message)
+        if match:
+            return match.group(1), "plan"
+    declared = _manifest_handler_class(module_id, context)
+    if declared:
+        return declared, "module_yaml"
+    return "".join(part[:1].upper() + part[1:] for part in module_id.split("_") if part) + "Module", "convention"
+
+
+def _base_handler_class(handler_class: str) -> str:
+    for suffix in ("Module", "Handler"):
+        stem = handler_class[: -len(suffix)]
+        if handler_class.endswith(suffix) and stem:
+            return f"{stem}Base{suffix}"
+    return f"{handler_class}Base"
+
+
+def _restate_handler_split(plan: dict[str, Any], context: Any) -> list[str]:
+    """Restate the two-file handler contract in every business_services task that owns base_handler.py.
+
+    The planner prompt requires each business_services initial_message to name
+    the module.handler class and the base/workspace split. A live CRM build's
+    message instead read "Implement backend/handler.py, backend/service.py,
+    backend/repo.py, backend/policy.py": no base_handler.py, and an instruction
+    to author a code-rendered policy. ServiceAgent followed the message, wrote a
+    flat handler class and a policy copy, and lost its one correction round
+    before ever emitting base_handler.py, which ended the run.
+
+    Everything stated here is projected from declared inputs: the owned paths,
+    the module's data_contract collections, and the handler entrypoint a task
+    message names or the existing module.yaml declares. Only when neither does
+    the module-contract naming rule supply a name; the note says so, and the
+    module_contract task (if planned) is told the same name, so both tasks name
+    one class.
+    """
+    repairs: list[str] = []
+    tasks = plan.get("build_tasks") or []
+    data_contract = detach(context.get("data_contract")) or {}
+    persistent = {
+        owner for owner, kind, _collection in iter_data_contract_collections(data_contract)
+        if kind == "module"
+    }
+    for task in tasks:
+        if task.get("task_type") != "business_services":
+            continue
+        owned = _normalized_owned_paths(task)
+        for base_path in [path for path in owned if path.endswith("/backend/base_handler.py")]:
+            parts = base_path.split("/")
+            if len(parts) != 4 or parts[0] != "modules":
+                continue
+            module_id = parts[1]
+            backend = f"modules/{module_id}/backend"
+            message = str(task.get("initial_message") or "").rstrip()
+            if _HANDLER_SPLIT_NOTE in message:
+                continue
+            contract = next(
+                (
+                    candidate for candidate in tasks
+                    if candidate.get("task_type") == "module_contract"
+                    and f"modules/{module_id}/module.yaml" in _normalized_owned_paths(candidate)
+                ),
+                None,
+            )
+            contract_message = str((contract or {}).get("initial_message") or "").rstrip()
+            handler_class, source = _module_handler_class(module_id, context, contract_message, message)
+            base_class = _base_handler_class(handler_class)
+            collections = module_id in persistent
+            schemas_path = f"{backend}/schemas.py"
+            rendered = [
+                path for path in owned
+                if path.startswith(f"{backend}/") and (
+                    (path in {f"{backend}/policy.py", schemas_path} and collections)
+                    or (path == f"{backend}/account_data_handler.py"
+                        and owns_per_user_collections(module_id, data_contract))
+                )
+            ]
+            authored = [path for path in owned if path.startswith(f"{backend}/") and path not in rendered]
+            not_authored = [*rendered, *([] if schemas_path in owned else [schemas_path])]
+            entrypoint = f"`backend.handler:{handler_class}`"
+            identity = {
+                "plan": f"The plan names module.yaml module.handler {entrypoint}.",
+                "module_yaml": f"The existing module.yaml declares module.handler {entrypoint}.",
+                "convention": (
+                    f"No declared module.handler exists yet; by the module-contract naming rule it is "
+                    f"{entrypoint}. If the accepted module.yaml declares another class, use that class "
+                    "and name its base accordingly."
+                ),
+            }[source]
+            canonical = (
+                f" Code adds the canonical create/update/delete and list/get methods to {handler_class} "
+                "and their service.py and repo.py functions; author them in neither class."
+                if collections else ""
+            )
+            note = (
+                f"{_HANDLER_SPLIT_NOTE} {identity} "
+                f"`{backend}/base_handler.py` defines `class {base_class}` holding the module's custom action "
+                "methods, each delegating to service.py. "
+                f"`{backend}/handler.py` imports it (`from .base_handler import {base_class}`) and defines "
+                f"`class {handler_class}({base_class})`, the exact module.handler class, with a workspace "
+                "docstring; an import or re-export alone is invalid."
+                f"{canonical} "
+                f"Author and emit: {', '.join(authored)}. "
+                + (f"Code renders or another task owns these, so do not author them: {', '.join(not_authored)}. "
+                   if not_authored else "")
+                + "Where the text above differs on these files, this note governs."
+            )
+            task["initial_message"] = "\n\n".join(part for part in (message, note) if part)
+            repairs.append(
+                f"{task.get('task_id')}: restated the {handler_class}/{base_class} handler split ({source}) "
+                f"and authored files {authored}"
+            )
+            if contract is not None and f"backend.handler:{handler_class}" not in contract_message:
+                contract["initial_message"] = "\n\n".join(part for part in (
+                    contract_message,
+                    f"module.yaml module.handler: `backend.handler:{handler_class}`, the class the "
+                    f"business_services task {task.get('task_id')!r} defines in handler.py.",
+                ) if part)
+                repairs.append(f"{contract.get('task_id')}: named module.handler backend.handler:{handler_class}")
+    return repairs
+
+
 def _approved_surface_ids(context: Any) -> set[str]:
     """Surfaces the approved design and the selected packs' registry declarations name."""
     design = detach(context.get("design_surface_map")) or {}
@@ -1899,6 +2048,7 @@ def review_app_build_plan(
             *_repair_coverage(plan, context_variables),
             *_construct_task_requirements(plan, context_variables),
             *_repair_contract_task_operations(plan, context_variables),
+            *_restate_handler_split(plan, context_variables),
             *_repair_page_contract_dependencies(plan, context_variables),
             *_note_pack_pages(plan, context_variables),
             *drop_unapproved_page_data_sources(plan, context_variables),
