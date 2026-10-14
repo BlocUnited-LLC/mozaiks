@@ -9,6 +9,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
 from scripts.generated_ui_acceptance import bundle_digest
 
@@ -54,17 +55,21 @@ def test_invalid_workspace_stops_before_service_operations(tmp_path, monkeypatch
         live.run(args_for(tmp_path), tmp_path / "evidence")
 
 
-def test_explicit_private_identity_fixture_uses_admitted_public_scopes(workspace, tmp_path, monkeypatch):
+def test_explicit_private_identity_fixture_uses_admitted_auth_scopes(workspace, tmp_path, monkeypatch):
     from tests.test_paired_experience_browser import _identity_realm_fixture
 
     original = (live.WORKSPACE / "tests/identity-realm.json").read_bytes()
     evidence = tmp_path / "fresh-runtime"
+    auth = yaml.safe_load((ROOT / "examples/canonical-apps/project-hub/app/config/auth.yaml").read_text(encoding="utf-8"))
+    auth["frontend"]["default_scopes"].extend(["messages.read", "messages.write"])
     fixture = _identity_realm_fixture(tmp_path / "identity-inputs/realm.json", {
+        "config/auth.yaml": yaml.safe_dump(auth),
         "modules/example/module.yaml": json.dumps({"actions": [
             {"id": "read", "permissions": ["messages.read"]},
             {"id": "write", "api_surface": None, "permissions": ["messages.write"]},
             {"id": "private", "api_surface": "internal", "permissions": ["internal.only"]},
             {"id": "admin", "api_surface": "admin_internal", "permissions": ["admin.only"]},
+            {"id": "unapproved", "permissions": ["unapproved.public"]},
         ]}),
     })
     assert not evidence.exists()
@@ -91,6 +96,19 @@ def test_explicit_private_identity_fixture_uses_admitted_public_scopes(workspace
     assert live.run(args, evidence, exercise=exercise) == "verified"
     assert fixture.read_bytes() == private_input
     assert (live.WORKSPACE / "tests/identity-realm.json").read_bytes() == original
+
+
+@pytest.mark.parametrize("auth", [None, {}, {"frontend": {"default_scopes": ["messages.read"]}}])
+def test_private_identity_fixture_requires_valid_admitted_auth(tmp_path, auth):
+    from pydantic import ValidationError
+
+    from tests.test_paired_experience_browser import _identity_realm_fixture
+
+    destination = tmp_path / "identity/realm.json"
+    files = {} if auth is None else {"config/auth.yaml": yaml.safe_dump(auth)}
+    with pytest.raises((KeyError, ValidationError)):
+        _identity_realm_fixture(destination, files)
+    assert not destination.exists()
 
 
 @pytest.mark.parametrize("invalid", ["missing", "wrong_realm", "wrong_client"])

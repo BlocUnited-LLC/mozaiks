@@ -381,6 +381,7 @@ def test_scanner_requires_repo_support_pack_outputs_to_be_declared_when_packs_se
         "capability_source": "config_file",
         "pack_source_path": "factory_app/build_context/operator_readiness",
     }
+    context = {"capability_packs": [pack], "readiness_profile": "host_operator_platform"}
 
     assert (
         scan_generated_bundle(
@@ -389,6 +390,7 @@ def test_scanner_requires_repo_support_pack_outputs_to_be_declared_when_packs_se
                 "docs/operations/operator-readiness.md": "",
             },
             capability_packs=[pack],
+            context_variables=context,
         )
         == []
     )
@@ -399,6 +401,7 @@ def test_scanner_requires_repo_support_pack_outputs_to_be_declared_when_packs_se
             "docs/operations/undeclared.md": "",
         },
         capability_packs=[pack],
+        context_variables=context,
     )
     assert any("undeclared repository-support pack outputs" in error for error in errors)
 
@@ -523,6 +526,7 @@ def test_declared_workspace_script_content_is_still_secret_scanned() -> None:
         "capability_source": "config_file",
         "pack_source_path": "factory_app/build_context/operator_readiness",
     }
+    context = {"capability_packs": [pack], "readiness_profile": "host_operator_platform"}
     leaked = "$env:PAYMENT_SECRET = 'provider_live_0123456789abcdef'\n"
     errors = scan_generated_bundle(
         {
@@ -530,6 +534,7 @@ def test_declared_workspace_script_content_is_still_secret_scanned() -> None:
             "scripts/check_operator_readiness_local.ps1": leaked,
         },
         capability_packs=[pack],
+        context_variables=context,
     )
     assert any(
         "scripts/check_operator_readiness_local.ps1" in error

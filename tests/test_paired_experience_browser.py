@@ -57,19 +57,17 @@ def _ports():
 
 
 def _identity_realm_fixture(destination: Path, files: dict[str, str]) -> Path:
-    """Write private synthetic identities with the admitted public action scopes.
+    """Configure the private test issuer from the admitted app auth intent.
 
     Keep this input outside the driver's fresh run directory. Passwords and
     tokens never belong in the public replay receipt or generated app bundle.
     """
+    from mozaiksai.core.runtime.app.auth_contract import AppAuthContract
+
+    auth = AppAuthContract.model_validate(yaml.safe_load(files["config/auth.yaml"]))
+    # A module's requested permissions cannot approve their own issuer grant.
+    permissions = set(auth.frontend.default_scopes) - {"openid"}
     realm = json.loads((ROOT / "examples/canonical-apps/community/tests/identity-realm.json").read_text(encoding="utf-8"))
-    permissions = set()
-    for path, content in files.items():
-        if path.startswith("modules/") and path.endswith("/module.yaml"):
-            manifest = yaml.safe_load(content)
-            for action in manifest.get("actions", []):
-                if action.get("api_surface") not in {"internal", "admin_internal"}:
-                    permissions.update(action.get("permissions", []))
     base_scopes = {"basic", "profile", "email"}
     realm["clientScopes"] = [scope for scope in realm["clientScopes"] if scope["name"] in base_scopes]
     realm["clientScopes"].extend({

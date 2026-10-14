@@ -373,6 +373,12 @@ async def _scripted_replay(presentation, *, build_context_root=None):
     contract = compile_data_contract(_domain_contract(), context_variables=selected)
     candidates = _candidate_files(presentation)
     candidates["data/contract.json"] = json.dumps(contract, indent=2, ensure_ascii=False)
+    if selected:
+        # This fixture explicitly approves the selected participant-scoped
+        # Messaging feature before admission; materialization never grants it.
+        auth = yaml.safe_load(candidates["config/auth.yaml"])
+        auth["frontend"]["default_scopes"].extend(["messages.read", "messages.write"])
+        candidates["config/auth.yaml"] = yaml.safe_dump(auth, sort_keys=False)
     tasks = []
 
     def task(task_id, task_type, agent, owned, depends_on, *, module_id=None, surface_kind="module"):
@@ -554,6 +560,9 @@ async def test_paired_messaging_is_selected_before_admission_and_preserves_domai
         files, context = await _scripted_replay(presentation, build_context_root=tmp_path / presentation / "build_context")
         receipt = _pack_receipt(files, context)
         assert receipt["selected_pack_ids"] == ["messaging"]
+        assert set(yaml.safe_load(files["config/auth.yaml"])["frontend"]["default_scopes"]) == {
+            "openid", "profile", "email", "messages.read", "messages.write",
+        }
         plan = detach(context.get("app_build_plan"))
         assert any(pack["capability_pack_id"] == "messaging" for pack in plan["capability_packs"])
         assert {surface["surface_id"] for surface in detach(context.get("data_contract"))["surfaces"]} == {

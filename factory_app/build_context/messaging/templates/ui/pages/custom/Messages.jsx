@@ -148,11 +148,12 @@ export default function Messages() {
                 padding: 12,
                 textAlign: "left",
                 border: selectedThreadId === thread.thread_id ? "1px solid var(--primary, #2563eb)" : "1px solid var(--border-color, #d1d5db)",
-                background: selectedThreadId === thread.thread_id ? "var(--muted, #f3f4f6)" : "transparent",
+                background: selectedThreadId === thread.thread_id ? "var(--color-surface-alt)" : "transparent",
+                color: "var(--color-text-primary)",
               }}
             >
               <strong><ThreadTitle thread={thread} /></strong>
-              <span style={{ display: "block", opacity: 0.7, fontSize: 12 }}>
+              <span style={{ display: "block", color: "var(--color-text-secondary)", fontSize: 12 }}>
                 {thread.thread_type || "group"} - {thread.status || "open"}
               </span>
               {thread.last_message?.body_preview && (

@@ -216,9 +216,11 @@ browser report, screenshots/traces and controller result, including failures.
 The synthetic identity environment is private local test material. The fixture
 proves only its declared routes and interactions; it is scripted AG2 generation,
 not live-model generation. It selects the verified Messaging pack before plan
-admission and records its version, digest and actual composed outputs. Public
-action permissions come from the admitted modules in a private synthetic realm;
-runtime authorization remains enabled. Pack browser cases exercise persisted
+admission and records its version, digest and actual composed outputs. The fixture
+explicitly approves Messaging read/write scopes in its app auth contract before
+admission. Its private synthetic issuer follows that validated auth intent;
+module permissions cannot grant themselves scopes. Runtime authorization remains
+enabled. Pack browser cases exercise persisted
 conversation actions and reject a non-participant. Projects, Tasks and the board
 use bounded server paging and literal search, with more records than the API's
 default first-page limit. Desktop board tests
@@ -230,6 +232,9 @@ requests or starting workflows.
 Browser success does not replace `validate_generated_app_candidate`. The
 canonical candidate validator also checks reachable declared write actions,
 module quality, contained loading, real runtime behavior and compilation. The
+create/list smoke checks resolve response members from each action's declared
+output schema and still match the returned identity to a real stored record.
+Undeclared, ambiguous or malformed response members fail the check. The
 module quality owner treats TODO comments, docstrings and explanatory messages
 as unfinished code while allowing the exact `todo` domain value in defaults and
 enumerations; other placeholder and fake-data checks remain unchanged.

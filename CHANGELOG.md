@@ -28,6 +28,9 @@ This project follows a practical pre-1.0 changelog format:
   retain participant-aware actions, and compose their UI registrations with
   app-owned routes. Page refinement receives the saved pack, design and domain
   context without widening its file scope.
+- Runtime smoke checks read declared action response wrappers when checking
+  persisted create/list results, retaining authorization and record identity
+  checks for APIs such as Messaging's `thread` and `threads` responses.
 - Generated module quality checks distinguish a `todo` domain value from TODO
   comments, docstrings and unfinished implementation messages.
 - Generated UI browser acceptance rejects empty, malformed, skipped or incomplete
