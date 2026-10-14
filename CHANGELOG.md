@@ -440,6 +440,28 @@ This project follows a practical pre-1.0 changelog format:
   Apps that sell tenant- or workspace-scoped plans need tokens that carry the
   tenant (`AUTH_TENANT_ID_CLAIM`) or workspace (`AUTH_WORKSPACE_ID_CLAIM`) claim.
 
+- The "Connect GitHub" flow of existing-app discovery is bound to the signed-in
+  user and to the browser that started it. Before, the `/api/oauth/github/*`
+  routes had no authentication and used a caller-chosen `session_key` as the
+  OAuth state: anyone could send a person a `/connect?session_key=` link of
+  their choosing and, once that person approved GitHub's consent screen, list
+  their repositories or start a discovery run with their `repo`-scoped token.
+  The flow now starts with an authenticated `POST /api/oauth/github/start`,
+  which returns GitHub's authorize URL and a connection id and sets a
+  short-lived HttpOnly cookie. The callback accepts only a state the server
+  issued, once, before it expires, and only from the browser holding that
+  cookie. `/status`, `/ready` and `/repos` require a signed-in user or local
+  development access and answer only the connection's owner, and discovery
+  receives the token only in a run of that same user.
+  `GET /api/oauth/github/connect` is removed, as is
+  `/api/oauth/github/_dev/complete`, which seeded tokens without
+  authentication whenever `APP_ENV` was not `production`. The callback page no
+  longer echoes GitHub's `error_description`, which could inject script on the
+  API origin. The callback must be served on the host the page sends its API
+  calls to (ports may differ). The flow still requests `repo` because GitHub
+  OAuth Apps have no read-only scope for private repositories; discovery only
+  reads.
+
 ### Changed
 
 - Factory design and app-planning guidance now carries approved page rendering

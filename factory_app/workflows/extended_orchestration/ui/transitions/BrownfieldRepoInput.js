@@ -3,6 +3,7 @@ import {
   TransitionChoicePanel,
   useTransitionMotion,
 } from '@mozaiks/chat-ui/platform';
+import { authFetch } from '@mozaiks/chat-ui/adapters/api.js';
 
 const REPO_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
@@ -13,11 +14,16 @@ function normalizeRepoInput(raw) {
   return trimmed;
 }
 
+const GITHUB_AUTHORIZE_PREFIX = 'https://github.com/login/oauth/authorize?';
+const POPUP_FEATURES = 'width=600,height=700,scrollbars=yes,resizable=yes';
+
+// Every GitHub OAuth route except GitHub's own redirect target requires the
+// signed-in user, so these calls go through the shell's authenticated fetch.
 function useGithubOauthAvailable() {
   const [available, setAvailable] = useState(null);
   useEffect(() => {
-    fetch('/api/oauth/github/status')
-      .then((r) => r.json())
+    authFetch('/api/oauth/github/status')
+      .then((r) => (r.ok ? r.json() : null))
       .then((d) => setAvailable(Boolean(d?.configured)))
       .catch(() => setAvailable(false));
   }, []);
@@ -27,35 +33,66 @@ function useGithubOauthAvailable() {
 function useGithubOauthPopup() {
   const popupRef = useRef(null);
   const pollRef = useRef(null);
-  const [sessionKey, setSessionKey] = useState(null);
+  const mountedRef = useRef(true);
+  const [connectionId, setConnectionId] = useState(null);
   const [status, setStatus] = useState('idle'); // idle | pending | connected | error
 
   const _stopPolling = useCallback(() => {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
   }, []);
 
-  // Clean up on unmount
-  useEffect(() => () => { _stopPolling(); }, [_stopPolling]);
+  const _closePopup = useCallback(() => {
+    if (popupRef.current && !popupRef.current.closed) popupRef.current.close();
+    popupRef.current = null;
+  }, []);
 
-  const open = useCallback(() => {
-    const key = crypto.randomUUID();
-    const url = `/api/oauth/github/connect?session_key=${encodeURIComponent(key)}`;
-    const popup = window.open(url, 'github_oauth', 'width=600,height=700,scrollbars=yes,resizable=yes');
+  // Clean up on unmount
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; _stopPolling(); };
+  }, [_stopPolling]);
+
+  const open = useCallback(async () => {
+    // Open the popup inside the click so it is not blocked, then send it to
+    // GitHub once the server has started a flow bound to this user and
+    // browser. A popup navigation cannot carry the bearer token, so the
+    // authenticated start is a fetch that returns the authorize URL.
+    _stopPolling();
+    const popup = window.open('', 'github_oauth', POPUP_FEATURES);
     if (!popup) { setStatus('error'); return; }
     popupRef.current = popup;
+    setConnectionId(null);
     setStatus('pending');
+
+    let started = null;
+    try {
+      // credentials: 'include' stores the flow's browser-binding cookie even
+      // when the API is served from another origin of the same site.
+      const r = await authFetch('/api/oauth/github/start', { method: 'POST', credentials: 'include' });
+      if (r.ok) started = await r.json();
+    } catch (_) { /* reported below */ }
+    if (!mountedRef.current) { _closePopup(); return; }
+    const authorizeUrl = typeof started?.authorize_url === 'string' ? started.authorize_url : '';
+    const id = typeof started?.connection_id === 'string' ? started.connection_id : '';
+    if (popup.closed) { popupRef.current = null; setStatus('idle'); return; }
+    if (!id || !authorizeUrl.startsWith(GITHUB_AUTHORIZE_PREFIX)) {
+      _closePopup();
+      setStatus('error');
+      return;
+    }
+    popup.location.href = authorizeUrl;
 
     // Poll /api/oauth/github/ready — works across any origin split (dev port 3000/8000 or prod same-origin)
     pollRef.current = setInterval(async () => {
       const popupClosed = !popupRef.current || popupRef.current.closed;
       try {
-        const r = await fetch(`/api/oauth/github/ready?session_key=${encodeURIComponent(key)}`);
-        const d = await r.json();
-        if (d.ready) {
+        const r = await authFetch(`/api/oauth/github/ready?connection_id=${encodeURIComponent(id)}`);
+        const d = r.ok ? await r.json() : null;
+        if (d?.ready) {
           _stopPolling();
-          if (popupRef.current && !popupRef.current.closed) popupRef.current.close();
-          popupRef.current = null;
-          setSessionKey(key);
+          _closePopup();
+          if (!mountedRef.current) return;
+          setConnectionId(id);
           setStatus('connected');
           return;
         }
@@ -63,33 +100,32 @@ function useGithubOauthPopup() {
       // If popup was closed by user before completing, stop
       if (popupClosed) {
         _stopPolling();
-        setStatus((prev) => (prev === 'pending' ? 'idle' : prev));
         popupRef.current = null;
+        if (mountedRef.current) setStatus((prev) => (prev === 'pending' ? 'idle' : prev));
       }
     }, 1000);
-  }, [_stopPolling]);
+  }, [_stopPolling, _closePopup]);
 
   const reset = useCallback(() => {
     _stopPolling();
-    if (popupRef.current && !popupRef.current.closed) popupRef.current.close();
-    popupRef.current = null;
-    setSessionKey(null);
+    _closePopup();
+    setConnectionId(null);
     setStatus('idle');
-  }, [_stopPolling]);
+  }, [_stopPolling, _closePopup]);
 
-  return { sessionKey, status, open, reset };
+  return { connectionId, status, open, reset };
 }
 
-function useGithubRepos(sessionKey) {
+function useGithubRepos(connectionId) {
   const [repos, setRepos] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    if (!sessionKey) { setRepos(null); setError(null); return; }
+    if (!connectionId) { setRepos(null); setError(null); return; }
     setLoading(true);
     setError(null);
-    fetch(`/api/oauth/github/repos?session_key=${encodeURIComponent(sessionKey)}`)
+    authFetch(`/api/oauth/github/repos?connection_id=${encodeURIComponent(connectionId)}`)
       .then((r) => r.json())
       .then((d) => {
         if (d.repos) setRepos(d.repos);
@@ -97,7 +133,7 @@ function useGithubRepos(sessionKey) {
       })
       .catch(() => setError('Could not load your repos.'))
       .finally(() => setLoading(false));
-  }, [sessionKey]);
+  }, [connectionId]);
 
   return { repos, loading, error };
 }
@@ -111,9 +147,9 @@ export default function BrownfieldRepoInput({
   const option = Array.isArray(transition?.options) ? transition.options[0] : null;
   const motion = useTransitionMotion();
   const oauthAvailable = useGithubOauthAvailable();
-  const { sessionKey, status: oauthStatus, open: openOAuth, reset: resetOAuth } = useGithubOauthPopup();
+  const { connectionId, status: oauthStatus, open: openOAuth, reset: resetOAuth } = useGithubOauthPopup();
   const { repos, loading: reposLoading, error: reposError } = useGithubRepos(
-    oauthStatus === 'connected' ? sessionKey : null
+    oauthStatus === 'connected' ? connectionId : null
   );
 
   const [selectedRepo, setSelectedRepo] = useState('');
@@ -144,7 +180,7 @@ export default function BrownfieldRepoInput({
   const handleContinue = async () => {
     if (!option || !canContinue) return;
     const contextVariables = { github_repo: activeRepo };
-    if (sessionKey) contextVariables.github_oauth_session = sessionKey;
+    if (connectionId) contextVariables.github_oauth_session = connectionId;
     setStartError(null);
     setStartMode('repo');
     try {

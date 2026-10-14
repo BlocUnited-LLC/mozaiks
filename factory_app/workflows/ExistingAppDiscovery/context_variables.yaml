@@ -205,9 +205,11 @@ definitions:
   github_oauth_session:
     type: string
     description: >
-      Short-lived session key from the GitHub OAuth popup flow. Consumed once
-      by the before_chat hook to retrieve the OAuth access token from the
-      server-side token store. Never persisted beyond the initial preload phase.
+      Connection id returned by POST /api/oauth/github/start for the user who
+      connected GitHub. Consumed once by the before_chat hook, which receives
+      the access token from the server-side store only when this run's
+      user_id owns the connection. Never persisted beyond the initial preload
+      phase.
     source:
       type: state
       default: null
