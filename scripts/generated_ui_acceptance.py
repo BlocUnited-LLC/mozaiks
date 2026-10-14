@@ -27,6 +27,7 @@ from mozaiksai.core.validation import (
 
 _GATE_ID = "generated_ui_browser"
 _PROJECTS = ("generated-desktop", "generated-mobile")
+_HARNESS_FAILURES = frozenset({"preflight", "identity", "report_integrity", "coverage", "runner"})
 
 
 class _Candidate(BaseModel):
@@ -228,9 +229,12 @@ def _finding(
         route=route,
         message=message,
         source=source,
-        suggested_fix=suggested_fix
-        or "Revise the generated page schema or bounded custom React for the affected route.",
-        repair_owner="AppSchemaAgent",
+        suggested_fix=suggested_fix or (
+            "Correct the acceptance environment or evidence before testing the same candidate again."
+            if category in _HARNESS_FAILURES
+            else "Revise the generated page schema or bounded custom React for the affected route."
+        ),
+        repair_owner=None if category in _HARNESS_FAILURES else "AppSchemaAgent",
     )
 
 
@@ -296,6 +300,9 @@ def parse_playwright_json_report(report: dict[str, Any]) -> list[ValidationIssue
             file_name = _string(spec.get("file"))
             for test in spec.get("tests") or []:
                 if not isinstance(test, dict):
+                    continue
+                if test.get("expectedStatus", "passed") != "passed":
+                    # Unsupported required outcomes are coverage findings, not UI repairs.
                     continue
                 project = _string(test.get("projectName"))
                 for result in test.get("results") or []:
@@ -369,8 +376,10 @@ def _report_tests(report: dict[str, Any]) -> list[tuple[dict[str, Any], dict[str
                 for test in spec["tests"]:
                     if not isinstance(test, dict) or test.get("status") not in ("expected", "unexpected", "flaky", "skipped"):
                         raise ValueError("Playwright test outcome is missing or invalid.")
-                    if not isinstance(test.get("projectName"), str):
+                    if test.get("projectName") not in _PROJECTS:
                         raise ValueError("Playwright project identity is missing or invalid.")
+                    if test.get("expectedStatus") not in ("passed", "failed", "timedOut", "skipped", "interrupted"):
+                        raise ValueError("Playwright expected test status is missing or invalid.")
                     results = test.get("results")
                     if not isinstance(results, list) or not results or any(
                         not isinstance(result, dict) or result.get("status") not in (
@@ -402,6 +411,7 @@ def _report_tests(report: dict[str, Any]) -> list[tuple[dict[str, Any], dict[str
 
 def _report_coverage(report: dict[str, Any]) -> tuple[dict[str, int], list[ValidationIssue]]:
     coverage = {"executed": 0, "passed": 0, "skipped": 0, "failed": 0}
+    render_failures = 0
     try:
         tests = _report_tests(report)
     except ValueError as exc:
@@ -416,6 +426,8 @@ def _report_coverage(report: dict[str, Any]) -> tuple[dict[str, int], list[Valid
                 result["status"] == "passed" and not result.get("errors") for result in results
             )
             coverage["passed" if passed else "failed"] += 1
+            if not passed and test["expectedStatus"] == "passed":
+                render_failures += 1
     findings = []
     if report["errors"]:
         findings.append(_finding(message="Playwright reported runner errors.", category="runner"))
@@ -423,8 +435,10 @@ def _report_coverage(report: dict[str, Any]) -> tuple[dict[str, int], list[Valid
         findings.append(_finding(message="No required browser cases executed.", category="coverage"))
     if coverage["skipped"]:
         findings.append(_finding(message="Required browser cases were skipped.", category="coverage"))
-    if coverage["failed"]:
-        findings.append(_finding(message="Browser cases did not pass without failed attempts.", category="coverage"))
+    if any(test["expectedStatus"] != "passed" for _, test in tests):
+        findings.append(_finding(message="Required browser cases must expect a passing outcome.", category="coverage"))
+    if render_failures:
+        findings.append(_finding(message="Browser cases did not pass without failed attempts.", category="render"))
     return coverage, findings
 
 
@@ -546,7 +560,9 @@ def _acceptance_result(findings: list[ValidationIssue], *, returncode: int | Non
             handler=lambda _context: findings,
         )
     )
-    acceptance = AcceptanceController(registry).run(context={})
+    # Missing proof and harness failures cannot be repaired by regenerating UI.
+    max_attempts = 0 if any(issue.code in _HARNESS_FAILURES and issue.severity == "error" for issue in findings) else 1
+    acceptance = AcceptanceController(registry).run(context={}, max_attempts=max_attempts)
     return {
         "success": returncode == 0 and acceptance.accepted,
         "returncode": returncode,
@@ -571,7 +587,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--mode", choices=("mocked_rendering_smoke", "real_host"), default="mocked_rendering_smoke")
     parser.add_argument("--profile", type=Path, help="Reviewed route/case inventory and candidate identity for real-host mode.")
     parser.add_argument("--base-url", help="Already-running local frontend origin, backed by the real app host.")
-    parser.add_argument("--storage-state", type=Path, help="Existing legitimate browser auth state; never copied into the receipt.")
+    parser.add_argument("--storage-state", type=Path, help="Legitimate Playwright-supported auth state (not sessionStorage); never copied into the receipt.")
     parser.add_argument("--spec", help="Trusted app-specific spec under web_shell/playwright/generated-ui; defaults to route probes.")
     args = parser.parse_args(argv)
 

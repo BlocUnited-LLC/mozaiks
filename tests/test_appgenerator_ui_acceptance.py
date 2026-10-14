@@ -55,7 +55,8 @@ def test_runner_refuses_incomplete_or_skipped_report(monkeypatch, tmp_path, stdo
     result = ui_acceptance.run_playwright_acceptance(app_root=tmp_path, repo_root=tmp_path)
     assert result["success"] is False
     assert result["validation_run"]["status"] == "failed"
-    assert result["repair_decision"]["disposition"] != "accept"
+    assert result["repair_decision"]["disposition"] == "block"
+    assert result["repair_decision"]["repair_owners"] == []
 
 
 def test_runner_accepts_complete_report_and_labels_mocked_mode(monkeypatch, tmp_path):
@@ -229,11 +230,13 @@ def test_real_host_runner_binds_local_inputs_but_never_attests_external_host(
     assert result["runtime_identity"] == "not_evaluated"
     assert result["success"] is False
     assert result["validation_run"]["status"] == "failed"
+    assert result["repair_decision"]["disposition"] == "block"
+    assert result["repair_decision"]["repair_owners"] == []
     assert result["route_probe_passed"] is (change == "none")
     assert result["route_coverage"]["reported_cases"] == (2 if change == "missing_custom" else 4)
 
 
-@pytest.mark.parametrize("change", ["status_object", "result_object", "project_object", "errors_object", "retry_failure"])
+@pytest.mark.parametrize("change", ["status_object", "result_object", "project_object", "project_empty", "project_unknown", "errors_object", "retry_failure"])
 def test_malformed_nested_or_failed_attempt_report_cannot_accept(monkeypatch, tmp_path, change):
     report = _complete_report()
     test = report["suites"][0]["specs"][0]["tests"][0]
@@ -243,6 +246,8 @@ def test_malformed_nested_or_failed_attempt_report_cannot_accept(monkeypatch, tm
         test["results"][0]["status"] = {}
     elif change == "project_object":
         test["projectName"] = {}
+    elif change in {"project_empty", "project_unknown"}:
+        test["projectName"] = "" if change == "project_empty" else "invented-project"
     elif change == "errors_object":
         test["results"][0]["errors"] = [{} , "bad error"]
     else:
@@ -262,6 +267,43 @@ def test_timeout_is_a_failure_with_no_clean_exit(monkeypatch, tmp_path):
     result = ui_acceptance.run_playwright_acceptance(app_root=tmp_path, repo_root=tmp_path)
     assert result["success"] is False
     assert result["returncode"] is None
+    assert result["repair_decision"]["disposition"] == "block"
+    assert result["repair_decision"]["repair_owners"] == []
+
+
+def test_actual_render_failure_keeps_existing_bounded_page_repair(monkeypatch, tmp_path):
+    report = _complete_report()
+    case = report["suites"][0]["specs"][0]["tests"][0]
+    case["status"] = "unexpected"
+    case["results"] = [{"status": "failed", "errors": [{"message": "Reviewed heading is absent"}]}]
+    report["stats"].update(expected=0, unexpected=1)
+    monkeypatch.setattr(ui_acceptance.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(
+        returncode=1, stdout=json.dumps(report), stderr="",
+    ))
+    result = ui_acceptance.run_playwright_acceptance(app_root=tmp_path, repo_root=tmp_path)
+    assert result["success"] is False
+    assert result["repair_decision"]["disposition"] == "repair"
+    assert result["repair_decision"]["max_attempts"] == 1
+    assert result["repair_decision"]["repair_owners"] == ["AppSchemaAgent"]
+
+
+@pytest.mark.parametrize("expected", [None, {}, "invented", "failed"])
+def test_invalid_or_nonpassing_expected_outcome_is_not_a_page_repair(monkeypatch, tmp_path, expected):
+    report = _complete_report()
+    case = report["suites"][0]["specs"][0]["tests"][0]
+    if expected is None:
+        case.pop("expectedStatus")
+    else:
+        case["expectedStatus"] = expected
+    if expected == "failed":
+        case["results"] = [{"status": "failed", "errors": [{"message": "Intentionally expected failure"}]}]
+    monkeypatch.setattr(ui_acceptance.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(
+        returncode=0, stdout=json.dumps(report), stderr="",
+    ))
+    result = ui_acceptance.run_playwright_acceptance(app_root=tmp_path, repo_root=tmp_path)
+    assert result["success"] is False
+    assert result["repair_decision"]["disposition"] == "block"
+    assert result["repair_decision"]["repair_owners"] == []
 
 
 def test_parse_playwright_json_report_returns_structured_findings() -> None:
@@ -343,7 +385,8 @@ def test_playwright_runner_returns_only_canonical_acceptance_state(monkeypatch, 
 
     assert result["success"] is False
     assert result["validation_run"]["status"] == "failed"
-    assert result["repair_decision"]["disposition"] == "repair"
+    assert result["repair_decision"]["disposition"] == "block"
+    assert result["repair_decision"]["repair_owners"] == []
     assert result["validation_run"]["gate_results"][0]["gate_id"] == "generated_ui_browser"
     assert "status" not in result
     assert "revision_count" not in result

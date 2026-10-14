@@ -118,6 +118,9 @@ The Python runner rejects missing/malformed JSON, inconsistent reporter totals,
 zero executed cases, required skips and failed attempts (including a later retry
 that passes). It uses the existing `ValidationRegistry` and
 `AcceptanceController`; it does not maintain a second repair state machine.
+Harness, coverage and identity failures use that controller with zero automatic
+repair attempts and no page-worker repair owner. Actual render failures retain
+the existing bounded `AppSchemaAgent` repair decision.
 
 ### Reviewed real-host route probes
 
@@ -164,7 +167,10 @@ python scripts/generated_ui_acceptance.py `
 ```
 
 Optional `--storage-state` uses existing legitimate browser authentication; keep
-that file private. Optional `--spec` selects a trusted app-specific specification
+that file private. It only restores Playwright-supported state, not
+`sessionStorage`. The current Mozaiks OIDC adapter uses `sessionStorage`, so its
+trusted app-specific specification must complete the existing real UI sign-in.
+Optional `--spec` selects a trusted app-specific specification
 under `web_shell/playwright/generated-ui/`. The default specification only checks
 actual shell identity/route registration, navigation, reviewed headings and browser
 errors. It does not prove create/edit, keyboard interactions or persisted effects.
