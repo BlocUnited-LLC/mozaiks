@@ -80,6 +80,30 @@ async function noHorizontalOverflow(page) {
     'The generated page must fit the viewport').toBe(true);
 }
 
+async function exerciseDeletion(page, testInfo, entity, label, recordId) {
+  await page.reload();
+  const main = page.getByRole('main');
+  await main.getByRole('searchbox').fill(label);
+  await selectRecord(page, label);
+  await main.getByRole('button', { name: `Delete ${entity}`, exact: true }).click();
+  const confirmation = page.getByRole('dialog', { name: `Delete ${entity}`, exact: true });
+  await expect(confirmation.getByRole('textbox')).toHaveValue(label);
+  await expect(confirmation.getByRole('textbox')).toBeDisabled();
+  const pending = mutationResponse(page, `${entity}s`, `delete_${entity}`);
+  await confirmation.getByRole('button', { name: `Delete ${entity}`, exact: true }).click();
+  const response = await pending;
+  expect(response.status()).toBe(200);
+  expect((await response.json()).deleted).toBe(true);
+  await expect(confirmation).toBeHidden();
+  await page.reload();
+  await main.getByRole('searchbox').fill(label);
+  await expect(main.getByText(label, { exact: true })).toHaveCount(0);
+  const remaining = await moduleAction(page, `${entity}s`, `list_${entity}s`, { search: recordId });
+  expect(remaining.total).toBe(0);
+  expect(remaining.items).toEqual([]);
+  await screenshot(page, testInfo, `${entity}-deleted-after-reload`);
+}
+
 async function exerciseProfile(page, testInfo, label) {
   const userId = await page.evaluate(async () => (await window.mozaiksAuth.getCurrentUser()).id);
   const responseFor = (method) => page.waitForResponse((response) => response.url() === `${apiURL}/api/me`
@@ -193,6 +217,31 @@ async function exerciseProjects(page, testInfo, label) {
   await selectRecord(page, label);
   const saved = await moduleAction(page, 'projects', 'get_projects', { id: project.project_id });
   expect(saved.item.name).toBe(label);
+  await main.getByRole('button', { name: 'Edit project', exact: true }).click();
+  const edit = page.getByRole('dialog', { name: 'Edit project', exact: true });
+  const updatedName = `${label} revised`;
+  await expect(edit.getByRole('textbox', { name: /^Project name/ })).toHaveValue(label);
+  await edit.getByRole('textbox', { name: /^Project name/ }).fill(updatedName);
+  await edit.getByRole('combobox', { name: 'Status', exact: true }).click();
+  await page.getByRole('option', { name: 'Active', exact: true }).click();
+  const updated = mutationResponse(page, 'projects', 'update_project');
+  await edit.getByRole('button', { name: 'Save project', exact: true }).click();
+  expect(await mutationItem(updated, 'project_id')).toMatchObject({
+    project_id: project.project_id, name: updatedName, status: 'active',
+  });
+  await expect(edit).toBeHidden();
+  await page.reload();
+  await main.getByRole('searchbox').fill(updatedName);
+  await selectRecord(page, updatedName);
+  expect((await moduleAction(page, 'projects', 'get_projects', { id: project.project_id })).item)
+    .toMatchObject({ name: updatedName, status: 'active' });
+  await screenshot(page, testInfo, 'project-edited-after-reload');
+  const disposableName = `${label} delete only`;
+  const disposable = (await moduleAction(page, 'projects', 'create_project', { name: disposableName })).item;
+  await exerciseDeletion(page, testInfo, 'project', disposableName, disposable.project_id);
+  expect((await moduleAction(page, 'projects', 'get_projects', { id: project.project_id })).item)
+    .toMatchObject({ name: updatedName, status: 'active' });
+  return updatedName;
 }
 
 async function exerciseTasks(page, testInfo, label) {
@@ -256,6 +305,15 @@ async function exerciseTasks(page, testInfo, label) {
   await main.getByRole('button', { name: 'View details', exact: true }).click();
   await expect(detail.getByRole('combobox', { name: 'Status', exact: true })).toContainText('In motion');
   await detail.getByRole('button', { name: 'Close', exact: true }).click();
+  const disposableTitle = `${label} delete only`;
+  const disposable = (await moduleAction(page, 'tasks', 'create_task', {
+    project_id: project.project_id, title: disposableTitle, status: 'todo',
+  })).item;
+  await exerciseDeletion(page, testInfo, 'task', disposableTitle, disposable.task_id);
+  expect((await moduleAction(page, 'tasks', 'get_tasks', { id: task.task_id })).item)
+    .toMatchObject({ title: updatedTitle, status: 'doing', description });
+  await main.getByRole('searchbox').fill(updatedTitle);
+  await selectRecord(page, updatedTitle);
 }
 
 async function exerciseBoard(page, testInfo, label) {
@@ -273,9 +331,25 @@ async function exerciseBoard(page, testInfo, label) {
   const card = board.getByRole('article').filter({ has: page.getByRole('button', { name: title, exact: true }) });
   await expect(card).toBeVisible();
   await card.getByRole('button', { name: title, exact: true }).click();
-  const inspector = page.getByRole('complementary', { name: 'Task inspector', exact: true });
+  const mobilePanel = process.env.MOZAIKS_PAIRED_EXPECT_MOBILE_PANEL === '1'
+    && testInfo.project.name === 'generated-mobile';
+  const inspector = mobilePanel ? page.getByRole('dialog', { name: title, exact: true })
+    : page.getByRole('complementary', { name: 'Task inspector', exact: true });
+  async function closeMobileDetails(useEscape = false) {
+    if (!mobilePanel) return;
+    await expect.poll(async () => {
+      const bounds = await inspector.boundingBox();
+      return bounds && Math.abs(bounds.y + bounds.height - page.viewportSize().height) <= 1;
+    }, { message: 'Refined mobile details must be anchored to the viewport bottom' }).toBe(true);
+    if (useEscape) await page.keyboard.press('Escape');
+    else await inspector.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(inspector).toBeHidden();
+    await expect(card.getByRole('button', { name: title, exact: true })).toBeFocused();
+  }
   await expect(inspector.getByRole('heading', { name: title, exact: true })).toBeVisible();
   await expect(inspector.getByText(description, { exact: true })).toBeVisible();
+  await screenshot(page, testInfo, mobilePanel ? 'refined-mobile-bottom-panel' : 'board-original-inspector');
+  await closeMobileDetails();
   const movingColumn = board.getByRole('region', { name: 'Planning board', exact: true })
     .locator(':scope > div').filter({ has: page.getByRole('heading', { name: /^In motion/ }) });
   const status = board.getByRole('combobox', { name: `Status for ${title}`, exact: true });
@@ -290,9 +364,11 @@ async function exerciseBoard(page, testInfo, label) {
   }
   expect((await mutationItem(moved, 'task_id')).status).toBe('doing');
   await expect(status).toHaveValue('doing');
+  if (mobilePanel) await card.getByRole('button', { name: title, exact: true }).click();
   await expect(inspector.getByText('doing', { exact: true })).toBeVisible();
   await screenshot(page, testInfo, testInfo.project.name === 'generated-mobile'
     ? 'board-native-status-change' : 'board-pointer-move');
+  await closeMobileDetails(true);
 
   // Focus the native select and use its real keyboard interaction; do not
   // synthesize DOM change events or use selectOption for this keyboard check.
@@ -311,6 +387,7 @@ async function exerciseBoard(page, testInfo, label) {
   expect((await moduleAction(page, 'tasks', 'get_tasks', { id: task.task_id })).item.status).toBe('done');
   expect((await moduleAction(page, 'tasks', 'get_tasks', { id: untouched.task_id })).item.status).toBe('todo');
   await screenshot(page, testInfo, 'board-reloaded-inspector');
+  await closeMobileDetails();
   await board.getByRole('link', { name: 'Project details', exact: true }).click();
   await expect(page).toHaveURL(new URL('/projects', baseURL).href);
   await page.getByRole('main').getByRole('searchbox').fill(`${label} project`);
@@ -350,10 +427,11 @@ for (const route of requiredRoutes) {
       expect(shell.appId).toBe(profile.candidate.app_id);
       expect(routeInventory(shell.pages)).toEqual(routeInventory(profile.routes));
       await expect(page.getByRole('main').getByRole('heading', { name: route.heading, exact: true }).first()).toBeVisible();
-      if (route.path === '/projects') await exerciseProjects(page, testInfo, label);
+      let projectName = label;
+      if (route.path === '/projects') projectName = await exerciseProjects(page, testInfo, label);
       else if (route.path === '/tasks') await exerciseTasks(page, testInfo, label);
       else await exerciseBoard(page, testInfo, label);
-      if (route.path === '/projects') await exerciseProfile(page, testInfo, label);
+      if (route.path === '/projects') await exerciseProfile(page, testInfo, projectName);
       else await exerciseAssistant(page, testInfo);
       await noHorizontalOverflow(page);
       expect(failures, 'Required interactions must not produce browser errors').toEqual([]);

@@ -215,8 +215,39 @@ Unique local evidence directories retain the profile, exact app bytes, raw
 browser report, screenshots/traces and controller result, including failures.
 The synthetic identity environment is private local test material. The fixture
 proves only its declared routes and interactions; it is scripted AG2 generation,
-not live-model generation, pack selection or refinement acceptance. Table paging
-currently covers nine loaded records, not retrieval beyond the API's first page.
+not live-model generation or pack selection. Table paging currently covers nine
+loaded records, not retrieval beyond the API's first page. Desktop board tests
+exercise pointer drag and keyboard status changes; mobile uses the native status
+control. Touch dragging is not established. Inherited profile changes persist
+through `/api/me`, and assistant session setup is exercised without sending model
+requests or starting workflows.
+
+Browser success does not replace `validate_generated_app_candidate`. The
+canonical candidate validator also checks reachable declared write actions,
+module quality, contained loading, real runtime behavior and compilation. The
+module quality owner treats TODO comments, docstrings and explanatory messages
+as unfinished code while allowing the exact `todo` domain value in defaults and
+enumerations; other placeholder and fake-data checks remain unchanged.
+
+The opt-in `tests/test_paired_browser_refinement.py` uses a saved accepted B
+browser candidate, validates it with the canonical Docker strategy, saves it
+through the existing artifact owner and submits the selected board source to
+the authorized Studio refinement endpoint. Only the AG2 provider responses are
+scripted. Mongo/GridFS, JWT checks, owner checks, scoped finalization and candidate
+validation remain real. It saves a child review draft, verifies all unaffected
+source bytes, and runs the child through the same owned browser acceptance with
+mobile bottom-panel assertions. Only after that passes does the authenticated
+owner accept the draft through the existing endpoint. It does not promote the
+app. This route integration does not qualify full Studio startup or selected-pack
+preservation.
+
+```powershell
+$env:MOZAIKS_PAIRED_REFINEMENT='1'
+$env:MOZAIKS_PAIRED_BROWSER_BASELINE='<accepted B evidence directory>'
+$env:MOZAIKS_APP_RUNTIME_IMAGE_ID='sha256:<canonical local image digest>'
+$env:MOZAIKS_PAIRED_VALIDATOR_SOURCE_SHA='<verified image source commit>'
+.venv/Scripts/python.exe -m pytest tests/test_paired_browser_refinement.py -q --no-cov --reruns 0
+```
 
 Keep source inspection, authored fixtures, scripted AG2 output, admitted
 materialization, real-host interactions, actual refinement and live-model output

@@ -30,6 +30,7 @@ from factory_app.workflows._shared.generated_ui_contract import audit_app_ui_bun
 from factory_app.workflows.AppGenerator.tools.app_build_plan import app_build_plan
 from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
 from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import scan_generated_bundle
+from factory_app.workflows.AppGenerator.tools.validate_wiring import validate_wiring
 from mozaiksai import __version__ as mozaiks_version
 from mozaiksai.core.runtime.app.loader import AppLoader
 from mozaiksai.core.validation import GeneratedAppValidationRequest, validate_generated_app_bundle
@@ -133,6 +134,10 @@ def _projects_page():
                  "payload": {"modal_id": "project-create"}},
                 {"label": "Project details", "action_type": "event", "event_type": "ui.modal.open",
                  "requires_selection": True, "payload": {"modal_id": "project-detail"}},
+                {"label": "Edit project", "action_type": "event", "event_type": "ui.modal.open",
+                 "requires_selection": True, "payload": {"modal_id": "project-edit"}},
+                {"label": "Delete project", "action_type": "event", "event_type": "ui.modal.open",
+                 "requires_selection": True, "payload": {"modal_id": "project-delete"}},
             ],
         }),
         _section("project-create", "Modal", {"title": "Create project", "children": [
@@ -151,6 +156,39 @@ def _projects_page():
                            {"name": "status", "label": "Status", "type": "text"}],
             }),
         ]}),
+        _section("project-edit", "Modal", {"title": "Edit project", "children": [
+            _section("project-edit-form", "Form", {
+                "initial_values_key": "selected_row", "fields": [
+                    {"name": "name", "label": "Project name", "type": "text", "required": True},
+                    {"name": "status", "label": "Status", "type": "select", "options": [
+                        {"value": value, "label": label} for value, label in
+                        (("planned", "Planned"), ("active", "Active"), ("complete", "Complete"))
+                    ]},
+                ],
+                "submit_label": "Save project", "submit_action": {
+                    "label": "Save project", "action_type": "submit", "closes_modal": True,
+                    "data_source": {"module_id": "projects", "action_id": "update_project"},
+                    "payload": [{"key": "project_id", "value": "{selected_row.project_id}"},
+                                {"key": "name", "value": "{form.name}"},
+                                {"key": "status", "value": "{form.status}"}],
+                },
+            }),
+        ]}),
+        _section("project-delete", "Modal", {
+            "title": "Delete project", "description": "Permanently delete the selected project.", "children": [
+                _section("project-delete-details", "Form", {
+                    "initial_values_key": "selected_row", "disabled": True,
+                    "fields": [{"name": "name", "label": "Project", "type": "text"}],
+                }),
+                _section("project-delete-form", "Form", {
+                    "fields": [], "submit_label": "Delete project", "submit_action": {
+                        "label": "Delete project", "action_type": "delete", "closes_modal": True,
+                        "data_source": {"module_id": "projects", "action_id": "delete_project"},
+                        "payload": [{"key": "project_id", "value": "{selected_row.project_id}"}],
+                    },
+                }),
+            ],
+        }),
     ])
 
 
@@ -183,6 +221,7 @@ def _operational_page():
                 {"label": "Create task", "action_type": "event", "event_type": "ui.modal.open",
                  "payload": {"modal_id": "task-create"}},
                 open_modal("View details", "task-detail"), open_modal("Edit task", "task-edit"),
+                open_modal("Delete task", "task-delete"),
             ],
         }),
         _section("task-create", "Modal", {"title": "Create task", "children": [
@@ -216,6 +255,21 @@ def _operational_page():
                     ],
                 },
             })],
+        }),
+        _section("task-delete", "Modal", {
+            "title": "Delete task", "description": "Permanently delete the selected task.", "children": [
+                _section("task-delete-details", "Form", {
+                    "initial_values_key": "selected_row", "disabled": True,
+                    "fields": [{"name": "title", "label": "Task", "type": "text"}],
+                }),
+                _section("task-delete-form", "Form", {
+                    "fields": [], "submit_label": "Delete task", "submit_action": {
+                        "label": "Delete task", "action_type": "delete", "closes_modal": True,
+                        "data_source": {"module_id": "tasks", "action_id": "delete_task"},
+                        "payload": [{"key": "task_id", "value": "{selected_row.task_id}"}],
+                    },
+                }),
+            ],
         }),
     ])
 
@@ -347,6 +401,8 @@ async def test_scripted_paired_apps_admit_and_assemble(presentation, tmp_path):
         files=files, build_tasks=detach(context.get("app_build_plan"))["build_tasks"],
     ))
     assert result.passed is True, result.diagnostics
+    wiring = await validate_wiring({"generated_files": files})
+    assert wiring["passed"] is True, wiring["failed_tests"]
     app_root = tmp_path / "app"
     for relative, content in files.items():
         path = app_root / relative

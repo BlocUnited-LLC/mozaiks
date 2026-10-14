@@ -24,6 +24,8 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Generated module quality checks distinguish a `todo` domain value from TODO
+  comments, docstrings and unfinished implementation messages.
 - Generated UI browser acceptance rejects empty, malformed, skipped or incomplete
   reports. Reviewed real-host route probes check declarative/custom coverage and
   local candidate identity; candidate acceptance remains blocked until running
