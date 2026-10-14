@@ -38,7 +38,7 @@ ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = Path(__file__).parent / "fixtures"
 LIVE = FIXTURES / "business_services_split_live_601d2f56.json"
 REVIEW_FIXTURE = FIXTURES / "appplan_review_live_20eb8742.json"
-NOTE = "Handler split (authoritative, from the approved plan):"
+NOTE = "Handler split ("
 
 
 @pytest.fixture(autouse=True)
@@ -145,6 +145,67 @@ def test_real_plan_review_restates_the_split_for_a_task_owning_base_handler():
 def test_real_plan_review_leaves_a_task_without_base_handler_alone():
     cached = _review(owns_base_handler=False)
     assert NOTE not in _task(cached, "business_services")["initial_message"]
+
+
+def _revision_services_task() -> dict:
+    return {
+        "task_id": "task_crm_core_services", "task_type": "business_services", "capability_pack_id": "crm_core",
+        "initial_agent": "ServiceAgent", "initial_message": "Add the follow-up reminder action to CRM Core.",
+        "owned_paths": [f"modules/crm_core/backend/{name}.py" for name in ("base_handler", "handler", "service", "repo")],
+        "depends_on": [],
+    }
+
+
+def test_revision_note_uses_the_baseline_module_handler_not_the_naming_rule():
+    """A revision plan has no module_contract task; the baseline module.yaml already names the class."""
+    live = _live()
+    plan = {"build_tasks": [_revision_services_task()]}
+    baseline = yaml.safe_dump({
+        "schema_version": "mozaiks.module.v1",
+        "module": {"id": "crm_core", "handler": "backend.handler:CRMCoreModule"},
+        "actions": [],
+    })
+    context = ContextVariablesBridge({
+        "build_mode": "revision", "data_contract": live["data_contract"],
+        "generated_files": {"modules/crm_core/module.yaml": baseline},
+    })
+
+    app_plan_review._restate_handler_split(plan, context)
+
+    message = plan["build_tasks"][0]["initial_message"]
+    assert "The existing module.yaml declares module.handler `backend.handler:CRMCoreModule`." in message
+    assert "class CRMCoreModule(CRMCoreBaseModule)" in message
+    assert "CrmCoreModule" not in message
+    assert "naming rule" not in message
+
+
+def test_a_convention_name_is_not_presented_as_declared_authority():
+    live = _live()
+    plan = {"build_tasks": [_revision_services_task()]}
+
+    app_plan_review._restate_handler_split(plan, ContextVariablesBridge({"data_contract": live["data_contract"]}))
+
+    message = plan["build_tasks"][0]["initial_message"]
+    assert "authoritative" not in message
+    assert "No declared module.handler exists yet; by the module-contract naming rule it is" in message
+    assert "If the accepted module.yaml declares another class, use that class" in message
+
+
+@pytest.mark.parametrize("collections", [True, False])
+def test_an_owned_schemas_file_is_listed_once(collections):
+    live = _live()
+    task = _revision_services_task()
+    task["owned_paths"].append("modules/crm_core/backend/schemas.py")
+    contract = live["data_contract"] if collections else {"version": "1", "surfaces": []}
+
+    app_plan_review._restate_handler_split({"build_tasks": [task]}, ContextVariablesBridge({"data_contract": contract}))
+
+    message = task["initial_message"]
+    in_authored = "modules/crm_core/backend/schemas.py" in _authored_segment(message)
+    excluded = message.split("do not author them:", 1)[1] if "do not author them:" in message else ""
+    in_excluded = "modules/crm_core/backend/schemas.py" in excluded
+    # Code renders schemas.py for a module owning collections; otherwise the owning task writes it.
+    assert (in_authored, in_excluded) == ((False, True) if collections else (True, False))
 
 
 # --- One rejection reports every problem of the attempt -------------------------------------
@@ -281,6 +342,41 @@ async def test_a_lone_policy_copy_is_still_reported_exactly(monkeypatch):
     )
 
 
+_BASE = (
+    "class TaskManagementBaseModule:\n"
+    "    async def task_summary(self, ctx, **params):\n"
+    "        from . import service\n"
+    "        return await service.task_summary(ctx)\n"
+)
+
+
+@pytest.mark.asyncio
+async def test_rejection_reports_an_unowned_file_and_a_missing_file_together(monkeypatch):
+    results = await _run_services_attempt(monkeypatch, {
+        f"{BACKEND}/handler.py": _FLAT_HANDLER,
+        f"{BACKEND}/service.py": _SERVICE,
+        f"{BACKEND}/helpers.py": "def label(value):\n    return str(value)\n",
+    })
+    error = results["_failed"]["services"]["error"]
+    assert f"emitted files outside owned_paths: ['{BACKEND}/helpers.py']" in error
+    assert f"did not emit required owned_paths: ['{BACKEND}/base_handler.py']" in error
+
+
+@pytest.mark.asyncio
+async def test_a_policy_copy_travels_with_a_later_python_rejection(monkeypatch):
+    results = await _run_services_attempt(monkeypatch, {
+        f"{BACKEND}/base_handler.py": _BASE,
+        f"{BACKEND}/handler.py": "from .base_handler import TaskManagementBaseModule\n\nclass TaskManagementModule(:\n",
+        f"{BACKEND}/service.py": _SERVICE,
+        f"{BACKEND}/policy.py": _POLICY_COPY,
+    })
+    error = results["_failed"]["services"]["error"]
+    assert error.startswith(
+        f"{BACKEND}/policy.py: policy.py is rendered from data_contract; omit model-authored policy source\n"
+    )
+    assert f"{BACKEND}/handler.py" in error.split("\n", 1)[1]
+
+
 # --- ServiceAgent prompt shows the split, never the flat shape -----------------------------------
 
 def _service_agent_prompt() -> str:
@@ -305,3 +401,15 @@ def test_service_agent_worked_example_is_the_handler_split():
     # No example or rule presents a flat module.handler class.
     assert "class TaskManagerModule:" not in prompt
     assert "`backend/handler.py` — action adapter only" not in prompt
+
+
+def test_service_agent_split_is_conditional_on_owning_base_handler():
+    """ExistingAppDiscovery hands off business_services tasks that own handler.py without base_handler.py."""
+    prompt = " ".join(_service_agent_prompt().split())
+    assert (
+        "When it is not owned, `backend/handler.py` defines that class with the dispatch directly; "
+        "do not create base_handler.py."
+    ) in prompt
+    assert "This example is for a task whose `current_build_task.owned_paths` include `backend/base_handler.py`." in prompt
+    assert "When base_handler.py is not owned, omit its entries" in prompt
+    assert "a workspace subclass of that base when base_handler.py is owned, otherwise the dispatch class itself" in prompt

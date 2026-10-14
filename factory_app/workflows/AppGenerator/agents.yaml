@@ -2374,8 +2374,8 @@ agents:
     heading: '[OBJECTIVE]'
     content: |-
       - Generate only the model-owned backend implementations declared in the supplied module contracts and assigned to current_build_task.owned_paths.
-      - Keep the handler files thin and aligned with `module.yaml.actions[].handler_method`: `backend/base_handler.py` holds the custom action dispatch in a base class, and `backend/handler.py` defines the exact `module.yaml.module.handler` class as its workspace subclass.
-      - Implement `backend/base_handler.py`, `backend/handler.py`, `backend/service.py`, `backend/repo.py`, and optional backend hooks when those paths are listed in `current_build_task.owned_paths`.
+      - Keep the handler files thin and aligned with `module.yaml.actions[].handler_method`. When `backend/base_handler.py` is in `current_build_task.owned_paths`, it holds the custom action dispatch in a base class and `backend/handler.py` defines the exact `module.yaml.module.handler` class as its workspace subclass. When it is not owned, `backend/handler.py` defines that class with the dispatch directly; do not create base_handler.py.
+      - Implement `backend/handler.py`, `backend/service.py`, `backend/repo.py`, `backend/base_handler.py`, and optional backend hooks when those paths are listed in `current_build_task.owned_paths`.
       - Emit every model-owned path listed in `current_build_task.owned_paths`. Code renders the canonical create/update/delete and list/get implementations into the owned handler/service/repo files, the owned `backend/policy.py`, and the module's `backend/schemas.py`, all from the approved data_contract. Omit policy.py and schemas.py from python_files and code_files. Missing declared scope requires contract correction, never an invented policy stub.
       - Implement only genuine business logic: the optional write hooks below, declared custom mutations, and declared custom_reads. Never author `create_<entity>`, `update_<entity>`, `delete_<entity>`, `list_<collection>` or `get_<collection>` in any handler, service, or repo class or function; code supplies them and replaces any authored copy.
       - Write hooks are plain module-level `async def` functions in `backend/service.py`, discovered by exact name; the rendered canonical service calls them when present and skips them when absent. For entity `Task`: `before_create_task(ctx, values) -> values`, `after_create_task(ctx, record)`, `before_update_task(ctx, record, changes) -> changes`, `after_update_task(ctx, record, changes)`, `before_delete_task(ctx, record)`, `after_delete_task(ctx, record)`. Task admission rejects a sync hook, a hook with another signature, a hook defined inside a class, or a hook naming an entity the module does not own. A before hook may return the (possibly mutated) payload or None, which means unchanged; the id and managed timestamps it returns are stripped with a logged warning, an update hook cannot change the owner field, and a create hook that sets a foreign owner is rejected by the runtime. Use before hooks for validation (raise `ModuleInputValidationError`) and derived fields; use after hooks for side effects and `await ctx.emit(...)` of custom events declared on that canonical action. The rendered service itself emits the canonical `domain.<entity>.<created|updated|deleted>` event after the after hook returns, with the stored record as payload; a hook emitting it again is removed.
@@ -2421,10 +2421,10 @@ agents:
         or api_surface adapter tasks before backend implementation begins.
 
       **Module implementation structure**:
-      - Required module adapter code goes in `modules/{capability_pack_id}/backend/base_handler.py` and `backend/handler.py`.
+      - Required module adapter code goes in `modules/{capability_pack_id}/backend/handler.py`, and in `backend/base_handler.py` when the task owns it.
       - Durable module logic should be layered across:
-        - `backend/base_handler.py` — base class with the custom action dispatch only
-        - `backend/handler.py` — the exact module.handler class, a workspace subclass of the base
+        - `backend/base_handler.py` — when owned: base class with the custom action dispatch only
+        - `backend/handler.py` — the exact module.handler class: a workspace subclass of that base when base_handler.py is owned, otherwise the dispatch class itself
         - `backend/service.py` — business logic + event publication
         - `backend/repo.py` — persistence
         - `backend/policy.py` — code-rendered optional ownership preflight helpers; omit model source even when this path is assigned to the task
@@ -2523,7 +2523,9 @@ agents:
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-
-      Output MUST be a valid JSON object matching `ServiceOutput` and NO additional text:
+      Output MUST be a valid JSON object matching `ServiceOutput` and NO additional text.
+
+      This example is for a task whose `current_build_task.owned_paths` include `backend/base_handler.py`. When base_handler.py is not owned, omit its entries and put the same dispatch methods directly on the module.handler class in handler.py.
 
       ```json
       {

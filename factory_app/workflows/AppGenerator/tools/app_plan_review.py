@@ -1189,16 +1189,40 @@ def _repair_contract_task_operations(plan: dict[str, Any], context: Any) -> list
 
 
 _HANDLER_ENTRYPOINT = re.compile(r"backend\.handler:([A-Za-z_][A-Za-z0-9_]*)")
-_HANDLER_SPLIT_NOTE = "Handler split (authoritative, from the approved plan):"
+_HANDLER_SPLIT_NOTE = "Handler split (from the approved plan):"
 
 
-def _module_handler_class(module_id: str, *messages: str) -> str:
-    """The module.handler class the plan states, else the module-contract naming rule."""
+def _manifest_handler_class(module_id: str, context: Any) -> str | None:
+    """The module.handler class an existing module.yaml declares (a revision baseline or an earlier write)."""
+    files = detach(context.get("generated_files")) or {}
+    source = files.get(f"modules/{module_id}/module.yaml") if isinstance(files, dict) else None
+    if isinstance(source, dict):
+        source = source.get("content")
+    if not isinstance(source, str):
+        return None
+    try:
+        manifest = yaml.safe_load(source)
+    except yaml.YAMLError:
+        return None
+    entrypoint = str(((manifest or {}).get("module") or {}).get("handler") or "") if isinstance(manifest, dict) else ""
+    match = _HANDLER_ENTRYPOINT.fullmatch(entrypoint)
+    return match.group(1) if match else None
+
+
+def _module_handler_class(module_id: str, context: Any, *messages: str) -> tuple[str, str]:
+    """The module.handler class and where it came from.
+
+    In order: a class a plan message names, the class the existing module.yaml
+    declares, and only then the module-contract naming rule.
+    """
     for message in messages:
         match = _HANDLER_ENTRYPOINT.search(message)
         if match:
-            return match.group(1)
-    return "".join(part[:1].upper() + part[1:] for part in module_id.split("_") if part) + "Module"
+            return match.group(1), "plan"
+    declared = _manifest_handler_class(module_id, context)
+    if declared:
+        return declared, "module_yaml"
+    return "".join(part[:1].upper() + part[1:] for part in module_id.split("_") if part) + "Module", "convention"
 
 
 def _base_handler_class(handler_class: str) -> str:
@@ -1220,10 +1244,12 @@ def _restate_handler_split(plan: dict[str, Any], context: Any) -> list[str]:
     flat handler class and a policy copy, and lost its one correction round
     before ever emitting base_handler.py, which ended the run.
 
-    Everything stated here is projected from declared plan fields: the owned
-    paths, the module's data_contract collections, and the handler entrypoint a
-    task message already names (else the module-contract naming rule, which the
-    module_contract task is then told as well, so both tasks name one class).
+    Everything stated here is projected from declared inputs: the owned paths,
+    the module's data_contract collections, and the handler entrypoint a task
+    message names or the existing module.yaml declares. Only when neither does
+    the module-contract naming rule supply a name; the note says so, and the
+    module_contract task (if planned) is told the same name, so both tasks name
+    one class.
     """
     repairs: list[str] = []
     tasks = plan.get("build_tasks") or []
@@ -1254,26 +1280,37 @@ def _restate_handler_split(plan: dict[str, Any], context: Any) -> list[str]:
                 None,
             )
             contract_message = str((contract or {}).get("initial_message") or "").rstrip()
-            handler_class = _module_handler_class(module_id, contract_message, message)
+            handler_class, source = _module_handler_class(module_id, context, contract_message, message)
             base_class = _base_handler_class(handler_class)
             collections = module_id in persistent
+            schemas_path = f"{backend}/schemas.py"
             rendered = [
                 path for path in owned
                 if path.startswith(f"{backend}/") and (
-                    (path == f"{backend}/policy.py" and collections)
+                    (path in {f"{backend}/policy.py", schemas_path} and collections)
                     or (path == f"{backend}/account_data_handler.py"
                         and owns_per_user_collections(module_id, data_contract))
                 )
             ]
             authored = [path for path in owned if path.startswith(f"{backend}/") and path not in rendered]
-            not_authored = [*rendered, f"{backend}/schemas.py"]
+            not_authored = [*rendered, *([] if schemas_path in owned else [schemas_path])]
+            entrypoint = f"`backend.handler:{handler_class}`"
+            identity = {
+                "plan": f"The plan names module.yaml module.handler {entrypoint}.",
+                "module_yaml": f"The existing module.yaml declares module.handler {entrypoint}.",
+                "convention": (
+                    f"No declared module.handler exists yet; by the module-contract naming rule it is "
+                    f"{entrypoint}. If the accepted module.yaml declares another class, use that class "
+                    "and name its base accordingly."
+                ),
+            }[source]
             canonical = (
                 f" Code adds the canonical create/update/delete and list/get methods to {handler_class} "
                 "and their service.py and repo.py functions; author them in neither class."
                 if collections else ""
             )
             note = (
-                f"{_HANDLER_SPLIT_NOTE} module.yaml module.handler is `backend.handler:{handler_class}`. "
+                f"{_HANDLER_SPLIT_NOTE} {identity} "
                 f"`{backend}/base_handler.py` defines `class {base_class}` holding the module's custom action "
                 "methods, each delegating to service.py. "
                 f"`{backend}/handler.py` imports it (`from .base_handler import {base_class}`) and defines "
@@ -1281,12 +1318,13 @@ def _restate_handler_split(plan: dict[str, Any], context: Any) -> list[str]:
                 "docstring; an import or re-export alone is invalid."
                 f"{canonical} "
                 f"Author and emit: {', '.join(authored)}. "
-                f"Code renders or owns these, so do not author them: {', '.join(not_authored)}. "
-                "Where the text above differs, this note governs."
+                + (f"Code renders or another task owns these, so do not author them: {', '.join(not_authored)}. "
+                   if not_authored else "")
+                + "Where the text above differs on these files, this note governs."
             )
             task["initial_message"] = "\n\n".join(part for part in (message, note) if part)
             repairs.append(
-                f"{task.get('task_id')}: restated the {handler_class}/{base_class} handler split "
+                f"{task.get('task_id')}: restated the {handler_class}/{base_class} handler split ({source}) "
                 f"and authored files {authored}"
             )
             if contract is not None and f"backend.handler:{handler_class}" not in contract_message:
