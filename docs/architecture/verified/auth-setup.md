@@ -171,7 +171,7 @@ Different providers put user data in different JWT claims. Configure as needed:
 |----------|---------|-------------|
 | `AUTH_USER_ID_CLAIM` | `sub` | Claim containing user ID |
 | `AUTH_EMAIL_CLAIM` | `email` | Claim containing email |
-| `AUTH_EMAIL_VERIFIED_CLAIM` | `email_verified` | Boolean claim saying the email is verified |
+| `AUTH_EMAIL_VERIFIED_CLAIM` | `email_verified`, only while `AUTH_EMAIL_CLAIM` is `email` | Boolean claim saying the `AUTH_EMAIL_CLAIM` value is verified |
 | `AUTH_NAME_CLAIM` | `name` | Claim containing display name |
 | `AUTH_ROLES_CLAIM` | `roles` | Claim containing user roles |
 | `AUTH_SCOPES_CLAIM` | `scp` | Claim containing scopes |
@@ -184,20 +184,42 @@ identity provider says that email is verified: the token's verified-email
 claim must be the JSON boolean `true`. A missing claim, `false`, or a string
 such as `"true"` grants nothing. Without this rule, anyone could register an
 account with an admin's address on a provider with open sign-up, before the
-admin does, and become an admin. An admin role issued in the token (the
-`AUTH_ROLES_CLAIM` claim, or Keycloak realm/client roles) needs no verified
-email.
+admin does, and become an admin. Matching ignores case and is ASCII-only: a
+non-ASCII address, in the token or in `admins`, never matches, because case
+folding can turn one address into another.
+
+An admin role issued in the token needs no verified email, but the provider
+must issue it where the adapter reads it. The generic `jwt` adapter reads only
+the top-level claim named by `AUTH_ROLES_CLAIM` (default `roles`); it does not
+read Keycloak's nested `realm_access.roles`. The `keycloak` adapter reads
+`realm_access.roles` and the `resource_access` roles of `KEYCLOAK_CLIENT_ID`.
+The packaged Keycloak realm defines no `admin` role and no `roles` mapper, so
+on the packaged Compose stack (generic `jwt`) the working path is a verified
+email; see
+[Admin access and email verification](../../guides/self-hosting.md#admin-access-and-email-verification)
+for both options.
 
 | Provider | Verified-email claim |
 |----------|----------------------|
-| Generic JWT (`jwt`) | `AUTH_EMAIL_VERIFIED_CLAIM`, default `email_verified` (the standard OIDC claim). Keycloak access tokens carry it through the `email` client scope. A provider that adds `email` to access tokens with a custom claim or action must add the verified flag the same way. |
+| Generic JWT (`jwt`) | `AUTH_EMAIL_VERIFIED_CLAIM`. Unset, it is `email_verified` (the standard OIDC claim) while `AUTH_EMAIL_CLAIM` is `email`, and nothing otherwise. Keycloak access tokens carry `email_verified` through the `email` client scope. A provider that adds `email` to access tokens with a custom claim or action must add the verified flag the same way. |
 | Keycloak (`keycloak`) | `email_verified`, from the realm's built-in `email` client scope |
 | Supabase (`supabase`) | top-level `email_verified` only. Supabase does not issue one by default; add it with a custom access token hook. The copy inside `user_metadata` is writable by the user and never counts. |
-| No auth (`none`) | never verified; with authentication off, use `AUTH_ANON_ROLES=admin,user` |
+| No auth (`none`) | never verified. With authentication off, a request with development access still uses the allowlist for `AUTH_ANON_EMAIL` or a dev persona's `X-Mozaiks-Dev-Email`, since it can already take any role; or use `AUTH_ANON_ROLES=admin,user` |
+
+`email_verified` vouches for the `email` claim and nothing else. If you point
+`AUTH_EMAIL_CLAIM` at another claim, such as `preferred_username` or `upn`,
+and leave `AUTH_EMAIL_VERIFIED_CLAIM` unset, no email counts as verified, so
+`admins` never grants admin, and the backend logs an
+`AUTH_EMAIL_VERIFIED_CLAIM_UNSET` warning when it builds the adapter. A
+username is not a verified address: on a realm with open sign-up, anyone can
+choose an admin's address as their username. When you set both settings,
+Mozaiks trusts the pairing, so set `AUTH_EMAIL_VERIFIED_CLAIM` only to a
+boolean claim that vouches for the value of the `AUTH_EMAIL_CLAIM` claim.
 
 Microsoft Entra ID issues no `email_verified` claim. Grant admin there through
 an app role in the `roles` claim, or set `AUTH_EMAIL_VERIFIED_CLAIM` to an
-optional claim that means the same thing for your tenant.
+optional claim that vouches for the claim `AUTH_EMAIL_CLAIM` names in your
+tenant.
 
 A refused allowlisted email gets the same `403 Admin access required` as any
 other non-admin, so the response does not reveal which addresses are admins.

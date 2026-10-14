@@ -272,7 +272,12 @@ Admin access follows the platform auth rules:
    provider marked that email verified (`email_verified` is JSON `true`; see
    [Admin allowlist needs a verified email](../verified/auth-setup.md#admin-allowlist-needs-a-verified-email))
 3. with authentication off, `AUTH_ANON_ROLES=admin,user` gives the local
-   development identity the admin role
+   development identity the admin role. A request with development access
+   also still uses the allowlist without verification: an `AUTH_ANON_EMAIL`
+   or dev persona `X-Mozaiks-Dev-Email` address on `admins` is promoted,
+   because that identity can already take any role (`AUTH_ANON_ROLES`,
+   `X-Mozaiks-Dev-Roles`). Public visitors carry no email, so the allowlist
+   never applies to them.
 
 The unified UI does not collapse authority:
 

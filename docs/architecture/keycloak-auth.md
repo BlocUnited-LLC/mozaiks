@@ -19,7 +19,8 @@ Owns app identity, admin bootstrap, target enablement, and the coarse
 Admin bootstrap (`admins`) matches only an email the identity provider marked
 verified (`email_verified` is `true` in the access token). The repo-local
 Keycloak realm allows self-registration without email verification, so mark a
-local admin's email verified in the Keycloak admin console; see
+local admin's email verified in the Keycloak admin console, in the `mozaiks`
+realm (not `master`); see
 [Admin access and email verification](../guides/self-hosting.md#admin-access-and-email-verification).
 
 `app/app.json` does not own:
@@ -155,7 +156,9 @@ Own deployment-time backend configuration, such as:
 - `AUTH_ACCESS_TOKEN_TYPE_CLAIM` and `AUTH_ACCESS_TOKEN_TYPE_VALUE` — optional
   signed access-token discriminator for issuers without RFC 9068 `at+jwt`
 - `AUTH_REQUIRED_SCOPE` — required scope for user-authenticated endpoints
-- `AUTH_ROLES_CLAIM` — JWT claim name for roles (default: `roles`)
+- `AUTH_ROLES_CLAIM` — JWT claim name for roles (default: `roles`); a
+  top-level claim, so the generic `jwt` provider does not read Keycloak's
+  nested `realm_access.roles` without a mapper
 - `VITE_OIDC_AUTHORITY` — frontend: OIDC authority for the browser auth flow
 - `VITE_OIDC_CLIENT_ID` — public browser client registered with the provider
 - `AUTH_ENABLED=false` with `ENV=development` — explicit backend local mode;

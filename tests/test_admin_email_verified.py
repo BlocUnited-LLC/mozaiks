@@ -189,6 +189,53 @@ def test_a_configured_verified_email_claim_is_honoured(admin_client: TestClient,
     assert _health(admin_client, _token(email_verified=True)).status_code == 403
 
 
+def _configure(monkeypatch, **values: str) -> None:
+    for name, value in values.items():
+        monkeypatch.setenv(name, value)
+    clear_auth_config_cache()
+    auth_registry.reset_auth_adapter()
+
+
+def test_a_remapped_email_claim_does_not_borrow_the_standard_verified_flag(
+    admin_client: TestClient, monkeypatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """``email_verified`` vouches for ``email``, not for the claim AUTH_EMAIL_CLAIM names.
+
+    A self-registered account picks the admin's address as its username and
+    verifies a mailbox it owns. With AUTH_EMAIL_CLAIM=preferred_username and no
+    verified claim configured for it, that must not make it an admin.
+    """
+    _configure(monkeypatch, AUTH_EMAIL_CLAIM="preferred_username")
+    token = _token(email="stranger@example.com", email_verified=True, preferred_username=_ADMIN_EMAIL)
+
+    with caplog.at_level(logging.WARNING):
+        response = _health(admin_client, token)
+        _health(admin_client, token)
+
+    assert response.status_code == 403
+    unpaired = [record for record in caplog.records if "AUTH_EMAIL_VERIFIED_CLAIM_UNSET" in record.getMessage()]
+    # Once per adapter build, not once per request.
+    assert len(unpaired) == 1
+    message = unpaired[0].getMessage()
+    assert "AUTH_EMAIL_CLAIM='preferred_username'" in message and "AUTH_EMAIL_VERIFIED_CLAIM" in message
+
+
+def test_a_remapped_email_claim_with_its_own_verified_claim_is_trusted(
+    admin_client: TestClient, monkeypatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Both settings explicit: the operator vouches that the pair belongs together."""
+    _configure(monkeypatch, AUTH_EMAIL_CLAIM="mail", AUTH_EMAIL_VERIFIED_CLAIM="mail_verified")
+
+    with caplog.at_level(logging.WARNING):
+        verified = _health(admin_client, _token(email=None, mail=_ADMIN_EMAIL, mail_verified=True))
+        unverified = _health(admin_client, _token(email=None, mail=_ADMIN_EMAIL, mail_verified=False))
+        # The standard flag says nothing about the "mail" claim.
+        borrowed = _health(admin_client, _token(email=None, mail=_ADMIN_EMAIL, email_verified=True))
+
+    assert (verified.status_code, unverified.status_code, borrowed.status_code) == (200, 403, 403)
+    assert not [record for record in caplog.records if "AUTH_EMAIL_VERIFIED_CLAIM_UNSET" in record.getMessage()]
+
+
 # --- Authentication off --------------------------------------------------------------
 
 
@@ -220,6 +267,101 @@ def test_local_development_identity_keeps_the_allowlist(admin_client: TestClient
     # A public visitor carries no email, so the allowlist never applies to it.
     _authentication_off(monkeypatch, AUTH_ANON_ACCESS="public", AUTH_ANON_EMAIL=_ADMIN_EMAIL)
     assert _peer(admin_client, "192.168.1.20").get("/api/admin/health").status_code == 403
+
+
+def test_dev_personas_never_carry_a_verified_email(admin_client: TestClient, monkeypatch) -> None:
+    """A request-supplied persona email has no identity provider behind it.
+
+    Drives the real ``require_user`` dependency with authentication off, so a
+    later change that copies a verified flag onto a persona fails here.
+    """
+    from fastapi import Depends
+
+    from mozaiksai.core.auth import require_user
+
+    _authentication_off(monkeypatch, AUTH_ANON_EMAIL=_ADMIN_EMAIL)
+    probe = FastAPI()
+
+    @probe.get("/whoami")
+    async def whoami(principal: UserPrincipal = Depends(require_user)) -> dict[str, Any]:
+        return {
+            "user_id": principal.user_id,
+            "email": principal.email,
+            "email_verified": principal.email_verified,
+            "auth_provenance": principal.auth_provenance,
+        }
+
+    client = TestClient(probe, client=("127.0.0.1", 50000), base_url="http://localhost:8000")
+    persona = {"X-Mozaiks-Dev-User-Id": "persona-1", "X-Mozaiks-Dev-Roles": "user"}
+
+    own_email = client.get("/whoami", headers={**persona, "X-Mozaiks-Dev-Email": "persona@example.com"}).json()
+    inherited = client.get("/whoami", headers=persona).json()
+    base = client.get("/whoami").json()
+
+    assert own_email == {
+        "user_id": "persona-1",
+        "email": "persona@example.com",
+        "email_verified": False,
+        "auth_provenance": "dev_override",
+    }
+    assert (inherited["email"], inherited["email_verified"]) == (_ADMIN_EMAIL, False)
+    assert (base["email"], base["email_verified"]) == (_ADMIN_EMAIL, False)
+
+
+@pytest.mark.parametrize("persona_email", [None, _ADMIN_EMAIL])
+def test_a_dev_persona_does_not_inherit_a_verified_email(persona_email: str | None) -> None:
+    """Even over a base principal that is verified, the persona is not."""
+    from starlette.requests import Request
+
+    from mozaiksai.core.auth.anonymous_access import LOCAL_DEVELOPMENT_PROVENANCE
+    from mozaiksai.core.auth.dependencies import _no_auth_dev_override_principal
+
+    headers = [(b"x-mozaiks-dev-user-id", b"persona-1")]
+    if persona_email:
+        headers.append((b"x-mozaiks-dev-email", persona_email.encode()))
+    request = Request({"type": "http", "method": "GET", "path": "/", "headers": headers, "query_string": b""})
+    base = UserPrincipal.from_claims(
+        UserClaims(user_id="local-dev", email=_ADMIN_EMAIL, email_verified=True),
+        auth_provenance=LOCAL_DEVELOPMENT_PROVENANCE,
+    )
+
+    persona = _no_auth_dev_override_principal(request, base)
+
+    assert (persona.user_id, persona.email, persona.email_verified) == ("persona-1", _ADMIN_EMAIL, False)
+
+
+# --- Allowlist matching is ASCII-only ------------------------------------------------
+
+_KELVIN_SIGN = "K"  # lowercases to the ASCII letter "k"
+
+
+def test_a_non_ascii_lookalike_never_matches_the_allowlist(monkeypatch, tmp_path: Path) -> None:
+    from mozaiksai.core.admin import email_promotion
+
+    app_root = tmp_path / "kelvin-app"
+    app_root.mkdir()
+    (app_root / "app.json").write_text(
+        json.dumps({"admins": ["kate@example.com", f"{_KELVIN_SIGN}im@example.com"]}), encoding="utf-8"
+    )
+    monkeypatch.setenv("PLATFORM_PATH", str(app_root))
+    assert f"{_KELVIN_SIGN}ate@example.com".lower() == "kate@example.com"
+
+    assert email_promotion.is_admin_by_email("kate@example.com") is True
+    assert email_promotion.is_admin_by_email(f"{_KELVIN_SIGN}ate@example.com") is False
+    # A non-ASCII app.json entry does not stand in for the ASCII address it folds to.
+    assert email_promotion.get_admin_emails() == ["kate@example.com"]
+    assert email_promotion.is_admin_by_email("kim@example.com") is False
+
+
+def test_a_verified_non_ascii_lookalike_is_not_promoted(admin_client: TestClient, monkeypatch, tmp_path: Path) -> None:
+    app_root = tmp_path / "kelvin-router-app"
+    app_root.mkdir()
+    (app_root / "app.json").write_text(json.dumps({"admins": ["kate@example.com"]}), encoding="utf-8")
+    monkeypatch.setenv("PLATFORM_PATH", str(app_root))
+
+    lookalike = _token(email=f"{_KELVIN_SIGN}ate@example.com", email_verified=True)
+    assert _health(admin_client, lookalike).status_code == 403
+    assert _health(admin_client, _token(email="kate@example.com", email_verified=True)).status_code == 200
 
 
 # --- Keycloak and Supabase providers through the same gate ---------------------------
@@ -333,6 +475,36 @@ def test_generic_jwt_adapter_reads_the_configured_verified_claim() -> None:
     assert adapter._extract_claims(_jwt_claims(xms_edov=True)).email_verified is True
     assert adapter._extract_claims(_jwt_claims(email_verified=True)).email_verified is False
     assert "AUTH_EMAIL_VERIFIED_CLAIM" in auth_registry._PROVIDER_CONFIG_ENV_VARS["jwt"]
+
+
+@pytest.mark.parametrize(
+    ("settings", "verified_claim"),
+    [
+        ({}, "email_verified"),
+        ({"AUTH_EMAIL_CLAIM": "email"}, "email_verified"),
+        # A blank value is the same as an unset one.
+        ({"AUTH_EMAIL_CLAIM": "upn", "AUTH_EMAIL_VERIFIED_CLAIM": ""}, ""),
+        ({"AUTH_EMAIL_CLAIM": "upn"}, ""),
+        ({"AUTH_EMAIL_CLAIM": "upn", "AUTH_EMAIL_VERIFIED_CLAIM": "upn_verified"}, "upn_verified"),
+        ({"AUTH_EMAIL_CLAIM": "preferred_username", "AUTH_EMAIL_VERIFIED_CLAIM": "email_verified"}, "email_verified"),
+    ],
+)
+def test_the_verified_claim_defaults_only_for_the_standard_email_claim(
+    settings: dict[str, str], verified_claim: str
+) -> None:
+    assert JWTAdapterConfig.from_env(settings).email_verified_claim == verified_claim
+
+
+def test_a_remapped_email_claim_is_never_verified_without_its_own_claim() -> None:
+    for config in (
+        JWTAdapterConfig.from_env({"AUTH_EMAIL_CLAIM": "upn"}),
+        JWTAdapterConfig(jwks_url="https://j.invalid", issuer=_ISSUER, audience=_AUDIENCE, email_claim="upn"),
+    ):
+        extracted = GenericJWTAdapter(config=config)._extract_claims(
+            {"sub": "user-1", "upn": _ADMIN_EMAIL, "email": "someone@example.com", "email_verified": True}
+        )
+
+        assert (extracted.email, extracted.email_verified) == (_ADMIN_EMAIL, False)
 
 
 @pytest.mark.parametrize(

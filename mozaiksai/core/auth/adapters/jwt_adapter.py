@@ -31,6 +31,11 @@ from mozaiksai.core.auth.jwks import JWKSClient
 
 logger = get_core_logger("auth.jwt_adapter")
 
+# The standard OIDC pair: ``email_verified`` vouches for ``email`` and for no
+# other claim, so it is the default verified claim only for this email claim.
+_STANDARD_EMAIL_CLAIM = "email"
+_STANDARD_EMAIL_VERIFIED_CLAIM = "email_verified"
+
 
 def _claim_value(raw_claims: dict[str, Any], claim_name: str, *fallbacks: str) -> str | None:
     """Return the first non-empty claim value as a string."""
@@ -85,10 +90,15 @@ class JWTAdapterConfig:
 
     # Claim mappings - which JWT claims map to our UserClaims
     user_id_claim: str = "sub"
-    email_claim: str = "email"
-    # Boolean claim asserting the email is verified. Only the JSON boolean
-    # true counts; issuers without one never get email-based admin promotion.
-    email_verified_claim: str = "email_verified"
+    email_claim: str = _STANDARD_EMAIL_CLAIM
+    # Boolean claim asserting that the ``email_claim`` value is verified. Only
+    # the JSON boolean true counts; issuers without one never get email-based
+    # admin promotion. Empty means not configured: with the standard email
+    # claim it resolves to ``email_verified``, and with any other email claim
+    # it stays empty, so no email is verified (``email_verified`` vouches for
+    # ``email``, not for a username or other claim). Set explicitly, it is
+    # trusted to vouch for ``email_claim``.
+    email_verified_claim: str = ""
     name_claim: str = "name"
     roles_claim: str = "roles"
     scopes_claim: str = "scp"  # Azure uses "scp", others use "scope"
@@ -118,6 +128,9 @@ class JWTAdapterConfig:
     def __post_init__(self):
         if self.algorithms is None:
             self.algorithms = ["RS256"]
+        self.email_verified_claim = self.email_verified_claim.strip()
+        if not self.email_verified_claim and self.email_claim == _STANDARD_EMAIL_CLAIM:
+            self.email_verified_claim = _STANDARD_EMAIL_VERIFIED_CLAIM
         self.access_token_type_claim = self.access_token_type_claim.strip()
         self.access_token_type_value = self.access_token_type_value.strip()
         if bool(self.access_token_type_claim.strip()) != bool(self.access_token_type_value.strip()):
@@ -176,7 +189,8 @@ class JWTAdapterConfig:
             oidc_discovery_url=_get("MOZAIKS_OIDC_DISCOVERY_URL"),
             user_id_claim=_get("AUTH_USER_ID_CLAIM", "sub"),
             email_claim=_get("AUTH_EMAIL_CLAIM", "email"),
-            email_verified_claim=_get("AUTH_EMAIL_VERIFIED_CLAIM", "email_verified"),
+            # No default here: __post_init__ pairs it with the email claim.
+            email_verified_claim=_get("AUTH_EMAIL_VERIFIED_CLAIM"),
             name_claim=_get("AUTH_NAME_CLAIM", "name"),
             roles_claim=_get("AUTH_ROLES_CLAIM", "roles"),
             scopes_claim=_get("AUTH_SCOPES_CLAIM", "scp"),
@@ -218,8 +232,10 @@ class GenericJWTAdapter(BaseAuthAdapter):
         AUTH_ACCESS_TOKEN_TYPE_VALUE: Expected value of that claim
         AUTH_USER_ID_CLAIM: Claim for user ID (default: sub)
         AUTH_EMAIL_CLAIM: Claim for email (default: email)
-        AUTH_EMAIL_VERIFIED_CLAIM: Boolean claim asserting that email is
-            verified (default: email_verified); only JSON true counts
+        AUTH_EMAIL_VERIFIED_CLAIM: Boolean claim asserting that the
+            AUTH_EMAIL_CLAIM value is verified; only JSON true counts. Defaults
+            to email_verified only when AUTH_EMAIL_CLAIM is email; with any
+            other email claim it must be set, or no email is verified
         AUTH_NAME_CLAIM: Claim for name (default: name)
         AUTH_ROLES_CLAIM: Claim for roles (default: roles)
         AUTH_SCOPES_CLAIM: Claim for scopes (default: scp)
@@ -238,6 +254,17 @@ class GenericJWTAdapter(BaseAuthAdapter):
     ):
         super().__init__(settings)
         self._config = config or JWTAdapterConfig.from_env(settings)
+        if not self._config.email_verified_claim:
+            # Logged when the adapter is built; the registry caches it per
+            # configuration, so this is once per configuration, not per request.
+            logger.warning(
+                "AUTH_EMAIL_VERIFIED_CLAIM_UNSET: AUTH_EMAIL_CLAIM=%r is not 'email' and "
+                "AUTH_EMAIL_VERIFIED_CLAIM is not set, so no email is treated as verified "
+                "and app/app.json admins never grants admin by email. Set "
+                "AUTH_EMAIL_VERIFIED_CLAIM to a boolean claim that vouches for the "
+                "AUTH_EMAIL_CLAIM value, or grant admin through the roles claim.",
+                self._config.email_claim,
+            )
         self._pyjwk_client: PyJWKClient | None = None
         self._discovery_client: OIDCDiscoveryClient | None = None
         self._jwks_client: JWKSClient | None = None

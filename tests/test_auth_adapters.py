@@ -1000,7 +1000,10 @@ class TestProviderConfigIdentity:
             ("AUTH_NAME_CLAIM", "display_name"),
             ("AUTH_USER_ID_CLAIM", "oid"),
             ("AUTH_EMAIL_CLAIM", "upn"),
-            ("AUTH_EMAIL_VERIFIED_CLAIM", "xms_edov"),
+            # Changed on its own, against the default email claim: a verified
+            # claim must vouch for the AUTH_EMAIL_CLAIM value, so the row above
+            # (upn) is not paired with this one.
+            ("AUTH_EMAIL_VERIFIED_CLAIM", "custom_email_verified"),
             ("AUTH_ROLES_CLAIM", "realm_access"),
             ("AUTH_APP_ID_CLAIM", "appid"),
             ("AUTH_CHAT_ID_CLAIM", "cid"),

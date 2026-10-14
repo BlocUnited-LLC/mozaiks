@@ -16,6 +16,10 @@
 #
 # This module only answers "is this address on the list"; the verified-email
 # requirement is enforced by the admin gate in admin/router.py.
+#
+# Matching is ASCII-only. Case folding non-ASCII text can turn one address into
+# another (the Kelvin sign U+212A lowercases to "k"), so a non-ASCII address,
+# in the token or in app.json, never matches.
 # ==============================================================================
 from __future__ import annotations
 
@@ -42,7 +46,7 @@ def get_admin_emails() -> list[str]:
     try:
         config = json.loads(path.read_text(encoding="utf-8"))
         raw: list[str] = config.get("admins") or []
-        return [e.lower().strip() for e in raw if isinstance(e, str) and e.strip()]
+        return [e.lower().strip() for e in raw if isinstance(e, str) and e.strip() and e.isascii()]
     except Exception as e:
         logger.warning("[admin] Could not read admins from app.json: %s", e)
         return []
@@ -53,8 +57,9 @@ def is_admin_by_email(email: str | None) -> bool:
 
     Membership alone grants nothing: the caller must also require that the
     identity provider verified the email (``UserPrincipal.email_verified``).
+    A non-ASCII address never matches (see the module header).
     """
-    if not email:
+    if not email or not email.isascii():
         return False
     return email.lower().strip() in get_admin_emails()
 
