@@ -1,0 +1,2795 @@
+{
+ "source": {
+  "sha": "deeef42d",
+  "chat": "601d2f56",
+  "context": "AppGenerator starting context for the live Create App chat, reduced to keys review_app_build_plan reads (null keys omitted); the reduced and full contexts review every draft to an identical cached plan, batch items and feedback. Build identifiers are synthetic; pack_source_path is repo-relative.",
+  "plans": "AG2NetworkKnowledge channel wal.jsonl: AppPlanAgent's first AppBuildPlan, unmodified. Its one page task owns the approved pages and the MozaiksPay pages; the next draft deleted every page task."
+ },
+ "live_failure": "Plan surface inventory errors:\n- unapproved surface 'page_bundle': remove its capability and tasks rather than relabel them. Use only surfaces from design_surface_map or selected pack provider/facade contracts. Valid approved surface_ids: ['billing_portal', 'crm_core', 'mozaikspay', 'mozaikspay_managed'].",
+ "attempts": {
+  "1": {
+   "agent_message": "Plan generated for GreenRoute CRM MVP: CRM Core module with CRUD/data reads, and MozaiksPay-backed billing_portal facade. Includes declarative CRM pages and billing pages wired to module contracts; all tasks sequenced for deterministic generation. No runtime code emitted here.",
+   "app_kind": "saas",
+   "pages": [
+    {
+     "name": "Dashboard",
+     "route": "/dashboard",
+     "purpose": "Overview of customers and jobs with KPI summary and recent activity",
+     "design_intent": "Overview of customers and jobs with KPI summaries",
+     "primary_entities": [
+      "Customer",
+      "Job"
+     ],
+     "primary_actions": [
+      "list_customers",
+      "list_jobs",
+      "summarize_dashboard"
+     ],
+     "ui_layout": "grid",
+     "shell_mode_hint": "standard",
+     "ui_surface": "declarative_page",
+     "page_type_hint": "analytics_dashboard",
+     "sections_hint": [
+      {
+       "primitive": "SummaryStrip",
+       "data_source": {
+        "module_id": "crm_core",
+        "action_id": "summarize_dashboard"
+       },
+       "config_hint": "{\"items\": [{\"label\": \"Active Customers\", \"value_key\": \"active_customers\"}, {\"label\": \"Open Jobs\", \"value_key\": \"open_jobs\"}]}",
+       "section_id_hint": "summary",
+       "title_hint": "Key metrics at a glance",
+       "intent": "Key metrics at a glance"
+      },
+      {
+       "primitive": "DataTable",
+       "data_source": {
+        "module_id": "crm_core",
+        "action_id": "list_customers"
+       },
+       "config_hint": "{\"columns\": [\"customer_id\", \"name\", \"phone\", \"email\"], \"selection\": \"none\"}",
+       "section_id_hint": "recent-customers",
+       "title_hint": "Recently added customers",
+       "intent": "Recently added customers"
+      },
+      {
+       "primitive": "DataTable",
+       "data_source": {
+        "module_id": "crm_core",
+        "action_id": "list_jobs"
+       },
+       "config_hint": "{\"columns\": [\"job_id\", \"title\", \"customer_id\", \"date\", \"status\"], \"selection\": \"none\"}",
+       "section_id_hint": "open-jobs",
+       "title_hint": "Open jobs by status",
+       "intent": "Open jobs by status"
+      }
+     ]
+    },
+    {
+     "name": "Customers",
+     "route": "/customers",
+     "purpose": "Manage customers: list, create, edit",
+     "design_intent": "Manage customers: list, create, edit",
+     "primary_entities": [
+      "Customer"
+     ],
+     "primary_actions": [
+      "list_customers",
+      "create_customer",
+      "update_customer",
+      "delete_customer"
+     ],
+     "ui_layout": "full-width",
+     "shell_mode_hint": "standard",
+     "ui_surface": "declarative_page",
+     "page_type_hint": "record_list",
+     "sections_hint": [
+      {
+       "primitive": "DataTable",
+       "data_source": {
+        "module_id": "crm_core",
+        "action_id": "list_customers"
+       },
+       "config_hint": "{\"columns\": [\"customer_id\", \"name\", \"phone\", \"email\"], \"selection\": \"single\"}",
+       "section_id_hint": "customer-list",
+       "title_hint": "Customer list",
+       "intent": "Paginated customer list with row actions"
+      },
+      {
+       "primitive": "Modal",
+       "data_source": null,
+       "config_hint": "{\"title\": \"New Customer\", \"size\": \"medium\"}",
+       "section_id_hint": "create-customer-modal",
+       "title_hint": "New Customer",
+       "intent": "Create a new customer"
+      }
+     ]
+    },
+    {
+     "name": "Jobs",
+     "route": "/jobs",
+     "purpose": "Manage jobs: list, create, edit, linked to customers",
+     "design_intent": "Manage jobs: list, create, edit, linked to customers",
+     "primary_entities": [
+      "Job"
+     ],
+     "primary_actions": [
+      "list_jobs",
+      "create_job",
+      "update_job",
+      "delete_job"
+     ],
+     "ui_layout": "full-width",
+     "shell_mode_hint": "standard",
+     "ui_surface": "declarative_page",
+     "page_type_hint": "record_list",
+     "sections_hint": [
+      {
+       "primitive": "DataTable",
+       "data_source": {
+        "module_id": "crm_core",
+        "action_id": "list_jobs"
+       },
+       "config_hint": "{\"columns\": [\"job_id\", \"title\", \"customer_id\", \"date\", \"status\", \"price\"] , \"selection\": \"single\"}",
+       "section_id_hint": "job-list",
+       "title_hint": "Job list",
+       "intent": "List of jobs with CRUD"
+      },
+      {
+       "primitive": "Modal",
+       "data_source": null,
+       "config_hint": "{\"title\": \"New Job\", \"size\": \"medium\"}",
+       "section_id_hint": "create-job",
+       "title_hint": "New Job",
+       "intent": "Create a new job"
+      }
+     ]
+    },
+    {
+     "name": "Weekly Schedule",
+     "route": "/calendar",
+     "purpose": "Weekly calendar view of jobs by day with filters",
+     "design_intent": "Weekly calendar view of jobs by day with filters",
+     "primary_entities": [
+      "Job",
+      "Customer"
+     ],
+     "primary_actions": [
+      "list_jobs",
+      "summarize_dashboard"
+     ],
+     "ui_layout": "grid",
+     "shell_mode_hint": "standard",
+     "ui_surface": "custom_react_page",
+     "page_type_hint": "analytics_dashboard",
+     "sections_hint": []
+    },
+    {
+     "name": "Billing",
+     "route": "/billing",
+     "purpose": "Billing portal surface for subscriptions",
+     "design_intent": "Billing portal surface",
+     "primary_entities": [
+      "Subscription",
+      "Plan"
+     ],
+     "primary_actions": [
+      "list_plans",
+      "start_subscription_checkout",
+      "open_billing_portal",
+      "get_subscription_status"
+     ],
+     "ui_layout": "full-width",
+     "shell_mode_hint": "workspace",
+     "ui_surface": "declarative_page",
+     "page_type_hint": "analytics_dashboard",
+     "sections_hint": [
+      {
+       "primitive": "DataTable",
+       "data_source": {
+        "module_id": "billing_portal",
+        "action_id": "list_plans"
+       },
+       "config_hint": "{\"columns\": [\"plan_id\",\"label\",\"description\"],\"selection\":\"single\"}",
+       "section_id_hint": "billing-plans",
+       "title_hint": "Pricing plans",
+       "intent": "Available subscription plans"
+      }
+     ]
+    },
+    {
+     "name": "Usage",
+     "route": "/usage",
+     "purpose": "Usage and token status",
+     "design_intent": "Usage and token status",
+     "primary_entities": [
+      "Usage",
+      "Token"
+     ],
+     "primary_actions": [
+      "get_usage_status",
+      "get_token_status",
+      "start_token_top_up"
+     ],
+     "ui_layout": "full-width",
+     "shell_mode_hint": "workspace",
+     "ui_surface": "declarative_page",
+     "page_type_hint": "analytics_dashboard",
+     "sections_hint": [
+      {
+       "primitive": "DataTable",
+       "data_source": {
+        "module_id": "billing_portal",
+        "action_id": "get_usage_status"
+       },
+       "config_hint": "{\"columns\": [\"tenant_id\",\"usage\"],\"selection\":\"none\"}",
+       "section_id_hint": "usage-status",
+       "title_hint": "Usage status",
+       "intent": "Usage summary"
+      }
+     ]
+    },
+    {
+     "name": "Pricing",
+     "route": "/pricing",
+     "purpose": "Pricing catalog",
+     "design_intent": "Pricing catalog",
+     "primary_entities": [
+      "Plan"
+     ],
+     "primary_actions": [
+      "list_plans"
+     ],
+     "ui_layout": "full-width",
+     "shell_mode_hint": "workspace",
+     "ui_surface": "declarative_page",
+     "page_type_hint": "analytics_dashboard",
+     "sections_hint": [
+      {
+       "primitive": "DataTable",
+       "data_source": {
+        "module_id": "billing_portal",
+        "action_id": "list_plans"
+       },
+       "config_hint": "{\"columns\": [\"plan_id\",\"label\",\"price\"],\"selection\":\"none\"}",
+       "section_id_hint": "pricing-plans",
+       "title_hint": "Plan catalog",
+       "intent": "Available pricing catalog"
+      }
+     ]
+    }
+   ],
+   "entities": [
+    {
+     "name": "Customer",
+     "operations": [
+      "list_customers",
+      "get_customer",
+      "create_customer",
+      "update_customer",
+      "delete_customer"
+     ],
+     "notes": "Durable entity managed in CRM Core module; per_user tenancy; data_contract defines persistence."
+    },
+    {
+     "name": "Job",
+     "operations": [
+      "list_jobs",
+      "get_job",
+      "create_job",
+      "update_job",
+      "delete_job"
+     ],
+     "notes": "Durable entity managed in CRM Core module; per_user tenancy; data_contract defines persistence."
+    }
+   ],
+   "roles": [],
+   "auth_strategy": "public",
+   "service_scope": [
+    "crm_core",
+    "billing_portal",
+    "mozaikspay"
+   ],
+   "frontend_scope": [
+    "crm_core",
+    "billing_portal"
+   ],
+   "theme_preferences": "Emerald, modern lean CRM",
+   "brand_intent": null,
+   "shell_preset_hint": null,
+   "profile_layout": "top_nav",
+   "surface_map": {
+    "surfaces": [
+     {
+      "surface_id": "crm_core",
+      "surface_kind": "module",
+      "owner": "app",
+      "source_capability_packs": [
+       "crud_pack",
+       "analytics_pack"
+      ],
+      "label": "CRM Core",
+      "summary": "Core durable state for customers and jobs",
+      "primary_entities": [
+       "Customer",
+       "Job"
+      ],
+      "owned_pages": [
+       "Dashboard",
+       "Customers",
+       "Jobs",
+       "Weekly Schedule"
+      ],
+      "owned_mutations": [
+       "create_customer",
+       "update_customer",
+       "delete_customer",
+       "create_job",
+       "update_job",
+       "delete_job"
+      ],
+      "events_emitted": [
+       "domain.crm.customer_created",
+       "domain.crm.customer_updated",
+       "domain.crm.customer_deleted",
+       "domain.crm.job_created",
+       "domain.crm.job_updated",
+       "domain.crm.job_deleted"
+      ],
+      "workflow_triggers": [],
+      "dependencies": []
+     }
+    ]
+   },
+   "capability_packs": [
+    {
+     "capability_pack_id": "mozaikspay",
+     "surface_id": "mozaikspay",
+     "surface_kind": "external_integration",
+     "pack_type": "mozaikspay",
+     "label": "MozaiksPay",
+     "summary": "Managed SaaS billing provider for subscriptions",
+     "implementation_mode": "external_integration",
+     "primary_entities": [],
+     "user_data_scope": false,
+     "primary_pages": null,
+     "operations": [
+      "billing_portal",
+      "subscription_status",
+      "subscription_checkout",
+      "usage_status",
+      "token_status",
+      "token_top_up"
+     ],
+     "required_integrations": [],
+     "agentic_extensions": [],
+     "capability_source": "managed_capability"
+    },
+    {
+     "capability_pack_id": "crm_core",
+     "surface_id": "crm_core",
+     "surface_kind": "module",
+     "pack_type": "crud_pack",
+     "label": "CRM Core Module",
+     "summary": "Core CRM durable module for Customers and Jobs",
+     "implementation_mode": "hybrid",
+     "primary_entities": [
+      "Customer",
+      "Job"
+     ],
+     "user_data_scope": true,
+     "primary_pages": [
+      "Dashboard",
+      "Customers",
+      "Jobs",
+      "Weekly Schedule"
+     ],
+     "operations": [
+      "create_customer",
+      "update_customer",
+      "delete_customer",
+      "create_job",
+      "update_job",
+      "delete_job"
+     ],
+     "required_integrations": [],
+     "agentic_extensions": [],
+     "capability_source": "generated_module"
+    },
+    {
+     "capability_pack_id": "billing_portal",
+     "surface_id": "billing_portal",
+     "surface_kind": "module",
+     "pack_type": "mozaikspay",
+     "label": "Billing Portal Facade",
+     "summary": "App-owned facade around MozaiksPay billing APIs",
+     "implementation_mode": "hybrid",
+     "primary_entities": [],
+     "user_data_scope": false,
+     "primary_pages": [
+      "Billing",
+      "Usage",
+      "Pricing"
+     ],
+     "operations": [
+      "list_plans",
+      "start_subscription_checkout",
+      "open_billing_portal",
+      "get_subscription_status",
+      "get_usage_status",
+      "token_status",
+      "start_token_top_up",
+      "list_plans"
+     ],
+     "required_integrations": [],
+     "agentic_extensions": [],
+     "capability_source": "generated_module"
+    }
+   ],
+   "readiness_profile": "none",
+   "revenue_model": "free",
+   "monetization_plan": {
+    "monetized": true,
+    "revenue_model": "subscriptions",
+    "subscription_contract_requirement": "required",
+    "monetization_provider": "mozaiks_pay",
+    "primary_payer": "customer",
+    "primary_payee": "app_owner",
+    "money_flow_summary": "Recurring monthly subscription per seat; Starter includes 2 seats; Upgrade to Pro available.",
+    "required_capability_routes": [
+     "mozaikspay",
+     "config/subscriptions.yaml"
+    ],
+    "rationale": "SaaS subscriptions with per-seat pricing align with MVP needs; utilizes MozaiksPay as the default provider."
+   },
+   "monetization_provider": "mozaiks_pay",
+   "external_integrations": [
+    {
+     "name": "MozaiksPay",
+     "service": "mozaikspay",
+     "display_name": "MozaiksPay",
+     "kind": "payments",
+     "purpose": "Billing for subscriptions and usage",
+     "required_at": "build_time",
+     "optional": false,
+     "preferred_setup_lane": "managed",
+     "allowed_setup_lanes": [
+      "bring_your_own_key",
+      "connect_account",
+      "managed",
+      "not_required"
+     ],
+     "managed_default": null,
+     "required_fields": [
+      {
+       "name": "api_base",
+       "label": "MozaiksPay API Base URL",
+       "type": "url",
+       "required": true,
+       "frontend_safe": true,
+       "options": null
+      },
+      {
+       "name": "api_key",
+       "label": "MozaiksPay API Key",
+       "type": "secret",
+       "required": true,
+       "frontend_safe": false,
+       "options": null
+      }
+     ]
+    }
+   ],
+   "workspace_integration_status": [
+    {
+     "catalog_id": "mozaikspay",
+     "display_name": "MozaiksPay",
+     "workspace_status": "configured",
+     "auto_wire": true,
+     "missing_secrets": []
+    }
+   ],
+   "event_flows": [
+    {
+     "event_type": "domain.crm.customer_created",
+     "producer_pack_id": "crm_core",
+     "producing_action": "create_customer",
+     "subscriber_intents": [
+      "summaries_update",
+      "dashboard_refresh"
+     ],
+     "workflow_capability_ids": []
+    },
+    {
+     "event_type": "domain.crm.customer_updated",
+     "producer_pack_id": "crm_core",
+     "producing_action": "update_customer",
+     "subscriber_intents": [
+      "summaries_update",
+      "dashboard_refresh"
+     ],
+     "workflow_capability_ids": []
+    },
+    {
+     "event_type": "domain.crm.customer_deleted",
+     "producer_pack_id": "crm_core",
+     "producing_action": "delete_customer",
+     "subscriber_intents": [
+      "summaries_update",
+      "dashboard_refresh"
+     ],
+     "workflow_capability_ids": []
+    },
+    {
+     "event_type": "domain.crm.job_created",
+     "producer_pack_id": "crm_core",
+     "producing_action": "create_job",
+     "subscriber_intents": [
+      "summaries_update",
+      "dashboard_refresh"
+     ],
+     "workflow_capability_ids": []
+    },
+    {
+     "event_type": "domain.crm.job_updated",
+     "producer_pack_id": "crm_core",
+     "producing_action": "update_job",
+     "subscriber_intents": [
+      "summaries_update",
+      "dashboard_refresh"
+     ],
+     "workflow_capability_ids": []
+    },
+    {
+     "event_type": "domain.crm.job_deleted",
+     "producer_pack_id": "crm_core",
+     "producing_action": "delete_job",
+     "subscriber_intents": [
+      "summaries_update",
+      "dashboard_refresh"
+     ],
+     "workflow_capability_ids": []
+    }
+   ],
+   "workflow_touchpoints": [],
+   "demo_fixture_sets": [],
+   "agent_backend_required": false,
+   "build_tasks": [
+    {
+     "task_id": "tt_module_contract_crm_core",
+     "task_type": "module_contract",
+     "capability_pack_id": "crm_core",
+     "surface_id": "crm_core",
+     "surface_kind": "module",
+     "execution_target": "backend-foundation",
+     "initial_agent": "ConfigMiddlewareAgent",
+     "description": "CRM Core canonical module contract with declared actions and events.",
+     "initial_message": "Provide module.yaml for crm_core with actions: create_customer, update_customer, delete_customer, create_job, update_job, delete_job; declare domain events: domain.crm.customer_created, domain.crm.customer_updated, domain.crm.customer_deleted, domain.crm.job_created, domain.crm.job_updated, domain.crm.job_deleted; include references to dependent contracts and replication rules.",
+     "owned_paths": [
+      "modules/crm_core/module.yaml",
+      "modules/crm_core/contracts/events.yaml",
+      "modules/crm_core/contracts/reactions.yaml",
+      "modules/crm_core/contracts/notifications.yaml",
+      "modules/crm_core/contracts/policy_hooks.yaml",
+      "modules/crm_core/contracts/settings.yaml",
+      "modules/crm_core/contracts/admin.yaml",
+      "modules/crm_core/contracts/profile.yaml",
+      "modules/crm_core/contracts/relationships.yaml",
+      "modules/crm_core/runtime_extensions.yaml"
+     ],
+     "depends_on": [],
+     "acceptance_criteria": [
+      "module.yaml must exist and declare actions: create_customer, update_customer, delete_customer, create_job, update_job, delete_job.",
+      "events.yaml must exist and declare domain.crm.customer_created, domain.crm.customer_updated, domain.crm.customer_deleted, domain.crm.job_created, domain.crm.job_updated, domain.crm.job_deleted.",
+      "no orphaned or missing required contracts; surface ownership must be app-owned.",
+      "admin/settings/profilecontracts must align with design surface_map; panels derived from module actions."
+     ],
+     "context_variables": [],
+     "integration_needs": [],
+     "domain_context": null
+    },
+    {
+     "task_id": "tt_persistence_crm_core",
+     "task_type": "persistence_contract",
+     "capability_pack_id": null,
+     "surface_id": "data_contract",
+     "surface_kind": "module",
+     "execution_target": "backend-foundation",
+     "initial_agent": "DatabaseAgent",
+     "description": "Canonical data contract for CRM Core persistence (two durable collections: customers and jobs).",
+     "initial_message": "Publish the approved data/contract.json for CRM Core; ownership per design: customers and jobs with per_user tenancy.",
+     "owned_paths": [
+      "data/contract.json"
+     ],
+     "depends_on": [
+      "tt_module_contract_crm_core"
+     ],
+     "acceptance_criteria": [
+      "data/contract.json must exist and reflect customers and jobs collections with fields, indexes, and tenancy as per design.",
+      "per_user tenancy enforced by contract; app.json.authRequired must be true.",
+      "no runtime secrets or host-specific IDs embedded."
+     ],
+     "context_variables": [],
+     "integration_needs": [],
+     "domain_context": null
+    },
+    {
+     "task_id": "tt_data_models_crm_core",
+     "task_type": "data_models",
+     "capability_pack_id": "crm_core",
+     "surface_id": "crm_core",
+     "surface_kind": "module",
+     "execution_target": "data-models",
+     "initial_agent": "ModelAgent",
+     "description": "CRM Core data models backing the Customers and Jobs modules.",
+     "initial_message": "Produce modules/crm_core/backend/schemas.py for the Customer and Job models; reflect fields from data_contract and indexes; provide sanctioned TypedDict shapes.",
+     "owned_paths": [
+      "modules/crm_core/backend/schemas.py"
+     ],
+     "depends_on": [
+      "tt_module_contract_crm_core",
+      "tt_persistence_crm_core"
+     ],
+     "acceptance_criteria": [
+      "schemas.py must declare Customer and Job types with fields = data_contract.json; include timestamps and tenancy fields as per contract.",
+      "data models align with per_user tenancy and owner_field; no extra fields beyond contract."
+     ],
+     "context_variables": [],
+     "integration_needs": [],
+     "domain_context": null
+    },
+    {
+     "task_id": "tt_business_services_crm_core",
+     "task_type": "business_services",
+     "capability_pack_id": "crm_core",
+     "surface_id": "crm_core",
+     "surface_kind": "module",
+     "execution_target": "business-services",
+     "initial_agent": "ServiceAgent",
+     "description": "CRM Core business services for persistent module.",
+     "initial_message": "Implement backend/handler.py, backend/service.py, backend/repo.py, backend/policy.py for CRM Core; use modules/crm_core/backend/schemas.py for DTOs and ensure dependency on module_contract and data_models outputs.",
+     "owned_paths": [
+      "modules/crm_core/backend/handler.py",
+      "modules/crm_core/backend/base_handler.py",
+      "modules/crm_core/backend/service.py",
+      "modules/crm_core/backend/repo.py",
+      "modules/crm_core/backend/policy.py"
+     ],
+     "depends_on": [
+      "tt_module_contract_crm_core",
+      "tt_data_models_crm_core",
+      "tt_persistence_crm_core"
+     ],
+     "acceptance_criteria": [
+      "handler.py defines the CRM core actions implementing create/update/delete for Customer and Job.",
+      "service.py and repo.py implement persistence boundaries; policy.py implements simple ownership checks.",
+      "backend files align with module contract stubs and data_model interfaces."
+     ],
+     "context_variables": [],
+     "integration_needs": [],
+     "domain_context": null
+    },
+    {
+     "task_id": "tt_module_contract_billing_portal",
+     "task_type": "module_contract",
+     "capability_pack_id": "billing_portal",
+     "surface_id": "billing_portal",
+     "surface_kind": "module",
+     "execution_target": "backend-foundation",
+     "initial_agent": "ConfigMiddlewareAgent",
+     "description": "Facade module contract for billing_portal wrapping MozaiksPay; defines facade actions and surfaces for pages Billing/Usage/Pricing.",
+     "initial_message": "Produce modules/billing_portal/module.yaml with facade actions that connect to mozaikspay; include related contracts: events.yaml, reactions.yaml, notifications.yaml, policy_hooks.yaml, settings.yaml, admin.yaml, profile.yaml, relationships.yaml, runtime_extensions.yaml. Include integration with Subscriptions endpoints; route to billing_portal facade endpoints.",
+     "owned_paths": [
+      "modules/billing_portal/module.yaml",
+      "modules/billing_portal/contracts/events.yaml",
+      "modules/billing_portal/contracts/reactions.yaml",
+      "modules/billing_portal/contracts/notifications.yaml",
+      "modules/billing_portal/contracts/policy_hooks.yaml",
+      "modules/billing_portal/contracts/settings.yaml",
+      "modules/billing_portal/contracts/admin.yaml",
+      "modules/billing_portal/contracts/profile.yaml",
+      "modules/billing_portal/contracts/relationships.yaml",
+      "modules/billing_portal/runtime_extensions.yaml"
+     ],
+     "depends_on": [
+      "tt_module_contract_crm_core"
+     ],
+     "acceptance_criteria": [
+      "billing_portal/module.yaml must declare facade module with actions that correspond to mozaikspay facade operations.",
+      "Contracts for events/reactions/notifications/policy_hooks/settings/admin/profile/relationships emitted as per plan.",
+      "Facade module aligns with Billing/Usage/Pricing pages wired in page_bundle."
+     ],
+     "context_variables": [],
+     "integration_needs": [],
+     "domain_context": null
+    },
+    {
+     "task_id": "tt_data_models_billing_portal",
+     "task_type": "data_models",
+     "capability_pack_id": "billing_portal",
+     "surface_id": "billing_portal",
+     "surface_kind": "module",
+     "execution_target": "data-models",
+     "initial_agent": "ModelAgent",
+     "description": "Data models backing the billing_portal facade module.",
+     "initial_message": "Produce modules/billing_portal/backend/schemas.py for any mapping used by the facade; reflect endpoints used by mozaikspay integration.",
+     "owned_paths": [
+      "modules/billing_portal/backend/schemas.py"
+     ],
+     "depends_on": [
+      "tt_module_contract_billing_portal",
+      "tt_persistence_crm_core"
+     ],
+     "acceptance_criteria": [
+      "billing_portal schemas align withever the facade's data contracts.",
+      "schema fields consistent with module contract and mozaikspay endpoints."
+     ],
+     "context_variables": [],
+     "integration_needs": [],
+     "domain_context": null
+    },
+    {
+     "task_id": "tt_business_services_billing_portal",
+     "task_type": "business_services",
+     "capability_pack_id": "billing_portal",
+     "surface_id": "billing_portal",
+     "surface_kind": "module",
+     "execution_target": "business-services",
+     "initial_agent": "ServiceAgent",
+     "description": "Backend services for the billing_portal facade; includes handler/service/repo/policy for the facade.",
+     "initial_message": "Produce modules/billing_portal/backend/handler.py, backend/service.py, backend/repo.py, backend/policy.py; connect to mozaikspay client's activities; depend on module_contractBilling and data_models.",
+     "owned_paths": [
+      "modules/billing_portal/backend/handler.py",
+      "modules/billing_portal/backend/base_handler.py",
+      "modules/billing_portal/backend/service.py",
+      "modules/billing_portal/backend/repo.py",
+      "modules/billing_portal/backend/policy.py"
+     ],
+     "depends_on": [
+      "tt_module_contract_billing_portal",
+      "tt_data_models_billing_portal",
+      "tt_persistence_crm_core"
+     ],
+     "acceptance_criteria": [
+      "hander/service/repo/policy implement facade logic; avoid touching catalogs outside the facade.",
+      "no business logic in handler.py beyond declared actions."
+     ],
+     "context_variables": [],
+     "integration_needs": [],
+     "domain_context": null
+    },
+    {
+     "task_id": "tt_page_bundle_crm_billing_ui",
+     "task_type": "page_bundle",
+     "capability_pack_id": null,
+     "surface_id": "page_bundle",
+     "surface_kind": "ui_only",
+     "execution_target": "app-schema",
+     "initial_agent": "AppSchemaAgent",
+     "description": "Page bundle for CRM core dashboards and MozaiksPay billing UI; owns declarative CRM pages and Billing UI pages.",
+     "initial_message": "Materialize AppBuildPlan.pages[] into declarative pages and bounded custom pages; own ui/pages/dashboard.yaml, ui/pages/customers.yaml, ui/pages/jobs.yaml, ui/pages/custom/calendar.jsx, ui/pages/billing.yaml, ui/pages/usage.yaml, ui/pages/pricing.yaml and route_manifest.json; ensure app.json generated with admins default.",
+     "owned_paths": [
+      "ui/pages/dashboard.yaml",
+      "ui/pages/customers.yaml",
+      "ui/pages/jobs.yaml",
+      "ui/pages/custom/calendar.jsx",
+      "ui/pages/billing.yaml",
+      "ui/pages/usage.yaml",
+      "ui/pages/pricing.yaml",
+      "ui/route_manifest.json",
+      "ui/index.js",
+      "app.json"
+     ],
+     "depends_on": [
+      "tt_module_contract_crm_core",
+      "tt_module_contract_billing_portal"
+     ],
+     "acceptance_criteria": [
+      "AppBuildPlan.pages contains seven pages with exact routes: /dashboard, /customers, /jobs, /calendar, /billing, /usage, /pricing.",
+      "ui/pages/* yaml and ui/pages/custom/calendar.jsx are emitted with correct ownership.",
+      "app.json is emitted with admins list including platform_user_email when available, otherwise admin@example.com.",
+      "Route bindings reflect CRM Core and Billing Portal facade endpoints."
+     ],
+     "context_variables": [],
+     "integration_needs": [],
+     "domain_context": null
+    },
+    {
+     "task_id": "tt_api_surface_mozaikspay_client",
+     "task_type": "api_surface",
+     "capability_pack_id": "mozaikspay",
+     "surface_id": "mozaikspay",
+     "surface_kind": "external_integration",
+     "execution_target": "api-surface",
+     "initial_agent": "ControllerAgent",
+     "description": "Thin external API client wrapper for MozaiksPay",
+     "initial_message": "Emit services/integrations/mozaikspay_client.py as API client wrapper; do not implement provider internals.",
+     "owned_paths": [
+      "services/integrations/mozaikspay_client.py"
+     ],
+     "depends_on": [
+      "tt_module_contract_billing_portal"
+     ],
+     "acceptance_criteria": [
+      "mozaikspay_client.py exists and implements a thin client with endpoints matching contract actions.",
+      "No provider logic embedded; all credentials loaded from environment at runtime."
+     ],
+     "context_variables": [],
+     "integration_needs": [],
+     "domain_context": null
+    }
+   ],
+   "pending_schema_migration": null,
+   "deployment_targets": [],
+   "deployment_template_manifest": null,
+   "carry_forward_decisions": [],
+   "generation_order": [
+    "backend-foundation",
+    "module_contract",
+    "persistence_contract",
+    "data_models",
+    "business_services",
+    "api_surface",
+    "page_bundle",
+    "validation-export"
+   ]
+  }
+ },
+ "context_variables": {
+  "app_plan_attempts": 0,
+  "app_type": "greenfield_app",
+  "build_mode": "initial",
+  "capability_packs": [
+   {
+    "capabilities": [
+     {
+      "capability_id": "mozaikspay.billing_portal",
+      "facade_recommended": "billing_portal"
+     },
+     {
+      "capability_id": "mozaikspay.subscription_status",
+      "facade_recommended": "billing_portal"
+     },
+     {
+      "capability_id": "mozaikspay.subscription_checkout",
+      "facade_recommended": "billing_portal"
+     },
+     {
+      "capability_id": "mozaikspay.usage_status",
+      "facade_recommended": "billing_portal"
+     },
+     {
+      "capability_id": "mozaikspay.token_status",
+      "facade_recommended": "billing_portal"
+     },
+     {
+      "capability_id": "mozaikspay.token_top_up",
+      "facade_recommended": "billing_portal"
+     }
+    ],
+    "capability_source": "managed_capability",
+    "deployment_env": {
+     "optional": [
+      "MOZAIKS_APP_URL",
+      "MOZAIKSPAY_API_BASE",
+      "MOZAIKSPAY_CLIENT_ID",
+      "MOZAIKSPAY_CLIENT_SECRET",
+      "MOZAIKSPAY_API_KEY"
+     ],
+     "secret": [
+      "MOZAIKSPAY_CLIENT_SECRET",
+      "MOZAIKSPAY_API_KEY"
+     ]
+    },
+    "facades": [
+     {
+      "module_id": "billing_portal",
+      "pages": [
+       {
+        "name": "Billing",
+        "page_type_hint": "analytics_dashboard",
+        "route": "/billing"
+       },
+       {
+        "name": "Usage",
+        "page_type_hint": "analytics_dashboard",
+        "route": "/usage"
+       }
+      ],
+      "provider_actions": [
+       "billing_portal",
+       "create_billing_portal_session",
+       "subscription_status",
+       "get_subscription_status",
+       "subscription_checkout",
+       "create_subscription_checkout_session",
+       "start_subscription_checkout",
+       "usage_status",
+       "get_usage_status",
+       "token_status",
+       "get_token_status",
+       "token_top_up",
+       "create_token_top_up_session",
+       "start_token_top_up"
+      ],
+      "provider_module": "mozaikspay"
+     }
+    ],
+    "id": "mozaikspay",
+    "pack_id": "mozaikspay",
+    "pack_source_path": "factory_app/build_context/mozaikspay",
+    "required_integrations": [
+     {
+      "display_name": "MozaiksPay",
+      "kind": "api_key",
+      "optional_fields": [
+       {
+        "frontend_safe": true,
+        "label": "Client ID",
+        "name": "client_id",
+        "required": false,
+        "type": "text"
+       },
+       {
+        "frontend_safe": false,
+        "label": "Client Secret",
+        "name": "client_secret",
+        "required": false,
+        "type": "secret"
+       }
+      ],
+      "provider": "mozaiks_pay",
+      "purpose": "Connect this generated SaaS app to the managed MozaiksPay subscription provider.",
+      "required_at": "runtime",
+      "required_fields": [
+       {
+        "frontend_safe": true,
+        "label": "MozaiksPay API Base URL",
+        "name": "api_base",
+        "required": true,
+        "type": "url"
+       },
+       {
+        "frontend_safe": false,
+        "label": "MozaiksPay API Key",
+        "name": "api_key",
+        "required": true,
+        "type": "secret"
+       }
+      ],
+      "service": "mozaikspay"
+     }
+    ],
+    "status": "active",
+    "version": "0.1.11"
+   }
+  ],
+  "concept_blueprint": {
+   "agent_message": "Field adjustments per feedback: app renamed to GreenRoute CRM; MVP now includes a Weekly Schedule Calendar page (week view of Jobs by day); CSV export has been removed from MVP; two data models (Customers, Jobs) and two browser users; per-seat starter plan with 2 included; core MVP scope updated accordingly. Changes: app_name, concept_overview, core_features, app_ui_requirements, surface_candidate_hints updated to include the calendar surface; other constraints and monetization remain as previously defined.",
+   "agentic_capabilities": [],
+   "api_endpoints": [
+    {
+     "description": "List all customers",
+     "method": "GET",
+     "path": "/api/customers"
+    },
+    {
+     "description": "Create a customer",
+     "method": "POST",
+     "path": "/api/customers"
+    },
+    {
+     "description": "Get a single customer",
+     "method": "GET",
+     "path": "/api/customers/{id}"
+    },
+    {
+     "description": "Update a customer",
+     "method": "PATCH",
+     "path": "/api/customers/{id}"
+    },
+    {
+     "description": "Delete a customer",
+     "method": "DELETE",
+     "path": "/api/customers/{id}"
+    },
+    {
+     "description": "List all jobs",
+     "method": "GET",
+     "path": "/api/jobs"
+    },
+    {
+     "description": "Create a job",
+     "method": "POST",
+     "path": "/api/jobs"
+    },
+    {
+     "description": "Get a single job",
+     "method": "GET",
+     "path": "/api/jobs/{id}"
+    },
+    {
+     "description": "Update a job",
+     "method": "PATCH",
+     "path": "/api/jobs/{id}"
+    },
+    {
+     "description": "Delete a job",
+     "method": "DELETE",
+     "path": "/api/jobs/{id}"
+    },
+    {
+     "description": "User login",
+     "method": "POST",
+     "path": "/api/auth/login"
+    },
+    {
+     "description": "User logout",
+     "method": "POST",
+     "path": "/api/auth/logout"
+    },
+    {
+     "description": "Current user session",
+     "method": "GET",
+     "path": "/api/auth/me"
+    }
+   ],
+   "app_name": "GreenRoute CRM",
+   "app_ui_requirements": [
+    "Customers list page with create/edit/delete and search by name/phone",
+    "Jobs list page with create/edit/delete, linked to customer, and search by date/type/status",
+    "Customer detail view showing linked jobs and notes",
+    "Weekly Schedule Calendar page showing jobs by day for each week",
+    "Two-user session management with basic role distinctions (owner vs helper)"
+   ],
+   "brand_intent": null,
+   "capability_pack_hints": [
+    "crud_pack",
+    "analytics_pack"
+   ],
+   "concept_overview": "Mozaiks will deliver a lean, landscaping-focused CRM featuring two durable data models (Customers and Jobs) accessible via web browsers for two users (owner + helper). The MVP enables CRUD, simple search/filters, a Weekly Schedule Calendar page showing each week's jobs by day, and two browser users; pricing on a per-seat plan with 2 included. CSV export has been removed; onboarding remains fast; path to quotes/invoicing, scheduling, payments, and basic reporting in future iterations.",
+   "constraints": [
+    "Web-first, web-only MVP",
+    "Lean two-model data schema (Customers, Jobs)",
+    "Two-browser-user minimum viable access (owner + helper)",
+    "Role-based access control and data export",
+    "Data portability via CSV export"
+   ],
+   "core_features": [
+    "CRUD for Customers",
+    "CRUD for Jobs linked to Customers",
+    "Simple search/filters for Customers and Jobs",
+    "Two browser users with basic role distinctions",
+    "Weekly Schedule Calendar (week view of jobs by day)",
+    "Web-based, responsive UI"
+   ],
+   "core_jobs": [
+    "Capture and manage customer details (name, phone, address, notes)",
+    "Create, view, edit, and delete jobs linked to customers",
+    "Record job details: date, type, price, status",
+    "Search and filter customers and jobs by name, date, type, and status",
+    "Export data to CSV for bookkeeping"
+   ],
+   "deferred_features": [
+    "Quotes and invoicing integration",
+    "Scheduling calendar with routing hints",
+    "Mobile app with offline access",
+    "In-app payments and payment tracking",
+    "Advanced reporting and dashboards"
+   ],
+   "monetization_intent": {
+    "likely_revenue_models": [
+     "subscriptions"
+    ],
+    "monetized": true,
+    "money_flow_summary": "Recurring monthly subscription per seat; starter plan includes 2 seats; additional seats billed monthly; optional add-ons later.",
+    "rationale": "The MVP uses a per-seat pricing approach aligned with a two-person team and enables scalable expansion.",
+    "subscription_contract_likely": true
+   },
+   "surface_candidate_hints": [
+    {
+     "confidence": "high",
+     "label": "Customer Registry",
+     "likely_surface_kind": "module",
+     "owner_hint": "app",
+     "rationale": "Core durable state for customers; essential for CRUD interactions.",
+     "source_capability_packs": [
+      "crud_pack"
+     ],
+     "surface_id": "customer_registry"
+    },
+    {
+     "confidence": "high",
+     "label": "Job Registry",
+     "likely_surface_kind": "module",
+     "owner_hint": "app",
+     "rationale": "Core durable state for jobs; links to customers and supports status/date/price fields.",
+     "source_capability_packs": [
+      "crud_pack"
+     ],
+     "surface_id": "job_registry"
+    },
+    {
+     "confidence": "medium",
+     "label": "Overview Dashboard",
+     "likely_surface_kind": "ui_only",
+     "owner_hint": "app",
+     "rationale": "Presents high-level views of customers and jobs; optional in MVP but valuable for quick insights.",
+     "source_capability_packs": [
+      "analytics_pack"
+     ],
+     "surface_id": "focus_dashboard"
+    },
+    {
+     "confidence": "high",
+     "label": "Weekly Schedule Calendar",
+     "likely_surface_kind": "ui_only",
+     "owner_hint": "app",
+     "rationale": "New calendar page showing jobs organized by week; primarily a presentation surface over Jobs data.",
+     "source_capability_packs": [
+      "crud_pack",
+      "analytics_pack"
+     ],
+     "surface_id": "weekly_schedule_calendar"
+    }
+   ],
+   "target_user": "Small landscaping business owner (and one helper) who needs an affordable, simple CRM to manage customers and on-site service jobs.",
+   "target_users": [
+    "Landscaping business owner",
+    "Assistant/Helper in a landscaping business"
+   ],
+   "unique_differentiators": [
+    "Lean two-model schema tailored to landscaping workflows",
+    "Clear two-seat starter plan designed for two-person teams",
+    "Fast onboarding with domain-appropriate terminology and lightweight UX",
+    "Web-first, portable data with straightforward import/export"
+   ],
+   "value_proposition": "A slim, affordable, two-seat landscaping CRM that helps small teams track customers and service jobs with fast onboarding and portable data."
+  },
+  "concept_overview": "Mozaiks will deliver a lean, landscaping-focused CRM featuring two durable data models (Customers and Jobs) accessible via web browsers for two users (owner + helper). The MVP enables CRUD, simple search/filters, a Weekly Schedule Calendar page showing each week's jobs by day, and two browser users; pricing on a per-seat plan with 2 included. CSV export has been removed; onboarding remains fast; path to quotes/invoicing, scheduling, payments, and basic reporting in future iterations.",
+  "data_contract": {
+   "app_id": "draft-app-ed82179a",
+   "artifact_version_id": null,
+   "policies": {
+    "allow_destructive_migrations": false,
+    "default_scope_field": "app_id"
+   },
+   "shared_collections": [],
+   "surfaces": [
+    {
+     "collections": [
+      {
+       "entity": "Customer",
+       "fields": [
+        {
+         "default": null,
+         "enum": null,
+         "name": "customer_id",
+         "nullable": false,
+         "required": true,
+         "type": "string"
+        },
+        {
+         "default": null,
+         "enum": null,
+         "name": "user_id",
+         "nullable": false,
+         "required": true,
+         "type": "string"
+        },
+        {
+         "default": null,
+         "enum": null,
+         "name": "app_id",
+         "nullable": false,
+         "required": true,
+         "type": "string"
+        },
+        {
+         "default": null,
+         "enum": null,
+         "name": "name",
+         "nullable": false,
+         "required": true,
+         "type": "string"
+        },
+        {
+         "default": null,
+         "enum": null,
+         "name": "phone",
+         "nullable": true,
+         "required": false,
+         "type": "string"
+        },
+        {
+         "default": null,
+         "enum": null,
+         "name": "email",
+         "nullable": true,
+         "required": false,
+         "type": "string"
+        },
+        {
+         "default": null,
+         "enum": null,
+         "name": "address",
+         "nullable": true,
+         "required": false,
+         "type": "string"
+        },
+        {
+         "default": null,
+         "enum": null,
+         "name": "notes",
+         "nullable": true,
+         "required": false,
+         "type": "string"
+        },
+        {
+         "default": null,
+         "enum": null,
+         "name": "created_at",
+         "nullable": false,
+         "required": true,
+         "type": "datetime"
+        },
+        {
+         "default": null,
+         "enum": null,
+         "name": "updated_at",
+         "nullable": false,
+         "required": true,
+         "type": "datetime"
+        }
+       ],
+       "indexes": [
+        {
+         "keys": [
+          {
+           "field": "user_id",
+           "order": 1
+          },
+          {
+           "field": "app_id",
+           "order": 1
+          },
+          {
+           "field": "customer_id",
+           "order": 1
+          }
+         ],
+         "name": "idx_b1c3a469cb910c65",
+         "sparse": null,
+         "unique": true
+        }
+       ],
+       "lifecycle": {
+        "migration_policy": "additive_only",
+        "write_mode": "module_action"
+       },
+       "name": "customers",
+       "owner_field": "user_id",
+       "ownership": {
+        "surface_id": "crm_core",
+        "surface_kind": "module"
+       },
+       "scope": "app",
+       "search_by": "customer_id",
+       "tenancy": "per_user"
+      },
+      {
+       "entity": "Job",
+       "fields": [
+        {
+         "default": null,
+         "enum": null,
+         "name": "job_id",
+         "nullable": false,
+         "required": true,
+         "type": "string"
+        },
+        {
+         "default": null,
+         "enum": null,
+         "name": "user_id",
+         "nullable": false,
+         "required": true,
+         "type": "string"
+        },
+        {
+         "default": null,
+         "enum": null,
+         "name": "app_id",
+         "nullable": false,
+         "required": true,
+         "type": "string"
+        },
+        {
+         "default": null,
+         "enum": null,
+         "name": "customer_id",
+         "nullable": false,
+         "required": true,
+         "type": "string"
+        },
+        {
+         "default": null,
+         "enum": null,
+         "name": "title",
+         "nullable": false,
+         "required": true,
+         "type": "string"
+        },
+        {
+         "default": null,
+         "enum": null,
+         "name": "date",
+         "nullable": false,
+         "required": true,
+         "type": "date"
+        },
+        {
+         "default": "planned",
+         "enum": [
+          "planned",
+          "in_progress",
+          "completed",
+          "cancelled"
+         ],
+         "name": "status",
+         "nullable": false,
+         "required": true,
+         "type": "string"
+        },
+        {
+         "default": null,
+         "enum": null,
+         "name": "price",
+         "nullable": true,
+         "required": false,
+         "type": "number"
+        },
+        {
+         "default": null,
+         "enum": null,
+         "name": "notes",
+         "nullable": true,
+         "required": false,
+         "type": "string"
+        },
+        {
+         "default": null,
+         "enum": null,
+         "name": "created_at",
+         "nullable": false,
+         "required": true,
+         "type": "datetime"
+        },
+        {
+         "default": null,
+         "enum": null,
+         "name": "updated_at",
+         "nullable": false,
+         "required": true,
+         "type": "datetime"
+        }
+       ],
+       "indexes": [
+        {
+         "keys": [
+          {
+           "field": "user_id",
+           "order": 1
+          },
+          {
+           "field": "app_id",
+           "order": 1
+          },
+          {
+           "field": "job_id",
+           "order": 1
+          }
+         ],
+         "name": "idx_8f968cc290bea186",
+         "sparse": null,
+         "unique": true
+        }
+       ],
+       "lifecycle": {
+        "migration_policy": "additive_only",
+        "write_mode": "module_action"
+       },
+       "name": "jobs",
+       "owner_field": "user_id",
+       "ownership": {
+        "surface_id": "crm_core",
+        "surface_kind": "module"
+       },
+       "scope": "app",
+       "search_by": "job_id",
+       "tenancy": "per_user"
+      }
+     ],
+     "surface_id": "crm_core",
+     "surface_kind": "module"
+    }
+   ],
+   "version": "1"
+  },
+  "design_surface_map": {
+   "surfaces": [
+    {
+     "custom_reads": [
+      "summarize_customers",
+      "summarize_jobs",
+      "summarize_dashboard"
+     ],
+     "events_emitted": [
+      "domain.crm.customer_created",
+      "domain.crm.customer_updated",
+      "domain.crm.customer_deleted",
+      "domain.crm.job_created",
+      "domain.crm.job_updated",
+      "domain.crm.job_deleted"
+     ],
+     "integrations": [],
+     "label": "CRM Core",
+     "notes": null,
+     "owned_mutations": [
+      "create_customer",
+      "update_customer",
+      "delete_customer",
+      "create_job",
+      "update_job",
+      "delete_job"
+     ],
+     "owned_pages": [
+      "Dashboard",
+      "Customers",
+      "Jobs",
+      "Weekly Schedule"
+     ],
+     "owner": "app",
+     "primary_entities": [
+      "Customer",
+      "Job"
+     ],
+     "source_capability_packs": [
+      "crud_pack",
+      "analytics_pack"
+     ],
+     "surface_id": "crm_core",
+     "surface_kind": "module",
+     "workflow_triggers": []
+    }
+   ]
+  },
+  "experience_spec": {
+   "brand_direction": "Modern, lean CRM for landscaping teams; emerald primary color; light theme; comfortable density; web-first; two users; fast onboarding; calendar-centric workflow.",
+   "navigation_model": "top-level routes with shell navigation",
+   "pages": [
+    {
+     "intent": "Overview of customers and jobs with KPI summary and recent activity",
+     "layout": "grid",
+     "name": "Dashboard",
+     "route": "/dashboard",
+     "sections": [
+      {
+       "config_hint": "{\"items\": [{\"label\": \"Active Customers\", \"value_key\": \"active_customers\"}, {\"label\": \"Open Jobs\", \"value_key\": \"open_jobs\"}]}",
+       "id": "summary",
+       "intent": "Key metrics at a glance",
+       "primitive": "SummaryStrip"
+      },
+      {
+       "config_hint": "{\"columns\": [\"customer_id\", \"name\", \"phone\", \"email\"], \"selection\": \"none\"}",
+       "id": "recent-customers",
+       "intent": "Recently added customers",
+       "primitive": "DataTable"
+      },
+      {
+       "config_hint": "{\"columns\": [\"job_id\", \"title\", \"customer_id\", \"date\", \"status\"], \"selection\": \"none\"}",
+       "id": "open-jobs",
+       "intent": "Open jobs by status",
+       "primitive": "DataTable"
+      }
+     ],
+     "ui_surface": "declarative_page"
+    },
+    {
+     "intent": "Manage customers: list, create, edit",
+     "layout": "full-width",
+     "name": "Customers",
+     "route": "/customers",
+     "sections": [
+      {
+       "config_hint": "{\"columns\": [\"customer_id\", \"name\", \"phone\", \"email\"], \"selection\": \"single\"}",
+       "id": "customer-list",
+       "intent": "Paginated customer list with row actions",
+       "primitive": "DataTable"
+      },
+      {
+       "config_hint": "{\"title\": \"New Customer\", \"size\": \"medium\"}",
+       "id": "create-customer",
+       "intent": "Create a new customer",
+       "primitive": "Modal"
+      }
+     ],
+     "ui_surface": "declarative_page"
+    },
+    {
+     "intent": "Manage jobs: list, create, edit, linked to customers",
+     "layout": "full-width",
+     "name": "Jobs",
+     "route": "/jobs",
+     "sections": [
+      {
+       "config_hint": "{\"columns\": [\"job_id\", \"title\", \"customer_id\", \"date\", \"status\", \"price\"], \"selection\": \"single\"}",
+       "id": "job-list",
+       "intent": "List of jobs with CRUD",
+       "primitive": "DataTable"
+      },
+      {
+       "config_hint": "{\"title\": \"New Job\", \"size\": \"medium\"}",
+       "id": "create-job",
+       "intent": "Create a new job",
+       "primitive": "Modal"
+      }
+     ],
+     "ui_surface": "declarative_page"
+    },
+    {
+     "intent": "Weekly calendar view of jobs by day with filters",
+     "layout": "grid",
+     "name": "Weekly Schedule",
+     "route": "/calendar",
+     "sections": [],
+     "ui_surface": "custom_react_page"
+    }
+   ]
+  },
+  "operator_contracts": [
+   {
+    "canonical_provider": {
+     "activation_requires_credentials": true,
+     "activation_requires_explicit_selection": false,
+     "api_contract_version": "mozaiks.provider_api_contract.v1",
+     "callback_event_namespace": "mozaikspay.billing",
+     "connector_file": "services/integrations/mozaikspay_client.py",
+     "display_name": "MozaiksPay",
+     "entitlement_boundary": "EntitlementPort",
+     "fulfillment_boundary": "BillingFulfillmentCommand",
+     "provider_api_contract_id": "mozaikspay_provider_api",
+     "provider_id": "mozaiks_pay",
+     "provider_pack_id": "mozaikspay",
+     "secret_references": [
+      "MOZAIKSPAY_API_BASE",
+      "MOZAIKSPAY_API_KEY",
+      "MOZAIKSPAY_CLIENT_ID",
+      "MOZAIKSPAY_CLIENT_SECRET"
+     ],
+     "self_managed_replacement_provider_id": "entitlement_dispatch"
+    },
+    "contract_id": "mozaikspay",
+    "contract_type": "build_pack_instructions",
+    "facades": [
+     {
+      "module_id": "billing_portal",
+      "pages": [
+       {
+        "name": "Pricing",
+        "page_type_hint": "landing",
+        "primary_actions": [
+         "list_plans",
+         "open_billing_portal"
+        ],
+        "primary_entities": [
+         "subscription"
+        ],
+        "route": "/pricing"
+       },
+       {
+        "name": "Billing",
+        "page_type_hint": "analytics_dashboard",
+        "primary_actions": [
+         "get_subscription_status",
+         "list_plans",
+         "start_subscription_checkout",
+         "open_billing_portal"
+        ],
+        "primary_entities": [
+         "subscription"
+        ],
+        "route": "/billing"
+       },
+       {
+        "name": "Usage",
+        "page_type_hint": "analytics_dashboard",
+        "primary_actions": [
+         "get_usage_status",
+         "get_token_status",
+         "start_token_top_up"
+        ],
+        "primary_entities": [
+         "runtime_usage",
+         "token_wallet"
+        ],
+        "route": "/usage"
+       }
+      ],
+      "provider_actions": [
+       "billing_portal",
+       "create_billing_portal_session",
+       "subscription_status",
+       "get_subscription_status",
+       "subscription_checkout",
+       "create_subscription_checkout_session",
+       "start_subscription_checkout",
+       "usage_status",
+       "get_usage_status",
+       "token_status",
+       "get_token_status",
+       "token_top_up",
+       "create_token_top_up_session",
+       "start_token_top_up"
+      ],
+      "provider_module": "mozaikspay"
+     }
+    ],
+    "forbidden_outputs": [
+     {
+      "path_prefix": "modules/mozaikspay/"
+     },
+     {
+      "path_prefix": "modules/wallet/"
+     },
+     {
+      "path_prefix": "app/capability_packs/"
+     },
+     {
+      "path_prefix": "services/managed_billing/"
+     },
+     {
+      "path_prefix": "services/wallet/"
+     }
+    ],
+    "inactive_surfaces": [
+     "checkout",
+     "creator_earnings",
+     "wallet_connection"
+    ],
+    "provider_api_response_contract": {
+     "billing_portal_session_required_fields": [
+      "success",
+      "portal_url",
+      "return_url"
+     ],
+     "description": "A MozaiksPay-compatible provider serves the provider API endpoints consumed by generated apps. Response shapes are pinned in provider_api_contract.yaml. Any change to field names or types on either side is a breaking change requiring coordinated release.\n",
+     "globally_forbidden_response_fields": [
+      "provider_customer_id",
+      "provider_subscription_id",
+      "payment_provider_customer_id",
+      "payment_provider_subscription_id",
+      "client_secret",
+      "secret_salt",
+      "client_secret_hash",
+      "session_id"
+     ],
+     "spec_file": "provider_api_contract.yaml",
+     "subscription_checkout_session_required_fields": [
+      "success",
+      "checkout_url",
+      "success_url",
+      "cancel_url",
+      "plan_id"
+     ],
+     "subscription_status_required_fields": [
+      "success",
+      "found",
+      "plan_id",
+      "plan_name",
+      "status",
+      "starts_at",
+      "expires_at",
+      "on_free_plan"
+     ],
+     "token_top_up_session_required_fields": [
+      "success",
+      "checkout_url",
+      "success_url",
+      "cancel_url",
+      "product_id",
+      "wallet_id",
+      "token_amount"
+     ]
+    },
+    "provider_lifecycle_boundary": [
+     {
+      "app_requirements": {
+       "subscriptions_yaml_price_block": {
+        "description": "Optional price metadata on each plan entry in app/config/subscriptions.yaml. When present on a plan, a compatible provider may use this metadata to map or provision provider-owned billing objects. When absent, the plan is free or requires provider/operator-side pricing configuration.\n",
+        "example": "plans:\n  - plan_id: pro\n    label: Pro\n    price:\n      amount: 29        # dollars\n      currency: usd\n      interval: month   # month | year\n    billing:\n      lookup_key: my_app_pro_monthly   # optional stable provider mapping key\n      allow_promotion_codes: true\n    capabilities: [...]\n"
+       }
+      },
+      "description": "The selected provider may read the app bundle's app/config/subscriptions.yaml catalog to map paid plans and top-up products to provider-owned billing objects. Mapping, provisioning, idempotency, provider IDs, payment processor objects, and hosted operational records remain provider-owned and are not generated into the canonical app bundle.\n",
+      "id": "plan_catalog_mapping",
+      "provider_role": "mozaikspay_compatible_provider"
+     }
+    ],
+    "provides_capabilities": [
+     "subscription_write_path"
+    ],
+    "recommended_domains": [
+     "billing",
+     "subscriptions",
+     "usage",
+     "saas"
+    ],
+    "required_integrations": [
+     {
+      "display_name": "MozaiksPay",
+      "kind": "api_key",
+      "optional_fields": [
+       {
+        "frontend_safe": true,
+        "label": "Client ID",
+        "name": "client_id",
+        "required": false,
+        "type": "text"
+       },
+       {
+        "frontend_safe": false,
+        "label": "Client Secret",
+        "name": "client_secret",
+        "required": false,
+        "type": "secret"
+       }
+      ],
+      "provider": "mozaiks_pay",
+      "purpose": "Connect this generated SaaS app to the managed MozaiksPay subscription provider.",
+      "required_at": "runtime",
+      "required_fields": [
+       {
+        "frontend_safe": true,
+        "label": "MozaiksPay API Base URL",
+        "name": "api_base",
+        "required": true,
+        "type": "url"
+       },
+       {
+        "frontend_safe": false,
+        "label": "MozaiksPay API Key",
+        "name": "api_key",
+        "required": true,
+        "type": "secret"
+       }
+      ],
+      "service": "mozaikspay"
+     }
+    ],
+    "required_outputs": [
+     {
+      "owner": "templates",
+      "path": "services/integrations/mozaikspay_client.py"
+     },
+     {
+      "owner": "templates",
+      "path": "modules/billing_portal/module.yaml"
+     },
+     {
+      "owner": "templates",
+      "path": "modules/billing_portal/backend/base_handler.py"
+     },
+     {
+      "owner": "workspace",
+      "path": "modules/billing_portal/backend/handler.py"
+     },
+     {
+      "owner": "templates",
+      "path": "modules/billing_portal/backend/service.py"
+     },
+     {
+      "owner": "templates",
+      "path": "modules/billing_portal/backend/schemas.py"
+     },
+     {
+      "owner": "templates",
+      "path": "modules/billing_portal/contracts/reactions.yaml"
+     },
+     {
+      "owner": "templates",
+      "path": "modules/billing_portal/contracts/profile.yaml"
+     },
+     {
+      "owner": "templates",
+      "path": "modules/billing_portal/contracts/admin.yaml"
+     },
+     {
+      "owner": "templates",
+      "path": "ui/pages/billing.yaml"
+     },
+     {
+      "owner": "templates",
+      "path": "ui/pages/usage.yaml"
+     },
+     {
+      "owner": "templates",
+      "path": "ui/pages/pricing.yaml"
+     }
+    ],
+    "runtime_boundaries": [
+     {
+      "id": "entitlements_runtime",
+      "rule": "Keep entitlement enforcement on the OSS runtime/module contract path."
+     },
+     {
+      "id": "usage_runtime",
+      "rule": "Read runtime token usage through /api/me/usage or /api/admin/usage; use the OSS token wallet ledger for balances instead of app-local duplicate ledgers."
+     },
+     {
+      "id": "plan_limits",
+      "rule": "Use app/config/subscriptions.yaml usage_limits, token_wallets, token_allowances, depleted_balance, and top_up_products for generated SaaS plan limits, token allowances, and recovery paths only when the app sells AI usage, credits, quotas, or token packs; access-only plans omit token wallet fields."
+     },
+     {
+      "id": "token_top_ups",
+      "rule": "Token top-up products are provider-neutral app contract entries; MozaiksPay only creates checkout sessions and must confirm payment before OSS billing fulfillment credits tokens."
+     },
+     {
+      "id": "managed_internals",
+      "rule": "Do not generate managed service internals, checkout, wallet, settlement logic, private APIs, or provider credentials."
+     },
+     {
+      "id": "connector_boundary",
+      "rule": "Generated apps must configure MozaiksPay through the app-scoped connector named mozaikspay and its scoped vault secret. MOZAIKSPAY_* environment configuration is a setup fallback only when no connector record exists. Unreadable or incomplete saved connectors fail closed; never combine their provider endpoint with environment credentials. Never commit provider credentials.\n"
+     },
+     {
+      "id": "page_bindings",
+      "rule": "Generated pages must call app-owned billing_portal actions, not managed backing modules directly."
+     }
+    ],
+    "runtime_connector_contract": {
+     "auth_secret_refs": {
+      "compatibility": [
+       "MOZAIKSPAY_CLIENT_ID",
+       "MOZAIKSPAY_CLIENT_SECRET"
+      ],
+      "primary": [
+       "MOZAIKSPAY_API_KEY"
+      ],
+      "public": [
+       "MOZAIKSPAY_API_BASE",
+       "MOZAIKS_APP_URL"
+      ]
+     },
+     "callback_verification": {
+      "accepted_event_shapes": [
+       "subscription_activated",
+       "subscription_updated",
+       "subscription_cancelled",
+       "token_top_up_paid"
+      ],
+      "fail_closed": true,
+      "malformed_callbacks": "reject",
+      "required": true,
+      "unsigned_callbacks": "reject"
+     },
+     "canonical_provider_id": "mozaiks_pay",
+     "connector_id": "mozaikspay",
+     "entitlement_sync": {
+      "assignment_store_authority": "config/subscriptions.yaml",
+      "enforcement_adapter": "ConfiguredEntitlementAdapter",
+      "normalized_command": "BillingFulfillmentCommand",
+      "source": "verified_provider_fulfillment"
+     },
+     "idempotency": {
+      "command_id_source": "provider_event_id",
+      "replay_boundary": "BillingFulfillmentService",
+      "required_for_provider_fulfillment": true
+     },
+     "mutually_exclusive_with": [
+      "entitlement_dispatch"
+     ],
+     "operations": [
+      "subscription_status",
+      "billing_portal_session",
+      "subscription_checkout_session",
+      "token_top_up_session"
+     ],
+     "readiness": {
+      "health_operation": "provider_readiness",
+      "offline_behavior": "not_ready",
+      "required_config": [
+       "api_base",
+       "api_key"
+      ]
+     },
+     "required_selected_pack_id": "mozaikspay",
+     "retry_policy": {
+      "retryable_errors": [
+       "timeout",
+       "rate_limited",
+       "service_unavailable"
+      ],
+      "terminal_errors": [
+       "invalid_credentials",
+       "invalid_scope",
+       "contract_version_mismatch",
+       "malformed_callback",
+       "unsigned_callback"
+      ]
+     },
+     "selection_field": "AppBuildPlan.monetization_provider",
+     "selection_value": "mozaiks_pay"
+    },
+    "selection_rules": [
+     {
+      "action": "select_pack",
+      "id": "select_for_token_wallets",
+      "when": {
+       "app_declares": [
+        "token_wallets",
+        "top_up_products"
+       ]
+      }
+     },
+     {
+      "action": "select_pack",
+      "id": "select_for_saas_billing",
+      "when": {
+       "intent_any": [
+        "saas billing",
+        "subscriptions",
+        "billing portal",
+        "runtime usage display"
+       ]
+      }
+     },
+     {
+      "action": "require_explicit_user_confirmation",
+      "id": "do_not_select_for_generic_payments",
+      "when": {
+       "intent_any": [
+        "checkout",
+        "marketplace payments",
+        "wallet connection",
+        "creator payouts"
+       ]
+      }
+     }
+    ],
+    "source_path": "C:\\Repos\\BlocUnitedRepo\\mozaiks-app\\.local\\worktrees\\live-app-b841bfbb\\.venv\\Lib\\site-packages\\factory_app\\build_context\\mozaikspay\\contract.yaml",
+    "surface_ownership": [
+     {
+      "account_state_field_names": [
+       "subscription_status",
+       "subscription_type"
+      ],
+      "action_aliases": {
+       "manage_subscription": "open_billing_portal",
+       "subscribe_user": "start_subscription_checkout"
+      },
+      "action_ids": [
+       "update_subscription",
+       "create_subscription",
+       "cancel_subscription",
+       "assign_subscription"
+      ],
+      "collection_names": [
+       "subscriptions",
+       "subscription_assignments",
+       "token_wallets"
+      ],
+      "entity_names": [
+       "Subscription",
+       "subscriptions",
+       "SubscriptionAssignment",
+       "subscription_assignment",
+       "TokenWallet",
+       "token_wallet"
+      ],
+      "facade_module": "billing_portal",
+      "homonym_entity_names": [
+       "Subscription",
+       "subscriptions"
+      ],
+      "owner": "MozaiksPay billing state (OSS runtime owns fulfilled entitlements and token wallets)",
+      "state_field_names": [
+       "_id",
+       "id",
+       "app_id",
+       "user_id",
+       "subscription_id",
+       "customer_id",
+       "plan_id",
+       "status",
+       "current_period_start",
+       "current_period_end",
+       "cancel_at_period_end",
+       "canceled_at",
+       "created_at",
+       "updated_at",
+       "token_balance",
+       "balance",
+       "currency",
+       "plan_name",
+       "starts_at",
+       "expires_at",
+       "on_free_plan",
+       "plan",
+       "plan_type",
+       "subscription_type",
+       "tier",
+       "subscription_status",
+       "start_date",
+       "end_date",
+       "expiration_date",
+       "type"
+      ],
+      "state_readers": {
+       "get_subscription_status": [
+        "plan_id",
+        "plan_name",
+        "status",
+        "starts_at",
+        "expires_at",
+        "on_free_plan"
+       ]
+      },
+      "surface_ids": [
+       "subscription_management",
+       "subscriptions",
+       "billing_management"
+      ]
+     }
+    ]
+   },
+   {
+    "auth": {
+     "compatibility_auth": {
+      "credential_prefixes": {
+       "client_id": "mpc_",
+       "client_secret": "mps_"
+      },
+      "headers": [
+       {
+        "description": "App-scoped client ID issued by the selected provider.",
+        "name": "X-MozaiksPay-Client-Id",
+        "required": true,
+        "secret": false
+       },
+       {
+        "description": "App-scoped client secret issued by the selected provider.",
+        "format": "Bearer {client_secret}",
+        "name": "Authorization",
+        "required": true,
+        "secret": true
+       }
+      ],
+      "scheme": "client_credentials"
+     },
+     "credential_prefixes": {
+      "api_key": [
+       "mzk_live_",
+       "mzk_test_"
+      ]
+     },
+     "headers": [
+      {
+       "description": "App-scoped MozaiksPay-compatible API key issued by the selected provider.",
+       "format": "Bearer {api_key}",
+       "name": "Authorization",
+       "required": true,
+       "secret": true
+      }
+     ],
+     "scheme": "mozaikspay_api_key"
+    },
+    "callbacks": {
+     "fulfillment_events": [
+      {
+       "event_type": "subscription_activated",
+       "normalized_command": "BillingFulfillmentCommand",
+       "required_fields": [
+        "event_id",
+        "app_id",
+        "plan_id",
+        "status"
+       ]
+      },
+      {
+       "event_type": "subscription_updated",
+       "normalized_command": "BillingFulfillmentCommand",
+       "required_fields": [
+        "event_id",
+        "app_id",
+        "plan_id",
+        "status"
+       ]
+      },
+      {
+       "event_type": "subscription_cancelled",
+       "normalized_command": "BillingFulfillmentCommand",
+       "required_fields": [
+        "event_id",
+        "app_id",
+        "status"
+       ]
+      },
+      {
+       "event_type": "token_top_up_paid",
+       "normalized_command": "BillingFulfillmentCommand",
+       "required_fields": [
+        "event_id",
+        "app_id",
+        "wallet_id",
+        "token_amount"
+       ]
+      }
+     ],
+     "idempotency": {
+      "event_id_field": "event_id",
+      "normalized_command_id": "event_id",
+      "replay_boundary": "BillingFulfillmentService"
+     },
+     "verification": {
+      "fail_closed": true,
+      "malformed_callbacks": "reject",
+      "required": true,
+      "signature_header": "X-MozaiksPay-Signature",
+      "timestamp_header": "X-MozaiksPay-Timestamp",
+      "unsigned_callbacks": "reject"
+     }
+    },
+    "contract_id": "mozaikspay_provider_api",
+    "contract_version": {
+     "current": "mozaiks.provider_api_contract.v1",
+     "header": "X-MozaiksPay-Contract-Version",
+     "mismatch_error_code": "contract_version_mismatch"
+    },
+    "description": "Machine-readable interface spec for the MozaiksPay provider API. Consumed by generated SaaS apps via mozaikspay_client.py. Served by the selected MozaiksPay-compatible provider. The hosted MozaiksPay service is the default provider implementation, but self-hosted or alternative providers may satisfy this same app-facing contract.\nThis file defines ONLY the public interface — request shape, response shape, auth scheme, and which fields are forbidden from responses. No payment provider logic, fee calculations, or subscription business rules belong here.\n",
+    "drift_guard": {
+     "consumer": "generated-saas-apps",
+     "description": "Changes to this file must be reflected in: - The selected provider server implementation - The generated client template (templates/services/integrations/mozaikspay_client.py) - The generated billing_portal schemas (templates/modules/billing_portal/backend/schemas.py) If any of these diverge, generated SaaS apps will break silently at runtime.\n",
+     "owned_by": "mozaikspay-platform"
+    },
+    "endpoints": [
+     {
+      "description": "Return whether the selected MozaiksPay-compatible provider is reachable and serving this public contract. This endpoint is a readiness check only; it must not create accounts, activate billing, mutate subscription state, transmit source code, or incur charges.\n",
+      "id": "provider_readiness",
+      "method": "GET",
+      "path": "/api/mozaikspay/v1/health",
+      "response": {
+       "error_shape": {
+        "error_code": {
+         "type": "string"
+        },
+        "ready": {
+         "type": "boolean",
+         "value": false
+        },
+        "success": {
+         "type": "boolean",
+         "value": false
+        }
+       },
+       "success_shape": {
+        "contract_version": {
+         "type": "string"
+        },
+        "ready": {
+         "type": "boolean"
+        },
+        "success": {
+         "type": "boolean",
+         "value": true
+        }
+       }
+      }
+     },
+     {
+      "description": "Return the current subscription plan for the calling app scope. Safe for display in generated app billing pages.\n",
+      "id": "subscription_status",
+      "method": "GET",
+      "path": "/api/mozaikspay/v1/subscription/status",
+      "response": {
+       "error_shape": {
+        "error": {
+         "type": "string"
+        },
+        "error_code": {
+         "type": "string"
+        },
+        "success": {
+         "type": "boolean",
+         "value": false
+        }
+       },
+       "forbidden_fields": [
+        "provider_customer_id",
+        "provider_subscription_id",
+        "payment_provider_customer_id",
+        "payment_provider_subscription_id",
+        "granted_capabilities",
+        "metadata",
+        "client_secret",
+        "secret_salt",
+        "client_secret_hash"
+       ],
+       "not_found_shape": {
+        "expires_at": {
+         "type": "null"
+        },
+        "found": {
+         "type": "boolean",
+         "value": false
+        },
+        "on_free_plan": {
+         "type": "boolean",
+         "value": true
+        },
+        "plan_id": {
+         "type": "null"
+        },
+        "plan_name": {
+         "type": "null"
+        },
+        "starts_at": {
+         "type": "null"
+        },
+        "status": {
+         "type": "null"
+        },
+        "success": {
+         "type": "boolean",
+         "value": true
+        }
+       },
+       "success_shape": {
+        "expires_at": {
+         "format": "iso8601",
+         "nullable": true,
+         "type": "string"
+        },
+        "found": {
+         "type": "boolean"
+        },
+        "on_free_plan": {
+         "type": "boolean"
+        },
+        "plan_id": {
+         "nullable": true,
+         "type": "string"
+        },
+        "plan_name": {
+         "nullable": true,
+         "type": "string"
+        },
+        "starts_at": {
+         "format": "iso8601",
+         "nullable": true,
+         "type": "string"
+        },
+        "status": {
+         "nullable": true,
+         "type": "string"
+        },
+        "success": {
+         "type": "boolean",
+         "value": true
+        }
+       }
+      },
+      "scope_params": [
+       {
+        "in": "query",
+        "name": "user_id",
+        "required": false
+       },
+       {
+        "in": "query",
+        "name": "tenant_id",
+        "required": false
+       },
+       {
+        "in": "query",
+        "name": "workspace_id",
+        "required": false
+       }
+      ]
+     },
+     {
+      "description": "Create a hosted billing portal redirect session. The caller redirects their end-user to portal_url. No subscription state is mutated by this call.\n",
+      "id": "billing_portal_session",
+      "method": "POST",
+      "path": "/api/mozaikspay/v1/billing-portal/session",
+      "request_body": {
+       "return_url": {
+        "format": "https_url",
+        "required": true,
+        "type": "string"
+       },
+       "tenant_id": {
+        "required": false,
+        "type": "string"
+       },
+       "user_id": {
+        "required": false,
+        "type": "string"
+       },
+       "workspace_id": {
+        "required": false,
+        "type": "string"
+       }
+      },
+      "response": {
+       "error_shape": {
+        "error_code": {
+         "type": "string"
+        },
+        "success": {
+         "type": "boolean",
+         "value": false
+        }
+       },
+       "forbidden_fields": [
+        "provider_customer_id",
+        "provider_subscription_id",
+        "payment_provider_customer_id",
+        "payment_provider_subscription_id",
+        "session_id",
+        "client_secret",
+        "secret_salt"
+       ],
+       "success_shape": {
+        "expires_at": {
+         "format": "iso8601",
+         "nullable": true,
+         "type": "string"
+        },
+        "portal_url": {
+         "format": "https_url",
+         "type": "string"
+        },
+        "return_url": {
+         "format": "https_url",
+         "type": "string"
+        },
+        "success": {
+         "type": "boolean",
+         "value": true
+        }
+       }
+      }
+     },
+     {
+      "description": "Create a hosted subscription checkout redirect session for a paid plan. The caller redirects their end-user to checkout_url. No OSS runtime state is mutated by this call; subscription fulfillment is driven by the selected provider after the payment provider confirms the subscription.\n",
+      "id": "subscription_checkout_session",
+      "method": "POST",
+      "path": "/api/mozaikspay/v1/subscription/checkout-session",
+      "request_body": {
+       "cancel_url": {
+        "format": "https_url",
+        "required": true,
+        "type": "string"
+       },
+       "customer_email": {
+        "required": false,
+        "type": "string"
+       },
+       "plan_id": {
+        "required": true,
+        "type": "string"
+       },
+       "success_url": {
+        "format": "https_url",
+        "required": true,
+        "type": "string"
+       },
+       "tenant_id": {
+        "required": false,
+        "type": "string"
+       },
+       "user_id": {
+        "required": false,
+        "type": "string"
+       },
+       "workspace_id": {
+        "required": false,
+        "type": "string"
+       }
+      },
+      "response": {
+       "error_shape": {
+        "error_code": {
+         "type": "string"
+        },
+        "missing_env": {
+         "nullable": true,
+         "type": "string"
+        },
+        "portal_available": {
+         "nullable": true,
+         "type": "boolean"
+        },
+        "success": {
+         "type": "boolean",
+         "value": false
+        }
+       },
+       "forbidden_fields": [
+        "provider_price_id",
+        "payment_provider_price_id",
+        "provider_customer_id",
+        "provider_subscription_id",
+        "payment_provider_customer_id",
+        "payment_provider_subscription_id",
+        "session_id",
+        "client_secret",
+        "secret_salt"
+       ],
+       "success_shape": {
+        "cancel_url": {
+         "format": "https_url",
+         "type": "string"
+        },
+        "checkout_url": {
+         "format": "https_url",
+         "type": "string"
+        },
+        "dry_run": {
+         "nullable": true,
+         "type": "boolean"
+        },
+        "expires_at": {
+         "format": "iso8601",
+         "nullable": true,
+         "type": "string"
+        },
+        "plan_id": {
+         "type": "string"
+        },
+        "success": {
+         "type": "boolean",
+         "value": true
+        },
+        "success_url": {
+         "format": "https_url",
+         "type": "string"
+        }
+       }
+      }
+     },
+     {
+      "description": "Create a hosted token top-up checkout session for a provider-neutral top_up_products entry declared by the generated app. Payment confirmation must produce an OSS BillingFulfillmentCommand with event_type token_top_up_paid before tokens are credited.\n",
+      "id": "token_top_up_session",
+      "method": "POST",
+      "path": "/api/mozaikspay/v1/tokens/top-up-session",
+      "request_body": {
+       "amount_cents": {
+        "required": true,
+        "type": "integer"
+       },
+       "cancel_url": {
+        "format": "https_url",
+        "required": true,
+        "type": "string"
+       },
+       "currency": {
+        "required": true,
+        "type": "string"
+       },
+       "product_id": {
+        "required": true,
+        "type": "string"
+       },
+       "success_url": {
+        "format": "https_url",
+        "required": true,
+        "type": "string"
+       },
+       "tenant_id": {
+        "required": false,
+        "type": "string"
+       },
+       "token_amount": {
+        "required": true,
+        "type": "integer"
+       },
+       "user_id": {
+        "required": false,
+        "type": "string"
+       },
+       "wallet_id": {
+        "required": true,
+        "type": "string"
+       },
+       "workspace_id": {
+        "required": false,
+        "type": "string"
+       }
+      },
+      "response": {
+       "error_shape": {
+        "amount_cents": {
+         "nullable": true,
+         "type": "integer"
+        },
+        "currency": {
+         "nullable": true,
+         "type": "string"
+        },
+        "error_code": {
+         "type": "string"
+        },
+        "product_id": {
+         "nullable": true,
+         "type": "string"
+        },
+        "success": {
+         "type": "boolean",
+         "value": false
+        },
+        "wallet_id": {
+         "nullable": true,
+         "type": "string"
+        }
+       },
+       "forbidden_fields": [
+        "provider_price_id",
+        "payment_provider_price_id",
+        "provider_customer_id",
+        "payment_provider_customer_id",
+        "session_id",
+        "client_secret",
+        "secret_salt"
+       ],
+       "success_shape": {
+        "amount_cents": {
+         "type": "integer"
+        },
+        "cancel_url": {
+         "format": "https_url",
+         "type": "string"
+        },
+        "checkout_url": {
+         "format": "https_url",
+         "type": "string"
+        },
+        "currency": {
+         "type": "string"
+        },
+        "expires_at": {
+         "format": "iso8601",
+         "nullable": true,
+         "type": "string"
+        },
+        "product_id": {
+         "type": "string"
+        },
+        "success": {
+         "type": "boolean",
+         "value": true
+        },
+        "success_url": {
+         "format": "https_url",
+         "type": "string"
+        },
+        "token_amount": {
+         "type": "integer"
+        },
+        "wallet_id": {
+         "type": "string"
+        }
+       }
+      }
+     }
+    ],
+    "error_handling": {
+     "application_errors": {
+      "BILLING_CUSTOMER_NOT_FOUND": "Subscription exists but billing provider customer not yet linked.",
+      "CONTRACT_VERSION_MISMATCH": "Provider and generated client do not agree on the MozaiksPay public contract version.",
+      "CUSTOM_PLAN_REQUIRES_SALES": "Plan requires operator setup before self-serve checkout.",
+      "INVALID_INPUT": "Required field missing or unsafe URL.",
+      "MOZAIKSPAY_BILLING_API_ERROR": "Billing provider returned an error.",
+      "MOZAIKSPAY_BILLING_NOT_CONFIGURED": "Selected MozaiksPay-compatible provider is not configured.",
+      "MOZAIKSPAY_PRICE_NOT_CONFIGURED": "Selected provider has no price mapping for the plan.",
+      "PLAN_NOT_CHECKOUTABLE": "Free/default plan cannot be purchased through checkout.",
+      "SUBSCRIPTION_ALREADY_EXISTS": "The requested billing scope already has an active paid subscription.",
+      "SUBSCRIPTION_NOT_FOUND": "No subscription record for the given scope.",
+      "TOKEN_TOP_UP_PRODUCT_NOT_FOUND": "The requested token top-up product is not declared by the app."
+     },
+     "http_errors": {
+      "400": "Invalid request body (missing return_url, unsafe URL, etc.).",
+      "401": "Missing or invalid MozaiksPay API key or client credentials.",
+      "403": "MozaiksPay credential app or user/tenant/workspace scope does not allow this request.",
+      "404": "No subscription found for this scope (subscription_status only — not an HTTP 404)."
+     }
+    },
+    "schema_version": "mozaiks.provider_api_contract.v1",
+    "source_path": "C:\\Repos\\BlocUnitedRepo\\mozaiks-app\\.local\\worktrees\\live-app-b841bfbb\\.venv\\Lib\\site-packages\\factory_app\\build_context\\mozaikspay\\provider_api_contract.yaml"
+   }
+  ],
+  "run_build_binding": {
+   "build_id": "build_live_601d2f56",
+   "build_registry_id": "appreg_live_601d2f56",
+   "phase": "genesis",
+   "target_app_id": "live-601d2f56"
+  },
+  "subscription_contract": {
+   "agent_message": "Contract prepared for GreenRoute CRM MVP with starter subscription and scalable Pro option; plan design references approved inventory.",
+   "app_generator_instructions": [
+    {
+     "instruction": "Use the app-owned billing_portal facade's public_readonly list_plans action to fetch the plan catalog from config/subscriptions.yaml and bind it to the approved pricing UI at /api/modules/billing_portal/list_plans. Do not create a new billing module or hardcode plan data.",
+     "target": "AppSchemaAgent"
+    }
+   ],
+   "app_id": "draft-app-ed82179a",
+   "app_name": "GreenRoute CRM",
+   "code_files": [
+    {
+     "content": "schema_version: mozaiks.subscriptions.v1\nlabel: GreenRoute CRM Plans\ndefault_plan_id: starter\nassignment_store:\n  data_alias: billing.subscriptions\n  app_id_field: app_id\n  tenant_id_field: tenant_id\n  user_id_field: user_id\n  plan_id_field: plan_id\n  status_field: status\n  starts_at_field: starts_at\n  expires_at_field: expires_at\n  capabilities_field: granted_capabilities\n  plan_snapshot_field: plan_snapshot\n  revision_field: billing_revision\n  active_statuses:\n  - active\n  - pending\n  - trialing\nproducts: []\nplans:\n- plan_id: starter\n  label: Starter\n  description: Starter plan for two-seat landscaping CRM\n  capabilities:\n  - feature.module.crm_core.create_customer\n  - feature.module.crm_core.create_job\n  - feature.module.crm_core.delete_customer\n  - feature.module.crm_core.delete_job\n  - feature.module.crm_core.summarize_customers\n  - feature.module.crm_core.summarize_dashboard\n  - feature.module.crm_core.summarize_jobs\n  - feature.module.crm_core.update_customer\n  - feature.module.crm_core.update_job\n- plan_id: pro\n  label: Pro\n  description: Pro plan for growing teams with more seats\n  capabilities:\n  - feature.module.crm_core.create_customer\n  - feature.module.crm_core.create_job\n  - feature.module.crm_core.delete_customer\n  - feature.module.crm_core.delete_job\n  - feature.module.crm_core.summarize_customers\n  - feature.module.crm_core.summarize_dashboard\n  - feature.module.crm_core.summarize_jobs\n  - feature.module.crm_core.update_customer\n  - feature.module.crm_core.update_job\n",
+     "filename": "config/subscriptions.yaml"
+    }
+   ],
+   "contract_required": true,
+   "forbidden_outputs": [
+    "contracts/subscriptions.yaml",
+    "custom token ledger",
+    "custom usage ledger",
+    "payment-provider price ids in config/subscriptions.yaml",
+    "payment-provider product ids in config/subscriptions.yaml"
+   ],
+   "metering_declarations": [],
+   "module_contract_updates": [],
+   "page_surface_requirements": [
+    {
+     "page_id": "dashboard",
+     "purpose": "Billing and plan management surface on Dashboard",
+     "required_runtime_endpoints": [
+      "/api/modules/billing_portal/list_plans"
+     ],
+     "route": "/dashboard"
+    }
+   ],
+   "plan_design_rationale": [
+    {
+     "affected_plan_ids": [
+      "starter",
+      "pro"
+     ],
+     "affected_pricing_group_ids": [],
+     "decision": "Introduce a starter plan with per-seat pricing and a scalable Pro option to support growth.",
+     "signal": "Monetization is enabled for this build; the monetization_intent indicates a subscription contract is likely.",
+     "source_context": "monetization_enabled"
+    },
+    {
+     "affected_plan_ids": [
+      "starter",
+      "pro"
+     ],
+     "affected_pricing_group_ids": [],
+     "decision": "Establish starter (2 included seats) and Pro with same feature gates to enable upsell; seats represented at runtime by provisioning logic outside this contract.",
+     "signal": "Concept monetization specifies recurring monthly subscriptions with two included seats in starter and seats-based upsell.",
+     "source_context": "concept_blueprint"
+    },
+    {
+     "affected_plan_ids": [
+      "starter",
+      "pro"
+     ],
+     "affected_pricing_group_ids": [],
+     "decision": "Select core feature set from approved inventory to enable CRUD and dashboard reads for both starter and pro.",
+     "signal": "Backend surfaces show CRM core CRUD and summarize reads; gating is done using the approved inventory.",
+     "source_context": "design_surface_map"
+    },
+    {
+     "affected_plan_ids": [
+      "starter",
+      "pro"
+     ],
+     "affected_pricing_group_ids": [],
+     "decision": "Expose plan catalog via the billing_portal list_plans endpoint and align with the pricing UI.",
+     "signal": "Experience specifies a web-first CRM with two users and calendar surfaces; pricing surface should be exposed.",
+     "source_context": "experience_spec"
+    }
+   ],
+   "rationale": "Monetization target is subscriptions with per-seat pricing; concept approval indicates starter (2 seats included) and upgrade path to Pro; plan features derived from approved inventory; app generates config/subscriptions.yaml for runtime enforcement.",
+   "review_response": {
+    "action": "confirm",
+    "approved": true,
+    "status": "approved",
+    "ui_event_id": "save_subscription_contract_7bf98f24"
+   },
+   "review_status": "confirmed",
+   "selected_features_by_plan": {
+    "pro": [
+     "module.crm_core.create_customer",
+     "module.crm_core.update_customer",
+     "module.crm_core.delete_customer",
+     "module.crm_core.create_job",
+     "module.crm_core.update_job",
+     "module.crm_core.delete_job",
+     "module.crm_core.summarize_customers",
+     "module.crm_core.summarize_jobs",
+     "module.crm_core.summarize_dashboard"
+    ],
+    "starter": [
+     "module.crm_core.create_customer",
+     "module.crm_core.update_customer",
+     "module.crm_core.delete_customer",
+     "module.crm_core.create_job",
+     "module.crm_core.update_job",
+     "module.crm_core.delete_job",
+     "module.crm_core.summarize_customers",
+     "module.crm_core.summarize_jobs",
+     "module.crm_core.summarize_dashboard"
+    ]
+   },
+   "subscription_config_file": {
+    "assignment_store": {
+     "active_statuses": [
+      "active",
+      "pending",
+      "trialing"
+     ],
+     "app_id_field": "app_id",
+     "capabilities_field": "granted_capabilities",
+     "data_alias": "billing.subscriptions",
+     "expires_at_field": "expires_at",
+     "plan_id_field": "plan_id",
+     "plan_snapshot_field": "plan_snapshot",
+     "revision_field": "billing_revision",
+     "starts_at_field": "starts_at",
+     "status_field": "status",
+     "tenant_id_field": "tenant_id",
+     "user_id_field": "user_id"
+    },
+    "default_plan_id": "starter",
+    "label": "GreenRoute CRM Plans",
+    "plans": [
+     {
+      "capabilities": [
+       "feature.module.crm_core.create_customer",
+       "feature.module.crm_core.create_job",
+       "feature.module.crm_core.delete_customer",
+       "feature.module.crm_core.delete_job",
+       "feature.module.crm_core.summarize_customers",
+       "feature.module.crm_core.summarize_dashboard",
+       "feature.module.crm_core.summarize_jobs",
+       "feature.module.crm_core.update_customer",
+       "feature.module.crm_core.update_job"
+      ],
+      "description": "Starter plan for two-seat landscaping CRM",
+      "label": "Starter",
+      "plan_id": "starter"
+     },
+     {
+      "capabilities": [
+       "feature.module.crm_core.create_customer",
+       "feature.module.crm_core.create_job",
+       "feature.module.crm_core.delete_customer",
+       "feature.module.crm_core.delete_job",
+       "feature.module.crm_core.summarize_customers",
+       "feature.module.crm_core.summarize_dashboard",
+       "feature.module.crm_core.summarize_jobs",
+       "feature.module.crm_core.update_customer",
+       "feature.module.crm_core.update_job"
+      ],
+      "description": "Pro plan for growing teams with more seats",
+      "label": "Pro",
+      "plan_id": "pro"
+     }
+    ],
+    "products": [],
+    "schema_version": "mozaiks.subscriptions.v1"
+   },
+   "user_confirmed": true,
+   "validation_notes": [
+    "Plans include features from the approved pricing feature inventory; token wallets and top-ups are not used for this MVP.",
+    "Seats are described in plan descriptions; actual seat enforcement is handled by host provisioning logic outside this contract.",
+    "Pricing display will rely on the presence of a single starter/pro plan lineup; pricing_catalog is null for default rendering.",
+    "Workflow metering not implemented; no token-based metering is defined in this MVP."
+   ],
+   "workflow_contract_updates": []
+  }
+ }
+}

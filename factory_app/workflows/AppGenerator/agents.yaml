@@ -204,9 +204,13 @@ agents:
         subscription extension file.
         If the contract declares `token_wallets[].auto_debit_usage`,
         `top_up_products`, `add_on_products`, billing page requirements, or
-        depleted-balance recovery routes, plan an app-owned `billing_portal`
-        facade module plus usage/billing/pricing pages. The facade may call a
-        selected managed billing adapter, but generated pages must bind only to
+        depleted-balance recovery routes, the app needs a `billing_portal`
+        facade module plus usage/billing/pricing pages. When a selected pack
+        declares that facade or those pages in its `required_outputs`, its
+        templates provide them: keep the facade capability entry and plan no
+        task for those files or pages. Plan app-owned work only for the facade
+        files and pages no selected pack declares. The facade may call a
+        selected managed billing adapter, but pages must bind only to
         `/api/modules/billing_portal/*`.
       - `platform_user_email`: Email of the authenticated platform user. Use this as the initial `admins` entry in `app/app.json` when the generated app needs admin bootstrap access. Non-null when running on the hosted mozaiks.ai platform; null in OSS/self-managed contexts.
       - `app_backend_url`: Base URL of the active Mozaiks app host for this app. When non-null, generated agents call this URL + the platform module action API to persist data and trigger domain events. Include this in the `module_contract` build task's initial_message so downstream module implementation agents have it.
