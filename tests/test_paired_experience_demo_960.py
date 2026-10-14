@@ -234,12 +234,11 @@ def _candidate_files(presentation):
     auth["routes"]["post_login_default"] = "/tasks" if presentation == "A" else "/board"
     files["config/auth.yaml"] = yaml.safe_dump(auth, sort_keys=False)
     files["ui/pages/projects.yaml"] = _projects_page()
-    routes = [{"path": "/projects", "component": "SchemaPage", "label": "Projects",
-               "order": 20, "schema": "projects", "navigation": {"group": "main"}, "meta": {"title": "Projects"}}]
+    # Declarative pages are discovered from ui/pages/*.yaml. The manifest owns
+    # custom routes only; SchemaPage is inherited and must not be registered.
+    routes = []
     if presentation == "A":
         files["ui/pages/tasks.yaml"] = _operational_page()
-        routes.insert(0, {"path": "/tasks", "component": "SchemaPage", "label": "Tasks", "order": 10,
-                          "schema": "tasks", "navigation": {"group": "main"}, "meta": {"title": "Tasks"}})
     else:
         files["ui/pages/custom/board.jsx"] = BOARD_SOURCE.read_text(encoding="utf-8")
         files["ui/index.js"] = (
@@ -251,9 +250,6 @@ def _candidate_files(presentation):
         routes.insert(0, {"id": "board", "path": "/board", "component": "PlanningBoard",
                           "label": "Planning board", "order": 10, "purpose": "Visual task planning and contextual inspection.",
                           "navigation": {"group": "main"}, "meta": {"title": "Planning board"}})
-        # The canonical custom-route manifest lists custom routes only. Schema
-        # pages are discovered from ui/pages/*.yaml by the platform shell.
-        routes = routes[:1]
     files["ui/route_manifest.json"] = json.dumps({"pages": routes})
     return files
 

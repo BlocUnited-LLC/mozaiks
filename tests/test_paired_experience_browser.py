@@ -63,6 +63,10 @@ def _profile(presentation, candidate):
          "excluded_reason": "Real sign-in is exercised before every required app route."},
         {"path": "/auth/callback", "component": "AuthCallbackPage", "kind": "auth",
          "excluded_reason": "The real PKCE callback is exercised by every sign-in; it is not a standalone page."},
+        {"path": "/me", "component": "ProfilePage", "kind": "extension",
+         "excluded_reason": "Inherited profile editing is outside this Projects/Tasks workload; not evaluated."},
+        {"path": "/u/:username", "component": "ProfilePage", "kind": "extension",
+         "excluded_reason": "Inherited public profile lookup is outside this workload; not evaluated."},
     ]
     routes.append(
         {"path": "/tasks", "component": "SchemaPage", "schema": "tasks",
