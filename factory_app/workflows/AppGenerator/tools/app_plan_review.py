@@ -1188,6 +1188,117 @@ def _repair_contract_task_operations(plan: dict[str, Any], context: Any) -> list
     return repairs
 
 
+_HANDLER_ENTRYPOINT = re.compile(r"backend\.handler:([A-Za-z_][A-Za-z0-9_]*)")
+_HANDLER_SPLIT_NOTE = "Handler split (authoritative, from the approved plan):"
+
+
+def _module_handler_class(module_id: str, *messages: str) -> str:
+    """The module.handler class the plan states, else the module-contract naming rule."""
+    for message in messages:
+        match = _HANDLER_ENTRYPOINT.search(message)
+        if match:
+            return match.group(1)
+    return "".join(part[:1].upper() + part[1:] for part in module_id.split("_") if part) + "Module"
+
+
+def _base_handler_class(handler_class: str) -> str:
+    for suffix in ("Module", "Handler"):
+        stem = handler_class[: -len(suffix)]
+        if handler_class.endswith(suffix) and stem:
+            return f"{stem}Base{suffix}"
+    return f"{handler_class}Base"
+
+
+def _restate_handler_split(plan: dict[str, Any], context: Any) -> list[str]:
+    """Restate the two-file handler contract in every business_services task that owns base_handler.py.
+
+    The planner prompt requires each business_services initial_message to name
+    the module.handler class and the base/workspace split. A live CRM build's
+    message instead read "Implement backend/handler.py, backend/service.py,
+    backend/repo.py, backend/policy.py": no base_handler.py, and an instruction
+    to author a code-rendered policy. ServiceAgent followed the message, wrote a
+    flat handler class and a policy copy, and lost its one correction round
+    before ever emitting base_handler.py, which ended the run.
+
+    Everything stated here is projected from declared plan fields: the owned
+    paths, the module's data_contract collections, and the handler entrypoint a
+    task message already names (else the module-contract naming rule, which the
+    module_contract task is then told as well, so both tasks name one class).
+    """
+    repairs: list[str] = []
+    tasks = plan.get("build_tasks") or []
+    data_contract = detach(context.get("data_contract")) or {}
+    persistent = {
+        owner for owner, kind, _collection in iter_data_contract_collections(data_contract)
+        if kind == "module"
+    }
+    for task in tasks:
+        if task.get("task_type") != "business_services":
+            continue
+        owned = _normalized_owned_paths(task)
+        for base_path in [path for path in owned if path.endswith("/backend/base_handler.py")]:
+            parts = base_path.split("/")
+            if len(parts) != 4 or parts[0] != "modules":
+                continue
+            module_id = parts[1]
+            backend = f"modules/{module_id}/backend"
+            message = str(task.get("initial_message") or "").rstrip()
+            if _HANDLER_SPLIT_NOTE in message:
+                continue
+            contract = next(
+                (
+                    candidate for candidate in tasks
+                    if candidate.get("task_type") == "module_contract"
+                    and f"modules/{module_id}/module.yaml" in _normalized_owned_paths(candidate)
+                ),
+                None,
+            )
+            contract_message = str((contract or {}).get("initial_message") or "").rstrip()
+            handler_class = _module_handler_class(module_id, contract_message, message)
+            base_class = _base_handler_class(handler_class)
+            collections = module_id in persistent
+            rendered = [
+                path for path in owned
+                if path.startswith(f"{backend}/") and (
+                    (path == f"{backend}/policy.py" and collections)
+                    or (path == f"{backend}/account_data_handler.py"
+                        and owns_per_user_collections(module_id, data_contract))
+                )
+            ]
+            authored = [path for path in owned if path.startswith(f"{backend}/") and path not in rendered]
+            not_authored = [*rendered, f"{backend}/schemas.py"]
+            canonical = (
+                f" Code adds the canonical create/update/delete and list/get methods to {handler_class} "
+                "and their service.py and repo.py functions; author them in neither class."
+                if collections else ""
+            )
+            note = (
+                f"{_HANDLER_SPLIT_NOTE} module.yaml module.handler is `backend.handler:{handler_class}`. "
+                f"`{backend}/base_handler.py` defines `class {base_class}` holding the module's custom action "
+                "methods, each delegating to service.py. "
+                f"`{backend}/handler.py` imports it (`from .base_handler import {base_class}`) and defines "
+                f"`class {handler_class}({base_class})`, the exact module.handler class, with a workspace "
+                "docstring; an import or re-export alone is invalid."
+                f"{canonical} "
+                f"Author and emit: {', '.join(authored)}. "
+                f"Code renders or owns these, so do not author them: {', '.join(not_authored)}. "
+                "Where the text above differs, this note governs."
+            )
+            task["initial_message"] = "\n\n".join(part for part in (message, note) if part)
+            repairs.append(
+                f"{task.get('task_id')}: restated the {handler_class}/{base_class} handler split "
+                f"and authored files {authored}"
+            )
+            if contract is not None and f"backend.handler:{handler_class}" not in contract_message:
+                contract["initial_message"] = "\n\n".join(part for part in (
+                    contract_message,
+                    f"module.yaml module.handler: `backend.handler:{handler_class}`, the class the "
+                    f"business_services task {task.get('task_id')!r} defines in handler.py.",
+                ) if part)
+                repairs.append(f"{contract.get('task_id')}: named module.handler backend.handler:{handler_class}")
+    return repairs
+
+
 def _approved_surface_ids(context: Any) -> set[str]:
     """Surfaces the approved design and the selected packs' registry declarations name."""
     design = detach(context.get("design_surface_map")) or {}
@@ -1899,6 +2010,7 @@ def review_app_build_plan(
             *_repair_coverage(plan, context_variables),
             *_construct_task_requirements(plan, context_variables),
             *_repair_contract_task_operations(plan, context_variables),
+            *_restate_handler_split(plan, context_variables),
             *_repair_page_contract_dependencies(plan, context_variables),
             *_note_pack_pages(plan, context_variables),
             *drop_unapproved_page_data_sources(plan, context_variables),

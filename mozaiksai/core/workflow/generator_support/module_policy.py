@@ -81,11 +81,17 @@ def materialize_module_policies(
     data_contract: dict[str, Any] | None = None,
     *,
     module_ids: set[str] | None = None,
+    failures: list[str] | None = None,
 ) -> dict[str, str]:
     """Render policies only for modules owning approved collection surfaces.
 
     The supplied DesignDocs contract is authoritative; its serialized artifact
     must agree and cannot act as a second input authority.
+
+    A model-authored copy that differs from the rendered policy is a rejection.
+    With ``failures`` supplied it is recorded there and the rendered policy
+    replaces the copy, so a task attempt can report it together with its other
+    rejections; without it the rejection is raised at once.
     """
     existing_policy_modules = {
         parts[1] for path in files
@@ -115,7 +121,10 @@ def materialize_module_policies(
         path = f"modules/{module_id}/backend/policy.py"
         result[path] = render_module_policy(module_id, collections)
         if path in files and files[path] != result[path]:
-            raise ValueError(f"{path}: policy.py is rendered from data_contract; omit model-authored policy source")
+            message = f"{path}: policy.py is rendered from data_contract; omit model-authored policy source"
+            if failures is None:
+                raise ValueError(message)
+            failures.append(message)
     declared_modules = {
         owner for owner, kind, _collection in iter_data_contract_collections(
             data_contract, require_complete_ownership=False,
@@ -129,6 +138,7 @@ def materialize_module_policies(
 
 def materialize_task_module_policies(
     files: Mapping[str, str], *, task: Mapping[str, Any], data_contract: Any = None,
+    failures: list[str] | None = None,
 ) -> dict[str, str]:
     """Render owned policy artifacts before batch output ownership validation."""
     selected = {
@@ -143,4 +153,4 @@ def materialize_task_module_policies(
     )
     if not selected:
         return {}
-    return materialize_module_policies(files, detach(data_contract), module_ids=selected)
+    return materialize_module_policies(files, detach(data_contract), module_ids=selected, failures=failures)
