@@ -181,14 +181,42 @@ Both runner and browser verify the reviewed profile hash; the runner rechecks
 profile, checkout and app bytes after execution. Direct Playwright exit zero is
 not an acceptance-controller result.
 
-**Current limit:** the existing external-host mode cannot attest that the running
+The external-host CLI cannot attest that the running
 backend and compiled frontend use the locally reviewed source and bundle. Echoed
 candidate annotations are not runtime provenance. It therefore always reports
 `runtime_identity: not_evaluated` and an identity finding through the canonical
 controller; aggregate `success` remains false even when `route_probe_passed` is
-true. Integrating the existing task-owned host/build driver with the admitted
-candidate is required before this mode can accept a candidate. There is no flag
-to bypass this gate. Route counts and failures remain available independently.
+true. There is no CLI flag or serialized receipt to bypass this gate. Route
+counts and failures remain available independently.
+
+The existing Community local acceptance driver can also run a generated workspace
+through `run(args, evidence, exercise=...)`. It starts disposable Mongo, Keycloak
+and the platform host with explicit environments. Its `frontend_preview` context
+builds that same app and owns a strict-port Vite preview. An in-process
+`OwnedBrowserLaunch.from_driver(...)` connects those process handles and launch
+inputs to `run_playwright_acceptance(..., owned_launch=...)`. The runner verifies
+the clean source revision, pre-launch bundle bytes, child origins/auth settings,
+live processes and served build bytes before and after the browser workload.
+This controlled local path can report `runtime_identity: verified_owned_launch`;
+it is not an attestation against a hostile local process owner.
+
+Run the opt-in paired scripted fixture from a clean committed checkout with
+isolated Python/frontend dependencies, cached `mongo:7` and
+`quay.io/keycloak/keycloak:26.0` images, and Playwright Chromium installed:
+
+```powershell
+$env:PYTHON_DOTENV_DISABLED='1'
+$env:MOZAIKS_PAIRED_BROWSER='1'
+.venv/Scripts/python.exe -m pytest tests/test_paired_experience_browser.py -q --no-cov --reruns 0
+```
+
+Each presentation gets a fresh database and real Keycloak browser sign-in.
+Unique local evidence directories retain the profile, exact app bytes, raw
+browser report, screenshots/traces and controller result, including failures.
+The synthetic identity environment is private local test material. The fixture
+proves only its declared routes and interactions; it is scripted AG2 generation,
+not live-model generation, pack selection or refinement acceptance. Table paging
+currently covers nine loaded records, not retrieval beyond the API's first page.
 
 Keep source inspection, authored fixtures, scripted AG2 output, admitted
 materialization, real-host interactions, actual refinement and live-model output

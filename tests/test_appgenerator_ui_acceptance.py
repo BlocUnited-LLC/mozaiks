@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 from copy import deepcopy
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -234,6 +235,119 @@ def test_real_host_runner_binds_local_inputs_but_never_attests_external_host(
     assert result["repair_decision"]["repair_owners"] == []
     assert result["route_probe_passed"] is (change == "none")
     assert result["route_coverage"]["reported_cases"] == (2 if change == "missing_custom" else 4)
+
+
+@pytest.fixture
+def owned_launch(mixed_profile, tmp_path, monkeypatch):
+    app, value = mixed_profile
+    repo = Path(__file__).resolve().parents[1]
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_bytes(b"<main>Owned frontend</main>")
+    (dist / "app.js").write_bytes(b"export const build = 'candidate';")
+    backend = SimpleNamespace(pid=101, poll=lambda: None, args=["python",
+        str(repo / "examples/canonical-apps/community/scripts/live_environment.py"),
+        "_host", "--api-port", "4318"])
+    frontend = SimpleNamespace(pid=102, poll=lambda: None, args=["node", "vite.js", "preview",
+        "--port", "4317", "--strictPort", "--outDir", str(dist)])
+    state = {"base_url": "http://127.0.0.1:4317", "api_url": "http://127.0.0.1:4318",
+             **{key: value["candidate"][key] for key in ("app_id", "source_sha", "bundle_sha256")}}
+    runtime = {"PLATFORM_PATH": str(app), "PYTHONPATH": str(repo), "PYTHON_DOTENV_DISABLED": "1",
+               "AUTH_ENABLED": "true", "AUTH_ISSUER": "http://127.0.0.1:4319/realm"}
+    preview = {"process": frontend, "dist_path": dist, "bundle_sha256": value["candidate"]["bundle_sha256"],
+               "env": {"PLATFORM_PATH": str(app), "VITE_API_URL": state["api_url"],
+                       "MOZAIKS_BACKEND_URL": state["api_url"], "VITE_OIDC_AUTHORITY": runtime["AUTH_ISSUER"]}}
+
+    def fetch(url, **_kwargs):
+        content = b'{}' if url.endswith("/api/health/ready") else (dist / url.rsplit("/", 1)[1]).read_bytes()
+        response = BytesIO(content)
+        response.status = 200
+        return response
+
+    monkeypatch.setattr(ui_acceptance, "urlopen", fetch)
+    binding = ui_acceptance.OwnedBrowserLaunch.from_driver(
+        app_root=app, repo_root=repo, candidate=value["candidate"], state=state,
+        backend=backend, runtime_env=runtime, preview=preview,
+    )
+    return binding, value, state, runtime, preview
+
+
+@pytest.mark.parametrize("change", ["none", "backend_stopped", "frontend_stopped", "dist_changed",
+                                        "served_other_build", "bundle_changed", "source_changed"])
+def test_owned_launch_accepts_only_unchanged_live_processes_and_served_build(
+    owned_launch, monkeypatch, tmp_path, change,
+):
+    binding, value, state, _runtime, _preview = owned_launch
+    profile_path = tmp_path / "profile.json"
+    profile_path.write_text(json.dumps(value))
+
+    def browser(_command, **kwargs):
+        report = _route_report(value, kwargs["env"]["MOZAIKS_GENERATED_UI_RUN_ID"])
+        if change == "backend_stopped":
+            binding.backend.poll = lambda: 0
+        elif change == "frontend_stopped":
+            binding.frontend.poll = lambda: 0
+        elif change == "dist_changed":
+            (binding.dist_path / "app.js").write_bytes(b"different build")
+        elif change == "served_other_build":
+            def other_build(*_args, **_kwargs):
+                response = BytesIO(b"wrong server")
+                response.status = 200
+                return response
+            monkeypatch.setattr(ui_acceptance, "urlopen", other_build)
+        elif change == "bundle_changed":
+            (binding.app_root / "app.json").write_text('{"appId": "changed"}')
+        elif change == "source_changed":
+            monkeypatch.setattr(ui_acceptance, "_source_commit", lambda _: "b" * 40)
+        return SimpleNamespace(returncode=0, stdout=json.dumps(report), stderr="")
+
+    monkeypatch.setattr(ui_acceptance.subprocess, "run", browser)
+    evidence = tmp_path / "browser-evidence"
+    result = ui_acceptance.run_playwright_acceptance(
+        app_root=binding.app_root, repo_root=binding.repo_root, mode="real_host",
+        profile_path=profile_path, base_url=state["base_url"], owned_launch=binding,
+        evidence_dir=evidence,
+    )
+    assert json.loads((evidence / "playwright.stdout").read_text())["suites"]
+    assert result["success"] is (change == "none")
+    assert result["runtime_identity"] == ("verified_owned_launch" if change == "none" else "not_evaluated")
+    if change != "none":
+        assert result["repair_decision"]["disposition"] == "block"
+        assert result["repair_decision"]["repair_owners"] == []
+
+
+@pytest.mark.parametrize("change", ["wrong_app", "wrong_backend", "wrong_bundle", "wrong_source",
+                                        "wrong_issuer", "wrong_origin", "wrong_revision",
+                                        "old_backend_bundle", "old_backend_source", "old_backend_app"])
+def test_owned_launch_cannot_be_reused_for_other_candidate_or_child_environment(owned_launch, change):
+    binding, value, state, runtime, preview = owned_launch
+    if change == "wrong_app":
+        preview["env"]["PLATFORM_PATH"] = str(binding.repo_root)
+    elif change == "wrong_backend":
+        preview["env"]["VITE_API_URL"] = "http://127.0.0.1:9999"
+    elif change == "wrong_bundle":
+        preview["bundle_sha256"] = "b" * 64
+    elif change == "wrong_source":
+        runtime["PYTHONPATH"] = str(binding.app_root)
+    elif change == "wrong_issuer":
+        runtime["AUTH_ISSUER"] = "http://127.0.0.1:9999"
+    elif change == "wrong_origin":
+        state["base_url"] = "http://127.0.0.1:9999"
+    elif change.startswith("old_backend_"):
+        key = {"old_backend_bundle": "bundle_sha256", "old_backend_source": "source_sha",
+               "old_backend_app": "app_id"}[change]
+        state[key] = "different"
+    else:
+        with pytest.raises(ValueError, match="candidate/profile"):
+            binding.verify(app_root=binding.app_root, repo_root=binding.repo_root,
+                           candidate=ui_acceptance._Candidate(**{**value["candidate"], "revision": "other"}),
+                           base_url=state["base_url"])
+        return
+    with pytest.raises(ValueError):
+        ui_acceptance.OwnedBrowserLaunch.from_driver(
+            app_root=binding.app_root, repo_root=binding.repo_root, candidate=value["candidate"],
+            state=state, backend=binding.backend, runtime_env=runtime, preview=preview,
+        )
 
 
 @pytest.mark.parametrize("change", ["status_object", "result_object", "project_object", "project_empty", "project_unknown", "errors_object", "retry_failure"])

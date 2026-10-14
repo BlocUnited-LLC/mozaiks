@@ -11,9 +11,11 @@ import os
 import shutil
 import subprocess
 from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
+from urllib.request import urlopen
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -94,6 +96,109 @@ def _source_commit(repo_root: Path) -> str:
     if git("status", "--porcelain", "--untracked-files=normal"):
         raise ValueError("Real-host acceptance requires a frozen clean source checkout.")
     return git("rev-parse", "HEAD")
+
+
+def _frontend_files(dist_path: Path) -> dict[str, str]:
+    root = dist_path.resolve(strict=True)
+    files = {}
+    for path in sorted(root.rglob("*")):
+        if not path.resolve().is_relative_to(root):
+            raise ValueError("Frontend build contains a path outside its root.")
+        if path.is_file():
+            files[path.relative_to(root).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+    if "index.html" not in files:
+        raise ValueError("Owned frontend build has no index.html.")
+    return files
+
+
+@dataclass(frozen=True)
+class OwnedBrowserLaunch:
+    """In-process binding from the existing local acceptance owner, never a CLI receipt.
+
+    The trusted Python driver owns both Popen handles and their explicit environments.
+    Browser annotations and serialized caller hashes cannot construct this binding.
+    This proves a local controlled launch, not isolation from a hostile machine owner.
+    """
+
+    app_root: Path
+    repo_root: Path
+    candidate: _Candidate
+    base_url: str
+    api_url: str
+    backend: Any
+    frontend: Any
+    dist_path: Path
+    build_files: dict[str, str]
+
+    @classmethod
+    def from_driver(cls, *, app_root: Path, repo_root: Path, candidate: dict,
+                    state: dict, backend: Any, runtime_env: dict, preview: dict):
+        app_root, repo_root = app_root.resolve(strict=True), repo_root.resolve(strict=True)
+        identity = _Candidate.model_validate(candidate)
+        if (state.get("source_sha") != identity.source_sha
+                or state.get("bundle_sha256") != identity.bundle_sha256
+                or state.get("app_id") != identity.app_id):
+            raise ValueError("Backend launch inputs differ from the admitted candidate.")
+        frontend_env = preview["env"]
+        dist_path = preview["dist_path"].resolve(strict=True)
+        backend_args, frontend_args = backend.args, preview["process"].args
+        launcher = repo_root / "examples/canonical-apps/community/scripts/live_environment.py"
+        if (not isinstance(backend_args, list) or len(backend_args) < 3
+                or Path(backend_args[1]).resolve() != launcher or backend_args[2] != "_host"
+                or not isinstance(frontend_args, list) or "preview" not in frontend_args
+                or "--strictPort" not in frontend_args or "--outDir" not in frontend_args
+                or frontend_args.index("--outDir") + 1 >= len(frontend_args)
+                or Path(frontend_args[frontend_args.index("--outDir") + 1]).resolve() != dist_path):
+            raise ValueError("Browser acceptance requires the existing owner's backend and built preview processes.")
+        for child_env in (runtime_env, frontend_env):
+            if Path(child_env.get("PLATFORM_PATH", "")).resolve() != app_root:
+                raise ValueError("Owned launch uses a different app root.")
+        if (Path(runtime_env.get("PYTHONPATH", "")).resolve() != repo_root
+                or runtime_env.get("PYTHON_DOTENV_DISABLED") != "1"
+                or runtime_env.get("AUTH_ENABLED") != "true"
+                or frontend_env.get("VITE_API_URL") != state["api_url"]
+                or frontend_env.get("MOZAIKS_BACKEND_URL") != state["api_url"]
+                or runtime_env.get("AUTH_ISSUER") != frontend_env.get("VITE_OIDC_AUTHORITY")):
+            raise ValueError("Owned frontend/backend source or authentication binding differs.")
+        for name, arguments, option in (("api_url", backend_args, "--api-port"),
+                                         ("base_url", frontend_args, "--port")):
+            url = urlsplit(state[name])
+            if (url.scheme != "http" or url.hostname != "127.0.0.1"
+                    or url.username or url.password or url.path or url.query or url.fragment
+                    or option not in arguments or arguments.index(option) + 1 >= len(arguments)
+                    or str(url.port) != arguments[arguments.index(option) + 1]):
+                raise ValueError("Owned process origin differs from its launch arguments.")
+        if preview["bundle_sha256"] != identity.bundle_sha256:
+            raise ValueError("Frontend was built from different candidate bytes.")
+        binding = cls(app_root, repo_root, identity, state["base_url"], state["api_url"],
+                      backend, preview["process"], dist_path, _frontend_files(dist_path))
+        binding.verify(app_root=app_root, repo_root=repo_root, candidate=identity,
+                       base_url=state["base_url"])
+        return binding
+
+    def verify(self, *, app_root: Path, repo_root: Path, candidate: _Candidate,
+               base_url: str) -> dict[str, Any]:
+        if (app_root.resolve() != self.app_root or repo_root.resolve() != self.repo_root
+                or candidate != self.candidate or base_url != self.base_url):
+            raise ValueError("Running launch does not belong to this candidate/profile.")
+        if self.backend.poll() is not None or self.frontend.poll() is not None:
+            raise ValueError("Owned backend or frontend process is no longer running.")
+        if (_source_commit(repo_root) != candidate.source_sha
+                or bundle_digest(app_root) != candidate.bundle_sha256
+                or _frontend_files(self.dist_path) != self.build_files):
+            raise ValueError("Owned launch source, candidate or frontend build changed.")
+        with urlopen(self.api_url + "/api/health/ready", timeout=10) as response:
+            if response.status != 200:
+                raise ValueError("Owned backend is not ready.")
+        for relative, expected in self.build_files.items():
+            with urlopen(self.base_url + "/" + quote(relative), timeout=10) as response:
+                if hashlib.sha256(response.read()).hexdigest() != expected:
+                    raise ValueError("Running frontend serves bytes different from its owned build.")
+        return {"source_sha": candidate.source_sha, "bundle_sha256": candidate.bundle_sha256,
+                "revision": candidate.revision, "backend_pid": self.backend.pid,
+                "frontend_pid": self.frontend.pid, "base_url": self.base_url,
+                "api_url": self.api_url, "frontend_sha256": hashlib.sha256(
+                    json.dumps(self.build_files, sort_keys=True).encode()).hexdigest()}
 
 
 def validate_real_host_profile(value: Any, *, app_root: Path, repo_root: Path) -> _Profile:
@@ -459,6 +564,8 @@ def run_playwright_acceptance(
     base_url: str | None = None,
     storage_state: Path | None = None,
     spec_path: str | None = None,
+    owned_launch: OwnedBrowserLaunch | None = None,
+    evidence_dir: Path | None = None,
 ) -> dict[str, Any]:
     web_shell = repo_root / "web_shell"
     env = os.environ.copy()
@@ -479,6 +586,10 @@ def run_playwright_acceptance(
                 raise ValueError("Real-host acceptance requires a credential-free loopback HTTP origin.")
             profile_bytes = profile_path.read_bytes()
             profile = validate_real_host_profile(json.loads(profile_bytes), app_root=app_root, repo_root=repo_root)
+            if owned_launch is not None:
+                metadata["launch"] = owned_launch.verify(
+                    app_root=app_root, repo_root=repo_root, candidate=profile.candidate, base_url=base_url,
+                )
             spec = spec_path or "playwright/generated-ui/generated-app.real-host.acceptance.spec.js"
             spec_file = (web_shell / spec).resolve(strict=True)
             if not spec_file.is_relative_to((web_shell / "playwright/generated-ui").resolve()) or not spec.endswith(".spec.js"):
@@ -496,7 +607,7 @@ def run_playwright_acceptance(
                 env.pop("MOZAIKS_GENERATED_UI_STORAGE_STATE", None)
             metadata.update(candidate=profile.candidate.model_dump(),
                             profile_sha256=hashlib.sha256(profile_bytes).hexdigest(), spec=spec)
-        elif mode != "mocked_rendering_smoke" or any(value is not None for value in (profile_path, base_url, storage_state, spec_path)):
+        elif mode != "mocked_rendering_smoke" or any(value is not None for value in (profile_path, base_url, storage_state, spec_path, owned_launch)):
             raise ValueError("Unknown acceptance mode or real-host arguments supplied to mocked mode.")
     except (OSError, ValueError, subprocess.CalledProcessError) as exc:
         return _acceptance_result([_finding(message=str(exc), category="preflight")], returncode=None, **metadata)
@@ -511,12 +622,26 @@ def run_playwright_acceptance(
         "--reporter=json",
         "--retries=0",
     ]
+    if evidence_dir is not None:
+        evidence_dir = evidence_dir.resolve()
+        evidence_dir.mkdir(parents=True, exist_ok=False)
+        command.extend(["--output", str(evidence_dir / "artifacts")])
+        metadata["evidence_dir"] = str(evidence_dir)
     try:
         completed = subprocess.run(command, cwd=str(web_shell), env=env, text=True,
                                    capture_output=True, timeout=timeout_seconds, check=False)
     except (OSError, subprocess.TimeoutExpired) as exc:
+        if evidence_dir is not None:
+            # Timeout output can be bytes even when subprocess text mode is used.
+            for name in ("stdout", "stderr"):
+                output = getattr(exc, name, None) or ""
+                (evidence_dir / f"playwright.{name}").write_bytes(
+                    output if isinstance(output, bytes) else output.encode("utf-8"))
         return _acceptance_result([_finding(message=f"Browser runner did not complete: {type(exc).__name__}.",
                                             category="runner")], returncode=None, **metadata)
+    if evidence_dir is not None:
+        (evidence_dir / "playwright.stdout").write_text(completed.stdout, encoding="utf-8")
+        (evidence_dir / "playwright.stderr").write_text(completed.stderr, encoding="utf-8")
     report = _extract_json_report(completed.stdout)
     coverage, coverage_findings = _report_coverage(report)
     findings = list(coverage_findings)
@@ -535,11 +660,20 @@ def run_playwright_acceptance(
             findings.append(_finding(message=str(exc), category="identity"))
         metadata["route_probe_passed"] = completed.returncode == 0 and not findings
         metadata["runtime_identity"] = "not_evaluated"
-        findings.append(_finding(
-            message="Running host/build identity is not bound to this candidate. External-host route probes cannot accept a candidate.",
-            category="identity",
-            suggested_fix="Integrate the existing task-owned host/build driver with admitted candidate provenance before acceptance.",
-        ))
+        if owned_launch is None:
+            findings.append(_finding(
+                message="Running host/build identity is not bound to this candidate. External-host route probes cannot accept a candidate.",
+                category="identity",
+                suggested_fix="Integrate the existing task-owned host/build driver with admitted candidate provenance before acceptance.",
+            ))
+        else:
+            try:
+                metadata["launch"] = owned_launch.verify(
+                    app_root=app_root, repo_root=repo_root, candidate=profile.candidate, base_url=base_url,
+                )
+                metadata["runtime_identity"] = "verified_owned_launch"
+            except (OSError, ValueError, subprocess.CalledProcessError) as exc:
+                findings.append(_finding(message=str(exc), category="identity"))
     if completed.returncode != 0 and not findings:
         findings = [
             _finding(

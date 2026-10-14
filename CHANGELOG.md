@@ -14,6 +14,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Changed
 
+- Generated UI acceptance can verify a candidate against the existing local
+  driver's owned backend and built frontend, with authenticated browser evidence
+  preserved per run. External-host probes still cannot accept a candidate.
 - Shared page titles now follow the validated app-owned `ui.page.title` role;
   page sections use app spacing, and sidebar pages stack on narrow screens.
   Invalid explicit title roles and layouts report errors instead of silently
