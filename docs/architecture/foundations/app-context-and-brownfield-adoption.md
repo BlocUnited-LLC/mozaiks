@@ -37,6 +37,11 @@ The source bundle contains exact redacted code context, the graph contains
 relationships, and the intelligence snapshot contains compact app
 understanding for agents.
 
+AppContext payloads too large for an inline artifact record use an external
+content reference. Each stored payload is keyed by its exact JSON SHA-256 so a
+later discovery refresh cannot replace the bytes referenced by an earlier
+artifact version. Historical content references remain readable.
+
 ## Modes
 
 | Mode | Meaning |

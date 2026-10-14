@@ -101,12 +101,16 @@ The policy is intentionally deterministic:
 - walk local roots with excluded directories pruned
 - filter unsupported extensions, generated output, lockfiles, minified files,
   and secret-sensitive paths
-- sort candidates by Mozaiks product-code priority before applying file and
-  character limits
+- sort app and module manifests plus the canonical admin and workflow
+  registries ahead of implementation files, then apply Mozaiks product-code
+  priority before file and character limits
 - emit `scan_health` metadata with selected file counts, skipped-file counts,
   limits, priority buckets, parser status, and warnings
 
-Priority favors app code before tests and scripts:
+The contract pass includes app and module manifests, the admin registry, and
+the workflow extension registry. It does not elevate every workflow file or
+bypass path, extension, size, or character safety limits. Remaining priority
+favors app code before tests and scripts:
 
 ```text
 app/modules

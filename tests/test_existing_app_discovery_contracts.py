@@ -1219,6 +1219,79 @@ def test_existing_app_github_context_graph_sets_access_recovery_on_lookup_failur
     assert seen_tokens == [None, "session-token"]
 
 
+def test_existing_app_github_context_graph_keeps_topology_registries_under_file_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mozaiksai.core.app_context.scan_policy import (
+        default_context_graph_scan_policy,
+        select_source_file_map,
+    )
+
+    module = _load_module(
+        "factory_app/workflows/ExistingAppDiscovery/tools/preload_discovery_context.py",
+        "tests.preload_discovery_github_contract_priority",
+    )
+    files = {
+        f"app/modules/module_{index:03}/backend/handler.py": "def run():\n    return True\n"
+        for index in range(70)
+    }
+    files.update(
+        {
+            "app/app.json": '{"appId": "existing-app"}',
+            "app/admin/admin_registry.yaml": "pages: []\n",
+            "workflows/extended_orchestration/extension_registry.json": '{"entrypoints": []}',
+            "workflows/Review/orchestrator.yaml": "name: Review\n",
+            ".env": "TOKEN=not-for-indexing\n",
+        }
+    )
+
+    class _FakeResponse:
+        status_code = 200
+
+        def __init__(self, payload: dict):
+            self.payload = payload
+
+        def json(self) -> dict:
+            return self.payload
+
+    async def _fake_github_request(url: str, token: str | None, **_kwargs):
+        assert token == "fixture-token"
+        if "/git/trees/" in url:
+            return _FakeResponse(
+                {"tree": [{"type": "blob", "path": path, "size": len(content)} for path, content in files.items()]}
+            )
+        assert url.endswith("/repos/Example/existing-app")
+        return _FakeResponse({"default_branch": "main"})
+
+    async def _fake_fetch_github_file(
+        owner: str, repo: str, path: str, ref: str, token: str | None, **_kwargs
+    ) -> bytes:
+        assert (owner, repo, ref, token) == ("Example", "existing-app", "main", "fixture-token")
+        assert path != ".env"
+        return files[path].encode("utf-8")
+
+    monkeypatch.setattr(module, "_github_request", _fake_github_request)
+    monkeypatch.setattr(module, "_fetch_github_file", _fake_fetch_github_file)
+
+    policy = default_context_graph_scan_policy({"max_files": 50})
+    result = asyncio.run(
+        module._collect_github_context_graph_file_map(
+            [("", "https://github.com/Example/existing-app")],
+            github_ref=None,
+            github_token="fixture-token",
+            scan_policy_inputs={"max_files": 50},
+        )
+    )
+
+    assert list(result.file_map) == list(select_source_file_map(files, policy=policy).file_map)
+    assert result.health["selected_file_count"] == 50
+    assert result.health["limit_reached"] is True
+    assert result.health["skipped"]["sensitive_path"] == 1
+    assert "app/admin/admin_registry.yaml" in result.file_map
+    assert "workflows/extended_orchestration/extension_registry.json" in result.file_map
+    assert "workflows/Review/orchestrator.yaml" not in result.file_map
+
+
 def test_existing_app_preload_builds_context_graph_pack_for_github_repo_url(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
