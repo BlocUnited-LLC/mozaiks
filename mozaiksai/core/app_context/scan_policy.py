@@ -76,6 +76,14 @@ DEFAULT_MANIFEST_PRIORITY_FILE_NAMES = frozenset(
         "next.config.mjs",
     }
 )
+DEFAULT_TOPOLOGY_PRIORITY_PATHS = frozenset(
+    {
+        "app/admin/admin_registry.yaml",
+        "factory_app/app/admin/admin_registry.yaml",
+        "workflows/extended_orchestration/extension_registry.json",
+        "factory_app/workflows/extended_orchestration/extension_registry.json",
+    }
+)
 SENSITIVE_EXACT_NAMES = frozenset(
     {
         ".env",
@@ -413,7 +421,10 @@ def _priority_for_path(path: str, policy: SourceScanPolicy) -> tuple[int, str]:
     normalized = safe_scan_relpath(path) or ""
     if normalized:
         normalized = f"{normalized}/" if "." not in PurePosixPath(normalized).name else normalized
-    if PurePosixPath(normalized).name.lower() in DEFAULT_MANIFEST_PRIORITY_FILE_NAMES:
+    if (
+        PurePosixPath(normalized).name.lower() in DEFAULT_MANIFEST_PRIORITY_FILE_NAMES
+        or normalized in DEFAULT_TOPOLOGY_PRIORITY_PATHS
+    ):
         return 0, "manifests"
     for rule in policy.priority_rules:
         if normalized == rule.prefix.rstrip("/") or normalized.startswith(rule.prefix):

@@ -43,6 +43,50 @@ def test_context_graph_scan_prioritizes_product_code_before_tests_and_scripts(tm
     assert result.health["selected_by_priority"]["app_modules"] == 1
 
 
+def test_context_graph_scan_keeps_topology_registries_under_file_limit(tmp_path: Path) -> None:
+    repo = tmp_path / "existing_app"
+    files = {
+        f"app/modules/module_{index:03}/backend/handler.py": "def run():\n    return True\n"
+        for index in range(70)
+    }
+    files.update(
+        {
+            "app/app.json": '{"appId": "existing-app"}',
+            "app/admin/admin_registry.yaml": "pages: []\n",
+            "workflows/extended_orchestration/extension_registry.json": '{"entrypoints": []}',
+            "workflows/Review/orchestrator.yaml": "name: Review\n",
+            "workflows/Review/extension_registry.json": '{"entrypoints": []}',
+            "docs/admin_registry.yaml": "pages: []\n",
+            "app/admin/operator_notes.json": '{"note": "not a runtime contract"}',
+        }
+    )
+    for relative_path, content in files.items():
+        path = repo / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+    policy = default_context_graph_scan_policy({"max_files": 50})
+    local = collect_source_scan_file_map([("", repo)], policy=policy)
+    in_memory = select_source_file_map(files, policy=policy)
+
+    assert list(local.file_map) == list(in_memory.file_map)
+    assert len(local.file_map) == 50
+    assert local.health["limit_reached"] is True
+    assert in_memory.health["limit_reached"] is True
+    for contract in (
+        "app/app.json",
+        "app/admin/admin_registry.yaml",
+        "workflows/extended_orchestration/extension_registry.json",
+    ):
+        assert contract in local.file_map
+    assert local.health["selected_by_priority"]["manifests"] == 3
+    assert local.health["selected_by_priority"]["app_modules"] == 47
+    assert "workflows/Review/orchestrator.yaml" not in local.file_map
+    assert "workflows/Review/extension_registry.json" not in local.file_map
+    assert "docs/admin_registry.yaml" not in local.file_map
+    assert "app/admin/operator_notes.json" not in local.file_map
+
+
 def test_context_graph_scan_skips_secret_sensitive_paths(tmp_path: Path) -> None:
     repo = tmp_path / "app"
     repo.mkdir()
