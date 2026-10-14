@@ -445,7 +445,7 @@ def test_the_binding_cookie_is_host_prefixed_outside_local_development(
 
 
 def test_local_development_uses_the_unprefixed_cookie_over_http(app: FastAPI, github: _GitHub) -> None:
-    """WebKit keeps no Secure cookie set over http://localhost, so a flow
+    """WebKit can drop a Secure cookie set over http://localhost, so a flow
     started in local development (authentication off, development access, a
     request from this machine, here through the Vite proxy) uses the
     unprefixed cookie, scoped to the OAuth routes. GitHub's redirect is a

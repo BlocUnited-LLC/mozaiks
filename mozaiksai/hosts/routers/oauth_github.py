@@ -34,8 +34,9 @@ Local development is the one exception: authentication is off, the request
 was granted development access, and it demonstrably comes from this machine
 (:func:`~mozaiksai.core.auth.anonymous_access.is_local_client`). There the
 cookie is the unprefixed ``mozaiks_github_oauth_binding`` without ``Secure``,
-because WebKit (Safari) keeps no ``Secure`` cookie set over
-``http://localhost``. Request facts alone never select it: behind some proxies
+because WebKit, Safari's engine, can drop a ``Secure`` cookie set over
+``http://localhost`` (Playwright's WebKit does; Chromium and Firefox keep it).
+Request facts alone never select it: behind some proxies
 they are client-supplied, and a token-validated user never has development
 access, so a deployment with an identity provider always uses the ``__Host-``
 cookie. The request scheme is not consulted either: behind a TLS-terminating

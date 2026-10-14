@@ -464,10 +464,10 @@ This project follows a practical pre-1.0 changelog format:
   calls to (ports may differ; `localhost` and `127.0.0.1` are different
   hosts), and the page must be served over HTTPS, which Chromium and Firefox
   also grant `http://localhost`. Only local development (authentication off,
-  a request from this machine) uses an unprefixed, non-`Secure` cookie, so
-  that Safari works on `http://localhost`. The flow still requests `repo`
-  because GitHub OAuth Apps have no read-only scope for private repositories;
-  discovery only reads.
+  a request from this machine) uses an unprefixed, non-`Secure` cookie,
+  because WebKit (Safari) can drop a `Secure` cookie on `http://localhost`.
+  The flow still requests `repo` because GitHub OAuth Apps have no read-only
+  scope for private repositories; discovery only reads.
 
 ### Changed
 
