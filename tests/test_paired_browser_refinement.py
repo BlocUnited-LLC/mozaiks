@@ -345,7 +345,7 @@ async def _refine(case_root, login_config):
         artifact_version_id=baseline.id, bundle_path=str(case_root / "workspace/app"), expected_build_id=build_id,
     )
     assert reviewed["success"] and reviewed["app"]["lifecycle_state"] == "review"
-    harness, providers = _scripted_harness(files, store, case_root / "refinements")
+    harness, providers = _scripted_harness(files, store, Path(facts["refinement_output_root"]))
     payload = {"build_registry_id": binding.build_registry_id, "trigger_source": "refinement",
                "trigger_payload": {"refinement_request": {"build_family": "app_bundle", "build_key": "app_bundle",
                                     "build_record_id": baseline.id, "raw_user_request": REQUEST, "source_surface": "app_workbench"},
@@ -513,8 +513,12 @@ def test_accepted_board_refines_through_real_studio():
     candidate = {**prior_candidate, "source_sha": source_sha}
     assert acceptance.bundle_digest(app_root) == candidate["bundle_sha256"]
     private = live.EVIDENCE_ROOT / f"paired-refinement-{case_root.name}"
+    # The existing finalizer adds its own nested workspace paths. Keep its
+    # retained staging directory short enough for Windows file operations.
+    refinement_output_root = Path(tempfile.mkdtemp(prefix="refine-", dir=ROOT / ".local"))
     live.write_json(case_root / "inputs.json", {"baseline_directory": str(baseline_dir), "candidate": candidate,
                     "baseline_browser_source_sha": prior_candidate["source_sha"],
+                    "refinement_output_root": str(refinement_output_root),
                     "validator_image": image_identity})
     mongo, oidc, api, web = _ports()
     args = argparse.Namespace(workspace=app_root.parent, mongo_port=mongo, oidc_port=oidc,
