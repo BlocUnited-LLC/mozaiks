@@ -940,6 +940,10 @@ agents:
       - `app/config/shell.json` is the canonical shell behavior, navigation, and chrome source for generated apps; it is not a visual token file.
       - `theme_config_patch` owns visual tokens only: compact `theme` selectors (`primary`, `radius`, `font`, `font_heading`, `appearance`, `density`), `primitives`, and semantic `ui.chat` / `ui.shell` / `ui.page` spacing, sizing, density, and visual styling.
       - The expanded `fonts`, `colors`, `shadows`, `ui`, and `primitives` layer is the runtime bridge for shell/chat tokens until those tokens fully migrate to `--mz-*`.
+      - Preserve `captured_theme_config.ui.page.title` unless approved design changes it.
+        Use `theme_config_patch.ui.page.title` for finite typography deltas, with null
+        on untouched fields. Fonts reference existing body/heading slots. Defaults are
+        heading/semibold/lg/tight/normal/none; casing follows the approved app design.
       - `shell_config` owns only app-wide shell behavior: `header.logo`, sparse `header.actions`, canonical `shortcuts`, `navigation.policy`, `navigation.items` for non-page-owned entries, and compact `chrome` mode overrides.
       - `asset_manifest` owns reusable media inventory metadata (`asset_id`, source, path/url, alt/provenance, usage). Use it for logos/icons/hero imagery/video references.
       - Do NOT put raw spacing, padding, width, or density tokens in `shell_config`.

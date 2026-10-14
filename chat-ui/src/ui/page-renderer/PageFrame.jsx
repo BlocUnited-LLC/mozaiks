@@ -11,6 +11,8 @@
  */
 
 import { cn } from '../lib/cn.js';
+import { PageTitle } from '../primitives/PageTitle.jsx';
+import { ErrorState } from '../primitives/Surface.jsx';
 
 const FRAME_WIDTH_VARS = {
   'grid': 'var(--shell-page-max-width-grid, 1280px)',
@@ -27,7 +29,10 @@ export function PageFrame({
   className,
   bodyClassName,
 }) {
-  const widthValue = FRAME_WIDTH_VARS[layout] ?? FRAME_WIDTH_VARS['full-width'];
+  if (!Object.hasOwn(FRAME_WIDTH_VARS, layout)) {
+    return <ErrorState title="Invalid page layout" message={`Unsupported layout: ${String(layout)}`} />;
+  }
+  const widthValue = FRAME_WIDTH_VARS[layout];
   const frameStyle = {
     maxWidth: widthValue,
     gap: 'var(--shell-page-section-gap, 2rem)',
@@ -40,19 +45,17 @@ export function PageFrame({
 
   return (
     <div
-      className={cn('min-h-full bg-transparent text-foreground', className)}
+      className={cn('min-h-full min-w-0 bg-transparent text-foreground', className)}
       data-page={name || undefined}
     >
       <div className="mx-auto flex w-full flex-col" style={frameStyle}>
         {title && (
-          <header className="border-b border-[rgba(var(--color-primary-rgb),0.16)]" style={headerStyle}>
-            <h1 className="text-2xl font-black uppercase tracking-[0.18em] text-foreground heading-font">
-              {title}
-            </h1>
+          <header style={headerStyle}>
+            <PageTitle>{title}</PageTitle>
           </header>
         )}
 
-        <div className={cn('min-h-0', bodyClassName)}>
+        <div className={cn('min-h-0 min-w-0', bodyClassName)}>
           {children}
         </div>
       </div>

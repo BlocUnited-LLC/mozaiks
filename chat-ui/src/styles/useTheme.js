@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { PageTitleStyleError } from '../ui/theme/pageTitle.js';
 import {
   getTheme,
   getCachedTheme,
@@ -26,8 +27,12 @@ export function useTheme(appId = null) {
       } catch (error) {
         console.error('❌ [useTheme] Failed to load theme:', error);
         if (!cancelled) {
-          applyTheme(DEFAULT_THEME);
-          setResult({ appId: resolvedAppId, theme: DEFAULT_THEME });
+          if (error instanceof PageTitleStyleError) {
+            setResult({ appId: resolvedAppId, error });
+          } else {
+            applyTheme(DEFAULT_THEME);
+            setResult({ appId: resolvedAppId, theme: DEFAULT_THEME });
+          }
         }
       }
     }
@@ -39,6 +44,7 @@ export function useTheme(appId = null) {
     };
   }, [resolvedAppId]);
 
+  if (result?.appId === resolvedAppId && result.error) throw result.error;
   return { theme: theme || DEFAULT_THEME, loading: !theme };
 }
 

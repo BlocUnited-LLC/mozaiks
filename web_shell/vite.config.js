@@ -271,6 +271,9 @@ export default defineConfig(({ mode }) => {
     }
   };
 
+  // Vite resolves dependency symlinks and Windows junctions before invoking this resolver.
+  const monacoSanitizer = fs.realpathSync(path.resolve(__dirname, 'node_modules/monaco-editor/esm/vs/base/browser/domSanitize.js')).replace(/\\/g, '/');
+
   return {
   cacheDir: path.join(__dirname, 'node_modules', '.vite-apps', createHash('sha256').update(platformAppDir).digest('hex').slice(0, 16)),
   plugins: [
@@ -278,8 +281,7 @@ export default defineConfig(({ mode }) => {
       name: 'monaco-patched-sanitizer',
       enforce: 'pre',
       resolveId(source, importer) {
-        const sanitizer = path.resolve(__dirname, 'node_modules/monaco-editor/esm/vs/base/browser/domSanitize.js').replace(/\\/g, '/');
-        if (source === './dompurify/dompurify.js' && importer?.split('?', 1)[0].replace(/\\/g, '/') === sanitizer) {
+        if (source === './dompurify/dompurify.js' && importer?.split('?', 1)[0].replace(/\\/g, '/') === monacoSanitizer) {
           return path.resolve(chatUiSrcRoot, 'utils/monacoDomPurify.js');
         }
       },
