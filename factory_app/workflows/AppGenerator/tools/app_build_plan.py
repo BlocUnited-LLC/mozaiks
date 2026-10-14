@@ -1901,7 +1901,9 @@ def _validate_build_tasks(build_tasks: list[dict[str, Any]], managed_capability_
                 "to own its ui/route_manifest.json and ui/index.js. Other raw frontend source is not allowed."
             )
 
-        if _OBSOLETE_HOST_ADMIN_CONFIG_PATH in owned_paths:
+        # Plan review strips a leading workspace app/ from owned paths, so the
+        # bundle-relative spelling is the same obsolete file.
+        if {_OBSOLETE_HOST_ADMIN_CONFIG_PATH, _OBSOLETE_HOST_ADMIN_CONFIG_PATH.removeprefix("app/")} & set(owned_paths):
             raise ValueError(
                 "Build task "
                 f"'{task_id}' owns obsolete path '{_OBSOLETE_HOST_ADMIN_CONFIG_PATH}'. "
