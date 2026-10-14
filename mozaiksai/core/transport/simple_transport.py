@@ -167,7 +167,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         self.pending_tool_call_responses: dict[str, asyncio.Future] = {}
         self._buffered_tool_call_responses: dict[str, dict[str, Any]] = {}
         self._ui_tool_metadata: dict[str, dict[str, Any]] = {}
-        self._resolved_tool_call_ids: dict[str, None] = {}
+        self._resolved_tool_call_ids: dict[str, dict[str, Any] | None] = {}
         self._owner_loop = None
 
         # Runtime context trigger managers (per chat)

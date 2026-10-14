@@ -100,9 +100,10 @@ def _enrich_payload_with_ui_contract(
     tool_id: str,
     payload: dict[str, Any],
     wf_logger,
+    workflow_name: str,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     enriched_payload = dict(payload if isinstance(payload, dict) else {})
-    tool_record = workflow_manager.get_ui_tool_record(tool_id)
+    tool_record = workflow_manager.get_ui_tool_record(tool_id, workflow_name=workflow_name)
     if not tool_record:
         return enriched_payload, None
 
@@ -228,10 +229,10 @@ def _resolve_ui_tool_owner(
     tool_id: str,
     payload: dict[str, Any],
     wf_logger,
+    tool_record: dict[str, Any] | None = None,
 ) -> str | None:
     agent_name = None
     try:
-        tool_record = workflow_manager.get_ui_tool_record(tool_id)
         if tool_record:
             agent_name = tool_record.get("agent")
             wf_logger.debug("UI_TOOL_OWNER tool=%s agent=%s", tool_id, agent_name)
@@ -247,11 +248,11 @@ def _resolve_ui_display(
     tool_id: str,
     display: str | None,
     wf_logger,
+    tool_record: dict[str, Any] | None = None,
 ) -> str:
     resolved_display = display
     if resolved_display is None:
         try:
-            tool_record = workflow_manager.get_ui_tool_record(tool_id)
             if tool_record:
                 resolved_display = tool_record.get('mode', 'inline')
                 wf_logger.debug("UI_TOOL_DISPLAY_RESOLVED tool=%s mode=%s", tool_id, resolved_display)
@@ -295,10 +296,12 @@ async def use_ui_tool(
     """
     wf_logger = get_workflow_logger(workflow_name=workflow_name, chat_id=chat_id)
     start = _dt.datetime.now(_dt.UTC)
-    enriched_payload, tool_record = _enrich_payload_with_ui_contract(tool_id, payload, wf_logger)
+    enriched_payload, tool_record = _enrich_payload_with_ui_contract(
+        tool_id, payload, wf_logger, workflow_name,
+    )
     component_name = str((tool_record or {}).get("component") or tool_id).strip() or tool_id
-    agent_name = _resolve_ui_tool_owner(tool_id, enriched_payload, wf_logger)
-    resolved_display = _resolve_ui_display(tool_id, display, wf_logger)
+    agent_name = _resolve_ui_tool_owner(tool_id, enriched_payload, wf_logger, tool_record)
+    resolved_display = _resolve_ui_display(tool_id, display, wf_logger, tool_record)
     
     event_id = await _emit_tool_call_core(
         tool_id=tool_id,
@@ -449,10 +452,12 @@ async def emit_ui_surface(
     render the component but no user response is required.
     """
     wf_logger = get_workflow_logger(workflow_name=workflow_name, chat_id=chat_id)
-    enriched_payload, tool_record = _enrich_payload_with_ui_contract(tool_id, payload, wf_logger)
+    enriched_payload, tool_record = _enrich_payload_with_ui_contract(
+        tool_id, payload, wf_logger, workflow_name,
+    )
     component_name = str((tool_record or {}).get("component") or tool_id).strip() or tool_id
-    resolved_agent_name = agent_name or _resolve_ui_tool_owner(tool_id, enriched_payload, wf_logger)
-    resolved_display = _resolve_ui_display(tool_id, display, wf_logger)
+    resolved_agent_name = agent_name or _resolve_ui_tool_owner(tool_id, enriched_payload, wf_logger, tool_record)
+    resolved_display = _resolve_ui_display(tool_id, display, wf_logger, tool_record)
 
     event_id = await _emit_tool_call_core(
         tool_id=tool_id,

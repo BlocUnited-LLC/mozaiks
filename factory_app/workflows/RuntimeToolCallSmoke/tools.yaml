@@ -24,18 +24,7 @@ tools:
         password:
           type: boolean
       additionalProperties: true
-    actions_schema:
-    - id: submit
-      label: Submit
-      variant: primary
-      payload_schema:
-        type: object
-        properties:
-          text:
-            type: string
-          user_input:
-            type: string
-        additionalProperties: true
+    actions_schema: []
 - agent: RuntimeConnectorSmokeAgent
   file: runtime_connector_readiness.py
   function: collect_runtime_connector_readiness

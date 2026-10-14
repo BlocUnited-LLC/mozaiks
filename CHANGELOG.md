@@ -20,6 +20,12 @@ This project follows a practical pre-1.0 changelog format:
   before the file limit, so large app workspaces retain their workflow entry
   points during brownfield discovery without increasing scan budgets.
 
+### Fixed
+
+- Bound interactive workflow replies to a registered tool's declared actions,
+  status, and response schema before delivery; conflicting retries are rejected.
+  Explicitly actionless tools retain free-form input.
+
 ## 0.2.0 - 2026-10-11
 
 ### Added

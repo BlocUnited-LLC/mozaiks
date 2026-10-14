@@ -25,7 +25,7 @@ class _WorkflowManager:
     def __init__(self) -> None:
         self.records = {}
 
-    def get_ui_tool_record(self, tool_id: str):
+    def get_ui_tool_record(self, tool_id: str, *, workflow_name: str | None = None):
         return self.records.get(tool_id)
 
     def iter_ui_tools(self):

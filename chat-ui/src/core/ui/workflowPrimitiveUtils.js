@@ -28,14 +28,31 @@ export function normalizeActions(rawActions, fallbackActions = []) {
 
 
 export function normalizePrimitiveActions(payload = {}, fallbackActions = []) {
-  const explicitActions = Array.isArray(payload?.actions) ? payload.actions : [];
   const contractActions = Array.isArray(payload?.ui_contract?.actions_schema)
     ? payload.ui_contract.actions_schema
     : [];
-  const source = explicitActions.length > 0
-    ? explicitActions
-    : (contractActions.length > 0 ? contractActions : fallbackActions);
-  return normalizeActions(source, fallbackActions);
+  if (contractActions.length > 0) {
+    const declared = normalizeActions(contractActions);
+    if (!Array.isArray(payload?.actions)) {
+      return declared;
+    }
+    const available = new Map(payload.actions
+      .filter((action) => action && typeof action === 'object' && typeof action.id === 'string')
+      .map((action) => [action.id, action]));
+    return declared.filter((action) => available.has(action.id)).map((action) => {
+      const offered = available.get(action.id);
+      return {
+        ...action,
+        label: String(offered.label || offered.title || action.label),
+        description: offered.description ? String(offered.description) : action.description,
+        variant: String(offered.variant || action.variant),
+        closes: typeof offered.closes === 'boolean' ? offered.closes : action.closes,
+        payload: offered.payload && typeof offered.payload === 'object' ? offered.payload : action.payload,
+      };
+    });
+  }
+  const explicitActions = Array.isArray(payload?.actions) ? payload.actions : [];
+  return normalizeActions(explicitActions, fallbackActions);
 }
 
 
@@ -51,7 +68,9 @@ export async function sendPrimitiveResponse(onResponse, action, extra = {}) {
     ...extra,
   };
 
-  if (typeof action.approved === 'boolean' && payload.approved === undefined) {
+  payload.action = action.id;
+  payload.status = 'submitted';
+  if (typeof action.approved === 'boolean') {
     payload.approved = action.approved;
   }
 

@@ -62,6 +62,10 @@ tools:
       label: Request Changes
       approved: false
       variant: secondary
+    - id: cancel
+      label: Cancel
+      approved: false
+      variant: ghost
 
 - agent: WorkflowBundleMergeAgent
   file: workflow_quality_gate.py

@@ -514,6 +514,13 @@ def test_agent_generator_smoke_fixture_covers_real_ag2_workflow_ui_contract() ->
     assert "ActionPlan" not in response_fixture["tool_responses"]
     assert any(rule["contains"] == "final tweaks" for rule in assistant_reply_rules)
     assert response_fixture["tool_responses"]["WorkflowPlanReview"]["action"] == "approve"
+    review_tool = next(
+        tool for tool in manifest["tools"]
+        if (tool.get("ui") or {}).get("component") == "WorkflowPlanReview"
+    )
+    assert {action["id"] for action in review_tool["ui_contract"]["actions_schema"]} == {
+        "approve", "request_changes", "cancel",
+    }
     assert "internal helpdesk lead" in smoke_prompt
     assert "classify urgency" in smoke_prompt
     assert "ask for human approval before closing" in smoke_prompt
@@ -522,6 +529,13 @@ def test_agent_generator_smoke_fixture_covers_real_ag2_workflow_ui_contract() ->
     assert manifest_realizations["DownloadCenter"] == "shipped_component"
     assert manifest_realizations["WorkflowPlanReview"] == "workflow_wrapper"
     assert (scripted_components - manifest_components) <= exported_names
+
+
+def test_runtime_input_request_manifest_declares_its_free_form_response() -> None:
+    manifest = _read_yaml("factory_app/workflows/RuntimeToolCallSmoke/tools.yaml")
+    tool = next(tool for tool in manifest["tools"] if tool["function"] == "collect_runtime_confirmation")
+    assert tool["ui"]["component"] == "UserInputRequest"
+    assert tool["ui_contract"]["actions_schema"] == []
 
 
 def test_agent_generator_review_handoff_uses_structured_outcomes() -> None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from copy import deepcopy
@@ -33,6 +34,7 @@ from tests.test_factory_auto_tool_acceptance import (
     _payload_for,
     factory_manager,  # noqa: F401
 )
+from tests.test_transport_ui_tools import _FakeTransport
 
 
 class Context(dict):
@@ -153,6 +155,35 @@ def _workflow_contracts():
     validate_workflow_tool_outcomes(config)
     review_tool = next(tool for tool in config["tools"]["tools"] if tool["function"] == "save_value_manifest")
     return config, ToolOutcomeSpec.model_validate(review_tool["outcome"])
+
+
+async def test_value_engine_manifest_binds_live_review_response_contract(request):
+    """The actual workflow registry, not a render payload, governs the response."""
+    manager = request.getfixturevalue("factory_manager")
+    assert not manager.reload_workflow("ValueEngine").get("error")
+    transport = _FakeTransport()
+    await transport.send_tool_call_event(
+        event_id="concept-event", chat_id="chat-review", tool_name="save_value_manifest",
+        component_name="ConceptBlueprint", display_type="artifact",
+        payload={"workflow_name": "ValueEngine", "review_id": "review-1",
+                 "actions": [{"id": "approve", "approved": False},
+                             {"id": "request_changes"}, {"id": "cancel"},
+                             {"id": "skip_review"}]},
+    )
+    actions = transport._ui_tool_metadata["concept-event"]["response_actions"]
+    assert [action["id"] for action in actions] == ["approve", "request_changes", "cancel"]
+    pending = transport.pending_tool_call_responses["concept-event"] = (
+        asyncio.get_running_loop().create_future()
+    )
+    assert await transport.submit_tool_call_response(
+        "concept-event", {"action": "approve", "approved": True,
+                          "review_id": "review-1", "rationale": 13},
+    ) is False
+    assert not pending.done()
+    valid = {"action": "approve", "approved": True,
+             "review_id": "review-1", "rationale": "Looks good"}
+    assert await transport.submit_tool_call_response("concept-event", valid) is True
+    assert pending.result() == valid
 
 
 @pytest.mark.parametrize("action,expected", [
