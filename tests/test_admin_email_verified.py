@@ -332,7 +332,7 @@ def test_a_dev_persona_does_not_inherit_a_verified_email(persona_email: str | No
 
 # --- Allowlist matching is ASCII-only ------------------------------------------------
 
-_KELVIN_SIGN = "K"  # lowercases to the ASCII letter "k"
+_KELVIN_SIGN = "\u212a"  # lowercases to the ASCII letter "k"
 
 
 def test_a_non_ascii_lookalike_never_matches_the_allowlist(monkeypatch, tmp_path: Path) -> None:
