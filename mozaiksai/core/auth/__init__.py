@@ -51,6 +51,7 @@ Configuration (environment variables):
     AUTH_ACCESS_TOKEN_TYPE_VALUE=access
     AUTH_USER_ID_CLAIM=sub
     AUTH_EMAIL_CLAIM=email
+    AUTH_EMAIL_VERIFIED_CLAIM=email_verified  # JSON true gates app.json admins
     AUTH_ROLES_CLAIM=roles
     AUTH_SCOPES_CLAIM=scp
     AUTH_SCOPES_FORMAT=space|array

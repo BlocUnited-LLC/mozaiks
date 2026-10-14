@@ -171,10 +171,38 @@ Different providers put user data in different JWT claims. Configure as needed:
 |----------|---------|-------------|
 | `AUTH_USER_ID_CLAIM` | `sub` | Claim containing user ID |
 | `AUTH_EMAIL_CLAIM` | `email` | Claim containing email |
+| `AUTH_EMAIL_VERIFIED_CLAIM` | `email_verified` | Boolean claim saying the email is verified |
 | `AUTH_NAME_CLAIM` | `name` | Claim containing display name |
 | `AUTH_ROLES_CLAIM` | `roles` | Claim containing user roles |
 | `AUTH_SCOPES_CLAIM` | `scp` | Claim containing scopes |
 | `AUTH_SCOPES_FORMAT` | `space` | `space` (Azure) or `array` (Auth0) |
+
+### Admin allowlist needs a verified email
+
+An email in `app/app.json` `admins` grants the admin role only when the
+identity provider says that email is verified: the token's verified-email
+claim must be the JSON boolean `true`. A missing claim, `false`, or a string
+such as `"true"` grants nothing. Without this rule, anyone could register an
+account with an admin's address on a provider with open sign-up, before the
+admin does, and become an admin. An admin role issued in the token (the
+`AUTH_ROLES_CLAIM` claim, or Keycloak realm/client roles) needs no verified
+email.
+
+| Provider | Verified-email claim |
+|----------|----------------------|
+| Generic JWT (`jwt`) | `AUTH_EMAIL_VERIFIED_CLAIM`, default `email_verified` (the standard OIDC claim). Keycloak access tokens carry it through the `email` client scope. A provider that adds `email` to access tokens with a custom claim or action must add the verified flag the same way. |
+| Keycloak (`keycloak`) | `email_verified`, from the realm's built-in `email` client scope |
+| Supabase (`supabase`) | top-level `email_verified` only. Supabase does not issue one by default; add it with a custom access token hook. The copy inside `user_metadata` is writable by the user and never counts. |
+| No auth (`none`) | never verified; with authentication off, use `AUTH_ANON_ROLES=admin,user` |
+
+Microsoft Entra ID issues no `email_verified` claim. Grant admin there through
+an app role in the `roles` claim, or set `AUTH_EMAIL_VERIFIED_CLAIM` to an
+optional claim that means the same thing for your tenant.
+
+A refused allowlisted email gets the same `403 Admin access required` as any
+other non-admin, so the response does not reveal which addresses are admins.
+The server logs an `ADMIN_EMAIL_UNVERIFIED` warning naming the user id and
+provider.
 
 ---
 

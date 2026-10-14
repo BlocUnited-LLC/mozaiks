@@ -227,6 +227,8 @@ class WebSocketUser:
     # How this identity came into existence; same vocabulary as
     # UserPrincipal.auth_provenance.
     auth_provenance: str = ANONYMOUS_PROVENANCE
+    # Same meaning as UserPrincipal.email_verified.
+    email_verified: bool = False
 
     @property
     def is_authenticated(self) -> bool:
@@ -287,6 +289,7 @@ class WebSocketUser:
             tenant_id=claims.tenant_id,
             workspace_id=claims.workspace_id,
             auth_provenance=auth_provenance,
+            email_verified=claims.email_verified,
         )
 
 

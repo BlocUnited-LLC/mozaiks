@@ -263,10 +263,14 @@ async def _require_admin(
     1. The principal carries the "admin" role: granted by the auth provider,
        or, with authentication off, by AUTH_ANON_ROLES to a request that has
        development access (a fresh scaffold grants it)
-    2. The principal's email is in the app.json admins allowlist
+    2. The principal's email is in the app.json admins allowlist, and the
+       identity provider verified that email (``email_verified``)
 
-    Either is sufficient. Authentication being off is never sufficient on its
-    own: anonymous visitors carry no roles and no email.
+    Either is sufficient. An unverified email never is: on a provider with
+    self-registration, anyone can sign up with an admin's address before the
+    admin does. Development access needs no verification, because it may
+    already assume any role. Authentication being off is never sufficient on
+    its own: anonymous visitors carry no roles and no email.
     """
     principal = await require_user(request, authorization)
 
@@ -274,11 +278,21 @@ async def _require_admin(
     if principal.has_role("admin"):
         return principal
 
-    # Email allowlist promotion
+    # Email allowlist promotion, for a verified email only
     if is_admin_by_email(principal.email):
-        logger.debug("[admin] email-promoted to admin: %s", principal.email)
-        principal.roles = list(principal.roles) + ["admin"]
-        return principal
+        if principal.email_verified or principal.has_local_development_access:
+            logger.debug("[admin] email-promoted to admin: %s", principal.email)
+            principal.roles = list(principal.roles) + ["admin"]
+            return principal
+        # The refusal says only "Admin access required", like any other, so a
+        # self-registered account cannot learn which addresses are admins.
+        logger.warning(
+            "ADMIN_EMAIL_UNVERIFIED: user_id=%r provider=%r has an email on the app.json "
+            "admins allowlist that its identity provider has not verified "
+            "(email_verified is not true); admin not granted",
+            principal.user_id,
+            principal.provider,
+        )
 
     if principal.has_local_development_access:
         # Development access without the admin role: authentication off, and a

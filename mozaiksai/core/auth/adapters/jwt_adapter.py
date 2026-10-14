@@ -13,7 +13,12 @@ import jwt
 from jwt import PyJWKClient
 
 from logs.logging_config import get_core_logger
-from mozaiksai.core.auth.adapters.base import AuthError, BaseAuthAdapter, UserClaims
+from mozaiksai.core.auth.adapters.base import (
+    AuthError,
+    BaseAuthAdapter,
+    UserClaims,
+    claim_is_true,
+)
 from mozaiksai.core.auth.cache_ttl import (
     DEFAULT_DISCOVERY_CACHE_TTL_SECONDS,
     DEFAULT_JWKS_CACHE_TTL_SECONDS,
@@ -81,6 +86,9 @@ class JWTAdapterConfig:
     # Claim mappings - which JWT claims map to our UserClaims
     user_id_claim: str = "sub"
     email_claim: str = "email"
+    # Boolean claim asserting the email is verified. Only the JSON boolean
+    # true counts; issuers without one never get email-based admin promotion.
+    email_verified_claim: str = "email_verified"
     name_claim: str = "name"
     roles_claim: str = "roles"
     scopes_claim: str = "scp"  # Azure uses "scp", others use "scope"
@@ -168,6 +176,7 @@ class JWTAdapterConfig:
             oidc_discovery_url=_get("MOZAIKS_OIDC_DISCOVERY_URL"),
             user_id_claim=_get("AUTH_USER_ID_CLAIM", "sub"),
             email_claim=_get("AUTH_EMAIL_CLAIM", "email"),
+            email_verified_claim=_get("AUTH_EMAIL_VERIFIED_CLAIM", "email_verified"),
             name_claim=_get("AUTH_NAME_CLAIM", "name"),
             roles_claim=_get("AUTH_ROLES_CLAIM", "roles"),
             scopes_claim=_get("AUTH_SCOPES_CLAIM", "scp"),
@@ -209,6 +218,8 @@ class GenericJWTAdapter(BaseAuthAdapter):
         AUTH_ACCESS_TOKEN_TYPE_VALUE: Expected value of that claim
         AUTH_USER_ID_CLAIM: Claim for user ID (default: sub)
         AUTH_EMAIL_CLAIM: Claim for email (default: email)
+        AUTH_EMAIL_VERIFIED_CLAIM: Boolean claim asserting that email is
+            verified (default: email_verified); only JSON true counts
         AUTH_NAME_CLAIM: Claim for name (default: name)
         AUTH_ROLES_CLAIM: Claim for roles (default: roles)
         AUTH_SCOPES_CLAIM: Claim for scopes (default: scp)
@@ -448,6 +459,7 @@ class GenericJWTAdapter(BaseAuthAdapter):
         return UserClaims(
             user_id=str(user_id),
             email=str(email) if email else None,
+            email_verified=bool(email) and claim_is_true(raw_claims, self._config.email_verified_claim),
             name=str(name) if name else None,
             roles=roles,
             scopes=scopes,

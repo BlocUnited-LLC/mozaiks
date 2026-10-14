@@ -16,6 +16,12 @@ It does not define chat startup defaults or workflow entry selection.
 Owns app identity, admin bootstrap, target enablement, and the coarse
 `authRequired` signal.
 
+Admin bootstrap (`admins`) matches only an email the identity provider marked
+verified (`email_verified` is `true` in the access token). The repo-local
+Keycloak realm allows self-registration without email verification, so mark a
+local admin's email verified in the Keycloak admin console; see
+[Admin access and email verification](../guides/self-hosting.md#admin-access-and-email-verification).
+
 `app/app.json` does not own:
 
 - OIDC provider selection

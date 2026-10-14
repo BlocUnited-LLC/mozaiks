@@ -412,5 +412,27 @@ Do not use Keycloak's shared `account` audience for either setting. Tokens
 issued to unrelated clients can carry it, so it does not bind a token to
 the Mozaiks API.
 
+### Admin access and email verification
+
+An address in `app/app.json` `admins` grants admin only once Keycloak marks
+that email verified (the token's `email_verified` claim is `true`). The
+included local realm allows self-registration and has no mail server, so it
+does not verify email: a freshly registered account is not an admin, even with
+an allowlisted address. Otherwise anyone who registered first with an admin's
+address would become an admin.
+
+For local use, open the Keycloak admin console (`http://localhost:8080`, the
+`KC_ADMIN_USER` account), go to **Users → your user**, turn **Email verified**
+on, and sign in again. Alternatively give the user an admin role your token
+carries in the roles claim.
+
+For a deployed realm, configure SMTP (**Realm settings → Email**) and turn on
+**Realm settings → Login → Verify email**, or turn off **User registration**
+and create accounts yourself. The packaged realm leaves verification off
+because Compose ships no mail server and Keycloak would block every login on
+an email it cannot send. See
+[Admin allowlist needs a verified email](../architecture/verified/auth-setup.md#admin-allowlist-needs-a-verified-email)
+for other providers.
+
 For detailed Keycloak configuration (custom domains, social login, external IdPs)
 see [Auth Setup](../architecture/verified/auth-setup.md).

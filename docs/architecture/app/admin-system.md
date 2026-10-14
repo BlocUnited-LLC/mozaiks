@@ -50,6 +50,7 @@ framework-owned admin shell.
 The admin system has four distinct layers. Keep them separate:
 
 1. `app/app.json` `admins` is the admin bootstrap/access allowlist for the app.
+  It matches verified emails only.
 2. The built-in admin section registry is framework-owned and defines the
   semantic section ids, default labels, route paths, and default ordering for
   the app admin route family.
@@ -267,8 +268,11 @@ the host-owned generated-app admin shell behavior described here.
 Admin access follows the platform auth rules:
 
 1. JWT role includes `admin`
-2. user email matches an entry in `app/app.json` `admins`
-3. local dev auth mode allows admin access
+2. user email matches an entry in `app/app.json` `admins` and the identity
+   provider marked that email verified (`email_verified` is JSON `true`; see
+   [Admin allowlist needs a verified email](../verified/auth-setup.md#admin-allowlist-needs-a-verified-email))
+3. with authentication off, `AUTH_ANON_ROLES=admin,user` gives the local
+   development identity the admin role
 
 The unified UI does not collapse authority:
 

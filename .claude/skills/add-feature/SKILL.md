@@ -106,7 +106,7 @@ Next steps:
 ### Adding **admin**
 ```
 Next steps:
-1. Configure admins in app/app.json
+1. Configure admins in app/app.json (each email must be verified by your identity provider)
 2. Access admin portal at /admin
 3. Requires auth to be enabled
 ```
