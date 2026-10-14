@@ -61,19 +61,27 @@ server-owned validation must bind all of these facts into one canonical,
 versioned evidence digest on the immutable imported record:
 
 1. The Factory owner, execution host, target app ID, registry ID, record ID,
-   source commit and tree, archive SHA-256, manifest SHA-256, and the complete
-   per-member digest projection, including binary members. The opened archive,
+   trusted source locator and available revision/tree provenance, archive
+   SHA-256, manifest SHA-256, and the complete per-member digest projection,
+   including binary members. Draft #871 requires caller-asserted `source_id`,
+   `revision_id`, and `tree_id` for every import; their shape alone does not
+   prove Git provenance. A Git-backed import must bind its verified commit and
+   tree. An archive or local-source import without such identities needs a
+   separately reviewed provenance contract, never fabricated Git IDs. Every
+   import binds the archive and manifest digests. The opened archive,
    `app.json` identity, and manifest must be reverified against the reservation;
    browser-supplied digests are comparisons, not authority.
 2. The inherited UI registry digest, app-root snapshot digest, required static
    and contained runtime-load results, and the immutable local validator image
    ID preflighted before imported source is staged.
 3. One host-bound observer run ID, source digest and image ID matching that
-   run, the trusted external observer origin, exactly one matching HTTP boot
-   and completion receipt, and all applicable HTTP/Mongo outcomes. Every
-   required outcome must pass; missing, duplicate, stale, timed-out, truncated,
-   or failed evidence blocks acceptance. An optional `not_run` outcome is never
-   presented as tested behavior.
+   run, and the trusted external observer origin. Observer B must emit exactly
+   one passing `boot.http_ready` outcome before exactly one final `done` event;
+   both carry the host-selected run nonce. The host verifies that sequence and
+   all applicable HTTP/Mongo outcomes. Every required outcome must pass;
+   missing, duplicate, stale, timed-out, truncated, or failed evidence blocks
+   acceptance. An optional `not_run` outcome is never presented as tested
+   behavior.
 4. Host-owned confirmation that both contained processes were removed, with no
    process, output, timeout, or teardown failure. Imported Python cannot attest
    to its own cleanup or manufacture the observer's completion.
@@ -125,9 +133,10 @@ gate must remain closed until a reviewed implementation changes it. Draft PRs
 
 Required implementation verification includes:
 
-- Exact archive/member, source commit/tree, owner/host/target, inherited UI,
-  image, run, external boot/completion, and host cleanup tampering or absence
-  each refuse the receipt and subsequent baseline read.
+- Exact archive/member, source locator, applicable revision/tree,
+  owner/host/target, inherited UI, image, run, external boot/`done`, and host
+  cleanup tampering or absence each refuse the receipt and subsequent baseline
+  read.
 - A contained invalid-event fixture still reports
   `observer_unverified_checks: ["event_rejection"]`; it may satisfy only the
   explicitly disclosed app-root scope when every other required check passes.
@@ -170,7 +179,8 @@ must distinguish the limited imported scope from complete event proof.
 Because no live `v2` receipt exists, the proposal itself is reversible. Once
 implemented, changing the scope requires a new version and explicit handling
 of existing receipts rather than silent reinterpretation. It preserves
-[Architectural Invariants](../../ARCHITECTURAL_INVARIANTS.md) 3, 4, 7, and 8:
+[Architectural Invariants](https://github.com/BlocUnited-LLC/mozaiks/blob/main/ARCHITECTURAL_INVARIANTS.md)
+3, 4, 7, and 8:
 deterministic validation, versioned public contracts, App Zero consumption of
 public seams, and separate operator authority. A docs-only proposal changes
 no runtime, workflow sequence, generator output, app workspace, or release
