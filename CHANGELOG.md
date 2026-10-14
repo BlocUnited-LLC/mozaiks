@@ -12,6 +12,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Fixed
+
+- Preserve historical large AppContext payloads across discovery refreshes by
+  giving each distinct JSON payload its own content-store key.
+
 ## 0.2.0 - 2026-10-11
 
 ### Added
