@@ -12,6 +12,14 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Fixed
+
+- Generated UI browser acceptance rejects empty, malformed, skipped or incomplete
+  reports. Reviewed real-host route probes check declarative/custom coverage and
+  local candidate identity; candidate acceptance remains blocked until running
+  host/build provenance is verified. Missing evidence and harness failures block
+  without asking a page worker to regenerate the application.
+
 ## 0.2.0 - 2026-10-11
 
 ### Added
