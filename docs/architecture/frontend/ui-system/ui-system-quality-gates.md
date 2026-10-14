@@ -215,8 +215,13 @@ Unique local evidence directories retain the profile, exact app bytes, raw
 browser report, screenshots/traces and controller result, including failures.
 The synthetic identity environment is private local test material. The fixture
 proves only its declared routes and interactions; it is scripted AG2 generation,
-not live-model generation or pack selection. Table paging currently covers nine
-loaded records, not retrieval beyond the API's first page. Desktop board tests
+not live-model generation. It selects the verified Messaging pack before plan
+admission and records its version, digest and actual composed outputs. Public
+action permissions come from the admitted modules in a private synthetic realm;
+runtime authorization remains enabled. Pack browser cases exercise persisted
+conversation actions and reject a non-participant. Projects, Tasks and the board
+use bounded server paging and literal search, with more records than the API's
+default first-page limit. Desktop board tests
 exercise pointer drag and keyboard status changes; mobile uses the native status
 control. Touch dragging is not established. Inherited profile changes persist
 through `/api/me`, and assistant session setup is exercised without sending model
@@ -238,8 +243,12 @@ validation remain real. It saves a child review draft, verifies all unaffected
 source bytes, and runs the child through the same owned browser acceptance with
 mobile bottom-panel assertions. Only after that passes does the authenticated
 owner accept the draft through the existing endpoint. It does not promote the
-app. This route integration does not qualify full Studio startup or selected-pack
-preservation.
+app. The pack-inclusive child repeats the same pack behavior and records hashes
+for changed and retained files, including pack outputs, contracts, routes and
+theme. The effective provider requests capture the worker's saved source and
+read-only design/pack context. Upstream design documents absent from this scripted
+fixture are explicitly marked absent. This route integration does not qualify
+full Studio startup or live-model creativity.
 
 ```powershell
 $env:MOZAIKS_PAIRED_REFINEMENT='1'

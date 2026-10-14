@@ -227,6 +227,12 @@ def run(args: argparse.Namespace, evidence: Path,
     app_id = manifest.get("appId") or manifest.get("app_id")
     if not isinstance(app_id, str) or not app_id.strip():
         raise RuntimeError("Acceptance workspace has no app identity.")
+    identity_realm = getattr(args, "identity_realm", None)
+    realm_path = Path(identity_realm) if identity_realm is not None else WORKSPACE / "tests/identity-realm.json"
+    realm = json.loads(realm_path.resolve(strict=True).read_text(encoding="utf-8"))
+    if (realm.get("realm") != "common-ground" or len(realm.get("clients", [])) != 1
+            or realm["clients"][0].get("clientId") != "common-ground"):
+        raise RuntimeError("Acceptance requires an explicit common-ground synthetic identity fixture.")
     for port in (args.mongo_port, args.oidc_port, args.api_port, args.web_port):
         free_port(port)
     images = {key: json.loads(docker("image", "inspect", name))[0]["Id"] for key, name in IMAGES.items()}
@@ -236,7 +242,9 @@ def run(args: argparse.Namespace, evidence: Path,
             raise RuntimeError("Owned container name already exists.")
     evidence.mkdir(parents=True, exist_ok=False)
     frontend, runtime = environment(args, evidence)
-    realm = json.loads((WORKSPACE / "tests/identity-realm.json").read_text(encoding="utf-8"))
+    if identity_realm is not None:
+        scopes = " ".join(dict.fromkeys(["openid", *realm["clients"][0]["defaultClientScopes"]]))
+        frontend["VITE_OIDC_SCOPE"] = runtime["VITE_OIDC_SCOPE"] = scopes
     web = f"http://127.0.0.1:{args.web_port}"
     realm["clients"][0]["redirectUris"] = [frontend["VITE_OIDC_REDIRECT_URI"]]
     realm["clients"][0]["webOrigins"] = [web]
@@ -420,6 +428,8 @@ def main() -> int:
     parser.add_argument("--evidence-dir", type=Path, required=True)
     parser.add_argument("--workspace", type=Path, default=WORKSPACE,
                         help="App workspace containing app/app.json; defaults to Community.")
+    parser.add_argument("--identity-realm", type=Path,
+                        help="Explicit synthetic common-ground realm fixture; defaults to Community's test realm.")
     parser.add_argument("--mongo-port", type=int, default=27443)
     parser.add_argument("--oidc-port", type=int, default=28443)
     parser.add_argument("--api-port", type=int, default=18443)

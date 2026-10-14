@@ -150,11 +150,7 @@ class SurfaceRegenerationWorker:
                 refinement_request=refinement_request,
                 routing_decision=routing_decision,
                 current_files=current_files,
-                read_only_files={
-                    path: workspace_files[path]
-                    for path in ("ui/route_manifest.json", "ui/index.js")
-                    if surface.kind == "page_binding" and path in workspace_files
-                },
+                read_only_files=self._build_read_only_files(surface, workspace_files),
                 system_prompt=system_prompt,
                 llm_config=llm_config,
             )
@@ -211,6 +207,35 @@ class SurfaceRegenerationWorker:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_read_only_files(
+        surface: ContractSurfaceUpdate, workspace_files: dict[str, str],
+    ) -> dict[str, str]:
+        """Keep page edits grounded in the admitted app's design and contracts.
+
+        These are saved artifact bytes, never caller-supplied context or current
+        pack templates. Pack provenance names the installed version and its
+        owned outputs; it does not grant permission to change them.
+        """
+        if surface.kind != "page_binding":
+            return {}
+        paths = {
+            "app.json", "brand/theme_config.json", "config/shell.json",
+            "config/auth.yaml", "data/contract.json", ".mozaiks/pack_provenance.json",
+            "ui/route_manifest.json", "ui/index.js",
+        }
+        paths.update(
+            path for path in workspace_files
+            if (path.startswith("modules/") and path.endswith("/module.yaml")
+                and len(path.split("/")) == 3)
+            or (path.startswith("ui/pages/") and path.endswith((".yaml", ".yml"))
+                and len(path.split("/")) == 3)
+        )
+        return {
+            path: workspace_files[path] for path in sorted(paths)
+            if path in workspace_files and path not in surface.affected_paths
+        }
 
     @staticmethod
     def _build_current_files(
@@ -355,7 +380,8 @@ class SurfaceRegenerationWorker:
             "- Include ALL affected_paths in updated_files, not only the ones you changed.",
             "- Write the complete updated content for each affected path.",
             "- Do not write paths outside affected_paths.",
-            "- read_only_files contains saved route and component registration context; never rewrite it.",
+            "- read_only_files contains the saved app design, theme, routes, domain contracts and selected-pack provenance; never rewrite it.",
+            "- Preserve pack-owned outputs and every file outside affected_paths. Installed pack identity comes from the saved provenance, not a newly selected pack.",
         ]
         return "\n".join(lines)
 

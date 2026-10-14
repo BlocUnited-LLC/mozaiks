@@ -76,6 +76,9 @@ from mozaiksai.core.workflow.generator_support.code_files import (
     compile_data_contract,
     data_contract_requires_auth,
 )
+from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    SHARED_PACK_OUTPUT_PATHS,
+)
 from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
     capability_id_for_feature,
 )
@@ -1755,7 +1758,7 @@ def _scan_pack_provenance_manifest(files_map: dict[str, str]) -> list[str]:
     missing_keys = _PROVENANCE_REQUIRED_KEYS - set(manifest.keys())
     for key in sorted(missing_keys):
         errors.append(f"{_PACK_PROVENANCE_PATH}: missing required field '{key}'")
-    unknown_keys = sorted(set(manifest.keys()) - _PROVENANCE_REQUIRED_KEYS)
+    unknown_keys = sorted(set(manifest.keys()) - _PROVENANCE_REQUIRED_KEYS - {"composed_outputs"})
     for key in unknown_keys:
         errors.append(f"{_PACK_PROVENANCE_PATH}: unsupported field '{key}'")
 
@@ -1795,6 +1798,40 @@ def _scan_pack_provenance_manifest(files_map: dict[str, str]) -> list[str]:
                     errors.append(
                         f"{_PACK_PROVENANCE_PATH}: packs[{i}].materialized_owned_files must be a JSON array"
                     )
+
+    composed = manifest.get("composed_outputs", {})
+    if not isinstance(composed, dict):
+        errors.append(f"{_PACK_PROVENANCE_PATH}: composed_outputs must be a JSON object")
+    else:
+        identities = {"pack_id", "version", "source", "digest"}
+        pack_entries = [entry for entry in packs if isinstance(entry, dict)] if isinstance(packs, list) else []
+        for path, contributors in composed.items():
+            location = f"{_PACK_PROVENANCE_PATH}: composed_outputs[{path!r}]"
+            if path not in SHARED_PACK_OUTPUT_PATHS or path not in files_map:
+                errors.append(f"{location} must identify a present shared composition root")
+            if not isinstance(contributors, list) or not contributors:
+                errors.append(f"{location} must contain pack contributors")
+                continue
+            seen = set()
+            for contributor in contributors:
+                if not isinstance(contributor, dict) or set(contributor) != identities or not all(
+                    isinstance(value, str) and value for value in contributor.values()
+                ):
+                    errors.append(f"{location} contributor must contain pack_id, version, source, and digest")
+                    continue
+                pack_id = contributor["pack_id"]
+                matches = [entry for entry in pack_entries if entry.get("pack_id") == pack_id]
+                if len(matches) != 1 or any(matches[0].get(key) != contributor[key] for key in identities):
+                    errors.append(f"{location} contributor must match one selected pack identity")
+                if pack_id in seen:
+                    errors.append(f"{location} contains duplicate contributors")
+                seen.add(pack_id)
+            if any(
+                isinstance(entry.get("materialized_owned_files"), list)
+                and any(isinstance(file, dict) and file.get("path") == path for file in entry["materialized_owned_files"])
+                for entry in pack_entries
+            ):
+                errors.append(f"{location} cannot also claim exclusive template file ownership")
 
     return errors
 

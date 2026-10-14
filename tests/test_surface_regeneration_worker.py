@@ -175,6 +175,56 @@ def _prompt_payload(call: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+@pytest.mark.asyncio
+async def test_page_worker_receives_saved_pack_design_and_domain_context_without_write_access():
+    files = _custom_page_workspace()
+    files.update({
+        "app.json": '{"appId":"app-1","name":"Saved workspace"}',
+        "brand/theme_config.json": '{"theme":{"font":"system"}}',
+        "config/shell.json": '{"navigation":[]}',
+        "config/auth.yaml": 'provider: keycloak\n',
+        "data/contract.json": '{"surfaces":[]}',
+        ".mozaiks/pack_provenance.json": '{"packs":[{"pack_id":"messaging","version":"saved-version"}]}',
+        "modules/messages/module.yaml": 'module:\n  id: messages\nactions: []\n',
+        "ui/pages/projects.yaml": 'name: projects\nroute: /projects\n',
+        "services/private.py": 'PRIVATE_SOURCE_SENTINEL',
+        "security/secrets.yaml": 'PRIVATE_SECRET_POLICY_SENTINEL',
+        ".env": 'PRIVATE_ENV_SENTINEL',
+    })
+    path = "ui/pages/custom/focus.jsx"
+    surface = _make_surface("page_binding", "Focus", [path], target_kind="page")
+    worker = _make_worker_with_mock_llm([{
+        "summary": "Responsive detail panel", "rationale": "Preserve the saved design",
+        "updated_files": [{"path": path, "content": files[path]}],
+    }])
+    result = await worker.execute_plan(
+        plan=_plan_for(surface), refinement_request=_make_refinement_request(),
+        routing_decision=_make_routing_decision(), workspace_files=files, allowed_paths=[path],
+    )
+    assert result.status == "success"
+    call = worker._agent_runner.calls[0]
+    payload = _prompt_payload(call)
+    assert payload["current_files"] == {path: files[path]}
+    assert payload["affected_paths"] == [path]
+    assert payload["read_only_files"] == {
+        name: content for name, content in files.items()
+        if name not in {path, "services/private.py", "security/secrets.yaml", ".env"}
+    }
+    assert "PRIVATE_" not in call["user_prompt"]
+    assert "never rewrite" in call["user_prompt"]
+
+
+def test_page_context_does_not_make_affected_files_read_only_or_expand_other_surfaces():
+    files = _custom_page_workspace()
+    path = "ui/pages/custom/focus.jsx"
+    surface = _make_surface("page_binding", "Focus", [path, "ui/index.js"], target_kind="page")
+    assert SurfaceRegenerationWorker._build_read_only_files(surface, files) == {
+        "ui/route_manifest.json": files["ui/route_manifest.json"],
+    }
+    module = _make_surface("module_action", "messages", ["modules/messages/module.yaml"])
+    assert SurfaceRegenerationWorker._build_read_only_files(module, files) == {}
+
+
 # ---------------------------------------------------------------------------
 # _extract_updated_files
 # ---------------------------------------------------------------------------

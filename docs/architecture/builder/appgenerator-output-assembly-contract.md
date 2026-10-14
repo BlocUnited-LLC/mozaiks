@@ -225,6 +225,44 @@ page and module artifacts together before final page compilation, so acceptance
 checks the actual emitted contracts. Worker inventories still come from their
 accepted prerequisite outputs.
 
+### Shared UI composition
+
+When selected packs contribute UI, `assemble_app_tasks` composes their verified
+declarations with admitted app output through `ui_registry_composition`.
+`ui/index.js` and `ui/route_manifest.json` are shared composition outputs;
+exclusive pack filtering must retain authored declarations for these two paths.
+The existing `CustomRouteBundle` materializer and `FrontendStubOutput` remain
+the producers. There is no second runtime registry, and component source files
+are not rewritten by composition.
+
+The existing JavaScript parser admits local default/named imports (including
+aliases), named re-exports, and literal `registerComponent` calls in the exported
+`register` function. Registration `description`, `core`, and `override` options
+retain their literal values. Imports must resolve and expose the requested
+export. Dynamic calls/options, side effects, missing exports, and unsupported
+barrel statements fail instead of being evaluated or concatenated.
+Component forwarding must name its default or named export explicitly;
+namespace objects and export-star forwarding are not component bindings.
+
+Separate active owners cannot declare the same component key, route id, route
+path, or barrel export, even with identical declarations. A unique explicit
+component `override: true` may replace a conflicting registration; it does not
+override a route collision. Repeated declarations from the same owner and exact
+copies in prior admitted assembly snapshots are idempotent. Contribution
+discovery order does not affect output. Each manifest's authored array sequence
+is preserved, explicit root and navigation `order` values remain intact, and
+incompatible sequences fail. Route metadata, auth and Ask references survive
+unchanged and still pass their existing acceptance gates.
+Final planned-page validation admits additional pack routes only when their
+complete entries match the verified resolver output; worker admission cannot
+grant that authority or invent an extra route.
+
+Pack provenance identifies contributors to the two composed roots under
+`composed_outputs`; they are not listed as exact template-owned final files.
+Other pack implementation files retain their existing template ownership.
+
+### Workflow and action reachability
+
 Page workflow actions must resolve to workflows in the supplied workflow bundle
 or its artifact-backed integration metadata. A proposed workflow name alone
 cannot authorize a button. CRUD actions use typed module references, including

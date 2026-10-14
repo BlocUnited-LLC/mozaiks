@@ -24,6 +24,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Messaging pack builds use canonical data contracts and additive migrations,
+  retain participant-aware actions, and compose their UI registrations with
+  app-owned routes. Page refinement receives the saved pack, design and domain
+  context without widening its file scope.
 - Generated module quality checks distinguish a `todo` domain value from TODO
   comments, docstrings and unfinished implementation messages.
 - Generated UI browser acceptance rejects empty, malformed, skipped or incomplete

@@ -1,0 +1,366 @@
+{
+  "version": "1",
+  "surfaces": [
+    {
+      "surface_id": "messages",
+      "surface_kind": "module",
+      "collections": [
+        {
+          "name": "threads",
+          "scope": "app",
+          "entity": "Thread",
+          "tenancy": "app_wide",
+          "owner_field": null,
+          "fields": [
+            {
+              "name": "thread_id",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "scope_type",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "scope_id",
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "subject_app_id",
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "thread_type",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "participant_ids",
+              "type": "array",
+              "required": true
+            },
+            {
+              "name": "status",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "created_by",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "created_at",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "updated_at",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "last_message_at",
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "last_message",
+              "type": "object",
+              "required": false
+            },
+            {
+              "name": "related_type",
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "related_id",
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "metadata",
+              "type": "object",
+              "required": true
+            }
+          ],
+          "lifecycle": {
+            "write_mode": "module_action"
+          },
+          "indexes": [
+            {
+              "name": "threads_by_id",
+              "keys": [
+                {
+                  "field": "thread_id",
+                  "order": 1
+                }
+              ],
+              "unique": true
+            },
+            {
+              "name": "threads_by_participant_updated",
+              "keys": [
+                {
+                  "field": "participant_ids",
+                  "order": 1
+                },
+                {
+                  "field": "updated_at",
+                  "order": -1
+                }
+              ]
+            },
+            {
+              "name": "threads_by_subject_app_updated",
+              "keys": [
+                {
+                  "field": "subject_app_id",
+                  "order": 1
+                },
+                {
+                  "field": "updated_at",
+                  "order": -1
+                }
+              ]
+            },
+            {
+              "name": "threads_by_scope_updated",
+              "keys": [
+                {
+                  "field": "scope_type",
+                  "order": 1
+                },
+                {
+                  "field": "scope_id",
+                  "order": 1
+                },
+                {
+                  "field": "updated_at",
+                  "order": -1
+                }
+              ]
+            },
+            {
+              "name": "threads_by_participant_type_status",
+              "keys": [
+                {
+                  "field": "participant_ids",
+                  "order": 1
+                },
+                {
+                  "field": "thread_type",
+                  "order": 1
+                },
+                {
+                  "field": "status",
+                  "order": 1
+                }
+              ]
+            },
+            {
+              "name": "threads_by_participant_last_message",
+              "keys": [
+                {
+                  "field": "participant_ids",
+                  "order": 1
+                },
+                {
+                  "field": "last_message_at",
+                  "order": -1
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "messages",
+          "scope": "app",
+          "entity": "Message",
+          "tenancy": "app_wide",
+          "owner_field": null,
+          "fields": [
+            {
+              "name": "message_id",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "thread_id",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "sender_id",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "sender_role",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "body",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "message_type",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "created_at",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "edited_at",
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "is_deleted",
+              "type": "boolean",
+              "required": true
+            },
+            {
+              "name": "metadata",
+              "type": "object",
+              "required": true
+            }
+          ],
+          "lifecycle": {
+            "write_mode": "module_action"
+          },
+          "indexes": [
+            {
+              "name": "messages_by_thread_created_asc",
+              "keys": [
+                {
+                  "field": "thread_id",
+                  "order": 1
+                },
+                {
+                  "field": "created_at",
+                  "order": 1
+                }
+              ]
+            },
+            {
+              "name": "messages_by_thread_created_desc",
+              "keys": [
+                {
+                  "field": "thread_id",
+                  "order": 1
+                },
+                {
+                  "field": "created_at",
+                  "order": -1
+                }
+              ]
+            },
+            {
+              "name": "messages_unread_scan",
+              "keys": [
+                {
+                  "field": "thread_id",
+                  "order": 1
+                },
+                {
+                  "field": "sender_id",
+                  "order": 1
+                },
+                {
+                  "field": "created_at",
+                  "order": 1
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "thread_reads",
+          "scope": "app",
+          "entity": "ThreadRead",
+          "tenancy": "app_wide",
+          "owner_field": null,
+          "fields": [
+            {
+              "name": "thread_id",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "user_id",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "read_at",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "scope_type",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "scope_id",
+              "type": "string",
+              "required": false
+            }
+          ],
+          "lifecycle": {
+            "write_mode": "module_action"
+          },
+          "indexes": [
+            {
+              "name": "reads_by_thread_user",
+              "keys": [
+                {
+                  "field": "scope_type",
+                  "order": 1
+                },
+                {
+                  "field": "scope_id",
+                  "order": 1
+                },
+                {
+                  "field": "thread_id",
+                  "order": 1
+                },
+                {
+                  "field": "user_id",
+                  "order": 1
+                }
+              ],
+              "unique": true
+            },
+            {
+              "name": "reads_by_user",
+              "keys": [
+                {
+                  "field": "user_id",
+                  "order": 1
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "shared_collections": []
+}

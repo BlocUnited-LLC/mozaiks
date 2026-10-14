@@ -1,4 +1,4 @@
-"""Opt-in browser acceptance for the admitted scripted Projects/Tasks fixtures.
+"""Opt-in browser acceptance for Projects/Tasks with the selected Messaging pack.
 
 From a clean committed checkout with dependencies, cached Chromium and the
 Community driver's Docker images installed, set MOZAIKS_PAIRED_BROWSER=1 and run
@@ -28,6 +28,7 @@ from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.skipif(
@@ -55,10 +56,39 @@ def _ports():
         return [sock.getsockname()[1] for sock in sockets]
 
 
+def _identity_realm_fixture(destination: Path, files: dict[str, str]) -> Path:
+    """Write private synthetic identities with the admitted public action scopes.
+
+    Keep this input outside the driver's fresh run directory. Passwords and
+    tokens never belong in the public replay receipt or generated app bundle.
+    """
+    realm = json.loads((ROOT / "examples/canonical-apps/community/tests/identity-realm.json").read_text(encoding="utf-8"))
+    permissions = set()
+    for path, content in files.items():
+        if path.startswith("modules/") and path.endswith("/module.yaml"):
+            manifest = yaml.safe_load(content)
+            for action in manifest.get("actions", []):
+                if action.get("api_surface") not in {"internal", "admin_internal"}:
+                    permissions.update(action.get("permissions", []))
+    base_scopes = {"basic", "profile", "email"}
+    realm["clientScopes"] = [scope for scope in realm["clientScopes"] if scope["name"] in base_scopes]
+    realm["clientScopes"].extend({
+        "name": permission, "protocol": "openid-connect",
+        "attributes": {"include.in.token.scope": "true", "display.on.consent.screen": "false"},
+    } for permission in sorted(permissions - base_scopes))
+    realm["clients"][0]["defaultClientScopes"] = ["basic", "profile", "email", *sorted(permissions - base_scopes)]
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with destination.open("x", encoding="utf-8") as stream:
+        json.dump(realm, stream, indent=2)
+        stream.write("\n")
+    return destination
+
+
 def _profile(presentation, candidate):
     routes = [
         {"path": "/projects", "component": "SchemaPage", "schema": "projects",
          "kind": "declarative", "heading": "Projects"},
+        {"path": "/messages", "component": "Messages", "kind": "custom", "heading": "Messages"},
         {"path": "/login", "component": "LoginPage", "kind": "auth",
          "excluded_reason": "Real sign-in is exercised before every required app route."},
         {"path": "/auth/callback", "component": "AuthCallbackPage", "kind": "auth",
@@ -131,7 +161,7 @@ async def test_admitted_paired_app_on_owned_browser(presentation, paired_browser
         from tests import test_paired_experience_demo_960 as replay
 
         source_sha = acceptance._source_commit(ROOT)
-        files, context = await replay._scripted_replay(presentation)
+        files, context = await replay._scripted_replay(presentation, build_context_root=workspace / "build_context")
         assert context.get("app_task_batch_status") == "completed"
         app_root.mkdir(parents=True)
         for relative, content in files.items():
@@ -165,15 +195,18 @@ async def test_admitted_paired_app_on_owned_browser(presentation, paired_browser
             ),
             "files": hashes, "run_build_binding": binding,
             "private_environment_path": str(private / "environment.json"),
+            **replay._pack_receipt(files, context),
         })
         live.write_json(case_root / "files.sha256.json", hashes)
         profile = _profile(presentation, candidate)
         live.write_json(profile_path, profile)
         acceptance.validate_real_host_profile(profile, app_root=app_root, repo_root=ROOT)
         mongo, oidc, api, web = _ports()
+        identity_realm = _identity_realm_fixture(case_root / "identity-private/identity-realm.json", files)
         args = argparse.Namespace(
             workspace=workspace, mongo_port=mongo, oidc_port=oidc,
             api_port=api, web_port=web, native_callback=None, client_origin=None,
+            identity_realm=identity_realm,
         )
 
         def exercise(state, backend, runtime_env):

@@ -13,6 +13,7 @@ from mozaiksai.core.workflow.generator_support.code_files import (
     safe_relpath,
 )
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    SHARED_UI_OUTPUT_PATHS,
     PackOwnedOutput,
     pack_owned_outputs,
 )
@@ -29,9 +30,13 @@ from mozaiksai.core.workflow.generator_support.page_plan_utils import (
     validate_planned_custom_routes,
     validate_planned_page,
 )
+from mozaiksai.core.workflow.generator_support.ui_registry_composition import (
+    compose_ui_registry,
+)
 
 from .assembly_phase import assemble_features
 from .code_file_utils import (
+    admitted_app_file_map,
     collect_generated_app_file_entries,
     extract_code_file_entries_from_payload,
     extract_deleted_file_paths_from_payload,
@@ -39,7 +44,10 @@ from .code_file_utils import (
 from .hydrate_app_revision_context import hydrate_app_revision_context
 from .materialize_app_config_contracts import materialize_app_config_contracts
 from .module_entitlement_gates import apply_entitlement_gates
-from .resolve_managed_capability_templates import resolve_managed_capability_templates
+from .resolve_managed_capability_templates import (
+    resolve_declared_pack_output_paths,
+    resolve_managed_capability_templates,
+)
 from .save_app_schema import resolve_app_theme_config
 
 logger = logging.getLogger(__name__)
@@ -79,6 +87,7 @@ def _apply_planned_page_contracts(
     failed_task_ids: set[str] | None = None,
     context_variables: Any = None,
     pack_outputs: dict[str, PackOwnedOutput] | None = None,
+    verified_pack_routes: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, str]]:
     if not isinstance(app_build_plan, dict):
         return [{"filename": str(f["filename"]), "content": str(f["content"])} for f in code_files]
@@ -117,6 +126,7 @@ def _apply_planned_page_contracts(
                     detach(context_variables.get("generated_files"))
                     if context_variables is not None and context_variables.get("build_mode") == "revision" else None
                 ),
+                verified_pack_routes=verified_pack_routes,
             )
         for raw_path in task.get("owned_paths") or []:
             # file_map keys are safe_relpath-canonical because every producer
@@ -249,6 +259,7 @@ def _apply_managed_capability_templates(
     *,
     app_build_plan: Any,
     context_variables: Any,
+    ui_contributions: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, str]]:
     if not isinstance(app_build_plan, dict):
         return code_files
@@ -264,13 +275,22 @@ def _apply_managed_capability_templates(
     template_files = resolve_managed_capability_templates(
         capability_packs,
         context_variables=context_variables,
+        ui_contributions=ui_contributions,
     )
     if not template_files:
         return code_files
 
     file_map = {str(f["filename"]): str(f["content"]) for f in code_files if f.get("filename")}
+    workspace_paths = resolve_declared_pack_output_paths(
+        capability_packs, context_variables=context_variables, owner="workspace",
+    )
+    admitted = admitted_app_file_map(context_variables)
     for file in template_files:
-        file_map[str(file["filename"])] = str(file["content"])
+        path = str(file["filename"])
+        # Workspace extension templates are genesis defaults, not replacements
+        # for admitted app code. Raw worker history never supplies this override.
+        content = admitted.get(path, file_map.get(path, file["content"])) if path in workspace_paths else file["content"]
+        file_map[path] = str(content)
     return [{"filename": path, "content": content} for path, content in sorted(file_map.items())]
 
 
@@ -354,6 +374,7 @@ async def _assemble_app_tasks(
     await hydrate_app_revision_context(context_variables)
     app_id = None
     feature_outputs: list[dict[str, Any]] = []
+    ui_source_owners: list[tuple[str, bool]] = []
     inject_key: str | None = None
 
     if context_variables and hasattr(context_variables, "get"):
@@ -363,6 +384,7 @@ async def _assemble_app_tasks(
                 {"filename": path, "content": content}
                 for path, content in sorted(existing_files.items())
             ]})
+            ui_source_owners.append(("app:generated_files", True))
         schema_ready = _is_truthy(context_variables.get("app_schema_ready"))
         if schema_ready:
             quality_status = context_variables.get("app_ui_quality_status")
@@ -383,6 +405,7 @@ async def _assemble_app_tasks(
                     "collectable app artifacts."
                 )
             feature_outputs.append({"code_files": schema_code_files})
+            ui_source_owners.append(("app:compiled_schema", True))
 
         from factory_app.workflows._shared.platform.build_target import require_build_binding
 
@@ -408,10 +431,12 @@ async def _assemble_app_tasks(
                     continue
                 if isinstance(value, dict):
                     feature_outputs.append(value)
+                    ui_source_owners.append((f"task:{key}", False))
 
         context_code_files = _context_code_file_output(context_variables)
         if context_code_files:
             feature_outputs.append(context_code_files)
+            ui_source_owners.append(("app:accumulated_files", True))
 
     if not app_id:
         raise ValueError("app_id is required to assemble task outputs")
@@ -422,9 +447,9 @@ async def _assemble_app_tasks(
         raise ValueError("No AppGenerator schema artifacts, task batch outputs, or accumulated code files are available for assembly")
 
     # Pack-owned files come only from the selected packs' templates; no worker,
-    # repair or earlier assembly copy of one is merged. Resolve them BEFORE
-    # canonical compilation so persistent template modules receive the same
-    # policy, schemas, account handlers and method closure as authored modules.
+    # repair or earlier assembly copy of one is merged. Resolve them before
+    # compilation so declared pack data participates in the app contract while
+    # complete verified template backends retain their policy and implementations.
     pack_outputs = pack_owned_outputs(context_variables)
     kept_outputs: list[dict[str, Any]] = []
     for output in feature_outputs:
@@ -437,15 +462,37 @@ async def _assemble_app_tasks(
         kept_outputs.append(kept)
     feature_outputs = kept_outputs
 
+    # Shared declarations survive exclusive pack filtering. Prior admitted
+    # snapshots may repeat current declarations, but separate task owners may not.
+    ui_contributions = []
+    for output, (owner, baseline) in zip(feature_outputs, ui_source_owners, strict=True):
+        files = extract_code_file_entries_from_payload(output)
+        if any(item["filename"] in SHARED_UI_OUTPUT_PATHS for item in files):
+            ui_contributions.append({"owner": owner, "baseline": baseline, "files": files})
+
     app_build_plan = (
         detach(context_variables.get("app_build_plan"))
         if context_variables and hasattr(context_variables, "get") else None
     )
     template_files = _apply_managed_capability_templates(
         [], app_build_plan=app_build_plan, context_variables=context_variables,
+        ui_contributions=ui_contributions,
     )
     if template_files:
         feature_outputs.append({"code_files": template_files})
+
+    if any(
+        str(contribution["owner"]).startswith("pack:")
+        and any(item["filename"] in SHARED_UI_OUTPUT_PATHS for item in contribution["files"])
+        for contribution in ui_contributions
+    ):
+        # Flatten only after typed payloads are materialized. Shared roots have
+        # one final writer; all other file ownership still uses the existing merge.
+        materialized = [extract_code_file_entries_from_payload(output) for output in feature_outputs]
+        file_map = {item["filename"]: item["content"] for entries in materialized for item in entries}
+        shared = compose_ui_registry(ui_contributions, file_map)
+        feature_outputs = [{"code_files": [item for item in entries if item["filename"] not in SHARED_UI_OUTPUT_PATHS]} for entries in materialized]
+        feature_outputs.append({"code_files": [{"filename": path, "content": content} for path, content in sorted(shared.items())]})
 
     result = await assemble_features(
         app_id=str(app_id),
@@ -469,6 +516,12 @@ async def _assemble_app_tasks(
     )
 
     code_files = result.get("code_files", [])
+    verified_pack_routes = [
+        route
+        for contribution in ui_contributions if str(contribution["owner"]).startswith("pack:")
+        for item in contribution["files"] if item["filename"] == "ui/route_manifest.json"
+        for route in json.loads(item["content"])["pages"]
+    ]
     code_files = _apply_planned_page_contracts(
         code_files,
         app_build_plan,
@@ -479,6 +532,7 @@ async def _assemble_app_tasks(
             else None
         ),
         pack_outputs=pack_outputs,
+        verified_pack_routes=verified_pack_routes,
     )
     code_files = _apply_module_handler_method_alignment(code_files)
     code_files = _apply_deleted_files(

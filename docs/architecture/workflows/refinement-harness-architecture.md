@@ -118,6 +118,15 @@ Schema-page refinement uses the page file stem as its identity; the page's
 display name may differ. Workbench theme edits target the saved `app_bundle`
 and explicitly scope the request to `brand/theme_config.json`.
 
+Page-surface generation receives read-only context from that same verified
+saved bundle: app identity, theme, shell, authentication contract, data contract,
+module declarations, declarative pages, route/component registries and installed
+pack provenance. It does not reload today's pack templates or expand the
+selected write scope. This describes the saved design and implementation; it
+does not assert that upstream design documents absent from the artifact were
+delivered to the worker. Unrelated service source and secret policy are excluded
+from this page-context projection.
+
 Accept, reject and promote verify the selected app archive and its available
 parent archive before changing lifecycle state. Their review response reuses
 those verified bytes. An unavailable or changed archive therefore leaves the

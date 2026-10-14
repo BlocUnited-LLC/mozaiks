@@ -165,6 +165,36 @@ app bundle paths.
 UI primitives stay first-class in `chat-ui`. Build-context packs compose page
 schemas from those primitives; they do not define their own primitive layer.
 
+### Persistent template contributions
+
+A selected pack may declare `templates/data/contract.json` as an
+`owner: templates` required output. The verified resolver contributes its
+module-owned collection surfaces to the approved app data contract. The data
+compiler preserves unrelated app surfaces and rejects conflicting ownership or
+collection definitions. It emits one `data/contract.json`; a pack template never
+replaces that shared app artifact directly. Shared outputs record contributor
+pack identities in `.mozaiks/pack_provenance.json`, separately from exclusively
+owned template files.
+
+Canonical policy, schema, and CRUD synthesis still owns ordinary generated and
+partially templated modules, including OutcomeFeedback. A complete template
+implementation keeps its own actions and participant-aware policy only when
+dependency closure, current source identity, declared output closure, and exact
+template bytes are verified. The factory's shipped packs are trusted sources;
+external sources require matching version and digest pins. A workspace-owned
+`backend/handler.py` may extend the verified template base handler. Missing,
+changed, or undeclared implementation files fail admission; the exemption does
+not skip runtime, schema, implementation, or browser validation.
+
+Messaging `0.1.13` declares `threads`, `messages`, and `thread_reads` under the
+`messages` module. These app-wide collections retain participant and verified
+workspace authorization in the shipped service and policy; generic collection
+CRUD must not expose private conversations. Its additive migration uses only
+`ensure_collection` and `ensure_index`, retaining the existing index names and
+keys. Reapplying the same migration hash skips it without rewriting records.
+Account export and deletion use the same app-bound persistence collections and
+preserve messages and conversations belonging to other participants.
+
 ## Targeting
 
 Targeting has two layers.

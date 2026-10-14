@@ -32,6 +32,8 @@ recommended_domains:
   - marketplace
 
 required_outputs:
+  - path: data/contract.json
+    owner: templates
   - path: data/migrations/001_messaging_collections.json
     owner: templates
   - path: modules/messages/module.yaml

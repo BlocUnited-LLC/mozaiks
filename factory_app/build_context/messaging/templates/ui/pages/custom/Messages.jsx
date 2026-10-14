@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { moduleAction } from "../../../lib/moduleApi.js";
+import { moduleAction } from "../../lib/moduleApi.js";
 
 const EMPTY_THREAD = { title: "", participantIds: "" };
 
@@ -113,8 +113,8 @@ export default function Messages() {
   }
 
   return (
-    <main className="messages-page" style={{ display: "grid", gridTemplateColumns: "320px 1fr", minHeight: "100vh" }}>
-      <aside style={{ borderRight: "1px solid var(--border-color, #d1d5db)", padding: 16 }}>
+    <main className="messages-page grid grid-cols-1 md:grid-cols-[minmax(0,320px)_minmax(0,1fr)]" style={{ minHeight: "100vh" }}>
+      <aside style={{ minWidth: 0, borderRight: "1px solid var(--border-color, #d1d5db)", padding: 16 }}>
         <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
           <h1 style={{ margin: 0, fontSize: 24 }}>Messages</h1>
           <button type="button" onClick={loadThreads} disabled={loading}>
@@ -166,7 +166,7 @@ export default function Messages() {
         </div>
       </aside>
 
-      <section style={{ display: "grid", gridTemplateRows: "auto 1fr auto", minHeight: 0 }}>
+      <section style={{ display: "grid", gridTemplateRows: "auto 1fr auto", minWidth: 0, minHeight: 0 }}>
         <header style={{ borderBottom: "1px solid var(--border-color, #d1d5db)", padding: 16 }}>
           <h2 style={{ margin: 0 }}>
             {selectedThread ? <ThreadTitle thread={selectedThread} /> : "Select a conversation"}
@@ -191,7 +191,7 @@ export default function Messages() {
             onChange={(event) => setDraft(event.target.value)}
             disabled={!selectedThread}
             placeholder={selectedThread ? "Type a message" : "Select a conversation first"}
-            style={{ flex: 1 }}
+            style={{ flex: 1, minWidth: 0 }}
           />
           <button type="submit" disabled={!selectedThread || !draft.trim()}>
             Send

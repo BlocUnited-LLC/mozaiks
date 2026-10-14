@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { Button, CollectionToolbar } from '@mozaiks/chat-ui/ui';
 import { moduleAction } from '../../lib/moduleApi.js';
 
+const PAGE_SIZE = 8;
 const STATES = [
   { id: 'todo', label: 'Ready', tone: 'border-sky-300/30' },
   { id: 'doing', label: 'In motion', tone: 'border-amber-300/30' },
@@ -17,23 +19,58 @@ export default function PlanningBoard() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState({ page: 1, search: '' });
+  const [total, setTotal] = useState(null);
+  const [revision, setRevision] = useState(0);
+  const requestSequence = React.useRef(0);
 
   const refresh = useCallback(async () => {
+    const sequence = ++requestSequence.current;
+    setLoading(true);
+    setTasks([]);
+    setTotal(null);
+    setError('');
     try {
-      const result = await taskAction('list_tasks');
-      setTasks(result.items || []);
-      setError('');
-    } catch (cause) { setError(cause.message); }
-    finally { setLoading(false); }
-  }, []);
-  useEffect(() => { refresh(); }, [refresh]);
+      const result = await taskAction('list_tasks', { ...query, page_size: PAGE_SIZE });
+      if (sequence !== requestSequence.current) return;
+      if (!Number.isSafeInteger(result.total) || result.total < 0 || !Array.isArray(result.items)) {
+        throw new Error('Invalid task page response.');
+      }
+      const lastPage = Math.max(1, Math.ceil(result.total / PAGE_SIZE));
+      if (query.page > lastPage) {
+        setSelected(null);
+        setQuery((current) => ({ ...current, page: lastPage }));
+        return;
+      }
+      const expected = Math.min(PAGE_SIZE, Math.max(0, result.total - (query.page - 1) * PAGE_SIZE));
+      if (result.items.length !== expected || result.items.some((task) => !task || typeof task.task_id !== 'string')) {
+        throw new Error('Task rows do not match the requested page.');
+      }
+      setTasks(result.items);
+      setTotal(result.total);
+    } catch (cause) { if (sequence === requestSequence.current) setError(cause.message); }
+    finally { if (sequence === requestSequence.current) setLoading(false); }
+  }, [query]);
+  useEffect(() => {
+    refresh();
+    return () => { requestSequence.current += 1; };
+  }, [refresh, revision]);
+
+  function changeQuery(update) {
+    requestSequence.current += 1;
+    setSelected(null);
+    setTasks([]);
+    setTotal(null);
+    setLoading(true);
+    setQuery((current) => ({ ...current, ...update, ...(update.search !== undefined ? { page: 1 } : {}) }));
+  }
 
   async function move(task, status) {
     if (busy || task.status === status) return;
     setBusy(true);
     try {
       await taskAction('update_task', { task_id: task.task_id, status });
-      await refresh();
+      setRevision((current) => current + 1);
       setSelected((current) => current?.task_id === task.task_id ? { ...current, status } : current);
     } catch (cause) { setError(cause.message); }
     finally { setBusy(false); }
@@ -51,6 +88,15 @@ export default function PlanningBoard() {
           </div>
           <a href="/projects" className="rounded-xl border border-[#9aadb0] px-4 py-2 font-semibold hover:bg-white">Project details</a>
         </header>
+        <CollectionToolbar searchValue={query.search} onSearchChange={(search) => changeQuery({ search })} searchPlaceholder="Search tasks..." className="mb-5" />
+        {total !== null && <div className="mb-5 flex flex-wrap items-center justify-between gap-3 text-sm">
+          <p><span>{total} results</span> <span className="text-muted-foreground">— columns show this page only.</span></p>
+          <nav aria-label="Task pages" className="flex items-center gap-3">
+            <Button label="Previous page" variant="secondary" disabled={loading || query.page <= 1} onClick={() => changeQuery({ page: query.page - 1 })} />
+            <span aria-live="polite">Page {query.page} of {Math.max(1, Math.ceil(total / PAGE_SIZE))}</span>
+            <Button label="Next page" variant="secondary" disabled={loading || query.page * PAGE_SIZE >= total} onClick={() => changeQuery({ page: query.page + 1 })} />
+          </nav>
+        </div>}
         {error && <div role="alert" className="mb-5 rounded-xl border border-red-300 bg-red-50 p-4 text-red-900">{error} <button type="button" onClick={refresh} className="ml-2 underline">Retry</button></div>}
         <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
           <section className="grid gap-4 md:grid-cols-3" aria-label="Planning board">
@@ -70,6 +116,7 @@ export default function PlanningBoard() {
               </div>
             </div>)}
             {loading && <p role="status">Loading the planning board…</p>}
+            {!loading && !error && total === 0 && <p role="status">No matching tasks.</p>}
           </section>
           <aside className="self-start rounded-2xl border border-[#dce5e5] bg-white p-5 shadow-sm" aria-label="Task inspector">
             <p className="text-xs font-semibold uppercase tracking-[0.15em] text-[#226276]">Task inspector</p>

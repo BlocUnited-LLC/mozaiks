@@ -125,9 +125,10 @@ def _page(name, route, sections):
 def _projects_page():
     return _page("projects", "/projects", [
         _section("projects-header", "PageHeader", {"title": "Projects", "subtitle": "A shared starting point for both experiences."}),
-        _section("projects-list", "ResourceTable", {
+        _section("projects-list", "DataTable", {
             "data_source": {"module_id": "projects", "action_id": "list_projects"},
             "data_key": "items", "search": True, "selection": "single",
+            "pagination": True, "pagination_mode": "server", "page_size": 8, "total_key": "total",
             "columns": [{"key": "name", "label": "Project"}, {"key": "status", "label": "Status", "type": "status"}],
             "actions": [
                 {"label": "Create project", "action_type": "event", "event_type": "ui.modal.open",
@@ -208,10 +209,10 @@ def _operational_page():
     ]
     return _page("tasks", "/tasks", [
         _section("tasks-header", "PageHeader", {"title": "Task records", "subtitle": "Search, inspect and update work without leaving the page."}),
-        _section("tasks-table", "ResourceTable", {
+        _section("tasks-table", "DataTable", {
             "data_source": {"module_id": "tasks", "action_id": "list_tasks"},
             "data_key": "items", "selection": "single", "pagination": True,
-            "page_size": 8, "search": True, "search_keys": ["title", "description"],
+            "pagination_mode": "server", "page_size": 8, "total_key": "total", "search": True,
             "columns": [
                 {"key": "title", "label": "Task"},
                 {"key": "status", "label": "Status", "type": "status"},
@@ -309,8 +310,74 @@ def _candidate_files(presentation):
     return files
 
 
-async def _scripted_replay(presentation):
+def _messaging_selection(build_context_root):
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        verify_pack_integrity,
+    )
+    from mozaiksai.core.session.build_context import load_trusted_build_context
+    from mozaiksai.core.workflow.context.authority import build_context_authority_policy
+
+    selected = Path(build_context_root) / "PairedExperience"
+    selected.mkdir(parents=True, exist_ok=True)
+    (selected / "context.yaml").write_text(yaml.safe_dump({
+        "context_id": "paired_experience", "applies_to_workflows": ["AppGenerator"], "assets": [],
+        "values": {"operator_capabilities": ["messaging"]},
+        "projections": {"context_variables": {"operator_capabilities": {"from": "operator_capabilities"}}},
+    }), encoding="utf-8")
+    definitions = yaml.safe_load(
+        (ROOT / "factory_app/workflows/AppGenerator/context_variables.yaml").read_text(encoding="utf-8"),
+    )["definitions"]
+    policy = build_context_authority_policy(workflow_name="AppGenerator", definitions=definitions)
+    trusted = load_trusted_build_context(policy, build_context_root=build_context_root)
+    descriptor, = trusted["capability_packs"]
+    assert descriptor["id"] == "messaging"
+    source = Path(descriptor["pack_source_path"]).resolve()
+    assert source == (ROOT / "factory_app/build_context/messaging").resolve()
+    metadata = verify_pack_integrity(source, "messaging")
+    assert descriptor["version"] == metadata["version"]
+    trusted["capability_packs"] = [{**descriptor, "digest": metadata["digest"]}]
+    return trusted
+
+
+def _pack_receipt(files, context):
+    descriptors = detach(context.get("capability_packs", []))
+    provenance = json.loads(files[".mozaiks/pack_provenance.json"]) if descriptors else None
+    if descriptors:
+        selected = {item["id"]: item for item in descriptors}
+        assert {item["pack_id"] for item in provenance["packs"]} == set(selected)
+        for item in provenance["packs"]:
+            assert item["version"] == selected[item["pack_id"]]["version"]
+            assert item["digest"] == selected[item["pack_id"]]["digest"]
+    return {
+        "capability_packs": descriptors,
+        "selected_pack_ids": sorted(item["id"] for item in descriptors),
+        "pack_provenance": provenance,
+        "compiled_data_contract_sha256": hashlib.sha256(files["data/contract.json"].encode("utf-8")).hexdigest(),
+        "design_source": {
+            "kind": "scripted_paired_fixture", "design_docs_present": False,
+            "authored_paths": sorted(path for path in files if path in {
+                "ui/pages/projects.yaml", "ui/pages/tasks.yaml", "ui/pages/custom/board.jsx",
+            }),
+        },
+    }
+
+
+async def _scripted_replay(presentation, *, build_context_root=None):
+    # Resolve the installed selected pack before the original plan and worker
+    # admission. Assembly alone writes its outputs; replay never repairs them.
+    selected = _messaging_selection(build_context_root) if build_context_root is not None else {}
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        verified_pack_data_contracts,
+        verified_pack_template_inventory,
+    )
+    from mozaiksai.core.workflow.generator_support.code_files import compile_data_contract
+
+    contract = compile_data_contract(
+        _domain_contract(), context_variables=selected,
+        pack_data_contracts=verified_pack_data_contracts(verified_pack_template_inventory(context_variables=selected)),
+    )
     candidates = _candidate_files(presentation)
+    candidates["data/contract.json"] = json.dumps(contract, indent=2, ensure_ascii=False)
     tasks = []
 
     def task(task_id, task_type, agent, owned, depends_on, *, module_id=None, surface_kind="module"):
@@ -358,13 +425,19 @@ async def _scripted_replay(presentation):
         "build_tasks": tasks, "generation_order": [item["task_id"] for item in tasks],
         "agent_backend_required": False,
     }
+    plan["capability_packs"].extend({**descriptor, "capability_pack_id": descriptor["id"],
+                                    "surface_id": "messages", "surface_kind": "module"}
+                                   for descriptor in selected.get("capability_packs", []))
     context = ContextVariablesBridge({
+        **selected,
+        **({"build_context_root": str(build_context_root), "build_timestamp": "2026-10-14T00:00:00Z"}
+           if build_context_root is not None else {}),
         "workflow_name": "AppGenerator", "app_id": "paired-projects",
         "chat_id": f"scripted-paired-{presentation.lower()}",
         "run_build_binding": {"build_registry_id": "paired-projects-registry",
                               "target_app_id": "paired-projects",
                               "build_id": f"paired-{presentation.lower()}-build", "phase": "genesis"},
-        "data_contract": _domain_contract(),
+        "data_contract": contract,
         "generated_files": {"config/auth.yaml": candidates["config/auth.yaml"]},
     })
     app_build_plan(AppBuildPlan=plan, context_variables=context)
@@ -442,6 +515,7 @@ async def test_scripted_paired_apps_admit_and_assemble(presentation, tmp_path):
                 key for key in detach(context.get("app_task_batch_results")) if not key.startswith("_")
             ),
             "files": receipt,
+            **_pack_receipt(files, context),
         }
         (destination / "receipt.json").write_text(
             json.dumps(build_receipt, indent=2), encoding="utf-8",
@@ -472,6 +546,56 @@ async def test_paired_presentations_admit_identical_domain_files():
     assert "ui/pages/tasks.yaml" in operational and "ui/pages/custom/board.jsx" not in operational
     assert "ui/pages/custom/board.jsx" in visual and "ui/pages/tasks.yaml" not in visual
     assert "ui/pages/projects.yaml" in operational and "ui/pages/projects.yaml" in visual
+
+
+@pytest.mark.asyncio
+async def test_paired_messaging_is_selected_before_admission_and_preserves_domain_equivalence(tmp_path):
+    from factory_app.workflows._shared.generated_ui_contract import (
+        resolve_registered_component_files,
+    )
+
+    outputs = []
+    for presentation in ("A", "B"):
+        files, context = await _scripted_replay(presentation, build_context_root=tmp_path / presentation / "build_context")
+        receipt = _pack_receipt(files, context)
+        assert receipt["selected_pack_ids"] == ["messaging"]
+        plan = detach(context.get("app_build_plan"))
+        assert any(pack["capability_pack_id"] == "messaging" for pack in plan["capability_packs"])
+        assert {surface["surface_id"] for surface in detach(context.get("data_contract"))["surfaces"]} == {
+            "projects", "tasks", "messages",
+        }
+        persistence = next(task for task in plan["build_tasks"] if task["task_id"] == "persistence")
+        assert "data/contract.json" in persistence["owned_paths"]
+        if presentation == "B":
+            pages = next(task for task in plan["build_tasks"] if task["task_id"] == "pages")
+            assert {"ui/pages/custom/board.jsx", "ui/index.js", "ui/route_manifest.json"} <= set(pages["owned_paths"])
+        assert not any(path.startswith("modules/messages/") for task in plan["build_tasks"] for path in task["owned_paths"])
+        assert context.get("app_task_batch_status") == "completed"
+        assert "modules/messages/backend/service.py" in files
+        registry, errors = resolve_registered_component_files(files, source_label=f"paired {presentation}")
+        assert not errors
+        assert {"Messages", "MessagingProfileTab"} <= set(registry)
+        if presentation == "B":
+            assert "PlanningBoard" in registry
+            assert files["ui/pages/custom/board.jsx"] == BOARD_SOURCE.read_text(encoding="utf-8")
+        scanner_errors = scan_generated_bundle(files, capability_packs=receipt["capability_packs"])
+        assert scanner_errors == [], "\n".join(scanner_errors)
+        assert audit_app_ui_bundle_integrity(
+            [{"filename": path, "content": content} for path, content in files.items()],
+            source_label=f"Paired {presentation} with Messaging",
+        ) == []
+        validation = validate_generated_app_bundle(GeneratedAppValidationRequest(
+            files=files, capability_packs=receipt["capability_packs"], build_tasks=plan["build_tasks"],
+        ))
+        assert validation.passed, validation.diagnostics
+        wiring = await validate_wiring({"generated_files": files})
+        assert wiring["passed"] is True, wiring["failed_tests"]
+        outputs.append((files, receipt))
+    domain_paths = {path for path in outputs[0][0] if path.startswith(("modules/", "data/"))}
+    assert domain_paths == {path for path in outputs[1][0] if path.startswith(("modules/", "data/"))}
+    assert {path: outputs[0][0][path] for path in domain_paths} == {path: outputs[1][0][path] for path in domain_paths}
+    assert outputs[0][1]["capability_packs"] == outputs[1][1]["capability_packs"]
+    assert outputs[0][1]["compiled_data_contract_sha256"] == outputs[1][1]["compiled_data_contract_sha256"]
 
 
 def _free_port():

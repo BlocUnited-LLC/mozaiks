@@ -16,8 +16,8 @@ const issuer = new URL(environment.auth_issuer);
 loopbackBaseUrl(issuer.origin);
 const requiredRoutes = profile.routes.filter((entry) => entry.excluded_reason == null);
 const paths = requiredRoutes.map((route) => route.path).sort();
-if (!['/board,/projects', '/projects,/tasks'].includes(paths.join(','))) {
-  throw new Error('Paired acceptance requires /projects and exactly one of /tasks or /board.');
+if (!['/board,/messages,/projects', '/messages,/projects,/tasks'].includes(paths.join(','))) {
+  throw new Error('Paired acceptance requires /messages, /projects and exactly one of /tasks or /board.');
 }
 
 // Every case starts a real browser login. API setup uses only the resulting
@@ -78,6 +78,169 @@ async function screenshot(page, testInfo, name) {
 async function noHorizontalOverflow(page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
     'The generated page must fit the viewport').toBe(true);
+}
+
+async function exerciseMessages(page, testInfo, label, username) {
+  const title = `${label} private conversation`;
+  const body = `${label} persisted message`;
+  const actor = await page.evaluate(async () => (await window.mozaiksAuth.getCurrentUser()).id);
+  await page.getByPlaceholder('Thread title', { exact: true }).fill(title);
+  const created = mutationResponse(page, 'messages', 'create_thread');
+  await page.getByRole('button', { name: 'Start conversation', exact: true }).click();
+  const createdResponse = await created;
+  expect(createdResponse.status()).toBe(200);
+  const result = await createdResponse.json();
+  expect(result.success).toBe(true);
+  const thread = result.thread;
+  expect(thread.thread_id).toEqual(expect.any(String));
+  expect(thread.participant_ids).toEqual([actor]);
+  expect(thread.scope_type).toBe('app');
+  expect(thread.scope_id).toBe(profile.candidate.app_id);
+  await expect(page.getByRole('heading', { name: title, exact: true })).toBeVisible();
+  await page.getByPlaceholder('Type a message', { exact: true }).fill(body);
+  const sent = mutationResponse(page, 'messages', 'send_message');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  const sentResponse = await sent;
+  expect(sentResponse.status()).toBe(200);
+  const sentBody = await sentResponse.json();
+  expect(sentBody.success).toBe(true);
+  expect(sentBody.message.sender_id).toBe(actor);
+  expect(sentBody.message.body).toBe(body);
+  await expect(page.locator('article').getByText(body, { exact: true })).toBeVisible();
+  await page.reload();
+  await page.getByRole('button').filter({ has: page.getByText(title, { exact: true }) }).click();
+  await expect(page.locator('article').getByText(body, { exact: true })).toBeVisible();
+  const persisted = await moduleAction(page, 'messages', 'get_thread', { thread_id: thread.thread_id });
+  expect(persisted.messages.map((message) => message.message_id)).toEqual([sentBody.message.message_id]);
+  await noHorizontalOverflow(page);
+  await screenshot(page, testInfo, 'pack-messages-persisted-after-reload');
+
+  // A second real PKCE session has the same public scopes but is not a thread
+  // participant. The pack's private-miss contract returns empty/false results.
+  const outsiderContext = await page.context().browser().newContext({ viewport: page.viewportSize() });
+  let privateEvidence;
+  try {
+    const outsider = await outsiderContext.newPage();
+    await signIn(outsider, username === 'alice' ? 'bob' : 'alice', '/messages');
+    await expect(outsider.getByRole('heading', { name: 'Messages', exact: true })).toBeVisible();
+    const outsiderId = await outsider.evaluate(async () => (await window.mozaiksAuth.getCurrentUser()).id);
+    expect(outsiderId).not.toBe(actor);
+    const listed = await moduleAction(outsider, 'messages', 'list_threads', { limit: 50 });
+    expect(listed.threads.some((entry) => entry.thread_id === thread.thread_id)).toBe(false);
+    await expect(outsider.getByText(title, { exact: true })).toHaveCount(0);
+    const read = await moduleAction(outsider, 'messages', 'get_thread', { thread_id: thread.thread_id });
+    expect(read.thread).toBeNull();
+    expect(read.messages).toEqual([]);
+    const write = await moduleAction(outsider, 'messages', 'send_message', {
+      thread_id: thread.thread_id, body: `${label} forbidden message`,
+    });
+    expect(write.success).toBe(false);
+    const mark = await moduleAction(outsider, 'messages', 'mark_thread_read', { thread_id: thread.thread_id });
+    expect(mark.success).toBe(false);
+    const anonymous = await outsider.request.post(`${apiURL}/api/modules/messages/list_threads`, {
+      data: { params: { limit: 50 } },
+    });
+    expect([401, 403]).toContain(anonymous.status());
+    await noHorizontalOverflow(outsider);
+    await screenshot(outsider, testInfo, 'pack-messages-private-for-other-member');
+    privateEvidence = { hidden_from_list: true, unreadable: true, write_denied: true,
+      mark_read_denied: true, anonymous_status: anonymous.status() };
+  } finally {
+    await outsiderContext.close();
+  }
+  const unchanged = await moduleAction(page, 'messages', 'get_thread', { thread_id: thread.thread_id });
+  expect(unchanged.messages.map((message) => message.message_id)).toEqual([sentBody.message.message_id]);
+  await testInfo.attach('pack-messaging-persistence-and-private-scope', {
+    body: JSON.stringify({ thread_id: thread.thread_id, message_id: sentBody.message.message_id,
+      scope_type: thread.scope_type, scope_id: thread.scope_id, ...privateEvidence }),
+    contentType: 'application/json',
+  });
+}
+
+async function exerciseServerPaging(page, testInfo, { entity, label, projectId, board = false }) {
+  const moduleId = `${entity}s`;
+  const endpoint = `/api/modules/${moduleId}/list_${moduleId}`;
+  const identity = `${entity}_id`;
+  const prefix = `${label} paging`;
+  const literal = `${prefix} literal [x].* &? +`;
+  const records = [];
+  // The target is the 25th record: beyond both the explicit eight-row page and
+  // the canonical action's default 20-row first batch.
+  for (let index = 0; index < 25; index += 1) {
+    const name = index === 24 ? literal : `${prefix} ${String(index).padStart(2, '0')}`;
+    records.push((await moduleAction(page, moduleId, `create_${entity}`, entity === 'project'
+      ? { name }
+      : { project_id: projectId, title: name, description: 'Server paging acceptance', status: 'todo' })).item);
+  }
+  function inputs(request) {
+    if (request.method() === 'POST') {
+      const body = request.postDataJSON();
+      return body.params ?? body;
+    }
+    const query = new URL(request.url()).searchParams;
+    return { page: Number(query.get('page')), page_size: Number(query.get('page_size')), search: query.get('search') };
+  }
+  const requests = [];
+  const responses = [];
+  const observe = (request) => {
+    if (new URL(request.url()).pathname === endpoint) requests.push({ method: request.method(), input: inputs(request) });
+  };
+  const scope = board ? page.getByTestId('planning-board') : page.getByRole('main');
+  const search = scope.getByRole('searchbox');
+  const visibleRecords = scope.locator('tr:visible, article:visible').filter({
+    has: board ? page.getByRole('combobox') : page.getByRole('radio'),
+  });
+  async function readPage(action, number, phrase, expectedRecords) {
+    const expectedQuery = { page: number, page_size: 8, search: phrase };
+    const pending = page.waitForResponse((response) => {
+      if (new URL(response.url()).pathname !== endpoint) return false;
+      const query = inputs(response.request());
+      return query.page === number && query.page_size === 8 && query.search === phrase;
+    });
+    await action();
+    const response = await pending;
+    expect(response.status(), 'The UI must retrieve the actual bounded server page').toBe(200);
+    expect(response.request().method()).toBe(board ? 'POST' : 'GET');
+    expect(inputs(response.request())).toEqual(expectedQuery);
+    const body = await response.json();
+    const expectedTotal = phrase === literal ? 1 : records.length;
+    expect(body.total).toBe(expectedTotal);
+    expect(body.items.map((item) => item[identity])).toEqual(expectedRecords.map((item) => item[identity]));
+    expect(body.items.length).toBeLessThanOrEqual(8);
+    await expect(scope.getByText(`${body.total} results`, { exact: true })).toBeVisible();
+    await expect(scope.getByText(`Page ${number} of ${Math.max(1, Math.ceil(body.total / 8))}`, { exact: true })).toBeVisible();
+    await expect(visibleRecords).toHaveCount(expectedRecords.length);
+    responses.push({ query: expectedQuery, total: body.total, ids: body.items.map((item) => item[identity]) });
+    return body;
+  }
+  page.on('request', observe);
+  try {
+    await page.reload();
+    const first = await readPage(() => search.fill(prefix), 1, prefix, records.slice(0, 8));
+    expect(first.items.some((item) => item[identity] === records[24][identity])).toBe(false);
+    for (const number of [2, 3, 4]) {
+      await readPage(() => scope.getByRole('button', { name: 'Next page', exact: true }).click(),
+        number, prefix, records.slice((number - 1) * 8, number * 8));
+    }
+    await expect(visibleRecords.getByText(literal, { exact: true })).toBeVisible();
+    await screenshot(page, testInfo, `${entity}-${board ? 'board' : 'table'}-server-fourth-page`);
+    await readPage(() => search.fill(literal), 1, literal, [records[24]]);
+    await expect(visibleRecords.getByText(literal, { exact: true })).toBeVisible();
+    await expect(scope.getByRole('button', { name: 'Next page', exact: true })).toBeDisabled();
+    await screenshot(page, testInfo, `${entity}-${board ? 'board' : 'table'}-literal-server-search`);
+    expect(requests.length).toBeGreaterThanOrEqual(5);
+    for (const request of requests) {
+      expect(request.method).toBe(board ? 'POST' : 'GET');
+      expect(request.input.page_size, 'Every UI request stays bounded; no load-all workaround').toBe(8);
+      expect(Number.isSafeInteger(request.input.page) && request.input.page >= 1).toBe(true);
+      expect(typeof request.input.search).toBe('string');
+    }
+  } finally {
+    page.off('request', observe);
+    await testInfo.attach(`${entity}-${board ? 'board' : 'table'}-server-pages`, {
+      body: JSON.stringify({ requests, responses }), contentType: 'application/json',
+    });
+  }
 }
 
 async function exerciseDeletion(page, testInfo, entity, label, recordId) {
@@ -241,6 +404,7 @@ async function exerciseProjects(page, testInfo, label) {
   await exerciseDeletion(page, testInfo, 'project', disposableName, disposable.project_id);
   expect((await moduleAction(page, 'projects', 'get_projects', { id: project.project_id })).item)
     .toMatchObject({ name: updatedName, status: 'active' });
+  await exerciseServerPaging(page, testInfo, { entity: 'project', label });
   return updatedName;
 }
 
@@ -285,21 +449,7 @@ async function exerciseTasks(page, testInfo, label) {
   expect((await moduleAction(page, 'tasks', 'get_tasks', { id: task.task_id })).item)
     .toMatchObject({ title: updatedTitle, status: 'doing', description });
 
-  // ResourceTable pages only its loaded rows. Nine rows prove its local second
-  // page; this deliberately makes no claim about fetching beyond the default 20.
-  for (let index = 0; index < 8; index += 1) {
-    await moduleAction(page, 'tasks', 'create_task', {
-      project_id: project.project_id, title: `${label} seed ${index}`, description: 'Bounded paging fixture', status: 'todo',
-    });
-  }
-  await page.reload();
-  await main.getByRole('searchbox').fill(label);
-  await expect(main.getByText('9 results', { exact: true })).toBeVisible();
-  await main.getByRole('button', { name: 'Next page', exact: true }).click();
-  await expect(main.getByText('Page 2 of 2', { exact: true })).toBeVisible();
-  await expect(main.locator('tr:visible').filter({ has: page.getByRole('radio') })
-    .or(main.locator('article:visible'))).toHaveCount(1);
-  await screenshot(page, testInfo, 'task-second-loaded-page');
+  await exerciseServerPaging(page, testInfo, { entity: 'task', label, projectId: project.project_id });
   await main.getByRole('searchbox').fill(updatedTitle);
   await selectRecord(page, updatedTitle);
   await main.getByRole('button', { name: 'View details', exact: true }).click();
@@ -328,6 +478,7 @@ async function exerciseBoard(page, testInfo, label) {
   })).item;
   await page.reload();
   const board = page.getByTestId('planning-board');
+  await board.getByRole('searchbox').fill(title);
   const card = board.getByRole('article').filter({ has: page.getByRole('button', { name: title, exact: true }) });
   await expect(card).toBeVisible();
   await card.getByRole('button', { name: title, exact: true }).click();
@@ -380,6 +531,7 @@ async function exerciseBoard(page, testInfo, label) {
   expect((await mutationItem(completed, 'task_id')).status).toBe('done');
   await expect(status).toHaveValue('done');
   await page.reload();
+  await board.getByRole('searchbox').fill(title);
   await expect(status).toHaveValue('done');
   await board.getByRole('button', { name: title, exact: true }).click();
   await expect(inspector.getByText('done', { exact: true })).toBeVisible();
@@ -394,7 +546,9 @@ async function exerciseBoard(page, testInfo, label) {
   await selectRecord(page, `${label} project`);
   await screenshot(page, testInfo, 'board-mixed-declarative-route');
   await page.goto(new URL('/board', baseURL).href);
+  await board.getByRole('searchbox').fill(title);
   await expect(status).toHaveValue('done');
+  await exerciseServerPaging(page, testInfo, { entity: 'task', label, projectId: project.project_id, board: true });
 }
 
 for (const route of requiredRoutes) {
@@ -430,9 +584,10 @@ for (const route of requiredRoutes) {
       let projectName = label;
       if (route.path === '/projects') projectName = await exerciseProjects(page, testInfo, label);
       else if (route.path === '/tasks') await exerciseTasks(page, testInfo, label);
+      else if (route.path === '/messages') await exerciseMessages(page, testInfo, label, username);
       else await exerciseBoard(page, testInfo, label);
       if (route.path === '/projects') await exerciseProfile(page, testInfo, projectName);
-      else await exerciseAssistant(page, testInfo);
+      else if (route.path !== '/messages') await exerciseAssistant(page, testInfo);
       await noHorizontalOverflow(page);
       expect(failures, 'Required interactions must not produce browser errors').toEqual([]);
     } finally {

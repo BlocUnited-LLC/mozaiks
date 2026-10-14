@@ -54,6 +54,59 @@ def test_invalid_workspace_stops_before_service_operations(tmp_path, monkeypatch
         live.run(args_for(tmp_path), tmp_path / "evidence")
 
 
+def test_explicit_private_identity_fixture_uses_admitted_public_scopes(workspace, tmp_path, monkeypatch):
+    from tests.test_paired_experience_browser import _identity_realm_fixture
+
+    original = (live.WORKSPACE / "tests/identity-realm.json").read_bytes()
+    evidence = tmp_path / "fresh-runtime"
+    fixture = _identity_realm_fixture(tmp_path / "identity-inputs/realm.json", {
+        "modules/example/module.yaml": json.dumps({"actions": [
+            {"id": "read", "permissions": ["messages.read"]},
+            {"id": "write", "api_surface": None, "permissions": ["messages.write"]},
+            {"id": "private", "api_surface": "internal", "permissions": ["internal.only"]},
+            {"id": "admin", "api_surface": "admin_internal", "permissions": ["admin.only"]},
+        ]}),
+    })
+    assert not evidence.exists()
+    private_input = fixture.read_bytes()
+    args = args_for(workspace)
+    args.identity_realm = fixture
+    mock_owner(monkeypatch, evidence)
+
+    def exercise(state, _process, child_env):
+        expected = "openid basic profile email messages.read messages.write"
+        assert state["frontend_env"]["VITE_OIDC_SCOPE"] == expected
+        assert child_env["VITE_OIDC_SCOPE"] == expected
+        assert child_env["AUTH_ENABLED"] == "true"
+        realm = json.loads((evidence / "identity-realm.json").read_text(encoding="utf-8"))
+        assert {scope["name"] for scope in realm["clientScopes"]} == {
+            "basic", "profile", "email", "messages.read", "messages.write",
+        }
+        client = realm["clients"][0]
+        assert client["redirectUris"] == [state["base_url"] + "/auth/callback"]
+        mapper = next(item for item in client["protocolMappers"] if item["config"].get("claim.name") == "app_id")
+        assert mapper["config"]["claim.value"] == "paired-projects"
+        return "verified"
+
+    assert live.run(args, evidence, exercise=exercise) == "verified"
+    assert fixture.read_bytes() == private_input
+    assert (live.WORKSPACE / "tests/identity-realm.json").read_bytes() == original
+
+
+@pytest.mark.parametrize("invalid", ["missing", "wrong_realm", "wrong_client"])
+def test_invalid_explicit_identity_stops_before_services(workspace, tmp_path, monkeypatch, invalid):
+    args = args_for(workspace)
+    args.identity_realm = tmp_path / "realm.json"
+    if invalid != "missing":
+        args.identity_realm.write_text(json.dumps({
+            "realm": "unexpected" if invalid == "wrong_realm" else "common-ground",
+            "clients": [{"clientId": "unexpected" if invalid == "wrong_client" else "common-ground"}],
+        }), encoding="utf-8")
+    monkeypatch.setattr(live, "docker", lambda *_: pytest.fail("No Docker call is allowed"))
+    with pytest.raises((FileNotFoundError, RuntimeError)):
+        live.run(args, tmp_path / "fresh-runtime")
+
+
 class Process:
     pid = 4321
 

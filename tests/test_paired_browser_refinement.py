@@ -9,7 +9,7 @@ compatibility are checked against the checkout.
 Only AG2 provider responses are scripted. Keycloak login, Mongo/GridFS, Studio
 authorization, scoped finalization and Docker candidate validation remain real.
 The saved child receives real browser acceptance before the owner accepts its
-review draft. It is not promoted. No live model or capability-pack proof is claimed.
+review draft. It is not promoted. No live model creativity is claimed.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 PAGE = "ui/pages/custom/board.jsx"
-REQUEST = "On mobile, open task details in a bottom panel; preserve desktop, routes, brand and task behavior."
+REQUEST = "On mobile, open task details in a bottom panel. Preserve the desktop workspace, routes, brand, and underlying task behavior."
 pytestmark = pytest.mark.skipif(
     os.environ.get("MOZAIKS_PAIRED_REFINEMENT") != "1",
     reason="Set MOZAIKS_PAIRED_REFINEMENT=1 for real local refinement acceptance.",
@@ -52,6 +52,22 @@ def _json(path):
 def _hashes(files):
     return {path: hashlib.sha256(content.encode("utf-8")).hexdigest()
             for path, content in sorted(files.items())}
+
+
+def _baseline_packs(receipt, files):
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        verified_pack_template_inventory,
+    )
+
+    packs = receipt["capability_packs"]
+    saved = json.loads(files[".mozaiks/pack_provenance.json"])["packs"]
+    fields = ("pack_id", "version", "digest", "source")
+    identities = [{key: pack[key] for key in fields} for pack in saved]
+    fresh = [{key: pack[key] for key in fields} for pack in verified_pack_template_inventory(packs)]
+    assert packs and {pack["pack_id"] for pack in saved} == {"messaging"}
+    assert len(identities) == len(packs) == len({pack["pack_id"] for pack in saved})
+    assert sorted(identities, key=lambda pack: pack["pack_id"]) == sorted(fresh, key=lambda pack: pack["pack_id"])
+    return packs
 
 
 def _compatible_sources(source, current):
@@ -110,6 +126,7 @@ def _accepted_baseline(directory):
     assert _hashes(files) == expected
     assert bundle_digest(app_root) == candidate["bundle_sha256"]
     assert PAGE in files and "ui/pages/projects.yaml" in files
+    _baseline_packs(receipt, files)
     return files, candidate
 
 
@@ -198,7 +215,13 @@ def _assert_delivered_context(providers, files, baseline_id):
     worker = json.JSONDecoder().raw_decode(_user_prompt(providers["generator"]).split("payload_json:\n", 1)[1])[0]
     assert worker["user_request"] == REQUEST and worker["affected_paths"] == [PAGE]
     assert worker["current_files"] == {PAGE: files[PAGE]}
-    assert worker["read_only_files"] == {path: files[path] for path in ("ui/route_manifest.json", "ui/index.js")}
+    read_only = worker["read_only_files"]
+    for path in ("app.json", "brand/theme_config.json", "data/contract.json", "ui/route_manifest.json",
+                 "ui/index.js", "modules/messages/module.yaml", ".mozaiks/pack_provenance.json"):
+        assert read_only[path] == files[path]
+    assert all(files[path] == content for path, content in read_only.items())
+    assert PAGE not in read_only
+    assert {pack["pack_id"] for pack in json.loads(read_only[".mozaiks/pack_provenance.json"])["packs"]} == {"messaging"}
 
 
 def _scripted_harness(files, store, output_root):
@@ -298,8 +321,10 @@ async def _refine(case_root, login_config):
                    for key in os.environ), "Refinement acceptance must not inherit model-provider credentials"
     facts = _json(case_root / "inputs.json")
     files, _ = _accepted_baseline(Path(facts["baseline_directory"]))
+    replay_receipt = _json(Path(facts["baseline_directory"]) / "replay-receipt.json")
+    packs = _baseline_packs(replay_receipt, files)
     app_id = json.loads(files["app.json"])["appId"]
-    validation = await validate_generated_app_candidate(files=files, app_id=app_id, validation_strategy="docker", capability_packs=[])
+    validation = await validate_generated_app_candidate(files=files, app_id=app_id, validation_strategy="docker", capability_packs=packs)
     live.write_json(case_root / "baseline-validation.json", validation)
     assert validation["validation_status"] == "passed", "Real baseline validator rejected the accepted browser candidate"
     assert validation["app_bundle_acceptance_result"]["passed"] is True
@@ -327,7 +352,7 @@ async def _refine(case_root, login_config):
         app_id=app_id, user_id=owner_id, workflow_name="AppGenerator", chat_id=None,
         bundle_name=bundle_name, zip_path=archive, app_dir=case_root / "workspace/app",
         written_paths=sorted(files), artifact_store=store,
-        context_variables={"run_build_binding": binding.model_dump(), "capability_packs": [],
+        context_variables={"run_build_binding": binding.model_dump(), "capability_packs": packs,
                            "app_bundle_acceptance_status": acceptance["status"],
                            "app_bundle_acceptance_result": acceptance,
                            "app_bundle_validation_evidence": acceptance.get("validation_evidence"),
@@ -375,7 +400,12 @@ async def _refine(case_root, login_config):
         assert not diagnostics and set(child_files) == set(files)
         assert {path for path in files if child_files[path] != files[path]} == {PAGE}
         assert child_files[PAGE] == providers["generator"].output["updated_files"][0]["content"]
-        assert child.commit_metadata.metadata["capability_packs"] == []
+        assert child.commit_metadata.metadata["capability_packs"] == packs
+        provenance = json.loads(files[".mozaiks/pack_provenance.json"])
+        retained_pack_paths = sorted({entry["path"] for pack in provenance["packs"]
+                                      for entry in pack["materialized_owned_files"]})
+        assert retained_pack_paths
+        assert all(child_files[path] == files[path] for path in retained_pack_paths)
         current = (await registry.get_app_record(owner_user_id=owner_id, build_registry_id=binding.build_registry_id))["app"]
         assert current["lifecycle_state"] == "review" and current["current_build_run"]["artifact_version_id"] == child.id
         assert result["refinement_session_id"] and result["review_continuation"] is None
@@ -391,8 +421,11 @@ async def _refine(case_root, login_config):
         live.write_json(case_root / "child-record.json", child.model_dump(mode="json"))
         live.write_json(case_root / "result.json", {
             "success": True, "evidence_kind": "authorized_studio_refinement_with_scripted_ag2_providers",
-            "live_llm_calls": False, "browser_acceptance": "not_evaluated_for_child", "capability_packs": [],
+            "live_llm_calls": False, "browser_acceptance": "not_evaluated_for_child", "capability_packs": packs,
             "source": facts, "request": REQUEST, "permitted_paths": [PAGE], "changed_paths": [PAGE],
+            "retained_paths": sorted(path for path in files if child_files[path] == files[path]),
+            "retained_pack_paths": retained_pack_paths, "baseline_files": _hashes(files),
+            "design_source": replay_receipt["design_source"],
             "baseline_build_record_id": baseline.id, "child_build_record_id": child.id,
             "refinement_session_id": result["refinement_session_id"], "registry": current,
             "anonymous_status": anonymous.status_code, "non_owner_status": other.status_code,
@@ -418,6 +451,7 @@ async def _accept(case_root, login_config):
     result = _json(case_root / "result.json")
     browser = _json(case_root / "child-browser-result.json")
     assert browser["success"] and browser["runtime_identity"] == "verified_owned_launch"
+    assert browser["candidate"] == _json(case_root / "child-browser-profile.json")["candidate"]
     assert browser["candidate"]["revision"] == result["child_build_record_id"]
     assert not studio.app.dependency_overrides
     tokens = _login_tokens(login_config)
@@ -451,7 +485,13 @@ async def _accept(case_root, login_config):
 
 def _child_browser(case_root, source_sha):
     from scripts import generated_ui_acceptance as acceptance
-    from tests.test_paired_experience_browser import _live_owner, _ports, _profile, _sanitized
+    from tests.test_paired_experience_browser import (
+        _identity_realm_fixture,
+        _live_owner,
+        _ports,
+        _profile,
+        _sanitized,
+    )
 
     live = _live_owner()
     result = _json(case_root / "result.json")
@@ -463,9 +503,13 @@ def _child_browser(case_root, source_sha):
     live.write_json(profile_path, _profile("B", candidate))
     acceptance.validate_real_host_profile(_json(profile_path), app_root=app_root, repo_root=ROOT)
     private = live.EVIDENCE_ROOT / f"paired-refined-child-{case_root.name}"
+    identity_realm = _identity_realm_fixture(live.EVIDENCE_ROOT / "identity-inputs" / f"child-{case_root.name}.json", {
+        path: (app_root / path).read_text(encoding="utf-8") for path in result["child_files"]
+    })
     mongo, oidc, api, web = _ports()
     args = argparse.Namespace(workspace=app_root.parent, mongo_port=mongo, oidc_port=oidc,
-                              api_port=api, web_port=web, native_callback=None, client_origin=None)
+                              api_port=api, web_port=web, native_callback=None, client_origin=None,
+                              identity_realm=identity_realm)
 
     def exercise(state, backend, runtime_env):
         with live.frontend_preview(state, private, runtime_env) as preview:
@@ -494,7 +538,7 @@ def _child_browser(case_root, source_sha):
 
 def test_accepted_board_refines_through_real_studio():
     from scripts import generated_ui_acceptance as acceptance
-    from tests.test_paired_experience_browser import _live_owner, _ports
+    from tests.test_paired_experience_browser import _identity_realm_fixture, _live_owner, _ports
 
     live = _live_owner()
     baseline_dir = Path(os.environ["MOZAIKS_PAIRED_BROWSER_BASELINE"]).resolve(strict=True)
@@ -520,9 +564,11 @@ def test_accepted_board_refines_through_real_studio():
                     "baseline_browser_source_sha": prior_candidate["source_sha"],
                     "refinement_output_root": str(refinement_output_root),
                     "validator_image": image_identity})
+    identity_realm = _identity_realm_fixture(live.EVIDENCE_ROOT / "identity-inputs" / f"refine-{case_root.name}.json", files)
     mongo, oidc, api, web = _ports()
     args = argparse.Namespace(workspace=app_root.parent, mongo_port=mongo, oidc_port=oidc,
-                              api_port=api, web_port=web, native_callback=None, client_origin=None)
+                              api_port=api, web_port=web, native_callback=None, client_origin=None,
+                              identity_realm=identity_realm)
 
     def exercise(state, backend, runtime_env):
         with live.frontend_preview(state, private, runtime_env) as preview:

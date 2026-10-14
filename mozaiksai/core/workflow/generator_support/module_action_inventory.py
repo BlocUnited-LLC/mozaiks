@@ -21,6 +21,11 @@ from mozaiksai.resources import resolve_factory_app_root
 
 logger = logging.getLogger(__name__)
 
+# Pack templates contribute declarations to these app-wide compiler outputs;
+# they cannot exclusively own a worker's contribution at the same path.
+SHARED_UI_OUTPUT_PATHS = frozenset({"ui/index.js", "ui/route_manifest.json"})
+SHARED_PACK_OUTPUT_PATHS = SHARED_UI_OUTPUT_PATHS | {"data/contract.json"}
+
 
 def _bundle_relative_path(raw: Any) -> str | None:
     """Normalize a declared pack output path; reject anything outside the bundle."""
@@ -354,7 +359,7 @@ class PackOwnedOutput(NamedTuple):
 
 
 def pack_owned_outputs(context_variables: Any) -> dict[str, PackOwnedOutput]:
-    """Bundle paths the selected packs write from their templates, by path.
+    """Exclusive bundle paths selected packs write from templates, by path.
 
     Pack-owned outputs are never model work: plan review builds no task for
     them, a worker's copy is discarded, and assembly takes them only from the
@@ -362,7 +367,8 @@ def pack_owned_outputs(context_variables: Any) -> dict[str, PackOwnedOutput]:
     at every assembly. An ``owner: workspace`` entry the pack ships a template
     for is written at genesis and then belongs to the workspace, so it is
     pack-owned only in a genesis build. Any other owner (``generator``) names
-    work the pack asks a model to author.
+    work the pack asks a model to author. Shared composition roots retain app
+    task ownership; their verified pack contributions are merged at assembly.
     """
     if context_variables is None:
         return {}
@@ -373,7 +379,7 @@ def pack_owned_outputs(context_variables: Any) -> dict[str, PackOwnedOutput]:
             for entry in contract.get("required_outputs") or []:
                 owner = str(entry.get("owner") or "templates").strip() if isinstance(entry, Mapping) else "templates"
                 path = _bundle_relative_path(entry.get("path") if isinstance(entry, Mapping) else entry)
-                if not path:
+                if not path or path in SHARED_PACK_OUTPUT_PATHS:
                     continue
                 if owner == "workspace":
                     if not genesis or pack.root is None or pack.config is None:
