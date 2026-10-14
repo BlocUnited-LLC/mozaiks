@@ -24,6 +24,7 @@ from mozaiksai.core.workflow.generator_support.module_action_inventory import (
 )
 from mozaiksai.core.workflow.generator_support.page_plan_utils import validate_planned_custom_routes
 from mozaiksai.core.workflow.generator_support.ui_registry_composition import compose_ui_registry
+from tests.test_appgenerator_revision_baseline import baseline as revision_baseline  # noqa: F401
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -168,6 +169,15 @@ def test_default_and_named_imports_from_same_module():
     assert compose({**app, **result}) == result
 
 
+@pytest.mark.parametrize("clause", ["View, { Panel as View }", "{ Panel as View, Other as View }"])
+def test_repeated_local_bindings_within_one_import_fail(clause):
+    app = component()
+    app["ui/pages/custom/Board.jsx"] += "\nexport function Panel() { return null; } export function Other() { return null; }"
+    app["ui/index.js"] = f"import {clause} from './pages/custom/Board.jsx'; export function register(registerComponent) {{ registerComponent('Board', View); }}"
+    with pytest.raises(ValueError, match="repeated import binding"):
+        compose(app)
+
+
 def test_one_explicit_override_replaces_component_without_renaming_key():
     old = component()
     old.pop("ui/route_manifest.json")
@@ -200,6 +210,159 @@ def test_same_owner_repeated_contribution_is_idempotent():
     files = component()
     declared = contribution("task:board", files)
     assert compose_ui_registry([declared, declared], files) == compose_ui_registry([declared], files)
+
+
+@pytest.mark.parametrize("full_root", [False, True])
+def test_admitted_revision_replaces_baseline_metadata_and_carries_pack_entries(full_root):
+    app = component(path="ui/pages/custom/board.jsx")
+    app["ui/auth/authAdapter.js"] = "export function createAuthAdapter() { return {}; }"
+    app["ui/index.js"] += "\nexport { createAuthAdapter } from './auth/authAdapter.js';"
+    pack = component("Messages", path="ui/pages/custom/Messages.jsx", order=50)
+    baseline = {**app, **pack, **compose(app, pack)}
+    revised = deepcopy(baseline if full_root else app)
+    manifest = json.loads(revised["ui/route_manifest.json"])
+    board = next(route for route in manifest["pages"] if route["id"] == "board")
+    board["meta"]["title"] = "Approved revised board"
+    board["order"] = board["navigation"]["order"] = 90
+    if full_root:
+        manifest["pages"].reverse()
+    revised["ui/route_manifest.json"] = json.dumps(manifest)
+    owned = {"ui/pages/custom/board.jsx", "ui/index.js", "ui/route_manifest.json"}
+    arguments = dict(pages=[{"name": "board", "route": "/board", "ui_surface": "custom_react_page"}], owned_paths=owned, baseline_files=baseline)
+    validate_planned_custom_routes(revised, **arguments)
+    parts = [contribution("app:generated_files", baseline, baseline=True), contribution("task:pages", revised), contribution("pack:messaging", pack)]
+    files = {**baseline, **revised}
+    result = compose_ui_registry(parts, files, revision_baseline=baseline)
+    for order in permutations(parts):
+        assert compose_ui_registry(list(order), files, revision_baseline=baseline) == result
+    routes = json.loads(result["ui/route_manifest.json"])["pages"]
+    assert [route["id"] for route in routes] == ["messages", "board"]
+    assert routes[1] == board
+    assert routes[0] == json.loads(pack["ui/route_manifest.json"])["pages"][0]
+    assert "createAuthAdapter" in result["ui/index.js"]
+    assert result["ui/index.js"].count('registerComponent("Messages"') == 1
+    validate_planned_custom_routes({**files, **result}, **arguments)
+    assert compose_ui_registry([contribution("app:generated_files", {**files, **result}, baseline=True), *parts[1:]], files, revision_baseline=baseline) == result
+
+
+@pytest.mark.parametrize("other_owner", ["task:other", "pack:other"])
+def test_baseline_revision_does_not_hide_competing_current_route_owners(other_owner):
+    baseline = component()
+    revised = deepcopy(baseline)
+    manifest = json.loads(revised["ui/route_manifest.json"])
+    manifest["pages"][0]["meta"]["title"] = "Admitted update"
+    revised["ui/route_manifest.json"] = json.dumps(manifest)
+    with pytest.raises(ValueError, match="Competing owners for route"):
+        compose_ui_registry([
+            contribution("app:generated_files", baseline, baseline=True),
+            contribution("task:pages", revised), contribution(other_owner, revised),
+        ], revised, revision_baseline=baseline)
+
+
+def test_pack_alone_cannot_replace_a_conflicting_saved_app_route():
+    baseline = component()
+    pack = deepcopy(baseline)
+    manifest = json.loads(pack["ui/route_manifest.json"])
+    manifest["pages"][0]["meta"]["requiresAuth"] = False
+    pack["ui/route_manifest.json"] = json.dumps(manifest)
+    with pytest.raises(ValueError, match="Conflicting route id"):
+        compose_ui_registry([contribution("app:generated_files", baseline, baseline=True), contribution("pack:other", pack)], pack)
+
+
+def test_partial_title_revision_preserves_prior_relative_positions():
+    zeta = component("Zeta", path="ui/pages/custom/zeta.jsx")
+    board = component(path="ui/pages/custom/board.jsx")
+    pack = component("Messages", path="ui/pages/custom/Messages.jsx", order=50)
+    baseline = {**zeta, **board, **pack, **compose(zeta, board, pack)}
+    by_id = {route["id"]: route for route in json.loads(baseline["ui/route_manifest.json"])["pages"]}
+    baseline["ui/route_manifest.json"] = json.dumps({"pages": [by_id[key] for key in ("zeta", "board", "messages")]})
+    changed = deepcopy(by_id["board"])
+    changed["meta"]["title"] = "Revised title only"
+    revised = {**board, "ui/route_manifest.json": json.dumps({"pages": [changed]})}
+    parts = [contribution("app:generated_files", baseline, baseline=True), contribution("task:board", revised), contribution("pack:messaging", pack)]
+    for order in permutations(parts):
+        result = compose_ui_registry(list(order), {**baseline, **revised}, revision_baseline=baseline)
+        routes = json.loads(result["ui/route_manifest.json"])["pages"]
+        assert [route["id"] for route in routes] == ["zeta", "board", "messages"]
+        assert routes[1] == changed
+
+
+@pytest.mark.parametrize("other_owner", ["task:other", "pack:other"])
+def test_current_accumulated_snapshot_cannot_hide_competing_active_owners(other_owner):
+    files = component()
+    with pytest.raises(ValueError, match="Competing owners for route"):
+        compose_ui_registry([
+            contribution("app:accumulated_files", files, baseline=True),
+            contribution("task:pages", files), contribution(other_owner, files),
+        ], files)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("other_owner", ["task", "pack"])
+async def test_actual_genesis_accumulated_copy_cannot_hide_competing_ui_owners(other_owner):
+    from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
+    from tests.factory_context import factory_context
+    from tests.test_messaging_pack_persistence_composition import _assembled_files, _context
+
+    class Context(dict):
+        def set(self, key, value):
+            self[key] = value
+
+    files = component() if other_owner == "task" else _assembled_files()
+    output = {"code_files": contribution("task:pages", files)["files"]}
+    context = Context(factory_context({
+        **_context(), "app_id": "genesis_collision", "code_files": output["code_files"],
+        "data_contract": {"version": "1", "surfaces": [], "shared_collections": []},
+        "app_task_batch_results": {"pages": output, **({"other": output} if other_owner == "task" else {})},
+    }))
+    result = await assemble_app_tasks(context_variables=context)
+    assert not result["success"]
+    assert "Competing owners for route" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_actual_revision_assembly_updates_app_route_and_retains_verified_pack(request):
+    from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
+    from mozaiksai.core.workflow.context.adapter import create_context_container
+    from tests.test_appgenerator_revision_baseline import _replace_archive
+    from tests.test_messaging_pack_persistence_composition import _assembled_files, _context
+
+    saved = request.getfixturevalue("revision_baseline")
+    app = component(path="ui/pages/custom/board.jsx")
+    pack = _assembled_files()
+    saved.files = {**app, **pack, **compose(app, pack), "app.json": json.dumps({"appId": "customer-app", "appName": "Board"})}
+    _replace_archive(saved, {})
+    revised = {path: saved.files[path] for path in ("ui/index.js", "ui/route_manifest.json", "ui/pages/custom/board.jsx")}
+    manifest = json.loads(revised["ui/route_manifest.json"])
+    board = next(route for route in manifest["pages"] if route["id"] == "board")
+    board["meta"]["title"] = "Approved revised board"
+    board["order"] = board["navigation"]["order"] = 90
+    manifest["pages"].reverse()
+    revised["ui/route_manifest.json"] = json.dumps(manifest)
+    selected = _context()
+    plan = {**selected["app_build_plan"], "pages": [{"name": "board", "route": "/board", "ui_surface": "custom_react_page"}],
+            "build_tasks": [{"task_id": "pages", "task_type": "page_bundle", "owned_paths": list(revised)}]}
+    context = create_context_container(initial={
+        **saved.context, **selected, "app_build_plan": plan,
+        "data_contract": {"version": "1", "surfaces": [], "shared_collections": []},
+        "app_task_batch_results": {"pages": {"code_files": contribution("task:pages", revised)["files"]}},
+    })
+    result = await assemble_app_tasks(context_variables=context)
+    assert result["success"], result
+    files = {file["filename"]: file["content"] for file in result["code_files"]}
+    assert json.loads(files["ui/route_manifest.json"])["pages"] == manifest["pages"]
+    assert files["ui/index.js"].count('registerComponent("Messages"') == 1
+    for path in ("modules/messages/backend/policy.py", "ui/pages/custom/Messages.jsx", "ui/pages/custom/board.jsx"):
+        assert files[path] == saved.files[path]
+    assert saved.content.get_bundle.await_count == 2
+    saved.content.get_bundle.assert_awaited_with("immutable-archive")
+    repeated = await assemble_app_tasks(context_variables=context)
+    assert repeated["success"], repeated
+    repeated_files = {file["filename"]: file["content"] for file in repeated["code_files"]}
+    for path in ("ui/index.js", "ui/route_manifest.json"):
+        assert repeated_files[path] == files[path]
+    assert saved.content.get_bundle.await_count == 4
+    saved.content.get_bundle.assert_awaited_with("immutable-archive")
 
 
 def test_declared_array_and_navigation_order_survive_discovery_order():

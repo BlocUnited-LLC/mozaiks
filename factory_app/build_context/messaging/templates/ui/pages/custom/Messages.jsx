@@ -185,7 +185,7 @@ export default function Messages() {
           ))}
         </div>
 
-        <form onSubmit={sendMessage} style={{ borderTop: "1px solid var(--border-color, #d1d5db)", display: "flex", gap: 8, padding: 16 }}>
+        <form onSubmit={sendMessage} className="p-4 pr-20 md:pr-4" style={{ borderTop: "1px solid var(--border-color, #d1d5db)", display: "flex", gap: 8 }}>
           <input
             value={draft}
             onChange={(event) => setDraft(event.target.value)}

@@ -13,11 +13,13 @@ import pytest
 import yaml
 
 from factory_app.workflows.AppGenerator.tools.app_validation import (
+    run_app_bundle_acceptance_gate,
     validate_module_implementation_contract,
 )
 from factory_app.workflows.AppGenerator.tools.assembly_phase import _merge_code_files
 from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import (
     _scan_pack_provenance_manifest,
+    scan_generated_bundle,
 )
 from factory_app.workflows.AppGenerator.tools.module_runtime_quality import (
     audit_module_runtime_quality,
@@ -83,6 +85,75 @@ def test_messaging_compiles_exact_backend_and_admitted_data_without_new_public_c
     provenance = json.loads(files[".mozaiks/pack_provenance.json"])
     assert provenance["composed_outputs"]["data/contract.json"][0]["pack_id"] == "messaging"
     assert _scan_pack_provenance_manifest(files) == []
+
+
+@pytest.mark.asyncio
+async def test_original_approved_context_reaches_assembly_and_acceptance_scanner_without_precompilation():
+    from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
+    from mozaiksai.core.workflow.context.adapter import create_context_container
+    from mozaiksai.core.workflow.context.frozen import detach
+    from tests.factory_context import factory_context
+
+    approved = {"version": "1", "surfaces": [], "shared_collections": []}
+    original = deepcopy(approved)
+    context = create_context_container(initial=factory_context({
+        **_context(), "app_id": "ordinary_messaging", "data_contract": approved,
+        "generated_files": {
+            "app.json": json.dumps({"appId": "ordinary_messaging", "appName": "Messages", "authRequired": True}),
+            "data/contract.json": json.dumps(approved),
+        },
+    }))
+    result = await assemble_app_tasks(context_variables=context)
+    assert result["success"], result
+    files = {file["filename"]: file["content"] for file in result["code_files"]}
+    assert approved == original
+    assert detach(context.get("data_contract")) == original
+    assert [surface["surface_id"] for surface in json.loads(files["data/contract.json"])["surfaces"]] == ["messages"]
+    plan_modules = detach(context.get("app_build_plan"))["capability_packs"]
+    assert all("pack_source_path" not in module for module in plan_modules)
+    assert scan_generated_bundle(
+        files, capability_packs=plan_modules, planned_data_contract=approved, context_variables=context,
+    ) == []
+    acceptance = await run_app_bundle_acceptance_gate(files=files, context_variables=context)
+    assert acceptance["bundle_scan"]["passed"], acceptance["bundle_scan"]
+    assert detach(context.get("data_contract")) == original
+
+
+@pytest.mark.parametrize("change", ["missing_collection", "changed_field", "extra_field", "undeclared_output"])
+def test_normal_context_scanner_keeps_exact_pack_contract_and_output_boundaries(change):
+    context = _context()
+    files = _assembled_files()
+    contract = json.loads(files["data/contract.json"])
+    collections = contract["surfaces"][0]["collections"]
+    if change == "missing_collection":
+        collections.pop()
+    elif change == "changed_field":
+        collections[0]["fields"][0]["type"] = "integer"
+    elif change == "extra_field":
+        collections[0]["fields"].append({"name": "injected", "type": "string", "required": False})
+    else:
+        files["ui/components/Undeclared.jsx"] = "export default function Undeclared() { return null; }"
+    files["data/contract.json"] = json.dumps(contract)
+    errors = scan_generated_bundle(
+        files, capability_packs=context["app_build_plan"]["capability_packs"],
+        planned_data_contract={"version": "1", "surfaces": [], "shared_collections": []},
+        context_variables=context,
+    )
+    expected = "outside the canonical app planes" if change == "undeclared_output" else "must match the compiled approved"
+    assert any(expected in error for error in errors), errors
+
+
+@pytest.mark.parametrize("key,value", [("version", "0.0.0"), ("digest", "sha256:" + "0" * 64)])
+def test_normal_context_scanner_reverifies_selected_pack_pins(key, value):
+    context = _context()
+    files = _assembled_files()
+    context["capability_packs"][0][key] = value
+    errors = scan_generated_bundle(
+        files, capability_packs=context["app_build_plan"]["capability_packs"],
+        planned_data_contract={"version": "1", "surfaces": [], "shared_collections": []},
+        context_variables=context,
+    )
+    assert any(f"selected {key} does not match freshly verified source" in error for error in errors), errors
 
 
 @pytest.mark.parametrize("change", ["unknown_pack", "wrong_digest", "absolute_path", "duplicate", "exclusive"])

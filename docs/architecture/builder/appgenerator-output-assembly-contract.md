@@ -248,8 +248,16 @@ Separate active owners cannot declare the same component key, route id, route
 path, or barrel export, even with identical declarations. A unique explicit
 component `override: true` may replace a conflicting registration; it does not
 override a route collision. Repeated declarations from the same owner and exact
-copies in prior admitted assembly snapshots are idempotent. Contribution
-discovery order does not affect output. Each manifest's authored array sequence
+copies in prior admitted assembly snapshots are idempotent. Saved snapshots
+are fallback declarations: an admitted app revision supersedes its
+saved route metadata and ordering. Exact unchanged entries carried from that
+verified prior archive do not claim a second active owner, including retained
+pack entries. Current accumulated output cannot grant this carryover. A title
+or other metadata update retains prior relative positions; explicit order or
+authored sequence changes replace the affected ordering constraints.
+Current task/task and task/pack collisions still fail; a pack alone cannot
+replace a conflicting saved app route. Repeated local import bindings also fail.
+Contribution discovery order does not affect output. Each manifest's authored array sequence
 is preserved, explicit root and navigation `order` values remain intact, and
 incompatible sequences fail. Route metadata, auth and Ask references survive
 unchanged and still pass their existing acceptance gates.

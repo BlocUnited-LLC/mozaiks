@@ -37,6 +37,8 @@ from factory_app.workflows.AppGenerator.tools.module_persistence_guard import (
 from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
     ManagedCapabilityTemplateError,
     resolve_declared_pack_output_paths,
+    verified_pack_data_contracts,
+    verified_pack_template_inventory,
 )
 from mozaiksai.core.runtime.app.auth_contract import (
     APP_AUTH_COMPONENTS,
@@ -2287,10 +2289,12 @@ def _scan_planned_data_fields(
     if error or not actual:
         return [error or "data/contract.json: missing approved data contract."]
     try:
+        inventory = verified_pack_template_inventory(context_variables=context_variables)
         planned = compile_data_contract(
             planned, subscription_contract=subscription_contract, context_variables=context_variables,
+            pack_data_contracts=verified_pack_data_contracts(inventory),
         )
-    except ValueError as exc:
+    except (ValueError, ManagedCapabilityTemplateError) as exc:
         return [f"data/contract.json: {exc}"]
     collections = {
         (surface["surface_id"], collection["name"]): collection
@@ -2339,6 +2343,7 @@ def scan_generated_bundle(
     capability_packs: list[dict[str, Any]] | None = None,
     planned_data_contract: dict[str, Any] | None = None,
     subscription_contract: dict[str, Any] | None = None,
+    context_variables: Any = None,
     require_deployment_artifacts: bool = False,
 ) -> list[str]:
     """Scan files_map for forbidden patterns.
@@ -2356,8 +2361,19 @@ def scan_generated_bundle(
     - modules/*/contracts/reactions.yaml: event_type closure, target.kind taxonomy,
       target-kind-specific required fields.
     """
+    persistence_context = context_variables if context_variables is not None else {"capability_packs": capability_packs or []}
     try:
-        selected_layout_extensions = _layout_extensions_for_selected_packs(capability_packs)
+        # Plan rows identify generated modules; selected pack context owns the
+        # verified source and its exact declared output paths.
+        output_packs = [dict(pack) for pack in capability_packs or [] if isinstance(pack, dict)]
+        for entry in verified_pack_template_inventory(context_variables=persistence_context):
+            matches = [pack for pack in output_packs if _pack_id_from_descriptor(pack) == entry["pack_id"]]
+            if not matches:
+                matches = [{"id": entry["pack_id"]}]
+                output_packs.extend(matches)
+            for pack in matches:
+                pack["pack_source_path"] = entry["source_path"]
+        selected_layout_extensions = _layout_extensions_for_selected_packs(output_packs)
     except ManagedCapabilityTemplateError as exc:
         return [f"Selected CapabilityPack output contract is invalid: {exc}"]
     layout_report = validate_file_map_layout(
@@ -2368,7 +2384,7 @@ def scan_generated_bundle(
     errors.extend(
         _scan_declared_pack_repo_support_outputs(
             files_map,
-            capability_packs=capability_packs,
+            capability_packs=output_packs,
         )
     )
     scannable_files_map = filter_layout_scannable_file_map(files_map, layout_report)
@@ -2381,13 +2397,12 @@ def scan_generated_bundle(
     errors.extend(
         _scan_canonical_app_paths(
             scannable_files_map,
-            capability_packs=capability_packs,
+            capability_packs=output_packs,
         )
     )
     errors.extend(error for error in scan_app_contracts(scannable_files_map) if error not in errors)
     errors.extend(_scan_planned_user_data_scope(scannable_files_map, capability_packs))
     errors.extend(_scan_subscription_assignment_storage(scannable_files_map))
-    persistence_context = {"capability_packs": capability_packs or []}
     errors.extend(_scan_planned_data_fields(
         scannable_files_map, planned_data_contract, subscription_contract=subscription_contract,
         context_variables=persistence_context,

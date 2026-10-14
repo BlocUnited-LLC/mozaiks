@@ -41,7 +41,11 @@ from .code_file_utils import (
     extract_code_file_entries_from_payload,
     extract_deleted_file_paths_from_payload,
 )
-from .hydrate_app_revision_context import hydrate_app_revision_context
+from .hydrate_app_revision_context import (
+    hydrate_app_revision_context,
+    read_bound_revision_files,
+    revision_baseline_required,
+)
 from .materialize_app_config_contracts import materialize_app_config_contracts
 from .module_entitlement_gates import apply_entitlement_gates
 from .resolve_managed_capability_templates import (
@@ -490,7 +494,8 @@ async def _assemble_app_tasks(
         # one final writer; all other file ownership still uses the existing merge.
         materialized = [extract_code_file_entries_from_payload(output) for output in feature_outputs]
         file_map = {item["filename"]: item["content"] for entries in materialized for item in entries}
-        shared = compose_ui_registry(ui_contributions, file_map)
+        revision_baseline = await read_bound_revision_files(context_variables) if revision_baseline_required(context_variables) else None
+        shared = compose_ui_registry(ui_contributions, file_map, revision_baseline=revision_baseline)
         feature_outputs = [{"code_files": [item for item in entries if item["filename"] not in SHARED_UI_OUTPUT_PATHS]} for entries in materialized]
         feature_outputs.append({"code_files": [{"filename": path, "content": content} for path, content in sorted(shared.items())]})
 

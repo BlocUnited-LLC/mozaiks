@@ -78,13 +78,18 @@ def _import_bindings(node: Any, files: dict[str, str], base: str = "ui/index.js"
     bindings: dict[str, tuple[str, str]] = {}
     for child in _children(clause):
         if child.type == "identifier":
-            bindings[_text(child)] = (path, "default")
+            binding = _text(child)
+            if binding in bindings:
+                raise ValueError(f"UI declarations contain repeated import binding: {binding}")
+            bindings[binding] = (path, "default")
         elif child.type == "named_imports":
             for specifier in _children(child):
                 name = _text(specifier.child_by_field_name("name"))
                 alias = _text(specifier.child_by_field_name("alias")) or name
                 if not _IDENTIFIER.fullmatch(name) or not _IDENTIFIER.fullmatch(alias):
                     raise ValueError("UI named imports require identifier bindings")
+                if alias in bindings:
+                    raise ValueError(f"UI declarations contain repeated import binding: {alias}")
                 bindings[alias] = (path, name)
         else:
             raise ValueError("UI registrations support default and named imports only")
@@ -246,12 +251,64 @@ def _registrations(source: str, files: dict[str, str], owner: str) -> tuple[list
     return registrations, reexports
 
 
-def compose_ui_registry(contributions: list[dict[str, Any]], files: dict[str, str]) -> dict[str, str]:
+def _manifest(source: str, owner: str) -> dict[str, Any]:
+    manifest = json.loads(source)
+    if not isinstance(manifest, dict) or not isinstance(manifest.get("pages"), list):
+        raise ValueError(f"{owner}: route manifest must declare pages")
+    for route in manifest["pages"]:
+        if not isinstance(route, dict) or not all(isinstance(route.get(key), str) and route[key] for key in ("id", "path", "component")):
+            raise ValueError(f"{owner}: routes require id, path and component")
+    return manifest
+
+
+def compose_ui_registry(
+    contributions: list[dict[str, Any]], files: dict[str, str], *, revision_baseline: dict[str, str] | None = None,
+) -> dict[str, str]:
     """Compose shared roots from admitted worker files and verified pack files.
 
-    Owners identify input for diagnostics, never authorize it. The caller admits
-    workers and verifies pack digests before invoking this function.
+    The caller admits workers, verifies pack digests, and reads revision_baseline
+    from the bound immutable archive. Current snapshots cannot grant carryover.
     """
+    declarations = []
+    baseline_entries: set[ComponentRegistration] = set()
+    baseline_exports: set[tuple[str, tuple[str, str]]] = set()
+    baseline_routes: dict[str, list[dict[str, Any]]] = {}
+    baseline_sequence: list[str] = []
+    if revision_baseline:
+        if "ui/index.js" in revision_baseline:
+            entries, exports = _registrations(revision_baseline["ui/index.js"], revision_baseline, "revision baseline")
+            baseline_entries.update(entries)
+            baseline_exports.update(exports.items())
+        if "ui/route_manifest.json" in revision_baseline:
+            for route in _manifest(revision_baseline["ui/route_manifest.json"], "revision baseline")["pages"]:
+                baseline_routes.setdefault(route["id"], []).append(route)
+                baseline_sequence.append(route["id"])
+    for contribution in contributions:
+        owner = str(contribution["owner"])
+        baseline = contribution.get("baseline") is True
+        contents = {item["filename"]: item["content"] for item in contribution["files"]}
+        entries, exports = _registrations(contents["ui/index.js"], files, owner) if "ui/index.js" in contents else ([], {})
+        manifest = _manifest(contents["ui/route_manifest.json"], owner) if "ui/route_manifest.json" in contents else None
+        declarations.append((owner, baseline, contents, entries, exports, manifest))
+
+    # Only admitted app declarations supersede saved app snapshots. Verified
+    # pack declarations remain current owners, including when carried by a task.
+    app_declarations = [item for item in declarations if not item[1] and not item[0].startswith("pack:")]
+    changed_components = {entry.key for _, _, _, entries, _, _ in app_declarations for entry in entries if entry not in baseline_entries}
+    changed_exports = {name for _, _, _, _, exports, _ in app_declarations for name, binding in exports.items() if (name, binding) not in baseline_exports}
+    changed_routes = {route["id"] for _, _, _, _, _, manifest in app_declarations if manifest is not None for route in manifest["pages"] if route not in baseline_routes.get(route["id"], [])}
+    reordered_routes = set()
+    for _, _, _, _, _, manifest in app_declarations:
+        if manifest is None:
+            continue
+        sequence = [route["id"] for route in manifest["pages"] if route["id"] in baseline_routes]
+        if sequence != [route_id for route_id in baseline_sequence if route_id in sequence]:
+            reordered_routes.update(sequence)
+        for route in manifest["pages"]:
+            order = (route.get("order"), (route.get("navigation") or {}).get("order"))
+            if any(order != (prior.get("order"), (prior.get("navigation") or {}).get("order")) for prior in baseline_routes.get(route["id"], [])):
+                reordered_routes.add(route["id"])
+
     registrations: dict[str, set[tuple[str, bool, ComponentRegistration]]] = {}
     reexports: dict[str, tuple[str, str]] = {}
     export_owners: dict[str, set[str]] = {}
@@ -261,49 +318,53 @@ def compose_ui_registry(contributions: list[dict[str, Any]], files: dict[str, st
     route_sequence: set[tuple[str, str]] = set()
     manifest_metadata: dict[str, Any] = {}
     has_index = has_manifest = False
-    for contribution in contributions:
-        owner = str(contribution["owner"])
-        baseline = contribution.get("baseline") is True
-        contents = {item["filename"]: item["content"] for item in contribution["files"]}
+    for owner, baseline, contents, entries, exports, manifest in declarations:
+        app_owner = not owner.startswith("pack:")
         if "ui/index.js" in contents:
             has_index = True
-            entries, exports = _registrations(contents["ui/index.js"], files, owner)
             for entry in entries:
-                registrations.setdefault(entry.key, set()).add((owner, baseline, entry))
+                carried = baseline or (app_owner and entry in baseline_entries)
+                if carried and entry.key in changed_components:
+                    continue
+                registrations.setdefault(entry.key, set()).add((owner, carried, entry))
             for name, binding in exports.items():
+                carried = baseline or (app_owner and (name, binding) in baseline_exports)
+                if carried and name in changed_exports:
+                    continue
                 if name in reexports and reexports[name] != binding:
                     raise ValueError(f"Conflicting UI barrel export: {name}")
                 reexports[name] = binding
-                if not baseline:
+                if not carried:
                     export_owners.setdefault(name, set()).add(owner)
                     if len(export_owners[name]) > 1:
                         raise ValueError(f"Competing owners for UI barrel export: {name}")
-        if "ui/route_manifest.json" not in contents:
+        if manifest is None:
             continue
         has_manifest = True
-        manifest = json.loads(contents["ui/route_manifest.json"])
-        if not isinstance(manifest, dict) or not isinstance(manifest.get("pages"), list):
-            raise ValueError(f"{owner}: route manifest must declare pages")
         for key, value in manifest.items():
             if key != "pages":
                 if key in manifest_metadata and manifest_metadata[key] != value:
                     raise ValueError(f"Conflicting route manifest metadata: {key}")
                 manifest_metadata[key] = value
         sequence = []
+        seen_route_ids = set()
         for route in manifest["pages"]:
-            if not isinstance(route, dict) or not all(isinstance(route.get(key), str) and route[key] for key in ("id", "path", "component")):
-                raise ValueError(f"{owner}: routes require id, path and component")
             route_id, path = route["id"], route["path"]
-            if route_id in sequence:
+            if route_id in seen_route_ids:
                 raise ValueError(f"{owner}: repeated route id: {route_id}")
-            sequence.append(route_id)
+            seen_route_ids.add(route_id)
+            if not baseline or route_id not in reordered_routes:
+                sequence.append(route_id)
             if not path.startswith("/"):
                 raise ValueError(f"{owner}: route paths must start with /")
+            carried = baseline or (app_owner and route in baseline_routes.get(route_id, []))
+            if carried and route_id in changed_routes:
+                continue
             if route_id in routes and routes[route_id] != route:
                 raise ValueError(f"Conflicting route id: {route_id}")
             if path in route_paths and route_paths[path] != route_id:
                 raise ValueError(f"Conflicting route path: {path}")
-            if not baseline:
+            if not carried:
                 route_owners.setdefault(route_id, set()).add(owner)
                 if len(route_owners[route_id]) > 1:
                     raise ValueError(f"Competing owners for route: {route_id}")

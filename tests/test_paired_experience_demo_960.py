@@ -366,16 +366,11 @@ async def _scripted_replay(presentation, *, build_context_root=None):
     # Resolve the installed selected pack before the original plan and worker
     # admission. Assembly alone writes its outputs; replay never repairs them.
     selected = _messaging_selection(build_context_root) if build_context_root is not None else {}
-    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
-        verified_pack_data_contracts,
-        verified_pack_template_inventory,
-    )
     from mozaiksai.core.workflow.generator_support.code_files import compile_data_contract
 
-    contract = compile_data_contract(
-        _domain_contract(), context_variables=selected,
-        pack_data_contracts=verified_pack_data_contracts(verified_pack_template_inventory(context_variables=selected)),
-    )
+    # DesignDocs describes app-owned data. The canonical assembly/scanner owners
+    # compose verified pack contributions without changing that approved input.
+    contract = compile_data_contract(_domain_contract(), context_variables=selected)
     candidates = _candidate_files(presentation)
     candidates["data/contract.json"] = json.dumps(contract, indent=2, ensure_ascii=False)
     tasks = []
@@ -562,6 +557,9 @@ async def test_paired_messaging_is_selected_before_admission_and_preserves_domai
         plan = detach(context.get("app_build_plan"))
         assert any(pack["capability_pack_id"] == "messaging" for pack in plan["capability_packs"])
         assert {surface["surface_id"] for surface in detach(context.get("data_contract"))["surfaces"]} == {
+            "projects", "tasks",
+        }
+        assert {surface["surface_id"] for surface in json.loads(files["data/contract.json"])["surfaces"]} == {
             "projects", "tasks", "messages",
         }
         persistence = next(task for task in plan["build_tasks"] if task["task_id"] == "persistence")
@@ -578,7 +576,10 @@ async def test_paired_messaging_is_selected_before_admission_and_preserves_domai
         if presentation == "B":
             assert "PlanningBoard" in registry
             assert files["ui/pages/custom/board.jsx"] == BOARD_SOURCE.read_text(encoding="utf-8")
-        scanner_errors = scan_generated_bundle(files, capability_packs=receipt["capability_packs"])
+        scanner_errors = scan_generated_bundle(
+            files, capability_packs=receipt["capability_packs"], context_variables=context,
+            planned_data_contract=detach(context.get("data_contract")),
+        )
         assert scanner_errors == [], "\n".join(scanner_errors)
         assert audit_app_ui_bundle_integrity(
             [{"filename": path, "content": content} for path, content in files.items()],
