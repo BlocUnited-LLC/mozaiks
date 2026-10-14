@@ -152,6 +152,43 @@ def test_only_the_reverse_edges_are_dropped_beside_a_kept_edge():
     assert _task(cached, "pt_persistence_customer_job_contract")["depends_on"] == ["pt_module_customer_registry"]
 
 
+def test_an_edge_to_a_module_without_persistent_collections_is_kept():
+    """Only tasks review binds to the serializer (modules that own collections) lose their reverse edge."""
+    context = _context("5cd39d67")
+
+    def module(module_id: str) -> list[dict]:
+        return [
+            {"task_id": f"{kind}_{module_id}", "task_type": kind, "capability_pack_id": module_id,
+             "owned_paths": paths, "depends_on": []}
+            for kind, paths in (
+                ("module_contract", [f"modules/{module_id}/module.yaml"]),
+                ("data_models", [f"modules/{module_id}/backend/schemas.py"]),
+                ("business_services", [f"modules/{module_id}/backend/{name}.py" for name in ("handler", "service")]),
+            )
+        ]
+
+    persistence = {
+        "task_id": "contract", "task_type": "persistence_contract", "capability_pack_id": None,
+        "owned_paths": ["data/contract.json"],
+        "depends_on": ["data_models_customer_registry", "data_models_notes", "business_services_notes"],
+    }
+    plan = {
+        "capability_packs": [
+            {"capability_pack_id": module_id, "surface_id": module_id, "surface_kind": "module",
+             "capability_source": "generated_module"}
+            for module_id in ("customer_registry", "notes")
+        ],
+        "build_tasks": [*module("customer_registry"), *module("notes"), persistence],
+    }
+
+    app_plan_review._repair_module_task_dependencies(plan, context)
+
+    assert persistence["depends_on"] == ["data_models_notes", "business_services_notes"]
+    tasks = {task["task_id"]: task for task in plan["build_tasks"]}
+    assert "contract" in tasks["data_models_customer_registry"]["depends_on"]
+    assert "contract" not in tasks["data_models_notes"]["depends_on"]
+
+
 def test_pack_pages_are_approved_page_artifacts_and_an_invented_page_is_not():
     context = _context("5cd39d67")
     task = {
@@ -175,7 +212,10 @@ def test_a_page_task_with_an_invented_page_is_told_to_keep_its_label():
     message = result["error"]
     assert "unapproved surface 'page_bundle'" in message
     assert "task 'tt_page_bundle_crm_billing_ui'" in message
-    assert "['ui/pages/reports.yaml']" in message, "only the out-of-scope path is named"
+    assert "drop ['ui/pages/reports.yaml']: no approved page or selected pack declares those pages" in message, (
+        "only the out-of-scope page is named, and it is dropped rather than moved"
+    )
+    assert "move [" not in message
     assert "Keep the page_bundle label" in message
     assert "need no task" in message and "ui/pages/billing.yaml" in message
     assert "remove its capability and tasks" not in message
@@ -192,9 +232,32 @@ def test_a_page_bundle_capability_and_a_mislabelled_task_are_named():
     result, _context_ = _review("5cd39d67", plan)
 
     message = result["error"]
-    assert "capability 'page_bundle' is not a capability: remove that capability_packs entry" in message
-    assert "task 'pt_module_customer_registry' has task_type='module_contract'" in message
-    assert "'modules/customer_registry/module.yaml'" in message
+    assert (
+        "capability_packs entry 'page_bundle' uses surface_id='page_bundle', a task label rather than "
+        "a capability surface; remove that entry"
+    ) in message
+    assert "task 'pt_module_customer_registry': task_type='module_contract' (page work needs 'page_bundle')" in message
+    assert (
+        "move ['modules/customer_registry/module.yaml', 'modules/customer_registry/contracts/events.yaml'] "
+        "to the task of the approved surface that owns them"
+    ) in message
+    assert " has " not in message and "is not a capability" not in message
+
+
+def test_with_no_approved_pages_no_page_bundle_task_is_suggested():
+    context = _context("5cd39d67")
+    spec = deepcopy(_fixture("5cd39d67")["context_variables"]["experience_spec"])
+    spec["pages"] = []
+    context.set("experience_spec", spec)
+
+    result = review_app_build_plan(AppBuildPlan=_draft("5cd39d67", "1"), context_variables=context)
+
+    message = result["error"]
+    assert "unapproved surface 'page_bundle'" in message
+    assert "build_tasks ['pt_page_bundle_app', 'pt_page_bundle_billing_portal'] use it" in message
+    assert "declares no pages, so page_bundle approves no task here: remove those page_bundle tasks" in message
+    assert "Keep the page_bundle label" not in message
+    assert "['app.json']" not in message
 
 
 def test_an_unapproved_module_surface_names_its_tasks_and_paths():
@@ -215,7 +278,9 @@ def test_an_unapproved_module_surface_names_its_tasks_and_paths():
 def test_workspace_app_root_is_stripped_from_the_leading_segment_only():
     untouched = ["app.json", "application/notes.yaml", "ui/pages/app/home.yaml", "modules/app/module.yaml", "app/"]
     plan = {"build_tasks": [
-        {"task_id": "pages", "owned_paths": ["app/app.json", "app.json", "app\\ui/pages/jobs.yaml", *untouched]},
+        {"task_id": "pages", "owned_paths": [
+            "app/app.json", "app.json", "app\\ui/pages/jobs.yaml", "app/ui/pages/app/lobby.yaml", *untouched,
+        ]},
         {"task_id": "module", "owned_paths": ["app/modules/jobs/module.yaml", "app/modules/jobs/module.yaml"]},
         {"task_id": "plain", "owned_paths": list(untouched)},
     ]}
@@ -223,7 +288,7 @@ def test_workspace_app_root_is_stripped_from_the_leading_segment_only():
     repairs = _strip_workspace_app_root(plan)
 
     pages, module, plain = plan["build_tasks"]
-    assert pages["owned_paths"] == ["app.json", "ui/pages/jobs.yaml", *untouched[1:]]
+    assert pages["owned_paths"] == ["app.json", "ui/pages/jobs.yaml", "ui/pages/app/lobby.yaml", *untouched[1:]]
     assert module["owned_paths"] == ["modules/jobs/module.yaml"]
     assert plain["owned_paths"] == untouched
     assert [repair.split(":")[0] for repair in repairs] == ["pages", "module"]

@@ -587,7 +587,8 @@ This project follows a practical pre-1.0 changelog format:
   does leave the approved page scope, the rejection names the task and its
   out-of-scope paths and tells the planner to keep the `page_bundle` label,
   rather than to delete its page work. The planner prompt no longer asks for
-  billing pages a selected pack already provides. A live build had spent all
+  billing pages a selected pack already provides, and names the app manifest
+  by its bundle path `app.json`. A live build had spent all
   three plan attempts on these rejections and stopped before any task ran.
 - Preserve historical large AppContext payloads across discovery refreshes by
   giving each distinct JSON payload its own content-store key.

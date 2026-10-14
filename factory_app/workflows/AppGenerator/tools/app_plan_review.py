@@ -559,9 +559,9 @@ def _strip_workspace_app_root(plan: dict[str, Any]) -> list[str]:
         targets = {text.removeprefix(_WORKSPACE_APP_ROOT) for text in stripped}
         rewritten: list[Any] = []
         for path in owned:
-            text = path.replace("\\", "/").strip() if isinstance(path, str) else None
-            if text in stripped:
-                path = text.removeprefix(_WORKSPACE_APP_ROOT)
+            spelled = path.replace("\\", "/").strip() if isinstance(path, str) else None
+            if spelled is not None and spelled in stripped:
+                path = spelled.removeprefix(_WORKSPACE_APP_ROOT)
             if path in targets and path in rewritten:
                 continue
             rewritten.append(path)
@@ -1806,34 +1806,54 @@ def _page_bundle_label_message(
     valid approved-page task, and in chat 601d2f56 it deleted every page task.
     What is wrong is one task's fields or files, so the message names them.
     """
-    approved_pages = _required_page_paths({"pages": _approved_page_inventory(context)})
+    approved_inventory = _approved_page_inventory(context)
+    approved_pages = _required_page_paths({"pages": approved_inventory})
     allowed = _approved_page_paths(context)
     pack_pages = sorted(_pack_page_paths(context))
-    details: list[str] = [
-        f"capability {pack_id!r} is not a capability: remove that capability_packs entry" for pack_id in capabilities
-    ]
-    for task in tasks:
-        faults = [
-            f"{field}={task.get(field)!r}"
-            for field, expected in (("task_type", "page_bundle"), ("surface_kind", "ui_only"), ("capability_pack_id", None))
-            if task.get(field) != expected
-        ]
-        outside = [
-            path for path in task.get("owned_paths") or []
-            if not is_safe_app_path(path) or normalize_app_path(path).lower() not in allowed
-        ]
-        if outside:
-            faults.append(f"owns {outside}, outside the approved page artifacts")
-        details.append(f"task {task.get('task_id')!r} has {'; '.join(faults) or 'no approved page'}")
     pack_note = (
         f" Pages a selected pack ships ({pack_pages}) need no task; the pack's templates provide them."
         if pack_pages else ""
     )
+    details: list[str] = [
+        f"capability_packs entry {pack_id!r} uses surface_id='page_bundle', a task label rather than "
+        "a capability surface; remove that entry"
+        for pack_id in capabilities
+    ]
+    if not approved_inventory:
+        # _owns_only_approved_pages approves page_bundle work only within an
+        # approved page inventory, so with none every page_bundle task fails;
+        # advising one would send the planner straight back here.
+        ids = [str(task.get("task_id")) for task in tasks]
+        if ids:
+            details.append(f"build_tasks {ids} use it")
+        return (
+            f"unapproved surface 'page_bundle': {'; '.join(details)}. The approved experience_spec "
+            "declares no pages, so page_bundle approves no task here: remove those page_bundle tasks."
+            f"{pack_note} A page the app needs must first be approved in ExperienceSpec."
+        )
+    for task in tasks:
+        faults = [
+            f"{field}={task.get(field)!r} (page work needs {expected!r})"
+            for field, expected in (("task_type", "page_bundle"), ("surface_kind", "ui_only"), ("capability_pack_id", None))
+            if task.get(field) != expected
+        ]
+        outside = [
+            str(path) for path in task.get("owned_paths") or []
+            if not is_safe_app_path(path) or normalize_app_path(path).lower() not in allowed
+        ]
+        # The same page shape _repair_coverage drops when no approved page claims it.
+        invented = [path for path in outside if path.startswith("ui/pages/") and path.endswith((".yaml", ".yml", ".jsx"))]
+        misplaced = [path for path in outside if path not in invented]
+        if invented:
+            faults.append(f"drop {invented}: no approved page or selected pack declares those pages")
+        if misplaced:
+            faults.append(f"move {misplaced} to the task of the approved surface that owns them")
+        details.append(f"task {task.get('task_id')!r}: {'; '.join(faults) or 'owns no approved page artifact'}")
     return (
         f"unapproved surface 'page_bundle': {'. '.join(details)}. Keep the page_bundle label for page "
         "work: task_type=page_bundle, surface_kind=ui_only, capability_pack_id=null, owning only "
-        f"the approved experience_spec page artifacts {approved_pages}.{pack_note} Move any other "
-        "path to the task of the approved surface that owns it; do not delete the approved page work."
+        f"the approved experience_spec page artifacts {approved_pages}.{pack_note} Do not delete "
+        "the approved page work."
     )
 
 

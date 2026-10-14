@@ -2,7 +2,7 @@
  "source": {
   "sha": "deeef42d",
   "chat": "5cd39d67-0efd-4aea-b47a-d19e75ae0037",
-  "context": "AppGenerator starting context for the live Create App chat, reduced to keys review_app_build_plan reads (null keys omitted); the reduced and full contexts review every draft to an identical cached plan, batch items and feedback. Build identifiers are synthetic; pack_source_path is repo-relative.",
+  "context": "AppGenerator starting context for the live Create App chat, reduced to keys review_app_build_plan reads (null keys omitted); the reduced and full contexts review every draft to an identical cached plan, batch items and feedback. Build identifiers are synthetic; pack_source_path and operator contract source_path values are repo-relative.",
   "plans": "AG2NetworkKnowledge channel wal.jsonl: AppPlanAgent's three AppBuildPlan drafts, unmodified. Attempt 1 owns app/app.json and the MozaiksPay pages; attempts 2 and 3 (identical but for spelling in prose) deleted the approved-page task as the rejection told them to."
  },
  "live_failure": "Plan surface inventory errors:\n- unapproved surface 'page_bundle': remove its capability and tasks rather than relabel them. Use only surfaces from design_surface_map or selected pack provider/facade contracts. Valid approved surface_ids: ['billing_portal', 'customer_registry', 'dashboard_aggregator', 'job_registry', 'mozaikspay', 'mozaikspay_managed'].",
@@ -3550,7 +3550,7 @@
       }
      }
     ],
-    "source_path": "C:\\Repos\\BlocUnitedRepo\\mozaiks-app\\.local\\worktrees\\live-app-b841bfbb\\.venv\\Lib\\site-packages\\factory_app\\build_context\\mozaikspay\\contract.yaml",
+    "source_path": "factory_app/build_context/mozaikspay/contract.yaml",
     "surface_ownership": [
      {
       "account_state_field_names": [
@@ -4199,7 +4199,7 @@
      }
     },
     "schema_version": "mozaiks.provider_api_contract.v1",
-    "source_path": "C:\\Repos\\BlocUnitedRepo\\mozaiks-app\\.local\\worktrees\\live-app-b841bfbb\\.venv\\Lib\\site-packages\\factory_app\\build_context\\mozaikspay\\provider_api_contract.yaml"
+    "source_path": "factory_app/build_context/mozaikspay/provider_api_contract.yaml"
    }
   ],
   "run_build_binding": {

@@ -2,7 +2,7 @@
  "source": {
   "sha": "deeef42d",
   "chat": "601d2f56",
-  "context": "AppGenerator starting context for the live Create App chat, reduced to keys review_app_build_plan reads (null keys omitted); the reduced and full contexts review every draft to an identical cached plan, batch items and feedback. Build identifiers are synthetic; pack_source_path is repo-relative.",
+  "context": "AppGenerator starting context for the live Create App chat, reduced to keys review_app_build_plan reads (null keys omitted); the reduced and full contexts review every draft to an identical cached plan, batch items and feedback. Build identifiers are synthetic; pack_source_path and operator contract source_path values are repo-relative.",
   "plans": "AG2NetworkKnowledge channel wal.jsonl: AppPlanAgent's first AppBuildPlan, unmodified. Its one page task owns the approved pages and the MozaiksPay pages; the next draft deleted every page task."
  },
  "live_failure": "Plan surface inventory errors:\n- unapproved surface 'page_bundle': remove its capability and tasks rather than relabel them. Use only surfaces from design_surface_map or selected pack provider/facade contracts. Valid approved surface_ids: ['billing_portal', 'crm_core', 'mozaikspay', 'mozaikspay_managed'].",
@@ -1956,7 +1956,7 @@
       }
      }
     ],
-    "source_path": "C:\\Repos\\BlocUnitedRepo\\mozaiks-app\\.local\\worktrees\\live-app-b841bfbb\\.venv\\Lib\\site-packages\\factory_app\\build_context\\mozaikspay\\contract.yaml",
+    "source_path": "factory_app/build_context/mozaikspay/contract.yaml",
     "surface_ownership": [
      {
       "account_state_field_names": [
@@ -2605,7 +2605,7 @@
      }
     },
     "schema_version": "mozaiks.provider_api_contract.v1",
-    "source_path": "C:\\Repos\\BlocUnitedRepo\\mozaiks-app\\.local\\worktrees\\live-app-b841bfbb\\.venv\\Lib\\site-packages\\factory_app\\build_context\\mozaikspay\\provider_api_contract.yaml"
+    "source_path": "factory_app/build_context/mozaikspay/provider_api_contract.yaml"
    }
   ],
   "run_build_binding": {

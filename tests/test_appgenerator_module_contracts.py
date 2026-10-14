@@ -306,7 +306,7 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_removed_operation
     assert "services/routes/admin.py" in source
     assert "APIRouter" in source
     assert "self-contained FastAPI" in source
-    assert "`app/app.json` `admins`" in source
+    assert "`app.json` `admins` (bundle-relative; physical workspace path `app/app.json`)" in source
     assert "`platform/config/admin.json`" not in source
     assert "Otherwise set `admin_yaml: null`" in source
     assert "derive panels from the module's declared actions" in source
