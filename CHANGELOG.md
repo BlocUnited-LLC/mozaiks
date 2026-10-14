@@ -448,19 +448,26 @@ This project follows a practical pre-1.0 changelog format:
   their repositories or start a discovery run with their `repo`-scoped token.
   The flow now starts with an authenticated `POST /api/oauth/github/start`,
   which returns GitHub's authorize URL and a connection id and sets a
-  short-lived HttpOnly cookie. The callback accepts only a state the server
-  issued, once, before it expires, and only from the browser holding that
-  cookie. `/status`, `/ready` and `/repos` require a signed-in user or local
-  development access and answer only the connection's owner, and discovery
-  receives the token only in a run of that same user.
+  short-lived HttpOnly `__Host-` cookie (`Secure`, `Path=/`), which a sibling
+  subdomain or an injected http response cannot plant. The callback accepts
+  only a state the server issued, once, before it expires, and only from the
+  browser holding that flow's cookie exactly once. `/status`, `/ready` and
+  `/repos` require a signed-in user or local development access and answer
+  only the connection's owner, and discovery receives the token only in a run
+  of that same user. When the callback refuses or fails a flow, `/ready` tells
+  the page that started it why, and the error popup stays open.
   `GET /api/oauth/github/connect` is removed, as is
   `/api/oauth/github/_dev/complete`, which seeded tokens without
   authentication whenever `APP_ENV` was not `production`. The callback page no
   longer echoes GitHub's `error_description`, which could inject script on the
   API origin. The callback must be served on the host the page sends its API
-  calls to (ports may differ). The flow still requests `repo` because GitHub
-  OAuth Apps have no read-only scope for private repositories; discovery only
-  reads.
+  calls to (ports may differ; `localhost` and `127.0.0.1` are different
+  hosts), and the page must be served over HTTPS, which Chromium and Firefox
+  also grant `http://localhost`. Only local development (authentication off,
+  a request from this machine) uses an unprefixed, non-`Secure` cookie, so
+  that Safari works on `http://localhost`. The flow still requests `repo`
+  because GitHub OAuth Apps have no read-only scope for private repositories;
+  discovery only reads.
 
 ### Changed
 

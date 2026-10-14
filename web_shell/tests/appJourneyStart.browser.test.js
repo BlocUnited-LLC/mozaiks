@@ -82,7 +82,7 @@ async function fixture(t) {
   return async (subtest, {
     createFailure = false, resolveFailure = false, holdCreate = false, holdResolve = false,
     entryTransition = null, navigation = null, isAuthenticated = true, startPath = '/create',
-    githubOauth = false,
+    githubOauth = false, githubOauthFailure = null,
   } = {}) => {
     const page = await browser.newPage({ reducedMotion: 'reduce' });
     subtest.after(() => page.close());
@@ -143,7 +143,9 @@ async function fixture(t) {
           return json({ authorize_url: githubAuthorizeUrl, connection_id: 'server-connection' });
         }
         if (githubOauth && url.pathname === '/api/oauth/github/ready') {
-          return json({ ready: calls.github.filter(call => call.path === url.pathname).length > 1 });
+          const settled = calls.github.filter(call => call.path === url.pathname).length > 1;
+          if (settled && githubOauthFailure) return json({ ready: false, error: githubOauthFailure });
+          return json({ ready: settled });
         }
         if (githubOauth && url.pathname === '/api/oauth/github/repos') {
           return json({ repos: [{ full_name: 'example/private-app', private: true, description: 'Customer app' }] });
@@ -299,6 +301,28 @@ test('registered app journeys use the normal factory selectors and shell transit
     const final = calls.resolves.at(-1).body;
     assert.equal(final.context_variables.github_repo, 'example/private-app');
     assert.equal(final.context_variables.github_oauth_session, 'server-connection');
+  });
+
+  await t.test('a GitHub connection the callback refused shows the reason on the page instead of going idle', async subtest => {
+    const failure = 'This GitHub connection was started from a different browser or a different address '
+      + '(e.g. localhost vs 127.0.0.1). Start again from the same address.';
+    const { page, calls } = await open(subtest, { githubOauth: true, githubOauthFailure: failure });
+    await brownfield(page).click();
+    await page.getByRole('button', { name: /Add AI Workflows/ }).click();
+    const popupOpened = page.waitForEvent('popup');
+    await page.getByRole('button', { name: 'Connect GitHub', exact: true }).click();
+    const popup = await popupOpened;
+
+    await expect(page.getByRole('alert').filter({ hasText: 'different address' })).toHaveText(failure, { timeout: 10000 });
+    await expect.poll(() => popup.isClosed()).toBe(true);
+    await expect(page.getByRole('button', { name: 'Connect GitHub', exact: true })).toBeEnabled();
+    assert.deepEqual(calls.github.map(call => call.path), [
+      '/api/oauth/github/status', '/api/oauth/github/start', '/api/oauth/github/ready', '/api/oauth/github/ready',
+    ]);
+    // Polling stopped: no further /ready, and no repo list for a flow that failed.
+    await page.waitForTimeout(1500);
+    assert.equal(calls.github.length, 4);
+    assert.deepEqual(calls.resolves.map(call => call.body?.context_variables?.github_oauth_session).filter(Boolean), []);
   });
 
   await t.test('registration error is visible and cannot start a workflow; retry recovers', async subtest => {

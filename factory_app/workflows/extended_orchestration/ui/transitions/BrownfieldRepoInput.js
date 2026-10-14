@@ -36,6 +36,7 @@ function useGithubOauthPopup() {
   const mountedRef = useRef(true);
   const [connectionId, setConnectionId] = useState(null);
   const [status, setStatus] = useState('idle'); // idle | pending | connected | error
+  const [error, setError] = useState(null); // why the server ended the flow, when it says
 
   const _stopPolling = useCallback(() => {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
@@ -62,6 +63,7 @@ function useGithubOauthPopup() {
     if (!popup) { setStatus('error'); return; }
     popupRef.current = popup;
     setConnectionId(null);
+    setError(null);
     setStatus('pending');
 
     let started = null;
@@ -96,6 +98,16 @@ function useGithubOauthPopup() {
           setStatus('connected');
           return;
         }
+        // The callback refused or failed this flow (for example it reached
+        // another address than the page): show why instead of going idle.
+        if (typeof d?.error === 'string' && d.error) {
+          _stopPolling();
+          _closePopup();
+          if (!mountedRef.current) return;
+          setError(d.error);
+          setStatus('error');
+          return;
+        }
       } catch (_) { /* network blip — keep polling */ }
       // If popup was closed by user before completing, stop
       if (popupClosed) {
@@ -110,10 +122,11 @@ function useGithubOauthPopup() {
     _stopPolling();
     _closePopup();
     setConnectionId(null);
+    setError(null);
     setStatus('idle');
   }, [_stopPolling, _closePopup]);
 
-  return { connectionId, status, open, reset };
+  return { connectionId, status, error, open, reset };
 }
 
 function useGithubRepos(connectionId) {
@@ -147,7 +160,9 @@ export default function BrownfieldRepoInput({
   const option = Array.isArray(transition?.options) ? transition.options[0] : null;
   const motion = useTransitionMotion();
   const oauthAvailable = useGithubOauthAvailable();
-  const { connectionId, status: oauthStatus, open: openOAuth, reset: resetOAuth } = useGithubOauthPopup();
+  const {
+    connectionId, status: oauthStatus, error: oauthError, open: openOAuth, reset: resetOAuth,
+  } = useGithubOauthPopup();
   const { repos, loading: reposLoading, error: reposError } = useGithubRepos(
     oauthStatus === 'connected' ? connectionId : null
   );
@@ -355,8 +370,8 @@ export default function BrownfieldRepoInput({
             )}
 
             {oauthStatus === 'error' && (
-              <p className="text-xs text-destructive text-center">
-                GitHub connection failed. Try again or paste a URL instead.
+              <p role="alert" className="text-xs text-destructive text-center">
+                {oauthError || 'GitHub connection failed. Try again or paste a URL instead.'}
               </p>
             )}
           </>
