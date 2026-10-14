@@ -85,8 +85,10 @@ docker stop mozaiks-release-audit-mongo
 
 The first two commands pull MongoDB through the same public mirror used by CI
 and tag it locally for the audit command; they avoid anonymous Docker Hub
-limits. If the local pull fails transiently, rerun it. CI uses the bounded
-retry helper `scripts/ci/pull_public_image.sh`.
+limits. If the local pull fails transiently, rerun it, or pull
+`mongo:7` from Docker Hub instead. CI uses the bounded retry helper
+`scripts/ci/pull_public_image.sh`, which falls back to Docker Hub's copy of the
+same official image when the mirror refuses a pull.
 
 The audit script is `scripts/run_release_audit.py`. Its first-run smoke starts
 both platform and Studio hosts and checks readiness and shell configuration
