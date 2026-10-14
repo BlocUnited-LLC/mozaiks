@@ -63,6 +63,8 @@ def test_a_refused_ecr_pull_falls_back_to_docker_hub(tmp_path: Path) -> None:
         "pull public.ecr.aws/docker/library/mongo:7",
         "pull docker.io/library/mongo:7",
         "tag docker.io/library/mongo:7 mongo:7",
+        # docker-image:// build contexts look the image up by its mirror name.
+        "tag docker.io/library/mongo:7 public.ecr.aws/docker/library/mongo:7",
     ]
     assert "Pulled mongo:7 from docker.io/library/mongo:7" in result.stderr
 

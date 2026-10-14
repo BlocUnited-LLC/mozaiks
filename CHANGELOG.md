@@ -613,6 +613,8 @@ This project follows a practical pre-1.0 changelog format:
   after a native callback or cancelled attempt.
 - CI and operator reference container builds resolve public base images from a
   public mirror, avoiding anonymous Docker Hub pull limits during release checks.
+  When the mirror refuses a pull with its own rate limit, CI pulls the same
+  official image from Docker Hub instead.
 - Restored the assistant launcher on declared app home pages and other custom
   routes, while keeping it hidden on full chat pages, declared chat aliases and
   sign-in surfaces. The widget uses the app's name and offers workflow access
