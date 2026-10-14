@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from factory_app.workflows._shared.generated_ui_contract import audit_app_ui_bundle_integrity
 from factory_app.workflows.AppGenerator.tools.app_build_plan import app_build_plan
 from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
 from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import scan_generated_bundle
@@ -338,6 +339,10 @@ async def test_scripted_paired_apps_admit_and_assemble(presentation, tmp_path):
     else:
         assert "ui/pages/custom/board.jsx" in files
     assert scan_generated_bundle(files) == []
+    assert audit_app_ui_bundle_integrity(
+        [{"filename": path, "content": content} for path, content in files.items()],
+        source_label=f"Paired {presentation} candidate",
+    ) == []
     result = validate_generated_app_bundle(GeneratedAppValidationRequest(
         files=files, build_tasks=detach(context.get("app_build_plan"))["build_tasks"],
     ))

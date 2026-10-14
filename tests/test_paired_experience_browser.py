@@ -64,7 +64,7 @@ def _profile(presentation, candidate):
         {"path": "/auth/callback", "component": "AuthCallbackPage", "kind": "auth",
          "excluded_reason": "The real PKCE callback is exercised by every sign-in; it is not a standalone page."},
         {"path": "/me", "component": "ProfilePage", "kind": "extension",
-         "excluded_reason": "Inherited profile editing is outside this Projects/Tasks workload; not evaluated."},
+         "excluded_reason": "Authenticated profile editing and reload persistence are exercised within each /projects case."},
         {"path": "/u/:username", "component": "ProfilePage", "kind": "extension",
          "excluded_reason": "Inherited public profile lookup is outside this workload; not evaluated."},
     ]
