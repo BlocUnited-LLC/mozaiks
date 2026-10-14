@@ -12,14 +12,6 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
-### Fixed
-
-- Preserve historical large AppContext payloads across discovery refreshes by
-  giving each distinct JSON payload its own content-store key.
-- Existing-app source scans prioritize canonical admin and workflow registries
-  before the file limit, so large app workspaces retain their workflow entry
-  points during brownfield discovery without increasing scan budgets.
-
 ## 0.2.0 - 2026-10-11
 
 ### Added
@@ -584,6 +576,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Preserve historical large AppContext payloads across discovery refreshes by
+  giving each distinct JSON payload its own content-store key.
+- Existing-app source scans prioritize canonical admin and workflow registries
+  before the file limit, so large app workspaces retain their workflow entry
+  points during brownfield discovery without increasing scan budgets.
 - AppGenerator now steers a generated module's backend task that owns
   `backend/base_handler.py` to the canonical two-file handler: `base_handler.py`
   holds the custom action dispatch and `backend/handler.py` defines the exact
