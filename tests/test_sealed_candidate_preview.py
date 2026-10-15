@@ -254,3 +254,41 @@ async def test_real_docker_sealed_public_app_boots_and_tears_down():
         assert not immutable.success
     finally:
         await manager.stop(state.sandbox_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(os.getenv("MOZAIKS_RUN_SEALED_DOCKER_SMOKE") != "1", reason="opt-in real Docker smoke")
+async def test_real_docker_sealed_workspace_denies_parent_writes_and_directory_replacement():
+    adapter = DockerSandboxAdapter()
+    session = await adapter.create_session(
+        template=os.environ["MOZAIKS_SEALED_PREVIEW_IMAGE_ID"],
+        metadata={"purpose": "sealed_candidate_preview"},
+        envs={},
+    )
+    try:
+        await adapter.stage_sealed_files(
+            session_id=session.session_id,
+            files={
+                "app/app.json": APP_JSON,
+                "workflows/example/orchestrator.yaml": b"name: example\n",
+            },
+        )
+        identity = await adapter.run_command(session_id=session.session_id, command="id -u")
+        assert identity.success and identity.stdout.strip() == "10001"
+        staged = await adapter.run_command(
+            session_id=session.session_id,
+            command="test -f /workspace/app/app.json && test -f /workspace/workflows/example/orchestrator.yaml",
+        )
+        assert staged.success
+        for command in (
+            "touch /workspace/unexpected",
+            "mv /workspace/app /workspace/replaced-app",
+            "mv /workspace/workflows /workspace/replaced-workflows",
+            "printf tamper >> /workspace/app/app.json",
+        ):
+            result = await adapter.run_command(session_id=session.session_id, command=command)
+            assert not result.success, command
+        logs = await adapter.run_command(session_id=session.session_id, command="touch /workspace/logs/probe")
+        assert logs.success
+    finally:
+        assert await adapter.terminate_session(session_id=session.session_id)
