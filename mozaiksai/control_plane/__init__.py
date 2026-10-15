@@ -143,6 +143,7 @@ from .repository_acp_usage import (
 from .repository_docker_executor import (
     RepositoryDockerExecutionError,
     RepositoryDockerTurn,
+    RepositoryLiveACPProfile,
     execute_repository_docker_turn,
 )
 from .repository_patch import (
@@ -288,6 +289,7 @@ __all__ = [
     "RepositorySnapshotEvidence",
     "RepositoryDockerExecutionError",
     "RepositoryDockerTurn",
+    "RepositoryLiveACPProfile",
     "execute_repository_docker_turn",
     "IsolatedACPUsage",
     "parse_isolated_acp_usage",
