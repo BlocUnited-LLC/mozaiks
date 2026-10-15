@@ -39,6 +39,7 @@ from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templat
     resolve_declared_pack_output_paths,
     verified_pack_data_contracts,
     verified_pack_template_inventory,
+    verified_selected_pack_sources,
 )
 from mozaiksai.core.runtime.app.auth_contract import (
     APP_AUTH_COMPONENTS,
@@ -2366,7 +2367,7 @@ def scan_generated_bundle(
         # Plan rows identify generated modules; selected pack context owns the
         # verified source and its exact declared output paths.
         output_packs = [dict(pack) for pack in capability_packs or [] if isinstance(pack, dict)]
-        for entry in verified_pack_template_inventory(context_variables=persistence_context):
+        for entry in verified_selected_pack_sources(context_variables=persistence_context):
             matches = [pack for pack in output_packs if _pack_id_from_descriptor(pack) == entry["pack_id"]]
             if not matches:
                 matches = [{"id": entry["pack_id"]}]

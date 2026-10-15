@@ -788,14 +788,14 @@ def resolve_templates_for_pack(
     return files
 
 
-def verified_pack_template_inventory(
+def verified_selected_pack_sources(
     capability_packs: list[dict[str, Any]] | None = None, *, context_variables: Any = None,
 ) -> list[dict[str, Any]]:
-    """Resolve dependency-closed templates and check fresh bytes against selected pins.
+    """Verify dependency-closed selected pack sources against their pins.
 
-    Only shipped factory packs or explicitly pinned external packs can own a
-    complete backend implementation. Unpinned external templates remain subject
-    to the ordinary canonical module compiler.
+    This does not render templates, so callers that only need verified source
+    paths (layout and declared-output checks) do not require the approved
+    build context that template variables come from.
     """
     if capability_packs is None and context_variables is not None:
         capability_packs = detach(context_variables.get("capability_packs")) or []
@@ -805,7 +805,7 @@ def verified_pack_template_inventory(
     if not capability_packs:
         return []
     _validate_pack_dependencies(capability_packs, context_variables=context_variables)
-    inventory = []
+    verified = []
     factory_contexts = (resolve_factory_app_root() / "build_context").resolve()
     for pack in capability_packs:
         if not isinstance(pack, dict):
@@ -819,11 +819,27 @@ def verified_pack_template_inventory(
         for key in ("version", "digest"):
             if pack.get(key) is not None and pack[key] != metadata[key]:
                 raise PackIntegrityError(f"Pack '{pack_id}' selected {key} does not match freshly verified source")
-        files = resolve_templates_for_pack(root, pack_id, context_variables=context_variables)
-        inventory.append({
-            **metadata, "source_path": str(root), "owner_map": _file_owner_map(root), "files": files,
+        verified.append({
+            **metadata, "source_path": str(root),
             "implementation_trusted": root.parent == factory_contexts or bool(pack.get("version") and pack.get("digest")),
         })
+    return verified
+
+
+def verified_pack_template_inventory(
+    capability_packs: list[dict[str, Any]] | None = None, *, context_variables: Any = None,
+) -> list[dict[str, Any]]:
+    """Resolve dependency-closed templates and check fresh bytes against selected pins.
+
+    Only shipped factory packs or explicitly pinned external packs can own a
+    complete backend implementation. Unpinned external templates remain subject
+    to the ordinary canonical module compiler.
+    """
+    inventory = []
+    for entry in verified_selected_pack_sources(capability_packs, context_variables=context_variables):
+        root = Path(entry["source_path"])
+        files = resolve_templates_for_pack(root, entry["pack_id"], context_variables=context_variables)
+        inventory.append({**entry, "owner_map": _file_owner_map(root), "files": files})
     return inventory
 
 
@@ -990,6 +1006,7 @@ __all__ = [
     "resolve_templates_for_pack",
     "verify_pack_integrity",
     "verified_pack_template_inventory",
+    "verified_selected_pack_sources",
     "verified_pack_data_contracts",
     "verified_template_module_ids",
 ]

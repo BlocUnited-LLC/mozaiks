@@ -28,6 +28,12 @@ This project follows a practical pre-1.0 changelog format:
   retain participant-aware actions, and compose their UI registrations with
   app-owned routes. Page refinement receives the saved pack, design and domain
   context without widening its file scope.
+- Generated bundle validation checks selected pack pins and declared outputs
+  without rendering pack templates, so the public validation facade no longer
+  needs build-time template variables such as `readiness_profile`.
+- Filtering an exclusive pack page out of a typed custom route bundle keeps the
+  app's own pages and shared registrations instead of leaving an empty or
+  dangling route bundle.
 - Runtime smoke checks read declared action response wrappers when checking
   persisted create/list results, retaining authorization and record identity
   checks for APIs such as Messaging's `thread` and `threads` responses.
