@@ -12,6 +12,19 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Changed
+
+- Shared page titles now follow the validated app-owned `ui.page.title` role;
+  page sections use app spacing, and sidebar pages stack on narrow screens.
+  Invalid explicit title roles and layouts report errors instead of silently
+  substituting another presentation.
+
+### Fixed
+
+- The shell's Monaco sanitizer replacement resolves the installed dependency
+  through directory junctions, preserving the locked sanitizer in isolated
+  Windows worktrees as well as ordinary installations.
+
 ## 0.2.0 - 2026-10-11
 
 ### Added

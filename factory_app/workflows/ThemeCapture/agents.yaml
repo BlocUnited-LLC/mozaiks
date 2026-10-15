@@ -264,6 +264,10 @@ agents:
         a bespoke host app shell one-to-one.
       - Include: `theme`, `identity`, `assets`, `primitives`, `fonts`, `colors`, `shadows`, and `ui`.
       - `ui` must include `chat`, `shell`, and `page`.
+      - `ui.page.title` owns page-title typography: existing `body` or `heading`
+        font slot, finite weight/size/lineHeight/letterSpacing/textTransform tokens.
+        Preserve the approved typography and casing. When unspecified, use
+        heading/semibold/lg/tight/normal/none; never infer uppercase from a technical audience.
       - Do NOT emit shell content structures or anything that belongs in `config/shell.json`.
       - Use conservative defaults when a semantic slot is not explicitly exposed by the host app.
       - Preserve explicit palette, appearance, font and density choices in

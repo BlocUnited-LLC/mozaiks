@@ -40,6 +40,7 @@ from mozaiksai.core.runtime.app.provenance import (
     build_default_app_provenance,
     dump_app_provenance_yaml,
 )
+from mozaiksai.core.runtime.app.theme_contract import validate_page_title_theme
 from mozaiksai.core.runtime.persistence.intent_loader import (
     validate_complete_data_contract_ownership,
 )
@@ -203,7 +204,10 @@ def resolve_app_theme_config(captured_theme_config: Any, theme_config_patch: Any
         raise ValueError("captured_theme_config must be an object or null")
     if patch is not None and not isinstance(patch, dict):
         raise ValueError("theme_config_patch must be an object or null")
-    return _deep_merge_dicts(captured or {}, patch or {}) or None
+    resolved = _deep_merge_dicts(captured or {}, patch or {}) or None
+    if resolved is not None:
+        validate_page_title_theme(resolved)
+    return resolved
 
 
 def _resolve_output_dir(

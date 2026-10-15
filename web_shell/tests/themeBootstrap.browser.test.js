@@ -47,6 +47,7 @@ test('theme bootstrap paints the app only after its own brand is ready', async t
           import * as themeProvider from ${JSON.stringify(path.join(chatUi, 'styles/themeProvider.js'))};
           import { useTheme } from ${JSON.stringify(path.join(chatUi, 'styles/useTheme.js'))};
           import { ChatUIProvider } from ${JSON.stringify(path.join(chatUi, 'context/ChatUIContext.jsx'))};
+          import ErrorBoundary from ${JSON.stringify(path.join(chatUi, 'components/ErrorBoundary.jsx'))};
           export { themeProvider };
           export const componentRegistry = { hasComponent: () => true };
           export class WebSocketApiAdapter {}
@@ -86,7 +87,7 @@ test('theme bootstrap paints the app only after its own brand is ready', async t
             const [appId, setAppId] = useState('slow-app');
             window.switchApp = setAppId;
             window.themeProvider = themeProvider;
-            return <Probe appId={appId} />;
+            return <ErrorBoundary key={appId}><Probe appId={appId} /></ErrorBoundary>;
           }
         `,
       }));
@@ -108,7 +109,7 @@ test('theme bootstrap paints the app only after its own brand is ready', async t
   t.after(() => browser.close());
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
 
-  async function pageFixture(subtest, { holdTheme = false, switchThemes = false } = {}) {
+  async function pageFixture(subtest, { holdTheme = false, switchThemes = false, invalidTheme = false, invalidSecondTheme = false } = {}) {
     const page = await browser.newPage();
     subtest.after(() => page.close());
     const errors = [];
@@ -126,6 +127,9 @@ test('theme bootstrap paints the app only after its own brand is ready', async t
       requests.push(url.pathname);
       if (url.pathname === '/api/theme-config') {
         const number = ++baseRequests;
+        if (invalidTheme || (invalidSecondTheme && number > 1)) {
+          return route.fulfill({ status: 422, json: { detail: 'ui.page.title.size: unsupported token' } });
+        }
         if (holdTheme && number === 1) await new Promise(resolve => pending.push(resolve));
         const result = switchThemes
           ? brand(number === 1 ? 'Slow app' : 'Current app', number === 1 ? 'orange' : 'teal', number === 1 ? '#c2410c' : '#0f766e')
@@ -208,5 +212,28 @@ test('theme bootstrap paints the app only after its own brand is ready', async t
     await expect(page.getByRole('heading')).toHaveText('Slow app');
     assert.ok((await page.evaluate(() => window.renderedThemes)).every(value => value.name === 'Slow app' && !value.loading));
     assert.equal(requests.filter(url => url === '/api/theme-config').length, 2);
+  });
+
+  await t.test('an invalid theme response blocks bootstrap before the app mounts', async st => {
+    const { page, requests } = await pageFixture(st, { invalidTheme: true });
+    await page.goto(baseUrl);
+    await expect(page.getByRole('status')).toBeVisible();
+    await page.evaluate(() => window.finishAuth());
+    await expect(page.getByRole('heading', { name: 'Unable to open this app' })).toBeVisible();
+    assert.equal(await page.evaluate(() => !!window.shellMounted), false);
+    assert.deepEqual(requests, ['/api/theme-config']);
+    assert.equal(await page.evaluate(() => document.documentElement.style.getPropertyValue('--shell-page-title-font-size')), '');
+  });
+
+  await t.test('invalid switched-app themes reach the error boundary without repainting previous app tokens', async st => {
+    const { page } = await pageFixture(st, { switchThemes: true, invalidSecondTheme: true });
+    await page.goto(`${baseUrl}?switch`);
+    await expect(page.getByRole('heading')).toHaveText('Slow app');
+    const before = await page.evaluate(() => document.documentElement.style.cssText);
+    await page.evaluate(() => window.switchApp('invalid-app'));
+    await expect(page.getByText('ui.page.title.size: unsupported token')).toBeVisible();
+    await expect(page.getByTestId('theme-probe')).toHaveCount(0);
+    assert.equal(await page.evaluate(() => document.documentElement.style.cssText), before);
+    assert.equal(await page.evaluate(() => window.themeProvider.getCachedTheme('invalid-app')), null);
   });
 });

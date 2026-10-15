@@ -523,6 +523,35 @@ models:
         type: str
         description: Max width for split pages.
 
+  PageTitleStyle:
+    type: model
+    description: Bounded page-title typography using existing app font slots.
+    fields:
+      font:
+        type: literal
+        values: [body, heading]
+        description: Existing app font slot; default heading.
+      weight:
+        type: literal
+        values: [regular, medium, semibold, bold]
+        description: Page-title weight; default semibold.
+      size:
+        type: literal
+        values: [sm, md, lg, xl]
+        description: Page-title scale; default lg.
+      lineHeight:
+        type: literal
+        values: [tight, normal, relaxed]
+        description: Page-title line height; default tight.
+      letterSpacing:
+        type: literal
+        values: [tight, normal, wide]
+        description: Page-title tracking; default normal.
+      textTransform:
+        type: literal
+        values: [none, uppercase, lowercase, capitalize]
+        description: Page-title casing; default none preserves authored case.
+
   PageUi:
     type: model
     description: Semantic page-frame tokens.
@@ -542,6 +571,10 @@ models:
       titlePaddingBottom:
         type: str
         description: Spacing below the page title.
+      title:
+        type: PageTitleStyle
+        default: {font: heading, weight: semibold, size: lg, lineHeight: tight, letterSpacing: normal, textTransform: none}
+        description: App-owned page-title role shared by declarative and custom pages.
 
   UiConfig:
     type: model
