@@ -216,12 +216,22 @@ def _assert_delivered_context(providers, files, baseline_id):
     assert worker["user_request"] == REQUEST and worker["affected_paths"] == [PAGE]
     assert worker["current_files"] == {PAGE: files[PAGE]}
     read_only = worker["read_only_files"]
-    for path in ("app.json", "brand/theme_config.json", "data/contract.json", "ui/route_manifest.json",
-                 "ui/index.js", "modules/messages/module.yaml", ".mozaiks/pack_provenance.json"):
+    for path in ("app.json", "config/auth.yaml", "config/shell.json", "data/contract.json",
+                 "ui/route_manifest.json", "ui/index.js", "ui/pages/projects.yaml",
+                 "modules/projects/module.yaml", "modules/tasks/module.yaml",
+                 "modules/messages/module.yaml", ".mozaiks/pack_provenance.json"):
         assert read_only[path] == files[path]
+    # A baseline without an app-owned theme inherits the framework theme. The
+    # worker must neither invent that file nor omit it when it was saved.
+    theme = "brand/theme_config.json"
+    assert (theme in read_only) == (theme in files)
+    if theme in files:
+        assert read_only[theme] == files[theme]
     assert all(files[path] == content for path, content in read_only.items())
     assert PAGE not in read_only
     assert {pack["pack_id"] for pack in json.loads(read_only[".mozaiks/pack_provenance.json"])["packs"]} == {"messaging"}
+    return {"read_only_paths": sorted(read_only), "app_owned_theme_present": theme in files,
+            "theme_source": "app_artifact" if theme in files else "inherited_framework"}
 
 
 def _scripted_harness(files, store, output_root):
@@ -397,6 +407,17 @@ async def _refine(case_root, login_config):
         assert child.validation_status == ArtifactValidationStatus.PASSED and child.app_validation_status == "passed"
         assert child.commit_metadata.metadata["content_backend"] == "gridfs"
         child_files, diagnostics = await read_artifact_bundle(child, retain_svg_text=True)
+        # Retain the actual saved child before later context/preservation checks
+        # can fail. These bytes are evidence, never an edited acceptance input.
+        child_root = case_root / "refined-workspace/app"
+        for path, content in child_files.items():
+            target = child_root / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(content.encode("utf-8"))
+        (case_root / "child.zip").write_bytes(await read_verified_artifact_bundle(child))
+        live.write_json(case_root / "child-files.sha256.json", _hashes(child_files))
+        live.write_json(case_root / "baseline-record.json", baseline.model_dump(mode="json"))
+        live.write_json(case_root / "child-record.json", child.model_dump(mode="json"))
         assert not diagnostics and set(child_files) == set(files)
         assert {path for path in files if child_files[path] != files[path]} == {PAGE}
         assert child_files[PAGE] == providers["generator"].output["updated_files"][0]["content"]
@@ -409,20 +430,12 @@ async def _refine(case_root, login_config):
         current = (await registry.get_app_record(owner_user_id=owner_id, build_registry_id=binding.build_registry_id))["app"]
         assert current["lifecycle_state"] == "review" and current["current_build_run"]["artifact_version_id"] == child.id
         assert result["refinement_session_id"] and result["review_continuation"] is None
-        _assert_delivered_context(providers, files, baseline.id)
-        child_root = case_root / "refined-workspace/app"
-        for path, content in child_files.items():
-            target = child_root / path
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(content.encode("utf-8"))
-        (case_root / "child.zip").write_bytes(await read_verified_artifact_bundle(child))
-        live.write_json(case_root / "child-files.sha256.json", _hashes(child_files))
-        live.write_json(case_root / "baseline-record.json", baseline.model_dump(mode="json"))
-        live.write_json(case_root / "child-record.json", child.model_dump(mode="json"))
+        delivered_context = _assert_delivered_context(providers, files, baseline.id)
         live.write_json(case_root / "result.json", {
             "success": True, "evidence_kind": "authorized_studio_refinement_with_scripted_ag2_providers",
             "live_llm_calls": False, "browser_acceptance": "not_evaluated_for_child", "capability_packs": packs,
             "source": facts, "request": REQUEST, "permitted_paths": [PAGE], "changed_paths": [PAGE],
+            "delivered_context": delivered_context,
             "retained_paths": sorted(path for path in files if child_files[path] == files[path]),
             "retained_pack_paths": retained_pack_paths, "baseline_files": _hashes(files),
             "design_source": replay_receipt["design_source"],
@@ -563,6 +576,8 @@ def test_accepted_board_refines_through_real_studio():
     live.write_json(case_root / "inputs.json", {"baseline_directory": str(baseline_dir), "candidate": candidate,
                     "baseline_browser_source_sha": prior_candidate["source_sha"],
                     "refinement_output_root": str(refinement_output_root),
+                    "harness_path": str(Path(__file__).resolve()),
+                    "harness_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                     "validator_image": image_identity})
     identity_realm = _identity_realm_fixture(live.EVIDENCE_ROOT / "identity-inputs" / f"refine-{case_root.name}.json", files)
     mongo, oidc, api, web = _ports()
