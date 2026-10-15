@@ -785,18 +785,15 @@ def discard_pack_owned_outputs(payload: Any, pack_paths: frozenset[str]) -> tupl
             dropped.add(path)
     routes = result.get("custom_route_bundle")
     if isinstance(routes, dict):
-        if {"ui/route_manifest.json", "ui/index.js"} & pack_paths:
-            # Both registries are derived from the typed bundle. Filter their
-            # actual materialized paths; a nonexistent ui_index field cannot
-            # suppress the generated registry.
+        page_files = routes.get("page_files")
+        if isinstance(page_files, list) and any(
+            isinstance(entry, dict) and pack_owned(entry.get("path")) for entry in page_files
+        ):
+            # Derive the shared registrations before removing an exclusive
+            # implementation; the verified template supplies that file later.
             rendered = keep_entries(_custom_route_bundle_code_files(routes), "filename")
             result["code_files"] = [*(result.get("code_files") or []), *rendered]
             result["custom_route_bundle"] = None
-        elif "page_files" in routes:
-            routes["page_files"] = keep_entries(routes["page_files"], "path")
-    if "ui/index.js" in pack_paths and result.get("registration_barrel") is not None:
-        result["registration_barrel"] = None
-        dropped.add("ui/index.js")
     bundle = result.get("module_contract")
     if isinstance(bundle, dict) and str(bundle.get("module_id") or "").strip():
         prefix = PurePosixPath("modules", str(bundle["module_id"]).strip())

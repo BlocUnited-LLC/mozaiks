@@ -235,6 +235,14 @@ The existing `CustomRouteBundle` materializer and `FrontendStubOutput` remain
 the producers. There is no second runtime registry, and component source files
 are not rewritten by composition.
 
+If a typed custom bundle also contains an exclusive pack-owned page, the
+existing materializer derives its shared registry and routes before the filter
+removes that page implementation. Other app page bytes and
+`registration_barrel` declarations remain unchanged; verified templates supply
+the exclusive file. Retaining declarations does not authorize a competing app
+claim over a pack route or registration: the composition checks below still
+reject conflicts.
+
 The existing JavaScript parser admits local default/named imports (including
 aliases), named re-exports, and literal `registerComponent` calls in the exported
 `register` function. Registration `description`, `core`, and `override` options
