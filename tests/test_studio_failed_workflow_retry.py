@@ -396,6 +396,16 @@ async def test_retry_journey_drift_is_rejected_before_router_state_mutation(retr
 
 
 @pytest.mark.asyncio
+async def test_retry_refuses_unaccepted_imported_genesis_before_routing(retry):
+    retry.baseline.commit_metadata.metadata["bundle_mode"] = "brownfield_genesis_import"
+    retry.record["genesis_import"] = {"status": "reserved", "build_record_id": "baseline"}
+    with pytest.raises(HTTPException, match="accepted owner review") as error:
+        await launch(retry)
+    assert error.value.status_code == 400
+    retry.service.begin_refinement_run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("fault", ["foreign_owner", "foreign_host", "wrong_workflow", "active_source", "completed_source",
                                    "superseded_build", "wrong_registry", "missing_change", "foreign_change", "missing_baseline",
                                    "foreign_baseline", "retired_baseline", "wrong_baseline_registry", "wrong_baseline_selector",

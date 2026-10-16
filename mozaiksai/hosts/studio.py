@@ -24,8 +24,16 @@ from fastapi import BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, TypeAdapter, ValidationError
 
+from factory_app.app.modules.app_registry.backend.schemas import GenesisImportClaim
 from factory_app.app.modules.app_registry.backend.service import AppRegistryService
 from factory_app.workflows._shared.artifact_bundle import read_artifact_bundle
+from factory_app.workflows._shared.platform.genesis_import import (
+    GenesisImportError,
+    accept_existing_app_genesis,
+    genesis_acceptance_disclosure,
+    read_imported_genesis_review_bundle,
+    require_accepted_genesis_baseline,
+)
 from factory_app.workflows._shared.platform.review_continuation import continue_inline_app_review
 from logs.logging_config import get_workflow_logger
 from mozaiksai.control_plane import (
@@ -675,13 +683,18 @@ async def _build_artifact_review_payload(
         version.lifecycle_status == ArtifactLifecycleStatus.DRAFT
         and version.validation_status == ArtifactValidationStatus.PASSED
         and _refinement_acceptance_ready(version)
+        and _version_metadata(version).get("bundle_mode") != "brownfield_genesis_import"
     )
-    can_reject = version.lifecycle_status == ArtifactLifecycleStatus.DRAFT
+    can_reject = (
+        version.lifecycle_status == ArtifactLifecycleStatus.DRAFT
+        and _version_metadata(version).get("bundle_mode") != "brownfield_genesis_import"
+    )
     can_promote = (
         version.lifecycle_status == ArtifactLifecycleStatus.CURRENT
         and version.validation_status == ArtifactValidationStatus.PASSED
         and version.app_validation_status == "passed"
         and current_zip is not None
+        and _version_metadata(version).get("bundle_mode") != "brownfield_genesis_import"
     )
     validation_override_required = _validation_override_required(version)
     validation_blocker = None
@@ -1927,6 +1940,7 @@ async def download_build_artifact(
     principal: UserPrincipal = Depends(require_studio_user),
 ):
     validate_path_id(artifact_version_id, "artifact_version_id")
+    execution_app_id, owner_user_id = _resolve_studio_scope(principal, app_id=app_id)
     target_app_id, _ = await _resolve_studio_artifact_scope(
         principal, build_registry_id=build_registry_id, app_id=app_id,
     )
@@ -1935,6 +1949,19 @@ async def download_build_artifact(
     )
     if version is None:
         raise HTTPException(status_code=404, detail="Artifact not found")
+    if _version_metadata(version).get("bundle_mode") == "brownfield_genesis_import":
+        try:
+            source_bytes = await read_imported_genesis_review_bundle(
+                version, owner_user_id=owner_user_id,
+                execution_app_id=execution_app_id, build_registry_id=build_registry_id,
+                registry_service=_get_app_registry_service(),
+            )
+        except (GenesisImportError, ValueError, OSError, ContentNotFoundError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return Response(
+            source_bytes, media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{target_app_id}-{artifact_version_id}.zip"'},
+        )
     try:
         binding = RunBuildBinding.model_validate({
             key: _version_metadata(version).get(key) for key in RunBuildBinding.model_fields
@@ -2068,7 +2095,7 @@ async def get_build_artifact_review(
     principal: UserPrincipal = Depends(require_studio_user),
 ):
     validate_path_id(artifact_version_id, "artifact_version_id")
-    app_id, _ = await _resolve_studio_artifact_scope(principal, app_id=app_id, build_registry_id=build_registry_id)
+    app_id, user_id = await _resolve_studio_artifact_scope(principal, app_id=app_id, build_registry_id=build_registry_id)
     artifact_store = get_artifact_store()
     version = await artifact_store.get_build_record(
         app_id=app_id,
@@ -2081,12 +2108,75 @@ async def get_build_artifact_review(
         version=version,
         artifact_store=artifact_store,
     )
+    if _version_metadata(version).get("bundle_mode") == "brownfield_genesis_import":
+        row = (await _get_app_registry_service().get_app_record(
+            owner_user_id=user_id, build_registry_id=build_registry_id,
+        )).get("app")
+        claim = row.get("genesis_import") if isinstance(row, dict) else None
+        payload["genesis_import"] = claim if isinstance(claim, dict) and claim.get("build_record_id") == version.id else None
+        if payload["genesis_import"] is not None:
+            try:
+                payload["genesis_acceptance_disclosure"] = genesis_acceptance_disclosure(
+                    GenesisImportClaim.model_validate({
+                        key: claim.get(key) for key in GenesisImportClaim.model_fields if key != "status"
+                    })
+                )
+            except ValueError:
+                payload["genesis_acceptance_disclosure"] = None
     return {"app_id": app_id, **payload}
 
 
 class BuildArtifactAcceptanceRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     notes: str | None = Field(default=None, max_length=2000)
+
+
+class GenesisAcceptanceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    confirm_exact_source_review: Literal[True]
+    reviewed_bundle_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    reviewed_manifest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    disclosure_version: Literal["authored_app_root_disclosure_v1"]
+    disclosure_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+@app.post("/api/studio/build/artifacts/{artifact_version_id}/accept-genesis")
+async def accept_imported_genesis_artifact(
+    artifact_version_id: str,
+    body: GenesisAcceptanceRequest,
+    app_id: str | None = None,
+    build_registry_id: str | None = None,
+    principal: UserPrincipal = Depends(require_studio_user),
+):
+    validate_path_id(artifact_version_id, "artifact_version_id")
+    if not build_registry_id:
+        raise HTTPException(status_code=400, detail="Factory build_registry_id is required")
+    execution_app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
+    target_app_id, owner_user_id = await _resolve_studio_artifact_scope(
+        principal, app_id=app_id, build_registry_id=build_registry_id,
+    )
+    registry = _get_app_registry_service()
+    try:
+        accepted = await accept_existing_app_genesis(
+            owner_user_id=owner_user_id, execution_app_id=execution_app_id,
+            build_registry_id=build_registry_id, build_record_id=artifact_version_id,
+            reviewed_bundle_sha256=body.reviewed_bundle_sha256,
+            reviewed_manifest_sha256=body.reviewed_manifest_sha256,
+            disclosure_version=body.disclosure_version,
+            disclosure_sha256=body.disclosure_sha256,
+            registry_service=registry, record_store=get_artifact_store(),
+        )
+    except (GenesisImportError, ValueError, OSError, ContentNotFoundError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if accepted.app_id != target_app_id:
+        raise HTTPException(status_code=409, detail="Accepted Genesis target changed")
+    return {
+        "accepted": True, "app_id": target_app_id,
+        "artifact_version": accepted.model_dump(mode="python"),
+        "genesis_import": (await registry.get_app_record(
+            owner_user_id=owner_user_id, build_registry_id=build_registry_id,
+        ))["app"]["genesis_import"],
+    }
 
 
 @app.post("/api/studio/build/artifacts/{artifact_version_id}/accept")
@@ -2103,6 +2193,8 @@ async def accept_build_artifact_version(
     version = await artifact_store.get_build_record(app_id=app_id, build_record_id=artifact_version_id)
     if not version:
         raise HTTPException(status_code=404, detail=f"Artifact version not found: {artifact_version_id}")
+    if _version_metadata(version).get("bundle_mode") == "brownfield_genesis_import":
+        raise HTTPException(status_code=409, detail="Imported Genesis requires exact-source owner review through accept-genesis")
     if version.lifecycle_status == ArtifactLifecycleStatus.ARCHIVED:
         raise HTTPException(status_code=409, detail="Rejected artifact versions cannot be accepted.")
     if version.lifecycle_status != ArtifactLifecycleStatus.DRAFT:
@@ -2176,6 +2268,8 @@ async def reject_build_artifact_version(
     version = await artifact_store.get_build_record(app_id=app_id, build_record_id=artifact_version_id)
     if not version:
         raise HTTPException(status_code=404, detail=f"Artifact version not found: {artifact_version_id}")
+    if _version_metadata(version).get("bundle_mode") == "brownfield_genesis_import":
+        raise HTTPException(status_code=409, detail="Imported Genesis cannot use generic artifact rejection")
     if version.lifecycle_status != ArtifactLifecycleStatus.DRAFT:
         raise HTTPException(status_code=409, detail="Only draft artifact versions can be rejected.")
     verified_bundle_snapshots = await _verified_review_snapshots(
@@ -2231,6 +2325,8 @@ async def promote_build_artifact_version(
     version = await artifact_store.get_build_record(app_id=app_id, build_record_id=artifact_version_id)
     if not version:
         raise HTTPException(status_code=404, detail=f"Artifact version not found: {artifact_version_id}")
+    if _version_metadata(version).get("bundle_mode") == "brownfield_genesis_import":
+        raise HTTPException(status_code=409, detail="Accepted imported Genesis is a source baseline, not a deployment candidate")
     if version.lifecycle_status != ArtifactLifecycleStatus.CURRENT:
         raise HTTPException(status_code=409, detail="Only accepted current artifact versions can be promoted.")
     if version.build_family != "app_bundle":
@@ -2612,6 +2708,14 @@ async def _failed_workflow_retry_contribution(
     metadata = _version_metadata(baseline)
     if metadata.get("build_registry_id") != binding.build_registry_id or metadata.get("target_app_id") != binding.target_app_id:
         raise ValueError("Selected retry baseline does not belong to the registered target")
+    try:
+        await require_accepted_genesis_baseline(
+            baseline, owner_user_id=user_id, execution_app_id=app_id,
+            build_registry_id=binding.build_registry_id,
+            registry_service=_get_app_registry_service(),
+        )
+    except (GenesisImportError, ValueError, OSError, ContentNotFoundError) as exc:
+        raise ValueError("Selected retry Genesis baseline has no accepted owner review") from exc
 
     # Reuse the accepted request and routing facts, never the failed run's
     # generated output, validation, counters, or mutable workspace copy.
@@ -2840,6 +2944,14 @@ async def trigger_workflow(
         if source_version is None or source_version.build_family != refinement_request.build_family:
             raise HTTPException(status_code=404, detail="Selected refinement artifact not found")
         metadata = _version_metadata(source_version)
+        try:
+            await require_accepted_genesis_baseline(
+                source_version, owner_user_id=user_id, execution_app_id=app_id,
+                build_registry_id=build_registry_id or "",
+                registry_service=_get_app_registry_service(),
+            )
+        except (GenesisImportError, ValueError, OSError, ContentNotFoundError) as exc:
+            raise HTTPException(status_code=409, detail="Selected imported Genesis source has no accepted owner review") from exc
         # Filesystem roots and baseline contracts come from the saved version,
         # not from caller context or copied workbench metadata.
         safe_extra = {

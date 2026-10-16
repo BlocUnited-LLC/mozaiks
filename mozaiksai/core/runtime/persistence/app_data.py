@@ -207,7 +207,11 @@ class AppData:
         collection_resolver: Callable[[str], Any] | None = None,
     ) -> None:
         self.db = db
-        self._aliases: DataAliasMap = MappingProxyType(dict(aliases or aliases_from_data_contract(contract) or DATA_COLLECTIONS))
+        resolved_aliases = aliases or aliases_from_data_contract(contract) or DATA_COLLECTIONS
+        if isinstance(resolved_aliases, _LazyDataAliasMap):
+            # Snapshot once; dict(lazy_map) reloads the contract for every key.
+            resolved_aliases = resolved_aliases._data()
+        self._aliases: DataAliasMap = MappingProxyType(dict(resolved_aliases))
         self._collection_resolver = collection_resolver
 
     @property

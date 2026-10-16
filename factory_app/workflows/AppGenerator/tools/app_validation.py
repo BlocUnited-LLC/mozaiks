@@ -1265,9 +1265,80 @@ async def _app_runtime_load_result(generated_files: dict[str, str]) -> dict[str,
     return await app_runtime_smoke.run_contained_generated_app_runtime_load(generated_files)
 
 
-async def _app_runtime_smoke_result(generated_files: dict[str, str]) -> dict[str, Any]:
-    """Observe generated app behavior without host Python or host Mongo access."""
-    return await app_runtime_smoke.run_contained_generated_app_runtime_smoke(generated_files)
+def require_contained_imported_smoke_runner():
+    """Fail before imported source is staged when the contained runner is absent."""
+    runner = getattr(app_runtime_smoke, "run_contained_imported_app_runtime_smoke", None)
+    if not callable(runner):
+        raise ValueError("Contained imported-source runtime smoke is unavailable")
+    return runner
+
+
+async def _app_runtime_smoke_result(
+    generated_files: dict[str, str], *, binary_assets: dict[str, bytes] | None = None,
+    contained_imported_source: bool = False,
+) -> dict[str, Any]:
+    """Boot the bundle in the runtime smoke's child process; generated code never runs here."""
+    if not contained_imported_source and not binary_assets:
+        return await app_runtime_smoke.run_contained_generated_app_runtime_smoke(generated_files)
+    contained_runner = require_contained_imported_smoke_runner() if contained_imported_source else None
+    with tempfile.TemporaryDirectory(prefix="mozaiks-app-runtime-smoke-", ignore_cleanup_errors=True) as tmp:
+        app_root = Path(tmp) / "app"
+        _write_files_to_dir(app_root, generated_files)
+        for rel_path, content in (binary_assets or {}).items():
+            safe = _safe_relpath(rel_path)
+            if not safe or safe in generated_files:
+                raise ValueError("Runtime smoke binary asset path is invalid or overlaps text source")
+            out_path = app_root / safe
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_bytes(content)
+        if contained_imported_source:
+            source_digests = {
+                path: hashlib.sha256(content.encode("utf-8")).hexdigest()
+                for path, content in generated_files.items()
+            }
+            source_digests.update({
+                path: hashlib.sha256(content).hexdigest()
+                for path, content in (binary_assets or {}).items()
+            })
+            return await contained_runner(app_root, expected_source_sha256=source_digests)
+        return await app_runtime_smoke.run_app_runtime_smoke(
+            app_root, mongo_uri=app_runtime_smoke.resolve_smoke_mongo_uri(),
+        )
+
+
+def _runtime_load_from_observer_smoke(smoke: dict[str, Any]) -> dict[str, Any]:
+    """Use the separate observer's HTTP readiness result for imported source."""
+    raw_outcomes = smoke.get("results")
+    outcomes = [item for item in raw_outcomes if isinstance(item, dict)
+                and item.get("check") == "boot.http_ready"] if isinstance(raw_outcomes, list) else []
+    failed = [item for item in outcomes if item.get("status") == "failed"]
+    passed = (
+        smoke.get("status") == "passed" and smoke.get("passed") is True
+        and len(outcomes) == 1 and not failed and outcomes[0].get("status") == "passed"
+        and smoke.get("observed_boot") == {"check": "boot.http_ready", "status": "passed"}
+        and smoke.get("observer_origin") == "trusted_external_probe_v1"
+    )
+    skipped = smoke.get("status") == "skipped"
+    status = "skipped" if skipped else "passed" if passed else "failed"
+    return {
+        "contract_version": "1.0",
+        "status": status,
+        "passed": None if skipped else passed,
+        "skipped_reason": smoke.get("skipped_reason") if skipped else None,
+        "checks": [{
+            "id": "app_runtime_load", "status": status,
+            "passed": None if skipped else passed,
+            "message": "The separate runtime observer checked loopback app readiness.",
+            "details": {"blocking": not passed, "outcomes": outcomes},
+        }],
+        "failed_tests": [] if skipped or passed else [{
+            "test": "app_runtime_load", "error": (
+                "; ".join(str(item.get("message") or "") for item in failed)
+                or "The external observer did not confirm app HTTP readiness."
+            ),
+        }],
+        "warnings": [],
+    }
 
 
 async def _agent_backend_integration_result(context_variables: Any | None) -> dict[str, Any]:
@@ -1786,11 +1857,78 @@ def _assembly_failure(context_variables: Any | None, *, prepare_recovery: bool =
     return result
 
 
+async def run_authored_app_source_acceptance_gate(
+    *,
+    files: dict[str, str],
+    inherited_ui_root: Path,
+    runtime_binary_assets: dict[str, bytes] | None = None,
+) -> dict[str, Any]:
+    """Validate an imported app root under an explicit authored-source contract.
+
+    The source is parsed here but executed only by the contained runtime smoke.
+    This contract does not claim generated-output policy, workspace-root
+    workflows, provider readiness, or deployed behavior.
+    """
+    from mozaiksai.core.validation.workspace import (
+        registered_ui_components,
+        validate_authored_app_file_map,
+    )
+
+    binary_assets = runtime_binary_assets or {}
+    if not files or not isinstance(files.get("app.json"), str) or set(files) & set(binary_assets):
+        raise ValueError("Authored app root is missing app.json or has overlapping source paths")
+    inherited = registered_ui_components(inherited_ui_root)
+    diagnostics = validate_authored_app_file_map(files, inherited_components=inherited)
+    errors = [item for item in diagnostics if item.severity == "error"]
+    source_digests = {
+        path: hashlib.sha256(content.encode("utf-8") if isinstance(content, str) else content).hexdigest()
+        for path, content in {**files, **binary_assets}.items()
+    }
+    snapshot_digest = hashlib.sha256(json.dumps(
+        source_digests, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+    inherited_ui_registry_sha256 = hashlib.sha256(json.dumps(
+        sorted(inherited), separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+    static_check = {
+        "id": "authored_app_contracts", "passed": not errors,
+        "diagnostics": [
+            {"code": item.code, "path": item.path, "message": item.message, "severity": item.severity}
+            for item in diagnostics
+        ],
+    }
+    result: dict[str, Any] = {
+        "validation_contract": "authored_app_root_acceptance_v2",
+        "validation_scope": "app_root_only",
+        "excluded_observer_checks": ["event_rejection"],
+        "inherited_ui_registry_sha256": inherited_ui_registry_sha256,
+        "snapshot_digest": snapshot_digest,
+        "checks": [static_check],
+    }
+    if errors:
+        return {**result, "status": "failed", "passed": False}
+
+    smoke = await _app_runtime_smoke_result(
+        files, binary_assets=binary_assets, contained_imported_source=True,
+    )
+    runtime_load = _runtime_load_from_observer_smoke(smoke)
+    result["app_runtime_load"] = runtime_load
+    result["app_runtime_smoke"] = smoke
+    result["checks"].extend([
+        {"id": "app_runtime_load", "passed": runtime_load.get("passed") is True},
+        {"id": "app_runtime_smoke", "passed": smoke.get("passed") is True},
+    ])
+    passed = all(check["passed"] for check in result["checks"])
+    return {**result, "status": "passed" if passed else "failed", "passed": passed}
+
+
 async def run_app_bundle_acceptance_gate(
     *,
     files: dict[str, str] | None = None,
     context_variables: Any | None = None,
     capability_packs: list[dict[str, Any]] | None = None,
+    contained_imported_source: bool = False,
+    runtime_binary_assets: dict[str, bytes] | None = None,
 ) -> dict[str, Any]:
     """Run the deterministic app-bundle acceptance gate.
 

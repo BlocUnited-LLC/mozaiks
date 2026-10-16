@@ -12,6 +12,14 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Added
+
+- Added owner-reviewed imported Genesis baselines for existing app roots. Studio
+  verifies the exact archive and member digests in contained local validation,
+  discloses the app-root-only event-observer limitation, and requires the owner
+  to acknowledge that exact disclosure before later Refinement Runs can use the
+  baseline.
+
 ## 0.2.0 - 2026-10-11
 
 ### Added

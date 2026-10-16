@@ -27,7 +27,7 @@ def test_getting_started_explains_how_to_start_again() -> None:
     doc = _read("docs/getting-started.md")
     normalized = " ".join(doc.split())
 
-    assert "pip install mozaiks" in doc
+    assert "python -m pip install mozaiks" in doc
     assert "python -m mozaiks quickstart --dir .\\my-workspace" in doc
     assert "python -m mozaiks studio --dir .\\my-workspace --open" in doc
     assert "You can open Studio without a key but builds will not run." in doc
@@ -37,7 +37,7 @@ def test_getting_started_explains_how_to_start_again() -> None:
     assert "repo checkout" in normalized
     assert "http://localhost:3000" in doc
     assert "python -m venv .venv" not in doc
-    assert "python -m pip install mozaiks" not in doc
+    assert "not published on PyPI" not in doc
     assert "pipx" not in doc
     assert ".\\scripts\\run-studio.ps1" not in doc
     assert "Then open a new PowerShell before running `mozaiks`" not in doc

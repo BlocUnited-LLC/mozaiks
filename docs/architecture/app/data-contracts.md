@@ -257,6 +257,13 @@ migration operations.
 
 ## Boundaries
 
+`AppData` takes an immutable alias snapshot when constructed. Resolving its
+default aliases reads the active data contract once, regardless of alias count.
+A later `AppData` construction reads the current workspace and contract again;
+existing views keep their original mapping. Explicit alias maps and contracts
+that resolve to nonempty mappings supply the view without reading the default
+contract. Empty mappings retain the existing default-resolution behavior.
+
 - `app/data/contract.json` is declarative metadata, not Python code.
 - Do not put helper Python files under `app/data/`.
 - Module repos may use data contract aliases only when the module and access
