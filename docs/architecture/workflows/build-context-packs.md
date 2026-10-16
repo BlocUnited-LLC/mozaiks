@@ -190,14 +190,19 @@ source's current bytes. A workspace-owned
 changed, or undeclared implementation files fail admission; the exemption does
 not skip runtime, schema, implementation, or browser validation.
 
-Messaging `0.1.13` declares `threads`, `messages`, and `thread_reads` under the
+Messaging `0.1.14` declares `threads`, `messages`, and `thread_reads` under the
 `messages` module. These app-wide collections retain participant and verified
 workspace authorization in the shipped service and policy; generic collection
 CRUD must not expose private conversations. Its additive migration uses only
 `ensure_collection` and `ensure_index`, retaining the existing index names and
 keys. Reapplying the same migration hash skips it without rewriting records.
 Account export and deletion use the same app-bound persistence collections and
-preserve messages and conversations belonging to other participants.
+preserve messages and conversations belonging to other participants. Its
+`message_sent` notification carries no message text, and its lifecycle events
+declare the subject app and related record as nullable, so plain direct
+conversations still dispatch them. Neither the migration nor account deletion
+touches platform notifications, so a notification rendered by `0.1.13` keeps its
+copied preview until the recipient clears it.
 
 ## Targeting
 

@@ -109,7 +109,10 @@ Current implementation:
 - `ModuleEventRouter` reads each loaded module's `contracts/reactions.yaml` and
   `notifications.yaml`.
 - Notification targets create platform notification intents and emit
-  `notification.created`.
+  `notification.created`. The stored record and that event keep a content-free
+  `source_event` reference (`id`, `type`, and `related_type` when the event
+  carries one), never the event payload. The rule's template and
+  `context_fields` decide everything else the notification holds.
 - Capability targets resolve against workflow `orchestrator.yaml` trigger
   declarations by matching `capability_id`.
 - `mozaiksai/hosts/platform.py` indexes capability-triggered workflows from

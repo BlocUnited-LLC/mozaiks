@@ -11,9 +11,11 @@ remaining message, or cleared when none remains. The user leaves participant_ids
 of every surviving thread, so participant checks admit only the remaining
 participants. created_by is a required string and becomes a blank marker that no
 actor id equals; the creator's user_id scope stamp is removed. In-app
-notifications already rendered from message_sent keep their body_preview: they
-live in the platform notification store, which the account protocol does not
-give module handlers.
+notifications rendered from message_sent since pack 0.1.14 hold only thread and
+message references, so deleted messages leave them nothing to show. Those
+rendered by an earlier pack keep the body_preview they copied: they live in the
+platform notification store, which the account protocol does not give module
+handlers.
 
 Export returns created threads, sent messages, read state, and a fixed
 projection of every thread the user participates in, without peers' previews or

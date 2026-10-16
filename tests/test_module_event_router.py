@@ -1295,6 +1295,32 @@ class TestEmitPlatformReaction:
         assert any("webhook_dispatched" in e for e in emitted)
 
     @pytest.mark.asyncio
+    async def test_platform_reaction_keeps_the_full_source_event_beside_a_content_free_notification(self):
+        emitted = []
+        stored = []
+
+        async def event_emitter(event_type, payload):
+            emitted.append((event_type, payload))
+
+        async def notification_store(record):
+            stored.append(record)
+
+        reaction = _reaction_model("ev.both", id="r-1", target={"kind": "webhook"})
+        mod = _loaded_module(
+            "m1", reactions=[reaction],
+            notifications=[_notification_rule("ev.both", rule_id="n1", module_id="m1")],
+        )
+        router = _router([mod], event_emitter=event_emitter, notification_store=notification_store)
+        envelope = _envelope(payload={"amount": 100, "note": "private note text"})
+        await router.handle_event("ev.both", envelope)
+
+        reaction_event = next(payload for kind, payload in emitted if kind == "platform.reaction.webhook_dispatched")
+        assert reaction_event["payload"]["source_event"] is envelope
+        assert stored[0]["source_event"] == {"id": "evt-1", "type": "ev.both"}
+        created = next(payload for kind, payload in emitted if kind == "notification.created")
+        assert "private note text" not in repr(created)
+
+    @pytest.mark.asyncio
     async def test_capability_invoker_called_for_capability_target(self):
         invoker_calls = []
 

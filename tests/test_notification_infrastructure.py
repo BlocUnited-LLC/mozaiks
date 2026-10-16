@@ -496,7 +496,7 @@ class TestContextFieldsBehaviour:
         )
         assert not stored[0].get("context")
 
-    def test_source_event_still_stored_internally(self):
+    def test_source_event_is_a_content_free_reference(self):
         rule = {
             "id": "task.created.notify",
             "event_type": "task.created",
@@ -504,10 +504,32 @@ class TestContextFieldsBehaviour:
             "template": {"title": "Task created", "body": ""},
         }
         router, stored, asyncio = self._make_router_and_store(rule)
-        asyncio.run(
-            router.handle_event("task.created", self._envelope({"task_id": "tsk_abc"}))
-        )
-        assert stored[0].get("source_event") is not None
+        envelope = self._envelope({
+            "task_id": "tsk_abc", "note": "private note text", "related_type": "project",
+        })
+        asyncio.run(router.handle_event("task.created", envelope))
+        assert stored[0]["source_event"] == {
+            "id": "evt_001", "type": "task.created", "related_type": "project",
+        }
+        assert stored[0]["source_event_id"] == "evt_001"
+        assert "private note text" not in repr(stored[0])
+        # The router reads the event without changing it.
+        assert envelope["payload"]["note"] == "private note text"
+
+    def test_source_event_reference_keeps_flat_related_type(self):
+        rule = {
+            "id": "task.created.notify",
+            "event_type": "task.created",
+            "template": {"title": "Task created", "body": ""},
+        }
+        router, stored, asyncio = self._make_router_and_store(rule)
+        asyncio.run(router.handle_event("task.created", {
+            "id": "evt_flat", "app_id": "app_test", "related_type": "workspace_support.request",
+            "preview": "private note text",
+        }))
+        assert stored[0]["source_event"] == {
+            "id": "evt_flat", "type": "task.created", "related_type": "workspace_support.request",
+        }
 
 
 # ---------------------------------------------------------------------------
