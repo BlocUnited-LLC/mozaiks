@@ -6,6 +6,7 @@ Validates Keycloak JWT tokens with Keycloak-specific claim mappings.
 Keycloak JWTs have the following structure:
 - sub: User UUID
 - email: User email
+- email_verified: Whether the realm verified that email (the "email" client scope)
 - preferred_username: Username
 - realm_access.roles: Realm-level roles
 - resource_access.{client}.roles: Client-level roles
@@ -19,7 +20,12 @@ import jwt
 from jwt import PyJWKClient
 
 from logs.logging_config import get_core_logger
-from mozaiksai.core.auth.adapters.base import AuthError, BaseAuthAdapter, UserClaims
+from mozaiksai.core.auth.adapters.base import (
+    AuthError,
+    BaseAuthAdapter,
+    UserClaims,
+    claim_is_true,
+)
 
 logger = get_core_logger("auth.keycloak")
 
@@ -203,6 +209,7 @@ class KeycloakAuthAdapter(BaseAuthAdapter):
         return UserClaims(
             user_id=str(user_id),
             email=str(email) if email else None,
+            email_verified=bool(email) and claim_is_true(raw_claims, "email_verified"),
             name=str(name) if name else None,
             roles=roles,
             scopes=scopes,

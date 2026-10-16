@@ -129,6 +129,26 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
+- An email in `app/app.json` `admins` grants the admin role only when the
+  identity provider marked that email verified (`email_verified` is JSON
+  `true` in the access token). Before, any signed-in account with an
+  allowlisted address became an admin, so on a provider with open sign-up,
+  such as the packaged Keycloak realm, anyone who registered first with an
+  admin's address could take admin rights. A missing or false claim now gets
+  the ordinary `403 Admin access required` and an `ADMIN_EMAIL_UNVERIFIED`
+  server log line. The generic JWT adapter reads the claim named by the new
+  `AUTH_EMAIL_VERIFIED_CLAIM`. Unset, that is `email_verified` only while
+  `AUTH_EMAIL_CLAIM` is `email`; with a remapped email claim (for example
+  `preferred_username`) no email counts as verified, and the adapter logs
+  `AUTH_EMAIL_VERIFIED_CLAIM_UNSET`. Keycloak reads `email_verified`;
+  Supabase counts only a top-level `email_verified` claim, never the
+  user-writable `user_metadata` copy. Allowlist matching is ASCII-only, so a
+  lookalike such as the Kelvin sign never folds into an admin address. Admin
+  roles issued in the token, and `AUTH_ANON_ROLES` with authentication off,
+  are unchanged. On the packaged Compose stack, mark the admin's email
+  verified in the Keycloak console's `mozaiks` realm, or configure SMTP and
+  email verification for a deployed realm.
+
 - Generated messaging modules now require a verified workspace for workspace
   conversations. A signed caller cannot select another workspace through
   dispatch context or `scope_id`.

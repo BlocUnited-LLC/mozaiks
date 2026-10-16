@@ -231,7 +231,8 @@ Authority is separated by panel source:
   admin shell contract
 
 Access is granted through the normal auth role model plus `app/app.json`
-`admins` for bootstrap email allowlisting.
+`admins` for bootstrap email allowlisting. The allowlist matches only emails
+the identity provider marked verified.
 
 Important boundaries:
 
