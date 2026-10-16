@@ -612,6 +612,20 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- AppGenerator plan review no longer rejects a page task as an unapproved
+  `page_bundle` surface because it also names the pages a selected pack ships
+  (such as MozaiksPay's billing, usage and pricing pages). Review releases
+  those pages to the pack and builds the approved page task, as plan coverage
+  already allowed. Review also drops a persistence task's reverse dependency
+  on the module tasks that consume the data contract instead of rejecting the
+  resulting cycle, and reads an owned path written with a leading workspace
+  `app/` (for example `app/app.json`) as the bundle path. When a page task
+  does leave the approved page scope, the rejection names the task and its
+  out-of-scope paths and tells the planner to keep the `page_bundle` label,
+  rather than to delete its page work. The planner prompt no longer asks for
+  billing pages a selected pack already provides, and names the app manifest
+  by its bundle path `app.json`. A live build had spent all
+  three plan attempts on these rejections and stopped before any task ran.
 - Preserve historical large AppContext payloads across discovery refreshes by
   giving each distinct JSON payload its own content-store key.
 - Existing-app source scans prioritize canonical admin and workflow registries

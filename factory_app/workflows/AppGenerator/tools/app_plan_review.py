@@ -528,6 +528,51 @@ def _is_glob_pattern(path: str) -> bool:
     return bool(_GLOB_CHARS.intersection(path))
 
 
+_WORKSPACE_APP_ROOT = "app/"
+
+
+def _strip_workspace_app_root(plan: dict[str, Any]) -> list[str]:
+    """Owned paths are app-bundle-relative; a leading workspace ``app/`` names the bundle root itself.
+
+    Chat 5cd39d67 at deeef42d planned its page task owning ``app/app.json``,
+    the manifest's physical workspace path. The bundle has no ``app/``
+    directory (generated_bundle_scanner strips the same prefix from pack
+    contract paths), so the path named a stray file, not the manifest, and the
+    page task failed the approved-page check. The prefix is removed from the
+    leading segment only; ``app/`` deeper in a path, and an ``app.json`` or
+    ``application/`` segment, are untouched. A path the planner wrote in both
+    spellings is kept once.
+    """
+    repairs: list[str] = []
+    for task in plan.get("build_tasks") or []:
+        owned = task.get("owned_paths")
+        if not isinstance(owned, list):
+            continue
+        stripped = [
+            text for path in owned
+            if isinstance(path, str)
+            and (text := path.replace("\\", "/").strip()).startswith(_WORKSPACE_APP_ROOT)
+            and text != _WORKSPACE_APP_ROOT
+        ]
+        if not stripped:
+            continue
+        targets = {text.removeprefix(_WORKSPACE_APP_ROOT) for text in stripped}
+        rewritten: list[Any] = []
+        for path in owned:
+            spelled = path.replace("\\", "/").strip() if isinstance(path, str) else None
+            if spelled is not None and spelled in stripped:
+                path = spelled.removeprefix(_WORKSPACE_APP_ROOT)
+            if path in targets and path in rewritten:
+                continue
+            rewritten.append(path)
+        task["owned_paths"] = rewritten
+        repairs.append(
+            f"{task.get('task_id')}: owned paths {stripped} are workspace paths; "
+            "owned paths are relative to the app bundle root"
+        )
+    return repairs
+
+
 def _apply_dispatch_path_rules(plan: dict[str, Any]) -> list[str]:
     """Hold every owned path to task dispatch's rules before anything else reads it.
 
@@ -819,7 +864,16 @@ def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
 
 
 def _repair_module_task_dependencies(plan: dict[str, Any], context: Any) -> list[str]:
-    """Supply direct contract inputs after every module task has been synthesized."""
+    """Supply direct contract inputs after every module task has been synthesized.
+
+    The approved data/contract.json serializer is an input of every persistent
+    module's data_models and business_services tasks, never their consumer.
+    Chat 5cd39d67 at deeef42d drafted the reverse edge (the persistence task
+    waiting on both data_models tasks); adding the canonical edge beside it made
+    a cycle, and review rejected the plan with "dependency cycle detected". A
+    reverse edge from a persistence task to a task that now depends on it is
+    dropped; every other edge the planner declared is kept.
+    """
     repairs: list[str] = []
     tasks = plan.get("build_tasks") or []
     by_scope_and_type = _tasks_by_scope_and_type(tasks)
@@ -831,6 +885,7 @@ def _repair_module_task_dependencies(plan: dict[str, Any], context: Any) -> list
     ]
     pack_paths = pack_owned_output_paths(context)
     facades = pack_facade_directories(context)
+    persistence_consumers: set[str] = set()
     for pack in plan.get("capability_packs") or []:
         if pack.get("surface_kind") != "module" or pack.get("capability_source") != "generated_module":
             continue
@@ -863,6 +918,7 @@ def _repair_module_task_dependencies(plan: dict[str, Any], context: Any) -> list
             )
             if f"modules/{module_id}/backend/repo.py" in required_paths["business_services"]:
                 required.extend(persistence_tasks)
+                persistence_consumers.add(str(task["task_id"]))
             declared = list(task.get("depends_on") or [])
             missing = [task_id for task_id in required if task_id not in declared]
             if missing:
@@ -870,6 +926,17 @@ def _repair_module_task_dependencies(plan: dict[str, Any], context: Any) -> list
                 repairs.append(
                     f"{task.get('task_id')}: added prerequisite contract inputs {missing}"
                 )
+    for task in tasks:
+        if str(task.get("task_id")) not in persistence_tasks:
+            continue
+        declared = list(task.get("depends_on") or [])
+        reverse = [task_id for task_id in declared if str(task_id) in persistence_consumers]
+        if reverse:
+            task["depends_on"] = [task_id for task_id in declared if task_id not in reverse]
+            repairs.append(
+                f"{task.get('task_id')}: dropped reverse edges {reverse}; those tasks consume "
+                "the data contract it serializes"
+            )
     return repairs
 
 # What each synthesized task tells its worker to do. A task the coverage
@@ -1361,16 +1428,35 @@ def _approved_surface_ids(context: Any) -> set[str]:
     return approved
 
 
+def _pack_page_paths(context: Any) -> frozenset[str]:
+    """The UI artifacts selected packs ship from their templates (for example MozaiksPay's billing pages)."""
+    return frozenset(path for path in pack_owned_output_paths(context) if path.startswith("ui/"))
+
+
+def _approved_page_paths(context: Any) -> set[str]:
+    """Lowercased page artifacts a page_bundle task may name: approved pages plus the pages selected packs ship.
+
+    Chat 5cd39d67 at deeef42d planned its page task with the structural
+    page_bundle label and owned app.json, the three approved pages, and the
+    billing, usage and pricing pages the selected MozaiksPay pack ships. Only
+    the approved experience_spec pages counted, so the task was rejected as an
+    unapproved surface before release_pack_owned_paths could release the pack
+    pages and _repair_coverage could build the approved page task, three times
+    in a row. validate_plan_coverage already accepts pack pages (#967); a pack
+    page here is released later, never built by the task.
+    """
+    pages = _approved_page_inventory(context)
+    return {path.lower() for path in (*_required_page_paths({"pages": pages}), *_pack_page_paths(context))}
+
+
 def _owns_only_approved_pages(task: dict[str, Any], context: Any) -> bool:
     """Resolve the rendering choice only for an already approved page route."""
-    pages = _approved_page_inventory(context)
     return bool(
         task.get("task_type") == "page_bundle"
         and task.get("capability_pack_id") is None
-        and pages
+        and _approved_page_inventory(context)
         and all(is_safe_app_path(path) for path in task.get("owned_paths") or [])
-        and {path.lower() for path in _normalized_owned_paths(task)}
-        <= {path.lower() for path in _required_page_paths({"pages": pages})}
+        and {path.lower() for path in _normalized_owned_paths(task)} <= _approved_page_paths(context)
     )
 
 
@@ -1709,6 +1795,68 @@ def _validate_ui_only_surface_claims(plan: dict[str, Any], context: Any) -> None
         raise ValueError("Plan surface inventory errors:\n- " + "\n- ".join(errors))
 
 
+def _page_bundle_label_message(
+    capabilities: list[str], tasks: list[dict[str, Any]], context: Any,
+) -> str:
+    """Say which page_bundle entries left the structural page scope, and how to return to it.
+
+    page_bundle is the label review itself gives aggregate page work
+    (_label_page_tasks, _repair_coverage), so "remove its capability and tasks"
+    is a dead end for it: in chat 5cd39d67 the planner obeyed and deleted the
+    valid approved-page task, and in chat 601d2f56 it deleted every page task.
+    What is wrong is one task's fields or files, so the message names them.
+    """
+    approved_inventory = _approved_page_inventory(context)
+    approved_pages = _required_page_paths({"pages": approved_inventory})
+    allowed = _approved_page_paths(context)
+    pack_pages = sorted(_pack_page_paths(context))
+    pack_note = (
+        f" Pages a selected pack ships ({pack_pages}) need no task; the pack's templates provide them."
+        if pack_pages else ""
+    )
+    details: list[str] = [
+        f"capability_packs entry {pack_id!r} uses surface_id='page_bundle', a task label rather than "
+        "a capability surface; remove that entry"
+        for pack_id in capabilities
+    ]
+    if not approved_inventory:
+        # _owns_only_approved_pages approves page_bundle work only within an
+        # approved page inventory, so with none every page_bundle task fails;
+        # advising one would send the planner straight back here.
+        ids = [str(task.get("task_id")) for task in tasks]
+        if ids:
+            details.append(f"build_tasks {ids} use it")
+        return (
+            f"unapproved surface 'page_bundle': {'; '.join(details)}. The approved experience_spec "
+            "declares no pages, so page_bundle approves no task here: remove those page_bundle tasks."
+            f"{pack_note} A page the app needs must first be approved in ExperienceSpec."
+        )
+    for task in tasks:
+        faults = [
+            f"{field}={task.get(field)!r} (page work needs {expected!r})"
+            for field, expected in (("task_type", "page_bundle"), ("surface_kind", "ui_only"), ("capability_pack_id", None))
+            if task.get(field) != expected
+        ]
+        outside = [
+            str(path) for path in task.get("owned_paths") or []
+            if not is_safe_app_path(path) or normalize_app_path(path).lower() not in allowed
+        ]
+        # The same page shape _repair_coverage drops when no approved page claims it.
+        invented = [path for path in outside if path.startswith("ui/pages/") and path.endswith((".yaml", ".yml", ".jsx"))]
+        misplaced = [path for path in outside if path not in invented]
+        if invented:
+            faults.append(f"drop {invented}: no approved page or selected pack declares those pages")
+        if misplaced:
+            faults.append(f"move {misplaced} to the task of the approved surface that owns them")
+        details.append(f"task {task.get('task_id')!r}: {'; '.join(faults) or 'owns no approved page artifact'}")
+    return (
+        f"unapproved surface 'page_bundle': {'. '.join(details)}. Keep the page_bundle label for page "
+        "work: task_type=page_bundle, surface_kind=ui_only, capability_pack_id=null, owning only "
+        f"the approved experience_spec page artifacts {approved_pages}.{pack_note} Do not delete "
+        "the approved page work."
+    )
+
+
 def _validate_plan_surface_inventory(plan: dict[str, Any], context: Any) -> None:
     """Reject invented scope before repairs or identity advice can obscure it."""
     _validate_ui_only_surface_claims(plan, context)
@@ -1723,7 +1871,7 @@ def _validate_plan_surface_inventory(plan: dict[str, Any], context: Any) -> None
         for hint in surface.get("source_capability_packs") or []
     }
     errors: list[str] = []
-    unapproved: set[str] = set()
+    unapproved: dict[str, tuple[list[str], list[dict[str, Any]]]] = {}
     for entries, is_task in (
         (plan.get("capability_packs") or [], False),
         (plan.get("build_tasks") or [], True),
@@ -1744,13 +1892,24 @@ def _validate_plan_surface_inventory(plan: dict[str, Any], context: Any) -> None
                 and _owns_only_approved_data_contract(entry, context)
             ):
                 continue
-            unapproved.add(surface_id)
+            capabilities, tasks = unapproved.setdefault(surface_id, ([], []))
+            if is_task:
+                tasks.append(entry)
+            else:
+                capabilities.append(str(_pack_id_from_descriptor(entry)))
     if unapproved:
-        for surface_id in sorted(unapproved):
+        for surface_id, (capabilities, tasks) in sorted(unapproved.items()):
+            if surface_id == "page_bundle":
+                errors.append(_page_bundle_label_message(capabilities, tasks, context))
+                continue
+            offenders = [
+                *(f"capability {pack_id!r}" for pack_id in capabilities),
+                *(f"task {task.get('task_id')!r} owning {list(task.get('owned_paths') or [])}" for task in tasks),
+            ]
             message = (
-                f"unapproved surface {surface_id!r}: remove its capability and tasks "
-                "rather than relabel them. Use only surfaces from design_surface_map "
-                "or selected pack provider/facade contracts. "
+                f"unapproved surface {surface_id!r} (declared by {'; '.join(offenders)}): "
+                "remove its capability and tasks rather than relabel them. Use only surfaces "
+                "from design_surface_map or selected pack provider/facade contracts. "
                 f"Valid approved surface_ids: {sorted(approved)}."
             )
             if re.search(r"(?:^|[_-])(?:auth|authentication|login|signin)(?:$|[_-])", surface_id.lower()):
@@ -2022,6 +2181,8 @@ def review_app_build_plan(
     try:
         models, _ = load_workflow_structured_outputs("AppGenerator")
         plan = models["AppBuildPlan"].model_validate(detach(AppBuildPlan)).model_dump(mode="json")
+        for repair in _strip_workspace_app_root(plan):
+            logger.info("[AppGenerator] plan repaired: %s", repair)
         _validate_ui_only_surface_claims(plan, context_variables)
         for repair in (
             *_apply_dispatch_path_rules(plan),
