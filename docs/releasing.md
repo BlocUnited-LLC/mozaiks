@@ -6,10 +6,11 @@
 > The workflow and this page prepare that decision; neither grants release
 > approval.
 
-Mozaiks remains pre-1.0. Version `0.2.0` is planned as the first **currently
-installable** PyPI release. The PyPI project presently lists no distribution
-files. Earlier `0.1.x` filenames cannot be reused, and restoring them is not
-needed for `0.2.0`.
+Mozaiks remains pre-1.0. Versions `0.1.0` through `0.1.10` were previously
+published through this repository's trusted `release.yml` workflow, then the
+PyPI project was deleted. Version `0.2.0` is planned to restore current PyPI
+availability. The deleted `0.1.x` files cannot be restored or reused, and no
+public record indicates that `0.2.0` was uploaded.
 
 ## Release gates
 

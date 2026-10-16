@@ -70,8 +70,14 @@ Commands below are shown for Windows PowerShell and for macOS / Linux shells
 
 ### 1. Install
 
-Mozaiks is not published as a public PyPI package yet. Install it from a local
-checkout in editable mode. These commands are the same in every shell:
+Install the public package from PyPI:
+
+```bash
+python -m pip install mozaiks
+```
+
+Contributors working on the framework should instead use an editable checkout.
+These commands are the same in every shell:
 
 ```bash
 git clone https://github.com/BlocUnited-LLC/mozaiks.git
