@@ -77,10 +77,12 @@ def _target(source: str, base: str, files: dict[str, str]) -> str:
     return existing[0]
 
 
-def _tombstoned(source: str, base: str, files: dict[str, str], deleted: frozenset[str]) -> bool:
-    """True when an import names only a file the admitted change deleted."""
+def _tombstone(source: str, base: str, files: dict[str, str], deleted: frozenset[str]) -> str | None:
+    """The deleted file an import names, when it names only files the admitted change deleted."""
     candidates = _candidates(source, base)
-    return not any(candidate in files for candidate in candidates) and any(candidate in deleted for candidate in candidates)
+    if any(candidate in files for candidate in candidates):
+        return None
+    return next((candidate for candidate in candidates if candidate in deleted), None)
 
 
 def _import_names(node: Any) -> dict[str, str]:
@@ -194,28 +196,30 @@ def _options(node: Any) -> tuple[tuple[str, str | bool], ...]:
 
 def _registrations(
     source: str, files: dict[str, str], owner: str, deleted: frozenset[str] = frozenset(),
-) -> tuple[list[ComponentRegistration], dict[str, tuple[str, str]], set[str]]:
-    """Parse one barrel; `deleted` lets a carried copy drop registrations of deleted files."""
+) -> tuple[list[ComponentRegistration], dict[str, tuple[str, str]], dict[str, tuple[str, str]]]:
+    """Parse one barrel; `deleted` lets an app barrel set aside registrations of deleted files.
+
+    The third result maps each set-aside key to its deleted file and import source.
+    """
     root = _parse(source, f"{owner}:ui/index.js")
     imports: dict[str, tuple[str, str]] = {}
-    tombstoned: set[str] = set()
-    removed: set[str] = set()
+    tombstoned: dict[str, tuple[str, str]] = {}
+    removed: dict[str, tuple[str, str]] = {}
     reexports: dict[str, tuple[str, str]] = {}
     register = None
     for node in _children(root):
         if node.type == "import_statement":
-            # Only a carried snapshot receives `deleted`: its registration of a
-            # file the admitted change deleted is dropped, not resolved.
-            removed_file = bool(deleted) and _tombstoned(
-                _string(node.child_by_field_name("source")), "ui/index.js", files, deleted,
-            )
+            # Only app barrels receive `deleted`: their registration of a file
+            # the admitted change deleted is set aside, not resolved.
+            import_source = _string(node.child_by_field_name("source"))
+            removed_file = _tombstone(import_source, "ui/index.js", files, deleted) if deleted else None
             incoming: dict[str, tuple[str, str]] = {} if removed_file else _import_bindings(node, files)
             names = set(_import_names(node)) if removed_file else set(incoming)
-            if (imports.keys() | tombstoned) & names:
+            if (imports.keys() | tombstoned.keys()) & names:
                 raise ValueError(f"{owner}: repeated import binding")
             imports.update(incoming)
             if removed_file:
-                tombstoned.update(names)
+                tombstoned.update(dict.fromkeys(names, (removed_file, import_source)))
         elif node.type == "export_statement":
             declaration = node.child_by_field_name("declaration")
             if declaration is not None and declaration.type == "function_declaration" and _text(declaration.child_by_field_name("name")) == "register":
@@ -264,16 +268,16 @@ def _registrations(
             if function != "registerComponent" or len(arguments) not in {2, 3} or not parameters:
                 raise ValueError(f"{owner}: unsupported UI registration call")
             key, binding = _string(arguments[0]), _text(arguments[1])
-            if not key or key in keys or arguments[1].type != "identifier" or binding not in imports.keys() | tombstoned:
+            if not key or key in keys or arguments[1].type != "identifier" or binding not in imports.keys() | tombstoned.keys():
                 raise ValueError(f"{owner}: repeated key or unresolved registration binding: {key!r}")
             keys.add(key)
             used.add(binding)
             if binding in tombstoned:
-                removed.add(key)
+                removed[key] = tombstoned[binding]
                 continue
             path, export = imports[binding]
             registrations.append(ComponentRegistration(key, path, export, _options(arguments[2]) if len(arguments) == 3 else ()))
-    if imports.keys() | tombstoned != used:
+    if imports.keys() | tombstoned.keys() != used:
         raise ValueError(f"{owner}: UI barrel contains unused imports")
     for registration in registrations:
         if not _has_export(registration.path, registration.export, files):
@@ -297,7 +301,18 @@ def _manifest(source: str, owner: str) -> dict[str, Any]:
 _Declaration = tuple[str, bool, dict[str, str], list[ComponentRegistration], dict[str, tuple[str, str]], dict[str, Any] | None]
 
 
-def _apply_admitted_overlay(declarations: list[_Declaration], overlay_owners: set[str]) -> list[_Declaration]:
+@dataclass(frozen=True)
+class _RevisionBaseline:
+    entries: frozenset[ComponentRegistration]
+    exports: frozenset[tuple[str, tuple[str, str]]]
+    routes: dict[str, list[dict[str, Any]]]
+    sequence: list[str]
+    metadata: dict[str, Any]
+
+
+def _apply_admitted_overlay(
+    declarations: list[_Declaration], overlay_owners: set[str], revision: _RevisionBaseline | None,
+) -> list[_Declaration]:
     """Let the newest admitted app layer replace older app declarations.
 
     Without a pack, last-writer-wins lets the accumulated repair overlay replace
@@ -305,40 +320,78 @@ def _apply_admitted_overlay(declarations: list[_Declaration], overlay_owners: se
     exports, route ids, relative route positions and manifest metadata that it
     declares. Patched task declarations keep their owner, so task/task and
     task/pack collisions still fail; pack declarations are never patched.
+    In a revision a current task takes only the overlay values that differ from
+    the verified baseline. An unchanged copy, such as a full root an earlier
+    repair or the auth scaffold saved, carries no admitted change: it still
+    replaces older snapshot values, but it can neither revert a task's approved
+    change nor make competing task declarations look carried.
     """
     entries: dict[str, ComponentRegistration] = {}
     exports: dict[str, tuple[str, str]] = {}
     routes: dict[str, dict[str, Any]] = {}
     sequence: list[str] = []
     metadata: dict[str, Any] = {}
+    restated: set[tuple[str, str]] = set()
+    task_positioned: set[str] = set()
     for owner, _, _, overlay_entries, overlay_exports, manifest in declarations:
         if owner not in overlay_owners:
             continue
         for entry in overlay_entries:
             if entries.setdefault(entry.key, entry) != entry:
                 raise ValueError(f"Conflicting component registration: {entry.key}")
+            if revision is not None and entry in revision.entries:
+                restated.add(("component", entry.key))
         for name, binding in overlay_exports.items():
             if exports.setdefault(name, binding) != binding:
                 raise ValueError(f"Conflicting UI barrel export: {name}")
+            if revision is not None and (name, binding) in revision.exports:
+                restated.add(("export", name))
         for key, value in (manifest or {}).items():
-            if key != "pages" and metadata.setdefault(key, value) != value:
+            if key == "pages":
+                continue
+            if metadata.setdefault(key, value) != value:
                 raise ValueError(f"Conflicting route manifest metadata: {key}")
-        for route in (manifest or {}).get("pages", []):
+            if revision is not None and key in revision.metadata and revision.metadata[key] == value:
+                restated.add(("metadata", key))
+        pages = (manifest or {}).get("pages", [])
+        for route in pages:
             if routes.setdefault(route["id"], route) != route:
                 raise ValueError(f"Conflicting route id: {route['id']}")
             if route["id"] not in sequence:
                 sequence.append(route["id"])
+            if revision is not None and route in revision.routes.get(route["id"], []):
+                restated.add(("route", route["id"]))
+            else:
+                task_positioned.add(route["id"])
+        # A task's relative order yields only to an overlay order that differs from the baseline's.
+        known = [route["id"] for route in pages if revision is not None and route["id"] in revision.routes]
+        if revision is None or known != [route_id for route_id in revision.sequence if route_id in known]:
+            task_positioned.update(route["id"] for route in pages)
     patched: list[_Declaration] = []
     for owner, baseline, contents, own_entries, own_exports, manifest in declarations:
         if owner not in overlay_owners and not owner.startswith("pack:"):
-            own_entries = [entries.get(entry.key, entry) for entry in own_entries]
-            own_exports = {name: exports.get(name, binding) for name, binding in own_exports.items()}
+            # A carried snapshot takes every overlay value; a current task keeps
+            # its own value wherever the overlay merely restates the baseline.
+            keeps = set() if baseline else restated
+            own_entries = [
+                entries[entry.key] if entry.key in entries and ("component", entry.key) not in keeps else entry
+                for entry in own_entries
+            ]
+            own_exports = {
+                name: exports[name] if name in exports and ("export", name) not in keeps else binding
+                for name, binding in own_exports.items()
+            }
             if manifest is not None:
                 pages = list(manifest["pages"])
-                slots = [index for index, route in enumerate(pages) if route["id"] in routes]
+                own_routes = {route["id"]: route for route in pages}
+                moved: Collection[str] = routes.keys() if baseline else task_positioned
+                slots = [index for index, route in enumerate(pages) if route["id"] in moved]
                 for index, route_id in zip(slots, sorted((pages[index]["id"] for index in slots), key=sequence.index), strict=True):
-                    pages[index] = routes[route_id]
-                manifest = {**{key: metadata.get(key, value) for key, value in manifest.items()}, "pages": pages}
+                    pages[index] = own_routes[route_id] if ("route", route_id) in keeps else routes[route_id]
+                manifest = {**{
+                    key: metadata[key] if key in metadata and ("metadata", key) not in keeps else value
+                    for key, value in manifest.items()
+                }, "pages": pages}
         patched.append((owner, baseline, contents, own_entries, own_exports, manifest))
     return patched
 
@@ -353,23 +406,26 @@ def compose_ui_registry(
     from the bound immutable archive. Current snapshots cannot grant carryover.
     A contribution marked ``admitted_overlay`` is the accumulated admitted repair
     layer. ``deleted_paths`` are admitted tombstones, already absent from files;
-    only carried app snapshots may drop registrations of those files.
+    app declarations (never pack ones) drop registrations of those files.
     """
     deleted = frozenset(deleted_paths)
     declarations: list[_Declaration] = []
+    set_aside: list[dict[str, tuple[str, str]]] = []
     overlay_owners: set[str] = set()
-    removed_components: set[str] = set()
     baseline_entries: set[ComponentRegistration] = set()
     baseline_exports: set[tuple[str, tuple[str, str]]] = set()
     baseline_routes: dict[str, list[dict[str, Any]]] = {}
     baseline_sequence: list[str] = []
+    baseline_metadata: dict[str, Any] = {}
     if revision_baseline:
         if "ui/index.js" in revision_baseline:
             entries, exports, _ = _registrations(revision_baseline["ui/index.js"], revision_baseline, "revision baseline")
             baseline_entries.update(entries)
             baseline_exports.update(exports.items())
         if "ui/route_manifest.json" in revision_baseline:
-            for route in _manifest(revision_baseline["ui/route_manifest.json"], "revision baseline")["pages"]:
+            saved_manifest = _manifest(revision_baseline["ui/route_manifest.json"], "revision baseline")
+            baseline_metadata.update((key, value) for key, value in saved_manifest.items() if key != "pages")
+            for route in saved_manifest["pages"]:
                 baseline_routes.setdefault(route["id"], []).append(route)
                 baseline_sequence.append(route["id"])
     for contribution in contributions:
@@ -382,22 +438,52 @@ def compose_ui_registry(
         # The overlay is carried: it never claims an active owner.
         baseline = contribution.get("baseline") is True or overlay
         contents = {item["filename"]: item["content"] for item in contribution["files"]}
-        carried_deletions = deleted if baseline and not owner.startswith("pack:") else frozenset()
         entries, exports, removed = (
-            _registrations(contents["ui/index.js"], files, owner, carried_deletions)
-            if "ui/index.js" in contents else ([], {}, set())
+            _registrations(contents["ui/index.js"], files, owner, frozenset() if owner.startswith("pack:") else deleted)
+            if "ui/index.js" in contents else ([], {}, {})
         )
-        removed_components.update(removed)
         manifest = _manifest(contents["ui/route_manifest.json"], owner) if "ui/route_manifest.json" in contents else None
         declarations.append((owner, baseline, contents, entries, exports, manifest))
-    declarations = _apply_admitted_overlay(declarations, overlay_owners) if overlay_owners else declarations
+        set_aside.append(removed)
+    # Admitted deletions are newer than task output, so a task's stale copy of a
+    # registration drops like a carried one. A task that writes the deleted file
+    # itself is current page work: only an admitted barrel that no longer
+    # registers the file supersedes it, otherwise the conflict fails here.
+    repair_barrels = [
+        removed for (owner, _, contents, *_), removed in zip(declarations, set_aside, strict=True)
+        if owner in overlay_owners and "ui/index.js" in contents
+    ]
+    for (owner, baseline, contents, *_), removed in zip(declarations, set_aside, strict=True):
+        for key, (path, source) in sorted(removed.items()):
+            if not baseline and path in contents and not any(barrel.get(key, ("", ""))[0] != path for barrel in repair_barrels):
+                raise ValueError(
+                    f"ui/index.js: UI import must resolve to one existing file: {source!r}; {owner} re-emits {path}, "
+                    "which an admitted repair deleted, and no admitted ui/index.js drops its registration"
+                )
+    revision = _RevisionBaseline(
+        frozenset(baseline_entries), frozenset(baseline_exports), baseline_routes, baseline_sequence, baseline_metadata,
+    ) if revision_baseline else None
+    declarations = _apply_admitted_overlay(declarations, overlay_owners, revision) if overlay_owners else declarations
     # Composition is additive: an omitted carried declaration stays. Only an
-    # admitted deletion of its component file removes a carried registration,
-    # and its carried routes leave with it. Current task or pack declarations
-    # never drop; they still fail on a missing file or unregistered component.
-    dropped_components = removed_components - {entry.key for _, _, _, entries, _, _ in declarations for entry in entries}
+    # admitted deletion of its component file removes an app registration, and
+    # the app routes to that component leave with it. Pack declarations never
+    # drop; they, and app declarations of files absent without an admitted
+    # deletion, still fail on a missing file or unregistered component.
+    registered = {entry.key for _, _, _, entries, _, _ in declarations for entry in entries}
+    dropped_components = {key for removed in set_aside for key in removed} - registered
     if dropped_components:
-        logger.info("UI composition dropped carried registrations of deleted files: %s", sorted(dropped_components))
+        dropped_routes = {
+            (route["id"], owner) for owner, _, _, _, _, manifest in declarations
+            if manifest is not None and not owner.startswith("pack:")
+            for route in manifest["pages"] if route["component"] in dropped_components
+        }
+        owners = {owner for _, owner in dropped_routes} | {
+            owner for (owner, *_), removed in zip(declarations, set_aside, strict=True) if removed.keys() & dropped_components
+        }
+        logger.info(
+            "UI composition dropped registrations and routes of admitted-deleted files: components=%s routes=%s owners=%s",
+            sorted(dropped_components), sorted({route_id for route_id, _ in dropped_routes}), sorted(owners),
+        )
 
     # Only admitted app declarations supersede saved app snapshots. Verified
     # pack declarations remain current owners, including when carried by a task.
@@ -461,9 +547,9 @@ def compose_ui_registry(
             if route_id in seen_route_ids:
                 raise ValueError(f"{owner}: repeated route id: {route_id}")
             seen_route_ids.add(route_id)
-            if baseline and app_owner and route["component"] in dropped_components:
-                # A carried route leaves with its deleted component; the
-                # remaining entries keep their relative positions.
+            if app_owner and route["component"] in dropped_components:
+                # An app route leaves with its deleted component; the remaining
+                # entries keep their relative positions.
                 continue
             if not baseline or route_id not in reordered_routes:
                 sequence.append(route_id)

@@ -6,6 +6,7 @@ import pytest
 import yaml
 
 from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
+from factory_app.workflows.AppGenerator.tools.code_file_utils import admitted_app_file_map
 from mozaiksai.core.workflow.context.adapter import create_context_container
 from tests.factory_context import factory_context
 from tests.test_app_ui_composition import component, compose, contribution, retitled
@@ -119,6 +120,74 @@ async def test_genesis_repair_overlay_reaches_the_composed_roots(fault):
     routes = _routes(_files(result))
     assert routes["board"] == _routes(repair)["board"]
     assert routes["messages"] == _routes(_assembled_files())["messages"]
+
+
+WIDGET = "ui/components/Widget.jsx"
+
+
+def _genesis_context(task, **extra):
+    return Context(factory_context({
+        **_context(), "app_id": "genesis_repair", "data_contract": EMPTY_CONTRACT,
+        "app_task_batch_results": {"pages": {"code_files": contribution("task:pages", task)["files"]}}, **extra,
+    }))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("barrel", ["composed", "task_style"])
+async def test_repair_deleting_a_task_written_component_reassembles(barrel, caplog):
+    board = component(path="ui/pages/custom/board.jsx")
+    task = {**board, WIDGET: "export default function Widget() { return null; }", "ui/index.js": (
+        "import View from './pages/custom/board.jsx';\nimport Widget from './components/Widget.jsx';\n"
+        "export function register(registerComponent) { registerComponent('Board', View, {}); registerComponent('Widget', Widget, {}); }"
+    )}
+    # The FrontendStubAgent repair deletes the forbidden file and rewrites the barrel without it;
+    # the task's batch output still writes and registers the file.
+    repaired = compose(board, _assembled_files())["ui/index.js"] if barrel == "composed" else board["ui/index.js"]
+    context = _genesis_context(task, code_files=[{"filename": "ui/index.js", "content": repaired}], deleted_files=[WIDGET])
+    caplog.set_level(logging.INFO, logger="mozaiksai.core.workflow.generator_support.ui_registry_composition")
+    result = await assemble_app_tasks(context_variables=context)
+    assert result["success"], result
+    assert any("'Widget'" in record.getMessage() and "task:pages" in record.getMessage() for record in caplog.records)
+    for files in (_files(result), admitted_app_file_map(context)):
+        assert WIDGET not in files and "Widget" not in files["ui/index.js"]
+        assert files["ui/index.js"].count('registerComponent("Messages"') == 1
+        assert list(_routes(files)) == ["board", "messages"]
+
+
+@pytest.mark.asyncio
+async def test_admitted_map_composes_repair_roots_onto_pack_composed_roots():
+    task = component(path="ui/pages/custom/board.jsx")
+    repair = {"ui/route_manifest.json": retitled(task["ui/route_manifest.json"], "board", "Repaired board")}
+    context = _genesis_context(task, code_files=contribution("repair", repair)["files"])
+    result = await assemble_app_tasks(context_variables=context)
+    assert result["success"], result
+    admitted = admitted_app_file_map(context)
+    # The partial repair manifest no longer replaces the composed root and its pack route.
+    assert _routes(admitted) == _routes(_files(result))
+    assert [(route["id"], route["meta"]["title"]) for route in _routes(admitted).values()] == [("board", "Repaired board"), ("messages", "Messages")]
+    # A partial repair barrel saved after this assembly reaches the projection without reassembly.
+    context["code_files"] = contribution("repair", {
+        **repair, "ui/pages/custom/board_v2.jsx": "export default function Board() { return null; }",
+        "ui/index.js": "import B from './pages/custom/board_v2.jsx';\nexport function register(registerComponent) { registerComponent('Board', B, {}); }",
+    })["files"]
+    admitted = admitted_app_file_map(context)
+    assert "./pages/custom/board_v2.jsx" in admitted["ui/index.js"] and "./pages/custom/board.jsx" not in admitted["ui/index.js"]
+    assert admitted["ui/index.js"].count('registerComponent("Messages"') == 1
+    assert list(_routes(admitted)) == ["board", "messages"]
+
+
+def test_admitted_map_keeps_last_writer_wins_without_pack_composition(caplog):
+    task = component(path="ui/pages/custom/board.jsx")
+    repair = {"ui/index.js": "import B from './pages/custom/board_v2.jsx';\nexport function register(registerComponent) { registerComponent('Board', B, {}); }"}
+    # No pack provenance records a composed root: the repair copy replaces the root.
+    assert admitted_app_file_map({"generated_files": task, "code_files": contribution("repair", repair)["files"]})["ui/index.js"] == repair["ui/index.js"]
+    # A copy that cannot be composed replaces the composed root as before and is reported.
+    composed = {**task, ".mozaiks/pack_provenance.json": json.dumps({"composed_outputs": {"ui/index.js": [{"pack_id": "messaging"}]}})}
+    owner = "factory_app.workflows.AppGenerator.tools.code_file_utils"
+    caplog.set_level(logging.WARNING, logger=owner)
+    admitted = admitted_app_file_map({"generated_files": composed, "code_files": contribution("repair", repair)["files"]})
+    assert admitted["ui/index.js"] == repair["ui/index.js"]
+    assert [record.getMessage().split(":", 1)[0] for record in caplog.records if record.name == owner] == ["ADMITTED_UI_ROOT_NOT_COMPOSED"]
 
 
 @pytest.mark.asyncio

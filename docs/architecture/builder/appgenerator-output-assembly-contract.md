@@ -285,17 +285,30 @@ order replaces theirs for those route ids. A patched task declaration keeps its
 owner, so task/task and task/pack collisions still fail. The overlay never
 patches a pack declaration: a differing overlay route fails as a conflict, and a
 differing registration wins only through the unique explicit `override: true`
-contract above.
+contract above. In a revision a current task takes only the overlay values
+that differ from the verified revision baseline: component keys, barrel
+exports, route ids, manifest metadata, and the relative order when the
+overlay's order differs from the baseline's. An overlay value equal to the
+baseline, such as a full-root copy an earlier repair or the auth scaffold saved,
+still replaces older saved-snapshot values. It cannot revert a task's approved
+revision change or make competing task or pack declarations look carried.
+Genesis has no baseline, so there every overlay value supersedes.
 
 Composition is additive. A carried declaration that a current task omits stays,
 so a partial root never removes a page. Removal is explicit: composition resolves
-imports against the final file set without admitted `deleted_files` tombstones,
-and a carried app registration (saved snapshot or repair overlay) whose
-component file was deleted is dropped together with the carried routes to that
-component. The remaining routes keep their relative positions. A current task or
-pack declaration that still registers a deleted file, or routes to a component
-that is no longer registered, fails with the existing explicit error.
-Pack-owned template paths are never tombstoned.
+imports against the final file set without admitted `deleted_files` tombstones.
+Admitted deletions are newer than task output. Any app registration (saved
+snapshot, repair overlay or current task) whose import names only a deleted
+file is dropped, and so are the app routes to a component left unregistered.
+The drop is logged with the components, routes and owners. The remaining routes
+keep their relative positions. A task that writes the deleted file itself and
+still registers it is current page work: an admitted `ui/index.js` that no
+longer registers that file supersedes it, and otherwise assembly fails with a
+`ui/index.js:` diagnostic naming the task. A planned page that loses its route
+this way still fails the planned-page route check. Pack declarations never
+drop. A pack registration of a deleted file, or an app registration of a file
+that is absent without an admitted deletion, fails with the existing explicit
+error. Pack-owned template paths are never tombstoned.
 
 Pack provenance identifies contributors to the two composed roots under
 `composed_outputs`; they are not listed as exact template-owned final files.
@@ -1151,6 +1164,14 @@ gate passes.
 
 Validation and download use `admitted_app_file_map`: the current `generated_files`
 map, admitted `code_files` repairs, and admitted `deleted_files` tombstones.
+When `.mozaiks/pack_provenance.json` records `ui/index.js` or
+`ui/route_manifest.json` under `composed_outputs`, a differing repair copy of
+that root is composed onto it with the overlay and deletion rules above instead
+of replacing it as a whole file. A partial repair copy therefore cannot drop the
+verified pack declarations it omits. No reassembly is needed for the repair to
+reach validation. A copy that cannot be composed still replaces the root, so the
+acceptance gates judge it as written, and an `ADMITTED_UI_ROOT_NOT_COMPOSED`
+warning names it. Without that provenance the last writer wins.
 Historical raw worker responses and prior generated directories cannot overwrite,
 refill, or delete that snapshot. An older foreign readback filtered by a save tool
 cannot reappear during packaging. Empty current artifacts remain empty.

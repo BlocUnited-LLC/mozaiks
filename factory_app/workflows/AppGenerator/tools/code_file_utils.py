@@ -53,6 +53,7 @@ from mozaiksai.core.workflow.generator_support.module_account_data import (
     materialize_task_module_account_handlers,
 )
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    SHARED_UI_OUTPUT_PATHS,
     pack_owned_output_paths,
 )
 from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
@@ -68,8 +69,11 @@ from mozaiksai.core.workflow.generator_support.module_write_actions import (
     materialize_task_module_schemas,
 )
 from mozaiksai.core.workflow.generator_support.page_plan_utils import compile_authored_page_files
+from mozaiksai.core.workflow.generator_support.ui_registry_composition import compose_ui_registry
 
 logger = logging.getLogger(__name__)
+
+_PACK_PROVENANCE_PATH = ".mozaiks/pack_provenance.json"
 
 
 def compose_bundle_auth_routes(files_map: dict[str, str]) -> None:
@@ -241,6 +245,45 @@ def save_generated_code(context_variables: Any) -> dict[str, Any]:
     return {"saved_files": sorted(incoming), "deleted_files": deleted}
 
 
+def _pack_composed_roots(files: dict[str, str]) -> frozenset[str]:
+    """Shared UI roots the pack provenance records as composed with pack declarations."""
+    try:
+        provenance = json.loads(files.get(_PACK_PROVENANCE_PATH) or "{}")
+    except json.JSONDecodeError:
+        return frozenset()
+    composed = provenance.get("composed_outputs") if isinstance(provenance, dict) else None
+    if not isinstance(composed, dict):
+        return frozenset()
+    return frozenset(path for path in SHARED_UI_OUTPUT_PATHS if path in composed and path in files)
+
+
+def _compose_repair_roots(
+    roots: dict[str, str], overlay: dict[str, str], files: dict[str, str], deleted: list[str], replaced: set[str],
+) -> dict[str, str]:
+    """Compose admitted repair copies onto pack-composed roots instead of replacing them.
+
+    A repair copy can be partial. Laid over as a whole file it would drop the
+    verified pack declarations it omits, so it supersedes only what it declares,
+    with the overlay rules assembly applies. A copy that cannot be composed
+    keeps replacing the root, and the acceptance gates judge it as written.
+    """
+    contributions = [
+        {"owner": owner, "baseline": True, "admitted_overlay": owner == "app:accumulated_files", "files": [
+            {"filename": path, "content": source[path]} for path in sorted(SHARED_UI_OUTPUT_PATHS & source.keys())
+        ]}
+        for owner, source in (("app:generated_files", roots), ("app:accumulated_files", overlay))
+    ]
+    try:
+        shared = compose_ui_registry(contributions, files, deleted_paths=deleted)
+    except ValueError as exc:
+        logger.warning(
+            "ADMITTED_UI_ROOT_NOT_COMPOSED: paths=%s; the admitted repair copy replaces the pack-composed root: %s",
+            sorted(replaced), exc,
+        )
+        return {}
+    return {path: shared[path] for path in sorted(replaced) if path in shared}
+
+
 def admitted_app_file_map(context_variables: Any) -> dict[str, str]:
     """Project the current bundle and admitted repairs, never raw worker history."""
     if context_variables is None or not hasattr(context_variables, "get"):
@@ -252,13 +295,22 @@ def admitted_app_file_map(context_variables: Any) -> dict[str, str]:
             safe = safe_relpath(str(path))
             if safe and safe != "." and ":" not in safe and "\x00" not in safe:
                 files[safe] = str(content)
-    files.update(extract_code_file_map_from_payload({
+    roots = {path: files[path] for path in SHARED_UI_OUTPUT_PATHS if path in files}
+    composed = _pack_composed_roots(files)
+    overlay = extract_code_file_map_from_payload({
         "code_files": detach(context_variables.get("code_files")),
-    }))
-    for path in extract_deleted_file_paths_from_payload({
+    })
+    files.update(overlay)
+    deleted = extract_deleted_file_paths_from_payload({
         "deleted_files": detach(context_variables.get("deleted_files")),
-    }):
+    })
+    for path in deleted:
         files.pop(path, None)
+    # Assembly composed these roots with verified pack declarations; a repair
+    # copy is composed onto them rather than replacing them as a whole file.
+    replaced = {path for path in composed & overlay.keys() if overlay[path] != roots[path] and path not in deleted}
+    if replaced:
+        files.update(_compose_repair_roots(roots, overlay, files, deleted, replaced))
     return files
 
 
