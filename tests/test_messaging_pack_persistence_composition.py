@@ -6,11 +6,14 @@ import os
 import shutil
 from copy import deepcopy
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 from urllib.parse import urlparse
 from uuid import uuid4
 
 import pytest
 import yaml
+from bson import ObjectId
 
 from factory_app.workflows.AppGenerator.tools.app_validation import (
     run_app_bundle_acceptance_gate,
@@ -32,6 +35,8 @@ from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templat
     verified_template_module_ids,
     verify_pack_integrity,
 )
+from mozaiksai.core.account import AccountDataRegistry
+from mozaiksai.core.runtime.app.module_loader import ModuleLoader
 from mozaiksai.core.runtime.persistence import apply_data_migrations, load_data_migrations
 from mozaiksai.core.runtime.persistence.adapter import PersistencePrincipal
 from mozaiksai.core.runtime.persistence.mongo import (
@@ -41,7 +46,7 @@ from mozaiksai.core.runtime.persistence.mongo import (
 from mozaiksai.core.workflow.generator_support.code_files import compile_data_contract
 from tests.test_appgenerator_revision_baseline import _replace_archive
 from tests.test_appgenerator_revision_baseline import baseline as revision_baseline  # noqa: F401
-from tests.test_runtime_database_migrations import FakeMongoClient
+from tests.test_runtime_database_migrations import FakeCursor, FakeDatabase, FakeMongoClient
 
 PACK = Path(__file__).resolve().parents[1] / "factory_app/build_context/messaging"
 MIGRATION = "data/migrations/001_messaging_collections.json"
@@ -330,7 +335,9 @@ def test_stale_selected_pins_are_rejected(key, value):
 
 @pytest.mark.parametrize("pinned", [True, False])
 def test_unresolvable_factory_root_trusts_only_pinned_packs(monkeypatch, pinned):
-    from factory_app.workflows.AppGenerator.tools import resolve_managed_capability_templates as resolver
+    from factory_app.workflows.AppGenerator.tools import (
+        resolve_managed_capability_templates as resolver,
+    )
 
     monkeypatch.setattr(resolver, "resolve_factory_app_root", lambda: None)
     context = _context(pinned=pinned)
@@ -382,6 +389,266 @@ async def test_actual_messaging_migration_applies_once_and_preserves_existing_re
     assert index_counts == [6, 3, 2]
     assert [len(client[DEFAULT_APP_DATABASE_NAME][name].create_index_calls) for name in names] == index_counts
     assert all(client[DEFAULT_APP_DATABASE_NAME][name].document_by_key == preserved for name in [*names, "unrelated_projects"])
+
+
+ACCOUNT_APP_ID = "messaging_account_test"
+ACCOUNT_DATABASE = "messaging_account_test_db"
+_MISSING = object()
+
+
+def _field(row, path):
+    value = row
+    for part in path.split("."):
+        if not isinstance(value, dict) or part not in value:
+            return _MISSING
+        value = value[part]
+    return value
+
+
+def _equal(actual, expected):
+    if actual is _MISSING:
+        return expected is None
+    if isinstance(actual, list) and not isinstance(expected, list):
+        return expected in actual
+    return actual == expected
+
+
+def _operator(actual, name, operand):
+    if name == "$ne":
+        return not _equal(actual, operand)
+    if name == "$gt":
+        return actual is not _MISSING and actual > operand
+    raise NotImplementedError(f"fake Mongo does not model {name}")
+
+
+def _matches(row, query):
+    for key, expected in query.items():
+        if key == "$and":
+            matched = all(_matches(row, part) for part in expected)
+        elif key.startswith("$"):
+            raise NotImplementedError(f"fake Mongo does not model {key}")
+        elif isinstance(expected, dict) and any(name.startswith("$") for name in expected):
+            matched = all(_operator(_field(row, key), name, operand) for name, operand in expected.items())
+        else:
+            matched = _equal(_field(row, key), expected)
+        if not matched:
+            return False
+    return True
+
+
+def _equalities(query):
+    fields = {}
+    for key, value in query.items():
+        if key == "$and":
+            for part in value:
+                fields.update(_equalities(part))
+        elif not (isinstance(value, dict) and any(name.startswith("$") for name in value)):
+            fields[key] = value
+    return fields
+
+
+class _DocumentCollection:
+    """Motor-shaped rows with ObjectId keys; an unmodelled operator fails the test."""
+
+    def __init__(self) -> None:
+        self.rows: list[dict[str, Any]] = []
+
+    def _matching(self, query):
+        return [row for row in self.rows if _matches(row, query)]
+
+    def find(self, query, projection=None, **_options):
+        return FakeCursor(deepcopy(self._matching(query)))
+
+    async def find_one(self, query, projection=None, **_options):
+        return next(iter(deepcopy(self._matching(query))), None)
+
+    async def insert_one(self, document, **_options):
+        row = {"_id": ObjectId(), **deepcopy(dict(document))}
+        self.rows.append(row)
+        return SimpleNamespace(inserted_id=row["_id"])
+
+    async def update_one(self, query, update, *, upsert=False, **_options):
+        changes = update.get("$set") or {}
+        if set(update) - {"$set"} or any("." in key for key in changes):
+            raise NotImplementedError(f"fake Mongo does not model update {update}")
+        rows = self._matching(query)[:1]
+        for row in rows:
+            row.update(deepcopy(changes))
+        if not rows and upsert:
+            await self.insert_one({**_equalities(query), **changes})
+        return SimpleNamespace(matched_count=len(rows), modified_count=len(rows))
+
+    async def _delete(self, query, limit=None):
+        doomed = self._matching(query)[:limit]
+        self.rows = [row for row in self.rows if not any(row is target for target in doomed)]
+        return SimpleNamespace(deleted_count=len(doomed))
+
+    async def delete_one(self, query, **_options):
+        return await self._delete(query, limit=1)
+
+    async def delete_many(self, query, **_options):
+        return await self._delete(query)
+
+    async def count_documents(self, query, **_options):
+        return len(self._matching(query))
+
+
+class _DocumentDatabase(FakeDatabase):
+    def __getitem__(self, name):
+        return self.collections.setdefault(name, _DocumentCollection())
+
+
+class _DocumentMongoClient(FakeMongoClient):
+    def __getitem__(self, name):
+        return self.databases.setdefault(name, _DocumentDatabase())
+
+
+@pytest.fixture
+def messaging_account(tmp_path, monkeypatch):
+    """Load the rendered pack the way a host does and bind its account handler to fake Mongo."""
+    files = _assembled_files()
+    for filename, content in files.items():
+        if filename.startswith("modules/messages/"):
+            path = tmp_path / "app" / filename
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+    registry = AccountDataRegistry()
+    monkeypatch.setattr("mozaiksai.core.account.account_data_registry", registry)
+    loaded = ModuleLoader(str(tmp_path / "app")).load("messages")
+    assert registry.registered_module_ids() == ["messages"]
+    client = _DocumentMongoClient()
+    contract = json.loads(files["data/contract.json"])
+
+    def persistence(user_id):
+        return MongoPersistenceContext(
+            app_id=ACCOUNT_APP_ID, database_name=ACCOUNT_DATABASE, client=client,
+            data_contract=contract, principal=PersistencePrincipal(user_id=user_id),
+        )
+
+    def rows(name):
+        return client[ACCOUNT_DATABASE][persistence("probe").collection_name("messages", name)].rows
+
+    def snapshot():
+        return deepcopy({name: rows(name) for name in ("threads", "messages", "thread_reads")})
+
+    async def account(operation, user_id, *, app_id=ACCOUNT_APP_ID):
+        # The account routes call the registry with the requesting account's persistence.
+        call = registry.delete_all if operation == "delete" else registry.export_all
+        return await call(app_id=app_id, user_id=user_id, db=None, persistence=persistence(user_id))
+
+    def ctx(user_id):
+        return SimpleNamespace(user_id=user_id, app_id=ACCOUNT_APP_ID, persistence=persistence(user_id))
+
+    module = loaded.handler
+
+    async def thread(user_id, peer):
+        result = await module.create_thread(ctx(user_id), participant_ids=[peer], thread_type="direct")
+        return result["thread"]["thread_id"]
+
+    async def send(user_id, thread_id, body):
+        result = await module.send_message(ctx(user_id), thread_id=thread_id, body=body)
+        assert result["success"], result
+        return result["message"]
+
+    async def stored_thread(user_id, thread_id):
+        return (await module.get_thread(ctx(user_id), thread_id=thread_id))["thread"]
+
+    return SimpleNamespace(module=module, ctx=ctx, persistence=persistence, rows=rows, snapshot=snapshot,
+                           account=account, thread=thread, send=send, stored_thread=stored_thread)
+
+
+@pytest.mark.asyncio
+async def test_messaging_account_deletion_preserves_peers_and_recomputes_previews(messaging_account):
+    rt = messaging_account
+    secret = "my home address is 12 Elm St"
+    # Alice spoke last in Bob's thread: Bob's own message (longer than a preview) becomes the preview again.
+    bob_thread = await rt.thread("bob", "alice")
+    bob_message = await rt.send("bob", bob_thread, "b" * 200)
+    bob_preview = (await rt.stored_thread("bob", bob_thread))["last_message"]
+    await rt.send("alice", bob_thread, secret)
+    for user_id in ("alice", "bob"):
+        await rt.module.mark_thread_read(rt.ctx(user_id), thread_id=bob_thread)
+    # Only Alice spoke in Bob's thread; a retracted Bob row must not resurface as the preview.
+    silent_thread = await rt.thread("bob", "alice")
+    await rt.persistence("bob").collection("messages", "messages").insert_one({
+        "message_id": "msg_retracted", "thread_id": silent_thread, "sender_id": "bob", "sender_role": "user",
+        "body": "retracted", "created_at": "2000-01-01T00:00:00+00:00", "is_deleted": True,
+    })
+    await rt.send("alice", silent_thread, secret)
+    # Alice's thread with a peer reply survives with the reply as its preview.
+    shared_thread = await rt.thread("alice", "bob")
+    await rt.send("bob", shared_thread, "bob reply")
+    reply_preview = (await rt.stored_thread("bob", shared_thread))["last_message"]
+    await rt.send("alice", shared_thread, secret)
+    # Alice's thread without peer messages is hers alone and is deleted.
+    alice_thread = await rt.thread("alice", "bob")
+    await rt.send("alice", alice_thread, secret)
+    # A thread whose latest message is Bob's keeps its row exactly.
+    peer_last_thread = await rt.thread("bob", "alice")
+    await rt.send("alice", peer_last_thread, secret)
+    await rt.send("bob", peer_last_thread, "bob has the last word")
+    peer_last_row = await rt.stored_thread("bob", peer_last_thread)
+
+    before = rt.snapshot()
+    assert await rt.account("delete", "alice", app_id="foreign_app") == {
+        "messages": {"error": "account persistence is bound to another app"},
+    }
+    assert rt.snapshot() == before
+
+    assert await rt.account("delete", "alice") == {
+        "messages": {"threads_deleted": 1, "messages_deleted": 5, "read_state_deleted": 1},
+    }
+    threads = {row["thread_id"]: row for row in rt.rows("threads")}
+    assert set(threads) == {bob_thread, silent_thread, shared_thread, peer_last_thread}
+    assert threads[bob_thread]["last_message"] == bob_preview
+    assert threads[bob_thread]["last_message_at"] == bob_message["created_at"]
+    assert (threads[silent_thread]["last_message"], threads[silent_thread]["last_message_at"]) == (None, None)
+    assert threads[shared_thread]["last_message"] == reply_preview
+    # Surviving peer conversations keep the opaque ids (see the handler's deletion policy).
+    assert (threads[shared_thread]["created_by"], threads[shared_thread]["participant_ids"]) == ("alice", ["alice", "bob"])
+    assert await rt.stored_thread("bob", peer_last_thread) == peer_last_row
+    assert {row["sender_id"] for row in rt.rows("messages")} == {"bob"}
+    assert [row["user_id"] for row in rt.rows("thread_reads")] == ["bob"]
+    assert secret not in json.dumps(rt.snapshot(), default=str)
+    assert secret not in json.dumps(await rt.module.list_threads(rt.ctx("bob")), default=str)
+    bob_view = await rt.module.get_thread(rt.ctx("bob"), thread_id=bob_thread)
+    assert [row["message_id"] for row in bob_view["messages"]] == [bob_message["message_id"]]
+
+    after = rt.snapshot()
+    assert await rt.account("delete", "alice") == {
+        "messages": {"threads_deleted": 0, "messages_deleted": 0, "read_state_deleted": 0},
+    }
+    assert rt.snapshot() == after
+
+
+@pytest.mark.asyncio
+async def test_messaging_account_export_is_json_safe_and_covers_deleted_collections(messaging_account):
+    rt = messaging_account
+    bob_thread = await rt.thread("bob", "alice")
+    await rt.send("bob", bob_thread, "hello alice")
+    alice_message = await rt.send("alice", bob_thread, "hello bob")
+    alice_thread = await rt.thread("alice", "bob")
+    for user_id in ("alice", "bob"):
+        await rt.module.mark_thread_read(rt.ctx(user_id), thread_id=bob_thread)
+    reads = rt.persistence("alice").collection("messages", "thread_reads")
+    for index in range(150):  # Read state spanning more than one export page.
+        await reads.insert_one({"thread_id": f"thr_page_{index}", "user_id": "alice", "read_at": "2026-01-01T00:00:00+00:00"})
+
+    assert await rt.account("export", "alice", app_id="foreign_app") == {
+        "messages.__error__": "account persistence is bound to another app",
+    }
+    exported = await rt.account("export", "alice")
+    assert json.loads(json.dumps(exported)) == exported  # Storage ObjectIds never reach account JSON.
+    assert set(exported) == {"threads_created", "messages_sent", "thread_reads"}
+    assert [row["thread_id"] for row in exported["threads_created"]] == [alice_thread]
+    assert [row["message_id"] for row in exported["messages_sent"]] == [alice_message["message_id"]]
+    assert {row["user_id"] for row in exported["thread_reads"]} == {"alice"}
+    assert len({row["thread_id"] for row in exported["thread_reads"]}) == len(exported["thread_reads"]) == 151
+
+    deleted = (await rt.account("delete", "alice"))["messages"]
+    assert deleted["messages_deleted"] == len(exported["messages_sent"])
+    assert deleted["read_state_deleted"] == len(exported["thread_reads"])
+    assert [row["user_id"] for row in rt.rows("thread_reads")] == ["bob"]
 
 
 @pytest.mark.skipif(os.getenv("MOZAIKS_RUN_MESSAGING_MONGO_TEST") != "1", reason="opt-in task-owned local Mongo")
@@ -442,6 +709,7 @@ async def test_messaging_real_mongo_fresh_repeat_and_account_peer_preservation()
         handler = namespace["AccountDataHandler"](persistence)
         exported = await handler.export_user_data(app_id=app_id, user_id="alice")
         assert {row["message_id"] for row in exported["messages_sent"]} == {"alice_shared", "alice_solo"}
+        assert [row["user_id"] for row in exported["thread_reads"]] == ["alice"]
         json.dumps(exported)  # Mongo _id values must not escape into account JSON.
         with pytest.raises(PermissionError, match="another app"):
             await handler.export_user_data(app_id="foreign", user_id="alice")
