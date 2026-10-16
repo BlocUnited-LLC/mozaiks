@@ -12,6 +12,8 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+## 0.2.0 - 2026-10-16
+
 ### Added
 
 - Added owner-reviewed imported Genesis baselines for existing app roots. Studio
@@ -19,11 +21,6 @@ This project follows a practical pre-1.0 changelog format:
   discloses the app-root-only event-observer limitation, and requires the owner
   to acknowledge that exact disclosure before later Refinement Runs can use the
   baseline.
-
-## 0.2.0 - 2026-10-11
-
-### Added
-
 - Module startup services can opt into a separate `worker` process profile;
   existing services stay on the ordinary host. Invalid worker selection aborts
   startup before serving requests. Studio preview maintenance stays on the
