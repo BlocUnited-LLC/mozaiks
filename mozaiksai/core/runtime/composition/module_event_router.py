@@ -1328,7 +1328,10 @@ class ModuleEventRouter:
             "body": _render_template(str(template.get("body") or ""), payload),
             "status": "unread",
             "created_at": _utc_now(),
-            "source_event": _notification_source_reference(event_type, envelope, payload),
+            "source_event": (
+                _notification_source_reference(event_type, envelope, payload)
+                if rule.get("source_event") == "reference" else envelope
+            ),
         }
         # Store the same owner chosen by event provenance. A malformed or
         # contradictory supplied owner must never become an unowned alert.
@@ -1450,10 +1453,11 @@ def _notification_source_reference(
 ) -> dict[str, Any]:
     """Identify a notification's originating event without copying its payload.
 
-    The record and its notification.created event must not retain event
-    content such as message text: the producing module owns that content, its
-    deletion, and who may read it. related_type stays because notification
-    reads classify support conversations by it.
+    Used when a rule declares ``source_event: reference``: the record and its
+    notification.created event must not retain event content such as message
+    text, because the producing module owns that content, its deletion, and who
+    may read it. related_type stays because notification reads classify
+    support conversations by it.
     """
     reference: dict[str, Any] = {"id": envelope.get("id"), "type": event_type}
     related_type = payload.get("related_type")

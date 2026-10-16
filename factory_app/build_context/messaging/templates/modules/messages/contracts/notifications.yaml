@@ -7,6 +7,7 @@ notifications:
       notification carries no message text; opening the conversation reads it
       under the current participant check.
     event_type: domain.messages.message_sent
+    source_event: reference
     channels:
       - in_app
     audience:

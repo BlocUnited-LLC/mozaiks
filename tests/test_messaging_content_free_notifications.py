@@ -478,6 +478,7 @@ def test_content_free_reference_keeps_support_notifications_workspace_scoped():
 
     # No context_fields: only the source reference can carry the support classification.
     rule = {"id": "reply", "module_id": "custom", "audience": {"user_id_field": "recipient_ids"},
+            "source_event": "reference",
             "template": {"title": "Reply", "body": "Open the conversation to read it."}}
     asyncio.run(ModuleEventRouter([], notification_store=store)._create_notification(
         rule, "domain.custom.reply", {

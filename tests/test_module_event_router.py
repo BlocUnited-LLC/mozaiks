@@ -196,6 +196,7 @@ def _notification_rule(
     channels: list | None = None,
     audience: dict | None = None,
     context_fields: list | None = None,
+    source_event: str | None = None,
 ) -> dict:
     rule: dict = {
         "id": rule_id,
@@ -210,6 +211,8 @@ def _notification_rule(
         rule["audience"] = audience
     if context_fields is not None:
         rule["context_fields"] = context_fields
+    if source_event is not None:
+        rule["source_event"] = source_event
     return rule
 
 
@@ -1308,7 +1311,10 @@ class TestEmitPlatformReaction:
         reaction = _reaction_model("ev.both", id="r-1", target={"kind": "webhook"})
         mod = _loaded_module(
             "m1", reactions=[reaction],
-            notifications=[_notification_rule("ev.both", rule_id="n1", module_id="m1")],
+            notifications=[
+                _notification_rule("ev.both", rule_id="n1", module_id="m1", source_event="reference"),
+                _notification_rule("ev.both", rule_id="n2", module_id="m1"),
+            ],
         )
         router = _router([mod], event_emitter=event_emitter, notification_store=notification_store)
         envelope = _envelope(payload={"amount": 100, "note": "private note text"})
@@ -1316,9 +1322,11 @@ class TestEmitPlatformReaction:
 
         reaction_event = next(payload for kind, payload in emitted if kind == "platform.reaction.webhook_dispatched")
         assert reaction_event["payload"]["source_event"] is envelope
-        assert stored[0]["source_event"] == {"id": "evt-1", "type": "ev.both"}
-        created = next(payload for kind, payload in emitted if kind == "notification.created")
-        assert "private note text" not in repr(created)
+        by_rule = {record["rule_id"]: record for record in stored}
+        assert by_rule["n1"]["source_event"] == {"id": "evt-1", "type": "ev.both"}
+        assert "private note text" not in repr(by_rule["n1"])
+        # A rule without the declaration keeps the event, as before.
+        assert by_rule["n2"]["source_event"] is envelope
 
     @pytest.mark.asyncio
     async def test_capability_invoker_called_for_capability_target(self):

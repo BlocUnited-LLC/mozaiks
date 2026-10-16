@@ -496,10 +496,23 @@ class TestContextFieldsBehaviour:
         )
         assert not stored[0].get("context")
 
-    def test_source_event_is_a_content_free_reference(self):
+    def test_source_event_still_stored_internally(self):
         rule = {
             "id": "task.created.notify",
             "event_type": "task.created",
+            "context_fields": ["task_id"],
+            "template": {"title": "Task created", "body": ""},
+        }
+        router, stored, asyncio = self._make_router_and_store(rule)
+        envelope = self._envelope({"task_id": "tsk_abc", "note": "module data"})
+        asyncio.run(router.handle_event("task.created", envelope))
+        assert stored[0]["source_event"] is envelope
+
+    def test_reference_rule_stores_a_content_free_source_event(self):
+        rule = {
+            "id": "task.created.notify",
+            "event_type": "task.created",
+            "source_event": "reference",
             "context_fields": ["task_id"],
             "template": {"title": "Task created", "body": ""},
         }
@@ -520,6 +533,7 @@ class TestContextFieldsBehaviour:
         rule = {
             "id": "task.created.notify",
             "event_type": "task.created",
+            "source_event": "reference",
             "template": {"title": "Task created", "body": ""},
         }
         router, stored, asyncio = self._make_router_and_store(rule)
