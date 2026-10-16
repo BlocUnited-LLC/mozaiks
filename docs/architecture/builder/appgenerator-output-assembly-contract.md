@@ -202,10 +202,20 @@ for a template module; `page_bundle` owns only the pages no pack ships, and its
 message names the pack-provided pages. A worker's, repairer's or earlier
 assembly's copy of a pack-owned path is discarded with a
 `PACK_OWNED_OUTPUT_DISCARDED` log line instead of validated. Outside genesis an
-`owner: workspace` path keeps its admitted copy, or the template default when
-none exists, because raw worker output cannot supersede admitted source. A task
-output that differs is replaced with a `WORKSPACE_PACK_OUTPUT_REPLACED` warning
-naming the path and the discarded task. Pages bind facade
+`owner: workspace` path is the app's own code and keeps its admitted copy. An
+explicit `full_rebuild` or `conceptual_replan` skips hydration; when it is bound
+to a verified revision source through the existing refinement binding, the path
+keeps that source's copy. The starter template is used only when no app copy
+exists: genesis, a newly selected pack, or a rebuild with no bound source.
+Output for the path from a task that is not a current plan task owning it is
+raw history: it is ignored with a `WORKSPACE_PACK_OUTPUT_IGNORED` warning. When a
+current plan task owns the path and its output differs from the retained copy,
+assembly fails with `WORKSPACE_PACK_OUTPUT_CHANGE_UNSUPPORTED`. AppGenerator
+cannot admit that change, and reporting success while dropping it would hide
+that it never shipped. The diagnostic names the missing capability
+(`authorized_backend_refinement`: a Studio selected-file patch refinement of
+that path) and carries a `block_reason`, so bounded repair does not try to
+admit the change either. Pages bind facade
 actions against the template module contract, the one assembly applies.
 Assembly takes pack-owned files only from the templates and never re-derives a
 template page; it runs `pack_template_page_errors` on each template page (page

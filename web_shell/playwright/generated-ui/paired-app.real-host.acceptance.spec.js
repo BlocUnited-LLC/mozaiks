@@ -150,9 +150,23 @@ async function exerciseMessages(page, testInfo, label, username) {
   }
   const unchanged = await moduleAction(page, 'messages', 'get_thread', { thread_id: thread.thread_id });
   expect(unchanged.messages.map((message) => message.message_id)).toEqual([sentBody.message.message_id]);
+  let normalizedEvidence = {};
+  if (process.env.MOZAIKS_PAIRED_EXPECT_NORMALIZED_MESSAGE === '1') {
+    // The accepted backend refinement's handler extension collapses whitespace
+    // before the pack service validates, authorizes and stores the body.
+    const spaced = await moduleAction(page, 'messages', 'send_message', {
+      thread_id: thread.thread_id, body: `${label}   spaced \t reply`,
+    });
+    expect(spaced.success).toBe(true);
+    expect(spaced.message.body).toBe(`${label} spaced reply`);
+    const stored = await moduleAction(page, 'messages', 'get_thread', { thread_id: thread.thread_id });
+    expect(stored.messages.find((message) => message.message_id === spaced.message.message_id)?.body)
+      .toBe(`${label} spaced reply`);
+    normalizedEvidence = { normalized_message_id: spaced.message.message_id, normalized_body: spaced.message.body };
+  }
   await testInfo.attach('pack-messaging-persistence-and-private-scope', {
     body: JSON.stringify({ thread_id: thread.thread_id, message_id: sentBody.message.message_id,
-      scope_type: thread.scope_type, scope_id: thread.scope_id, ...privateEvidence }),
+      scope_type: thread.scope_type, scope_id: thread.scope_id, ...privateEvidence, ...normalizedEvidence }),
     contentType: 'application/json',
   });
 }

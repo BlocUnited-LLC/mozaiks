@@ -223,7 +223,7 @@ async def test_pack_ui_assembly_renders_provenance_from_the_pinned_build_timesta
 
 
 @pytest.mark.asyncio
-async def test_revision_task_edit_of_workspace_pack_path_is_reported_and_admitted_copy_kept(request, caplog):
+async def test_revision_plan_task_edit_of_workspace_pack_path_fails_assembly_explicitly(request):
     saved = request.getfixturevalue("revision_baseline")
     _save(saved, component(path="ui/pages/custom/board.jsx"), _assembled_files())
     handler = "modules/messages/backend/handler.py"
@@ -233,12 +233,13 @@ async def test_revision_task_edit_of_workspace_pack_path_is_reported_and_admitte
         **saved.context, **selected, "app_build_plan": plan, "data_contract": EMPTY_CONTRACT,
         "app_task_batch_results": {"svc": {"code_files": [{"filename": handler, "content": saved.files[handler] + "\n# revision edit\n"}]}},
     })
-    caplog.set_level(logging.WARNING, logger="factory_app.workflows.AppGenerator.tools.assemble_app_tasks")
     result = await assemble_app_tasks(context_variables=context)
-    assert result["success"], result
-    # Which bytes win is unchanged: raw worker output cannot supersede admitted source.
-    assert _files(result)[handler] == saved.files[handler]
-    assert [record.getMessage() for record in caplog.records if "WORKSPACE_PACK_OUTPUT_REPLACED" in record.getMessage()] == [
-        f"[AppGenerator] WORKSPACE_PACK_OUTPUT_REPLACED at assembly: path={handler} discarded_owner=task:svc "
-        "retained=admitted; raw worker output cannot supersede admitted source"
-    ]
+    # The planned change is neither shipped nor silently dropped behind a success.
+    assert not result["success"] and "WorkspacePackOutputChangeUnsupported" in result["error"]
+    assert result["diagnostic"] == {
+        "code": "WORKSPACE_PACK_OUTPUT_CHANGE_UNSUPPORTED", "path": handler, "task_id": "svc", "retained": "admitted",
+        "missing_capability": "authorized_backend_refinement", "block_reason": "authorized_backend_refinement_required",
+    }
+    assert context.get("app_assembly_status") == "failed"
+    assert context.get("app_assembly_diagnostic")["block_reason"] == "authorized_backend_refinement_required"
+    assert "Studio selected-file patch refinement" in context.get("app_assembly_diagnostic")["error"]

@@ -74,7 +74,10 @@ from mozaiksai.control_plane.app_intelligence_jobs import (
     save_app_intelligence_index_job,
 )
 from mozaiksai.control_plane.dry_run import RefinementDryRunPlan, RefinementExecutionPlan
-from mozaiksai.control_plane.implementations.coding_worker import resolve_coding_validation_strategy
+from mozaiksai.control_plane.implementations.coding_worker import (
+    parent_workspace_pack_paths,
+    resolve_coding_validation_strategy,
+)
 from mozaiksai.control_plane.review import load_refinement_review_record
 from mozaiksai.core.app_context.models import SourceRef
 from mozaiksai.core.app_context.refresh import ContextRefreshPlan, ContextRefreshScope
@@ -2668,6 +2671,22 @@ async def _complete_inline_refinement(*, binding: RunBuildBinding, user_id: str,
         raise ValueError("Inline refinement was superseded before its output could be registered")
 
 
+async def _registry_current_artifact_version_id(
+    *, user_id: str, build_registry_id: str | None, workspace_pack_paths: frozenset[str] | None,
+) -> str | None:
+    """The build the registry serves, read before a refinement run supersedes it.
+
+    Only a parent that declares app-owned pack code (or whose packs cannot be
+    resolved) needs this: changing that code requires the current build.
+    """
+    if not build_registry_id or (workspace_pack_paths is not None and not workspace_pack_paths):
+        return None
+    record = (await _get_app_registry_service().get_app_record(
+        owner_user_id=user_id, build_registry_id=build_registry_id,
+    )).get("app") or {}
+    return str((record.get("current_build_run") or {}).get("artifact_version_id") or "").strip() or None
+
+
 async def _fail_inline_refinement(*, binding: RunBuildBinding, user_id: str) -> None:
     try:
         with CancelScope(shield=True):
@@ -2840,6 +2859,9 @@ async def trigger_workflow(
         if source_version is None or source_version.build_family != refinement_request.build_family:
             raise HTTPException(status_code=404, detail="Selected refinement artifact not found")
         metadata = _version_metadata(source_version)
+        # App-owned pack code of the saved parent: an inferred scope that would
+        # change it waits for confirmation, and changing it needs the current build.
+        workspace_pack_paths = parent_workspace_pack_paths(metadata.get("capability_packs") or [])
         # Filesystem roots and baseline contracts come from the saved version,
         # not from caller context or copied workbench metadata.
         safe_extra = {
@@ -2979,6 +3001,10 @@ async def trigger_workflow(
                         detail="This change could not be resolved within the selected files. Narrow the request, or clear the file limit to review a broader plan. No files were changed.",
                     )
                 if contract_surface_plan is not None:
+                    registry_artifact_version_id = await _registry_current_artifact_version_id(
+                        user_id=user_id, build_registry_id=build_registry_id,
+                        workspace_pack_paths=workspace_pack_paths,
+                    )
                     inline_binding = await _get_app_registry_service().begin_refinement_run(
                         owner_user_id=user_id, app_id=app_id, build_registry_id=build_registry_id,
                         workflow_name=refinement_decision.workflow_id,
@@ -2996,7 +3022,8 @@ async def trigger_workflow(
                     finalized = await orchestration_control.finalize_surface_output(
                         plan=contract_surface_plan, result=surface_result, refinement_request=refinement_request,
                         routing_decision=refinement_decision, workspace_files=baseline_files,
-                        run_build_binding=inline_binding,
+                        run_build_binding=inline_binding, allowed_paths=explicit_paths or None,
+                        registry_artifact_version_id=registry_artifact_version_id,
                     )
                     await _complete_inline_refinement(binding=inline_binding, user_id=user_id, result=finalized)
                     surface_result = surface_result.model_copy(update={
@@ -3034,12 +3061,18 @@ async def trigger_workflow(
             if coding_request is not None:
                 inline_binding = None
                 try:
-                    coding_request, coding_decision = await orchestration_control.prepare_coding_request(coding_request)
+                    coding_request, coding_decision = await orchestration_control.prepare_coding_request(
+                        coding_request, confirmation_required_paths=workspace_pack_paths or (),
+                    )
                     harness_decision = coding_decision
                     if coding_request is not None:
                         baseline_files, skipped = _decode_text_bundle_entries(await _verified_app_bundle(source_version))
                         if skipped:
                             raise HTTPException(status_code=409, detail="Inline refinement cannot preserve every file in this bundle")
+                        registry_artifact_version_id = await _registry_current_artifact_version_id(
+                            user_id=user_id, build_registry_id=build_registry_id,
+                            workspace_pack_paths=workspace_pack_paths,
+                        )
                         inline_binding = await _get_app_registry_service().begin_refinement_run(
                             owner_user_id=user_id, app_id=app_id,
                             build_registry_id=build_registry_id,
@@ -3047,6 +3080,11 @@ async def trigger_workflow(
                         )
                         coding_request = coding_request.model_copy(update={
                             "run_build_binding": inline_binding, "baseline_files": baseline_files,
+                            "metadata": {
+                                **coding_request.metadata,
+                                **({"registry_artifact_version_id": registry_artifact_version_id}
+                                   if registry_artifact_version_id else {}),
+                            },
                         })
                         coding_result = await orchestration_control.execute_coding_request(coding_request)
                         await _complete_inline_refinement(

@@ -8,8 +8,11 @@ compatibility are checked against the checkout.
 
 Only AG2 provider responses are scripted. Keycloak login, Mongo/GridFS, Studio
 authorization, scoped finalization and Docker candidate validation remain real.
-The saved child receives real browser acceptance before the owner accepts its
-review draft. It is not promoted. No live model creativity is claimed.
+An authorized backend patch of the app-owned Messaging handler runs first and its
+review draft is accepted; the board refinement then builds on that child. The
+saved board child receives real browser acceptance, including the handler's
+send behavior, before the owner accepts its review draft. It is not promoted.
+No live model creativity is claimed.
 """
 
 from __future__ import annotations
@@ -34,6 +37,15 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 PAGE = "ui/pages/custom/board.jsx"
 REQUEST = "On mobile, open task details in a bottom panel. Preserve the desktop workspace, routes, brand, and underlying task behavior."
+HANDLER = "modules/messages/backend/handler.py"
+BACKEND_REQUEST = "Collapse repeated spaces in sent messages before they are stored. Keep every pack file and Messaging authorization unchanged."
+SEND_OVERRIDE = """
+    async def send_message(self, ctx, *, thread_id, body, message_type="text", **_):
+        # Collapse whitespace runs before the template service validates and stores the body.
+        return await super().send_message(
+            ctx, thread_id=thread_id, body=" ".join(body.split()), message_type=message_type,
+        )
+"""
 pytestmark = pytest.mark.skipif(
     os.environ.get("MOZAIKS_PAIRED_REFINEMENT") != "1",
     reason="Set MOZAIKS_PAIRED_REFINEMENT=1 for real local refinement acceptance.",
@@ -128,6 +140,30 @@ def _accepted_baseline(directory):
     assert PAGE in files and "ui/pages/projects.yaml" in files
     _baseline_packs(receipt, files)
     return files, candidate
+
+
+def _normalizing_handler(source):
+    """Derive the scripted backend response from the exact accepted handler bytes."""
+    assert "def send_message" not in source, "Accepted handler already overrides send_message"
+    assert source.rstrip().endswith('"""'), "Accepted handler must end inside its class docstring"
+    return source + SEND_OVERRIDE
+
+
+def _template_pack_paths(files):
+    """Template-owned materialized pack paths of the accepted baseline.
+
+    _baseline_packs verifies the baseline's pack identity against freshly
+    verified pinned sources, so these bytes are the pinned pack templates as
+    assembled. Composed shared roots merge app declarations and are excluded.
+    """
+    from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+        SHARED_PACK_OUTPUT_PATHS,
+    )
+
+    provenance = json.loads(files[".mozaiks/pack_provenance.json"])
+    owned = {entry["path"]: entry["owner"] for pack in provenance["packs"] for entry in pack["materialized_owned_files"]}
+    assert owned.get(HANDLER) == "workspace" and owned.get("modules/messages/backend/base_handler.py") == "templates"
+    return sorted(path for path, owner in owned.items() if owner == "templates" and path not in SHARED_PACK_OUTPUT_PATHS)
 
 
 def _mobile_board(source):
@@ -232,6 +268,127 @@ def _assert_delivered_context(providers, files, baseline_id):
     assert {pack["pack_id"] for pack in json.loads(read_only[".mozaiks/pack_provenance.json"])["packs"]} == {"messaging"}
     return {"read_only_paths": sorted(read_only), "app_owned_theme_present": theme in files,
             "theme_source": "app_artifact" if theme in files else "inherited_framework"}
+
+
+def _scripted_backend_harness(files, store, output_root):
+    """The patch lane: scripted classifier and coding provider, real worker and finalizer."""
+    from ag2 import Agent
+
+    from mozaiksai.control_plane.config import load_control_plane_config
+    from mozaiksai.control_plane.implementations.change_classifier import LLMChangeClassifier
+    from mozaiksai.control_plane.implementations.coding_worker import ScopedRefinementCodingWorker
+    from mozaiksai.control_plane.implementations.harness_decision import (
+        FirstPartyHarnessDecisionPolicy,
+    )
+    from mozaiksai.control_plane.implementations.orchestration_control import (
+        OrchestrationControlHarness,
+    )
+    from mozaiksai.control_plane.implementations.refinement_router import (
+        RefinementTriggerRouteResolver,
+    )
+    from mozaiksai.control_plane.loader import load_refinement_harness
+    from mozaiksai.core.adapters.ag2_agent_runner import AG2StructuredAgentRunner
+    from tests.test_ui_worker_context_acceptance import _ScriptedProvider
+
+    config = load_control_plane_config(ROOT / "factory_app/app")
+    pack = load_refinement_harness(app_root=ROOT / "factory_app/app")
+    options = {"config_loader": lambda: config, "pack_loader": lambda: pack}
+    outputs = {
+        "classifier": {"change_class": "patch", "rationale": BACKEND_REQUEST, "confidence": 0.99, "signals": ["message_whitespace"]},
+        "coder": {"summary": BACKEND_REQUEST, "owned_paths": [HANDLER],
+                  "updated_files": [{"path": HANDLER, "content": _normalizing_handler(files[HANDLER])}],
+                  "validation_strategy": "docker", "validation_commands": [], "start_preview": False,
+                  "needs_human_review": True,
+                  "rationale": "Extend the app-owned handler; the template service keeps validation and authorization."},
+    }
+    providers = {name: _ScriptedProvider(output) for name, output in outputs.items()}
+
+    def runner(name):
+        def factory(system_prompt, llm_config, *, middleware):
+            return Agent(f"scripted_{name}", system_prompt, config=providers[name], middleware=middleware)
+        return AG2StructuredAgentRunner(agent_factory=factory)
+
+    return OrchestrationControlHarness(
+        refinement_resolver=RefinementTriggerRouteResolver(
+            classifier=LLMChangeClassifier(agent_runner=runner("classifier"), **options), pack_loader=lambda: pack,
+        ),
+        coding_worker=ScopedRefinementCodingWorker(
+            agent_runner=runner("coder"), artifact_store=store, output_root=output_root, **options,
+        ),
+        decision_policy=FirstPartyHarnessDecisionPolicy(pack_loader=lambda: pack),
+        config_loader=lambda: config,
+    ), providers
+
+
+async def _refine_backend(*, case_root, live, client, studio, store, registry, binding, baseline, files, packs, tokens, owner_id):
+    """Authorize, validate and accept the handler-only backend child through Studio."""
+    from factory_app.workflows._shared.artifact_bundle import read_artifact_bundle
+    from mozaiksai.core.artifacts import ArtifactLifecycleStatus, ArtifactValidationStatus
+    from mozaiksai.core.artifacts.content_store import read_verified_artifact_bundle
+
+    harness, providers = _scripted_backend_harness(files, store, Path(_json(case_root / "inputs.json")["refinement_output_root"]))
+    payload = {"build_registry_id": binding.build_registry_id, "trigger_source": "refinement",
+               "trigger_payload": {"refinement_request": {"build_family": "app_bundle", "build_key": "app_bundle",
+                                    "build_record_id": baseline.id, "raw_user_request": BACKEND_REQUEST,
+                                    "source_surface": "app_workbench"},
+                                   "coding_request": {"files": {HANDLER: ""}}}}
+    with patch.object(studio, "get_orchestration_control_harness", return_value=harness):
+        anonymous = await client.post("/api/workflows/trigger", json=payload)
+        other = await client.post("/api/workflows/trigger", json=payload, headers={"Authorization": f"Bearer {tokens['bob']}"})
+        assert anonymous.status_code == 401 and other.status_code == 404
+        response = await client.post("/api/workflows/trigger", json=payload, headers={"Authorization": f"Bearer {tokens['alice']}"})
+    live.write_json(case_root / "backend-endpoint-result.json", {"status_code": response.status_code, "body": response.json()})
+    for name, provider in providers.items():
+        requests = [{"prompt": call["prompt"], "messages": call["messages"]} for call in provider.calls]
+        assert all(token not in json.dumps(requests) for token in tokens.values())
+        live.write_json(case_root / f"backend-provider-{name}-requests.json", requests)
+    assert response.status_code == 200, "Real Studio backend refinement was rejected; inspect backend-endpoint-result.json"
+    result = response.json()
+    assert result["execution_mode"] == "coding_worker" and result["coding_worker"]["status"] == "validated", result["coding_worker"]
+    classifier = _user_prompt(providers["classifier"])
+    assert BACKEND_REQUEST in classifier and baseline.id in classifier
+    coder = json.JSONDecoder().raw_decode(_user_prompt(providers["coder"]).split("payload_json:\n", 1)[1])[0]
+    assert coder["file_paths"] == [HANDLER] and coder["input_files"] == {HANDLER: files[HANDLER]}
+    child = await store.get_build_record(app_id=baseline.app_id, build_record_id=result["coding_worker"]["metadata"]["build_record_id"])
+    assert child.parent_build_record_id == baseline.id and child.lifecycle_status == ArtifactLifecycleStatus.DRAFT
+    assert child.validation_status == ArtifactValidationStatus.PASSED and child.app_validation_status == "passed"
+    metadata = child.commit_metadata.metadata
+    assert metadata["content_backend"] == "gridfs" and metadata["applied_paths"] == [HANDLER]
+    assert metadata["refinement_scope"] == {
+        "selected_file_paths": [HANDLER], "scope_origin": "explicit", "changed_workspace_pack_paths": [HANDLER],
+    }
+    # An app revision: the pack's source, version and digest are unchanged.
+    assert metadata["capability_packs"] == packs
+    child_files, diagnostics = await read_artifact_bundle(child, retain_svg_text=True)
+    (case_root / "backend-child.zip").write_bytes(await read_verified_artifact_bundle(child))
+    live.write_json(case_root / "backend-child-record.json", child.model_dump(mode="json"))
+    live.write_json(case_root / "backend-child-files.sha256.json", _hashes(child_files))
+    assert not diagnostics and set(child_files) == set(files)
+    assert {path for path in files if child_files[path] != files[path]} == {HANDLER}
+    assert child_files[HANDLER] == providers["coder"].output["updated_files"][0]["content"]
+    assert child_files[".mozaiks/pack_provenance.json"] == files[".mozaiks/pack_provenance.json"]
+    assert all(child_files[path] == files[path] for path in _template_pack_paths(files))
+    current = (await registry.get_app_record(owner_user_id=owner_id, build_registry_id=binding.build_registry_id))["app"]
+    assert current["lifecycle_state"] == "review" and current["current_build_run"]["artifact_version_id"] == child.id
+    accepted = await client.post(
+        f"/api/studio/build/artifacts/{child.id}/accept", params={"build_registry_id": binding.build_registry_id},
+        json={"notes": "Accepted the handler-only backend refinement after canonical validation."},
+        headers={"Authorization": f"Bearer {tokens['alice']}"},
+    )
+    live.write_json(case_root / "backend-acceptance-endpoint-result.json", {"status_code": accepted.status_code, "body": accepted.json()})
+    assert accepted.status_code == 200 and accepted.json()["accepted"] is True
+    child = await store.get_build_record(app_id=baseline.app_id, build_record_id=child.id)
+    assert child.lifecycle_status == ArtifactLifecycleStatus.CURRENT
+    live.write_json(case_root / "backend-accepted-child-record.json", child.model_dump(mode="json"))
+    return child, child_files, {
+        "request": BACKEND_REQUEST, "permitted_paths": [HANDLER], "changed_paths": [HANDLER],
+        "build_record_id": child.id, "parent_build_record_id": baseline.id, "review_acceptance": "accepted",
+        "refinement_scope": metadata["refinement_scope"], "anonymous_status": anonymous.status_code,
+        "non_owner_status": other.status_code, "child_files": _hashes(child_files),
+        "provider_calls": {name: {"count": len(provider.calls),
+                                  "requests_sha256": hashlib.sha256((case_root / f"backend-provider-{name}-requests.json").read_bytes()).hexdigest()}
+                           for name, provider in providers.items()},
+    }
 
 
 def _scripted_harness(files, store, output_root):
@@ -380,15 +537,20 @@ async def _refine(case_root, login_config):
         artifact_version_id=baseline.id, bundle_path=str(case_root / "workspace/app"), expected_build_id=build_id,
     )
     assert reviewed["success"] and reviewed["app"]["lifecycle_state"] == "review"
-    harness, providers = _scripted_harness(files, store, Path(facts["refinement_output_root"]))
-    payload = {"build_registry_id": binding.build_registry_id, "trigger_source": "refinement",
-               "trigger_payload": {"refinement_request": {"build_family": "app_bundle", "build_key": "app_bundle",
-                                    "build_record_id": baseline.id, "raw_user_request": REQUEST, "source_surface": "app_workbench"},
-                                   "coding_request": {"files": {PAGE: ""}}}}
     assert not studio.app.dependency_overrides, "Real route acceptance cannot use dependency overrides"
     try:
-        with patch.object(studio, "get_orchestration_control_harness", return_value=harness):
-            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=studio.app), base_url="http://testserver", timeout=None) as client:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=studio.app), base_url="http://testserver", timeout=None) as client:
+            # The authorized backend child is the parent of the board refinement.
+            backend, parent_files, backend_evidence = await _refine_backend(
+                case_root=case_root, live=live, client=client, studio=studio, store=store, registry=registry,
+                binding=binding, baseline=baseline, files=files, packs=packs, tokens=tokens, owner_id=owner_id,
+            )
+            harness, providers = _scripted_harness(parent_files, store, Path(facts["refinement_output_root"]))
+            payload = {"build_registry_id": binding.build_registry_id, "trigger_source": "refinement",
+                       "trigger_payload": {"refinement_request": {"build_family": "app_bundle", "build_key": "app_bundle",
+                                            "build_record_id": backend.id, "raw_user_request": REQUEST, "source_surface": "app_workbench"},
+                                           "coding_request": {"files": {PAGE: ""}}}}
+            with patch.object(studio, "get_orchestration_control_harness", return_value=harness):
                 anonymous = await client.post("/api/workflows/trigger", json=payload)
                 other = await client.post("/api/workflows/trigger", json=payload, headers={"Authorization": f"Bearer {tokens['bob']}"})
                 assert anonymous.status_code == 401 and other.status_code == 404
@@ -403,7 +565,7 @@ async def _refine(case_root, login_config):
         result = response.json()
         assert result["execution_mode"] == "surface_regeneration" and result["surface_result"]["status"] == "success"
         child = await store.get_build_record(app_id=app_id, build_record_id=result["surface_result"]["metadata"]["build_record_id"])
-        assert child.parent_build_record_id == baseline.id and child.lifecycle_status == ArtifactLifecycleStatus.DRAFT
+        assert child.parent_build_record_id == backend.id and child.lifecycle_status == ArtifactLifecycleStatus.DRAFT
         assert child.validation_status == ArtifactValidationStatus.PASSED and child.app_validation_status == "passed"
         assert child.commit_metadata.metadata["content_backend"] == "gridfs"
         child_files, diagnostics = await read_artifact_bundle(child, retain_svg_text=True)
@@ -418,28 +580,37 @@ async def _refine(case_root, login_config):
         live.write_json(case_root / "child-files.sha256.json", _hashes(child_files))
         live.write_json(case_root / "baseline-record.json", baseline.model_dump(mode="json"))
         live.write_json(case_root / "child-record.json", child.model_dump(mode="json"))
-        assert not diagnostics and set(child_files) == set(files)
-        assert {path for path in files if child_files[path] != files[path]} == {PAGE}
+        assert not diagnostics and set(child_files) == set(files) == set(parent_files)
+        assert {path for path in parent_files if child_files[path] != parent_files[path]} == {PAGE}
+        assert {path for path in files if child_files[path] != files[path]} == {PAGE, HANDLER}
         assert child_files[PAGE] == providers["generator"].output["updated_files"][0]["content"]
         assert child.commit_metadata.metadata["capability_packs"] == packs
+        assert child.commit_metadata.metadata["refinement_scope"] == {
+            "selected_file_paths": [PAGE], "scope_origin": "explicit", "changed_workspace_pack_paths": [],
+        }
         provenance = json.loads(files[".mozaiks/pack_provenance.json"])
         retained_pack_paths = sorted({entry["path"] for pack in provenance["packs"]
                                       for entry in pack["materialized_owned_files"]})
         assert retained_pack_paths
-        assert all(child_files[path] == files[path] for path in retained_pack_paths)
+        # The UI refinement keeps every pack path of its parent, including the
+        # accepted backend handler; template-owned paths stay the pinned bytes.
+        assert all(child_files[path] == parent_files[path] for path in retained_pack_paths)
+        assert child_files[HANDLER] == parent_files[HANDLER] != files[HANDLER]
+        assert all(child_files[path] == files[path] for path in _template_pack_paths(files))
         current = (await registry.get_app_record(owner_user_id=owner_id, build_registry_id=binding.build_registry_id))["app"]
         assert current["lifecycle_state"] == "review" and current["current_build_run"]["artifact_version_id"] == child.id
         assert result["refinement_session_id"] and result["review_continuation"] is None
-        delivered_context = _assert_delivered_context(providers, files, baseline.id)
+        delivered_context = _assert_delivered_context(providers, parent_files, backend.id)
         live.write_json(case_root / "result.json", {
             "success": True, "evidence_kind": "authorized_studio_refinement_with_scripted_ag2_providers",
             "live_llm_calls": False, "browser_acceptance": "not_evaluated_for_child", "capability_packs": packs,
             "source": facts, "request": REQUEST, "permitted_paths": [PAGE], "changed_paths": [PAGE],
             "delivered_context": delivered_context,
-            "retained_paths": sorted(path for path in files if child_files[path] == files[path]),
+            "retained_paths": sorted(path for path in parent_files if child_files[path] == parent_files[path]),
             "retained_pack_paths": retained_pack_paths, "baseline_files": _hashes(files),
-            "design_source": replay_receipt["design_source"],
-            "baseline_build_record_id": baseline.id, "child_build_record_id": child.id,
+            "design_source": replay_receipt["design_source"], "backend_refinement": backend_evidence,
+            "baseline_build_record_id": baseline.id, "parent_build_record_id": backend.id,
+            "child_build_record_id": child.id,
             "refinement_session_id": result["refinement_session_id"], "registry": current,
             "anonymous_status": anonymous.status_code, "non_owner_status": other.status_code,
             "provider_calls": {name: {"count": len(provider.calls),
@@ -532,7 +703,7 @@ def _child_browser(case_root, source_sha):
             )
             browser_env = live.clean_environment(dict(os.environ), {
                 "PYTHON_DOTENV_DISABLED": "1", "COMMUNITY_LIVE_CONFIG": str(private / "environment.json"),
-                "MOZAIKS_PAIRED_EXPECT_MOBILE_PANEL": "1",
+                "MOZAIKS_PAIRED_EXPECT_MOBILE_PANEL": "1", "MOZAIKS_PAIRED_EXPECT_NORMALIZED_MESSAGE": "1",
             })
             with patch.dict(os.environ, browser_env, clear=True):
                 browser = acceptance.run_playwright_acceptance(

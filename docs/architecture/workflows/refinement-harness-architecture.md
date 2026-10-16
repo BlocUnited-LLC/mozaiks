@@ -184,6 +184,49 @@ points, including directory junctions, before traversal or file reads. A linked
 workspace root is rejected too. These are scope violations; linked targets are
 never harvested or deleted by the harvester.
 
+#### Capability-pack ownership of candidate files
+
+Before validation, the shared finalizer holds every candidate, from the patch
+lane or the surface lane, to the capability packs its saved parent selected.
+Ownership comes from those packs' pinned contracts, never from the candidate:
+
+- `owner: templates` outputs and `.mozaiks/pack_provenance.json` stay
+  byte-identical to the parent, and a pack module keeps its exact declared file
+  set. Composed shared roots (`ui/index.js`, `ui/route_manifest.json`,
+  `data/contract.json`) follow registry composition instead.
+- An `owner: workspace` output, such as `modules/messages/backend/handler.py`,
+  may change only inside a selected-file scope the user named, or a proposed
+  scope the user confirmed through the pending decision. An auto-applied
+  proposal or a surface plan without a file limit cannot change it. Studio
+  passes the parent's workspace paths to scope resolution, so an inferred scope
+  that includes one returns the existing confirmation decision instead of
+  applying.
+- The parent must be the build the registry currently serves
+  (`current_build_run.artifact_version_id`, read before the refinement run
+  supersedes it). A stale or unread parent is rejected.
+- A changed workspace handler must be a thin leaf over its template base handler
+  (`prove_workspace_handler_extension`): overrides of declared action methods
+  with the base signatures only, reaching the service only through `super()` or
+  the base method's own service call, with `ctx` passed through unchanged and no
+  keyword the base method does not pass. It reads no other `self` or `ctx`
+  attribute and adds no import, helper, event or nested scope. Validation,
+  persistence, events and Messaging membership checks therefore stay in the
+  template service.
+
+A rejected candidate fails with a structured `candidate_admission` code
+(`PACK_TEMPLATE_OUTPUT_CHANGED`, `PACK_MODULE_CLOSURE_CHANGED`,
+`WORKSPACE_PACK_OUTPUT_UNAUTHORIZED`, `STALE_REFINEMENT_BASELINE` or
+`WORKSPACE_HANDLER_EXTENSION_REJECTED`) and no child record. An admitted child
+records `refinement_scope` (selected paths, scope origin
+`explicit|confirmed|auto_proposal|surface_plan`, changed workspace pack paths) in
+its commit metadata and keeps the parent's `capability_packs`. An app-only
+handler edit is a new app revision, not a new pack version. If the selected
+pack sources cannot be resolved, admission defers to candidate validation,
+which verifies the same sources and fails the candidate.
+
+A failed inline run leaves the registry's current run without an artifact. App-owned
+pack code cannot change again until a build is registered as current.
+
 #### Current readiness and promotion boundaries
 
 `control_plane/app_validation.py` remains the source-project command validator.

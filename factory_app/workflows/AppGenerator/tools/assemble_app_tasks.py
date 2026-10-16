@@ -45,6 +45,7 @@ from .hydrate_app_revision_context import (
     hydrate_app_revision_context,
     read_bound_revision_files,
     revision_baseline_required,
+    revision_source_artifact_id,
 )
 from .materialize_app_config_contracts import materialize_app_config_contracts
 from .module_entitlement_gates import apply_entitlement_gates
@@ -58,6 +59,24 @@ logger = logging.getLogger(__name__)
 
 # The context `code_files` overlay of admitted repairs, merged last.
 _ADMITTED_OVERLAY_OWNER = "app:accumulated_files"
+
+
+class WorkspacePackOutputChangeUnsupported(ValueError):
+    """A current plan task changed app-owned pack code that AppGenerator cannot admit."""
+
+    def __init__(self, *, path: str, task_id: str, retained: str) -> None:
+        super().__init__(
+            f"{path}: plan task {task_id!r} changes app-owned capability pack code, which "
+            "AppGenerator cannot admit. It needs an authorized backend refinement: a Studio "
+            "selected-file patch refinement of this exact path."
+        )
+        self.diagnostic = {
+            "code": "WORKSPACE_PACK_OUTPUT_CHANGE_UNSUPPORTED",
+            "path": path, "task_id": task_id, "retained": retained,
+            "missing_capability": "authorized_backend_refinement",
+            # A bounded repair cannot authorize this change either.
+            "block_reason": "authorized_backend_refinement_required",
+        }
 
 
 def _is_truthy(value: Any) -> bool:
@@ -261,6 +280,48 @@ def _apply_module_handler_method_alignment(
     return [{"filename": path, "content": content} for path, content in sorted(file_map.items())]
 
 
+def _selected_capability_packs(app_build_plan: Any, context_variables: Any) -> list[dict[str, Any]] | None:
+    if not isinstance(app_build_plan, dict):
+        return None
+    capability_packs = None
+    if context_variables and hasattr(context_variables, "get"):
+        capability_packs = detach(context_variables.get("capability_packs"))
+    if not capability_packs:
+        capability_packs = app_build_plan.get("capability_packs")
+    return capability_packs if isinstance(capability_packs, list) else None
+
+
+async def _bound_rebuild_workspace_source(app_build_plan: Any, context_variables: Any) -> dict[str, str]:
+    """Verified revision copies of app-owned pack code that an explicit rebuild lacks.
+
+    ``conceptual_replan`` and ``full_rebuild`` deliberately skip hydrating the
+    old implementation, but an ``owner: workspace`` pack output is the app's
+    own code: regeneration must not reset it to the starter template. Only the
+    existing refinement binding to a verified revision source supplies it; a
+    rebuild without one keeps the template default.
+    """
+    if (
+        context_variables is None
+        or context_variables.get("build_mode") != "revision"
+        or revision_baseline_required(context_variables)
+        or not revision_source_artifact_id(context_variables)
+    ):
+        return {}
+    from factory_app.workflows._shared.platform.build_target import require_build_binding
+
+    capability_packs = _selected_capability_packs(app_build_plan, context_variables)
+    if require_build_binding(context_variables).phase != "refinement" or not capability_packs:
+        return {}
+    workspace_paths = resolve_declared_pack_output_paths(
+        capability_packs, context_variables=context_variables, owner="workspace",
+    )
+    missing = workspace_paths - set(admitted_app_file_map(context_variables))
+    if not missing:
+        return {}
+    saved = await read_bound_revision_files(context_variables)
+    return {path: content for path, content in saved.items() if path in missing and isinstance(content, str)}
+
+
 def _apply_managed_capability_templates(
     code_files: list[dict[str, str]],
     *,
@@ -268,16 +329,10 @@ def _apply_managed_capability_templates(
     context_variables: Any,
     ui_contributions: list[dict[str, Any]] | None = None,
     task_files: list[tuple[str, dict[str, str]]] | None = None,
+    rebuild_source: dict[str, str] | None = None,
 ) -> list[dict[str, str]]:
-    if not isinstance(app_build_plan, dict):
-        return code_files
-
-    capability_packs = None
-    if context_variables and hasattr(context_variables, "get"):
-        capability_packs = detach(context_variables.get("capability_packs"))
-    if not capability_packs:
-        capability_packs = app_build_plan.get("capability_packs")
-    if not isinstance(capability_packs, list):
+    capability_packs = _selected_capability_packs(app_build_plan, context_variables)
+    if capability_packs is None:
         return code_files
 
     template_files = resolve_managed_capability_templates(
@@ -293,21 +348,36 @@ def _apply_managed_capability_templates(
         capability_packs, context_variables=context_variables, owner="workspace",
     )
     admitted = admitted_app_file_map(context_variables)
+    planned_owners = {
+        str(task.get("task_id") or ""): set(task.get("owned_paths") or [])
+        for task in (app_build_plan.get("build_tasks") or []) if isinstance(task, dict)
+    }
     for file in template_files:
         path = str(file["filename"])
-        # Workspace extension templates are genesis defaults, not replacements
-        # for admitted app code. Raw worker history never supplies this override.
-        content = admitted.get(path, file_map.get(path, file["content"])) if path in workspace_paths else file["content"]
-        if path in workspace_paths:
-            # A revision plan may still assign this path to a task; report the
-            # replaced output instead of dropping it silently.
-            for owner, files in task_files or []:
-                if path in files and files[path] != content:
-                    logger.warning(
-                        "[AppGenerator] WORKSPACE_PACK_OUTPUT_REPLACED at assembly: path=%s discarded_owner=%s "
-                        "retained=%s; raw worker output cannot supersede admitted source",
-                        path, owner, "admitted" if path in admitted else "template",
-                    )
+        if path not in workspace_paths:
+            file_map[path] = str(file["content"])
+            continue
+        # Workspace extension templates are initial defaults, never replacements
+        # for admitted app code or a bound app's verified revision source.
+        retained, content = next(
+            ((label, layer[path]) for label, layer in (
+                ("admitted", admitted), ("verified_revision_source", rebuild_source or {}), ("code_files", file_map),
+            ) if path in layer),
+            ("template", file["content"]),
+        )
+        for owner, files in task_files or []:
+            if path not in files or files[path] == content:
+                continue
+            task_id = owner.removeprefix("task:")
+            if path in planned_owners.get(task_id, set()):
+                # A current plan task asked for this change; dropping it and
+                # reporting success would hide that the change never shipped.
+                raise WorkspacePackOutputChangeUnsupported(path=path, task_id=task_id, retained=retained)
+            logger.warning(
+                "[AppGenerator] WORKSPACE_PACK_OUTPUT_IGNORED at assembly: path=%s discarded_owner=%s "
+                "retained=%s; output from no current plan task owning this path cannot supersede admitted source",
+                path, owner, retained,
+            )
         file_map[path] = str(content)
     return [{"filename": path, "content": content} for path, content in sorted(file_map.items())]
 
@@ -507,6 +577,7 @@ async def _assemble_app_tasks(
     template_files = _apply_managed_capability_templates(
         [], app_build_plan=app_build_plan, context_variables=context_variables,
         ui_contributions=ui_contributions, task_files=task_files,
+        rebuild_source=await _bound_rebuild_workspace_source(app_build_plan, context_variables),
     )
     if template_files:
         feature_outputs.append({"code_files": template_files})
@@ -655,18 +726,21 @@ async def assemble_app_tasks(
     except Exception as exc:
         error = f"{type(exc).__name__}: {exc}"
         logger.exception("App assembly failed: %s", error)
+        diagnostic = getattr(exc, "diagnostic", None)
+        diagnostic = dict(diagnostic) if isinstance(diagnostic, dict) else {}
         if context is not None and hasattr(context, "set"):
             context.set("generated_files", previous_files)
             context.set("assembled_source", previous_source)
             context.set("app_assembly_status", "failed")
             context.set("app_assembly_error", error)
-            context.set("app_assembly_diagnostic", {"code": "APP_ASSEMBLY_FAILED", "error": str(exc)})
+            context.set("app_assembly_diagnostic", {"code": "APP_ASSEMBLY_FAILED", **diagnostic, "error": str(exc)})
             context.set("app_validation_status", "failed")
             context.set("app_bundle_acceptance_status", "failed")
         return {
             "success": False,
             "status": "failed",
             "error": error,
+            **({"diagnostic": diagnostic} if diagnostic else {}),
             "agent_message": f"App assembly failed: {error}. The previous bundle was preserved.",
         }
     if context is not None and hasattr(context, "set"):

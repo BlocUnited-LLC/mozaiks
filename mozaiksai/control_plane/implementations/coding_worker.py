@@ -11,6 +11,8 @@ logger = logging.getLogger(__name__)
 from pathlib import Path
 from typing import Any, cast
 
+import yaml
+
 from mozaiksai.control_plane.config import ControlPlaneConfig, load_control_plane_config
 from mozaiksai.control_plane.contracts import (
     CodingWorkerPlan,
@@ -47,14 +49,77 @@ from mozaiksai.core.artifacts.models import (
     canonical_bundle_archive_path,
     resolve_canonical_bundle_entry,
 )
+from mozaiksai.core.semantics.implementation_artifacts import (
+    ImplementationArtifactError,
+    prove_workspace_handler_extension,
+)
 from mozaiksai.core.validation.generated_app import validate_generated_app_candidate
 from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
     APP_VALIDATION_STRATEGIES,
     resolve_app_validation_strategy,
 )
+from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    SHARED_PACK_OUTPUT_PATHS,
+)
 
 _ELIGIBLE_CHANGE_CLASSES = {"patch"}
 _ELIGIBLE_ARTIFACT_KINDS = {"app_bundle", "workflow_bundle", "theme_capture"}
+_PACK_PROVENANCE_PATH = ".mozaiks/pack_provenance.json"
+# Only a scope the user named, or a proposal the user confirmed, can carry a
+# change to app-owned pack code. Auto-applied proposals and surface plans cannot.
+_AUTHORIZED_SCOPE_ORIGINS = frozenset({"explicit", "confirmed"})
+
+
+class CandidateAdmissionError(ValueError):
+    """A candidate changes capability-pack output its scope cannot authorize."""
+
+    def __init__(self, code: str, message: str, *, paths: list[str], **details: Any) -> None:
+        super().__init__(f"{code}: {message}: {', '.join(sorted(paths))}")
+        self.details = {"code": code, "message": message, "paths": sorted(paths), **details}
+
+
+def pack_output_owners(capability_packs: list[dict[str, Any]]) -> dict[str, str]:
+    """Map the declared outputs of a saved parent's verified packs to their owners.
+
+    Ownership comes from the pinned pack contracts the parent selected, never
+    from the candidate. Composed shared roots are left out: assembly merges
+    pack and app declarations there. Pack provenance is template-owned.
+    """
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        resolve_declared_pack_output_paths,
+        verified_selected_pack_sources,
+    )
+
+    verified = [
+        {"id": entry["pack_id"], "pack_source_path": entry["source_path"]}
+        for entry in verified_selected_pack_sources(capability_packs)
+    ]
+    if not verified:
+        return {}
+    workspace = resolve_declared_pack_output_paths(verified, owner="workspace")
+    owners = {
+        path: "workspace" if path in workspace else "templates"
+        for path in resolve_declared_pack_output_paths(verified)
+        if path not in SHARED_PACK_OUTPUT_PATHS
+    }
+    owners[_PACK_PROVENANCE_PATH] = "templates"
+    return owners
+
+
+def parent_workspace_pack_paths(capability_packs: Any) -> frozenset[str] | None:
+    """App-owned pack extension paths a saved parent declares; None when unverifiable."""
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        ManagedCapabilityTemplateError,
+    )
+
+    if not isinstance(capability_packs, list) or any(not isinstance(pack, dict) for pack in capability_packs):
+        return None
+    try:
+        owners = pack_output_owners(capability_packs)
+    except (ManagedCapabilityTemplateError, OSError, yaml.YAMLError) as exc:
+        logger.warning("PARENT_PACK_OWNERSHIP_UNRESOLVED: %s", exc)
+        return None
+    return frozenset(path for path, owner in owners.items() if owner == "workspace")
 
 
 def resolve_coding_validation_strategy(raw: str | None) -> str:
@@ -208,15 +273,32 @@ class ScopedRefinementCodingWorker:
 
         validation_result = None
         capability_packs: list[dict[str, Any]] = []
+        refinement_scope = self._refinement_scope(request)
         status = "planned"
         if resolved_artifact_kind == "app_bundle" and merged_files:
             try:
                 capability_packs = await self._parent_capability_packs(request)
+                refinement_scope = self._admit_pack_outputs(
+                    request=request, capability_packs=capability_packs,
+                    applied_files=applied_files, merged_files=merged_files,
+                )
                 validation_result = await self._run_candidate_validation(
                     request=request,
                     merged_files=merged_files,
                     validation_strategy=resolved_strategy,
                     capability_packs=capability_packs,
+                )
+            except CandidateAdmissionError as exc:
+                # Rejected before validation: no child record, nothing to review.
+                return CodingWorkerResult(
+                    eligible=True, status="failed", provider=proposal.provider_id, error=str(exc),
+                    metadata={
+                        "build_family": request.build_family,
+                        "change_class": request.change_class,
+                        "coding_provider_attempts": provider_attempts,
+                        "candidate_admission": exc.details,
+                        "refinement_scope": refinement_scope,
+                    },
                 )
             except Exception as exc:
                 return CodingWorkerResult(
@@ -248,6 +330,7 @@ class ScopedRefinementCodingWorker:
             "applied_paths": sorted(applied_files.keys()),
             "applied_file_count": len(applied_files),
             "selected_file_paths": list((request.metadata or {}).get("selected_file_paths") or []),
+            "refinement_scope": refinement_scope,
         }
         if validation_result is not None:
             validation_status = str((validation_result or {}).get("validation_status") or "").strip().lower()
@@ -268,6 +351,7 @@ class ScopedRefinementCodingWorker:
                         validation_result=validation_result or {},
                         provider_execution=provider_execution,
                         capability_packs=capability_packs,
+                        refinement_scope=refinement_scope,
                     )
                 )
             except Exception as exc:
@@ -375,6 +459,117 @@ class ScopedRefinementCodingWorker:
             raise ValueError("Refinement parent capability_packs must be a list of selected pack descriptors")
         return deepcopy(packs)
 
+    @staticmethod
+    def _refinement_scope(request: CodingWorkerRequest) -> dict[str, Any]:
+        metadata = request.metadata or {}
+        return {
+            "selected_file_paths": sorted(str(path) for path in metadata.get("selected_file_paths") or []),
+            "scope_origin": str(metadata.get("scope_origin") or "unspecified"),
+            "changed_workspace_pack_paths": [],
+        }
+
+    def _admit_pack_outputs(
+        self,
+        *,
+        request: CodingWorkerRequest,
+        capability_packs: list[dict[str, Any]],
+        applied_files: dict[str, str],
+        merged_files: dict[str, str],
+    ) -> dict[str, Any]:
+        """Hold the candidate to the saved parent's pack ownership before validation.
+
+        Template-owned outputs stay byte-identical to the verified parent. An
+        app-owned (``owner: workspace``) output may change only inside an
+        explicit or user-confirmed selected-file scope, from the build the
+        registry currently serves, and, for a workspace handler, only as a thin
+        extension of its template base handler. Applied paths are real changes
+        against the parent, so any owned path among them is a change.
+        """
+        from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+            ManagedCapabilityTemplateError,
+        )
+
+        scope = self._refinement_scope(request)
+        if not capability_packs:
+            return scope
+        try:
+            owners = pack_output_owners(capability_packs)
+        except (ManagedCapabilityTemplateError, OSError, yaml.YAMLError) as exc:
+            # Candidate validation verifies the same selected sources and fails
+            # this candidate, so it is saved as failed and never promotable.
+            logger.warning("CANDIDATE_PACK_OWNERSHIP_UNRESOLVED app=%s: %s", request.app_id, exc)
+            return scope
+        changed = sorted(applied_files)
+        drifted = [path for path in changed if owners.get(path) == "templates"]
+        if drifted:
+            raise CandidateAdmissionError(
+                "PACK_TEMPLATE_OUTPUT_CHANGED",
+                "template-owned capability pack outputs must stay byte-identical to the verified parent",
+                paths=drifted,
+            )
+        module_roots = {
+            "/".join(path.split("/")[:2]) + "/" for path in owners if path.startswith("modules/")
+        }
+        undeclared = [
+            path for path in changed
+            if path not in owners and any(path.startswith(root) for root in module_roots)
+        ]
+        if undeclared:
+            raise CandidateAdmissionError(
+                "PACK_MODULE_CLOSURE_CHANGED",
+                "a capability pack module keeps its exact declared file set",
+                paths=undeclared,
+            )
+        workspace = [path for path in changed if owners.get(path) == "workspace"]
+        scope["changed_workspace_pack_paths"] = workspace
+        if not workspace:
+            return scope
+        selected = set(scope["selected_file_paths"]) & set(request.files)
+        if scope["scope_origin"] not in _AUTHORIZED_SCOPE_ORIGINS or not set(workspace) <= selected:
+            raise CandidateAdmissionError(
+                "WORKSPACE_PACK_OUTPUT_UNAUTHORIZED",
+                "app-owned pack code changes only inside an explicit or user-confirmed selected-file scope",
+                paths=workspace, scope_origin=scope["scope_origin"],
+            )
+        current = str((request.metadata or {}).get("registry_artifact_version_id") or "").strip() or None
+        if current is None or current != request.build_record_id:
+            raise CandidateAdmissionError(
+                "STALE_REFINEMENT_BASELINE",
+                "app-owned pack code changes only from the build the registry currently serves",
+                paths=workspace, parent_build_record_id=request.build_record_id,
+                registry_artifact_version_id=current,
+            )
+        for path in workspace:
+            if path.endswith("/backend/handler.py"):
+                self._prove_handler_extension(path, owners=owners, merged_files=merged_files)
+        return scope
+
+    @staticmethod
+    def _prove_handler_extension(path: str, *, owners: dict[str, str], merged_files: dict[str, str]) -> None:
+        module_root = path[: -len("backend/handler.py")]
+        base_path, manifest_path = module_root + "backend/base_handler.py", module_root + "module.yaml"
+        try:
+            if owners.get(base_path) != "templates" or base_path not in merged_files:
+                raise ImplementationArtifactError("a workspace handler needs its template-owned base handler")
+            manifest = yaml.safe_load(merged_files.get(manifest_path) or "") or {}
+            module = manifest.get("module") if isinstance(manifest, dict) else None
+            reference = str(module.get("handler") or "") if isinstance(module, dict) else ""
+            module_path, _, handler_class = reference.partition(":")
+            if module_path != "backend.handler" or not handler_class:
+                raise ImplementationArtifactError(f"{manifest_path} must declare backend.handler:<class>")
+            prove_workspace_handler_extension(
+                handler_source=merged_files[path], base_handler_source=merged_files[base_path],
+                handler_class=handler_class,
+                action_methods=[
+                    str(action.get("handler_method") or "")
+                    for action in manifest.get("actions") or [] if isinstance(action, dict)
+                ],
+            )
+        except (ImplementationArtifactError, yaml.YAMLError) as exc:
+            raise CandidateAdmissionError(
+                "WORKSPACE_HANDLER_EXTENSION_REJECTED", str(exc), paths=[path],
+            ) from exc
+
     async def _run_candidate_validation(
         self,
         *,
@@ -421,6 +616,7 @@ class ScopedRefinementCodingWorker:
         validation_result: dict[str, Any],
         capability_packs: list[dict[str, Any]],
         provider_execution: dict[str, Any] | None = None,
+        refinement_scope: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         build_key = str(request.build_key or resolved_artifact_kind or "artifact").strip() or "artifact"
         bundle_token = uuid.uuid4().hex[:12]
@@ -475,6 +671,8 @@ class ScopedRefinementCodingWorker:
             "staged_file_sha256": dict(staged_workspace.editable_manifest),
             "coding_provider": provider_execution,
             "capability_packs": deepcopy(capability_packs),
+            # Who chose the written scope stays with the record it authorized.
+            "refinement_scope": deepcopy(refinement_scope or {}),
         }
         content_store = get_artifact_content_store()
         if content_store.backend_name != "local":
