@@ -14,8 +14,8 @@
 > [mozaiks.ai](https://mozaiks.ai), but you can self-host the framework and run
 > the builder locally.
 
-> Public PyPI and GitHub releases are not published yet. Install from a local
-> checkout instead.
+> Install the public package with `python -m pip install mozaiks`. Use an
+> editable checkout when contributing to the framework itself.
 
 ---
 
