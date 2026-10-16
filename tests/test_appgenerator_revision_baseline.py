@@ -11,6 +11,7 @@ import pytest
 import yaml
 
 from factory_app.workflows._shared.artifact_bundle import read_artifact_bundle
+from factory_app.workflows._shared.platform.genesis_import import GenesisImportError
 from factory_app.workflows.AppGenerator.tools import (
     app_validation,
     export_app_code,
@@ -153,6 +154,20 @@ async def test_bad_revision_baseline_fails_without_mutating_generated_files(base
     with pytest.raises(ValueError):
         await revision.hydrate_app_revision_context(context)
     assert "generated_files" not in context
+
+
+@pytest.mark.asyncio
+async def test_imported_genesis_requires_owner_receipt_before_revision_hydration(baseline, monkeypatch):
+    baseline.artifact.commit_metadata.metadata["bundle_mode"] = "brownfield_genesis_import"
+    check = AsyncMock(side_effect=GenesisImportError("no accepted review receipt"))
+    monkeypatch.setattr(revision, "require_accepted_genesis_baseline", check)
+    with pytest.raises(GenesisImportError, match="no accepted review receipt"):
+        await revision.hydrate_app_revision_context(baseline.context)
+    check.assert_awaited_once_with(
+        baseline.artifact, owner_user_id="owner", execution_app_id="factory-host",
+        build_registry_id="registry_1",
+    )
+    assert "generated_files" not in baseline.context
 
 
 @pytest.mark.asyncio

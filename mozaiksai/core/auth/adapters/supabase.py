@@ -19,7 +19,12 @@ import jwt
 from jwt import PyJWKClient
 
 from logs.logging_config import get_core_logger
-from mozaiksai.core.auth.adapters.base import AuthError, BaseAuthAdapter, UserClaims
+from mozaiksai.core.auth.adapters.base import (
+    AuthError,
+    BaseAuthAdapter,
+    UserClaims,
+    claim_is_true,
+)
 
 logger = get_core_logger("auth.supabase")
 
@@ -204,9 +209,15 @@ class SupabaseAuthAdapter(BaseAuthAdapter):
         # Supabase doesn't use scopes the same way, but we map role to scope
         scopes = ["access_as_user"] if role == "authenticated" else []
 
+        # Only a top-level email_verified claim counts. Supabase does not issue
+        # one by default (a custom access token hook can add it); the
+        # user_metadata copy is writable by the user and never verifies.
+        email_verified = bool(email) and claim_is_true(raw_claims, "email_verified")
+
         return UserClaims(
             user_id=str(user_id),
             email=str(email) if email else None,
+            email_verified=email_verified,
             name=str(name) if name else None,
             roles=roles,
             scopes=scopes,

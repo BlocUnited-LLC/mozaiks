@@ -80,6 +80,10 @@ class UserPrincipal:
     # has_local_development_access rather than inferring authority from
     # role/scope strings or from the process-wide auth mode.
     auth_provenance: str = ANONYMOUS_PROVENANCE
+    # Whether the identity provider asserted that ``email`` is verified
+    # (UserClaims.email_verified). The built-in no-auth adapter, anonymous
+    # visitors and dev personas never carry it.
+    email_verified: bool = False
 
     @property
     def is_authenticated(self) -> bool:
@@ -158,6 +162,7 @@ class UserPrincipal:
             tenant_id=claims.tenant_id,
             workspace_id=claims.workspace_id,
             auth_provenance=auth_provenance,
+            email_verified=claims.email_verified,
         )
 
 
@@ -216,6 +221,8 @@ def _no_auth_dev_override_principal(request: Request, principal: UserPrincipal) 
         # Dev personas are never authenticated provenance, no matter which
         # roles/scopes the request-scoped override assigns them.
         auth_provenance=DEV_OVERRIDE_PROVENANCE,
+        # No identity provider stands behind a request-supplied email.
+        email_verified=False,
     )
 
 

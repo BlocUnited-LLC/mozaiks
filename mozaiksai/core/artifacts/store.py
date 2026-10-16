@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from typing import Any
@@ -173,6 +174,10 @@ class BuildRecordStore:
                 "_id": artifact_version_id,
                 **build_app_scope_filter(resolved_app_id),
                 "lifecycle_status": {"$nin": [ArtifactLifecycleStatus.ARCHIVED.value, ArtifactLifecycleStatus.DELETED.value]},
+                "$or": [
+                    {"commit_metadata.metadata.bundle_mode": {"$ne": "brownfield_genesis_import"}},
+                    {"lifecycle_status": {"$ne": ArtifactLifecycleStatus.DRAFT.value}},
+                ],
             },
             {
                 "$set": {
@@ -204,6 +209,10 @@ class BuildRecordStore:
             "artifact_kind": artifact_kind,
             "artifact_key": artifact_key,
             "lifecycle_status": {"$nin": [ArtifactLifecycleStatus.ARCHIVED.value, ArtifactLifecycleStatus.DELETED.value, ArtifactLifecycleStatus.STALE.value]},
+            "$or": [
+                {"commit_metadata.metadata.bundle_mode": {"$ne": "brownfield_genesis_import"}},
+                {"lifecycle_status": {"$ne": ArtifactLifecycleStatus.DRAFT.value}},
+            ],
         }
         if exclude_version_id:
             query["_id"] = {"$ne": exclude_version_id}
@@ -298,7 +307,10 @@ class BuildRecordStore:
 
         versions = await self._coll("ArtifactVersions")
         result = await versions.update_one(
-            {"_id": resolved_id, **build_app_scope_filter(resolved_app_id)},
+            {
+                "_id": resolved_id, **build_app_scope_filter(resolved_app_id),
+                "commit_metadata.metadata.bundle_mode": {"$ne": "brownfield_genesis_import"},
+            },
             {"$set": updates},
         )
         return bool(result.modified_count)
@@ -436,7 +448,10 @@ class BuildRecordStore:
 
         versions = await self._coll("ArtifactVersions")
         result = await versions.update_one(
-            {"_id": artifact_version_id, **build_app_scope_filter(resolved_app_id)},
+            {
+                "_id": artifact_version_id, **build_app_scope_filter(resolved_app_id),
+                "commit_metadata.metadata.bundle_mode": {"$ne": "brownfield_genesis_import"},
+            },
             {"$set": updates},
         )
         return bool(result.modified_count)
@@ -662,6 +677,7 @@ class BuildRecordStore:
         app_id: str,
         build_family: str,
         build_key: str,
+        build_record_id: str | None = None,
         files_manifest: Iterable[dict[str, Any] | ArtifactFileManifestEntry] | None = None,
         source_workflow: str | None = None,
         source_chat_id: str | None = None,
@@ -689,7 +705,9 @@ class BuildRecordStore:
                 raise ValueError(f"Unknown parent_build_record_id: {parent_build_record_id}")
             parent_doc = BuildRecord.model_validate(parent_raw)
 
-        build_record_id = f"av_{uuid4().hex[:24]}"
+        if build_record_id is not None and re.fullmatch(r"av_[0-9a-f]{24}", build_record_id) is None:
+            raise ValueError("build_record_id must use the canonical av_ identity")
+        build_record_id = build_record_id or f"av_{uuid4().hex[:24]}"
         version_number = await self._next_build_record_version_number(
             app_id=resolved_app_id,
             build_family=build_family,
@@ -813,6 +831,10 @@ class BuildRecordStore:
                 "_id": build_record_id,
                 **build_app_scope_filter(resolved_app_id),
                 "lifecycle_status": {"$nin": [ArtifactLifecycleStatus.ARCHIVED.value, ArtifactLifecycleStatus.DELETED.value]},
+                "$or": [
+                    {"commit_metadata.metadata.bundle_mode": {"$ne": "brownfield_genesis_import"}},
+                    {"lifecycle_status": {"$ne": ArtifactLifecycleStatus.DRAFT.value}},
+                ],
             },
             {
                 "$set": {
@@ -844,6 +866,10 @@ class BuildRecordStore:
             "build_family": build_family,
             "build_key": build_key,
             "lifecycle_status": {"$nin": [ArtifactLifecycleStatus.ARCHIVED.value, ArtifactLifecycleStatus.DELETED.value, ArtifactLifecycleStatus.STALE.value]},
+            "$or": [
+                {"commit_metadata.metadata.bundle_mode": {"$ne": "brownfield_genesis_import"}},
+                {"lifecycle_status": {"$ne": ArtifactLifecycleStatus.DRAFT.value}},
+            ],
         }
         if exclude_version_id:
             query["_id"] = {"$ne": exclude_version_id}
@@ -921,6 +947,8 @@ class BuildRecordStore:
         if not isinstance(raw, dict):
             return None
         target = BuildRecord.model_validate(raw)
+        if target.commit_metadata.metadata.get("bundle_mode") == "brownfield_genesis_import":
+            raise ValueError("Imported Genesis requires dedicated owner-reviewed acceptance")
         now = _utc_now()
         updates: dict[str, Any] = {
             "lifecycle_status": ArtifactLifecycleStatus.CURRENT.value,
@@ -950,11 +978,58 @@ class BuildRecordStore:
             },
         )
         await versions.update_one(
-            {"_id": target.id, **build_app_scope_filter(resolved_app_id)},
+            {
+                "_id": target.id, **build_app_scope_filter(resolved_app_id),
+                "commit_metadata.metadata.bundle_mode": {"$ne": "brownfield_genesis_import"},
+            },
             {"$set": updates},
         )
         refreshed = await versions.find_one({"_id": target.id, **build_app_scope_filter(resolved_app_id)})
         return BuildRecord.model_validate(refreshed) if isinstance(refreshed, dict) else target
+
+    async def mark_genesis_build_record_validated(
+        self, *, app_id: str, build_record_id: str, validation: dict[str, Any],
+    ) -> BuildRecord | None:
+        """Record passed whole-app validation only on the imported draft."""
+        versions = await self._coll("ArtifactVersions")
+        await versions.update_one(
+            {
+                "_id": build_record_id, **build_app_scope_filter(app_id),
+                "lifecycle_status": ArtifactLifecycleStatus.DRAFT.value,
+                "commit_metadata.metadata.bundle_mode": "brownfield_genesis_import",
+                "commit_metadata.metadata.bundle_sha256": validation["bundle_sha256"],
+                "validation_status": ArtifactValidationStatus.PENDING.value,
+                "commit_metadata.metadata.genesis_validation": {"$exists": False},
+            },
+            {"$set": {
+                "validation_status": ArtifactValidationStatus.PASSED.value,
+                "app_validation_status": "passed",
+                "commit_metadata.metadata.genesis_validation": validation,
+                "updated_at": _utc_now(),
+            }},
+        )
+        return await self.get_build_record(app_id=app_id, build_record_id=build_record_id)
+
+    async def accept_genesis_build_record(
+        self, *, app_id: str, build_record_id: str, validation_sha256: str,
+    ) -> BuildRecord | None:
+        """Project the accepted registry receipt to CURRENT without superseding a lineage."""
+        versions = await self._coll("ArtifactVersions")
+        await versions.update_one(
+            {
+                "_id": build_record_id, **build_app_scope_filter(app_id),
+                "lifecycle_status": ArtifactLifecycleStatus.DRAFT.value,
+                "validation_status": ArtifactValidationStatus.PASSED.value,
+                "app_validation_status": "passed",
+                "commit_metadata.metadata.bundle_mode": "brownfield_genesis_import",
+                "commit_metadata.metadata.genesis_validation.sha256": validation_sha256,
+            },
+            {"$set": {
+                "lifecycle_status": ArtifactLifecycleStatus.CURRENT.value,
+                "updated_at": _utc_now(),
+            }},
+        )
+        return await self.get_build_record(app_id=app_id, build_record_id=build_record_id)
 
     async def set_validation_status_for_build_record(
         self,
@@ -984,7 +1059,10 @@ class BuildRecordStore:
 
         versions = await self._coll("ArtifactVersions")
         result = await versions.update_one(
-            {"_id": build_record_id, **build_app_scope_filter(resolved_app_id)},
+            {
+                "_id": build_record_id, **build_app_scope_filter(resolved_app_id),
+                "commit_metadata.metadata.bundle_mode": {"$ne": "brownfield_genesis_import"},
+            },
             {"$set": updates},
         )
         return bool(result.modified_count)

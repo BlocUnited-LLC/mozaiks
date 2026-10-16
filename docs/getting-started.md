@@ -6,29 +6,18 @@
 - Node.js 20.19+ or 22.12+ (required by the Vite 8 frontend toolchain)
 - Docker Desktop — [download here](https://www.docker.com/products/docker-desktop/) (used to run MongoDB)
 
-Mozaiks installs Tree-sitter parser packages with the core framework checkout
-so Studio can build source-backed App Intelligence for generated and existing
-apps. Mozaiks is not published on PyPI yet, so install it from this repo
-instead of `pip install mozaiks`.
-No separate parser setup is required.
+Mozaiks installs Tree-sitter parser packages with the core framework package so
+Studio can build source-backed App Intelligence for generated and existing
+apps. No separate parser setup is required.
 
 ## 1. Install
 
-=== "Windows"
+```bash
+python -m pip install mozaiks
+```
 
-    ```powershell
-    git clone https://github.com/BlocUnited-LLC/mozaiks.git
-    cd mozaiks
-    python -m pip install -e ".[dev]"
-    ```
-
-=== "macOS / Linux"
-
-    ```bash
-    git clone https://github.com/BlocUnited-LLC/mozaiks.git
-    cd mozaiks
-    python -m pip install -e ".[dev]"
-    ```
+For framework development, clone the repository and run
+`python -m pip install -e ".[dev]"` instead.
 
 ## 2. Start MongoDB
 
