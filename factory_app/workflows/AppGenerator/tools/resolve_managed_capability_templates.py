@@ -228,7 +228,7 @@ def _validate_pack_dependencies(
         # Capabilities from context.yaml (fallback when descriptor lacks them).
         # Only attempt when pack_id is safe — unsafe IDs will be caught later
         # by resolve_templates_for_pack's _is_safe_identifier check.
-        raw_path = _resolve_pack_source_from_installed_state(pack, context_variables=context_variables)
+        raw_path, _pins = _resolve_pack_source_from_installed_state(pack, context_variables=context_variables)
         if raw_path and pid and _is_safe_identifier(pid):
             try:
                 context_data = _read_pack_context(Path(raw_path).resolve(), pid)
@@ -246,7 +246,7 @@ def _validate_pack_dependencies(
         if not isinstance(pack, dict):
             continue
         pack_id = str(pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id") or "").strip()
-        raw_path = _resolve_pack_source_from_installed_state(pack, context_variables=context_variables)
+        raw_path, _pins = _resolve_pack_source_from_installed_state(pack, context_variables=context_variables)
         if not raw_path or not pack_id:
             continue
 
@@ -647,16 +647,20 @@ def _resolve_pack_source_from_installed_state(
     pack: dict[str, Any],
     *,
     context_variables: Any | None,
-) -> str | None:
-    """Resolve an explicitly selected installed pack without copying local paths into AppBuildPlan."""
+) -> tuple[str | None, dict[str, str]]:
+    """Resolve an explicitly selected installed pack without copying local paths into AppBuildPlan.
+
+    Returns the source path and, for an installed pack, the version and digest
+    pins that workspace state verified against the source's fresh bytes.
+    """
 
     raw_path = pack.get("pack_source_path")
     if raw_path:
-        return str(raw_path)
+        return str(raw_path), {}
     pack_id = str(pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id") or "").strip()
     build_context_root = _context_build_context_root(context_variables)
     if not pack_id or build_context_root is None:
-        return None
+        return None, {}
     try:
         from .community_component_lifecycle import resolve_installed_component_descriptors
 
@@ -669,8 +673,9 @@ def _resolve_pack_source_from_installed_state(
             f"Selected installed pack '{pack_id}' could not be resolved from workspace state: {exc}"
         ) from exc
     if not descriptors:
-        return None
-    return str(descriptors[0].get("pack_source_path") or "")
+        return None, {}
+    installed = descriptors[0]
+    return str(installed.get("pack_source_path") or ""), {key: str(installed[key]) for key in ("version", "digest")}
 
 
 def _safe_declared_output_path(raw_path: Any, *, pack_id: str) -> str:
@@ -709,7 +714,7 @@ def resolve_declared_pack_output_paths(
         if not isinstance(pack, dict):
             continue
         pack_id = str(pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id") or "").strip()
-        raw_path = _resolve_pack_source_from_installed_state(
+        raw_path, _pins = _resolve_pack_source_from_installed_state(
             pack,
             context_variables=context_variables,
         )
@@ -808,24 +813,26 @@ def verified_selected_pack_sources(
     verified = []
     factory_root = resolve_factory_app_root()
     # Without a resolvable factory root, only explicitly pinned packs are trusted.
+    # Selected-row pins and verified installed-state pins are both explicit pins.
     factory_contexts = (factory_root / "build_context").resolve() if factory_root is not None else None
     for pack in capability_packs:
         if not isinstance(pack, dict):
             continue
         pack_id = str(pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id") or "").strip()
-        source = _resolve_pack_source_from_installed_state(pack, context_variables=context_variables)
+        source, installed_pins = _resolve_pack_source_from_installed_state(pack, context_variables=context_variables)
         if not source or not pack_id:
             continue
         root = Path(source).resolve()
         metadata = verify_pack_integrity(root, pack_id)
-        for key in ("version", "digest"):
-            if pack.get(key) is not None and pack[key] != metadata[key]:
-                raise PackIntegrityError(f"Pack '{pack_id}' selected {key} does not match freshly verified source")
+        for label, pins in (("selected", pack), ("installed", installed_pins)):
+            for key in ("version", "digest"):
+                if pins.get(key) is not None and pins[key] != metadata[key]:
+                    raise PackIntegrityError(f"Pack '{pack_id}' {label} {key} does not match freshly verified source")
         verified.append({
             **metadata, "source_path": str(root),
             "implementation_trusted": (
                 (factory_contexts is not None and root.parent == factory_contexts)
-                or bool(pack.get("version") and pack.get("digest"))
+                or any(bool(pins.get("version") and pins.get("digest")) for pins in (pack, installed_pins))
             ),
         })
     return verified

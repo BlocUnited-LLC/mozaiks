@@ -174,14 +174,18 @@ compiler preserves unrelated app surfaces and rejects conflicting ownership or
 collection definitions. It emits one `data/contract.json`; a pack template never
 replaces that shared app artifact directly. Shared outputs record contributor
 pack identities in `.mozaiks/pack_provenance.json`, separately from exclusively
-owned template files.
+owned template files. Several selected packs may declare the same shared root
+(`data/contract.json`, `ui/index.js`, `ui/route_manifest.json`); any other
+declared output path belongs to exactly one selected pack.
 
 Canonical policy, schema, and CRUD synthesis still owns ordinary generated and
 partially templated modules, including OutcomeFeedback. A complete template
 implementation keeps its own actions and participant-aware policy only when
 dependency closure, current source identity, declared output closure, and exact
 template bytes are verified. The factory's shipped packs are trusted sources;
-external sources require matching version and digest pins. A workspace-owned
+external sources require matching version and digest pins, either on the
+selected pack or from installed Community Component state verified against the
+source's current bytes. A workspace-owned
 `backend/handler.py` may extend the verified template base handler. Missing,
 changed, or undeclared implementation files fail admission; the exemption does
 not skip runtime, schema, implementation, or browser validation.
@@ -478,6 +482,13 @@ is allowed only when the operation can compare the workspace files against the
 old pack's rendered content. It refuses to overwrite locally modified owned
 files, files owned by another installed pack, or workspace-owned/custom files.
 It does not execute migration scripts.
+
+`data/contract.json` is never an owned file. When a pack's data contribution
+changes, the plan lists it in `recomposed_files`, and applying replaces only
+that pack's surfaces in the app contract, preserving app-owned surfaces and
+other contributions. A locally modified pack surface or a conflicting
+contribution blocks the upgrade. Provenance keeps other packs' composed
+contributors, and a root the app already composes stays composed.
 
 Mozaiks does not perform remote downloads, registry lookup, marketplace ranking,
 trust scoring, cryptographic signing, or automatic semver range upgrades for

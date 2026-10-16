@@ -75,6 +75,7 @@ from mozaiksai.core.runtime.app.paths import (
     unsafe_app_paths,
 )
 from mozaiksai.core.runtime.app.theme_contract import validate_page_title_theme
+from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import (
     compile_data_contract,
     data_contract_requires_auth,
@@ -2154,7 +2155,9 @@ def _layout_extensions_for_selected_packs(
             continue
         for path in sorted(resolve_declared_pack_output_paths([pack])):
             prior_owner = claimed_paths.get(path)
-            if prior_owner is not None and prior_owner != pack_id:
+            # Shared roots have several contributors by design; composition and
+            # composed_outputs provenance validate them. Every other path is exclusive.
+            if prior_owner is not None and prior_owner != pack_id and path not in SHARED_PACK_OUTPUT_PATHS:
                 raise ManagedCapabilityTemplateError(
                     f"Selected packs '{prior_owner}' and '{pack_id}' both declare "
                     f"output path {path!r}; duplicate pack output claims fail closed"
@@ -2338,6 +2341,38 @@ def _scan_owned_collection_auth(files_map: dict[str, str]) -> list[str]:
     return []
 
 
+class _ExplicitPackContext:
+    """Read-only view of a caller context that adds the caller's explicit packs."""
+
+    def __init__(self, base: Any, capability_packs: list[dict[str, Any]]) -> None:
+        self._base = base
+        self._capability_packs = capability_packs
+
+    def get(self, key: str, default: Any = None) -> Any:
+        if key == "capability_packs":
+            return self._capability_packs
+        return self._base.get(key, default)
+
+
+def _selected_pack_scan_context(context_variables: Any, capability_packs: list[dict[str, Any]] | None) -> Any:
+    """Layer explicit packs under a context that selects no packs of its own.
+
+    Context pack selections stay authoritative. A facade context such as
+    ``{"app_id": ...}`` must not drop the caller's trusted packs, which own the
+    managed-provider and pin checks.
+    """
+    if context_variables is None:
+        return {"capability_packs": capability_packs or []}
+    plan = detach(context_variables.get("app_build_plan")) or {}
+    if not capability_packs or detach(context_variables.get("capability_packs")) or (
+        isinstance(plan, dict) and plan.get("capability_packs")
+    ):
+        return context_variables
+    if isinstance(context_variables, dict):
+        return {**context_variables, "capability_packs": capability_packs}
+    return _ExplicitPackContext(context_variables, capability_packs)
+
+
 def scan_generated_bundle(
     files_map: dict[str, str],
     *,
@@ -2362,7 +2397,7 @@ def scan_generated_bundle(
     - modules/*/contracts/reactions.yaml: event_type closure, target.kind taxonomy,
       target-kind-specific required fields.
     """
-    persistence_context = context_variables if context_variables is not None else {"capability_packs": capability_packs or []}
+    persistence_context = _selected_pack_scan_context(context_variables, capability_packs)
     try:
         # Plan rows identify generated modules; selected pack context owns the
         # verified source and its exact declared output paths.

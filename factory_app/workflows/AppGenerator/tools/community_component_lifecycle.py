@@ -9,6 +9,8 @@ from typing import Any
 
 import yaml
 
+from mozaiksai.core.workflow.generator_support.code_files import compile_data_contract
+
 from .community_component_state import (
     InstalledComponentStateError,
     canonical_component_entry,
@@ -24,14 +26,18 @@ from .resolve_managed_capability_templates import (
     PackIntegrityError,
     _capabilities_from_context,
     _extract_requires,
+    _file_owner_map,
     _read_pack_context,
     _read_pack_contract,
     resolve_managed_capability_templates,
     resolve_templates_for_pack,
+    verified_pack_data_contracts,
     verify_pack_integrity,
 )
 
 _PROVENANCE_PATH = ".mozaiks/pack_provenance.json"
+# The resolver composes the data contract for every caller; a pack never owns it.
+_DATA_CONTRACT_PATH = "data/contract.json"
 
 
 class CommunityComponentLifecycleError(ValueError):
@@ -67,6 +73,7 @@ class UpgradePlan:
     removed_files: list[str] = field(default_factory=list)
     changed_files: list[str] = field(default_factory=list)
     potential_conflicts: list[dict[str, str]] = field(default_factory=list)
+    recomposed_files: list[str] = field(default_factory=list)
 
 
 def _pack_id_from_context(pack_source_path: Path) -> str:
@@ -224,20 +231,91 @@ def _files_by_name(files: list[dict[str, str]]) -> dict[str, str]:
     return {str(file["filename"]): str(file["content"]) for file in files if file.get("filename")}
 
 
-def _render_owned_files(pack_source_path: Path, pack_id: str) -> dict[str, str]:
-    return _files_by_name(resolve_templates_for_pack(pack_source_path, pack_id))
+def _render_pack(pack_source_path: Path, pack_id: str) -> tuple[dict[str, str], list[dict[str, Any]]]:
+    """Split rendered templates into owned files and verified data contributions."""
+    files = resolve_templates_for_pack(pack_source_path, pack_id)
+    contributions = verified_pack_data_contracts([
+        {"pack_id": pack_id, "owner_map": _file_owner_map(pack_source_path), "files": files},
+    ])
+    owned = {path: content for path, content in _files_by_name(files).items() if path != _DATA_CONTRACT_PATH}
+    return owned, contributions
 
 
-def _provenance_pack_entries(app_root: Path) -> list[dict[str, Any]]:
+def _recompose_data_contract(
+    app_root: Path, old: list[dict[str, Any]], new: list[dict[str, Any]],
+) -> tuple[str | None, str | None]:
+    """Swap one pack's data contribution in the app contract.
+
+    Returns the recomposed contract text, or the conflict kind that blocks it.
+    App-owned surfaces and other packs' contributions are preserved.
+    """
+    path = app_root / _DATA_CONTRACT_PATH
+    try:
+        current = (
+            json.loads(path.read_text(encoding="utf-8")) if path.exists()
+            else {"version": "1", "surfaces": [], "shared_collections": []}
+        )
+        if not isinstance(current, dict):
+            return None, "composed_output_conflict"
+        contract = compile_data_contract(current)
+        retired = compile_data_contract(
+            {"version": "1", "surfaces": [], "shared_collections": []}, pack_data_contracts=old,
+        )["surfaces"]
+        surfaces = contract.get("surfaces") or []
+        if any(row.get("surface_id") == surface["surface_id"] and row != surface for row in surfaces for surface in retired):
+            return None, "locally_modified_composed_output"
+        contract["surfaces"] = [row for row in surfaces if row not in retired]
+        recomposed = compile_data_contract(contract, pack_data_contracts=new)
+    except ValueError:
+        return None, "composed_output_conflict"
+    return json.dumps(recomposed, indent=2, ensure_ascii=False), None
+
+
+def _provenance_manifest(app_root: Path) -> dict[str, Any]:
     path = app_root.resolve() / _PROVENANCE_PATH
     if not path.exists():
-        return []
+        return {}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except Exception as exc:
         raise CommunityComponentLifecycleError(f"Invalid pack provenance at {path}: {exc}") from exc
-    packs = data.get("packs") if isinstance(data, dict) else None
+    return data if isinstance(data, dict) else {}
+
+
+def _provenance_pack_entries(app_root: Path) -> list[dict[str, Any]]:
+    packs = _provenance_manifest(app_root).get("packs")
     return [item for item in packs or [] if isinstance(item, dict)]
+
+
+def _merged_provenance(app_root: Path, upgraded: dict[str, Any], pack_id: str) -> dict[str, Any]:
+    """Replace one pack's provenance and keep every other pack's entries and contributions.
+
+    A root the app already composes stays composed: the upgraded pack becomes
+    one of its contributors instead of claiming the whole file.
+    """
+    existing = _provenance_manifest(app_root).get("composed_outputs")
+    composed: dict[str, list[dict[str, Any]]] = {
+        path: [row for row in rows if isinstance(row, dict) and row.get("pack_id") != pack_id]
+        for path, rows in (existing.items() if isinstance(existing, dict) else ())
+        if isinstance(rows, list)
+    }
+    entries = list(upgraded.get("packs") or [])
+    for entry in entries:
+        identity = {key: entry[key] for key in ("pack_id", "version", "source", "digest")}
+        owned = entry["materialized_owned_files"]
+        entry["materialized_owned_files"] = [row for row in owned if row["path"] not in composed]
+        for row in owned:
+            if row["path"] in composed:
+                composed[row["path"]].append(identity)
+    for path, rows in (upgraded.get("composed_outputs") or {}).items():
+        composed.setdefault(path, []).extend(rows)
+    upgraded["packs"] = [
+        pack for pack in _provenance_pack_entries(app_root) if str(pack.get("pack_id") or "").strip() != pack_id
+    ] + entries
+    upgraded.pop("composed_outputs", None)
+    if any(composed.values()):
+        upgraded["composed_outputs"] = {path: rows for path, rows in composed.items() if rows}
+    return upgraded
 
 
 def _pack_owned_paths(app_root: Path, pack_id: str) -> set[str]:
@@ -269,6 +347,21 @@ def plan_component_upgrade(
 ) -> UpgradePlan:
     """Dry-run a deterministic upgrade from installed pack state to a local candidate."""
 
+    return _plan_upgrade(
+        build_context_root=build_context_root,
+        candidate_pack_source_path=candidate_pack_source_path,
+        workspace_app_root=workspace_app_root,
+    )[0]
+
+
+def _plan_upgrade(
+    *,
+    build_context_root: str | Path,
+    candidate_pack_source_path: str | Path,
+    workspace_app_root: str | Path | None,
+) -> tuple[UpgradePlan, str | None]:
+    """Plan an upgrade and the recomposed data contract its apply step writes."""
+
     root = Path(build_context_root).resolve()
     candidate_source = Path(candidate_pack_source_path).resolve()
     pack_id = _pack_id_from_context(candidate_source)
@@ -285,8 +378,10 @@ def plan_component_upgrade(
     if not old_source_raw:
         raise CommunityComponentLifecycleError(f"Installed pack has no old local source sidecar: {pack_id}")
     old_source = Path(old_source_raw).resolve()
-    old_files = _render_owned_files(old_source, pack_id)
-    new_files = _render_owned_files(candidate_source, pack_id)
+    old_files, old_data = _render_pack(old_source, pack_id)
+    new_files, new_data = _render_pack(candidate_source, pack_id)
+    recomposed = [_DATA_CONTRACT_PATH] if old_data != new_data else []
+    data_contract: str | None = None
 
     old_paths = set(old_files)
     new_paths = set(new_files)
@@ -316,6 +411,10 @@ def plan_component_upgrade(
             current_content = target.read_text(encoding="utf-8")
             if current_content != old_files[path]:
                 potential_conflicts.append({"path": path, "kind": "locally_modified_owned_file"})
+        if recomposed:
+            data_contract, conflict = _recompose_data_contract(app_root, old_data, new_data)
+            if conflict:
+                potential_conflicts.append({"path": _DATA_CONTRACT_PATH, "kind": conflict})
 
     dependency_changes = {
         "added_packs": [item for item in candidate["dependencies"]["packs"] if item not in current["dependencies"]["packs"]],
@@ -345,7 +444,8 @@ def plan_component_upgrade(
         removed_files=removed,
         changed_files=changed,
         potential_conflicts=potential_conflicts,
-    )
+        recomposed_files=recomposed,
+    ), data_contract
 
 
 def apply_component_upgrade(
@@ -360,7 +460,7 @@ def apply_component_upgrade(
     app_root = Path(workspace_app_root).resolve()
     candidate_source = Path(candidate_pack_source_path).resolve()
     pack_id = _pack_id_from_context(candidate_source)
-    plan = plan_component_upgrade(
+    plan, data_contract = _plan_upgrade(
         build_context_root=root,
         candidate_pack_source_path=candidate_source,
         workspace_app_root=app_root,
@@ -371,7 +471,7 @@ def apply_component_upgrade(
     candidate = _component_entry_from_verified_pack(candidate_source, pack_id)
     descriptors = [{"id": pack_id, "pack_id": pack_id, "pack_source_path": str(candidate_source)}]
     rendered = _files_by_name(resolve_managed_capability_templates(descriptors))
-    rendered.pop(_PROVENANCE_PATH, None)
+    provenance = _merged_provenance(app_root, json.loads(rendered.pop(_PROVENANCE_PATH)), pack_id)
     for path in sorted(plan.added_files + plan.changed_files):
         target = app_root / path
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -380,14 +480,10 @@ def apply_component_upgrade(
         target = app_root / path
         if target.exists():
             target.unlink()
+    if data_contract is not None:
+        (app_root / _DATA_CONTRACT_PATH).parent.mkdir(parents=True, exist_ok=True)
+        (app_root / _DATA_CONTRACT_PATH).write_text(data_contract, encoding="utf-8")
 
-    provenance = json.loads(_files_by_name(resolve_managed_capability_templates(descriptors))[_PROVENANCE_PATH])
-    existing_entries = [
-        pack
-        for pack in _provenance_pack_entries(app_root)
-        if str(pack.get("pack_id") or "").strip() != pack_id
-    ]
-    provenance["packs"] = existing_entries + list(provenance.get("packs") or [])
     (app_root / _PROVENANCE_PATH).parent.mkdir(parents=True, exist_ok=True)
     (app_root / _PROVENANCE_PATH).write_text(json.dumps(provenance, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
