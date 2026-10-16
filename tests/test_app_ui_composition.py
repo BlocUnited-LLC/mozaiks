@@ -52,6 +52,18 @@ def compose(*parts):
     return compose_ui_registry([contribution("input:" + ",".join(sorted(part)), part) for part in parts], files)
 
 
+def admitted_overlay(files):
+    return {**contribution("app:accumulated_files", files, baseline=True), "admitted_overlay": True}
+
+
+def retitled(manifest_source, route_id, title):
+    manifest = json.loads(manifest_source)
+    for route in manifest["pages"]:
+        if route["id"] == route_id:
+            route["meta"]["title"] = title
+    return json.dumps(manifest)
+
+
 def test_actual_pack_custom_and_declarative_pages_preserve_bytes_and_metadata():
     pack = {entry["filename"]: entry["content"] for entry in resolve_templates_for_pack(
         ROOT / "factory_app/build_context/messaging", "messaging",
@@ -363,6 +375,152 @@ async def test_actual_revision_assembly_updates_app_route_and_retains_verified_p
         assert repeated_files[path] == files[path]
     assert saved.content.get_bundle.await_count == 4
     saved.content.get_bundle.assert_awaited_with("immutable-archive")
+
+
+@pytest.mark.parametrize("repaired", ["board", "zeta"])
+def test_admitted_overlay_supersedes_saved_and_unchanged_task_routes_in_revision(repaired):
+    board = component(path="ui/pages/custom/board.jsx")
+    zeta = component("Zeta", path="ui/pages/custom/zeta.jsx", order=20)
+    pack = component("Messages", path="ui/pages/custom/Messages.jsx", order=50)
+    saved = {**board, **zeta, **pack, **compose(board, zeta, pack)}
+    # The task re-emits board exactly as saved; the repair retitles one route.
+    repair = {"ui/route_manifest.json": retitled(saved["ui/route_manifest.json"], repaired, "Repaired")}
+    parts = [
+        contribution("app:generated_files", saved, baseline=True), contribution("task:board", board),
+        admitted_overlay(repair), contribution("pack:messaging", pack),
+    ]
+    for order in permutations(parts):
+        result = compose_ui_registry(list(order), saved, revision_baseline=saved)
+        routes = json.loads(result["ui/route_manifest.json"])["pages"]
+        assert [route["id"] for route in routes] == ["board", "zeta", "messages"]
+        assert {route["id"]: route["meta"]["title"] for route in routes} == {
+            "board": "Board", "zeta": "Zeta", "messages": "Messages", repaired: "Repaired",
+        }
+        assert routes[2] == json.loads(pack["ui/route_manifest.json"])["pages"][0]
+
+
+def test_admitted_overlay_repairs_task_registration_route_and_order_in_genesis():
+    board, zeta = component(path="ui/pages/custom/board.jsx"), component("Zeta", path="ui/pages/custom/zeta.jsx")
+    pack = component("Messages", path="ui/pages/custom/Messages.jsx", order=50)
+    board_route = json.loads(board["ui/route_manifest.json"])["pages"][0]
+    zeta_route = json.loads(zeta["ui/route_manifest.json"])["pages"][0]
+    task = {**board, **zeta, "ui/route_manifest.json": json.dumps({"pages": [board_route, zeta_route]}), "ui/index.js": (
+        "import B from './pages/custom/board.jsx';\nimport Z from './pages/custom/zeta.jsx';\n"
+        "export function register(registerComponent) { registerComponent('Board', B); registerComponent('Zeta', Z); }"
+    )}
+    repaired_route = {**board_route, "meta": {**board_route["meta"], "title": "Repaired"}}
+    repair = {
+        "ui/pages/custom/board_v2.jsx": "export default function Board() { return null; }",
+        "ui/index.js": "import B from './pages/custom/board_v2.jsx';\nexport function register(registerComponent) { registerComponent('Board', B); }",
+        "ui/route_manifest.json": json.dumps({"pages": [zeta_route, repaired_route]}),
+    }
+    files = {**task, **pack, **repair}
+    parts = [contribution("task:pages", task), admitted_overlay(repair), contribution("pack:messaging", pack)]
+    result = compose_ui_registry(parts, files)
+    assert [route for route in json.loads(result["ui/route_manifest.json"])["pages"] if route["id"] != "messages"] == [zeta_route, repaired_route]
+    assert "./pages/custom/board_v2.jsx" in result["ui/index.js"]
+    assert "./pages/custom/board.jsx" not in result["ui/index.js"]
+    assert compose_ui_registry(parts[::-1], files) == result
+
+
+@pytest.mark.parametrize("target", ["route", "registration"])
+@pytest.mark.parametrize("with_snapshot", [False, True])
+def test_admitted_overlay_cannot_patch_pack_declarations(target, with_snapshot):
+    board = component(path="ui/pages/custom/board.jsx")
+    pack = component("Messages", path="ui/pages/custom/Messages.jsx", order=50)
+    saved = {**board, **pack, **compose(board, pack)}
+    if target == "route":
+        repair = {"ui/route_manifest.json": retitled(saved["ui/route_manifest.json"], "messages", "Hijacked")}
+        match = "Conflicting route id: messages"
+    else:
+        repair = {"ui/pages/custom/Inbox.jsx": "export default function Inbox() { return null; }",
+                  "ui/index.js": "import I from './pages/custom/Inbox.jsx';\nexport function register(registerComponent) { registerComponent('Messages', I); }"}
+        match = "Conflicting component registration: Messages"
+    parts = [contribution("task:pages", board), admitted_overlay(repair), contribution("pack:messaging", pack)]
+    if with_snapshot:
+        parts.insert(0, contribution("app:generated_files", saved, baseline=True))
+    with pytest.raises(ValueError, match=match):
+        compose_ui_registry(parts, {**saved, **repair})
+    with pytest.raises(ValueError, match="cannot be the admitted app overlay"):
+        compose_ui_registry([{**contribution("pack:messaging", pack), "admitted_overlay": True}], saved)
+
+
+def test_admitted_overlay_does_not_hide_competing_task_owners():
+    files = component()
+    repair = {"ui/route_manifest.json": retitled(files["ui/route_manifest.json"], "board", "Repaired")}
+    with pytest.raises(ValueError, match="Competing owners for route"):
+        compose_ui_registry([
+            admitted_overlay(repair), contribution("task:pages", files), contribution("task:other", files),
+        ], files)
+
+
+def _saved_bundle_with_old_page():
+    pages = {key: component(key, path=f"ui/pages/custom/{key.lower()}.jsx") for key in ("Zeta", "Old", "Board")}
+    pack = component("Messages", path="ui/pages/custom/Messages.jsx", order=50)
+    saved = {path: source for part in [*pages.values(), pack] for path, source in part.items()}
+    saved.update(compose(*pages.values(), pack))
+    by_id = {route["id"]: route for route in json.loads(saved["ui/route_manifest.json"])["pages"]}
+    # Equal navigation order: only the authored array places zeta before board.
+    saved["ui/route_manifest.json"] = json.dumps({"pages": [by_id[key] for key in ("zeta", "old", "board", "messages")]})
+    task = {
+        "ui/pages/custom/zeta.jsx": saved["ui/pages/custom/zeta.jsx"], "ui/pages/custom/board.jsx": saved["ui/pages/custom/board.jsx"],
+        "ui/index.js": (
+            "import Z from './pages/custom/zeta.jsx';\nimport B from './pages/custom/board.jsx';\n"
+            "export function register(registerComponent) { registerComponent('Zeta', Z, {}); registerComponent('Board', B, {}); }"
+        ),
+        "ui/route_manifest.json": json.dumps({"pages": [by_id["zeta"], by_id["board"]]}),
+    }
+    return saved, pack, task, by_id
+
+
+@pytest.mark.parametrize("revision", [False, True])
+def test_admitted_deletion_drops_carried_registration_and_route(revision):
+    saved, pack, task, _ = _saved_bundle_with_old_page()
+    files = {path: source for path, source in {**saved, **task}.items() if path != "ui/pages/custom/old.jsx"}
+    snapshot = {path: source for path, source in saved.items() if path in files}
+    repeated = {"ui/index.js": saved["ui/index.js"]}  # an earlier admitted repair still registering Old
+    parts = [
+        contribution("app:generated_files", snapshot, baseline=True), admitted_overlay(repeated),
+        contribution("task:pages", task), contribution("pack:messaging", pack),
+    ]
+    arguments = dict(revision_baseline=saved if revision else None, deleted_paths={"ui/pages/custom/old.jsx"})
+    result = compose_ui_registry(parts, files, **arguments)
+    for order in permutations(parts):
+        assert compose_ui_registry(list(order), files, **arguments) == result
+    assert [route["id"] for route in json.loads(result["ui/route_manifest.json"])["pages"]] == ["zeta", "board", "messages"]
+    assert "old.jsx" not in result["ui/index.js"] and '"Old"' not in result["ui/index.js"]
+    assert result["ui/index.js"].count('registerComponent("Messages"') == 1
+    registered, issues = resolve_registered_component_files({**files, **result}, source_label="composed")
+    assert not issues and set(registered) == {"Zeta", "Board", "Messages"}
+
+
+def test_composition_without_a_deletion_keeps_omitted_carried_pages():
+    saved, pack, task, _ = _saved_bundle_with_old_page()
+    parts = [contribution("app:generated_files", saved, baseline=True), contribution("task:pages", task), contribution("pack:messaging", pack)]
+    result = compose_ui_registry(parts, {**saved, **task}, revision_baseline=saved)
+    assert [route["id"] for route in json.loads(result["ui/route_manifest.json"])["pages"]] == ["zeta", "old", "board", "messages"]
+    assert 'registerComponent("Old"' in result["ui/index.js"]
+
+
+@pytest.mark.parametrize("declaration,match", [
+    ("task_registration", "UI import must resolve to one existing file: './pages/custom/old.jsx'"),
+    ("task_route", "Unregistered route component: Old"),
+    ("pack_registration", "UI import must resolve to one existing file: './pages/custom/old.jsx'"),
+])
+def test_current_declaration_of_a_deleted_component_still_fails(declaration, match):
+    saved, pack, task, by_id = _saved_bundle_with_old_page()
+    parts = [contribution("app:generated_files", saved, baseline=True), contribution("pack:messaging", pack)]
+    if declaration == "task_registration":
+        task["ui/index.js"] = saved["ui/index.js"]
+    elif declaration == "task_route":
+        # The saved entry is unchanged, so only current task ownership keeps it.
+        task["ui/route_manifest.json"] = json.dumps({"pages": [by_id[key] for key in ("zeta", "old", "board")]})
+    else:
+        parts.append(contribution("pack:legacy", {"ui/index.js": component("Old", path="ui/pages/custom/old.jsx")["ui/index.js"]}))
+    parts.append(contribution("task:pages", task))
+    files = {path: source for path, source in {**saved, **task}.items() if path != "ui/pages/custom/old.jsx"}
+    with pytest.raises(ValueError, match=match):
+        compose_ui_registry(parts, files, revision_baseline=saved, deleted_paths={"ui/pages/custom/old.jsx"})
 
 
 def test_declared_array_and_navigation_order_survive_discovery_order():

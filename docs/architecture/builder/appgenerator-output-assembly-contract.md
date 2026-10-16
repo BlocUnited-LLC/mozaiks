@@ -201,7 +201,11 @@ a task left with nothing to build, so it never synthesizes a facade task trio
 for a template module; `page_bundle` owns only the pages no pack ships, and its
 message names the pack-provided pages. A worker's, repairer's or earlier
 assembly's copy of a pack-owned path is discarded with a
-`PACK_OWNED_OUTPUT_DISCARDED` log line instead of validated. Pages bind facade
+`PACK_OWNED_OUTPUT_DISCARDED` log line instead of validated. Outside genesis an
+`owner: workspace` path keeps its admitted copy, or the template default when
+none exists, because raw worker output cannot supersede admitted source. A task
+output that differs is replaced with a `WORKSPACE_PACK_OUTPUT_REPLACED` warning
+naming the path and the discarded task. Pages bind facade
 actions against the template module contract, the one assembly applies.
 Assembly takes pack-owned files only from the templates and never re-derives a
 template page; it runs `pack_template_page_errors` on each template page (page
@@ -272,6 +276,26 @@ unchanged and still pass their existing acceptance gates.
 Final planned-page validation admits additional pack routes only when their
 complete entries match the verified resolver output; worker admission cannot
 grant that authority or invent an extra route.
+
+The accumulated `code_files` repair overlay is the newest admitted app layer,
+as it is in the merge without a pack and in `admitted_app_file_map`. For each
+component key, barrel export, route id and manifest metadata key it declares,
+it replaces the saved-snapshot and task declarations, and its relative route
+order replaces theirs for those route ids. A patched task declaration keeps its
+owner, so task/task and task/pack collisions still fail. The overlay never
+patches a pack declaration: a differing overlay route fails as a conflict, and a
+differing registration wins only through the unique explicit `override: true`
+contract above.
+
+Composition is additive. A carried declaration that a current task omits stays,
+so a partial root never removes a page. Removal is explicit: composition resolves
+imports against the final file set without admitted `deleted_files` tombstones,
+and a carried app registration (saved snapshot or repair overlay) whose
+component file was deleted is dropped together with the carried routes to that
+component. The remaining routes keep their relative positions. A current task or
+pack declaration that still registers a deleted file, or routes to a component
+that is no longer registered, fails with the existing explicit error.
+Pack-owned template paths are never tombstoned.
 
 Pack provenance identifies contributors to the two composed roots under
 `composed_outputs`; they are not listed as exact template-owned final files.

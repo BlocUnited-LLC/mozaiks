@@ -56,6 +56,9 @@ from .save_app_schema import resolve_app_theme_config
 
 logger = logging.getLogger(__name__)
 
+# The context `code_files` overlay of admitted repairs, merged last.
+_ADMITTED_OVERLAY_OWNER = "app:accumulated_files"
+
 
 def _is_truthy(value: Any) -> bool:
     if isinstance(value, bool):
@@ -264,6 +267,7 @@ def _apply_managed_capability_templates(
     app_build_plan: Any,
     context_variables: Any,
     ui_contributions: list[dict[str, Any]] | None = None,
+    task_files: list[tuple[str, dict[str, str]]] | None = None,
 ) -> list[dict[str, str]]:
     if not isinstance(app_build_plan, dict):
         return code_files
@@ -294,6 +298,16 @@ def _apply_managed_capability_templates(
         # Workspace extension templates are genesis defaults, not replacements
         # for admitted app code. Raw worker history never supplies this override.
         content = admitted.get(path, file_map.get(path, file["content"])) if path in workspace_paths else file["content"]
+        if path in workspace_paths:
+            # A revision plan may still assign this path to a task; report the
+            # replaced output instead of dropping it silently.
+            for owner, files in task_files or []:
+                if path in files and files[path] != content:
+                    logger.warning(
+                        "[AppGenerator] WORKSPACE_PACK_OUTPUT_REPLACED at assembly: path=%s discarded_owner=%s "
+                        "retained=%s; raw worker output cannot supersede admitted source",
+                        path, owner, "admitted" if path in admitted else "template",
+                    )
         file_map[path] = str(content)
     return [{"filename": path, "content": content} for path, content in sorted(file_map.items())]
 
@@ -440,7 +454,7 @@ async def _assemble_app_tasks(
         context_code_files = _context_code_file_output(context_variables)
         if context_code_files:
             feature_outputs.append(context_code_files)
-            ui_source_owners.append(("app:accumulated_files", True))
+            ui_source_owners.append((_ADMITTED_OVERLAY_OWNER, True))
 
     if not app_id:
         raise ValueError("app_id is required to assemble task outputs")
@@ -466,13 +480,25 @@ async def _assemble_app_tasks(
         kept_outputs.append(kept)
     feature_outputs = kept_outputs
 
+    build_timestamp = (
+        context_variables.get("build_timestamp")
+        if context_variables and hasattr(context_variables, "get")
+        else None
+    )
     # Shared declarations survive exclusive pack filtering. Prior admitted
     # snapshots may repeat current declarations, but separate task owners may not.
+    # The accumulated repair overlay is the newest admitted app layer.
     ui_contributions: list[dict[str, Any]] = []
+    task_files: list[tuple[str, dict[str, str]]] = []
     for output, (owner, baseline) in zip(feature_outputs, ui_source_owners, strict=True):
-        files = extract_code_file_entries_from_payload(output)
+        files = extract_code_file_entries_from_payload(output, build_timestamp=build_timestamp)
+        if owner.startswith("task:"):
+            task_files.append((owner, {item["filename"]: item["content"] for item in files}))
         if any(item["filename"] in SHARED_UI_OUTPUT_PATHS for item in files):
-            ui_contributions.append({"owner": owner, "baseline": baseline, "files": files})
+            ui_contributions.append({
+                "owner": owner, "baseline": baseline, "files": files,
+                "admitted_overlay": owner == _ADMITTED_OVERLAY_OWNER,
+            })
 
     app_build_plan = (
         detach(context_variables.get("app_build_plan"))
@@ -480,7 +506,7 @@ async def _assemble_app_tasks(
     )
     template_files = _apply_managed_capability_templates(
         [], app_build_plan=app_build_plan, context_variables=context_variables,
-        ui_contributions=ui_contributions,
+        ui_contributions=ui_contributions, task_files=task_files,
     )
     if template_files:
         feature_outputs.append({"code_files": template_files})
@@ -492,25 +518,32 @@ async def _assemble_app_tasks(
     ):
         # Flatten only after typed payloads are materialized. Shared roots have
         # one final writer; all other file ownership still uses the existing merge.
-        materialized = [extract_code_file_entries_from_payload(output) for output in feature_outputs]
-        file_map = {item["filename"]: item["content"] for entries in materialized for item in entries}
+        materialized = [
+            extract_code_file_entries_from_payload(output, build_timestamp=build_timestamp)
+            for output in feature_outputs
+        ]
+        # Compose against the final file set: _apply_deleted_files removes these
+        # tombstones below, so a registration of one cannot resolve here either.
+        deleted = frozenset(path for path in _context_deleted_files(context_variables) if path not in pack_outputs)
+        file_map = {
+            item["filename"]: item["content"]
+            for entries in materialized for item in entries if item["filename"] not in deleted
+        }
         revision_baseline = None
         if revision_baseline_required(context_variables):
             # Text-only read (include_binary=False); registries are text sources.
             saved = await read_bound_revision_files(context_variables)
             revision_baseline = {path: content for path, content in saved.items() if isinstance(content, str)}
-        shared = compose_ui_registry(ui_contributions, file_map, revision_baseline=revision_baseline)
+        shared = compose_ui_registry(
+            ui_contributions, file_map, revision_baseline=revision_baseline, deleted_paths=deleted,
+        )
         feature_outputs = [{"code_files": [item for item in entries if item["filename"] not in SHARED_UI_OUTPUT_PATHS]} for entries in materialized]
         feature_outputs.append({"code_files": [{"filename": path, "content": content} for path, content in sorted(shared.items())]})
 
     result = await assemble_features(
         app_id=str(app_id),
         feature_outputs=feature_outputs,
-        build_timestamp=(
-            context_variables.get("build_timestamp")
-            if context_variables and hasattr(context_variables, "get")
-            else None
-        ),
+        build_timestamp=build_timestamp,
         app_build_plan=app_build_plan,
         data_contract=(
             detach(context_variables.get("data_contract"))
