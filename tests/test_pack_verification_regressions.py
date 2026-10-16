@@ -25,12 +25,16 @@ from mozaiksai.core.workflow.generator_support.persistence_artifacts import (
 
 BUILD_CONTEXT = Path(__file__).resolve().parents[1] / "factory_app/build_context"
 MESSAGING = BUILD_CONTEXT / "messaging"
+GREETINGS = Path(__file__).resolve().parent / "fixtures/community_packs/greetings"
 DATA_CONTRACT = "data/contract.json"
+ROUTE_MANIFEST = "ui/route_manifest.json"
+PROVENANCE = ".mozaiks/pack_provenance.json"
 EMPTY_CONTRACT = {"version": "1", "surfaces": [], "shared_collections": []}
 PROJECTS = {"surface_id": "projects", "surface_kind": "module", "collections": [{
     "name": "projects", "entity": "Project", "scope": "app", "tenancy": "per_user",
     "owner_field": "owner", "fields": [{"name": "owner", "type": "string", "required": True}],
 }]}
+OTHER_PACK = {"pack_id": "other_pack", "version": "1.0.0", "source": "local", "digest": "sha256:" + "a" * 64}
 
 
 def _factory_pack(pack_id: str, **extra: str) -> dict[str, str]:
@@ -84,6 +88,23 @@ def _write_app(app_root: Path, pack_root: Path, *, app_contract: dict | None) ->
 def _surfaces(app_root: Path) -> dict[str, dict]:
     contract = json.loads((app_root / DATA_CONTRACT).read_text(encoding="utf-8"))
     return {surface["surface_id"]: surface for surface in contract["surfaces"]}
+
+
+def _snapshot(*roots: Path) -> dict[str, str]:
+    return {str(path): path.read_text(encoding="utf-8") for root in roots for path in sorted(root.rglob("*")) if path.is_file()}
+
+
+def _assert_upgrade_blocked_before_writing(build_context_root: Path, candidate: Path, app_root: Path, conflicts: list) -> None:
+    before = _snapshot(build_context_root, app_root)
+    plan = plan_component_upgrade(
+        build_context_root=build_context_root, candidate_pack_source_path=candidate, workspace_app_root=app_root,
+    )
+    assert (plan.status, plan.potential_conflicts) == ("blocked", conflicts)
+    with pytest.raises(CommunityComponentConflictError):
+        apply_component_upgrade(
+            build_context_root=build_context_root, candidate_pack_source_path=candidate, workspace_app_root=app_root,
+        )
+    assert _snapshot(build_context_root, app_root) == before
 
 
 @pytest.mark.asyncio
@@ -143,7 +164,7 @@ def test_upgrade_recomposes_changed_pack_data_contract(tmp_path):
     projects = _surfaces(app_root)["projects"]
     provenance_path = app_root / ".mozaiks/pack_provenance.json"
     provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
-    other = {"pack_id": "other_pack", "version": "1.0.0", "source": "local", "digest": "sha256:" + "a" * 64}
+    other = OTHER_PACK
     provenance["packs"].append({**other, "materialized_owned_files": []})
     provenance["composed_outputs"][DATA_CONTRACT].append(other)
     provenance_path.write_text(json.dumps(provenance), encoding="utf-8")
@@ -231,7 +252,7 @@ def test_upgrade_keeps_an_app_composed_root_composed(tmp_path):
     provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
     entry = provenance["packs"][0]
     entry["materialized_owned_files"] = [row for row in entry["materialized_owned_files"] if row["path"] != root]
-    other = {"pack_id": "other_pack", "version": "1.0.0", "source": "local", "digest": "sha256:" + "a" * 64}
+    other = OTHER_PACK
     provenance["packs"].append({**other, "materialized_owned_files": []})
     provenance["composed_outputs"] = {root: [{key: entry[key] for key in other}, other]}
     provenance_path.write_text(json.dumps(provenance), encoding="utf-8")
@@ -250,6 +271,116 @@ def test_upgrade_keeps_an_app_composed_root_composed(tmp_path):
         path.relative_to(app_root).as_posix(): path.read_text(encoding="utf-8")
         for path in app_root.rglob("*") if path.is_file()
     }) == []
+
+
+@pytest.mark.parametrize("contract_owner", ["other_pack", "messaging"])
+def test_upgrade_checks_exclusive_data_contract_claims_before_writing(tmp_path, contract_owner):
+    build_context_root, app_root = tmp_path / "build_context", tmp_path / "app"
+    v1 = _messaging_copy(tmp_path / "v1", version="0.1.13")
+    v2 = _messaging_copy(tmp_path / "v2", version="0.1.14", extra_field=True)
+    install_verified_local_pack(pack_source_path=v1, build_context_root=build_context_root)
+    _write_app(app_root, v1, app_contract=None)
+    # Earlier resolvers recorded a pack's data contract as one pack's exclusive file.
+    provenance_path = app_root / PROVENANCE
+    provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+    del provenance["composed_outputs"]
+    provenance["packs"].append({**OTHER_PACK, "materialized_owned_files": []})
+    owner = next(pack for pack in provenance["packs"] if pack["pack_id"] == contract_owner)
+    owner["materialized_owned_files"].append({"path": DATA_CONTRACT, "owner": "templates"})
+    provenance_path.write_text(json.dumps(provenance), encoding="utf-8")
+
+    if contract_owner == "other_pack":
+        _assert_upgrade_blocked_before_writing(build_context_root, v2, app_root, [
+            {"path": DATA_CONTRACT, "kind": "owned_by_other_pack", "owner": "other_pack"},
+        ])
+        return
+    # The upgraded pack's own earlier claim becomes a composed contribution.
+    apply_component_upgrade(
+        build_context_root=build_context_root, candidate_pack_source_path=v2, workspace_app_root=app_root,
+    )
+    updated = json.loads(provenance_path.read_text(encoding="utf-8"))
+    assert [row["version"] for row in updated["composed_outputs"][DATA_CONTRACT]] == ["0.1.14"]
+    assert not any(file["path"] == DATA_CONTRACT for pack in updated["packs"] for file in pack["materialized_owned_files"])
+
+
+@pytest.mark.parametrize("malform", [
+    lambda contract: contract["surfaces"].append("bogus"),
+    lambda contract: contract.update(surfaces={}),
+    lambda contract: next(
+        surface for surface in contract["surfaces"] if surface["surface_id"] == "projects"
+    )["collections"][0].update(indexes=["bogus"]),
+], ids=["surface_entry", "surfaces_object", "index_entry"])
+def test_upgrade_blocks_a_malformed_app_data_contract(tmp_path, malform):
+    build_context_root, app_root = tmp_path / "build_context", tmp_path / "app"
+    v1 = _messaging_copy(tmp_path / "v1", version="0.1.13")
+    v2 = _messaging_copy(tmp_path / "v2", version="0.1.14", extra_field=True)
+    install_verified_local_pack(pack_source_path=v1, build_context_root=build_context_root)
+    _write_app(app_root, v1, app_contract={**EMPTY_CONTRACT, "surfaces": [PROJECTS]})
+    contract = json.loads((app_root / DATA_CONTRACT).read_text(encoding="utf-8"))
+    malform(contract)
+    (app_root / DATA_CONTRACT).write_text(json.dumps(contract), encoding="utf-8")
+
+    _assert_upgrade_blocked_before_writing(build_context_root, v2, app_root, [
+        {"path": DATA_CONTRACT, "kind": "composed_output_conflict"},
+    ])
+
+
+def test_upgrade_does_not_create_a_data_contract_with_nothing_to_compose(tmp_path):
+    build_context_root, app_root = tmp_path / "build_context", tmp_path / "app"
+    v1 = _messaging_copy(tmp_path / "v1", version="0.1.13")
+    v2 = _messaging_copy(tmp_path / "v2", version="0.1.14", without_data=True)
+    install_verified_local_pack(pack_source_path=v1, build_context_root=build_context_root)
+    _write_app(app_root, v1, app_contract=None)
+    (app_root / DATA_CONTRACT).unlink()
+
+    plan = apply_component_upgrade(
+        build_context_root=build_context_root, candidate_pack_source_path=v2, workspace_app_root=app_root,
+    )
+
+    assert (plan.status, plan.recomposed_files) == ("ready", [])
+    assert not (app_root / DATA_CONTRACT).exists()
+    assert "composed_outputs" not in json.loads((app_root / PROVENANCE).read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("change", ["changed", "removed"])
+def test_upgrade_blocks_a_pack_change_to_a_composed_ui_root(tmp_path, change):
+    build_context_root, app_root = tmp_path / "build_context", tmp_path / "app"
+    install_verified_local_pack(pack_source_path=GREETINGS, build_context_root=build_context_root)
+    contributions: list[dict] = []
+    files = {
+        item["filename"]: item["content"]
+        for item in resolver.resolve_managed_capability_templates(
+            [{"id": "greetings", "pack_source_path": str(GREETINGS)}], ui_contributions=contributions,
+        )
+    }
+    # Assembly passes ui_contributions, so the pack's route manifest is a composed root.
+    assert list(json.loads(files[PROVENANCE])["composed_outputs"]) == [ROUTE_MANIFEST]
+    files[ROUTE_MANIFEST] = next(item["content"] for item in contributions[0]["files"] if item["filename"] == ROUTE_MANIFEST)
+    for path, content in files.items():
+        (app_root / path).parent.mkdir(parents=True, exist_ok=True)
+        (app_root / path).write_text(content, encoding="utf-8")
+    v2 = tmp_path / "greetings_v2"
+    shutil.copytree(GREETINGS, v2)
+    (v2 / "context.yaml").write_text(
+        (v2 / "context.yaml").read_text(encoding="utf-8").replace('version: "0.1.0"', 'version: "0.2.0"'), encoding="utf-8",
+    )
+    service = v2 / "templates/modules/greetings/backend/service.py"
+    service.write_text(service.read_text(encoding="utf-8") + "# v2\n", encoding="utf-8")
+    template = v2 / "templates" / ROUTE_MANIFEST
+    if change == "changed":
+        manifest = json.loads(template.read_text(encoding="utf-8"))
+        manifest["pages"][0]["label"] = "Greetings v2"
+        template.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    else:
+        contract = v2 / "contract.yaml"
+        declared = f"  - path: {ROUTE_MANIFEST}\n    owner: templates\n"
+        assert declared in contract.read_text(encoding="utf-8")
+        contract.write_text(contract.read_text(encoding="utf-8").replace(declared, ""), encoding="utf-8")
+        template.unlink()
+
+    _assert_upgrade_blocked_before_writing(build_context_root, v2, app_root, [
+        {"path": ROUTE_MANIFEST, "kind": "composed_output_requires_reassembly"},
+    ])
 
 
 @pytest.mark.parametrize("factory_root_resolves", [True, False])

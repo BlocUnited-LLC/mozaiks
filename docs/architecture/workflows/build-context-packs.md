@@ -486,9 +486,23 @@ It does not execute migration scripts.
 `data/contract.json` is never an owned file. When a pack's data contribution
 changes, the plan lists it in `recomposed_files`, and applying replaces only
 that pack's surfaces in the app contract, preserving app-owned surfaces and
-other contributions. A locally modified pack surface or a conflicting
-contribution blocks the upgrade. Provenance keeps other packs' composed
-contributors, and a root the app already composes stays composed.
+other contributions. An app without a contract gets one only when the new
+version contributes surfaces. The plan blocks before anything is written when
+another installed pack's provenance claims the contract as an exclusive file
+(`owned_by_other_pack`), when a pack surface was modified locally
+(`locally_modified_composed_output`), or when the app contract fails the
+runtime data contract loader or conflicts with the contribution
+(`composed_output_conflict`).
+
+Provenance keeps other packs' composed contributors, and a root the app
+already composes stays composed. A composed shared UI root (`ui/index.js`,
+`ui/route_manifest.json` under `composed_outputs`) merges the app's and every
+contributing pack's declarations into one file, so the lifecycle does not
+recompose it. When an upgrade adds, changes, or removes the pack's template
+for such a root, the plan blocks with `composed_output_requires_reassembly`;
+reassemble the app with the upgraded pack selected so UI composition rebuilds
+the root. An unchanged template only updates the contributor identity, and a
+root the pack owns exclusively upgrades as an ordinary owned file.
 
 Mozaiks does not perform remote downloads, registry lookup, marketplace ranking,
 trust scoring, cryptographic signing, or automatic semver range upgrades for

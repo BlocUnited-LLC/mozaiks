@@ -9,6 +9,7 @@ from typing import Any
 
 import yaml
 
+from mozaiksai.core.runtime.persistence.intent_loader import load_data_contract
 from mozaiksai.core.workflow.generator_support.code_files import compile_data_contract
 
 from .community_component_state import (
@@ -246,27 +247,24 @@ def _recompose_data_contract(
 ) -> tuple[str | None, str | None]:
     """Swap one pack's data contribution in the app contract.
 
-    Returns the recomposed contract text, or the conflict kind that blocks it.
+    Returns the recomposed contract text, or the conflict kind that blocks it,
+    or neither when an app without a contract has nothing to compose.
     App-owned surfaces and other packs' contributions are preserved.
     """
-    path = app_root / _DATA_CONTRACT_PATH
     try:
-        current = (
-            json.loads(path.read_text(encoding="utf-8")) if path.exists()
-            else {"version": "1", "surfaces": [], "shared_collections": []}
-        )
-        if not isinstance(current, dict):
-            return None, "composed_output_conflict"
-        contract = compile_data_contract(current)
-        retired = compile_data_contract(
-            {"version": "1", "surfaces": [], "shared_collections": []}, pack_data_contracts=old,
-        )["surfaces"]
+        current = load_data_contract(app_root)
+        if current is None and not new:
+            return None, None
+        empty = {"version": "1", "surfaces": [], "shared_collections": []}
+        contract = compile_data_contract(current or empty)
+        retired = compile_data_contract(empty, pack_data_contracts=old)["surfaces"]
         surfaces = contract.get("surfaces") or []
         if any(row.get("surface_id") == surface["surface_id"] and row != surface for row in surfaces for surface in retired):
             return None, "locally_modified_composed_output"
         contract["surfaces"] = [row for row in surfaces if row not in retired]
         recomposed = compile_data_contract(contract, pack_data_contracts=new)
-    except ValueError:
+    except (ValueError, TypeError, AttributeError):
+        # The app contract is workspace input; malformed rows block instead of crashing.
         return None, "composed_output_conflict"
     return json.dumps(recomposed, indent=2, ensure_ascii=False), None
 
@@ -285,6 +283,11 @@ def _provenance_manifest(app_root: Path) -> dict[str, Any]:
 def _provenance_pack_entries(app_root: Path) -> list[dict[str, Any]]:
     packs = _provenance_manifest(app_root).get("packs")
     return [item for item in packs or [] if isinstance(item, dict)]
+
+
+def _composed_output_paths(app_root: Path) -> set[str]:
+    composed = _provenance_manifest(app_root).get("composed_outputs")
+    return set(composed) if isinstance(composed, dict) else set()
 
 
 def _merged_provenance(app_root: Path, upgraded: dict[str, Any], pack_id: str) -> dict[str, Any]:
@@ -393,7 +396,12 @@ def _plan_upgrade(
     app_root = Path(workspace_app_root).resolve() if workspace_app_root else None
     if app_root:
         owner_by_path = _current_owner_by_path(app_root)
-        for path in sorted(added + changed):
+        # A composed root merges the app's and every contributor's declarations into
+        # one file, so one pack's part cannot be swapped in place; assembly rebuilds it.
+        composed_paths = _composed_output_paths(app_root)
+        for path in sorted(composed_paths.intersection(added + changed + removed)):
+            potential_conflicts.append({"path": path, "kind": "composed_output_requires_reassembly"})
+        for path in sorted(set(added + changed) - composed_paths):
             owner = owner_by_path.get(path)
             if owner and owner != pack_id:
                 potential_conflicts.append({"path": path, "kind": "owned_by_other_pack", "owner": owner})
@@ -401,7 +409,7 @@ def _plan_upgrade(
             if target.exists() and not owner:
                 potential_conflicts.append({"path": path, "kind": "workspace_owned_file"})
         owned_by_candidate = _pack_owned_paths(app_root, pack_id)
-        for path in sorted(changed + removed):
+        for path in sorted(set(changed + removed) - composed_paths):
             target = app_root / path
             if not target.exists():
                 continue
@@ -411,10 +419,16 @@ def _plan_upgrade(
             current_content = target.read_text(encoding="utf-8")
             if current_content != old_files[path]:
                 potential_conflicts.append({"path": path, "kind": "locally_modified_owned_file"})
-        if recomposed:
+        # Composing into the contract never overrides another pack's exclusive claim on it.
+        contract_owner = owner_by_path.get(_DATA_CONTRACT_PATH)
+        if (recomposed or new_data) and contract_owner and contract_owner != pack_id:
+            potential_conflicts.append({"path": _DATA_CONTRACT_PATH, "kind": "owned_by_other_pack", "owner": contract_owner})
+        elif recomposed:
             data_contract, conflict = _recompose_data_contract(app_root, old_data, new_data)
             if conflict:
                 potential_conflicts.append({"path": _DATA_CONTRACT_PATH, "kind": conflict})
+            elif data_contract is None:
+                recomposed = []
 
     dependency_changes = {
         "added_packs": [item for item in candidate["dependencies"]["packs"] if item not in current["dependencies"]["packs"]],
