@@ -468,7 +468,7 @@ async def _assemble_app_tasks(
 
     # Shared declarations survive exclusive pack filtering. Prior admitted
     # snapshots may repeat current declarations, but separate task owners may not.
-    ui_contributions = []
+    ui_contributions: list[dict[str, Any]] = []
     for output, (owner, baseline) in zip(feature_outputs, ui_source_owners, strict=True):
         files = extract_code_file_entries_from_payload(output)
         if any(item["filename"] in SHARED_UI_OUTPUT_PATHS for item in files):
@@ -494,7 +494,11 @@ async def _assemble_app_tasks(
         # one final writer; all other file ownership still uses the existing merge.
         materialized = [extract_code_file_entries_from_payload(output) for output in feature_outputs]
         file_map = {item["filename"]: item["content"] for entries in materialized for item in entries}
-        revision_baseline = await read_bound_revision_files(context_variables) if revision_baseline_required(context_variables) else None
+        revision_baseline = None
+        if revision_baseline_required(context_variables):
+            # Text-only read (include_binary=False); registries are text sources.
+            saved = await read_bound_revision_files(context_variables)
+            revision_baseline = {path: content for path, content in saved.items() if isinstance(content, str)}
         shared = compose_ui_registry(ui_contributions, file_map, revision_baseline=revision_baseline)
         feature_outputs = [{"code_files": [item for item in entries if item["filename"] not in SHARED_UI_OUTPUT_PATHS]} for entries in materialized]
         feature_outputs.append({"code_files": [{"filename": path, "content": content} for path, content in sorted(shared.items())]})

@@ -328,6 +328,16 @@ def test_stale_selected_pins_are_rejected(key, value):
         resolve_managed_capability_templates(context["capability_packs"], context_variables=context)
 
 
+@pytest.mark.parametrize("pinned", [True, False])
+def test_unresolvable_factory_root_trusts_only_pinned_packs(monkeypatch, pinned):
+    from factory_app.workflows.AppGenerator.tools import resolve_managed_capability_templates as resolver
+
+    monkeypatch.setattr(resolver, "resolve_factory_app_root", lambda: None)
+    context = _context(pinned=pinned)
+    [entry] = resolver.verified_selected_pack_sources(context_variables=context)
+    assert entry["implementation_trusted"] is pinned
+
+
 def test_mutated_source_after_selection_fails_fresh_digest_check(tmp_path):
     root = tmp_path / "messaging"
     shutil.copytree(PACK, root, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))

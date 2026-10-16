@@ -806,7 +806,9 @@ def verified_selected_pack_sources(
         return []
     _validate_pack_dependencies(capability_packs, context_variables=context_variables)
     verified = []
-    factory_contexts = (resolve_factory_app_root() / "build_context").resolve()
+    factory_root = resolve_factory_app_root()
+    # Without a resolvable factory root, only explicitly pinned packs are trusted.
+    factory_contexts = (factory_root / "build_context").resolve() if factory_root is not None else None
     for pack in capability_packs:
         if not isinstance(pack, dict):
             continue
@@ -821,7 +823,10 @@ def verified_selected_pack_sources(
                 raise PackIntegrityError(f"Pack '{pack_id}' selected {key} does not match freshly verified source")
         verified.append({
             **metadata, "source_path": str(root),
-            "implementation_trusted": root.parent == factory_contexts or bool(pack.get("version") and pack.get("digest")),
+            "implementation_trusted": (
+                (factory_contexts is not None and root.parent == factory_contexts)
+                or bool(pack.get("version") and pack.get("digest"))
+            ),
         })
     return verified
 

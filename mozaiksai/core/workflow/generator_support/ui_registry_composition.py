@@ -372,13 +372,13 @@ def compose_ui_registry(
         route_sequence.update(zip(sequence, sequence[1:], strict=False))
     selected: dict[str, ComponentRegistration] = {}
     for key, records in registrations.items():
-        entries = {entry for _, _, entry in records}
+        candidates = {entry for _, _, entry in records}
         active_owners = {owner for owner, baseline, _ in records if not baseline}
-        overrides = {entry for entry in entries if dict(entry.options).get("override") is True}
-        if len(entries) == 1:
+        overrides = {entry for entry in candidates if dict(entry.options).get("override") is True}
+        if len(candidates) == 1:
             if len(active_owners) > 1:
                 raise ValueError(f"Competing owners for component registration: {key}")
-            selected[key] = next(iter(entries))
+            selected[key] = next(iter(candidates))
         elif len(overrides) == 1:
             override = next(iter(overrides))
             if len({owner for owner, baseline, entry in records if not baseline and entry == override}) > 1:
@@ -393,16 +393,16 @@ def compose_ui_registry(
     if has_index:
         imports, calls = [], []
         for index, (key, entry) in enumerate(sorted(selected.items())):
-            binding = f"UiComponent{index}"
-            specifier = binding if entry.export == "default" else f"{{ {entry.export} as {binding} }}"
+            alias = f"UiComponent{index}"
+            specifier = alias if entry.export == "default" else f"{{ {entry.export} as {alias} }}"
             imports.append(f"import {specifier} from {json.dumps('./' + posixpath.relpath(entry.path, 'ui'))};")
-            calls.append(f"  registerComponent({json.dumps(key)}, {binding}, {json.dumps(dict(entry.options), sort_keys=True, ensure_ascii=False)});")
-        exports = [
+            calls.append(f"  registerComponent({json.dumps(key)}, {alias}, {json.dumps(dict(entry.options), sort_keys=True, ensure_ascii=False)});")
+        reexport_lines = [
             f"export {{ {export} as {name} }} from {json.dumps('./' + posixpath.relpath(path, 'ui'))};"
             for name, (path, export) in sorted(reexports.items())
         ]
         result["ui/index.js"] = "\n".join([
-            *imports, *exports, "", "export function register(registerComponent) {",
+            *imports, *reexport_lines, "", "export function register(registerComponent) {",
             '  if (typeof registerComponent !== "function") return;', *calls, "}", "",
         ])
     if has_manifest:
