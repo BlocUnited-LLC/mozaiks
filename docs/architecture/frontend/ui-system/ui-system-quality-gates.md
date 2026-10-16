@@ -195,10 +195,13 @@ and the platform host with explicit environments. Its `frontend_preview` context
 builds that same app and owns a strict-port Vite preview. An in-process
 `OwnedBrowserLaunch.from_driver(...)` connects those process handles and launch
 inputs to `run_playwright_acceptance(..., owned_launch=...)`. The runner verifies
-the clean source revision, pre-launch bundle bytes, child origins/auth settings,
-live processes and served build bytes before and after the browser workload.
+the clean source commit (`source_sha`), pre-launch bundle bytes, child
+origins/auth settings, live processes and served build bytes before and after
+the browser workload.
 This controlled local path can report `runtime_identity: verified_owned_launch`;
-it is not an attestation against a hostile local process owner.
+it is not an attestation against a hostile local process owner. No launch input
+binds the profile's candidate `revision`, so the receipt keeps it out of the
+verified `launch` block and reports it under `unverified_caller_annotations`.
 
 Run the opt-in paired scripted fixture from a clean committed checkout with
 isolated Python/frontend dependencies, cached `mongo:7` and
@@ -249,10 +252,13 @@ source bytes, and runs the child through the same owned browser acceptance with
 mobile bottom-panel assertions. Only after that passes does the authenticated
 owner accept the draft through the existing endpoint. It does not promote the
 app. The pack-inclusive child repeats the same pack behavior and records hashes
-for changed and retained files, including pack outputs, contracts, routes and
-theme. The effective provider requests capture the worker's saved source and
-read-only design/pack context. Upstream design documents absent from this scripted
-fixture are explicitly marked absent. This route integration does not qualify
+for changed and retained files, including pack outputs, contracts and routes.
+The paired baseline has no app-owned `brand/theme_config.json` and inherits the
+framework theme, recorded as `theme_source: inherited_framework`, so this run
+does not exercise app-theme or page-title preservation. The effective provider
+requests capture the worker's saved source and read-only design/pack context.
+Upstream design documents absent from this scripted fixture are explicitly
+marked absent. This route integration does not qualify
 full Studio startup or live-model creativity.
 
 ```powershell

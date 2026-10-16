@@ -316,6 +316,43 @@ def test_owned_launch_accepts_only_unchanged_live_processes_and_served_build(
         assert result["repair_decision"]["repair_owners"] == []
 
 
+def test_owned_launch_receipt_keeps_caller_revision_out_of_verified_launch_identity(
+    owned_launch, monkeypatch, tmp_path,
+):
+    binding, value, state, _runtime, _preview = owned_launch
+    profile_path = tmp_path / "profile.json"
+    profile_path.write_text(json.dumps(value))
+    monkeypatch.setattr(ui_acceptance.subprocess, "run", lambda _command, **kwargs: SimpleNamespace(
+        returncode=0, stderr="",
+        stdout=json.dumps(_route_report(value, kwargs["env"]["MOZAIKS_GENERATED_UI_RUN_ID"]))))
+
+    # No driver state or launch input carries the revision, so nothing verifies it.
+    assert "revision" not in binding.verify(app_root=binding.app_root, repo_root=binding.repo_root,
+                                            candidate=binding.candidate, base_url=state["base_url"])
+    result = ui_acceptance.run_playwright_acceptance(
+        app_root=binding.app_root, repo_root=binding.repo_root, mode="real_host",
+        profile_path=profile_path, base_url=state["base_url"], owned_launch=binding,
+    )
+    assert result["success"] is True and result["runtime_identity"] == "verified_owned_launch"
+    assert "revision" not in result["launch"]
+    assert {key: result["launch"][key] for key in ("source_sha", "bundle_sha256")} == {
+        key: value["candidate"][key] for key in ("source_sha", "bundle_sha256")}
+    assert result["unverified_caller_annotations"] == {"revision": "accepted-r1"}
+    assert result["candidate"] == value["candidate"]
+
+
+def test_quality_gates_doc_claims_only_recorded_identity_and_refinement_evidence():
+    root = Path(__file__).resolve().parents[1]
+    doc = " ".join((root / "docs/architecture/frontend/ui-system/ui-system-quality-gates.md")
+                   .read_text(encoding="utf-8").split())
+    harness = (root / "tests/test_paired_browser_refinement.py").read_text(encoding="utf-8")
+    assert "`unverified_caller_annotations`" in doc
+    # The paired baseline has no app-owned theme, so refinement hashes none.
+    assert "contracts, routes and theme" not in doc
+    assert '"inherited_framework"' in harness
+    assert "`theme_source: inherited_framework`" in doc
+
+
 @pytest.mark.parametrize("change", ["wrong_app", "wrong_backend", "wrong_bundle", "wrong_source",
                                         "wrong_issuer", "wrong_origin", "wrong_revision",
                                         "old_backend_bundle", "old_backend_source", "old_backend_app"])

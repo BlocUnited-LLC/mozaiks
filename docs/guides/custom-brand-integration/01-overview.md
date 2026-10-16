@@ -200,8 +200,12 @@ existing app `fonts.body` or `fonts.heading` slot. The finite choices are:
 | `textTransform` | `none`, `uppercase`, `lowercase`, `capitalize` |
 
 Omitting the role preserves authored title casing. Invalid explicit values or
-unknown title fields produce diagnostics at capture, generation, runtime loading,
-and frontend config validation. `PageHeader.title_font` may explicitly select
+unknown title fields are rejected at capture and generation. At runtime the host's
+`/api/theme-config` returns `422` with the field-level reason. The app does not
+open: the shell shows a generic load failure with a retry button and logs the
+reason to the browser console. Frontend config validation checks the same title
+rules only on a successfully served theme config, which the host never serves
+with an invalid title. `PageHeader.title_font` may explicitly select
 `body` or `heading`; omitting it uses the theme role. ThemeCapture persists the
 role, and AppGenerator applies partial `theme_config_patch.ui.page.title` deltas
 without replacing unrelated title fields or existing page spacing. Null fields

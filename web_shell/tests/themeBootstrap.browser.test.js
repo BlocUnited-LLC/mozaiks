@@ -178,7 +178,7 @@ test('theme bootstrap paints the app only after its own brand is ready', async t
     await page.goto(baseUrl);
     await expect(page.getByRole('status')).toBeVisible();
     await page.evaluate(() => window.failAuth());
-    await expect(page.getByRole('alert')).toContainText('sign-in settings');
+    await expect(page.getByRole('alert')).toHaveText('The app could not finish loading. Please try again.');
     assert.deepEqual(requests, []);
     await page.getByRole('button', { name: 'Try again' }).click();
     await expect.poll(() => page.evaluate(() => window.authCalls)).toBe(2);
@@ -216,10 +216,15 @@ test('theme bootstrap paints the app only after its own brand is ready', async t
 
   await t.test('an invalid theme response blocks bootstrap before the app mounts', async st => {
     const { page, requests } = await pageFixture(st, { invalidTheme: true });
+    const logged = [];
+    page.on('console', message => { if (message.type() === 'error') logged.push(message.text()); });
     await page.goto(baseUrl);
     await expect(page.getByRole('status')).toBeVisible();
     await page.evaluate(() => window.finishAuth());
     await expect(page.getByRole('heading', { name: 'Unable to open this app' })).toBeVisible();
+    // The failure copy names no cause; the field-level reason reaches the console.
+    await expect(page.getByRole('alert')).toHaveText('The app could not finish loading. Please try again.');
+    assert.ok(logged.some(text => text.includes('ui.page.title.size: unsupported token')), logged.join('\n'));
     assert.equal(await page.evaluate(() => !!window.shellMounted), false);
     assert.deepEqual(requests, ['/api/theme-config']);
     assert.equal(await page.evaluate(() => document.documentElement.style.getPropertyValue('--shell-page-title-font-size')), '');

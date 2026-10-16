@@ -194,10 +194,11 @@ class OwnedBrowserLaunch:
             with urlopen(self.base_url + "/" + quote(relative), timeout=10) as response:
                 if hashlib.sha256(response.read()).hexdigest() != expected:
                     raise ValueError("Running frontend serves bytes different from its owned build.")
+        # The caller-supplied revision is bound to nothing verified here; the
+        # receipt reports it separately as an unverified caller annotation.
         return {"source_sha": candidate.source_sha, "bundle_sha256": candidate.bundle_sha256,
-                "revision": candidate.revision, "backend_pid": self.backend.pid,
-                "frontend_pid": self.frontend.pid, "base_url": self.base_url,
-                "api_url": self.api_url, "frontend_sha256": hashlib.sha256(
+                "backend_pid": self.backend.pid, "frontend_pid": self.frontend.pid,
+                "base_url": self.base_url, "api_url": self.api_url, "frontend_sha256": hashlib.sha256(
                     json.dumps(self.build_files, sort_keys=True).encode()).hexdigest()}
 
 
@@ -606,6 +607,7 @@ def run_playwright_acceptance(
             else:
                 env.pop("MOZAIKS_GENERATED_UI_STORAGE_STATE", None)
             metadata.update(candidate=profile.candidate.model_dump(),
+                            unverified_caller_annotations={"revision": profile.candidate.revision},
                             profile_sha256=hashlib.sha256(profile_bytes).hexdigest(), spec=spec)
         elif mode != "mocked_rendering_smoke" or any(value is not None for value in (profile_path, base_url, storage_state, spec_path, owned_launch)):
             raise ValueError("Unknown acceptance mode or real-host arguments supplied to mocked mode.")
