@@ -2,8 +2,8 @@
 
 Date: 2026-10-14
 
-Status: Proposed. This ADR changes no admission gate; live imported Genesis
-acceptance remains closed.
+Status: Accepted. Implemented with the coordinated imported Genesis gate,
+receipt, review API, and owner-facing Studio surface.
 
 ## Context
 
@@ -121,15 +121,15 @@ trusted, requirement-specific observed effects. If that evidence is absent,
 the event-dependent guarantee remains unverified and the dependent decision
 must not pass. The limited app-root receipt cannot serve as that evidence.
 
-## Implementation boundary and proof before activation
+## Implementation boundary and activation proof
 
-This decision proposes a coordinated replacement of draft `v1`, not an alias
+This decision uses a coordinated replacement of draft `v1`, without an alias
 or permissive branch. The imported gate, typed AppRegistry receipt, persisted
-validation evidence, owner-facing review/API, baseline reads, and tests must
-move together. Draft PRs #871 and #889 currently require an empty unverified
-list and do not yet bind every completion and cleanup fact above. Their current
-gate must remain closed until a reviewed implementation changes it. Draft PRs
-#890 and #892 remain analysis of the event boundary, not event proofs.
+validation evidence, owner-facing review/API, baseline reads, and tests move
+together. Earlier draft PRs #871 and #889 required an empty unverified list and
+did not bind every completion and cleanup fact above; this implementation
+supersedes those drafts. Draft PRs #890 and #892 remain analysis of the event
+boundary, not event proofs.
 
 Required implementation verification includes:
 
@@ -152,10 +152,9 @@ Required implementation verification includes:
   independently blocking where claimed. A local contained proof does not
   claim live App Zero, Android, marketplace, or release acceptance.
 
-Until those tests and the coordinated code/UI change land, the `v1` strict
-gate remains authoritative and imported Genesis stays a reviewable draft.
-No release, migration of an existing live lineage, or cloud service follows
-from this ADR.
+Activation requires the coordinated code/UI tests in the implementing PR. No
+release, migration of an existing live lineage, or cloud service follows from
+this ADR.
 
 ## Architecture fit and alternatives
 

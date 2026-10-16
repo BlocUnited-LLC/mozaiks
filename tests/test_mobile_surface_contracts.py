@@ -285,6 +285,7 @@ def test_factory_app_surface_routes_are_all_covered_by_smoke() -> None:
         "CarryForwardReportPanel",
         "PricingHealthPanel",
         "MetricDetailPanel",
+            "GenesisImportReview",
     }
 
 
@@ -318,6 +319,7 @@ def test_factory_app_react_files_are_classified() -> None:
         "factory_app/app/admin/pages/PricingHealthPanel.jsx",
         # Universal metric drill-down drawer, opened from analytics surfaces
         "factory_app/app/admin/pages/MetricDetailPanel.jsx",
+        "factory_app/app/admin/pages/GenesisImportReview.jsx",
         "factory_app/app/ui/components/StudioShared.jsx",
         "factory_app/app/ui/components/HarnessDecisionCard.jsx",
         "factory_app/app/ui/components/OnboardingTour.jsx",
