@@ -468,12 +468,18 @@ class _DocumentCollection:
         return SimpleNamespace(inserted_id=row["_id"])
 
     async def update_one(self, query, update, *, upsert=False, **_options):
-        changes = update.get("$set") or {}
-        if set(update) - {"$set"} or any("." in key for key in changes):
+        changes, pulls, unsets = (update.get(name) or {} for name in ("$set", "$pull", "$unset"))
+        if (set(update) - {"$set", "$pull", "$unset"} or any("." in key for key in [*changes, *pulls, *unsets])
+                or any(isinstance(value, dict) for value in pulls.values()) or (upsert and (pulls or unsets))):
             raise NotImplementedError(f"fake Mongo does not model update {update}")
         rows = self._matching(query)[:1]
         for row in rows:
             row.update(deepcopy(changes))
+            for key, value in pulls.items():
+                if isinstance(row.get(key), list):
+                    row[key] = [item for item in row[key] if item != value]
+            for key in unsets:
+                row.pop(key, None)
         if not rows and upsert:
             await self.insert_one({**_equalities(query), **changes})
         return SimpleNamespace(matched_count=len(rows), modified_count=len(rows))
@@ -520,13 +526,17 @@ def messaging_account(tmp_path, monkeypatch):
     contract = json.loads(files["data/contract.json"])
 
     def persistence(user_id):
+        # Module dispatch and the account routes both bind user_id, which stamps inserted rows.
         return MongoPersistenceContext(
-            app_id=ACCOUNT_APP_ID, database_name=ACCOUNT_DATABASE, client=client,
+            app_id=ACCOUNT_APP_ID, user_id=user_id, database_name=ACCOUNT_DATABASE, client=client,
             data_contract=contract, principal=PersistencePrincipal(user_id=user_id),
         )
 
+    def collection(name):
+        return client[ACCOUNT_DATABASE][persistence("probe").collection_name("messages", name)]
+
     def rows(name):
-        return client[ACCOUNT_DATABASE][persistence("probe").collection_name("messages", name)].rows
+        return collection(name).rows
 
     def snapshot():
         return deepcopy({name: rows(name) for name in ("threads", "messages", "thread_reads")})
@@ -553,8 +563,16 @@ def messaging_account(tmp_path, monkeypatch):
     async def stored_thread(user_id, thread_id):
         return (await module.get_thread(ctx(user_id), thread_id=thread_id))["thread"]
 
-    return SimpleNamespace(module=module, ctx=ctx, persistence=persistence, rows=rows, snapshot=snapshot,
-                           account=account, thread=thread, send=send, stored_thread=stored_thread)
+    async def group(user_id, peers):
+        result = await module.create_thread(ctx(user_id), participant_ids=peers, thread_type="group", title="Trip")
+        return result["thread"]["thread_id"]
+
+    def stored_row(thread_id):
+        return next(row for row in rows("threads") if row["thread_id"] == thread_id)
+
+    return SimpleNamespace(module=module, ctx=ctx, persistence=persistence, collection=collection, rows=rows,
+                           snapshot=snapshot, account=account, thread=thread, group=group, send=send,
+                           stored_thread=stored_thread, stored_row=stored_row)
 
 
 @pytest.mark.asyncio
@@ -596,7 +614,7 @@ async def test_messaging_account_deletion_preserves_peers_and_recomputes_preview
     assert rt.snapshot() == before
 
     assert await rt.account("delete", "alice") == {
-        "messages": {"threads_deleted": 1, "messages_deleted": 5, "read_state_deleted": 1},
+        "messages": {"threads_deleted": 1, "messages_deleted": 5, "memberships_removed": 4, "read_state_deleted": 1},
     }
     threads = {row["thread_id"]: row for row in rt.rows("threads")}
     assert set(threads) == {bob_thread, silent_thread, shared_thread, peer_last_thread}
@@ -604,50 +622,174 @@ async def test_messaging_account_deletion_preserves_peers_and_recomputes_preview
     assert threads[bob_thread]["last_message_at"] == bob_message["created_at"]
     assert (threads[silent_thread]["last_message"], threads[silent_thread]["last_message_at"]) == (None, None)
     assert threads[shared_thread]["last_message"] == reply_preview
-    # Surviving peer conversations keep the opaque ids (see the handler's deletion policy).
-    assert (threads[shared_thread]["created_by"], threads[shared_thread]["participant_ids"]) == ("alice", ["alice", "bob"])
-    assert await rt.stored_thread("bob", peer_last_thread) == peer_last_row
+    # Surviving peer conversations drop Alice's membership and her creator identity.
+    assert {thread_id: row["participant_ids"] for thread_id, row in threads.items()} == dict.fromkeys(threads, ["bob"])
+    assert (threads[shared_thread]["created_by"], "user_id" in threads[shared_thread]) == ("", False)
+    assert await rt.stored_thread("bob", peer_last_thread) == {**peer_last_row, "participant_ids": ["bob"]}
     assert {row["sender_id"] for row in rt.rows("messages")} == {"bob"}
     assert [row["user_id"] for row in rt.rows("thread_reads")] == ["bob"]
     assert secret not in json.dumps(rt.snapshot(), default=str)
+    assert "alice" not in json.dumps(rt.snapshot(), default=str)
     assert secret not in json.dumps(await rt.module.list_threads(rt.ctx("bob")), default=str)
     bob_view = await rt.module.get_thread(rt.ctx("bob"), thread_id=bob_thread)
     assert [row["message_id"] for row in bob_view["messages"]] == [bob_message["message_id"]]
 
     after = rt.snapshot()
     assert await rt.account("delete", "alice") == {
-        "messages": {"threads_deleted": 0, "messages_deleted": 0, "read_state_deleted": 0},
+        "messages": {"threads_deleted": 0, "messages_deleted": 0, "memberships_removed": 0, "read_state_deleted": 0},
     }
     assert rt.snapshot() == after
 
 
 @pytest.mark.asyncio
+async def test_messaging_account_deletion_repoints_to_the_newest_remaining_peer_message(messaging_account):
+    rt = messaging_account
+    group = await rt.group("bob", ["carol", "alice"])
+    await rt.send("bob", group, "bob older")
+    carol_message = await rt.send("carol", group, "carol newest")
+    # Stored after Carol's message but sent first: recency follows created_at, not storage order.
+    await rt.persistence("bob").collection("messages", "messages").insert_one({
+        "message_id": "msg_backfilled", "thread_id": group, "sender_id": "bob", "sender_role": "user",
+        "body": "bob backfilled", "created_at": "2000-01-01T00:00:00+00:00", "is_deleted": False,
+    })
+    await rt.send("alice", group, "alice spoke last")
+
+    await rt.account("delete", "alice")
+    row = rt.stored_row(group)
+    assert row["last_message"] == {
+        "message_id": carol_message["message_id"], "sender_id": "carol", "sender_role": "user",
+        "body_preview": "carol newest", "sent_at": carol_message["created_at"],
+    }
+    assert row["last_message_at"] == carol_message["created_at"]
+
+
+def _is_repoint_query(query, user_id):
+    text = json.dumps(query, default=str)
+    return '"is_deleted"' in text and json.dumps({"$ne": user_id})[1:-1] in text
+
+
+@pytest.mark.asyncio
+async def test_messaging_account_deletion_keeps_a_preview_a_peer_sent_meanwhile(messaging_account, monkeypatch):
+    rt = messaging_account
+    thread_id = await rt.thread("bob", "alice")
+    await rt.send("bob", thread_id, "bob earlier")
+    await rt.send("alice", thread_id, "alice spoke last")
+    messages = rt.collection("messages")
+    find, raced = messages.find, []
+
+    def find_then_peer_sends(query, projection=None, **options):
+        cursor = find(query, projection, **options)
+        if not raced and _is_repoint_query(query, "alice"):
+            stale_to_list = cursor.to_list
+
+            async def to_list(length=None):
+                # The handler now holds a stale newest peer row; Bob's send commits before its write.
+                rows = await stale_to_list(length)
+                raced.append(await rt.send("bob", thread_id, "bob meanwhile"))
+                return rows
+
+            cursor.to_list = to_list
+        return cursor
+
+    monkeypatch.setattr(messages, "find", find_then_peer_sends)
+    await rt.account("delete", "alice")
+    (meanwhile,) = raced
+    row = rt.stored_row(thread_id)
+    assert (row["last_message"]["message_id"], row["last_message"]["body_preview"]) == (
+        meanwhile["message_id"], "bob meanwhile",
+    )
+    assert row["last_message_at"] == meanwhile["created_at"]
+
+
+@pytest.mark.asyncio
+async def test_messaging_account_deletion_releases_membership_and_keeps_peer_access(messaging_account):
+    rt = messaging_account
+    group = await rt.group("alice", ["bob", "carol"])
+    await rt.send("bob", group, "bob joins")
+    await rt.send("alice", group, "alice plans")
+    for user_id in ("alice", "carol"):
+        await rt.module.mark_thread_read(rt.ctx(user_id), thread_id=group)
+    carol_read = deepcopy([row for row in rt.rows("thread_reads") if row["user_id"] == "carol"])
+
+    assert await rt.account("delete", "alice") == {
+        "messages": {"threads_deleted": 0, "messages_deleted": 1, "memberships_removed": 1, "read_state_deleted": 1},
+    }
+    row = rt.stored_row(group)
+    assert (row["participant_ids"], row["created_by"], row["title"]) == (["bob", "carol"], "", "Trip")
+    assert rt.rows("thread_reads") == carol_read
+    assert "alice" not in json.dumps(rt.snapshot(), default=str)
+
+    # The remaining participants keep the conversation, and Alice receives no new notifications.
+    events = []
+    bob = SimpleNamespace(**vars(rt.ctx("bob")), emit=lambda _event_type, payload: events.append(payload))
+    assert [thread["thread_id"] for thread in (await rt.module.list_threads(rt.ctx("carol")))["threads"]] == [group]
+    assert (await rt.module.send_message(bob, thread_id=group, body="still here"))["success"]
+    assert [event["recipient_ids"] for event in events] == [["carol"]]
+    assert await rt.module.mark_thread_read(rt.ctx("carol"), thread_id=group) == {"success": True}
+
+    # The deleted account's id is no longer admitted to the conversation it left.
+    alice = rt.ctx("alice")
+    assert (await rt.module.list_threads(alice))["threads"] == []
+    assert (await rt.module.get_thread(alice, thread_id=group))["error"] == "access denied"
+    assert (await rt.module.send_message(alice, thread_id=group, body="back again"))["error"] == "access denied"
+    assert (await rt.module.mark_thread_read(alice, thread_id=group))["success"] is False
+
+    # No later account request reclaims the released thread, including through the blank marker.
+    exported = await rt.account("export", "alice")
+    assert (exported["threads_created"], exported["thread_memberships"]) == ([], [])
+    before = rt.snapshot()
+    for blank in ("", " "):
+        assert await rt.account("delete", blank) == {"messages": {"error": "account user_id is required"}}
+        assert await rt.account("export", blank) == {"messages.__error__": "account user_id is required"}
+    assert rt.snapshot() == before
+
+
+@pytest.mark.asyncio
 async def test_messaging_account_export_is_json_safe_and_covers_deleted_collections(messaging_account):
     rt = messaging_account
+    peer_text = "bob's private last word"
     bob_thread = await rt.thread("bob", "alice")
     await rt.send("bob", bob_thread, "hello alice")
     alice_message = await rt.send("alice", bob_thread, "hello bob")
+    await rt.send("bob", bob_thread, peer_text)
     alice_thread = await rt.thread("alice", "bob")
     for user_id in ("alice", "bob"):
         await rt.module.mark_thread_read(rt.ctx(user_id), thread_id=bob_thread)
     reads = rt.persistence("alice").collection("messages", "thread_reads")
     for index in range(150):  # Read state spanning more than one export page.
         await reads.insert_one({"thread_id": f"thr_page_{index}", "user_id": "alice", "read_at": "2026-01-01T00:00:00+00:00"})
+    carol_threads = rt.persistence("carol").collection("messages", "threads")
+    for index in range(100):  # Memberships in threads Alice did not create, spanning more than one page.
+        await carol_threads.insert_one({
+            "thread_id": f"thr_member_{index}", "thread_type": "group", "participant_ids": ["carol", "alice"],
+            "created_by": "carol", "last_message": {"sender_id": "carol", "body_preview": peer_text},
+        })
 
     assert await rt.account("export", "alice", app_id="foreign_app") == {
         "messages.__error__": "account persistence is bound to another app",
     }
     exported = await rt.account("export", "alice")
     assert json.loads(json.dumps(exported)) == exported  # Storage ObjectIds never reach account JSON.
-    assert set(exported) == {"threads_created", "messages_sent", "thread_reads"}
+    assert set(exported) == {"threads_created", "messages_sent", "thread_reads", "thread_memberships"}
     assert [row["thread_id"] for row in exported["threads_created"]] == [alice_thread]
     assert [row["message_id"] for row in exported["messages_sent"]] == [alice_message["message_id"]]
     assert {row["user_id"] for row in exported["thread_reads"]} == {"alice"}
     assert len({row["thread_id"] for row in exported["thread_reads"]}) == len(exported["thread_reads"]) == 151
+    memberships = exported["thread_memberships"]
+    assert len({row["thread_id"] for row in memberships}) == len(memberships) == 102
+    assert {row["thread_id"] for row in memberships} >= {bob_thread, alice_thread, "thr_member_0", "thr_member_99"}
+    # Membership is a fixed projection: peers' previews, ids, and storage metadata stay out.
+    assert {frozenset(row) for row in memberships} == {frozenset({
+        "thread_id", "thread_type", "title", "status", "scope_type", "scope_id", "subject_app_id",
+        "related_type", "related_id", "created_at",
+    })}
+    assert not {peer_text, "bob", "carol"} & {value for row in memberships for value in row.values()}
+    assert peer_text not in json.dumps(memberships)
 
     deleted = (await rt.account("delete", "alice"))["messages"]
     assert deleted["messages_deleted"] == len(exported["messages_sent"])
     assert deleted["read_state_deleted"] == len(exported["thread_reads"])
+    assert deleted["threads_deleted"] + deleted["memberships_removed"] == len(memberships)
     assert [row["user_id"] for row in rt.rows("thread_reads")] == ["bob"]
 
 
@@ -710,13 +852,15 @@ async def test_messaging_real_mongo_fresh_repeat_and_account_peer_preservation()
         exported = await handler.export_user_data(app_id=app_id, user_id="alice")
         assert {row["message_id"] for row in exported["messages_sent"]} == {"alice_shared", "alice_solo"}
         assert [row["user_id"] for row in exported["thread_reads"]] == ["alice"]
+        assert sorted(row["thread_id"] for row in exported["thread_memberships"]) == ["shared", "solo"]
         json.dumps(exported)  # Mongo _id values must not escape into account JSON.
         with pytest.raises(PermissionError, match="another app"):
             await handler.export_user_data(app_id="foreign", user_id="alice")
         assert await handler.delete_user_data(app_id=app_id, user_id="alice") == {
-            "threads_deleted": 1, "messages_deleted": 2, "read_state_deleted": 1,
+            "threads_deleted": 1, "messages_deleted": 2, "memberships_removed": 1, "read_state_deleted": 1,
         }
-        assert [row["thread_id"] for row in await threads.find_many({})] == ["shared"]
+        assert [(row["thread_id"], row["created_by"], row["participant_ids"])
+                for row in await threads.find_many({})] == [("shared", "", ["bob"])]
         assert [row["message_id"] for row in await messages.find_many({})] == ["bob_shared"]
         assert [row["user_id"] for row in await reads.find_many({})] == ["bob"]
         assert await database["unrelated_projects"].find_one({"_id": "project"}) == before["unrelated_projects"][0]

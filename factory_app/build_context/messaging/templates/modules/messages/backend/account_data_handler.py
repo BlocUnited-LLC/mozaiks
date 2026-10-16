@@ -1,12 +1,23 @@
 """Export and delete account contributions while preserving peer conversations.
 
+The AppGenerator messaging archetype requires deletion to remove or anonymise the
+user's message content, DMs, and thread participation records, and export to
+return sent messages and thread membership.
+
 Deletion removes the user's messages and read state, and the threads the user
 created in which no other participant has posted. A surviving thread whose
 last_message preview copies the user's text is repointed at its newest
-remaining message, or cleared when none remains. The user's id stays in
-created_by and participant_ids of surviving threads as an opaque reference: the
-messages contracts define no rewrite of thread membership. Export covers the
-same collections: created threads, sent messages, and read state.
+remaining message, or cleared when none remains. The user leaves participant_ids
+of every surviving thread, so participant checks admit only the remaining
+participants. created_by is a required string and becomes a blank marker that no
+actor id equals; the creator's user_id scope stamp is removed. In-app
+notifications already rendered from message_sent keep their body_preview: they
+live in the platform notification store, which the account protocol does not
+give module handlers.
+
+Export returns created threads, sent messages, read state, and a fixed
+projection of every thread the user participates in, without peers' previews or
+participant ids.
 """
 from __future__ import annotations
 
@@ -15,6 +26,18 @@ from typing import Any
 _PAGE_SIZE = 100
 # schemas.MESSAGE_PREVIEW_LENGTH; the handler stays free of package imports.
 _PREVIEW_LENGTH = 160
+# policy.actor_id never yields a blank id, and blank account ids are refused.
+_RELEASED_CREATOR = ""
+_MEMBERSHIP_FIELDS = (
+    "thread_id", "thread_type", "title", "status", "scope_type", "scope_id", "subject_app_id",
+    "related_type", "related_id", "created_at",
+)
+
+
+def _account_user_id(user_id: str) -> str:
+    if not str(user_id or "").strip():
+        raise ValueError("account user_id is required")
+    return user_id
 
 
 class AccountDataHandler:
@@ -28,13 +51,20 @@ class AccountDataHandler:
             raise PermissionError("account persistence is bound to another app")
         return self.persistence.collection("messages", name)
 
-    async def _records(self, app_id: str, name: str, query: dict[str, Any]) -> list[dict[str, Any]]:
+    async def _records(
+        self, app_id: str, name: str, query: dict[str, Any], fields: tuple[str, ...] = (),
+    ) -> list[dict[str, Any]]:
         collection = self._collection(app_id, name)
-        records = []
+        projection = {field: 1 for field in fields} or None
+        records: list[dict[str, Any]] = []
         cursor = dict(query)
         while True:
-            page = await collection.find_many(cursor, limit=_PAGE_SIZE, sort=[("_id", 1)])
-            records.extend({key: value for key, value in row.items() if key != "_id"} for row in page)
+            page = await collection.find_many(cursor, limit=_PAGE_SIZE, sort=[("_id", 1)], projection=projection)
+            records.extend(
+                {field: row.get(field) for field in fields} if fields
+                else {key: value for key, value in row.items() if key != "_id"}
+                for row in page
+            )
             if len(page) < _PAGE_SIZE:
                 return records
             cursor = {**query, "_id": {"$gt": page[-1]["_id"]}}
@@ -42,7 +72,7 @@ class AccountDataHandler:
     async def _repoint_previews(self, app_id: str, user_id: str) -> None:
         threads = self._collection(app_id, "threads")
         messages = self._collection(app_id, "messages")
-        for thread in await self._records(app_id, "threads", {"last_message.sender_id": user_id}):
+        for thread in await self._records(app_id, "threads", {"last_message.sender_id": user_id}, ("thread_id",)):
             newest = await messages.find_many(
                 {"thread_id": thread["thread_id"], "sender_id": {"$ne": user_id}, "is_deleted": {"$ne": True}},
                 limit=1,
@@ -67,11 +97,30 @@ class AccountDataHandler:
                 {"$set": updates},
             )
 
+    async def _release_threads(self, app_id: str, user_id: str) -> int:
+        threads = self._collection(app_id, "threads")
+        memberships_removed = 0
+        for thread in await self._records(app_id, "threads", {"participant_ids": user_id}, ("thread_id",)):
+            result = await threads.update_one(
+                {"thread_id": thread["thread_id"], "participant_ids": user_id},
+                {"$pull": {"participant_ids": user_id}},
+            )
+            memberships_removed += int(result.modified_count)
+        # Module dispatch also stamps the acting user onto inserted rows as scope metadata.
+        for field, update in (
+            ("created_by", {"$set": {"created_by": _RELEASED_CREATOR}}),
+            ("user_id", {"$unset": {"user_id": ""}}),
+        ):
+            for thread in await self._records(app_id, "threads", {field: user_id}, ("thread_id",)):
+                await threads.update_one({"thread_id": thread["thread_id"], field: user_id}, update)
+        return memberships_removed
+
     async def delete_user_data(self, *, app_id: str, user_id: str) -> dict[str, Any]:
+        user_id = _account_user_id(user_id)
         threads = self._collection(app_id, "threads")
         messages = self._collection(app_id, "messages")
         threads_deleted = 0
-        for thread in await self._records(app_id, "threads", {"created_by": user_id}):
+        for thread in await self._records(app_id, "threads", {"created_by": user_id}, ("thread_id",)):
             peer_messages = await messages.count({
                 "thread_id": thread["thread_id"], "sender_id": {"$ne": user_id},
             })
@@ -80,16 +129,22 @@ class AccountDataHandler:
                 threads_deleted += int(result.deleted_count)
         messages_result = await messages.delete_many({"sender_id": user_id})
         await self._repoint_previews(app_id, user_id)
+        memberships_removed = await self._release_threads(app_id, user_id)
         reads_result = await self._collection(app_id, "thread_reads").delete_many({"user_id": user_id})
         return {
             "threads_deleted": threads_deleted,
             "messages_deleted": int(messages_result.deleted_count),
+            "memberships_removed": memberships_removed,
             "read_state_deleted": int(reads_result.deleted_count),
         }
 
     async def export_user_data(self, *, app_id: str, user_id: str) -> dict[str, Any]:
+        user_id = _account_user_id(user_id)
         return {
             "threads_created": await self._records(app_id, "threads", {"created_by": user_id}),
             "messages_sent": await self._records(app_id, "messages", {"sender_id": user_id}),
             "thread_reads": await self._records(app_id, "thread_reads", {"user_id": user_id}),
+            "thread_memberships": await self._records(
+                app_id, "threads", {"participant_ids": user_id}, _MEMBERSHIP_FIELDS,
+            ),
         }
