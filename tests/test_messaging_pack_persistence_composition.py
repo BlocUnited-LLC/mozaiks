@@ -321,6 +321,69 @@ def test_pack_only_contract_without_approval_reassembles_only_its_own_compositio
             merge([{"filename": "data/contract.json", "content": carried}])
 
 
+def _assignment_store_subscription():
+    config = {
+        "schema_version": "mozaiks.subscriptions.v1", "label": "Plans", "default_plan_id": "free",
+        "assignment_store": {"data_alias": "billing.subscriptions", "user_id_field": "user_id",
+                             "active_statuses": ["active"]},
+        "plans": [
+            {"plan_id": "free", "label": "Free", "capabilities": []},
+            {"plan_id": "pro", "label": "Pro", "capabilities": []},
+        ],
+    }
+    return {"contract_required": True, "subscription_config_file": config,
+            "selected_features_by_plan": {"free": [], "pro": []}, "module_contract_updates": []}
+
+
+@pytest.mark.parametrize("carried", [
+    "lifecycle_reordered", "gains_assignment_store", "pack_contribution_changed", "app_surface", "app_shared_collection",
+])
+def test_pack_only_contract_replaces_a_carried_contract_only_when_it_holds_no_app_data(tmp_path, carried):
+    from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
+        _recompose_data_contract,
+    )
+
+    context = _context()
+    emitted = resolve_managed_capability_templates(context["capability_packs"], context_variables=context)
+
+    def merge(contract=None, subscription=None):
+        carried_files = [] if contract is None else [{"filename": "data/contract.json", "content": contract}]
+        return json.loads({file["filename"]: file["content"] for file in _merge_code_files(
+            [{"code_files": [*emitted, *carried_files]}], app_build_plan=context["app_build_plan"],
+            data_contract=None, subscription_contract=subscription, context_variables=context,
+        )}["data/contract.json"])
+
+    subscription = _assignment_store_subscription()
+    plain, with_store = merge(), merge(subscription=subscription)
+    assert [surface["surface_id"] for surface in with_store["surfaces"]] == ["messages", "subscription_assignments"]
+    if carried == "lifecycle_reordered":
+        # The pack lifecycle recomposes the same contract with its surfaces in another order.
+        (tmp_path / "data").mkdir()
+        (tmp_path / "data/contract.json").write_text(json.dumps(with_store), encoding="utf-8")
+        contributions = verified_pack_data_contracts(verified_pack_template_inventory(context_variables=context))
+        text, conflict = _recompose_data_contract(tmp_path, contributions, contributions)
+        assert conflict is None and json.loads(text)["surfaces"] == with_store["surfaces"][::-1]
+        assert merge(text, subscription) == with_store
+    elif carried == "gains_assignment_store":
+        # A pack-only app whose revision adds a subscription assignment store.
+        assert merge(json.dumps(plain), subscription) == with_store
+    elif carried == "pack_contribution_changed":
+        # The carried composition came from an earlier version of the pack's contribution.
+        earlier = deepcopy(plain)
+        earlier["surfaces"][0]["collections"][0]["fields"].pop()
+        assert merge(json.dumps(earlier)) == plain
+    else:
+        app_data = deepcopy(with_store)
+        if carried == "app_surface":
+            app_data["surfaces"].extend(CARRIED_APP_CONTRACT["surfaces"])
+        else:
+            app_data["shared_collections"] = [{"name": "notes", "entity": "Note", "scope": "app", "fields": []}]
+        # Reordering never hides app data: the app's own surface would be dropped.
+        app_data["surfaces"].reverse()
+        with pytest.raises(ValueError, match="requires the approved DesignDocs data_contract"):
+            merge(json.dumps(app_data), subscription)
+
+
 @pytest.mark.parametrize("path", ["modules/messages/backend/policy.py", "modules/messages/backend/service.py",
                                   "modules/messages/module.yaml"])
 def test_injected_pack_backend_bytes_are_rejected(path):

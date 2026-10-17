@@ -50,12 +50,48 @@ from mozaiksai.core.workflow.generator_support.module_write_actions import (
 logger = logging.getLogger(__name__)
 
 
-def _is_contract(content: str, contract: dict[str, Any]) -> bool:
-    """Whether carried contract text is exactly this contract; unreadable text never is."""
+#: The surface the subscription assignment store compiler declares its collections under.
+_ASSIGNMENT_STORE_SURFACE = {"surface_id": "subscription_assignments", "surface_kind": "app_policy"}
+
+
+def _holds_only_derived_data(content: str, pack_data_contracts: list[dict[str, Any]], composed: dict[str, Any]) -> bool:
+    """Whether a carried contract holds nothing but what selected packs and subscription stores derive.
+
+    Every surface must be a selected pack's contributed surface or the
+    subscription assignment store surface, and every alias must name one of
+    their collections; any shared collection, or metadata the composition
+    would change, is the app's own. Order is not compared: a carried
+    composition, such as the pack lifecycle's recomposition, may list the
+    same surfaces in another order. Unreadable text never qualifies.
+    """
     try:
-        return bool(json.loads(content) == contract)
+        carried = json.loads(content)
     except ValueError:
         return False
+    if not isinstance(carried, dict) or not isinstance(carried.get("surfaces") or [], list):
+        return False
+    pack_surfaces = {
+        surface.get("surface_id") for contribution in pack_data_contracts for surface in contribution.get("surfaces") or []
+    }
+    collections: set[Any] = set()
+    for surface in carried.get("surfaces") or []:
+        if not isinstance(surface, dict) or not (
+            surface.get("surface_id") in pack_surfaces
+            or {key: surface.get(key) for key in _ASSIGNMENT_STORE_SURFACE} == _ASSIGNMENT_STORE_SURFACE
+        ):
+            return False
+        for collection in surface.get("collections") or []:
+            if isinstance(collection, dict):
+                collections.update(collection.get(key) for key in ("name", "mongo_collection", "collection"))
+    if carried.get("shared_collections"):
+        return False
+    if not all(
+        isinstance(alias, dict) and (alias.get("collection") or alias.get("mongo_collection")) in collections - {None}
+        for alias in carried.get("aliases") or []
+    ):
+        return False
+    metadata = set(carried) - {"version", "surfaces", "shared_collections", "aliases"}
+    return all(carried[key] == composed.get(key) for key in metadata)
 
 
 def _merge_code_files(
@@ -84,8 +120,10 @@ def _merge_code_files(
     pack_data_contracts = verified_pack_data_contracts(inventory)
     # Without an approved contract the selected packs' contributions compose onto
     # an empty base. A carried data/contract.json is not an approval, so the base
-    # may replace it only when it already is that composition (a reassembly of
-    # this build); otherwise the app's own surfaces would be silently dropped.
+    # may replace it only when it holds nothing the app owns: only selected pack
+    # surfaces and subscription assignment stores, such as an earlier assembly
+    # or pack lifecycle composition. Otherwise the app's own surfaces would be
+    # silently dropped.
     pack_only_base = data_contract is None and bool(pack_data_contracts)
     if pack_only_base:
         data_contract = {"version": "1", "surfaces": [], "shared_collections": []}
@@ -95,10 +133,12 @@ def _merge_code_files(
             pack_data_contracts=pack_data_contracts,
         )
         carried = file_map.get("data/contract.json")
-        if pack_only_base and carried is not None and not _is_contract(carried, data_contract):
+        if pack_only_base and carried is not None and not _holds_only_derived_data(
+            carried, pack_data_contracts, data_contract,
+        ):
             raise ValueError(
                 "data/contract.json requires the approved DesignDocs data_contract; without it the selected "
-                "packs' data contributions cannot replace a carried contract that differs from their composition"
+                "packs' data contributions cannot replace a carried contract that holds app-owned data"
             )
     elif subscription_contract is not None:
         assignment_contract = compile_data_contract(

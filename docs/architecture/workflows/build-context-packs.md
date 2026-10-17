@@ -178,6 +178,19 @@ owned template files. Several selected packs may declare the same shared root
 (`data/contract.json`, `ui/index.js`, `ui/route_manifest.json`); any other
 declared output path belongs to exactly one selected pack.
 
+Without an approved DesignDocs data contract, assembly composes the selected
+packs' contributions (and any subscription assignment stores) onto an empty
+contract. A `data/contract.json` the bundle already carries is not an approval,
+so that composition replaces it only when the carried contract holds nothing the
+app owns: every surface is a selected pack's contributed surface or the
+subscription assignment store surface, every alias names one of their
+collections, it declares no shared collections, and its other metadata matches.
+Surface order is not compared, so an earlier assembly, the pack lifecycle's
+recomposition, a changed pack contribution or a newly added assignment store
+all recompose. A carried contract holding any app-owned surface, shared
+collection or alias fails assembly with the approved-contract error instead of
+being silently replaced.
+
 Canonical policy, schema, and CRUD synthesis still owns ordinary generated and
 partially templated modules, including OutcomeFeedback. A complete template
 implementation keeps its own actions and participant-aware policy only when
