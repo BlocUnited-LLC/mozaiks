@@ -20,6 +20,9 @@ from mozaiksai.core.session.build_context import (
     resolve_context_asset_path,
 )
 from mozaiksai.core.session.build_context_schema import validate_pack_context
+from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.generator_support.module_action_inventory import SHARED_UI_OUTPUT_PATHS
+from mozaiksai.resources import resolve_factory_app_root
 
 logger = logging.getLogger(__name__)
 
@@ -225,7 +228,7 @@ def _validate_pack_dependencies(
         # Capabilities from context.yaml (fallback when descriptor lacks them).
         # Only attempt when pack_id is safe — unsafe IDs will be caught later
         # by resolve_templates_for_pack's _is_safe_identifier check.
-        raw_path = _resolve_pack_source_from_installed_state(pack, context_variables=context_variables)
+        raw_path, _pins = _resolve_pack_source_from_installed_state(pack, context_variables=context_variables)
         if raw_path and pid and _is_safe_identifier(pid):
             try:
                 context_data = _read_pack_context(Path(raw_path).resolve(), pid)
@@ -243,7 +246,7 @@ def _validate_pack_dependencies(
         if not isinstance(pack, dict):
             continue
         pack_id = str(pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id") or "").strip()
-        raw_path = _resolve_pack_source_from_installed_state(pack, context_variables=context_variables)
+        raw_path, _pins = _resolve_pack_source_from_installed_state(pack, context_variables=context_variables)
         if not raw_path or not pack_id:
             continue
 
@@ -644,16 +647,20 @@ def _resolve_pack_source_from_installed_state(
     pack: dict[str, Any],
     *,
     context_variables: Any | None,
-) -> str | None:
-    """Resolve an explicitly selected installed pack without copying local paths into AppBuildPlan."""
+) -> tuple[str | None, dict[str, str]]:
+    """Resolve an explicitly selected installed pack without copying local paths into AppBuildPlan.
+
+    Returns the source path and, for an installed pack, the version and digest
+    pins that workspace state verified against the source's fresh bytes.
+    """
 
     raw_path = pack.get("pack_source_path")
     if raw_path:
-        return str(raw_path)
+        return str(raw_path), {}
     pack_id = str(pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id") or "").strip()
     build_context_root = _context_build_context_root(context_variables)
     if not pack_id or build_context_root is None:
-        return None
+        return None, {}
     try:
         from .community_component_lifecycle import resolve_installed_component_descriptors
 
@@ -666,8 +673,9 @@ def _resolve_pack_source_from_installed_state(
             f"Selected installed pack '{pack_id}' could not be resolved from workspace state: {exc}"
         ) from exc
     if not descriptors:
-        return None
-    return str(descriptors[0].get("pack_source_path") or "")
+        return None, {}
+    installed = descriptors[0]
+    return str(installed.get("pack_source_path") or ""), {key: str(installed[key]) for key in ("version", "digest")}
 
 
 def _safe_declared_output_path(raw_path: Any, *, pack_id: str) -> str:
@@ -706,7 +714,7 @@ def resolve_declared_pack_output_paths(
         if not isinstance(pack, dict):
             continue
         pack_id = str(pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id") or "").strip()
-        raw_path = _resolve_pack_source_from_installed_state(
+        raw_path, _pins = _resolve_pack_source_from_installed_state(
             pack,
             context_variables=context_variables,
         )
@@ -785,10 +793,132 @@ def resolve_templates_for_pack(
     return files
 
 
+def verified_selected_pack_sources(
+    capability_packs: list[dict[str, Any]] | None = None, *, context_variables: Any = None,
+) -> list[dict[str, Any]]:
+    """Verify dependency-closed selected pack sources against their pins.
+
+    This does not render templates, so callers that only need verified source
+    paths (layout and declared-output checks) do not require the approved
+    build context that template variables come from.
+    """
+    if capability_packs is None and context_variables is not None:
+        capability_packs = detach(context_variables.get("capability_packs")) or []
+        if not capability_packs:
+            plan = detach(context_variables.get("app_build_plan")) or {}
+            capability_packs = plan.get("capability_packs") or []
+    if not capability_packs:
+        return []
+    _validate_pack_dependencies(capability_packs, context_variables=context_variables)
+    verified = []
+    factory_root = resolve_factory_app_root()
+    # Without a resolvable factory root, only explicitly pinned packs are trusted.
+    # Selected-row pins and verified installed-state pins are both explicit pins.
+    factory_contexts = (factory_root / "build_context").resolve() if factory_root is not None else None
+    for pack in capability_packs:
+        if not isinstance(pack, dict):
+            continue
+        pack_id = str(pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id") or "").strip()
+        source, installed_pins = _resolve_pack_source_from_installed_state(pack, context_variables=context_variables)
+        if not source or not pack_id:
+            continue
+        root = Path(source).resolve()
+        metadata = verify_pack_integrity(root, pack_id)
+        for label, pins in (("selected", pack), ("installed", installed_pins)):
+            for key in ("version", "digest"):
+                if pins.get(key) is not None and pins[key] != metadata[key]:
+                    raise PackIntegrityError(f"Pack '{pack_id}' {label} {key} does not match freshly verified source")
+        verified.append({
+            **metadata, "source_path": str(root),
+            "implementation_trusted": (
+                (factory_contexts is not None and root.parent == factory_contexts)
+                or any(bool(pins.get("version") and pins.get("digest")) for pins in (pack, installed_pins))
+            ),
+        })
+    return verified
+
+
+def verified_pack_template_inventory(
+    capability_packs: list[dict[str, Any]] | None = None, *, context_variables: Any = None,
+) -> list[dict[str, Any]]:
+    """Resolve dependency-closed templates and check fresh bytes against selected pins.
+
+    Only shipped factory packs or explicitly pinned external packs can own a
+    complete backend implementation. Unpinned external templates remain subject
+    to the ordinary canonical module compiler.
+    """
+    inventory = []
+    for entry in verified_selected_pack_sources(capability_packs, context_variables=context_variables):
+        root = Path(entry["source_path"])
+        files = resolve_templates_for_pack(root, entry["pack_id"], context_variables=context_variables)
+        inventory.append({**entry, "owner_map": _file_owner_map(root), "files": files})
+    return inventory
+
+
+def verified_template_module_ids(files: dict[str, str], inventory: list[dict[str, Any]]) -> frozenset[str]:
+    """Keep only complete, declared, exact template implementations out of synthesis.
+
+    Workspace-owned handler extensions remain workspace code. They never grant
+    ownership to a policy, schema, service, repo, or undeclared backend helper.
+    """
+    result = set()
+    required = {"module.yaml", "backend/service.py", "backend/repo.py", "backend/policy.py", "backend/schemas.py"}
+    for pack in inventory:
+        owners = pack["owner_map"]
+        rendered = {entry["filename"]: entry["content"] for entry in pack["files"]}
+        modules = {path.split("/")[1] for path in rendered if path.startswith("modules/")}
+        for module_id in modules:
+            prefix = f"modules/{module_id}/"
+            if not all(owners.get(prefix + path) == "templates" and prefix + path in rendered for path in required):
+                continue
+            if not pack["implementation_trusted"]:
+                raise PackIntegrityError(f"Pack '{pack['pack_id']}' complete backend requires a verified source pin")
+            declared = {path: owner for path, owner in owners.items() if path.startswith(prefix)}
+            template_paths = {path for path in rendered if path.startswith(prefix)}
+            candidate_paths = {path for path in files if path.startswith(prefix)}
+            handler = prefix + "backend/handler.py"
+            if owners.get(handler) not in {"templates", "workspace"} or handler not in template_paths:
+                raise PackIntegrityError(f"Pack '{pack['pack_id']}' module '{module_id}' requires a declared handler template")
+            if template_paths != set(declared) or candidate_paths != set(declared):
+                raise PackIntegrityError(f"Pack '{pack['pack_id']}' module '{module_id}' requires its complete declared template closure")
+            for path, owner in declared.items():
+                if owner == "templates" and files[path] != rendered[path]:
+                    raise PackIntegrityError(f"Pack '{pack['pack_id']}' template bytes differ at '{path}'")
+                if owner not in {"templates", "workspace"}:
+                    raise PackIntegrityError(f"Pack '{pack['pack_id']}' module '{module_id}' has non-template implementation ownership")
+                if owner == "workspace" and path != prefix + "backend/handler.py":
+                    raise PackIntegrityError(f"Pack '{pack['pack_id']}' workspace ownership is limited to its handler extension")
+            if owners.get(handler) == "workspace" and owners.get(prefix + "backend/base_handler.py") != "templates":
+                raise PackIntegrityError(f"Pack '{pack['pack_id']}' workspace handler needs a template-owned base handler")
+            result.add(module_id)
+    return frozenset(result)
+
+
+def verified_pack_data_contracts(inventory: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Expose only data contributions whose module owners the same pack ships."""
+    contributions = []
+    for pack in inventory:
+        for file in pack["files"]:
+            if file["filename"] != "data/contract.json":
+                continue
+            if pack["owner_map"].get(file["filename"]) != "templates":
+                raise PackIntegrityError(f"Pack '{pack['pack_id']}' data contribution must be template-owned")
+            contract = json.loads(file["content"])
+            for surface in contract.get("surfaces") or []:
+                manifest = f"modules/{surface.get('surface_id')}/module.yaml"
+                if pack["owner_map"].get(manifest) != "templates" or not any(
+                    item["filename"] == manifest for item in pack["files"]
+                ):
+                    raise PackIntegrityError(f"Pack '{pack['pack_id']}' data contribution has an undeclared module owner")
+            contributions.append(contract)
+    return contributions
+
+
 def resolve_managed_capability_templates(
     capability_packs: list[dict[str, Any]] | None,
     *,
     context_variables: Any | None = None,
+    ui_contributions: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, str]]:
     """Materialize all template files from selected managed capabilities.
 
@@ -811,39 +941,32 @@ def resolve_managed_capability_templates(
         return []
 
     # --- Step 1: dependency validation (fast fail before rendering) ---
-    _validate_pack_dependencies(capability_packs, context_variables=context_variables)
+    inventory = verified_pack_template_inventory(capability_packs, context_variables=context_variables)
 
     # --- Step 2: render templates, tracking per-pack output for provenance ---
     results_by_filename: dict[str, str] = {}
     # (metadata, owner_map, [produced filenames])
     provenance_entries: list[tuple[dict[str, Any], dict[str, str], list[str]]] = []
+    composed_outputs: dict[str, list[dict[str, str]]] = {}
 
-    for pack in capability_packs:
-        if not isinstance(pack, dict):
-            continue
-        pack_id = str(pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id") or "").strip()
-        raw_path = _resolve_pack_source_from_installed_state(pack, context_variables=context_variables)
-        if not raw_path or not pack_id:
-            continue
-
-        if not _is_safe_identifier(pack_id):
-            raise ManagedCapabilityTemplateError(
-                f"Unsafe pack_id '{pack_id}': must be a simple identifier without path separators or traversal sequences"
-            )
-        pack_source_path = Path(raw_path)
-        metadata = verify_pack_integrity(pack_source_path, pack_id)
-
-        # Ownership map: output_path → owner (from contract.yaml required_outputs)
-        owner_map = _file_owner_map(pack_source_path)
-
+    for metadata in inventory:
+        pack_id = metadata["pack_id"]
+        owner_map = metadata["owner_map"]
+        if ui_contributions is not None:
+            ui_contributions.append({
+                "owner": f"pack:{pack_id}", "pack_id": pack_id, "digest": metadata["digest"],
+                "files": metadata["files"],
+            })
         pack_files: list[str] = []
-        for file in resolve_templates_for_pack(
-            pack_source_path,
-            pack_id,
-            context_variables=context_variables or {},
-        ):
+        for file in metadata["files"]:
             filename = file["filename"]
             content = file["content"]
+            if filename == "data/contract.json" or (ui_contributions is not None and filename in SHARED_UI_OUTPUT_PATHS):
+                composed_outputs.setdefault(filename, []).append({
+                    "pack_id": pack_id, "version": metadata["version"],
+                    "digest": metadata["digest"], "source": metadata["source"],
+                })
+                continue
             existing = results_by_filename.get(filename)
             if existing is not None and existing != content:
                 raise ManagedCapabilityTemplateError(
@@ -871,6 +994,10 @@ def resolve_managed_capability_templates(
             pack_file_map,
             build_timestamp=_context_to_dict(context_variables).get("build_timestamp"),
         )
+        if composed_outputs:
+            provenance = json.loads(provenance_json)
+            provenance["composed_outputs"] = composed_outputs
+            provenance_json = json.dumps(provenance, indent=2)
         existing_prov = results_by_filename.get(_PROVENANCE_PATH)
         if existing_prov is None:
             results_by_filename[_PROVENANCE_PATH] = provenance_json
@@ -890,4 +1017,8 @@ __all__ = [
     "resolve_declared_pack_output_paths",
     "resolve_templates_for_pack",
     "verify_pack_integrity",
+    "verified_pack_template_inventory",
+    "verified_selected_pack_sources",
+    "verified_pack_data_contracts",
+    "verified_template_module_ids",
 ]

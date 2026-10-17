@@ -1,88 +1,235 @@
 {
+  "schema_version": "mozaiks.data_migration.v1",
   "migration_id": "messaging_001_collections",
-  "description": "Declare messaging module collections and indexes in the app data contract.",
-  "surfaces": [
+  "version": "1",
+  "description": "Ensure participant-scoped Messaging collections and indexes without rewriting records.",
+  "operations": [
     {
-      "surface_id": "messaging",
-      "collections": [
-        {
-          "mongo_collection": "messages_threads",
-          "data_alias": "messages.threads",
-          "indexes": [
-            {
-              "name": "threads_by_id",
-              "keys": [{"field": "thread_id", "order": 1}],
-              "unique": true
-            },
-            {
-              "name": "threads_by_participant_updated",
-              "keys": [{"field": "participant_ids", "order": 1}, {"field": "updated_at", "order": -1}]
-            },
-            {
-              "name": "threads_by_subject_app_updated",
-              "keys": [{"field": "subject_app_id", "order": 1}, {"field": "updated_at", "order": -1}]
-            },
-            {
-              "name": "threads_by_scope_updated",
-              "keys": [{"field": "scope_type", "order": 1}, {"field": "scope_id", "order": 1}, {"field": "updated_at", "order": -1}]
-            },
-            {
-              "name": "threads_by_participant_type_status",
-              "keys": [
-                {"field": "participant_ids", "order": 1},
-                {"field": "thread_type", "order": 1},
-                {"field": "status", "order": 1}
-              ]
-            },
-            {
-              "name": "threads_by_participant_last_message",
-              "keys": [{"field": "participant_ids", "order": 1}, {"field": "last_message_at", "order": -1}]
-            }
+      "type": "ensure_collection",
+      "module_id": "messages",
+      "entity_name": "threads"
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "messages",
+      "entity_name": "threads",
+      "index": {
+        "name": "threads_by_id",
+        "keys": [
+          [
+            "thread_id",
+            1
           ]
-        },
-        {
-          "mongo_collection": "messages_messages",
-          "data_alias": "messages.messages",
-          "indexes": [
-            {
-              "name": "messages_by_thread_created_asc",
-              "keys": [{"field": "thread_id", "order": 1}, {"field": "created_at", "order": 1}]
-            },
-            {
-              "name": "messages_by_thread_created_desc",
-              "keys": [{"field": "thread_id", "order": 1}, {"field": "created_at", "order": -1}]
-            },
-            {
-              "name": "messages_unread_scan",
-              "keys": [
-                {"field": "thread_id", "order": 1},
-                {"field": "sender_id", "order": 1},
-                {"field": "created_at", "order": 1}
-              ]
-            }
+        ],
+        "unique": true
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "messages",
+      "entity_name": "threads",
+      "index": {
+        "name": "threads_by_participant_updated",
+        "keys": [
+          [
+            "participant_ids",
+            1
+          ],
+          [
+            "updated_at",
+            -1
           ]
-        },
-        {
-          "mongo_collection": "messages_thread_reads",
-          "data_alias": "messages.thread_reads",
-          "indexes": [
-            {
-              "name": "reads_by_thread_user",
-              "keys": [
-                {"field": "scope_type", "order": 1},
-                {"field": "scope_id", "order": 1},
-                {"field": "thread_id", "order": 1},
-                {"field": "user_id", "order": 1}
-              ],
-              "unique": true
-            },
-            {
-              "name": "reads_by_user",
-              "keys": [{"field": "user_id", "order": 1}]
-            }
+        ]
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "messages",
+      "entity_name": "threads",
+      "index": {
+        "name": "threads_by_subject_app_updated",
+        "keys": [
+          [
+            "subject_app_id",
+            1
+          ],
+          [
+            "updated_at",
+            -1
           ]
-        }
-      ]
+        ]
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "messages",
+      "entity_name": "threads",
+      "index": {
+        "name": "threads_by_scope_updated",
+        "keys": [
+          [
+            "scope_type",
+            1
+          ],
+          [
+            "scope_id",
+            1
+          ],
+          [
+            "updated_at",
+            -1
+          ]
+        ]
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "messages",
+      "entity_name": "threads",
+      "index": {
+        "name": "threads_by_participant_type_status",
+        "keys": [
+          [
+            "participant_ids",
+            1
+          ],
+          [
+            "thread_type",
+            1
+          ],
+          [
+            "status",
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "messages",
+      "entity_name": "threads",
+      "index": {
+        "name": "threads_by_participant_last_message",
+        "keys": [
+          [
+            "participant_ids",
+            1
+          ],
+          [
+            "last_message_at",
+            -1
+          ]
+        ]
+      }
+    },
+    {
+      "type": "ensure_collection",
+      "module_id": "messages",
+      "entity_name": "messages"
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "messages",
+      "entity_name": "messages",
+      "index": {
+        "name": "messages_by_thread_created_asc",
+        "keys": [
+          [
+            "thread_id",
+            1
+          ],
+          [
+            "created_at",
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "messages",
+      "entity_name": "messages",
+      "index": {
+        "name": "messages_by_thread_created_desc",
+        "keys": [
+          [
+            "thread_id",
+            1
+          ],
+          [
+            "created_at",
+            -1
+          ]
+        ]
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "messages",
+      "entity_name": "messages",
+      "index": {
+        "name": "messages_unread_scan",
+        "keys": [
+          [
+            "thread_id",
+            1
+          ],
+          [
+            "sender_id",
+            1
+          ],
+          [
+            "created_at",
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "type": "ensure_collection",
+      "module_id": "messages",
+      "entity_name": "thread_reads"
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "messages",
+      "entity_name": "thread_reads",
+      "index": {
+        "name": "reads_by_thread_user",
+        "keys": [
+          [
+            "scope_type",
+            1
+          ],
+          [
+            "scope_id",
+            1
+          ],
+          [
+            "thread_id",
+            1
+          ],
+          [
+            "user_id",
+            1
+          ]
+        ],
+        "unique": true
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "messages",
+      "entity_name": "thread_reads",
+      "index": {
+        "name": "reads_by_user",
+        "keys": [
+          [
+            "user_id",
+            1
+          ]
+        ]
+      }
     }
   ]
 }

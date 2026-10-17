@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Collection
+
 from mozaiksai.control_plane.contracts import (
     CodingWorkerResult,
     ContractSurfacePlan,
@@ -105,6 +107,7 @@ class FirstPartyHarnessDecisionPolicy:
         proposal: ScopeProposal | None,
         selected_paths: list[str],
         explicit_scope: bool,
+        confirmation_required_paths: Collection[str] = (),
     ) -> HarnessDecision:
         if explicit_scope:
             return HarnessDecision(
@@ -243,6 +246,32 @@ class FirstPartyHarnessDecisionPolicy:
                     include_apply=True,
                 ),
                 metadata={"scope_origin": "proposal", "signals": list(proposal.signals)},
+            )
+
+        protected = sorted(set(selected_paths) & set(confirmation_required_paths))
+        if protected:
+            # App-owned capability pack code changes only in a scope the user
+            # chose; an inferred scope waits for the existing confirmation.
+            return HarnessDecision(
+                decision_type="clarify_scope",
+                message="This patch changes app-owned capability pack code. Confirm the proposed scope before applying it.",
+                rationale=proposal.rationale,
+                confidence=float(proposal.confidence or 0.0),
+                recommended_workflow_id=routing_decision.workflow_id,
+                selected_paths=list(selected_paths),
+                clarification_question=proposal.clarification_question
+                or "Confirm these files are the right scope, or narrow the request further.",
+                requires_confirmation=False,
+                actions=self._clarify_actions(
+                    workflow_id=routing_decision.workflow_id,
+                    selected_paths=selected_paths,
+                    include_apply=True,
+                ),
+                metadata={
+                    "scope_origin": "proposal",
+                    "signals": list(proposal.signals),
+                    "confirmation_required_paths": protected,
+                },
             )
 
         return HarnessDecision(

@@ -201,7 +201,28 @@ a task left with nothing to build, so it never synthesizes a facade task trio
 for a template module; `page_bundle` owns only the pages no pack ships, and its
 message names the pack-provided pages. A worker's, repairer's or earlier
 assembly's copy of a pack-owned path is discarded with a
-`PACK_OWNED_OUTPUT_DISCARDED` log line instead of validated. Pages bind facade
+`PACK_OWNED_OUTPUT_DISCARDED` log line instead of validated. Outside genesis an
+`owner: workspace` path is the app's own code, and its copy comes only from
+verified source: the bound verified revision source (through the existing
+refinement binding, including an explicit `full_rebuild` or
+`conceptual_replan` that skips hydration), else the admitted genesis copy in
+`generated_files`, else the starter template, used only when no app copy exists
+(genesis, a newly selected pack, or a rebuild with no bound source). A repair
+overlay copy or a `deleted_files` tombstone never changes it: assembly and
+`admitted_app_file_map` exclude one with a `WORKSPACE_PACK_OUTPUT_EXCLUDED`
+warning, and `save_generated_code` rejects a candidate that changes or deletes
+one (identical bytes are not a change) through `validate_repair_candidate`,
+with a `WORKSPACE_PACK_OUTPUT_CHANGE_UNSUPPORTED` diagnostic, whether or not a
+repair is active.
+Output for the path from a task that is not a current plan task owning it is
+raw history: it is ignored with a `WORKSPACE_PACK_OUTPUT_IGNORED` warning. When a
+current plan task owns the path and its output differs from the retained copy,
+assembly fails with `WORKSPACE_PACK_OUTPUT_CHANGE_UNSUPPORTED`. AppGenerator
+cannot admit that change, and reporting success while dropping it would hide
+that it never shipped. The diagnostic names the missing capability
+(`authorized_backend_refinement`: a Studio selected-file patch refinement of
+that path) and carries a `block_reason`, so bounded repair does not try to
+admit the change either. Pages bind facade
 actions against the template module contract, the one assembly applies.
 Assembly takes pack-owned files only from the templates and never re-derives a
 template page; it runs `pack_template_page_errors` on each template page (page
@@ -224,6 +245,97 @@ changing persistence or the data contract. Managed pack templates replace their
 page and module artifacts together before final page compilation, so acceptance
 checks the actual emitted contracts. Worker inventories still come from their
 accepted prerequisite outputs.
+
+### Shared UI composition
+
+When selected packs contribute UI, `assemble_app_tasks` composes their verified
+declarations with admitted app output through `ui_registry_composition`.
+`ui/index.js` and `ui/route_manifest.json` are shared composition outputs;
+exclusive pack filtering must retain authored declarations for these two paths.
+The existing `CustomRouteBundle` materializer and `FrontendStubOutput` remain
+the producers. There is no second runtime registry, and component source files
+are not rewritten by composition.
+
+If a typed custom bundle also contains an exclusive pack-owned page, the
+existing materializer derives its shared registry and routes before the filter
+removes that page implementation. Other app page bytes and
+`registration_barrel` declarations remain unchanged; verified templates supply
+the exclusive file. Retaining declarations does not authorize a competing app
+claim over a pack route or registration: the composition checks below still
+reject conflicts.
+
+The existing JavaScript parser admits local default/named imports (including
+aliases), named re-exports, and literal `registerComponent` calls in the exported
+`register` function. Registration `description`, `core`, and `override` options
+retain their literal values. Imports must resolve and expose the requested
+export. Dynamic calls/options, side effects, missing exports, and unsupported
+barrel statements fail instead of being evaluated or concatenated.
+Component forwarding must name its default or named export explicitly;
+namespace objects and export-star forwarding are not component bindings.
+
+Separate active owners cannot declare the same component key, route id, route
+path, or barrel export, even with identical declarations. A unique explicit
+component `override: true` may replace a conflicting registration; it does not
+override a route collision. Repeated declarations from the same owner and exact
+copies in prior admitted assembly snapshots are idempotent. Saved snapshots
+are fallback declarations: an admitted app revision supersedes its
+saved route metadata and ordering. Exact unchanged entries carried from that
+verified prior archive do not claim a second active owner, including retained
+pack entries. Current accumulated output cannot grant this carryover. A title
+or other metadata update retains prior relative positions; explicit order or
+authored sequence changes replace the affected ordering constraints.
+Current task/task and task/pack collisions still fail; a pack alone cannot
+replace a conflicting saved app route. Repeated local import bindings also fail.
+Contribution discovery order does not affect output. Each manifest's authored array sequence
+is preserved, explicit root and navigation `order` values remain intact, and
+incompatible sequences fail. Route metadata, auth and Ask references survive
+unchanged and still pass their existing acceptance gates.
+Final planned-page validation admits additional pack routes only when their
+complete entries match the verified resolver output; worker admission cannot
+grant that authority or invent an extra route.
+
+The accumulated `code_files` repair overlay is the newest admitted app layer,
+as it is in the merge without a pack and in `admitted_app_file_map`. For each
+component key, barrel export, route id and manifest metadata key it declares,
+it replaces the saved-snapshot and task declarations, and its relative route
+order replaces theirs for those route ids. A patched task declaration keeps its
+owner, so task/task and task/pack collisions still fail. The overlay never
+patches a pack declaration: a differing overlay route fails as a conflict, and a
+differing registration wins only through the unique explicit `override: true`
+contract above. In a revision a current task takes only the overlay values
+that differ from the verified revision baseline: component keys, barrel
+exports, route ids, manifest metadata, and the relative order when the
+overlay's order differs from the baseline's. An overlay value equal to the
+baseline, such as a full-root copy an earlier repair or the auth scaffold saved,
+still replaces older saved-snapshot values. It cannot revert a task's approved
+revision change or make competing task or pack declarations look carried. The
+exception is a root an admitted repair of that task saved: a responded repair
+records its `saved_paths` in `bundle_repair_result`, and such an overlay copy
+is newer than the task's output, so it supersedes that task even where it
+restates the baseline (`overlay_supersedes` on the task's contribution).
+Genesis has no baseline, so there every overlay value supersedes.
+
+Composition is additive. A carried declaration that a current task omits stays,
+so a partial root never removes a page. Removal is explicit: composition resolves
+imports against the final file set without admitted `deleted_files` tombstones.
+Admitted deletions are newer than task output. Any app registration (saved
+snapshot, repair overlay or current task) whose import names only a deleted
+file is dropped, and so are the app routes to a component left unregistered.
+The drop is logged with the components, routes and owners. The remaining routes
+keep their relative positions. A task that writes the deleted file itself and
+still registers it is current page work: an admitted `ui/index.js` that no
+longer registers that file supersedes it, and otherwise assembly fails with a
+`ui/index.js:` diagnostic naming the task. A planned page that loses its route
+this way still fails the planned-page route check. Pack declarations never
+drop. A pack registration of a deleted file, or an app registration of a file
+that is absent without an admitted deletion, fails with the existing explicit
+error. Pack-owned template paths are never tombstoned.
+
+Pack provenance identifies contributors to the two composed roots under
+`composed_outputs`; they are not listed as exact template-owned final files.
+Other pack implementation files retain their existing template ownership.
+
+### Workflow and action reachability
 
 Page workflow actions must resolve to workflows in the supplied workflow bundle
 or its artifact-backed integration metadata. A proposed workflow name alone
@@ -1073,6 +1185,20 @@ gate passes.
 
 Validation and download use `admitted_app_file_map`: the current `generated_files`
 map, admitted `code_files` repairs, and admitted `deleted_files` tombstones.
+When `.mozaiks/pack_provenance.json` records `ui/index.js` or
+`ui/route_manifest.json` under `composed_outputs`, a differing repair copy of
+that root is composed onto it with assembly's own contributions and rules: the
+assembled roots as the carried snapshot, every current task output, the
+admitted overlay, the verified pack templates, the admitted deletions and, in a
+revision, the same bound revision baseline (assembly records the UI roots of the
+source it read, by source identity). A partial repair copy therefore cannot drop
+the verified pack declarations it omits, a stale baseline copy cannot revert a
+task's change, and a pack declaration is never patched. No reassembly is needed
+for the repair to reach validation. When those rules reject the copy, or cannot
+be applied here (the baseline or the selected packs are unavailable), the
+assembled roots are kept and an `ADMITTED_UI_ROOT_NOT_COMPOSED` warning names
+them; only without resolvable packs does the copy replace the root for the
+acceptance gates to judge. Without that provenance the last writer wins.
 Historical raw worker responses and prior generated directories cannot overwrite,
 refill, or delete that snapshot. An older foreign readback filtered by a save tool
 cannot reappear during packaging. Empty current artifacts remain empty.

@@ -1464,6 +1464,12 @@ def _input_schema(module: Any, action: str) -> dict[str, Any]:
     return dict(schema) if isinstance(schema, Mapping) else {}
 
 
+def _output_schema(module: Any, action: str) -> dict[str, Any]:
+    schemas = module.action_schemas_map.get(action) or {}
+    schema = schemas.get("output") if isinstance(schemas, Mapping) else None
+    return dict(schema) if isinstance(schema, Mapping) else {}
+
+
 def _properties(schema: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
     properties = schema.get("properties")
     if not isinstance(properties, Mapping):
@@ -1748,19 +1754,27 @@ def _owner_value(entity: _Entity, principal: _Principal) -> str | None:
     return principal.workspace_id if entity.tenancy == "per_workspace" else principal.user_id
 
 
-def _items(body: Any) -> list[Any] | None:
-    if isinstance(body, Mapping) and isinstance(body.get("items"), list):
-        return list(body["items"])
-    return None
-
-
-def _record_id(entity: _Entity, body: Any) -> Any:
-    if not isinstance(body, Mapping):
+def _response_member(body: Any, schema: Mapping[str, Any], *, kind: str, canonical: str) -> Any:
+    """Read the declared response member; ambiguous custom envelopes fail closed."""
+    if not isinstance(body, Mapping) or _schema_type(schema) != "object":
         return None
-    item = body.get("item")
-    if isinstance(item, Mapping) and item.get(entity.id_field) is not None:
-        return item.get(entity.id_field)
-    return body.get(entity.id_field)
+    candidates = [name for name, prop in _properties(schema).items() if _schema_type(prop) == kind]
+    name = canonical if canonical in candidates else candidates[0] if len(candidates) == 1 else None
+    return body.get(name) if name is not None else None
+
+
+def _items(body: Any, output_schema: Mapping[str, Any]) -> list[Any] | None:
+    items = _response_member(body, output_schema, kind="array", canonical="items")
+    return list(items) if isinstance(items, list) else None
+
+
+def _record_id(entity: _Entity, body: Any, output_schema: Mapping[str, Any]) -> Any:
+    if not isinstance(body, Mapping) or _schema_type(output_schema) != "object":
+        return None
+    if entity.id_field in _properties(output_schema):
+        return body.get(entity.id_field)
+    item = _response_member(body, output_schema, kind="object", canonical="item")
+    return item.get(entity.id_field) if isinstance(item, Mapping) else None
 
 
 def _lookup_value(entity: _Entity, stored: Mapping[str, Any] | None) -> str | None:
@@ -1836,7 +1850,7 @@ async def _crud(run: _SmokeRun, entity: _Entity) -> None:
     create = actions["create"]
     payload = _required_params(_input_schema(module, create), fields)
     status, body, summary = await run.call("POST", entity.module, create, a, payload)
-    record_id = _record_id(entity, body) if 200 <= status < 300 else None
+    record_id = _record_id(entity, body, _output_schema(module, create)) if 200 <= status < 300 else None
     stored = await _stored(run, entity, record_id) if record_id is not None else None
     no_record = f"user A's {create} produced no stored record to act on"
     if not 200 <= status < 300:
@@ -1870,14 +1884,15 @@ async def _crud(run: _SmokeRun, entity: _Entity) -> None:
     no_lookup = f"the stored record has no value for canonical get lookup {entity.lookup_field!r}"
 
     def listed_ids(body: Any) -> list[Any] | None:
-        items = _items(body)
+        items = _items(body, _output_schema(module, actions["list"]))
         return None if items is None else [item.get(entity.id_field) for item in items if isinstance(item, Mapping)]
 
     if "list" in actions:
         status, body, summary = await run.call("GET", entity.module, actions["list"], a, {})
         listed = listed_ids(body)
         if not 200 <= status < 300 or listed is None:
-            run.record(f"{tag}.a_list", False, f"{describe(actions['list'], 'A')}: expected 2xx with items, got {summary}.",
+            run.record(f"{tag}.a_list", False,
+                       f"{describe(actions['list'], 'A')}: expected 2xx with the declared record array, got {summary}.",
                        path=failure_path())
         elif has_record and record_id not in listed:
             run.record(f"{tag}.a_list", False,
@@ -1916,7 +1931,7 @@ async def _crud(run: _SmokeRun, entity: _Entity) -> None:
             listed = listed_ids(body)
             if not 200 <= status < 300 or listed is None:
                 run.record(f"{tag}.b_list_isolated", False,
-                           f"{describe(actions['list'], 'B')}: expected 2xx with B's own items, got {summary}.",
+                           f"{describe(actions['list'], 'B')}: expected 2xx with B's declared record array, got {summary}.",
                            path=failure_path())
             elif record_id in listed:
                 run.record(f"{tag}.b_list_isolated", False,
@@ -2040,7 +2055,7 @@ async def _gated_params(
         status, body, _summary = await run.call(
             "POST", module.name, create, principal, _required_params(_input_schema(module, create), fields),
         )
-        record_id = _record_id(entity, body) if 200 <= status < 300 else None
+        record_id = _record_id(entity, body, _output_schema(module, create)) if 200 <= status < 300 else None
         record_id = record_id if record_id is not None else "smoke-missing-record"
         if operation == "get":
             stored = await _stored(run, entity, record_id)

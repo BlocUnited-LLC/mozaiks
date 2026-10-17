@@ -8,11 +8,12 @@ workflow triggering on top of the headless platform host.
 """
 
 import io
+import json
 import os
 import stat
 import zipfile
-from asyncio import CancelledError, to_thread
-from contextlib import asynccontextmanager
+from asyncio import CancelledError, Lock, to_thread
+from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
 from datetime import UTC, datetime
 from difflib import unified_diff
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -82,7 +83,10 @@ from mozaiksai.control_plane.app_intelligence_jobs import (
     save_app_intelligence_index_job,
 )
 from mozaiksai.control_plane.dry_run import RefinementDryRunPlan, RefinementExecutionPlan
-from mozaiksai.control_plane.implementations.coding_worker import resolve_coding_validation_strategy
+from mozaiksai.control_plane.implementations.coding_worker import (
+    parent_workspace_pack_paths,
+    resolve_coding_validation_strategy,
+)
 from mozaiksai.control_plane.review import load_refinement_review_record
 from mozaiksai.core.app_context.models import SourceRef
 from mozaiksai.core.app_context.refresh import ContextRefreshPlan, ContextRefreshScope
@@ -2131,6 +2135,123 @@ class BuildArtifactAcceptanceRequest(BaseModel):
     notes: str | None = Field(default=None, max_length=2000)
 
 
+#: Per-app serialization of app bundle acceptances, so the app-owned pack code
+#: rechecks and the acceptance they guard cannot interleave in this process.
+_WORKSPACE_ACCEPTANCE_LOCKS: dict[str, Lock] = {}
+
+
+def _changed_workspace_pack_paths(version) -> list[str]:  # noqa: ANN001
+    scope = _version_metadata(version).get("refinement_scope")
+    paths = scope.get("changed_workspace_pack_paths") if isinstance(scope, dict) else None
+    return sorted(str(path) for path in paths) if isinstance(paths, list) else []
+
+
+def _workspace_acceptance_guard(app_id: str, version) -> AbstractAsyncContextManager[Any]:  # noqa: ANN001
+    if version.build_family != "app_bundle" and not _changed_workspace_pack_paths(version):
+        return nullcontext()
+    return _WORKSPACE_ACCEPTANCE_LOCKS.setdefault(app_id, Lock())
+
+
+def _recorded_workspace_pack_paths(files: dict[str, str]) -> set[str]:
+    try:
+        provenance = json.loads(files.get(".mozaiks/pack_provenance.json") or "{}")
+    except ValueError:
+        return set()
+    packs = provenance.get("packs") if isinstance(provenance, dict) else None
+    return {
+        str(entry.get("path")) for pack in packs or [] if isinstance(pack, dict)
+        for entry in pack.get("materialized_owned_files") or []
+        if isinstance(entry, dict) and entry.get("owner") == "workspace" and entry.get("path")
+    }
+
+
+async def _require_current_app_owned_pack_code(version, *, app_id: str, artifact_store: Any) -> None:  # noqa: ANN001
+    """Reject a stale version that would replace app-owned pack code accepted since its parent.
+
+    Acceptance replaces the whole bundle. A version made from a build that is
+    no longer the app's accepted current build carries that older build's
+    app-owned pack code, such as a customized Messaging handler, so accepting
+    it would silently revert an authorized change accepted since.
+    """
+    if version.build_family != "app_bundle":
+        return
+    refs = await artifact_store.get_current_build_record_refs(app_id=app_id)
+    current_id = str((refs or {}).get(version.build_family) or "").strip()
+    if not current_id or current_id in {version.id, version.parent_build_record_id}:
+        return
+    current = await artifact_store.get_build_record(app_id=app_id, build_record_id=current_id)
+    if current is None:
+        return
+    current_files, _ = _decode_text_bundle_entries(await _verified_app_bundle(current))
+    version_files, _ = _decode_text_bundle_entries(await _verified_app_bundle(version))
+    paths = _recorded_workspace_pack_paths(current_files) | _recorded_workspace_pack_paths(version_files)
+    for record in (current, version):
+        paths |= set(parent_workspace_pack_paths(_version_metadata(record).get("capability_packs") or []) or ())
+    changed = sorted(path for path in paths if current_files.get(path) != version_files.get(path))
+    if changed:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This version was made from an earlier build and would replace app-owned capability code "
+                f"accepted since ({', '.join(changed)}). Refine the current build instead. No version was accepted."
+            ),
+        )
+
+
+async def _require_accepted_workspace_parent(
+    version, *, app_id: str, owner_user_id: str, build_registry_id: str | None, artifact_store: Any,  # noqa: ANN001
+) -> None:
+    """Recheck at acceptance the authority an app-owned pack code change was admitted under.
+
+    The server-recorded scope must still be an explicit or user-confirmed
+    selection of the changed paths in this registered build, and the child's
+    parent must still be the app's accepted current build. Otherwise nothing
+    is accepted.
+    """
+    changed = _changed_workspace_pack_paths(version)
+    metadata = _version_metadata(version)
+    scope = metadata.get("refinement_scope") or {}
+    if (
+        scope.get("scope_origin") not in {"explicit", "confirmed"}
+        or not set(changed) <= set(scope.get("selected_file_paths") or [])
+        or not build_registry_id
+        or metadata.get("build_registry_id") != build_registry_id
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This change to app-owned capability code was not made in an authorized selected-file "
+                "refinement of this build. No version was accepted."
+            ),
+        )
+    refs = await artifact_store.get_current_build_record_refs(app_id=app_id)
+    current = str((refs or {}).get(version.build_family) or "").strip() or None
+    if not version.parent_build_record_id or (current is not None and current != version.parent_build_record_id):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This change to app-owned capability code was made from a build that is no longer the "
+                "app's accepted current build. Refine the current build again. No version was accepted."
+            ),
+        )
+    # A refinement run marks its own parent stale, so no build is CURRENT while
+    # this child awaits review. The registry's compare-and-set run chain then
+    # decides: the child must still be the latest registered run, admitted
+    # against the parent that was current when its run began.
+    registry_record = (await _get_app_registry_service().get_app_record(
+        owner_user_id=owner_user_id, build_registry_id=build_registry_id,
+    )).get("app") or {}
+    run = registry_record.get("current_build_run") or {}
+    if run.get("artifact_version_id") != version.id or run.get("build_id") != metadata.get("build_id"):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "A newer build run started for this app after this change to app-owned capability code was "
+                "made. Refine the current build again. No version was accepted."
+            ),
+        )
+
+
 class GenesisAcceptanceRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     confirm_exact_source_review: Literal[True]
@@ -2188,7 +2309,7 @@ async def accept_build_artifact_version(
     principal: UserPrincipal = Depends(require_studio_user),
 ):
     validate_path_id(artifact_version_id, "artifact_version_id")
-    app_id, _ = await _resolve_studio_artifact_scope(principal, app_id=app_id, build_registry_id=build_registry_id)
+    app_id, owner_user_id = await _resolve_studio_artifact_scope(principal, app_id=app_id, build_registry_id=build_registry_id)
     artifact_store = get_artifact_store()
     version = await artifact_store.get_build_record(app_id=app_id, build_record_id=artifact_version_id)
     if not version:
@@ -2214,23 +2335,34 @@ async def accept_build_artifact_version(
             status_code=409,
             detail="Staged refinement drafts require a promotion_ready review record before acceptance.",
         )
-    if refinement_review_record is not None:
-        try:
-            accepted_result = await accept_staged_refinement_build_record(
-                app_id=app_id,
-                draft_build_record_id=artifact_version_id,
-                review_record=refinement_review_record,
-                request_id=refinement_review_record.request_id,
-                record_store=artifact_store,
-                accepted_by=principal.user_id,
-                notes=body.notes if body is not None else None,
+    async with _workspace_acceptance_guard(app_id, version):
+        if _changed_workspace_pack_paths(version):
+            # Re-read under the guard: another acceptance may have just completed.
+            current_version = await artifact_store.get_build_record(app_id=app_id, build_record_id=artifact_version_id)
+            if current_version is None or current_version.lifecycle_status != ArtifactLifecycleStatus.DRAFT:
+                raise HTTPException(status_code=409, detail="Only draft artifact versions can be accepted.")
+            await _require_accepted_workspace_parent(
+                current_version, app_id=app_id, owner_user_id=owner_user_id,
+                build_registry_id=build_registry_id, artifact_store=artifact_store,
             )
-        except (AcceptedStagedAppBundleBuildRecordError, ValueError) as exc:
-            logger.warning("accept_staged_refinement conflict app=%s version=%s: %s", app_id, artifact_version_id, exc)
-            raise HTTPException(status_code=409, detail="Conflict accepting artifact version.") from exc
-        accepted = accepted_result.build_record
-    else:
-        accepted = await artifact_store.accept_build_record(app_id=app_id, build_record_id=artifact_version_id)
+        await _require_current_app_owned_pack_code(version, app_id=app_id, artifact_store=artifact_store)
+        if refinement_review_record is not None:
+            try:
+                accepted_result = await accept_staged_refinement_build_record(
+                    app_id=app_id,
+                    draft_build_record_id=artifact_version_id,
+                    review_record=refinement_review_record,
+                    request_id=refinement_review_record.request_id,
+                    record_store=artifact_store,
+                    accepted_by=principal.user_id,
+                    notes=body.notes if body is not None else None,
+                )
+            except (AcceptedStagedAppBundleBuildRecordError, ValueError) as exc:
+                logger.warning("accept_staged_refinement conflict app=%s version=%s: %s", app_id, artifact_version_id, exc)
+                raise HTTPException(status_code=409, detail="Conflict accepting artifact version.") from exc
+            accepted = accepted_result.build_record
+        else:
+            accepted = await artifact_store.accept_build_record(app_id=app_id, build_record_id=artifact_version_id)
     if accepted is None:
         raise HTTPException(status_code=404, detail=f"Artifact version not found: {artifact_version_id}")
 
@@ -2952,6 +3084,9 @@ async def trigger_workflow(
             )
         except (GenesisImportError, ValueError, OSError, ContentNotFoundError) as exc:
             raise HTTPException(status_code=409, detail="Selected imported Genesis source has no accepted owner review") from exc
+        # App-owned pack code of the saved parent: an inferred scope that would
+        # change it waits for confirmation, and changing it needs the current build.
+        workspace_pack_paths = parent_workspace_pack_paths(metadata.get("capability_packs") or [])
         # Filesystem roots and baseline contracts come from the saved version,
         # not from caller context or copied workbench metadata.
         safe_extra = {
@@ -3108,7 +3243,7 @@ async def trigger_workflow(
                     finalized = await orchestration_control.finalize_surface_output(
                         plan=contract_surface_plan, result=surface_result, refinement_request=refinement_request,
                         routing_decision=refinement_decision, workspace_files=baseline_files,
-                        run_build_binding=inline_binding,
+                        run_build_binding=inline_binding, allowed_paths=explicit_paths or None,
                     )
                     await _complete_inline_refinement(binding=inline_binding, user_id=user_id, result=finalized)
                     surface_result = surface_result.model_copy(update={
@@ -3146,7 +3281,9 @@ async def trigger_workflow(
             if coding_request is not None:
                 inline_binding = None
                 try:
-                    coding_request, coding_decision = await orchestration_control.prepare_coding_request(coding_request)
+                    coding_request, coding_decision = await orchestration_control.prepare_coding_request(
+                        coding_request, confirmation_required_paths=workspace_pack_paths or (),
+                    )
                     harness_decision = coding_decision
                     if coding_request is not None:
                         baseline_files, skipped = _decode_text_bundle_entries(await _verified_app_bundle(source_version))

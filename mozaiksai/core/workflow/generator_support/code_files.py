@@ -22,6 +22,7 @@ from mozaiksai.core.runtime.persistence.intent_loader import (
 )
 from mozaiksai.core.semantics.closed_contract_schema import import_closed_contract_schema
 
+from .module_action_inventory import SHARED_PACK_OUTPUT_PATHS
 from .persistence_artifacts import (
     managed_data_owners,
     materialize_data_migrations,
@@ -332,9 +333,35 @@ def _materialize_app_schema_file_map(
 def compile_data_contract(
     data_contract: dict[str, Any], *, subscription_contract: dict[str, Any] | None = None,
     context_variables: Any = None,
+    pack_data_contracts: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Resolve mechanical persistence fields from approved design and subscriptions."""
+    """Compile approved design and verified pack collection contributions.
+
+    The factory resolver supplies pack contributions. A contribution may add an
+    owner or agree exactly with an already admitted owner; it cannot overwrite
+    an app's collection, policies, aliases, or unrelated data contract metadata.
+    """
     contract = normalize_data_contract_indexes(data_contract)
+    contributed_surfaces = []
+    for contribution in pack_data_contracts or []:
+        if set(contribution) - {"version", "surfaces", "shared_collections"} or contribution.get("shared_collections"):
+            raise ValueError("Pack data contributions must declare module-owned collection surfaces only")
+        contribution = normalize_data_contract_indexes(contribution)
+        validate_complete_data_contract_ownership(contribution)
+        identities = [surface.get("surface_id") for surface in contribution.get("surfaces") or []]
+        if len(identities) != len(set(identities)):
+            raise ValueError("Pack data contribution has duplicate surface owners")
+        for surface in contribution.get("surfaces") or []:
+            if surface.get("surface_kind") != "module":
+                raise ValueError("Pack data contributions require module owners")
+            contributed_surfaces.append(surface)
+    surfaces = contract.setdefault("surfaces", [])
+    for surface in sorted(contributed_surfaces, key=lambda row: row["surface_id"]):
+        existing = [row for row in surfaces if row.get("surface_id") == surface["surface_id"]]
+        if existing and (len(existing) != 1 or existing[0] != surface):
+            raise ValueError(f"Conflicting pack data contribution for {surface['surface_id']!r}")
+        if not existing:
+            surfaces.append(deepcopy(surface))
     managed_owners = managed_data_owners(context_variables)
     for surface in contract.get("surfaces") or []:
         if surface.get("surface_id") in managed_owners and surface.get("collections"):
@@ -705,6 +732,9 @@ def discard_pack_owned_outputs(payload: Any, pack_paths: frozenset[str]) -> tupl
     materialize at one of these paths are dropped, and so is a request to
     delete one. Returns the payload without them and the sorted dropped paths.
     """
+    # These are app-wide registries. Assembly composes their declarations with
+    # verified pack contributions instead of replacing the worker's root file.
+    pack_paths = pack_paths - SHARED_PACK_OUTPUT_PATHS
     unwrapped = _unwrap_output_envelope(payload)
     if not pack_paths or not isinstance(unwrapped, dict):
         return payload, []
@@ -755,18 +785,15 @@ def discard_pack_owned_outputs(payload: Any, pack_paths: frozenset[str]) -> tupl
             dropped.add(path)
     routes = result.get("custom_route_bundle")
     if isinstance(routes, dict):
-        if {"ui/route_manifest.json", "ui/index.js"} & pack_paths:
-            # Both registries are derived from the typed bundle. Filter their
-            # actual materialized paths; a nonexistent ui_index field cannot
-            # suppress the generated registry.
+        page_files = routes.get("page_files")
+        if isinstance(page_files, list) and any(
+            isinstance(entry, dict) and pack_owned(entry.get("path")) for entry in page_files
+        ):
+            # Derive the shared registrations before removing an exclusive
+            # implementation; the verified template supplies that file later.
             rendered = keep_entries(_custom_route_bundle_code_files(routes), "filename")
             result["code_files"] = [*(result.get("code_files") or []), *rendered]
             result["custom_route_bundle"] = None
-        elif "page_files" in routes:
-            routes["page_files"] = keep_entries(routes["page_files"], "path")
-    if "ui/index.js" in pack_paths and result.get("registration_barrel") is not None:
-        result["registration_barrel"] = None
-        dropped.add("ui/index.js")
     bundle = result.get("module_contract")
     if isinstance(bundle, dict) and str(bundle.get("module_id") or "").strip():
         prefix = PurePosixPath("modules", str(bundle["module_id"]).strip())

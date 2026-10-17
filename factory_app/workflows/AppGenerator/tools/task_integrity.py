@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from typing import Any, NoReturn
 
 from mozaiksai.core.workflow.context.frozen import detach
@@ -18,6 +18,31 @@ from mozaiksai.core.workflow.task_batches import (
 
 class RepairOwnershipError(ValueError):
     """The entire repair candidate was rejected before artifact mutation."""
+
+
+#: AppGenerator cannot authorize a change to app-owned (``owner: workspace``)
+#: pack code; only an authorized Studio backend refinement can.
+WORKSPACE_PACK_CHANGE_DIAGNOSTIC = {
+    "code": "WORKSPACE_PACK_OUTPUT_CHANGE_UNSUPPORTED",
+    "missing_capability": "authorized_backend_refinement",
+    # A bounded repair cannot authorize this change either.
+    "block_reason": "authorized_backend_refinement_required",
+}
+WORKSPACE_PACK_CHANGE_REMEDY = (
+    "It needs an authorized backend refinement: a Studio selected-file patch refinement of this exact path."
+)
+
+
+class WorkspacePackOutputChangeRejected(RepairOwnershipError):
+    """A saved candidate changes app-owned pack code that AppGenerator cannot admit."""
+
+    def __init__(self, *, paths: list[str], task_id: str) -> None:
+        owner = f"task {task_id!r}" if task_id else "this output"
+        super().__init__(
+            f"{', '.join(paths)}: {owner} changes app-owned capability pack code, which AppGenerator "
+            f"cannot admit. {WORKSPACE_PACK_CHANGE_REMEDY}"
+        )
+        self.diagnostic = {**WORKSPACE_PACK_CHANGE_DIAGNOSTIC, "paths": paths, "task_id": task_id}
 
 
 def _get(context: Any, key: str, default: Any = None) -> Any:
@@ -218,8 +243,14 @@ def _settle_repair(context: Any, status: str, error: str = "") -> None:
     _set(context, "bundle_repair_result", result)
 
 
-def mark_repair_responded(context: Any) -> None:
-    _settle_repair(context, "responded")
+def mark_repair_responded(context: Any, saved_paths: Iterable[str] = ()) -> None:
+    """Settle a saved repair, recording what it saved: those paths are now newer than its task's output."""
+    result = _get(context, "bundle_repair_result") or {}
+    active = result.get("active")
+    if not isinstance(active, dict):
+        return
+    result["active"] = {**active, "status": "responded", "error": "", "saved_paths": sorted(set(saved_paths))}
+    _set(context, "bundle_repair_result", result)
 
 
 def mark_repair_rejected(context: Any, error: str) -> bool:
@@ -233,11 +264,30 @@ def mark_repair_rejected(context: Any, error: str) -> bool:
 
 def validate_repair_candidate(
     context: Any, incoming: dict[str, str], deleted: Iterable[str] = (),
-    *, existing: dict[str, str] | None = None,
+    *, existing: dict[str, str] | None = None, protected: Collection[str] = (),
 ) -> dict[str, str]:
-    """Admit one owned repair atomically; foreign identical readback is omitted."""
+    """Admit one owned repair atomically; foreign identical readback is omitted.
+
+    ``protected`` paths are app-owned pack code: a candidate that changes or
+    deletes one is rejected whole, repair or not, because owning the path in
+    the plan is not authority to change it. Identical bytes are not a change.
+    """
     result = _get(context, "bundle_repair_result") or {}
     active = result.get("active")
+    deleted = list(deleted)
+    changed = sorted(
+        {path for path, content in incoming.items() if path in protected and (existing or {}).get(path) != content}
+        | {path for path in deleted if path in protected}
+    )
+    if changed:
+        task = _get(context, "current_build_task") or {}
+        rejection = WorkspacePackOutputChangeRejected(
+            paths=changed,
+            task_id=str((active or {}).get("task_id") or task.get("task_id") or ""),
+        )
+        if isinstance(active, dict) and active.get("status") == "selected":
+            _settle_repair(context, "rejected", str(rejection))
+        raise rejection
     if not isinstance(active, dict):
         if _get(context, "bundle_repair_target"):
             raise RepairOwnershipError("repair has no approved task ownership request")

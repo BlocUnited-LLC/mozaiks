@@ -170,34 +170,31 @@ def test_messages_contract_declares_account_data_handler_as_required_output() ->
 # Data migration
 # ---------------------------------------------------------------------------
 
-def test_messaging_data_migration_declares_stable_collection_aliases() -> None:
+def test_messaging_data_migration_declares_canonical_collection_operations() -> None:
     migration_path = TEMPLATES / "data" / "migrations" / "001_messaging_collections.json"
     assert migration_path.exists()
     migration = json.loads(migration_path.read_text(encoding="utf-8"))
 
-    aliases = {
-        collection["data_alias"]
-        for surface in migration.get("surfaces", [])
-        for collection in surface.get("collections", [])
+    collections = {
+        (operation["module_id"], operation["entity_name"])
+        for operation in migration["operations"] if operation["type"] == "ensure_collection"
     }
-    assert aliases == {
-        "messages.threads",
-        "messages.messages",
-        "messages.thread_reads",
-    }
+    assert collections == {("messages", name) for name in ("threads", "messages", "thread_reads")}
+    assert migration["schema_version"] == "mozaiks.data_migration.v1"
+    assert {operation["type"] for operation in migration["operations"]} == {"ensure_collection", "ensure_index"}
+    assert "surfaces" not in migration
 
 
 def test_messaging_read_state_index_includes_scope() -> None:
     migration_path = TEMPLATES / "data" / "migrations" / "001_messaging_collections.json"
     migration = json.loads(migration_path.read_text(encoding="utf-8"))
-    collections = {
-        collection["data_alias"]: collection
-        for surface in migration.get("surfaces", [])
-        for collection in surface.get("collections", [])
+    read_indexes = {
+        operation["index"]["name"]: operation["index"]
+        for operation in migration["operations"]
+        if operation["type"] == "ensure_index" and operation["entity_name"] == "thread_reads"
     }
-    read_indexes = {index["name"]: index for index in collections["messages.thread_reads"]["indexes"]}
 
-    assert [key["field"] for key in read_indexes["reads_by_thread_user"]["keys"]] == [
+    assert [key[0] for key in read_indexes["reads_by_thread_user"]["keys"]] == [
         "scope_type",
         "scope_id",
         "thread_id",

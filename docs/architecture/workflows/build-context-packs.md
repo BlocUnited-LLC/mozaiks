@@ -165,6 +165,45 @@ app bundle paths.
 UI primitives stay first-class in `chat-ui`. Build-context packs compose page
 schemas from those primitives; they do not define their own primitive layer.
 
+### Persistent template contributions
+
+A selected pack may declare `templates/data/contract.json` as an
+`owner: templates` required output. The verified resolver contributes its
+module-owned collection surfaces to the approved app data contract. The data
+compiler preserves unrelated app surfaces and rejects conflicting ownership or
+collection definitions. It emits one `data/contract.json`; a pack template never
+replaces that shared app artifact directly. Shared outputs record contributor
+pack identities in `.mozaiks/pack_provenance.json`, separately from exclusively
+owned template files. Several selected packs may declare the same shared root
+(`data/contract.json`, `ui/index.js`, `ui/route_manifest.json`); any other
+declared output path belongs to exactly one selected pack.
+
+Canonical policy, schema, and CRUD synthesis still owns ordinary generated and
+partially templated modules, including OutcomeFeedback. A complete template
+implementation keeps its own actions and participant-aware policy only when
+dependency closure, current source identity, declared output closure, and exact
+template bytes are verified. The factory's shipped packs are trusted sources;
+external sources require matching version and digest pins, either on the
+selected pack or from installed Community Component state verified against the
+source's current bytes. A workspace-owned
+`backend/handler.py` may extend the verified template base handler. Missing,
+changed, or undeclared implementation files fail admission; the exemption does
+not skip runtime, schema, implementation, or browser validation.
+
+Messaging `0.1.14` declares `threads`, `messages`, and `thread_reads` under the
+`messages` module. These app-wide collections retain participant and verified
+workspace authorization in the shipped service and policy; generic collection
+CRUD must not expose private conversations. Its additive migration uses only
+`ensure_collection` and `ensure_index`, retaining the existing index names and
+keys. Reapplying the same migration hash skips it without rewriting records.
+Account export and deletion use the same app-bound persistence collections and
+preserve messages and conversations belonging to other participants. Its
+`message_sent` notification carries no message text, and its lifecycle events
+declare the subject app and related record as nullable, so plain direct
+conversations still dispatch them. Neither the migration nor account deletion
+touches platform notifications, so a notification rendered by `0.1.13` keeps its
+copied preview until the recipient clears it.
+
 ## Targeting
 
 Targeting has two layers.
@@ -448,6 +487,41 @@ is allowed only when the operation can compare the workspace files against the
 old pack's rendered content. It refuses to overwrite locally modified owned
 files, files owned by another installed pack, or workspace-owned/custom files.
 It does not execute migration scripts.
+
+`data/contract.json` is never an owned file. When a pack's data contribution
+changes, the plan lists it in `recomposed_files`, and applying replaces only
+that pack's surfaces in the app contract, preserving app-owned surfaces and
+other contributions. When the contribution changes and the app has no
+contract, the lifecycle creates one whenever the new version ships a data
+contract template, even one that declares no surfaces. In that case it writes
+the same empty contract (`"surfaces": []`) that assembly composes for the pack
+when no approved DesignDocs contract exists. If the new version ships no data
+contract template, no contract is created. The plan blocks before anything is
+written when any installed pack other than the upgraded one claims the contract
+as an exclusive file in its provenance, in any entry order and even when the
+upgraded pack claims it too (`owned_by_other_pack`), when a pack surface was
+modified locally (`locally_modified_composed_output`), or when the app contract
+fails the runtime data contract loader or conflicts with the contribution
+(`composed_output_conflict`).
+
+Provenance keeps other packs' composed contributors, and a root the app
+already composes stays composed. A composed shared UI root (`ui/index.js`,
+`ui/route_manifest.json` under `composed_outputs`) merges the app's and every
+contributing pack's declarations into one file, so the lifecycle does not
+recompose it. An unchanged template only updates the contributor identity, and
+a root the pack owns exclusively upgrades as an ordinary owned file. When an
+upgrade adds, changes, or removes the pack's template for a composed root, the
+plan blocks with `composed_output_requires_reassembly` and nothing is written.
+
+For an installed Community Component, that block currently has no supported
+way through: the lifecycle cannot adopt that pack version. Applying the
+upgrade is the only operation that moves the installed pin, and it is the
+blocked step. Installing the new version is refused while another version of
+the pack is installed. Reassembly that selects the pack by id resolves the
+pinned old source. A reassembly whose pack descriptor names the new version's
+`pack_source_path` directly renders the new templates but does not touch
+`installed_components.json` or its source sidecar, so the next upgrade plan
+still compares against the old version's output and blocks again.
 
 Mozaiks does not perform remote downloads, registry lookup, marketplace ranking,
 trust scoring, cryptographic signing, or automatic semver range upgrades for

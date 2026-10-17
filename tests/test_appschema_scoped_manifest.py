@@ -310,19 +310,115 @@ def test_scoped_custom_revision_retains_only_unchanged_baseline_routes(schema_mo
         assert {entry["filename"]: entry["content"] for entry in validate()} == files
 
 
-@pytest.mark.parametrize("pack_paths", [
-    frozenset({"ui/index.js"}), frozenset({"ui/route_manifest.json"}),
-    frozenset({"ui/index.js", "ui/route_manifest.json", "ui/pages/custom/deal_room.jsx"}),
+@pytest.mark.parametrize("pack_paths,expected_dropped", [
+    (frozenset({"ui/index.js"}), frozenset()),
+    (frozenset({"ui/route_manifest.json"}), frozenset()),
+    (
+        frozenset({"ui/index.js", "ui/route_manifest.json", "ui/pages/custom/deal_room.jsx"}),
+        frozenset({"ui/pages/custom/deal_room.jsx"}),
+    ),
+    (frozenset({"ui/pages/custom/deal_room.jsx"}), frozenset({"ui/pages/custom/deal_room.jsx"})),
 ])
-def test_pack_filter_removes_derived_custom_registries_without_ui_index_field(schema_model, pack_paths):
+@pytest.mark.parametrize("include_app_page", [False, True])
+def test_pack_filter_preserves_shared_custom_registries_and_drops_only_exclusive_pages(
+    schema_model, pack_paths, expected_dropped, include_app_page,
+):
     typed, _, _ = _planned_custom_candidate(schema_model)
+    if include_app_page:
+        bundle = typed["custom_route_bundle"]
+        bundle["route_manifest"].append({
+            **bundle["route_manifest"][0], "id": "review", "path": "/review", "component": "ReviewPage",
+        })
+        bundle["page_files"].append({
+            **bundle["page_files"][0], "route_id": "review", "path": "ui/pages/custom/review.jsx",
+            "component_name": "Review", "registry_key": "ReviewPage", "contract_refs": [],
+            "content": "export default function Review() { return null; }",
+        })
     before = deepcopy(typed)
     original = extract_code_file_map_from_payload(typed)
     filtered, dropped = discard_pack_owned_outputs(typed, pack_paths)
-    assert set(dropped) == pack_paths
+    assert set(dropped) == expected_dropped
     assert extract_code_file_map_from_payload(filtered) == {
-        path: content for path, content in original.items() if path not in pack_paths
+        path: content for path, content in original.items() if path not in expected_dropped
     }
+    repeated, repeated_drops = discard_pack_owned_outputs(filtered, pack_paths)
+    assert repeated == filtered
+    assert repeated_drops == []
+    assert typed == before
+
+
+@pytest.mark.parametrize("pack_paths", [
+    frozenset({"ui/index.js"}),
+    frozenset({"ui/index.js", "ui/pages/custom/Messages.jsx"}),
+])
+def test_pack_filter_preserves_shared_registration_barrel(pack_paths):
+    page_path = "ui/pages/custom/Messages.jsx"
+    payload = {
+        "registration_barrel": "export function register(registerComponent) {}\n",
+        "code_files": [{"filename": page_path, "content": "export default function Messages() { return null; }"}],
+    }
+    before = deepcopy(payload)
+    original = extract_code_file_map_from_payload(payload)
+    filtered, dropped = discard_pack_owned_outputs(payload, pack_paths)
+    expected_dropped = {page_path} if page_path in pack_paths else set()
+    assert set(dropped) == expected_dropped
+    assert filtered["registration_barrel"] == payload["registration_barrel"]
+    assert extract_code_file_map_from_payload(filtered) == {
+        path: content for path, content in original.items() if path not in expected_dropped
+    }
+    assert discard_pack_owned_outputs(filtered, pack_paths) == (filtered, [])
+    assert payload == before
+
+
+@pytest.mark.parametrize("claim_pack_page", [False, True])
+def test_filtered_custom_bundle_composes_with_verified_pack_or_rejects_competing_claim(schema_model, claim_pack_page):
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        resolve_managed_capability_templates,
+    )
+    from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+        pack_owned_output_paths,
+    )
+    from mozaiksai.core.workflow.generator_support.ui_registry_composition import (
+        compose_ui_registry,
+    )
+    from tests.test_messaging_pack_persistence_composition import _context
+
+    context = _context()
+    pack_contributions = []
+    templates = {entry["filename"]: entry["content"] for entry in resolve_managed_capability_templates(
+        context["capability_packs"], context_variables=context, ui_contributions=pack_contributions,
+    )}
+    typed, _, _ = _planned_custom_candidate(schema_model)
+    if claim_pack_page:
+        bundle = typed["custom_route_bundle"]
+        bundle["route_manifest"].append({
+            **bundle["route_manifest"][0], "id": "messages", "path": "/messages", "component": "Messages",
+        })
+        bundle["page_files"].append({
+            **bundle["page_files"][0], "route_id": "messages", "path": "ui/pages/custom/Messages.jsx",
+            "component_name": "Messages", "registry_key": "Messages", "contract_refs": [],
+            "content": "export default function Messages() { return 'worker copy'; }",
+        })
+    before = deepcopy(typed)
+    filtered, dropped = discard_pack_owned_outputs(typed, pack_owned_output_paths(context))
+    app_files = extract_code_file_map_from_payload(filtered)
+    assert dropped == (["ui/pages/custom/Messages.jsx"] if claim_pack_page else [])
+    assert "ui/pages/custom/Messages.jsx" not in app_files
+    contributions = [{"owner": "task:custom_pages", "files": [
+        {"filename": path, "content": content} for path, content in app_files.items()
+    ]}, *pack_contributions]
+    final_files = {**app_files, **templates}
+    if claim_pack_page:
+        with pytest.raises(ValueError, match="Conflicting route id: messages|Competing owners for route: messages"):
+            compose_ui_registry(contributions, final_files)
+    else:
+        shared = compose_ui_registry(contributions, final_files)
+        assert {route["path"] for route in json.loads(shared["ui/route_manifest.json"])["pages"]} == {
+            "/deal-room", "/messages",
+        }
+        assert "InvestorDealRoomPage" in shared["ui/index.js"]
+        assert "MessagingProfileTab" in shared["ui/index.js"]
+        assert "Messages" in shared["ui/index.js"]
     assert typed == before
 
 

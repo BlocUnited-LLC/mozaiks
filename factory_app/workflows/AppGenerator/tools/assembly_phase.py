@@ -21,6 +21,11 @@ from factory_app.workflows.AppGenerator.tools.code_file_utils import (
 )
 from factory_app.workflows.AppGenerator.tools.module_api_template import get_module_api_template
 from factory_app.workflows.AppGenerator.tools.render_auth_scaffold import materialize_auth_scaffold
+from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+    verified_pack_data_contracts,
+    verified_pack_template_inventory,
+    verified_template_module_ids,
+)
 from mozaiksai.core.workflow.generator_support.code_files import (
     compile_data_contract,
     materialize_collection_auth,
@@ -66,9 +71,14 @@ def _merge_code_files(
             if not filename or content is None:
                 continue
             file_map[str(filename)] = str(content)
+    inventory = verified_pack_template_inventory(context_variables=context_variables)
+    pack_data_contracts = verified_pack_data_contracts(inventory)
+    if data_contract is None and pack_data_contracts:
+        data_contract = {"version": "1", "surfaces": [], "shared_collections": []}
     if isinstance(data_contract, dict):
         data_contract = compile_data_contract(
             data_contract, subscription_contract=subscription_contract, context_variables=context_variables,
+            pack_data_contracts=pack_data_contracts,
         )
     elif subscription_contract is not None:
         assignment_contract = compile_data_contract(
@@ -78,6 +88,8 @@ def _merge_code_files(
         if assignment_contract.get("aliases"):
             data_contract = assignment_contract
     owned_paths = list(file_map)
+    if pack_data_contracts:
+        owned_paths.append("data/contract.json")
     if subscription_contract is not None and (data_contract or {}).get("aliases"):
         owned_paths.append("data/contract.json")
     file_map = materialize_data_contract(
@@ -87,6 +99,13 @@ def _merge_code_files(
     file_map = materialize_collection_auth(file_map, data_contract=data_contract)
     # Selected pack manifests come from registered templates, never model tasks.
     pack_paths = pack_owned_outputs(context_variables)
+    template_modules = verified_template_module_ids(file_map, inventory)
+    # A complete verified template backend owns its participant-aware policy and
+    # action implementations. All other modules retain canonical CRUD synthesis.
+    synthesis_files = {
+        path: content for path, content in file_map.items()
+        if not (path.startswith("modules/") and path.split("/")[1] in template_modules)
+    }
     # Feature outputs may carry an auth edit alongside a module. Only the
     # pre-merge admitted bundle (or the canonical scaffold) can approve scopes.
     admitted_scopes = (
@@ -96,8 +115,8 @@ def _merge_code_files(
             data_contract=data_contract,
         ) if app_build_plan is not None else None
     )
-    file_map.update(materialize_module_actions(
-        file_map, app_build_plan=app_build_plan, data_contract=data_contract,
+    synthesis_files.update(materialize_module_actions(
+        synthesis_files, app_build_plan=app_build_plan, data_contract=data_contract,
         design_surface_map=design_surface_map,
         subscription_contract=subscription_contract,
         declared_auth_scopes=admitted_scopes,
@@ -105,32 +124,32 @@ def _merge_code_files(
             path for path in pack_paths if path.startswith("modules/") and path.endswith("/module.yaml")
         ),
     ))
-    file_map.update(materialize_module_policies(file_map, data_contract))
-    file_map.update(materialize_module_schemas(file_map, app_build_plan=app_build_plan, data_contract=data_contract))
-    file_map.update(materialize_module_account_handlers(
-        file_map, app_build_plan=app_build_plan, data_contract=data_contract,
+    synthesis_files.update(materialize_module_policies(synthesis_files, data_contract))
+    synthesis_files.update(materialize_module_schemas(synthesis_files, app_build_plan=app_build_plan, data_contract=data_contract))
+    synthesis_files.update(materialize_module_account_handlers(
+        synthesis_files, app_build_plan=app_build_plan, data_contract=data_contract,
     ))
     service_paths = [
         path for task in (app_build_plan or {}).get("build_tasks") or []
         if task.get("task_type") == "business_services"
         for path in task.get("owned_paths") or []
     ]
-    # Models never own template paths. Canonical compilation still owns the
-    # declared CRUD/read methods inside admitted persistent template modules.
+    # Partially templated modules still receive canonical implementations.
     service_paths.extend(
         path for path in pack_paths
-        if path in file_map and len(parts := path.split("/")) == 4
+        if path in synthesis_files and len(parts := path.split("/")) == 4
         and parts[0] == "modules" and parts[2] == "backend"
         and parts[3] in {"handler.py", "service.py", "repo.py"}
     )
-    file_map.update(materialize_module_read_implementations(
-        file_map, app_build_plan=app_build_plan, data_contract=data_contract,
+    synthesis_files.update(materialize_module_read_implementations(
+        synthesis_files, app_build_plan=app_build_plan, data_contract=data_contract,
         subscription_contract=subscription_contract, owned_paths=service_paths,
     ))
-    file_map.update(materialize_module_write_implementations(
-        file_map, app_build_plan=app_build_plan, data_contract=data_contract, owned_paths=service_paths,
+    synthesis_files.update(materialize_module_write_implementations(
+        synthesis_files, app_build_plan=app_build_plan, data_contract=data_contract, owned_paths=service_paths,
         subscription_contract=subscription_contract,
     ))
+    file_map.update(synthesis_files)
     if "app.json" in file_map:
         file_map.update(materialize_auth_scaffold(file_map, data_contract=data_contract))
         file_map.setdefault("ui/lib/moduleApi.js", get_module_api_template())

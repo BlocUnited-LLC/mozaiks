@@ -167,6 +167,56 @@ Keys match the color palette: `primary`, `secondary`, `accent`, `success`,
 chat feed. These rarely need changing — adjust only when the default density
 or layout proportions don't match your design.
 
+Page-title typography belongs in `ui.page.title` in the same app-owned theme.
+`PageFrame`, declarative page headings, and `PageHeader` consume this role:
+
+```json
+{
+  "ui": {
+    "page": {
+      "title": {
+        "font": "heading",
+        "weight": "semibold",
+        "size": "lg",
+        "lineHeight": "tight",
+        "letterSpacing": "normal",
+        "textTransform": "none"
+      }
+    }
+  }
+}
+```
+
+All fields are optional; the example shows the defaults. `font` selects the
+existing app `fonts.body` or `fonts.heading` slot. The finite choices are:
+
+| Field | Values |
+| --- | --- |
+| `font` | `body`, `heading` |
+| `weight` | `regular` (400), `medium` (500), `semibold` (600), `bold` (700) |
+| `size` | `sm` (1.5rem), `md` (1.875rem), `lg` (2.25rem), `xl` (3rem) |
+| `lineHeight` | `tight` (1.15), `normal` (1.3), `relaxed` (1.5) |
+| `letterSpacing` | `tight` (-0.025em), `normal`, `wide` (0.05em) |
+| `textTransform` | `none`, `uppercase`, `lowercase`, `capitalize` |
+
+Omitting the role preserves authored title casing. Invalid explicit values or
+unknown title fields are rejected at capture and generation. At runtime the host's
+`/api/theme-config` returns `422` with the field-level reason. The app does not
+open: the shell shows a generic load failure with a retry button and logs the
+reason to the browser console. Frontend config validation checks the same title
+rules only on a successfully served theme config, which the host never serves
+with an invalid title. `PageHeader.title_font` may explicitly select
+`body` or `heading`; omitting it uses the theme role. ThemeCapture persists the
+role, and AppGenerator applies partial `theme_config_patch.ui.page.title` deltas
+without replacing unrelated title fields or existing page spacing. Null fields
+in generation patches mean no change; app-owned title values must be valid tokens.
+
+Both title paths use this role; an explicit `PageHeader` section suppresses the
+frame's extra title. The four page layouts share `ui.page.sectionGap`. Sidebar
+pages preserve their section order and mounted controls while stacking below
+the medium breakpoint. Unknown explicit layout values show an error before
+section data is fetched. Long title and action text wraps within the page.
+
 ```json
 {
   "primitives": {

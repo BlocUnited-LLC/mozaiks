@@ -25,7 +25,9 @@ router = APIRouter(tags=["notifications"])
 logger = get_workflow_logger("platform_app")
 
 # Fields excluded from notification list responses.
-# source_event may contain provider IDs (e.g. payment_provider_payment_intent_id).
+# source_event is a content-free event reference on new records, but records
+# stored earlier hold the whole originating event, including provider IDs
+# (e.g. payment_provider_payment_intent_id) and message text.
 _NOTIFICATION_SAFE_PROJECTION: dict[str, int] = {
     "_id": 0,
     "source_event": 0,
@@ -41,6 +43,7 @@ _SUPPORT_NOTIFICATION_MATCHES: tuple[dict[str, Any], ...] = (
     {"rule_id": {"$regex": r"^workspace_support\."}},
     {"event_type": {"$regex": r"^domain\.workspace_support\."}},
     {"context.related_type": "workspace_support.request"},
+    # Earlier records hold the whole event; new ones keep related_type on the reference.
     {"source_event.payload.related_type": "workspace_support.request"},
     {"source_event.related_type": "workspace_support.request"},
 )

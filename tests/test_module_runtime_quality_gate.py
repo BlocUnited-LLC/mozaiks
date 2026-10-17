@@ -141,6 +141,43 @@ class TestAuditModuleRuntimeQuality:
         )
         assert any("unfinished runtime logic" in warning for warning in warnings)
 
+    @pytest.mark.parametrize("source", [
+        "TASK_DEFAULTS = {'status': 'todo'}\n",
+        "from typing import Literal\nTaskStatus = Literal['todo', 'doing', 'done']\n",
+        "from enum import Enum\nclass TaskStatus(Enum):\n    TODO = 'todo'\n    DONE = 'done'\n",
+        "def next_status(todo):\n    return 'todo' if todo else 'done'\n",
+    ])
+    def test_todo_domain_values_and_identifiers_are_not_unfinished_logic(self, source):
+        assert self._audit(_code_files(("modules/tasks/backend/schemas.py", source))) == []
+
+    @pytest.mark.parametrize("source", [
+        "# TODO\ndef save():\n    return None\n",
+        "# todo: persist the record\ndef save():\n    return None\n",
+        "def save():\n    '''todo'''\n    return None\n",
+        "'''TODO: persist records'''\n",
+        "def save():\n    return 'TODO: implement persistence'\n",
+        "def save():\n    raise RuntimeError('todo: persist records')\n",
+        "def save():\n    raise RuntimeError('TODO')\n",
+        "def save():\n    raise RuntimeError('todo')\n",
+        "def save(reason):\n    return f'TODO{reason}'\n",
+        "def save(reason):\n    return f'{reason}todo'\n",
+        "TASK_DEFAULTS = {'status': 'todo'}\n# TODO: persist the record\n",
+        "def broken(:\n    # TODO: persist the record\n",
+        "def broken(:\n    return 'todo: persist records'\n",
+    ])
+    def test_todo_markers_remain_blocking(self, source):
+        warnings = self._audit(_code_files(("modules/tasks/backend/service.py", source)))
+        assert any("TODO runtime logic" in warning for warning in warnings)
+
+    def test_paired_domain_code_owned_schemas_pass_without_changing_status_values(self):
+        from tests.test_paired_experience_demo_960 import _domain_contract, _module_files
+
+        files = _module_files(_domain_contract())
+        source = files["modules/tasks/backend/schemas.py"]
+        assert "TASK_DEFAULTS: dict[str, Any] = {'status': 'todo'}" in source
+        assert self._audit([{"filename": name, "content": content}
+                            for name, content in files.items()]) == []
+
 
 class TestReviewModuleRuntimeQuality:
     def _review(self, code_files=None, prior_warnings=None, revision_count=None):

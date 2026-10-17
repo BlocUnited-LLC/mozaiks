@@ -37,6 +37,9 @@ from factory_app.workflows.AppGenerator.tools.module_persistence_guard import (
 from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
     ManagedCapabilityTemplateError,
     resolve_declared_pack_output_paths,
+    verified_pack_data_contracts,
+    verified_pack_template_inventory,
+    verified_selected_pack_sources,
 )
 from mozaiksai.core.runtime.app.auth_contract import (
     APP_AUTH_COMPONENTS,
@@ -71,9 +74,14 @@ from mozaiksai.core.runtime.app.paths import (
     noncanonical_app_root_paths,
     unsafe_app_paths,
 )
+from mozaiksai.core.runtime.app.theme_contract import validate_page_title_theme
+from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import (
     compile_data_contract,
     data_contract_requires_auth,
+)
+from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    SHARED_PACK_OUTPUT_PATHS,
 )
 from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
     capability_id_for_feature,
@@ -1754,7 +1762,7 @@ def _scan_pack_provenance_manifest(files_map: dict[str, str]) -> list[str]:
     missing_keys = _PROVENANCE_REQUIRED_KEYS - set(manifest.keys())
     for key in sorted(missing_keys):
         errors.append(f"{_PACK_PROVENANCE_PATH}: missing required field '{key}'")
-    unknown_keys = sorted(set(manifest.keys()) - _PROVENANCE_REQUIRED_KEYS)
+    unknown_keys = sorted(set(manifest.keys()) - _PROVENANCE_REQUIRED_KEYS - {"composed_outputs"})
     for key in unknown_keys:
         errors.append(f"{_PACK_PROVENANCE_PATH}: unsupported field '{key}'")
 
@@ -1794,6 +1802,40 @@ def _scan_pack_provenance_manifest(files_map: dict[str, str]) -> list[str]:
                     errors.append(
                         f"{_PACK_PROVENANCE_PATH}: packs[{i}].materialized_owned_files must be a JSON array"
                     )
+
+    composed = manifest.get("composed_outputs", {})
+    if not isinstance(composed, dict):
+        errors.append(f"{_PACK_PROVENANCE_PATH}: composed_outputs must be a JSON object")
+    else:
+        identities = {"pack_id", "version", "source", "digest"}
+        pack_entries = [entry for entry in packs if isinstance(entry, dict)] if isinstance(packs, list) else []
+        for path, contributors in composed.items():
+            location = f"{_PACK_PROVENANCE_PATH}: composed_outputs[{path!r}]"
+            if path not in SHARED_PACK_OUTPUT_PATHS or path not in files_map:
+                errors.append(f"{location} must identify a present shared composition root")
+            if not isinstance(contributors, list) or not contributors:
+                errors.append(f"{location} must contain pack contributors")
+                continue
+            seen = set()
+            for contributor in contributors:
+                if not isinstance(contributor, dict) or set(contributor) != identities or not all(
+                    isinstance(value, str) and value for value in contributor.values()
+                ):
+                    errors.append(f"{location} contributor must contain pack_id, version, source, and digest")
+                    continue
+                pack_id = contributor["pack_id"]
+                matches = [entry for entry in pack_entries if entry.get("pack_id") == pack_id]
+                if len(matches) != 1 or any(matches[0].get(key) != contributor[key] for key in identities):
+                    errors.append(f"{location} contributor must match one selected pack identity")
+                if pack_id in seen:
+                    errors.append(f"{location} contains duplicate contributors")
+                seen.add(pack_id)
+            if any(
+                isinstance(entry.get("materialized_owned_files"), list)
+                and any(isinstance(file, dict) and file.get("path") == path for file in entry["materialized_owned_files"])
+                for entry in pack_entries
+            ):
+                errors.append(f"{location} cannot also claim exclusive template file ownership")
 
     return errors
 
@@ -2113,7 +2155,9 @@ def _layout_extensions_for_selected_packs(
             continue
         for path in sorted(resolve_declared_pack_output_paths([pack])):
             prior_owner = claimed_paths.get(path)
-            if prior_owner is not None and prior_owner != pack_id:
+            # Shared roots have several contributors by design; composition and
+            # composed_outputs provenance validate them. Every other path is exclusive.
+            if prior_owner is not None and prior_owner != pack_id and path not in SHARED_PACK_OUTPUT_PATHS:
                 raise ManagedCapabilityTemplateError(
                     f"Selected packs '{prior_owner}' and '{pack_id}' both declare "
                     f"output path {path!r}; duplicate pack output claims fail closed"
@@ -2249,10 +2293,12 @@ def _scan_planned_data_fields(
     if error or not actual:
         return [error or "data/contract.json: missing approved data contract."]
     try:
+        inventory = verified_pack_template_inventory(context_variables=context_variables)
         planned = compile_data_contract(
             planned, subscription_contract=subscription_contract, context_variables=context_variables,
+            pack_data_contracts=verified_pack_data_contracts(inventory),
         )
-    except ValueError as exc:
+    except (ValueError, ManagedCapabilityTemplateError) as exc:
         return [f"data/contract.json: {exc}"]
     collections = {
         (surface["surface_id"], collection["name"]): collection
@@ -2295,12 +2341,45 @@ def _scan_owned_collection_auth(files_map: dict[str, str]) -> list[str]:
     return []
 
 
+class _ExplicitPackContext:
+    """Read-only view of a caller context that adds the caller's explicit packs."""
+
+    def __init__(self, base: Any, capability_packs: list[dict[str, Any]]) -> None:
+        self._base = base
+        self._capability_packs = capability_packs
+
+    def get(self, key: str, default: Any = None) -> Any:
+        if key == "capability_packs":
+            return self._capability_packs
+        return self._base.get(key, default)
+
+
+def _selected_pack_scan_context(context_variables: Any, capability_packs: list[dict[str, Any]] | None) -> Any:
+    """Layer explicit packs under a context that selects no packs of its own.
+
+    Context pack selections stay authoritative. A facade context such as
+    ``{"app_id": ...}`` must not drop the caller's trusted packs, which own the
+    managed-provider and pin checks.
+    """
+    if context_variables is None:
+        return {"capability_packs": capability_packs or []}
+    plan = detach(context_variables.get("app_build_plan")) or {}
+    if not capability_packs or detach(context_variables.get("capability_packs")) or (
+        isinstance(plan, dict) and plan.get("capability_packs")
+    ):
+        return context_variables
+    if isinstance(context_variables, dict):
+        return {**context_variables, "capability_packs": capability_packs}
+    return _ExplicitPackContext(context_variables, capability_packs)
+
+
 def scan_generated_bundle(
     files_map: dict[str, str],
     *,
     capability_packs: list[dict[str, Any]] | None = None,
     planned_data_contract: dict[str, Any] | None = None,
     subscription_contract: dict[str, Any] | None = None,
+    context_variables: Any = None,
     require_deployment_artifacts: bool = False,
 ) -> list[str]:
     """Scan files_map for forbidden patterns.
@@ -2318,8 +2397,19 @@ def scan_generated_bundle(
     - modules/*/contracts/reactions.yaml: event_type closure, target.kind taxonomy,
       target-kind-specific required fields.
     """
+    persistence_context = _selected_pack_scan_context(context_variables, capability_packs)
     try:
-        selected_layout_extensions = _layout_extensions_for_selected_packs(capability_packs)
+        # Plan rows identify generated modules; selected pack context owns the
+        # verified source and its exact declared output paths.
+        output_packs = [dict(pack) for pack in capability_packs or [] if isinstance(pack, dict)]
+        for entry in verified_selected_pack_sources(context_variables=persistence_context):
+            matches = [pack for pack in output_packs if _pack_id_from_descriptor(pack) == entry["pack_id"]]
+            if not matches:
+                matches = [{"id": entry["pack_id"]}]
+                output_packs.extend(matches)
+            for pack in matches:
+                pack["pack_source_path"] = entry["source_path"]
+        selected_layout_extensions = _layout_extensions_for_selected_packs(output_packs)
     except ManagedCapabilityTemplateError as exc:
         return [f"Selected CapabilityPack output contract is invalid: {exc}"]
     layout_report = validate_file_map_layout(
@@ -2330,20 +2420,25 @@ def scan_generated_bundle(
     errors.extend(
         _scan_declared_pack_repo_support_outputs(
             files_map,
-            capability_packs=capability_packs,
+            capability_packs=output_packs,
         )
     )
     scannable_files_map = filter_layout_scannable_file_map(files_map, layout_report)
+    for theme_path in ("brand/theme_config.json", "app/brand/theme_config.json"):
+        if theme_path in scannable_files_map:
+            try:
+                validate_page_title_theme(json.loads(scannable_files_map[theme_path]))
+            except ValueError as exc:
+                errors.append(f"{theme_path}: {exc}")
     errors.extend(
         _scan_canonical_app_paths(
             scannable_files_map,
-            capability_packs=capability_packs,
+            capability_packs=output_packs,
         )
     )
     errors.extend(error for error in scan_app_contracts(scannable_files_map) if error not in errors)
     errors.extend(_scan_planned_user_data_scope(scannable_files_map, capability_packs))
     errors.extend(_scan_subscription_assignment_storage(scannable_files_map))
-    persistence_context = {"capability_packs": capability_packs or []}
     errors.extend(_scan_planned_data_fields(
         scannable_files_map, planned_data_contract, subscription_contract=subscription_contract,
         context_variables=persistence_context,

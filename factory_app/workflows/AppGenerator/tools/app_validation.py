@@ -1982,6 +1982,7 @@ async def run_app_bundle_acceptance_gate(
         capability_packs=selected_capability_packs,
         planned_data_contract=_context_get(context_variables, "data_contract"),
         subscription_contract=resolve_subscription_contract(context_variables),
+        context_variables=context_variables,
         require_deployment_artifacts=_requires_deployment_artifacts(
             generated_files,
             context_variables,

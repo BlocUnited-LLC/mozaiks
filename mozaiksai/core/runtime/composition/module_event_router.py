@@ -1328,7 +1328,10 @@ class ModuleEventRouter:
             "body": _render_template(str(template.get("body") or ""), payload),
             "status": "unread",
             "created_at": _utc_now(),
-            "source_event": envelope,
+            "source_event": (
+                _notification_source_reference(event_type, envelope, payload)
+                if rule.get("source_event") == "reference" else envelope
+            ),
         }
         # Store the same owner chosen by event provenance. A malformed or
         # contradictory supplied owner must never become an unowned alert.
@@ -1443,6 +1446,26 @@ def _is_secret_context_key(key: str) -> bool:
     """Return True if *key* looks like a secret and must not be copied into context."""
     k = key.lower()
     return any(pat in k for pat in _CONTEXT_SECRET_PATTERNS)
+
+
+def _notification_source_reference(
+    event_type: str, envelope: dict[str, Any], payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Identify a notification's originating event without copying its payload.
+
+    Used when a rule declares ``source_event: reference``: the record and its
+    notification.created event must not retain event content such as message
+    text, because the producing module owns that content, its deletion, and who
+    may read it. related_type stays because notification reads classify
+    support conversations by it.
+    """
+    reference: dict[str, Any] = {"id": envelope.get("id"), "type": event_type}
+    related_type = payload.get("related_type")
+    if not isinstance(related_type, str):
+        related_type = envelope.get("related_type")
+    if isinstance(related_type, str) and related_type.strip():
+        reference["related_type"] = related_type
+    return reference
 
 
 def _notification_rule_matches(rule: dict[str, Any], envelope: dict[str, Any]) -> bool:

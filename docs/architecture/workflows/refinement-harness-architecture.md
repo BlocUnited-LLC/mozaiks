@@ -118,6 +118,15 @@ Schema-page refinement uses the page file stem as its identity; the page's
 display name may differ. Workbench theme edits target the saved `app_bundle`
 and explicitly scope the request to `brand/theme_config.json`.
 
+Page-surface generation receives read-only context from that same verified
+saved bundle: app identity, theme, shell, authentication contract, data contract,
+module declarations, declarative pages, route/component registries and installed
+pack provenance. It does not reload today's pack templates or expand the
+selected write scope. This describes the saved design and implementation; it
+does not assert that upstream design documents absent from the artifact were
+delivered to the worker. Unrelated service source and secret policy are excluded
+from this page-context projection.
+
 Accept, reject and promote verify the selected app archive and its available
 parent archive before changing lifecycle state. Their review response reuses
 those verified bytes. An unavailable or changed archive therefore leaves the
@@ -174,6 +183,70 @@ The opt-in ACP workspace harvester rejects symbolic links and Windows reparse
 points, including directory junctions, before traversal or file reads. A linked
 workspace root is rejected too. These are scope violations; linked targets are
 never harvested or deleted by the harvester.
+
+#### Capability-pack ownership of candidate files
+
+Before validation, the shared finalizer holds every candidate, from the patch
+lane or the surface lane, to the capability packs its saved parent selected.
+Ownership comes from those packs' pinned contracts, never from the candidate:
+
+- `owner: templates` outputs and `.mozaiks/pack_provenance.json` stay
+  byte-identical to the parent, and a pack module keeps its exact declared file
+  set. Composed shared roots (`ui/index.js`, `ui/route_manifest.json`,
+  `data/contract.json`) follow registry composition instead.
+- An `owner: workspace` output, such as `modules/messages/backend/handler.py`,
+  may change only inside a selected-file scope the user named, or a proposed
+  scope the user confirmed through the pending decision. An auto-applied
+  proposal or a surface plan without a file limit cannot change it. Studio
+  passes the parent's workspace paths to scope resolution, so an inferred scope
+  that includes one returns the existing confirmation decision instead of
+  applying.
+- The parent must be the app's accepted current build: the artifact store's
+  `CURRENT` record of that build family, which only acceptance changes. The
+  finalizer reads it at admission. A stale or never-accepted parent is
+  rejected. A failed inline run changes nothing there, so it never blocks a
+  later authorized change.
+- A changed workspace handler must be a thin leaf over its template base handler
+  (`prove_workspace_handler_extension`): overrides of declared action methods
+  with the base signatures only, reaching the service only through `super()` or
+  the base method's own service call, with `ctx` passed through unchanged, no
+  keyword the base method does not pass, and for each keyword only the
+  override's own same-named parameter or a value computed from it (never a
+  literal the template input contract would reject). Every parameter, return
+  and local annotation and every default is a static expression (names,
+  attribute chains, subscripts, constants; no calls), and the module keeps
+  `from __future__ import annotations` when the pack's template handler has it,
+  so nothing runs when the handler loads or its type hints resolve. It reads no
+  other `self` or `ctx` attribute and adds no import, helper, event or nested
+  scope. These are targeted checks, not a certification that arbitrary Python
+  is safe: validation, persistence, events and Messaging membership checks stay
+  in the template service, and candidate validation and runtime authorization
+  still apply.
+
+A rejected candidate fails with a structured `candidate_admission` code
+(`PACK_TEMPLATE_OUTPUT_CHANGED`, `PACK_MODULE_CLOSURE_CHANGED`,
+`WORKSPACE_PACK_OUTPUT_UNAUTHORIZED`, `STALE_REFINEMENT_BASELINE` or
+`WORKSPACE_HANDLER_EXTENSION_REJECTED`) and no child record. An admitted child
+records `refinement_scope` (selected paths, scope origin
+`explicit|confirmed|auto_proposal|surface_plan`, changed workspace pack paths) in
+its commit metadata and keeps the parent's `capability_packs`. An app-only
+handler edit is a new app revision, not a new pack version. If the selected
+pack sources cannot be resolved, admission defers to candidate validation,
+which verifies the same sources and fails the candidate.
+
+Acceptance rechecks a child that changed app-owned pack code before it becomes
+current. Its recorded `refinement_scope` must still be an explicit or confirmed
+selection of the changed paths in the requested registered build, and its
+parent must still be the accepted current build. Otherwise the endpoint returns
+409 and nothing changes. Studio serializes these acceptances per app, so of two
+children made from the same parent only the first is accepted.
+
+AppGenerator never changes app-owned pack code. Its copy comes only from the
+bound verified revision source, else the admitted genesis copy, else the
+starter template. A bounded repair or task save that changes or deletes one is
+rejected whole with `WORKSPACE_PACK_OUTPUT_CHANGE_UNSUPPORTED`. An overlay copy
+or tombstone that reaches assembly or the admitted bundle is excluded with
+`WORKSPACE_PACK_OUTPUT_EXCLUDED`.
 
 #### Current readiness and promotion boundaries
 

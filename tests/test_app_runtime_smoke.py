@@ -152,6 +152,75 @@ async def mongo():
 # --------------------------------------------------------------------------- no database (D1, D2)
 
 
+def test_declared_response_envelopes_use_the_shipped_messaging_contract():
+    source = Path(__file__).parents[1] / "factory_app/build_context/messaging/templates/modules/messages/module.yaml"
+    manifest = yaml.safe_load(source.read_text(encoding="utf-8"))
+    module = SimpleNamespace(action_schemas_map={
+        action["id"]: {"output": action["output_schema"]} for action in manifest["actions"]
+    })
+    entity = SimpleNamespace(id_field="thread_id")
+    thread = {"thread_id": "declared-thread"}
+    assert app_runtime_smoke._record_id(
+        entity, {"success": True, "thread": thread}, app_runtime_smoke._output_schema(module, "create_thread"),
+    ) == "declared-thread"
+    assert app_runtime_smoke._items(
+        {"threads": [thread], "total": 1}, app_runtime_smoke._output_schema(module, "list_threads"),
+    ) == [thread]
+
+
+@pytest.mark.parametrize("recorded_bundle", [_good, _dead])
+def test_declared_response_envelopes_preserve_canonical_items_and_direct_record_ids(recorded_bundle):
+    manifest = yaml.safe_load(recorded_bundle()[MODULE_YAML])
+    schemas = {action["id"]: action["output_schema"] for action in manifest["actions"]}
+    entity = SimpleNamespace(id_field="task_id")
+    item = {"task_id": "task-one"}
+    body = {"item": item} if "item" in schemas["create_task"]["properties"] else item
+    assert app_runtime_smoke._record_id(entity, body, schemas["create_task"]) == "task-one"
+    assert app_runtime_smoke._items({"items": [item], "total": 1}, schemas["list_tasks"]) == [item]
+
+
+@pytest.mark.parametrize("change", ["missing", "wrong_type", "undeclared", "ambiguous", "wrong_schema_type", "wrong_root_type"])
+@pytest.mark.parametrize("kind,member", [("object", "thread"), ("array", "threads")])
+def test_declared_response_envelopes_reject_unresolved_or_malformed_members(change, kind, member):
+    record = {"thread_id": "thread-one"}
+    body = {member: record if kind == "object" else [record]}
+    schema = {"type": "object", "properties": {member: {"type": kind}}}
+    if change == "missing":
+        body = {}
+    elif change == "wrong_type":
+        body[member] = [] if kind == "object" else {}
+    elif change == "undeclared":
+        schema["properties"] = {}
+    elif change == "ambiguous":
+        schema["properties"]["another"] = {"type": kind}
+    elif change == "wrong_schema_type":
+        schema["properties"][member]["type"] = "string"
+    else:
+        schema["type"] = "array"
+    if kind == "object":
+        assert app_runtime_smoke._record_id(SimpleNamespace(id_field="thread_id"), body, schema) is None
+    else:
+        assert app_runtime_smoke._items(body, schema) is None
+
+
+def test_declared_response_envelopes_never_fall_back_to_undeclared_record_values():
+    entity = SimpleNamespace(id_field="thread_id")
+    schema = {"type": "object", "properties": {"thread": {"type": "object"}}}
+    assert app_runtime_smoke._record_id(entity, {"thread": {}, "thread_id": "outside"}, schema) is None
+    assert app_runtime_smoke._record_id(entity, {"item": {"thread_id": "wrong-envelope"}}, schema) is None
+    assert app_runtime_smoke._record_id(entity, {"thread_id": "undeclared"}, {}) is None
+    assert app_runtime_smoke._items({"items": []}, {"properties": {"threads": {"type": "array"}}}) is None
+
+
+def test_declared_response_envelopes_keep_canonical_members_with_declared_metadata():
+    entity = SimpleNamespace(id_field="task_id")
+    record = {"task_id": "canonical"}
+    record_schema = {"type": "object", "properties": {"item": {"type": "object"}, "metadata": {"type": "object"}}}
+    array_schema = {"type": "object", "properties": {"items": {"type": "array"}, "warnings": {"type": "array"}}}
+    assert app_runtime_smoke._record_id(entity, {"item": record, "metadata": {}}, record_schema) == "canonical"
+    assert app_runtime_smoke._items({"items": [record], "warnings": []}, array_schema) == [record]
+
+
 async def test_no_database_is_reported_as_skipped_never_as_a_pass():
     result = await _smoke(_good(), None)
 

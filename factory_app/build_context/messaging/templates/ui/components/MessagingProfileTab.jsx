@@ -65,7 +65,7 @@ export default function MessagingProfileTab({ data }) {
   async function startConversation(friendId) {
     setError(null);
     try {
-      const result = await moduleAction("messages", "find_or_create_dm", { participant_ids: [friendId] });
+      const result = await moduleAction("messages", "create_thread", { thread_type: "direct", participant_ids: [friendId] });
       const threadId = result?.thread?.thread_id;
       if (!threadId) throw new Error("Missing thread");
       setSelectedId(threadId);
@@ -94,8 +94,8 @@ export default function MessagingProfileTab({ data }) {
   }
 
   return (
-    <section style={{ border: "1px solid var(--border-color, #d1d5db)", display: "grid", gridTemplateColumns: "minmax(180px, 30%) 1fr", minHeight: 420, overflow: "hidden" }}>
-      <aside style={{ borderRight: "1px solid var(--border-color, #d1d5db)" }}>
+    <section className="grid grid-cols-1 md:grid-cols-[minmax(0,30%)_minmax(0,1fr)]" style={{ border: "1px solid var(--border-color, #d1d5db)", minHeight: 420, overflow: "hidden" }}>
+      <aside style={{ minWidth: 0, borderRight: "1px solid var(--border-color, #d1d5db)" }}>
         <header style={{ borderBottom: "1px solid var(--border-color, #d1d5db)", padding: 12 }}>
           <strong>Messages</strong>
           <input aria-label="Search conversations" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search conversations" style={{ display: "block", marginTop: 10, maxWidth: "100%", width: "100%" }} />
@@ -113,7 +113,7 @@ export default function MessagingProfileTab({ data }) {
         {selectedThread ? <>
           <header style={{ borderBottom: "1px solid var(--border-color, #d1d5db)", padding: 12 }}><strong>{threadTitle(selectedThread)}</strong></header>
           <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>{loading ? <p>Loading conversation...</p> : error ? <p role="alert">{error}</p> : messages.length ? messages.map((message) => <div key={message.message_id} style={{ marginBottom: 10 }}><p style={{ margin: 0 }}>{message.body}</p><span style={{ fontSize: 11, opacity: 0.6 }}>{messageTime(message.created_at)}</span></div>) : <p>No messages yet. Say something.</p>}</div>
-          <form onSubmit={sendMessage} style={{ borderTop: "1px solid var(--border-color, #d1d5db)", display: "flex", gap: 8, padding: 12 }}><input aria-label="Message conversation" value={body} onChange={(event) => setBody(event.target.value)} placeholder="Message conversation..." style={{ flex: 1 }} /><button type="submit" disabled={!body.trim() || sending}>{sending ? "Sending..." : "Send"}</button></form>
+          <form onSubmit={sendMessage} style={{ borderTop: "1px solid var(--border-color, #d1d5db)", display: "flex", gap: 8, padding: 12 }}><input aria-label="Message conversation" value={body} onChange={(event) => setBody(event.target.value)} placeholder="Message conversation..." style={{ flex: 1, minWidth: 0 }} /><button type="submit" disabled={!body.trim() || sending}>{sending ? "Sending..." : "Send"}</button></form>
         </> : <div style={{ alignItems: "center", display: "flex", flex: 1, justifyContent: "center", padding: 24, textAlign: "center" }}><div><strong>Your conversation space</strong><p style={{ opacity: 0.7 }}>Select a conversation or a friend to start messaging.</p></div></div>}
       </div>
     </section>

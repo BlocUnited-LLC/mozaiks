@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from factory_app.app.modules.messages.backend.service import MessageService
 from mozaiksai.core.runtime.app.module_loader import ModuleLoader
+from mozaiksai.core.runtime.composition.module_event_router import ModuleEventRouter
+from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, ModuleRequest
 from mozaiksai.core.runtime.persistence.adapter import PersistencePrincipal
+from tests.module_authority_test_helpers import enforce_authority
+from tests.test_messaging_pack_persistence_composition import _DocumentMongoClient
+
+FACTORY_APP = Path(__file__).resolve().parents[1] / "factory_app" / "app"
 
 
 class _FakeCollection:
@@ -213,3 +220,56 @@ def test_active_messages_module_contract_loads():
     assert "allow_support_thread" not in schemas["get_thread"]["input"].get("properties", {})
     assert "domain.messages.message_sent" in loaded.manifests.events.event_types
     assert loaded.manifests.notifications.notifications[0].audience.user_id_field == "recipient_ids"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope_type", ["app", "workspace"])
+async def test_plain_direct_thread_events_pass_the_executor_and_notify_the_recipient(scope_type):
+    """A thread with no related record (and, in workspace scope, no subject app) emits nulls.
+
+    The executor validates each emitted event against contracts/events.yaml; a rejected
+    event never reaches the router, so the recipient would get no notification.
+    """
+    loaded = ModuleLoader(str(FACTORY_APP)).load("messages")
+    stored = []
+
+    async def store(record):
+        stored.append(record)
+
+    router = ModuleEventRouter([loaded], notification_store=store)
+    dispatched = []
+
+    async def emit(event_type, envelope):
+        dispatched.append((event_type, envelope["payload"]))
+        await router.handle_event(event_type, envelope)
+
+    executor = ModuleExecutor(
+        event_emitter=emit, persistence_client=_DocumentMongoClient(), persistence_database="factory_messages_test",
+    )
+    executor.register_loaded_module(loaded)
+
+    async def dispatch(user_id, action, **params):
+        result = await executor.execute(ModuleRequest(
+            module="messages", action=action, params=params, app_id="app_1", user_id=user_id,
+            workspace_id="workspace_1", authority=enforce_authority("messages.read", "messages.write", actor_id=user_id),
+            persistence_principal=PersistencePrincipal(user_id=user_id, workspace_id="workspace_1"),
+        ))
+        assert result.success, result
+        assert list(result.rejected_events) == []
+        return result.data
+
+    created = await dispatch("alice", "create_thread", participant_ids=["bob"], thread_type="direct",
+                             scope_type=scope_type)
+    thread_id = created["thread"]["thread_id"]
+    sent = await dispatch("alice", "send_message", thread_id=thread_id, body="hello bob")
+    assert sent["success"] is True
+
+    (_, thread_created), (_, message_sent) = dispatched
+    nulls = ["related_type", "related_id", *(["subject_app_id"] if scope_type == "workspace" else [])]
+    for payload in (thread_created, message_sent):
+        assert [field for field in nulls if payload[field] is None] == nulls
+    assert [event_type for event_type, _ in dispatched] == [
+        "domain.messages.thread_created", "domain.messages.message_sent",
+    ]
+    (notification,) = stored
+    assert (notification["audience"]["user_ids"], notification["context"]["thread_id"]) == (["bob"], thread_id)
