@@ -1065,6 +1065,8 @@ def _accept_route(monkeypatch, store):
 
     store.accept_build_record = accept_build_record
     store.list_refinement_sessions = AsyncMock(return_value=[])
+    # A fresh per-app lock table: an asyncio lock binds to the event loop it first waits in.
+    monkeypatch.setattr(studio, "_WORKSPACE_ACCEPTANCE_LOCKS", {})
     monkeypatch.setattr(studio, "_get_app_registry_service", lambda: Registry())
     monkeypatch.setattr(studio, "_verified_app_bundle", verified_app_bundle)
     monkeypatch.setattr(studio, "get_artifact_store", lambda: store)
@@ -1165,3 +1167,98 @@ async def test_concurrent_acceptance_of_two_handler_children_admits_only_one(mon
     winner, loser = store.accepted[0], ({"child_1", "child_2"} - set(store.accepted)).pop()
     assert store.records[winner].lifecycle_status == ArtifactLifecycleStatus.CURRENT
     assert store.records[loser].lifecycle_status == ArtifactLifecycleStatus.DRAFT
+
+
+def _with_parent_packs(store, record_id):
+    """The child keeps its parent's capability packs, as an admitted child does."""
+    record = store.records[record_id]
+    metadata = {**record.commit_metadata.metadata, "capability_packs": deepcopy(_packs())}
+    store.records[record_id] = record.model_copy(update={
+        "commit_metadata": record.commit_metadata.model_copy(update={"metadata": metadata}),
+    })
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("first", ["handler_child", "ui_child"])
+async def test_concurrent_handler_and_stale_ui_only_acceptances_are_serialized(monkeypatch, first):
+    """The handler child's run staled the shared parent, so no build is CURRENT during review.
+
+    Each acceptance passes its own checks while the other is still in flight; only the
+    per-app acceptance lock makes the second one see the first as CURRENT and refuse.
+    """
+    from fastapi import HTTPException
+
+    store = _Store()
+    _accept_records(store, ["ui_child"], scope={
+        "selected_file_paths": [PAGE], "scope_origin": "explicit", "changed_workspace_pack_paths": [],
+    })
+    _accept_records(store, ["handler_child"])  # the registry's latest run names the handler child
+    for child in ("ui_child", "handler_child"):
+        _with_parent_packs(store, child)
+    store.records["parent"] = store.records["parent"].model_copy(update={"lifecycle_status": ArtifactLifecycleStatus.STALE})
+    store.bundle_files = {"handler_child": {HANDLER: "CUSTOMIZED", PAGE: "parent"}}
+    accept = _accept_route(monkeypatch, store)
+    second = ({"handler_child", "ui_child"} - {first}).pop()
+    results = await asyncio.gather(accept(first), accept(second), return_exceptions=True)
+    assert isinstance(results[0], dict) and results[0]["accepted"] is True, results
+    assert isinstance(results[1], HTTPException) and results[1].status_code == 409, results
+    assert store.accepted == [first]
+    current = [record_id for record_id, record in store.records.items() if record.lifecycle_status == ArtifactLifecycleStatus.CURRENT]
+    assert current == [first] and store.records[second].lifecycle_status == ArtifactLifecycleStatus.DRAFT
+    if first == "handler_child":
+        # The UI-only sibling carries the starter handler and would have reverted the change.
+        assert HANDLER in results[1].detail
+
+
+# Two hundred text files fill the Studio text decoder's file limit, so an entry after them
+# lies past the bound that inline refinement reads within.
+_DECODER_FILLER = {f"docs/note_{index:03d}.md": "note\n" for index in range(200)}
+PROVENANCE_ONLY = "modules/notes/backend/handler.py"
+
+
+def _workspace_provenance(path):
+    return json.dumps({"packs": [{"materialized_owned_files": [{"path": path, "owner": "workspace"}]}]})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("layout", [
+    "past_file_limit", "over_file_size", "provenance_past_file_limit",
+    "unchanged_past_file_limit_in_one", "over_compare_bound",
+])
+async def test_stale_ui_only_child_compares_app_owned_code_past_the_text_decoder_bounds(monkeypatch, layout):
+    """Acceptance compares app-owned pack code in full, however large the app bundle grows."""
+    from fastapi import HTTPException
+
+    from mozaiksai.hosts import studio
+
+    store = _Store()
+    _accept_records(store, ["child_1"], scope={
+        "selected_file_paths": [PAGE], "scope_origin": "explicit", "changed_workspace_pack_paths": [],
+    })
+    store.supersede_parent_with("newer_build")
+    oversized = "#" * 250_001
+    current, child = {
+        "past_file_limit": ({**_DECODER_FILLER, HANDLER: "CUSTOMIZED"}, {**_DECODER_FILLER, HANDLER: "STARTER"}),
+        "over_file_size": ({HANDLER: "CUSTOMIZED" + oversized}, {HANDLER: "STARTER" + oversized}),
+        "provenance_past_file_limit": (
+            {**_DECODER_FILLER, PROVENANCE: _workspace_provenance(PROVENANCE_ONLY), PROVENANCE_ONLY: "CUSTOMIZED"},
+            {**_DECODER_FILLER, PROVENANCE: _workspace_provenance(PROVENANCE_ONLY), PROVENANCE_ONLY: "STARTER"},
+        ),
+        "unchanged_past_file_limit_in_one": ({HANDLER: "CUSTOMIZED"}, {**_DECODER_FILLER, HANDLER: "CUSTOMIZED"}),
+        "over_compare_bound": ({HANDLER: "CUSTOMIZED" * 8}, {HANDLER: "CUSTOMIZED" * 8}),
+    }[layout]
+    store.bundle_files = {"newer_build": current, "child_1": child}
+    if layout == "over_compare_bound":
+        # An entry too large to compare is refused, never skipped.
+        monkeypatch.setattr(studio, "_APP_OWNED_CODE_COMPARE_MAX_BYTES", 16)
+    accept = _accept_route(monkeypatch, store)
+    if layout == "unchanged_past_file_limit_in_one":
+        assert (await accept("child_1"))["accepted"] is True
+        assert store.accepted == ["child_1"]
+        return
+    before = deepcopy(store.records)
+    with pytest.raises(HTTPException) as rejected:
+        await accept("child_1")
+    assert rejected.value.status_code == 409
+    assert (PROVENANCE_ONLY if layout.startswith("provenance") else HANDLER) in rejected.value.detail
+    assert store.accepted == [] and store.records == before

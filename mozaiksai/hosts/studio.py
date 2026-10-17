@@ -17,7 +17,7 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcon
 from datetime import UTC, datetime
 from difflib import unified_diff
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 from uuid import uuid4
 
 from anyio import CancelScope
@@ -286,7 +286,10 @@ def _zipinfo_is_symlink(info: zipfile.ZipInfo) -> bool:
 
 
 
-def _strip_shared_root_prefix(entries: list[tuple[str, bytes]]) -> list[tuple[str, bytes]]:
+_EntryT = TypeVar("_EntryT")
+
+
+def _strip_shared_root_prefix(entries: list[tuple[str, _EntryT]]) -> list[tuple[str, _EntryT]]:
     if not entries:
         return entries
     split_paths = [path.split("/") for path, _ in entries]
@@ -2152,9 +2155,49 @@ def _workspace_acceptance_guard(app_id: str, version) -> AbstractAsyncContextMan
     return _WORKSPACE_ACCEPTANCE_LOCKS.setdefault(app_id, Lock())
 
 
-def _recorded_workspace_pack_paths(files: dict[str, str]) -> set[str]:
+#: Largest app-owned pack file that acceptance compares; a larger one refuses
+#: acceptance instead of being left out of the comparison.
+_APP_OWNED_CODE_COMPARE_MAX_BYTES = 8_000_000
+_PACK_PROVENANCE_PATH = ".mozaiks/pack_provenance.json"
+
+
+def _app_bundle_entries(zip_source: bytes, paths: set[str]) -> dict[str, bytes]:
+    """Read the named app-relative entries of a verified app bundle in full.
+
+    ``_decode_text_bundle_entries`` drops entries past its file count and size
+    limits, so a comparison through it can miss an app-owned file. Here every
+    named entry present is read; one that cannot be compared exactly (a
+    duplicate, a symbolic link, or an entry over the compare bound) refuses.
+    """
+    with zipfile.ZipFile(io.BytesIO(zip_source), "r") as archive:
+        named = [
+            (name, info) for info in archive.infolist()
+            if not info.is_dir() and (name := _normalize_bundle_entry_name(info.filename)) is not None
+        ]
+        found: dict[str, list[zipfile.ZipInfo]] = {}
+        for path, info in _strip_shared_root_prefix(named):
+            if path in paths:
+                found.setdefault(path, []).append(info)
+        entries: dict[str, bytes] = {}
+        for path, infos in found.items():
+            if (
+                len(infos) != 1 or _zipinfo_is_symlink(infos[0])
+                or infos[0].file_size > _APP_OWNED_CODE_COMPARE_MAX_BYTES
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"App-owned capability code ({path}) in this version or the current build could not be "
+                        "compared. No version was accepted."
+                    ),
+                )
+            entries[path] = archive.read(infos[0])
+    return entries
+
+
+def _recorded_workspace_pack_paths(provenance_entry: bytes | None) -> set[str]:
     try:
-        provenance = json.loads(files.get(".mozaiks/pack_provenance.json") or "{}")
+        provenance = json.loads(provenance_entry or b"{}")
     except ValueError:
         return set()
     packs = provenance.get("packs") if isinstance(provenance, dict) else None
@@ -2182,11 +2225,15 @@ async def _require_current_app_owned_pack_code(version, *, app_id: str, artifact
     current = await artifact_store.get_build_record(app_id=app_id, build_record_id=current_id)
     if current is None:
         return
-    current_files, _ = _decode_text_bundle_entries(await _verified_app_bundle(current))
-    version_files, _ = _decode_text_bundle_entries(await _verified_app_bundle(version))
-    paths = _recorded_workspace_pack_paths(current_files) | _recorded_workspace_pack_paths(version_files)
-    for record in (current, version):
+    current_zip = await _verified_app_bundle(current)
+    version_zip = await _verified_app_bundle(version)
+    paths: set[str] = set()
+    for archive, record in ((current_zip, current), (version_zip, version)):
+        provenance = _app_bundle_entries(archive, {_PACK_PROVENANCE_PATH}).get(_PACK_PROVENANCE_PATH)
+        paths |= _recorded_workspace_pack_paths(provenance)
         paths |= set(parent_workspace_pack_paths(_version_metadata(record).get("capability_packs") or []) or ())
+    current_files = _app_bundle_entries(current_zip, paths)
+    version_files = _app_bundle_entries(version_zip, paths)
     changed = sorted(path for path in paths if current_files.get(path) != version_files.get(path))
     if changed:
         raise HTTPException(
@@ -2204,9 +2251,10 @@ async def _require_accepted_workspace_parent(
     """Recheck at acceptance the authority an app-owned pack code change was admitted under.
 
     The server-recorded scope must still be an explicit or user-confirmed
-    selection of the changed paths in this registered build, and the child's
-    parent must still be the app's accepted current build. Otherwise nothing
-    is accepted.
+    selection of the changed paths in this registered build. The app must have
+    no accepted current build, or that build must still be the child's parent,
+    and the registry's current build run must still name this child and its
+    build. Otherwise nothing is accepted.
     """
     changed = _changed_workspace_pack_paths(version)
     metadata = _version_metadata(version)

@@ -236,10 +236,27 @@ which verifies the same sources and fails the candidate.
 
 Acceptance rechecks a child that changed app-owned pack code before it becomes
 current. Its recorded `refinement_scope` must still be an explicit or confirmed
-selection of the changed paths in the requested registered build, and its
-parent must still be the accepted current build. Otherwise the endpoint returns
-409 and nothing changes. Studio serializes these acceptances per app, so of two
-children made from the same parent only the first is accepted.
+selection of the changed paths in the requested registered build. The run that
+made the child marks its parent stale, so while the child awaits review the app
+normally has no `CURRENT` app bundle build: there must be none, or the
+`CURRENT` build must still be the child's parent. The app registry's
+`current_build_run` must also still name this child's artifact version and
+build id. Of the children that changed app-owned pack code, only the one from
+the latest registered run can be accepted; a child of an earlier run is refused
+even when its acceptance is requested first.
+
+Every app bundle acceptance also refuses a stale version, including a UI-only
+or AppGenerator draft, that would revert app-owned pack code accepted since.
+When the app's `CURRENT` build is neither the version nor its parent, Studio
+compares each app-owned path named by either archive's pack provenance or
+either record's `capability_packs`, reading those entries in full from both
+verified archives. A difference, or an entry that cannot be compared exactly
+(a duplicate, a symbolic link or a file over 8 MB), refuses the version.
+
+Each refusal returns 409 and nothing changes. Studio serializes app bundle
+acceptances per app with an in-process lock, so within one Studio process these
+rechecks and the acceptance they guard cannot interleave. The lock does not
+coordinate separate Studio processes.
 
 AppGenerator never changes app-owned pack code. Its copy comes only from the
 bound verified revision source, else the admitted genesis copy, else the
