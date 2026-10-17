@@ -192,7 +192,7 @@ for (const extra of ['.npmrc', 'android/app/build.gradle', '.local/workspace/app
   });
 }
 
-test('successful orchestration uses argument arrays and binds an actual APK hash to manifest provenance', t => {
+test('successful debug orchestration uses argument arrays and binds the typed APK to manifest provenance', t => {
   const f = fixture(t);
   const calls = [];
   const result = buildAndroid(f.root, { run(command, args, options) {
@@ -205,10 +205,40 @@ test('successful orchestration uses argument arrays and binds an actual APK hash
   assert.equal(result.source_digest, f.manifest.source_digest);
   assert.equal(result.pack_digest, f.manifest.pack.digest);
   assert.equal(result.framework_commit, f.manifest.framework.commit);
-  assert.equal(result.apk.sha256, sha('fake test-only APK bytes'));
-  assert.equal(result.apk.size_bytes, 24);
+  assert.equal(result.schema_version, 'mozaiks.android_build_result.v2');
+  assert.equal(result.artifact.kind, 'debug_apk');
+  assert.equal(result.artifact.path, 'android/app/build/outputs/apk/debug/app-debug.apk');
+  assert.equal(result.artifact.sha256, sha('fake test-only APK bytes'));
+  assert.equal(result.artifact.size_bytes, 24);
   assert.equal(calls.length, 8);
   assert.ok(calls.every(call => Array.isArray(call.args) && call.options.cwd.includes('workspace with spaces')));
   assert.ok(calls.some(call => call.args.includes(path.join(f.root, '.local/web'))));
   assert.deepEqual(JSON.parse(f.read('build-result.json')), result);
+});
+
+test('release orchestration builds an unsigned AAB and cannot enable device acceptance', t => {
+  const f = fixture(t);
+  f.manifest.spec.build_type = 'release';
+  f.save();
+  const calls = [];
+  const result = buildAndroid(f.root, { run(command, args, options) {
+    calls.push({ command, args, options });
+    if (args.includes('android') && args.includes('sync')) f.generated();
+    if (args.includes('bundleRelease')) f.write('android/app/build/outputs/bundle/release/app-release.aab', 'fake unsigned AAB bytes');
+  } });
+  assert.equal(result.status, 'succeeded');
+  assert.equal(result.acceptance_build, false);
+  assert.equal(result.artifact.kind, 'unsigned_release_aab');
+  assert.equal(result.artifact.path, 'android/app/build/outputs/bundle/release/app-release.aab');
+  assert.equal(result.artifact.sha256, sha('fake unsigned AAB bytes'));
+  assert.ok(calls.some(call => call.args.includes('bundleRelease')));
+  assert.ok(calls.every(call => !call.args.includes('assembleDebug')));
+
+  const rejected = fixture(t);
+  rejected.manifest.spec.build_type = 'release';
+  rejected.save();
+  let rejectedCalls = 0;
+  assert.throws(() => buildAndroid(rejected.root, { acceptance: true, run() { rejectedCalls++; } }), /requires a debug/);
+  assert.equal(rejectedCalls, 0);
+  assert.equal(JSON.parse(rejected.read('build-result.json')).status, 'failed');
 });

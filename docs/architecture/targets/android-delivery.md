@@ -7,8 +7,10 @@ renderer behind its own authenticated actions, entitlements, and delivery record
 
 This implements the local Android packaging portion of
 [ADR 0013](../../adr/0013-multisurface-applications-and-managed-delivery.md).
-The supported output is a debug APK for development and acceptance. Store
-submission, release signing, and iOS delivery are outside this contract.
+The supported outputs are a debug APK for development and acceptance and an
+unsigned release Android App Bundle (AAB) for a trusted host to sign. Store
+submission, key custody, release signing, and iOS delivery are outside this
+contract.
 
 ## Usage
 
@@ -30,6 +32,12 @@ Create a delivery specification:
 ```sh
 mozaiks package android ./my-app --config ./android.json --output ./android-delivery
 ```
+
+Use `"build_type": "release"` to produce an unsigned release AAB. The output is
+a private release candidate. A trusted product host must verify its receipt,
+sign it with a stable protected key, and record both unsigned and signed digests
+before the bundle can enter a store publication workflow. Signing keys and
+credentials are never delivery specification fields or build inputs.
 
 Compilation requires Python 3.11+, Node.js 22.12+, npm, Java 21, and an Android SDK
 with platform 36. Set `JAVA_HOME` and `ANDROID_HOME` to the installed toolchains.
@@ -124,7 +132,7 @@ android-delivery/
 `source.zip` records the captured app and workflow files. `android-workspace.zip`
 adds the mobile pack's native facade and renderer-owned tooling. These archives
 use deterministic ZIP construction; timestamps, installed dependencies, Android
-build directories, APKs, and signing material are excluded.
+build directories, APKs, AABs, and signing material are excluded.
 
 `delivery.manifest.json` records the specification, source digest, mobile pack
 version and digest, framework commit and resource digest, and file inventories.
@@ -160,9 +168,11 @@ the same committed resource bytes; a different revision or other resource drift
 still fails verification.
 
 After compilation, `mobile/build-result.json` binds the output to those input
-identities and records the APK's relative path, byte size, and SHA-256. The CLI
-verifies that receipt against the actual file before returning success. A
-failed build records failure. Compilation alone reports
+identities and records one typed artifact (`debug_apk` or
+`unsigned_release_aab`) with its canonical relative path, byte size, and
+SHA-256. The CLI verifies that receipt against the actual file and requested
+build type before returning success. A failed build records failure. Release
+builds refuse the debug-only acceptance override. Compilation alone reports
 `device_acceptance: "not_run"`; device acceptance is separate evidence.
 
 ## Canonical owners
@@ -173,7 +183,7 @@ failed build records failure. Compilation alone reports
 | Shared app/workflow export admission | `factory_app/workflows/AppGenerator/tools/android_export_policy.py` |
 | Local command | `mozaiks_cli/commands/package.py` |
 | Declared native facade and pinned package inputs | `factory_app/build_context/mobile/` |
-| Build execution and APK receipt | Exported `mobile/build.mjs` |
+| Build execution and typed APK/AAB receipt | Exported `mobile/build.mjs` |
 | OAuth, PKCE, authenticated sessions | Shared chat UI auth implementation |
 | Platform backend, actions, persistence, authorization | Existing app host and modules |
 | Premium access, delivery jobs, authorized downloads | Hosted product, when implemented |

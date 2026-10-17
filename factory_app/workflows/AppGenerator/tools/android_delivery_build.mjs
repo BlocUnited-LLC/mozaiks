@@ -71,7 +71,7 @@ function verifyFreshMobileInputs(mobileRoot, manifest) {
 export function readDelivery(mobileRoot) {
   const manifest = readJson(regularPath(mobileRoot, 'delivery.manifest.json'));
   const spec = manifest.spec;
-  if (manifest.schema_version !== 'mozaiks.android_delivery_manifest.v1' || spec?.build_type !== 'debug'
+  if (manifest.schema_version !== 'mozaiks.android_delivery_manifest.v1' || !['debug', 'release'].includes(spec?.build_type)
       || !/^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/.test(spec.package_id)
       || !/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(spec.version_name)
       || !Number.isSafeInteger(spec.version_code) || spec.version_code < 1 || spec.version_code > 2100000000
@@ -192,10 +192,11 @@ export function buildAndroid(mobileRoot, { acceptance = false, env = process.env
   const receiptPath = path.join(mobileRoot, 'build-result.json');
   if (existsSync(receiptPath) && !lstatSync(receiptPath).isFile()) fail('Build receipt must be a regular file');
   if (existsSync(receiptPath) && lstatSync(receiptPath).isSymbolicLink()) fail('Build receipt must not be a link');
-  let receipt = { schema_version: 'mozaiks.android_build_result.v1', status: 'failed', stage: 'preflight', device_acceptance: 'not_run' };
+  let receipt = { schema_version: 'mozaiks.android_build_result.v2', status: 'failed', stage: 'preflight', device_acceptance: 'not_run' };
   writeJson(receiptPath, receipt);
   try {
     const manifest = readDelivery(mobileRoot);
+    if (acceptance && manifest.spec.build_type !== 'debug') fail('Device acceptance requires a debug Android delivery');
     verifyFreshMobileInputs(mobileRoot, manifest);
     receipt = { ...receipt, source_digest: manifest.source_digest, spec_digest: manifest.spec_digest, pack_digest: manifest.pack.digest, framework_commit: manifest.framework.commit, framework_resource_digest: manifest.framework.resource_digest };
     const buildEnv = buildEnvironment(mobileRoot, manifest, { acceptance, env });
@@ -226,11 +227,16 @@ export function buildAndroid(mobileRoot, { acceptance = false, env = process.env
     const identity = configureAndroid(mobileRoot, { acceptance, manifest });
     const assets = verifyBundledAssets(mobileRoot, manifest);
     const java = buildEnv.JAVA_HOME ? path.join(buildEnv.JAVA_HOME, 'bin', process.platform === 'win32' ? 'java.exe' : 'java') : 'java';
-    command(java, ['-classpath', path.join(mobileRoot, 'android/gradle/wrapper/gradle-wrapper.jar'), 'org.gradle.wrapper.GradleWrapperMain', '--no-daemon', 'assembleDebug'], path.join(mobileRoot, 'android'), 'compile');
-    const apkPath = 'android/app/build/outputs/apk/debug/app-debug.apk';
-    const apk = readFileSync(regularPath(mobileRoot, apkPath));
-    if (!apk.length) fail('Android compilation produced an empty APK');
-    receipt = { ...receipt, status: 'succeeded', stage: 'complete', acceptance_build: acceptance, android: identity, assets, apk: { path: apkPath, sha256: sha256(apk), size_bytes: apk.length } };
+    const release = manifest.spec.build_type === 'release';
+    const gradleTask = release ? 'bundleRelease' : 'assembleDebug';
+    const artifactPath = release
+      ? 'android/app/build/outputs/bundle/release/app-release.aab'
+      : 'android/app/build/outputs/apk/debug/app-debug.apk';
+    const artifactKind = release ? 'unsigned_release_aab' : 'debug_apk';
+    command(java, ['-classpath', path.join(mobileRoot, 'android/gradle/wrapper/gradle-wrapper.jar'), 'org.gradle.wrapper.GradleWrapperMain', '--no-daemon', gradleTask], path.join(mobileRoot, 'android'), 'compile');
+    const artifactBytes = readFileSync(regularPath(mobileRoot, artifactPath));
+    if (!artifactBytes.length) fail('Android compilation produced an empty artifact');
+    receipt = { ...receipt, status: 'succeeded', stage: 'complete', acceptance_build: acceptance, android: identity, assets, artifact: { kind: artifactKind, path: artifactPath, sha256: sha256(artifactBytes), size_bytes: artifactBytes.length } };
     writeJson(receiptPath, receipt);
     return receipt;
   } catch (error) {

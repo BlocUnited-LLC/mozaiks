@@ -95,7 +95,7 @@ def test_renderer_requires_registered_workspace_tooling(workspace, framework, sp
 
 
 @pytest.mark.parametrize("change", [
-    {"unknown": "ignored?"}, {"build_type": "release"}, {"package_id": "example"},
+    {"unknown": "ignored?"}, {"build_type": "profile"}, {"package_id": "example"},
     {"package_id": "org.Bad.app"}, {"version_code": True}, {"version_code": 0},
     {"display_name": "bad\nname"}, {"backend_origin": "http://api.example.com"},
     {"backend_origin": "https://user:password@example.com"}, {"backend_origin": "https://example.com/"},
