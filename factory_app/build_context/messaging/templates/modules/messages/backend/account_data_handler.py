@@ -9,17 +9,21 @@ created in which no other participant has posted. A surviving thread whose
 last_message preview copies the user's text is repointed at its newest
 remaining message, or cleared when none remains. The user leaves participant_ids
 of every surviving thread, so participant checks admit only the remaining
-participants. created_by is a required string and becomes a blank marker that no
-actor id equals; the creator's user_id scope stamp is removed. In-app
+participants; a send never writes back the participant list it read, so one
+that overlaps the deletion cannot restore the user. created_by is a required
+string and becomes a blank marker that no actor id equals, and a non-blank
+title the user gave a surviving thread (a support thread is titled with its
+opening message) becomes a neutral title; the creator's user_id scope stamp is
+removed. In-app
 notifications rendered from message_sent since pack 0.1.14 hold only thread and
 message references, so deleted messages leave them nothing to show. Those
 rendered by an earlier pack keep the body_preview they copied: they live in the
 platform notification store, which the account protocol does not give module
 handlers.
 
-Export returns created threads, sent messages, read state, and a fixed
-projection of every thread the user participates in, without peers' previews or
-participant ids.
+Export returns sent messages, read state, and one fixed thread projection, without
+peers' previews or participant ids, for the threads the user created and for
+every thread the user participates in.
 """
 from __future__ import annotations
 
@@ -30,7 +34,8 @@ _PAGE_SIZE = 100
 _PREVIEW_LENGTH = 160
 # policy.actor_id never yields a blank id, and blank account ids are refused.
 _RELEASED_CREATOR = ""
-_MEMBERSHIP_FIELDS = (
+_RELEASED_TITLE = "Conversation"
+_THREAD_FIELDS = (
     "thread_id", "thread_type", "title", "status", "scope_type", "scope_id", "subject_app_id",
     "related_type", "related_id", "created_at",
 )
@@ -108,13 +113,15 @@ class AccountDataHandler:
                 {"$pull": {"participant_ids": user_id}},
             )
             memberships_removed += int(result.modified_count)
+        # A title the user wrote is their content; a support thread's title is its opening message.
+        for thread in await self._records(app_id, "threads", {"created_by": user_id}, ("thread_id", "title")):
+            released: dict[str, Any] = {"created_by": _RELEASED_CREATOR}
+            if str(thread.get("title") or "").strip():
+                released["title"] = _RELEASED_TITLE
+            await threads.update_one({"thread_id": thread["thread_id"], "created_by": user_id}, {"$set": released})
         # Module dispatch also stamps the acting user onto inserted rows as scope metadata.
-        for field, update in (
-            ("created_by", {"$set": {"created_by": _RELEASED_CREATOR}}),
-            ("user_id", {"$unset": {"user_id": ""}}),
-        ):
-            for thread in await self._records(app_id, "threads", {field: user_id}, ("thread_id",)):
-                await threads.update_one({"thread_id": thread["thread_id"], field: user_id}, update)
+        for thread in await self._records(app_id, "threads", {"user_id": user_id}, ("thread_id",)):
+            await threads.update_one({"thread_id": thread["thread_id"], "user_id": user_id}, {"$unset": {"user_id": ""}})
         return memberships_removed
 
     async def delete_user_data(self, *, app_id: str, user_id: str) -> dict[str, Any]:
@@ -143,10 +150,10 @@ class AccountDataHandler:
     async def export_user_data(self, *, app_id: str, user_id: str) -> dict[str, Any]:
         user_id = _account_user_id(user_id)
         return {
-            "threads_created": await self._records(app_id, "threads", {"created_by": user_id}),
+            "threads_created": await self._records(app_id, "threads", {"created_by": user_id}, _THREAD_FIELDS),
             "messages_sent": await self._records(app_id, "messages", {"sender_id": user_id}),
             "thread_reads": await self._records(app_id, "thread_reads", {"user_id": user_id}),
             "thread_memberships": await self._records(
-                app_id, "threads", {"participant_ids": user_id}, _MEMBERSHIP_FIELDS,
+                app_id, "threads", {"participant_ids": user_id}, _THREAD_FIELDS,
             ),
         }

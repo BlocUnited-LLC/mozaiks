@@ -393,6 +393,12 @@ async def test_actual_messaging_migration_applies_once_and_preserves_existing_re
 
 ACCOUNT_APP_ID = "messaging_account_test"
 ACCOUNT_DATABASE = "messaging_account_test_db"
+# The neutral title a surviving thread keeps once its creator's account is deleted.
+RELEASED_TITLE = "Conversation"
+THREAD_EXPORT_FIELDS = frozenset({
+    "thread_id", "thread_type", "title", "status", "scope_type", "scope_id", "subject_app_id",
+    "related_type", "related_id", "created_at",
+})
 _MISSING = object()
 
 
@@ -468,9 +474,11 @@ class _DocumentCollection:
         return SimpleNamespace(inserted_id=row["_id"])
 
     async def update_one(self, query, update, *, upsert=False, **_options):
-        changes, pulls, unsets = (update.get(name) or {} for name in ("$set", "$pull", "$unset"))
-        if (set(update) - {"$set", "$pull", "$unset"} or any("." in key for key in [*changes, *pulls, *unsets])
-                or any(isinstance(value, dict) for value in pulls.values()) or (upsert and (pulls or unsets))):
+        operators = ("$set", "$pull", "$unset", "$addToSet")
+        changes, pulls, unsets, additions = (update.get(name) or {} for name in operators)
+        if (set(update) - set(operators) or any("." in key for key in [*changes, *pulls, *unsets, *additions])
+                or any(isinstance(value, dict) for value in [*pulls.values(), *additions.values()])
+                or (upsert and (pulls or unsets or additions))):
             raise NotImplementedError(f"fake Mongo does not model update {update}")
         rows = self._matching(query)[:1]
         for row in rows:
@@ -478,6 +486,11 @@ class _DocumentCollection:
             for key, value in pulls.items():
                 if isinstance(row.get(key), list):
                     row[key] = [item for item in row[key] if item != value]
+            for key, value in additions.items():
+                if not isinstance(row.setdefault(key, []), list):
+                    raise NotImplementedError(f"fake Mongo does not model $addToSet on {key}")
+                if value not in row[key]:
+                    row[key].append(value)
             for key in unsets:
                 row.pop(key, None)
         if not rows and upsert:
@@ -715,7 +728,7 @@ async def test_messaging_account_deletion_releases_membership_and_keeps_peer_acc
         "messages": {"threads_deleted": 0, "messages_deleted": 1, "memberships_removed": 1, "read_state_deleted": 1},
     }
     row = rt.stored_row(group)
-    assert (row["participant_ids"], row["created_by"], row["title"]) == (["bob", "carol"], "", "Trip")
+    assert (row["participant_ids"], row["created_by"], row["title"]) == (["bob", "carol"], "", RELEASED_TITLE)
     assert rt.rows("thread_reads") == carol_read
     assert "alice" not in json.dumps(rt.snapshot(), default=str)
 
@@ -742,6 +755,126 @@ async def test_messaging_account_deletion_releases_membership_and_keeps_peer_acc
         assert await rt.account("delete", blank) == {"messages": {"error": "account user_id is required"}}
         assert await rt.account("export", blank) == {"messages.__error__": "account user_id is required"}
     assert rt.snapshot() == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sender", ["bob", "operator"])
+async def test_messaging_send_overlapping_account_deletion_cannot_restore_the_member(
+    messaging_account, monkeypatch, sender,
+):
+    """A send reads the thread, the deletion releases Alice, then the send writes: Alice stays released.
+
+    Bob is a participant; the operator is admitted by the send itself, as a support reply admits it.
+    """
+    rt = messaging_account
+    group = await rt.group("bob", ["alice", "carol"])
+    await rt.send("alice", group, "alice was here")
+    threads = rt.collection("threads")
+    find_one, deleted = threads.find_one, []
+
+    async def read_then_delete_alice(query, projection=None, **options):
+        row = await find_one(query, projection, **options)
+        if row is not None and not deleted:
+            # The send now holds a copy that still lists Alice; her deletion commits before its write.
+            assert "alice" in row["participant_ids"]
+            deleted.append(await rt.account("delete", "alice"))
+        return row
+
+    monkeypatch.setattr(threads, "find_one", read_then_delete_alice)
+    sent = await rt.module._service.send_message(
+        rt.ctx(sender), thread_id=group, body=f"{sender} meanwhile", allow_nonparticipant_sender=sender == "operator",
+    )
+    assert sent["success"], sent
+    assert deleted == [{"messages": {
+        "threads_deleted": 0, "messages_deleted": 1, "memberships_removed": 1, "read_state_deleted": 0,
+    }}]
+    row = rt.stored_row(group)
+    assert row["participant_ids"] == ["bob", "carol", *(["operator"] if sender == "operator" else [])]
+    # The send still records its own preview.
+    assert (row["last_message"]["message_id"], row["last_message_at"]) == (
+        sent["message"]["message_id"], sent["message"]["created_at"],
+    )
+    assert "alice" not in json.dumps(rt.snapshot(), default=str)
+
+    # Alice is not admitted again, and later sends do not address her.
+    alice = rt.ctx("alice")
+    assert (await rt.module.list_threads(alice))["threads"] == []
+    assert (await rt.module.get_thread(alice, thread_id=group))["error"] == "access denied"
+    assert (await rt.account("export", "alice"))["thread_memberships"] == []
+    events = []
+    carol = SimpleNamespace(**vars(rt.ctx("carol")), emit=lambda _event_type, payload: events.append(payload))
+    assert (await rt.module.send_message(carol, thread_id=group, body="carol after"))["success"]
+    assert [sorted(event["recipient_ids"]) for event in events] == [
+        ["bob", *(["operator"] if sender == "operator" else [])],
+    ]
+
+
+@pytest.mark.asyncio
+async def test_messaging_account_deletion_anonymises_titles_of_threads_the_user_created(messaging_account):
+    rt = messaging_account
+    service = rt.module._service
+    secret = "alice private support text about her medical bill"
+    # The support pack titles a support thread with the opening message (create_support_request).
+    support = (await service.create_thread(
+        rt.ctx("alice"), title=secret[:80], participant_ids=[], thread_type="support",
+        related_type="support.request", related_id="sr_1",
+    ))["thread"]["thread_id"]
+    assert (await service.send_message(
+        rt.ctx("alice"), thread_id=support, body=secret, allow_support_thread_sender=True,
+    ))["success"]
+    reply = await service.send_message(
+        rt.ctx("operator"), thread_id=support, body="operator reply", sender_role="operator",
+        allow_nonparticipant_sender=True, allow_support_thread_sender=True,
+    )
+    assert reply["success"]
+    assert rt.stored_row(support)["participant_ids"] == ["alice", "operator"]
+    group = await rt.group("alice", ["bob"])
+    await rt.send("bob", group, "bob joins")
+    direct = await rt.thread("alice", "bob")
+    await rt.send("bob", direct, "bob says hi")
+    bob_group = (await rt.module.create_thread(
+        rt.ctx("bob"), participant_ids=["alice"], thread_type="group", title="Bob's plans",
+    ))["thread"]["thread_id"]
+    await rt.send("alice", bob_group, "alice answers")
+
+    await rt.account("delete", "alice")
+    titles = {thread_id: rt.stored_row(thread_id)["title"] for thread_id in (support, group, direct, bob_group)}
+    # Titles Alice wrote become the neutral title; an untitled thread stays untitled; peers' titles stay.
+    assert titles == {support: RELEASED_TITLE, group: RELEASED_TITLE, direct: "", bob_group: "Bob's plans"}
+    assert secret[:20] not in json.dumps(rt.snapshot(), default=str)
+    assert "alice" not in json.dumps(rt.snapshot(), default=str)
+
+    # The remaining participants keep their access to the anonymised threads.
+    operator_view = await service.get_thread(rt.ctx("operator"), thread_id=support, allow_support_thread_reader=True)
+    assert (operator_view["thread"]["title"], [row["body"] for row in operator_view["messages"]]) == (
+        RELEASED_TITLE, ["operator reply"],
+    )
+    bob_view = await rt.module.get_thread(rt.ctx("bob"), thread_id=group)
+    assert (bob_view["thread"]["title"], [row["body"] for row in bob_view["messages"]]) == (
+        RELEASED_TITLE, ["bob joins"],
+    )
+    assert (await rt.module.send_message(rt.ctx("bob"), thread_id=group, body="still here"))["success"]
+    after = rt.snapshot()
+    await rt.account("delete", "alice")
+    assert rt.snapshot() == after
+
+
+@pytest.mark.asyncio
+async def test_messaging_account_export_of_created_threads_holds_only_the_users_own_data(messaging_account):
+    rt = messaging_account
+    peer_text = "bob private reply"
+    thread_id = await rt.thread("alice", "bob")
+    await rt.send("alice", thread_id, "alice opens")
+    await rt.send("bob", thread_id, peer_text)
+
+    exported = await rt.account("export", "alice")
+    (created,) = exported["threads_created"]
+    # The same fixed projection as memberships: no peer preview, participant ids, or storage metadata.
+    assert set(created) == THREAD_EXPORT_FIELDS
+    assert created["thread_id"] == thread_id
+    assert created == next(row for row in exported["thread_memberships"] if row["thread_id"] == thread_id)
+    assert peer_text not in json.dumps(exported["threads_created"])
+    assert "bob" not in json.dumps(exported["threads_created"])
 
 
 @pytest.mark.asyncio
