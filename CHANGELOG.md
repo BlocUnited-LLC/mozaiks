@@ -28,6 +28,18 @@ This project follows a practical pre-1.0 changelog format:
   page sections use app spacing, and sidebar pages stack on narrow screens.
   Invalid explicit title roles and layouts report errors instead of silently
   substituting another presentation.
+- Messaging `0.1.14` notifications carry no message text: they say "New
+  message" and "Open the conversation to read it.", with thread and message ids
+  only. A notification rule can declare `source_event: reference` to store just
+  the originating event's id, type and related type; other rules keep storing
+  the full event. Notifications rendered by `0.1.13` keep their copied preview
+  until the recipient clears them.
+- An app-owned pack handler, such as Messaging's `handler.py`, can now be
+  changed through an authorized selected-file Studio refinement of the app's
+  accepted current build, as a thin extension that keeps every template-owned
+  pack file byte-identical. Regeneration, UI-only refinement, repairs and
+  AppGenerator plan tasks cannot change it, and an unsupported request fails
+  with an explicit diagnostic that names the supported path.
 
 ### Fixed
 
@@ -54,6 +66,33 @@ This project follows a practical pre-1.0 changelog format:
 - The shell's Monaco sanitizer replacement resolves the installed dependency
   through directory junctions, preserving the locked sanitizer in isolated
   Windows worktrees as well as ordinary installations.
+- Pack-composed UI roots honor admitted repairs and page deletions in both
+  assembly and the admitted bundle. A repair overrides only what it changes
+  relative to the verified revision baseline. Pack declarations stay strict, and
+  provenance uses the pinned build timestamp.
+- Bundle validation keeps explicitly selected packs when its context selects
+  none, accepts shared roots claimed by several packs, and trusts verified
+  installed pins. Community pack upgrades fail before writing when another pack
+  owns the data contract, the app contract is malformed, or a composed UI root
+  would change.
+- Messaging account deletion repoints previews away from the deleted user's
+  messages, releases their thread membership, and neutralizes thread titles they
+  authored. Export includes membership, read state and the creator's thread
+  annotations. A send no longer rewrites thread membership, and plain direct
+  threads emit their lifecycle events again (nullable subject and related
+  fields).
+- Page refinement workers see earlier surfaces' outputs in the same plan, and
+  real-host acceptance receipts label the caller-supplied revision as an
+  unverified annotation.
+
+### Security
+
+- Workspace handler extensions are checked so that annotations and defaults
+  cannot run code at import, and service arguments must come from the
+  override's own parameters. These checks are targeted guards, not
+  certification of arbitrary code.
+- Accepting a version whose parent is no longer the current accepted build is
+  refused when it would replace app-owned pack code accepted since.
 
 ## 0.2.0 - 2026-10-16
 
