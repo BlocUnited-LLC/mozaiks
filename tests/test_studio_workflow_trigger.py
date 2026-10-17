@@ -1661,6 +1661,13 @@ class _ReviewArtifactStore:
             return [self.session]
         return []
 
+    async def get_current_build_record_refs(self, *, app_id):  # noqa: ANN001
+        """The accepted current record per build family, as the artifact store reports it."""
+        return {
+            version.build_family: version.id for version in (self.parent_version, self.child_version)
+            if version.app_id == app_id and version.lifecycle_status == ArtifactLifecycleStatus.CURRENT
+        }
+
     async def get_change_request(self, **kwargs):  # noqa: ANN003
         if kwargs.get("change_request_id") == self.change_request.id:
             return self.change_request
