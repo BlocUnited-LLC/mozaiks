@@ -12,6 +12,7 @@ Responsibilities:
 """
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -49,6 +50,14 @@ from mozaiksai.core.workflow.generator_support.module_write_actions import (
 logger = logging.getLogger(__name__)
 
 
+def _is_contract(content: str, contract: dict[str, Any]) -> bool:
+    """Whether carried contract text is exactly this contract; unreadable text never is."""
+    try:
+        return bool(json.loads(content) == contract)
+    except ValueError:
+        return False
+
+
 def _merge_code_files(
     feature_outputs: list[dict[str, Any]],
     *,
@@ -73,13 +82,24 @@ def _merge_code_files(
             file_map[str(filename)] = str(content)
     inventory = verified_pack_template_inventory(context_variables=context_variables)
     pack_data_contracts = verified_pack_data_contracts(inventory)
-    if data_contract is None and pack_data_contracts:
+    # Without an approved contract the selected packs' contributions compose onto
+    # an empty base. A carried data/contract.json is not an approval, so the base
+    # may replace it only when it already is that composition (a reassembly of
+    # this build); otherwise the app's own surfaces would be silently dropped.
+    pack_only_base = data_contract is None and bool(pack_data_contracts)
+    if pack_only_base:
         data_contract = {"version": "1", "surfaces": [], "shared_collections": []}
     if isinstance(data_contract, dict):
         data_contract = compile_data_contract(
             data_contract, subscription_contract=subscription_contract, context_variables=context_variables,
             pack_data_contracts=pack_data_contracts,
         )
+        carried = file_map.get("data/contract.json")
+        if pack_only_base and carried is not None and not _is_contract(carried, data_contract):
+            raise ValueError(
+                "data/contract.json requires the approved DesignDocs data_contract; without it the selected "
+                "packs' data contributions cannot replace a carried contract that differs from their composition"
+            )
     elif subscription_contract is not None:
         assignment_contract = compile_data_contract(
             {"version": "1", "surfaces": [], "shared_collections": []},

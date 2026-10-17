@@ -271,6 +271,56 @@ def test_persistence_repair_save_keeps_the_verified_pack_data_contributions(repa
     assert _scan_planned_data_fields(admitted, approved, context_variables=context) == []
 
 
+CARRIED_APP_CONTRACT = {"version": "1", "surfaces": [{
+    "surface_id": "projects", "surface_kind": "module", "collections": [{
+        "name": "projects", "entity": "Project", "scope": "app", "tenancy": "per_user",
+        "owner_field": "owner", "fields": [{"name": "owner", "type": "string", "required": True}],
+    }],
+}], "shared_collections": []}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("with_pack", [False, True])
+async def test_revision_without_approved_contract_never_replaces_the_carried_app_contract(request, with_pack):
+    from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
+    from mozaiksai.core.workflow.context.adapter import create_context_container
+
+    # An imported app: its bundle carries its own contract, but DesignDocs never
+    # approved one, so the run has no data_contract. A data-contributing pack
+    # must not turn the missing approval into a pack-only contract.
+    saved = request.getfixturevalue("revision_baseline")
+    saved.files = {
+        "app.json": json.dumps({"appId": "customer-app", "appName": "Projects"}),
+        "data/contract.json": json.dumps(CARRIED_APP_CONTRACT),
+    }
+    _replace_archive(saved, {})
+    context = create_context_container(initial={**saved.context, **(_context() if with_pack else {})})
+    result = await assemble_app_tasks(context_variables=context)
+    assert not result["success"], [file["filename"] for file in result["code_files"]]
+    assert "data/contract.json requires the approved DesignDocs data_contract" in result["error"]
+
+
+def test_pack_only_contract_without_approval_reassembles_only_its_own_composition():
+    context = _context()
+    emitted = resolve_managed_capability_templates(context["capability_packs"], context_variables=context)
+
+    def merge(carried):
+        return {file["filename"]: file["content"] for file in _merge_code_files(
+            [{"code_files": [*emitted, *carried]}], app_build_plan=context["app_build_plan"],
+            data_contract=None, context_variables=context,
+        )}
+
+    written = merge([])["data/contract.json"]
+    assert [surface["surface_id"] for surface in json.loads(written)["surfaces"]] == ["messages"]
+    # A reassembly of this build carries the composition it wrote: nothing to drop.
+    assert merge([{"filename": "data/contract.json", "content": written}])["data/contract.json"] == written
+    extended = json.loads(written)
+    extended["surfaces"].extend(CARRIED_APP_CONTRACT["surfaces"])
+    for carried in (json.dumps(extended), "not json"):
+        with pytest.raises(ValueError, match="requires the approved DesignDocs data_contract"):
+            merge([{"filename": "data/contract.json", "content": carried}])
+
+
 @pytest.mark.parametrize("path", ["modules/messages/backend/policy.py", "modules/messages/backend/service.py",
                                   "modules/messages/module.yaml"])
 def test_injected_pack_backend_bytes_are_rejected(path):

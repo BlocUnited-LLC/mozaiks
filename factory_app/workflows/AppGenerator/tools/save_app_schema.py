@@ -1632,7 +1632,10 @@ def save_app_schema(
                     context_variables[key] = value
                 else:
                     context_variables.set(key, value)
-            mark_repair_responded(context_variables)
+            # As in save_generated_code: the shared UI roots an admitted repair
+            # saved are newer than its task's output, so assembly lets them
+            # supersede that task even where they restate the revision baseline.
+            mark_repair_responded(context_variables, saved_paths=written)
     except Exception as exc:
         _logger.exception("Could not write schema files to disk")
         raise RuntimeError("Could not write schema files to disk") from exc

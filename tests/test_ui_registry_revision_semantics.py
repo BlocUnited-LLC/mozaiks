@@ -425,3 +425,72 @@ async def test_revision_repair_restoring_the_baseline_supersedes_the_task_it_rep
     expected = "Board" if evidence == "repair_of_the_task" else "Faulty title"
     assert _routes(_files(result))["board"]["meta"]["title"] == expected
     assert _routes(admitted_app_file_map(context))["board"]["meta"]["title"] == expected
+
+
+BOARD_BUNDLE = {
+    "route_manifest": [{
+        "id": "board", "label": "Board", "path": "/board", "component": "Board", "requiresAuth": True,
+        "order": 10, "purpose": "Board", "meta": {"title": "Board"},
+    }],
+    "page_files": [{
+        "path": "ui/pages/custom/board.jsx", "route_id": "board", "component_name": "Board",
+        "registry_key": "Board", "purpose": "Board", "contract_refs": [],
+        "content": "export default function Board() { return null; }",
+    }],
+}
+
+
+@pytest.mark.asyncio
+async def test_revision_app_schema_repair_restoring_the_baseline_supersedes_the_task_it_repairs(
+    request, tmp_path, monkeypatch,
+):
+    from factory_app.workflows.AppGenerator.tools.save_app_schema import save_app_schema
+    from mozaiksai.core.workflow.generator_support.code_files import _custom_route_bundle_code_files
+
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path))
+    saved = request.getfixturevalue("revision_baseline")
+    board = {item["filename"]: item["content"] for item in _custom_route_bundle_code_files(BOARD_BUNDLE)}
+    pack = _assembled_files()
+    saved.files = {**board, **pack, **compose(board, pack), "app.json": json.dumps({
+        "appId": "customer-app", "appName": "Board", "startup": {"landing_spot": "/board"},
+        "targets": {"web": True, "mobile": False}, "authRequired": False, "admins": [],
+    }, indent=2)}
+    _replace_archive(saved, {})
+    revised = {**board, "ui/route_manifest.json": retitled(board["ui/route_manifest.json"], "board", "Faulty title")}
+    task = {"task_id": "pages", "task_type": "page_bundle", "initial_agent": "AppSchemaAgent",
+            "owned_paths": sorted(revised), "depends_on": []}
+    selected = _context()
+    context = create_context_container(initial={
+        **saved.context, **selected, "app_task_batch_items": [task],
+        "app_build_plan": {**selected["app_build_plan"], "build_tasks": [task], "pages": [
+            {"name": "board", "route": "/board", "ui_surface": "custom_react_page"},
+        ]},
+        # The approved contract already names the pack surface, so the schema save re-renders it unchanged.
+        "data_contract": json.loads(pack["data/contract.json"]),
+        "app_task_batch_results": {"pages": {"code_files": contribution("task:pages", revised)["files"]}},
+    })
+    first = await assemble_app_tasks(context_variables=context)
+    assert first["success"], first
+    assert _routes(_files(first))["board"]["meta"]["title"] == "Faulty title"
+    # Validation selects a bounded repair of the page task; AppSchemaAgent's auto
+    # tool saves the restored baseline route, then the UI quality gate passes.
+    context.set("bundle_repair_target", "AppSchemaAgent")
+    context.set("bundle_repair_result", {"active": {
+        "task_id": "pages", "target_agent": "AppSchemaAgent", "request_id": "pages-repair-1",
+        "allowed_paths": sorted(revised), "status": "selected",
+    }, "history": []})
+    message = save_app_schema(
+        manifest={"app_name": "Board", "default_route": "/board", "pages": [], "custom_routes": ["board"]},
+        pages=[], custom_route_bundle=BOARD_BUNDLE, context_variables=context,
+    )
+    assert "rejected" not in message, message
+    assert context.get("bundle_repair_result")["active"]["status"] == "responded"
+    context.set("app_ui_quality_status", "passed")
+    result = await assemble_app_tasks(context_variables=context)
+    assert result["success"], result
+    files = _files(result)
+    assert _routes(files)["board"] == _routes(board)["board"]
+    assert _routes(files)["messages"] == _routes(pack)["messages"]
+    assert files["ui/index.js"].count('registerComponent("Messages"') == 1
+    assert _routes(admitted_app_file_map(context)) == _routes(files)
+    assert {"ui/index.js", "ui/route_manifest.json"} <= set(context.get("bundle_repair_result")["active"]["saved_paths"])
