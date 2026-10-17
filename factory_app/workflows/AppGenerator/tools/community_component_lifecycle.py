@@ -342,6 +342,16 @@ def _current_owner_by_path(app_root: Path) -> dict[str, str]:
     return owner_by_path
 
 
+def _exclusive_claimants(app_root: Path, path: str) -> set[str]:
+    """Every pack whose provenance claims ``path`` as an exclusive file, whatever the entry order."""
+    return {
+        str(pack.get("pack_id") or "").strip()
+        for pack in _provenance_pack_entries(app_root)
+        for file_entry in pack.get("materialized_owned_files") or []
+        if isinstance(file_entry, dict) and file_entry.get("path") == path
+    }
+
+
 def plan_component_upgrade(
     *,
     build_context_root: str | Path,
@@ -419,10 +429,14 @@ def _plan_upgrade(
             current_content = target.read_text(encoding="utf-8")
             if current_content != old_files[path]:
                 potential_conflicts.append({"path": path, "kind": "locally_modified_owned_file"})
-        # Composing into the contract never overrides another pack's exclusive claim on it.
-        contract_owner = owner_by_path.get(_DATA_CONTRACT_PATH)
-        if (recomposed or new_data) and contract_owner and contract_owner != pack_id:
-            potential_conflicts.append({"path": _DATA_CONTRACT_PATH, "kind": "owned_by_other_pack", "owner": contract_owner})
+        # Composing into the contract never overrides another pack's exclusive claim on it,
+        # even when the upgraded pack also claims it: every claimant is checked, not the last.
+        other_contract_owners = sorted(_exclusive_claimants(app_root, _DATA_CONTRACT_PATH) - {pack_id})
+        if (recomposed or new_data) and other_contract_owners:
+            potential_conflicts.extend(
+                {"path": _DATA_CONTRACT_PATH, "kind": "owned_by_other_pack", "owner": owner}
+                for owner in other_contract_owners
+            )
         elif recomposed:
             data_contract, conflict = _recompose_data_contract(app_root, old_data, new_data)
             if conflict:

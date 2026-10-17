@@ -486,23 +486,37 @@ It does not execute migration scripts.
 `data/contract.json` is never an owned file. When a pack's data contribution
 changes, the plan lists it in `recomposed_files`, and applying replaces only
 that pack's surfaces in the app contract, preserving app-owned surfaces and
-other contributions. An app without a contract gets one only when the new
-version contributes surfaces. The plan blocks before anything is written when
-another installed pack's provenance claims the contract as an exclusive file
-(`owned_by_other_pack`), when a pack surface was modified locally
-(`locally_modified_composed_output`), or when the app contract fails the
-runtime data contract loader or conflicts with the contribution
+other contributions. When the contribution changes and the app has no
+contract, the lifecycle creates one whenever the new version ships a data
+contract template, even one that declares no surfaces. In that case it writes
+the same empty contract (`"surfaces": []`) that assembly composes for the pack
+when no approved DesignDocs contract exists. If the new version ships no data
+contract template, no contract is created. The plan blocks before anything is
+written when any installed pack other than the upgraded one claims the contract
+as an exclusive file in its provenance, in any entry order and even when the
+upgraded pack claims it too (`owned_by_other_pack`), when a pack surface was
+modified locally (`locally_modified_composed_output`), or when the app contract
+fails the runtime data contract loader or conflicts with the contribution
 (`composed_output_conflict`).
 
 Provenance keeps other packs' composed contributors, and a root the app
 already composes stays composed. A composed shared UI root (`ui/index.js`,
 `ui/route_manifest.json` under `composed_outputs`) merges the app's and every
 contributing pack's declarations into one file, so the lifecycle does not
-recompose it. When an upgrade adds, changes, or removes the pack's template
-for such a root, the plan blocks with `composed_output_requires_reassembly`;
-reassemble the app with the upgraded pack selected so UI composition rebuilds
-the root. An unchanged template only updates the contributor identity, and a
-root the pack owns exclusively upgrades as an ordinary owned file.
+recompose it. An unchanged template only updates the contributor identity, and
+a root the pack owns exclusively upgrades as an ordinary owned file. When an
+upgrade adds, changes, or removes the pack's template for a composed root, the
+plan blocks with `composed_output_requires_reassembly` and nothing is written.
+
+For an installed Community Component, that block currently has no supported
+way through: the lifecycle cannot adopt that pack version. Applying the
+upgrade is the only operation that moves the installed pin, and it is the
+blocked step. Installing the new version is refused while another version of
+the pack is installed. Reassembly that selects the pack by id resolves the
+pinned old source. A reassembly whose pack descriptor names the new version's
+`pack_source_path` directly renders the new templates but does not touch
+`installed_components.json` or its source sidecar, so the next upgrade plan
+still compares against the old version's output and blocks again.
 
 Mozaiks does not perform remote downloads, registry lookup, marketplace ranking,
 trust scoring, cryptographic signing, or automatic semver range upgrades for

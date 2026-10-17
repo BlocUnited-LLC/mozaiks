@@ -11,8 +11,10 @@ from factory_app.workflows.AppGenerator.tools import generated_bundle_scanner as
 from factory_app.workflows.AppGenerator.tools import (
     resolve_managed_capability_templates as resolver,
 )
+from factory_app.workflows.AppGenerator.tools.assembly_phase import _merge_code_files
 from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
     CommunityComponentConflictError,
+    CommunityComponentLifecycleError,
     apply_component_upgrade,
     install_verified_local_pack,
     plan_component_upgrade,
@@ -26,6 +28,7 @@ from mozaiksai.core.workflow.generator_support.persistence_artifacts import (
 BUILD_CONTEXT = Path(__file__).resolve().parents[1] / "factory_app/build_context"
 MESSAGING = BUILD_CONTEXT / "messaging"
 GREETINGS = Path(__file__).resolve().parent / "fixtures/community_packs/greetings"
+LIFECYCLE_DOCS = Path(__file__).resolve().parents[1] / "docs/architecture/workflows/build-context-packs.md"
 DATA_CONTRACT = "data/contract.json"
 ROUTE_MANIFEST = "ui/route_manifest.json"
 PROVENANCE = ".mozaiks/pack_provenance.json"
@@ -105,6 +108,50 @@ def _assert_upgrade_blocked_before_writing(build_context_root: Path, candidate: 
             build_context_root=build_context_root, candidate_pack_source_path=candidate, workspace_app_root=app_root,
         )
     assert _snapshot(build_context_root, app_root) == before
+
+
+def _write_composed_greetings_app(app_root: Path, pack_root: Path) -> None:
+    """Write the greetings pack as assembly does, with its route manifest a composed root."""
+    contributions: list[dict] = []
+    files = {
+        item["filename"]: item["content"]
+        for item in resolver.resolve_managed_capability_templates(
+            [{"id": "greetings", "pack_source_path": str(pack_root)}], ui_contributions=contributions,
+        )
+    }
+    # Assembly passes ui_contributions, so the pack's route manifest is a composed root.
+    assert list(json.loads(files[PROVENANCE])["composed_outputs"]) == [ROUTE_MANIFEST]
+    files[ROUTE_MANIFEST] = next(item["content"] for item in contributions[0]["files"] if item["filename"] == ROUTE_MANIFEST)
+    for path, content in files.items():
+        (app_root / path).parent.mkdir(parents=True, exist_ok=True)
+        (app_root / path).write_text(content, encoding="utf-8")
+
+
+def _greetings_v2(tmp_path: Path, change: str) -> Path:
+    """Copy greetings as 0.2.0 whose route manifest template is changed or removed."""
+    v2 = tmp_path / "greetings_v2"
+    shutil.copytree(GREETINGS, v2)
+    (v2 / "context.yaml").write_text(
+        (v2 / "context.yaml").read_text(encoding="utf-8").replace('version: "0.1.0"', 'version: "0.2.0"'), encoding="utf-8",
+    )
+    service = v2 / "templates/modules/greetings/backend/service.py"
+    service.write_text(service.read_text(encoding="utf-8") + "# v2\n", encoding="utf-8")
+    template = v2 / "templates" / ROUTE_MANIFEST
+    if change == "changed":
+        manifest = json.loads(template.read_text(encoding="utf-8"))
+        manifest["pages"][0]["label"] = "Greetings v2"
+        template.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    else:
+        contract = v2 / "contract.yaml"
+        declared = f"  - path: {ROUTE_MANIFEST}\n    owner: templates\n"
+        assert declared in contract.read_text(encoding="utf-8")
+        contract.write_text(contract.read_text(encoding="utf-8").replace(declared, ""), encoding="utf-8")
+        template.unlink()
+    return v2
+
+
+def _lifecycle_docs() -> str:
+    return " ".join(LIFECYCLE_DOCS.read_text(encoding="utf-8").split())
 
 
 @pytest.mark.asyncio
@@ -346,41 +393,101 @@ def test_upgrade_does_not_create_a_data_contract_with_nothing_to_compose(tmp_pat
 def test_upgrade_blocks_a_pack_change_to_a_composed_ui_root(tmp_path, change):
     build_context_root, app_root = tmp_path / "build_context", tmp_path / "app"
     install_verified_local_pack(pack_source_path=GREETINGS, build_context_root=build_context_root)
-    contributions: list[dict] = []
-    files = {
-        item["filename"]: item["content"]
-        for item in resolver.resolve_managed_capability_templates(
-            [{"id": "greetings", "pack_source_path": str(GREETINGS)}], ui_contributions=contributions,
-        )
-    }
-    # Assembly passes ui_contributions, so the pack's route manifest is a composed root.
-    assert list(json.loads(files[PROVENANCE])["composed_outputs"]) == [ROUTE_MANIFEST]
-    files[ROUTE_MANIFEST] = next(item["content"] for item in contributions[0]["files"] if item["filename"] == ROUTE_MANIFEST)
-    for path, content in files.items():
-        (app_root / path).parent.mkdir(parents=True, exist_ok=True)
-        (app_root / path).write_text(content, encoding="utf-8")
-    v2 = tmp_path / "greetings_v2"
-    shutil.copytree(GREETINGS, v2)
-    (v2 / "context.yaml").write_text(
-        (v2 / "context.yaml").read_text(encoding="utf-8").replace('version: "0.1.0"', 'version: "0.2.0"'), encoding="utf-8",
-    )
-    service = v2 / "templates/modules/greetings/backend/service.py"
-    service.write_text(service.read_text(encoding="utf-8") + "# v2\n", encoding="utf-8")
-    template = v2 / "templates" / ROUTE_MANIFEST
-    if change == "changed":
-        manifest = json.loads(template.read_text(encoding="utf-8"))
-        manifest["pages"][0]["label"] = "Greetings v2"
-        template.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-    else:
-        contract = v2 / "contract.yaml"
-        declared = f"  - path: {ROUTE_MANIFEST}\n    owner: templates\n"
-        assert declared in contract.read_text(encoding="utf-8")
-        contract.write_text(contract.read_text(encoding="utf-8").replace(declared, ""), encoding="utf-8")
-        template.unlink()
+    _write_composed_greetings_app(app_root, GREETINGS)
+    v2 = _greetings_v2(tmp_path, change)
 
     _assert_upgrade_blocked_before_writing(build_context_root, v2, app_root, [
         {"path": ROUTE_MANIFEST, "kind": "composed_output_requires_reassembly"},
     ])
+
+
+@pytest.mark.parametrize("claim_order", [
+    ("other_pack", "messaging"), ("messaging", "other_pack"),
+], ids=["upgraded_listed_last", "upgraded_listed_first"])
+def test_upgrade_blocks_any_other_exclusive_data_contract_claim_in_either_order(tmp_path, claim_order):
+    build_context_root, app_root = tmp_path / "build_context", tmp_path / "app"
+    v1 = _messaging_copy(tmp_path / "v1", version="0.1.13")
+    v2 = _messaging_copy(tmp_path / "v2", version="0.1.14", extra_field=True)
+    install_verified_local_pack(pack_source_path=v1, build_context_root=build_context_root)
+    _write_app(app_root, v1, app_contract=None)
+    # Legacy or hand-edited provenance can list the same exclusive claim twice; no claim may hide another.
+    provenance_path = app_root / PROVENANCE
+    provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+    del provenance["composed_outputs"]
+    entries = {pack["pack_id"]: pack for pack in [*provenance["packs"], {**OTHER_PACK, "materialized_owned_files": []}]}
+    assert sorted(entries) == sorted(claim_order)
+    for entry in entries.values():
+        entry["materialized_owned_files"].append({"path": DATA_CONTRACT, "owner": "templates"})
+    provenance["packs"] = [entries[pack_id] for pack_id in claim_order]
+    provenance_path.write_text(json.dumps(provenance), encoding="utf-8")
+
+    _assert_upgrade_blocked_before_writing(build_context_root, v2, app_root, [
+        {"path": DATA_CONTRACT, "kind": "owned_by_other_pack", "owner": "other_pack"},
+    ])
+
+
+def test_upgrade_writes_the_empty_contract_assembly_composes_for_a_zero_surface_template(tmp_path):
+    build_context_root, app_root = tmp_path / "build_context", tmp_path / "app"
+    v1 = _messaging_copy(tmp_path / "v1", version="0.1.12", without_data=True)
+    v2 = _messaging_copy(tmp_path / "v2", version="0.1.13")
+    (v2 / "templates" / DATA_CONTRACT).write_text(json.dumps(EMPTY_CONTRACT, indent=2), encoding="utf-8")
+    install_verified_local_pack(pack_source_path=v1, build_context_root=build_context_root)
+    _write_app(app_root, v1, app_contract=None)
+    assert not (app_root / DATA_CONTRACT).exists()
+
+    plan = apply_component_upgrade(
+        build_context_root=build_context_root, candidate_pack_source_path=v2, workspace_app_root=app_root,
+    )
+
+    # Assembly without an approved DesignDocs contract composes the same empty contract for this pack.
+    metadata = resolver.verify_pack_integrity(v2, "messaging")
+    selected = {"id": "messaging", "pack_source_path": str(v2), "version": metadata["version"], "digest": metadata["digest"]}
+    context = {"capability_packs": [selected]}
+    emitted = resolver.resolve_managed_capability_templates(context["capability_packs"], context_variables=context)
+    assembled = {item["filename"]: item["content"] for item in _merge_code_files([{"code_files": emitted}], context_variables=context)}
+    assert plan.recomposed_files == [DATA_CONTRACT]
+    assert json.loads((app_root / DATA_CONTRACT).read_text(encoding="utf-8")) == json.loads(assembled[DATA_CONTRACT]) == EMPTY_CONTRACT
+    docs = _lifecycle_docs()
+    assert "gets one only when the new version contributes surfaces" not in docs
+    assert "creates one whenever the new version ships a data contract template, even one that declares no surfaces" in docs
+    assert "If the new version ships no data contract template, no contract is created." in docs
+
+
+def test_installed_pack_cannot_adopt_a_changed_composed_ui_root_template(tmp_path):
+    build_context_root, app_root = tmp_path / "build_context", tmp_path / "app"
+    install_verified_local_pack(pack_source_path=GREETINGS, build_context_root=build_context_root)
+    _write_composed_greetings_app(app_root, GREETINGS)
+    v2 = _greetings_v2(tmp_path, "changed")
+    blocked = {"path": ROUTE_MANIFEST, "kind": "composed_output_requires_reassembly"}
+    plan = plan_component_upgrade(
+        build_context_root=build_context_root, candidate_pack_source_path=v2, workspace_app_root=app_root,
+    )
+    assert plan.status == "blocked" and blocked in plan.potential_conflicts
+
+    # Installing the new version is refused while the old one is pinned.
+    with pytest.raises(CommunityComponentLifecycleError, match="already installed at 0.1.0"):
+        install_verified_local_pack(pack_source_path=v2, build_context_root=build_context_root)
+    # Reassembly that selects the pack by id resolves the pinned old source.
+    by_id = {
+        item["filename"]: item["content"]
+        for item in resolver.resolve_managed_capability_templates(
+            [{"id": "greetings"}], context_variables={"build_context_root": str(build_context_root)}, ui_contributions=[],
+        )
+    }
+    assert [pack["version"] for pack in json.loads(by_id[PROVENANCE])["packs"]] == ["0.1.0"]
+    # Reassembly from the new source's explicit path leaves the pin behind, so the next plan blocks again.
+    _write_composed_greetings_app(app_root, v2)
+    installed = json.loads((build_context_root / ".mozaiks/installed_components.json").read_text(encoding="utf-8"))
+    assert [component["version"] for component in installed["components"]] == ["0.1.0"]
+    plan = plan_component_upgrade(
+        build_context_root=build_context_root, candidate_pack_source_path=v2, workspace_app_root=app_root,
+    )
+    assert plan.status == "blocked" and blocked in plan.potential_conflicts
+    docs = _lifecycle_docs()
+    assert "reassemble the app with the upgraded pack selected" not in docs
+    assert "the lifecycle cannot adopt that pack version" in docs
+    assert "the only operation that moves the installed pin" in docs
+    assert "the next upgrade plan still compares against the old version's output and blocks again" in docs
 
 
 @pytest.mark.parametrize("factory_root_resolves", [True, False])
