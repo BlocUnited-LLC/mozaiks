@@ -77,10 +77,12 @@ logger = logging.getLogger(__name__)
 _PACK_PROVENANCE_PATH = ".mozaiks/pack_provenance.json"
 # The context `code_files` overlay of admitted repairs, merged last.
 ADMITTED_OVERLAY_OWNER = "app:accumulated_files"
-# UI roots of each bound revision source assembly composed against, by source
-# identity, so the admitted projection composes with the same baseline.
+# Text files of each bound revision source assembly composed against, by source
+# identity, so the admitted projection composes with the same baseline. The
+# whole text map is kept because composition resolves the baseline barrel's
+# imports against it; UI roots alone cannot be composed.
 _REVISION_UI_BASELINES: dict[tuple[str, ...], dict[str, str]] = {}
-_REVISION_UI_BASELINE_LIMIT = 64
+_REVISION_UI_BASELINE_LIMIT = 16
 
 
 def compose_bundle_auth_routes(files_map: dict[str, str]) -> None:
@@ -368,14 +370,12 @@ def _revision_source_key(context_variables: Any) -> tuple[str, ...] | None:
 
 
 def remember_revision_baseline(context_variables: Any, files: dict[str, Any]) -> None:
-    """Record the UI roots of the bound revision source assembly just read and composed with."""
+    """Record the text files of the bound revision source assembly just read and composed with."""
     key = _revision_source_key(context_variables)
     if key is None:
         return
     _REVISION_UI_BASELINES.pop(key, None)
-    _REVISION_UI_BASELINES[key] = {
-        path: content for path, content in files.items() if path in SHARED_UI_OUTPUT_PATHS and isinstance(content, str)
-    }
+    _REVISION_UI_BASELINES[key] = {path: content for path, content in files.items() if isinstance(content, str)}
     while len(_REVISION_UI_BASELINES) > _REVISION_UI_BASELINE_LIMIT:
         _REVISION_UI_BASELINES.pop(next(iter(_REVISION_UI_BASELINES)))
 

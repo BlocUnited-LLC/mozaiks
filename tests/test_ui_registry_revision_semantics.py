@@ -288,6 +288,27 @@ async def test_admitted_map_keeps_a_task_revision_change_over_a_stale_baseline_c
 
 
 @pytest.mark.asyncio
+async def test_admitted_map_applies_a_revision_repair_saved_after_assembly(request, caplog):
+    saved = request.getfixturevalue("revision_baseline")
+    board, pack = component(path="ui/pages/custom/board.jsx"), _assembled_files()
+    _save(saved, board, pack)
+    revised = {path: saved.files[path] for path in ("ui/index.js", "ui/route_manifest.json", "ui/pages/custom/board.jsx")}
+    context = _revision_context(saved, revised)
+    result = await assemble_app_tasks(context_variables=context)
+    assert result["success"], result
+    # A repair admitted after assembly reaches validation and export through the
+    # admitted map, which must compose it exactly as reassembly would.
+    repair = {"ui/route_manifest.json": retitled(_files(result)["ui/route_manifest.json"], "board", "Repaired later")}
+    context.set("code_files", contribution("repair", repair)["files"])
+    caplog.set_level(logging.WARNING, logger="factory_app.workflows.AppGenerator.tools.code_file_utils")
+    admitted = admitted_app_file_map(context)
+    assert _routes(admitted)["board"]["meta"]["title"] == "Repaired later"
+    assert _routes(admitted)["messages"] == _routes(pack)["messages"]
+    assert admitted["ui/index.js"].count('registerComponent("Messages"') == 1
+    assert not any("ADMITTED_UI_ROOT_NOT_COMPOSED" in record.getMessage() for record in caplog.records)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("repair", ["retitle_pack_route", "reregister_pack_component"])
 async def test_admitted_map_never_patches_a_verified_pack_declaration(repair, caplog):
     task, pack = component(path="ui/pages/custom/board.jsx"), _assembled_files()
