@@ -19,6 +19,14 @@ This project follows a practical pre-1.0 changelog format:
   contract for debug APK and unsigned release AAB outputs; signing keys and
   store credentials remain outside OSS delivery inputs.
 
+### Fixed
+
+- Android delivery now accepts app-owned workflow overlays that extend the
+  canonical `mozaiks.default_workflow_registry`; unknown inheritance targets
+  still fail before export.
+- Product-specific browser auth adapters can accompany Android source while the
+  generated native barrel keeps the Capacitor auth facade authoritative.
+
 ## 0.2.0 - 2026-10-16
 
 ### Added
