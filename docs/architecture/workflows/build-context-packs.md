@@ -182,14 +182,19 @@ Without an approved DesignDocs data contract, assembly composes the selected
 packs' contributions (and any subscription assignment stores) onto an empty
 contract. A `data/contract.json` the bundle already carries is not an approval,
 so that composition replaces it only when the carried contract holds nothing the
-app owns: every surface is a selected pack's contributed surface or the
-subscription assignment store surface, every alias names one of their
-collections, it declares no shared collections, and its other metadata matches.
-Surface order is not compared, so an earlier assembly, the pack lifecycle's
-recomposition, a changed pack contribution or a newly added assignment store
-all recompose. A carried contract holding any app-owned surface, shared
-collection or alias fails assembly with the approved-contract error instead of
-being silently replaced.
+app owns. Every carried surface must be a surface of that composition (a
+selected pack's contributed surface or the subscription assignment store
+surface) with the same `surface_kind`, and hold only collections the
+composition declares under that surface, matched by collection name and
+physical collection. Every alias must be one the composition declares, the
+contract declares no shared collections, and its other metadata matches.
+Fields inside a declared collection and surface order are not compared, so an
+earlier assembly, the pack lifecycle's recomposition, a changed pack
+contribution or a newly added assignment store all recompose. A carried contract
+holding any other surface, collection or alias (including an app surface that
+shares a pack's surface id, or an app collection placed inside a pack or
+assignment store surface) fails assembly with the approved-contract error
+instead of being silently replaced.
 
 Canonical policy, schema, and CRUD synthesis still owns ordinary generated and
 partially templated modules, including OutcomeFeedback. A complete template

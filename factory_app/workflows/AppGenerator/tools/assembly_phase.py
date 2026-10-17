@@ -50,19 +50,34 @@ from mozaiksai.core.workflow.generator_support.module_write_actions import (
 logger = logging.getLogger(__name__)
 
 
-#: The surface the subscription assignment store compiler declares its collections under.
-_ASSIGNMENT_STORE_SURFACE = {"surface_id": "subscription_assignments", "surface_kind": "app_policy"}
+def _storage_name(collection: dict[str, Any]) -> Any:
+    """The physical collection a contract row names, as the assignment store compiler resolves it."""
+    return collection.get("mongo_collection") or collection.get("collection") or collection.get("name")
 
 
-def _holds_only_derived_data(content: str, pack_data_contracts: list[dict[str, Any]], composed: dict[str, Any]) -> bool:
+def _alias_identity(alias: Any) -> tuple[str, str] | None:
+    """An alias row's name and target collection, or None when either is not a string."""
+    if not isinstance(alias, dict):
+        return None
+    name = alias.get("alias") or alias.get("data_alias")
+    target = alias.get("collection") or alias.get("mongo_collection")
+    return (name, target) if isinstance(name, str) and isinstance(target, str) else None
+
+
+def _holds_only_derived_data(content: str, composed: dict[str, Any]) -> bool:
     """Whether a carried contract holds nothing but what selected packs and subscription stores derive.
 
-    Every surface must be a selected pack's contributed surface or the
-    subscription assignment store surface, and every alias must name one of
-    their collections; any shared collection, or metadata the composition
-    would change, is the app's own. Order is not compared: a carried
-    composition, such as the pack lifecycle's recomposition, may list the
-    same surfaces in another order. Unreadable text never qualifies.
+    ``composed`` is that derivation: the selected packs' contributed surfaces
+    and the compiled subscription assignment store surface, on an empty base.
+    Every carried surface must be one of its surfaces, with the same
+    surface_kind, and hold only collections that surface declares, by name
+    and physical collection. Fields inside such a collection may differ, so a
+    changed pack contribution recomposes. Every alias must be one the
+    derivation declares, so it targets a derived collection. Any other
+    surface, collection or alias, any shared collection, and metadata the
+    composition would change are the app's own. Order is not compared: a
+    carried composition, such as the pack lifecycle's recomposition, may list
+    the same surfaces in another order. Unreadable text never qualifies.
     """
     try:
         carried = json.loads(content)
@@ -70,24 +85,30 @@ def _holds_only_derived_data(content: str, pack_data_contracts: list[dict[str, A
         return False
     if not isinstance(carried, dict) or not isinstance(carried.get("surfaces") or [], list):
         return False
-    pack_surfaces = {
-        surface.get("surface_id") for contribution in pack_data_contracts for surface in contribution.get("surfaces") or []
+    derived = {
+        surface["surface_id"]: (surface.get("surface_kind"), {
+            collection.get("name"): _storage_name(collection) for collection in surface.get("collections") or []
+        })
+        for surface in composed.get("surfaces") or []
     }
-    collections: set[Any] = set()
     for surface in carried.get("surfaces") or []:
-        if not isinstance(surface, dict) or not (
-            surface.get("surface_id") in pack_surfaces
-            or {key: surface.get(key) for key in _ASSIGNMENT_STORE_SURFACE} == _ASSIGNMENT_STORE_SURFACE
-        ):
+        if not isinstance(surface, dict) or not isinstance(surface.get("surface_id"), str):
+            return False
+        kind, collections = derived.get(surface["surface_id"], (None, None))
+        if collections is None or surface.get("surface_kind") != kind:
+            return False
+        if not isinstance(surface.get("collections") or [], list):
             return False
         for collection in surface.get("collections") or []:
-            if isinstance(collection, dict):
-                collections.update(collection.get(key) for key in ("name", "mongo_collection", "collection"))
+            if not isinstance(collection, dict) or not isinstance(collection.get("name"), str):
+                return False
+            if collection["name"] not in collections or _storage_name(collection) != collections[collection["name"]]:
+                return False
     if carried.get("shared_collections"):
         return False
-    if not all(
-        isinstance(alias, dict) and (alias.get("collection") or alias.get("mongo_collection")) in collections - {None}
-        for alias in carried.get("aliases") or []
+    aliases = {_alias_identity(alias) for alias in composed.get("aliases") or []} - {None}
+    if not isinstance(carried.get("aliases") or [], list) or not all(
+        _alias_identity(alias) in aliases for alias in carried.get("aliases") or []
     ):
         return False
     metadata = set(carried) - {"version", "surfaces", "shared_collections", "aliases"}
@@ -120,10 +141,10 @@ def _merge_code_files(
     pack_data_contracts = verified_pack_data_contracts(inventory)
     # Without an approved contract the selected packs' contributions compose onto
     # an empty base. A carried data/contract.json is not an approval, so the base
-    # may replace it only when it holds nothing the app owns: only selected pack
-    # surfaces and subscription assignment stores, such as an earlier assembly
-    # or pack lifecycle composition. Otherwise the app's own surfaces would be
-    # silently dropped.
+    # may replace it only when it holds nothing the app owns: only the
+    # collections and aliases this composition declares, such as an earlier
+    # assembly or pack lifecycle composition. Otherwise the app's own surfaces,
+    # collections or aliases would be silently dropped.
     pack_only_base = data_contract is None and bool(pack_data_contracts)
     if pack_only_base:
         data_contract = {"version": "1", "surfaces": [], "shared_collections": []}
@@ -133,9 +154,7 @@ def _merge_code_files(
             pack_data_contracts=pack_data_contracts,
         )
         carried = file_map.get("data/contract.json")
-        if pack_only_base and carried is not None and not _holds_only_derived_data(
-            carried, pack_data_contracts, data_contract,
-        ):
+        if pack_only_base and carried is not None and not _holds_only_derived_data(carried, data_contract):
             raise ValueError(
                 "data/contract.json requires the approved DesignDocs data_contract; without it the selected "
                 "packs' data contributions cannot replace a carried contract that holds app-owned data"

@@ -337,6 +337,8 @@ def _assignment_store_subscription():
 
 @pytest.mark.parametrize("carried", [
     "lifecycle_reordered", "gains_assignment_store", "pack_contribution_changed", "app_surface", "app_shared_collection",
+    "app_surface_with_the_pack_surface_id", "app_collection_and_alias_in_pack_surface",
+    "app_collection_in_assignment_surface", "app_alias_of_a_pack_collection",
 ])
 def test_pack_only_contract_replaces_a_carried_contract_only_when_it_holds_no_app_data(tmp_path, carried):
     from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
@@ -374,10 +376,26 @@ def test_pack_only_contract_replaces_a_carried_contract_only_when_it_holds_no_ap
         assert merge(json.dumps(earlier)) == plain
     else:
         app_data = deepcopy(with_store)
+        app_collection = deepcopy(CARRIED_APP_CONTRACT["surfaces"][0]["collections"][0])
+        surfaces = {surface["surface_id"]: surface for surface in app_data["surfaces"]}
         if carried == "app_surface":
             app_data["surfaces"].extend(CARRIED_APP_CONTRACT["surfaces"])
-        else:
+        elif carried == "app_shared_collection":
             app_data["shared_collections"] = [{"name": "notes", "entity": "Note", "scope": "app", "fields": []}]
+        elif carried == "app_surface_with_the_pack_surface_id":
+            # An imported app's own surface that happens to share the pack's surface id.
+            app_data = {**deepcopy(CARRIED_APP_CONTRACT), "surfaces": [{
+                "surface_id": "messages", "surface_kind": "module",
+                "collections": [{**app_collection, "name": "inbox_items", "entity": "InboxItem"}],
+            }]}
+        elif carried == "app_collection_and_alias_in_pack_surface":
+            surfaces["messages"]["collections"].append(app_collection)
+            app_data["aliases"].append({"alias": "app.projects", "collection": "projects"})
+        elif carried == "app_collection_in_assignment_surface":
+            surfaces["subscription_assignments"]["collections"].append(app_collection)
+        else:
+            # An app alias naming a pack collection is the app's own, too.
+            app_data["aliases"].append({"alias": "app.inbox", "collection": "messages"})
         # Reordering never hides app data: the app's own surface would be dropped.
         app_data["surfaces"].reverse()
         with pytest.raises(ValueError, match="requires the approved DesignDocs data_contract"):
