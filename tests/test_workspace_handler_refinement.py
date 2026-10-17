@@ -1014,6 +1014,8 @@ async def test_overlay_copy_of_the_workspace_handler_never_replaces_the_verified
 def _accept_records(store, children, *, scope=None, registry="registry_1"):
     from mozaiksai.core.artifacts import ArtifactValidationStatus
 
+    # The registry's compare-and-set run chain names the latest registered run.
+    store.registry_run = {"build_id": BINDING.build_id, "phase": "refinement", "artifact_version_id": children[-1]}
     for child in children:
         store.records[child] = BuildRecord(
             id=child, app_id=APP_ID, build_family="app_bundle", build_key="app_bundle", version_number=2,
@@ -1057,8 +1059,13 @@ def _accept_route(monkeypatch, store):
         # Every record carries the starter handler unless a test sets its own files.
         return bundle(getattr(store, "bundle_files", {}).get(version.id, {HANDLER: "STARTER", PAGE: version.id}))
 
+    class Registry:
+        async def get_app_record(self, *, owner_user_id, build_registry_id):
+            return {"app": {"current_build_run": dict(getattr(store, "registry_run", {}))}}
+
     store.accept_build_record = accept_build_record
     store.list_refinement_sessions = AsyncMock(return_value=[])
+    monkeypatch.setattr(studio, "_get_app_registry_service", lambda: Registry())
     monkeypatch.setattr(studio, "_verified_app_bundle", verified_app_bundle)
     monkeypatch.setattr(studio, "get_artifact_store", lambda: store)
     monkeypatch.setattr(studio, "_resolve_studio_artifact_scope", scope)
@@ -1116,6 +1123,30 @@ async def test_accepting_a_stale_ui_only_child_cannot_revert_app_owned_pack_code
     with pytest.raises(HTTPException) as rejected:
         await accept("child_1")
     assert rejected.value.status_code == 409 and HANDLER in rejected.value.detail
+    assert store.accepted == [] and store.records == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("registry_run", ["this_child", "newer_run"])
+async def test_accepting_a_handler_change_whose_run_staled_its_parent(monkeypatch, registry_run):
+    """A refinement run marks its own parent stale, so no build is CURRENT during review."""
+    from fastapi import HTTPException
+
+    store = _Store()
+    _accept_records(store, ["child_1"])
+    store.records["parent"] = store.records["parent"].model_copy(update={"lifecycle_status": ArtifactLifecycleStatus.STALE})
+    if registry_run == "newer_run":
+        # Another refinement began after this child's run, replacing the registry's current run.
+        store.registry_run = {"build_id": "build_newer", "phase": "refinement"}
+    accept = _accept_route(monkeypatch, store)
+    if registry_run == "this_child":
+        assert (await accept("child_1"))["accepted"] is True
+        assert store.accepted == ["child_1"]
+        return
+    before = deepcopy(store.records)
+    with pytest.raises(HTTPException) as rejected:
+        await accept("child_1")
+    assert rejected.value.status_code == 409 and "newer build run" in rejected.value.detail
     assert store.accepted == [] and store.records == before
 
 

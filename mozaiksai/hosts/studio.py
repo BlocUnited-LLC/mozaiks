@@ -2199,7 +2199,7 @@ async def _require_current_app_owned_pack_code(version, *, app_id: str, artifact
 
 
 async def _require_accepted_workspace_parent(
-    version, *, app_id: str, build_registry_id: str | None, artifact_store: Any,  # noqa: ANN001
+    version, *, app_id: str, owner_user_id: str, build_registry_id: str | None, artifact_store: Any,  # noqa: ANN001
 ) -> None:
     """Recheck at acceptance the authority an app-owned pack code change was admitted under.
 
@@ -2226,12 +2226,28 @@ async def _require_accepted_workspace_parent(
         )
     refs = await artifact_store.get_current_build_record_refs(app_id=app_id)
     current = str((refs or {}).get(version.build_family) or "").strip() or None
-    if not version.parent_build_record_id or current != version.parent_build_record_id:
+    if not version.parent_build_record_id or (current is not None and current != version.parent_build_record_id):
         raise HTTPException(
             status_code=409,
             detail=(
                 "This change to app-owned capability code was made from a build that is no longer the "
                 "app's accepted current build. Refine the current build again. No version was accepted."
+            ),
+        )
+    # A refinement run marks its own parent stale, so no build is CURRENT while
+    # this child awaits review. The registry's compare-and-set run chain then
+    # decides: the child must still be the latest registered run, admitted
+    # against the parent that was current when its run began.
+    registry_record = (await _get_app_registry_service().get_app_record(
+        owner_user_id=owner_user_id, build_registry_id=build_registry_id,
+    )).get("app") or {}
+    run = registry_record.get("current_build_run") or {}
+    if run.get("artifact_version_id") != version.id or run.get("build_id") != metadata.get("build_id"):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "A newer build run started for this app after this change to app-owned capability code was "
+                "made. Refine the current build again. No version was accepted."
             ),
         )
 
@@ -2293,7 +2309,7 @@ async def accept_build_artifact_version(
     principal: UserPrincipal = Depends(require_studio_user),
 ):
     validate_path_id(artifact_version_id, "artifact_version_id")
-    app_id, _ = await _resolve_studio_artifact_scope(principal, app_id=app_id, build_registry_id=build_registry_id)
+    app_id, owner_user_id = await _resolve_studio_artifact_scope(principal, app_id=app_id, build_registry_id=build_registry_id)
     artifact_store = get_artifact_store()
     version = await artifact_store.get_build_record(app_id=app_id, build_record_id=artifact_version_id)
     if not version:
@@ -2326,7 +2342,8 @@ async def accept_build_artifact_version(
             if current_version is None or current_version.lifecycle_status != ArtifactLifecycleStatus.DRAFT:
                 raise HTTPException(status_code=409, detail="Only draft artifact versions can be accepted.")
             await _require_accepted_workspace_parent(
-                current_version, app_id=app_id, build_registry_id=build_registry_id, artifact_store=artifact_store,
+                current_version, app_id=app_id, owner_user_id=owner_user_id,
+                build_registry_id=build_registry_id, artifact_store=artifact_store,
             )
         await _require_current_app_owned_pack_code(version, app_id=app_id, artifact_store=artifact_store)
         if refinement_review_record is not None:
