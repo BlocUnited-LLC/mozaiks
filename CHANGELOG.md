@@ -34,9 +34,12 @@ This project follows a practical pre-1.0 changelog format:
   `related_type` and `related_id` when the event carries them; and, because
   the rule declares `source_event: reference`, its `source_event` holds only
   the originating event's id, type and related type. Like every notification
-  record it also keeps the event's id and type, its actor, the recipients, the
-  channels, its status and creation time, and the owning app, tenant and
-  workspace, and `notification.created` carries the same record. A rule that
+  record it also keeps its own `notification_id`, the `rule_id` and
+  `module_id` of the rule that created it, the event's id and type, its actor,
+  the rule's audience with the resolved recipients, the channels, its status
+  and creation time, and the owning app (and tenant and workspace, when the
+  event names them); `notification.created` carries the same record, and the
+  default store's saved copy also gets MongoDB's `_id`. A rule that
   does not declare `source_event: reference` keeps storing the full
   originating event as `source_event`, which notification list responses never
   return. Notifications rendered by an earlier pack version (the released

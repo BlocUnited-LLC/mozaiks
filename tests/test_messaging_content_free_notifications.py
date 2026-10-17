@@ -349,6 +349,12 @@ async def test_message_notification_reaches_recipient_without_the_message_text(h
     assert MARKER not in _text(record)
     (created,) = _of(host.events, "notification.created")
     assert created["payload"]["notification_id"] == record["notification_id"]
+    # Exactly the fields the CHANGELOG and docs list; the saved copy also gets MongoDB's _id.
+    assert set(created["payload"]) == {
+        "notification_id", "rule_id", "module_id", "event_type", "source_event_id", "app_id", "actor",
+        "audience", "channels", "title", "body", "status", "created_at", "source_event", "context",
+    }
+    assert set(record) == {*created["payload"], "_id"} and record["status"] == "unread"
     assert MARKER not in _text(created)
     assert MARKER not in _text(_of(host.events, "notification.count_changed"))
     bob_view = host.listed("bob")
