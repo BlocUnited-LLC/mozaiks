@@ -2974,6 +2974,77 @@ async def _fail_inline_refinement(*, binding: RunBuildBinding, user_id: str) -> 
         logger.exception("Could not record inline refinement failure for build=%s", binding.build_id)
 
 
+async def _inline_run_stored_reviewable_child(
+    artifact_store: Any, *, app_id: str, parent_build_record_id: str | None, binding: RunBuildBinding, result: Any,
+) -> bool:
+    """Whether an inline run stored a child of its baseline that could still become current.
+
+    An inline coding or surface run's only durable output is a DRAFT child of
+    the baseline whose commit metadata carries the run's build_id, and the run
+    can store one even when its result reports a failure. The store, not the
+    result's status, is the evidence. A child whose validation FAILED is
+    refused at acceptance and nothing validates a stored child again, so it
+    cannot become current. Any other child, a child the result names that the
+    store does not return, or a lookup that fails counts as a change.
+    """
+    reported = str(((getattr(result, "metadata", None) or {}).get("build_record_id")) or "").strip()
+    try:
+        children = await artifact_store.list_run_child_build_records(
+            app_id=app_id, parent_build_record_id=parent_build_record_id or "", build_id=binding.build_id,
+        )
+    except Exception:
+        logger.warning("inline_run_child_lookup_failed build=%s", binding.build_id, exc_info=True)
+        return True
+    if reported and reported not in {child.id for child in children}:
+        return True
+    return any(child.validation_status != ArtifactValidationStatus.FAILED for child in children)
+
+
+async def _persist_trigger_invalidation(
+    orchestration_control: Any, *, refinement_request: Any, routing_decision: Any,
+    change_request_id: str | None, artifact_store: Any,
+) -> None:
+    try:
+        await orchestration_control.persist_revision_invalidation(
+            refinement_request=refinement_request,
+            routing_decision=routing_decision,
+            change_request_id=change_request_id,
+            artifact_store=artifact_store,
+        )
+    except Exception as invalidation_err:
+        logger.warning("Failed to persist artifact invalidation: %s", invalidation_err)
+
+
+#: A confirmation needs its baseline still usable: a build that was made stale,
+#: replaced or removed after the proposal is not what the user agreed to change.
+_UNCONFIRMABLE_BASELINE_STATUSES = frozenset({
+    ArtifactLifecycleStatus.STALE, ArtifactLifecycleStatus.SUPERSEDED,
+    ArtifactLifecycleStatus.ARCHIVED, ArtifactLifecycleStatus.DELETED,
+})
+
+
+def _require_server_proposed_scope(pending: dict[str, Any], change: Any, request: RefinementRequest) -> None:
+    """Bind a confirmation to the scope this endpoint proposed for the change request.
+
+    The pending decision can also be written through the session decision
+    API, so it does not prove what the server proposed. The ChangeRequest
+    the proposal wrote does: its harness decision must name exactly the
+    pending decision's files, for the same saved build.
+    """
+    router_decision = getattr(change, "router_decision", None)
+    proposed = router_decision.get("harness_decision") if isinstance(router_decision, dict) else None
+    if (
+        change is None
+        or getattr(change, "build_record_id", None) != request.build_record_id
+        or not isinstance(proposed, dict)
+        or list(pending.get("selected_paths") or []) != list(proposed.get("selected_paths") or [])
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="The proposed scope does not match the change request it was proposed for. Submit the change again.",
+        )
+
+
 def _confirmed_refinement_decision(
     snapshot: dict[str, Any] | None,
     request: RefinementRequest,
@@ -3163,6 +3234,7 @@ async def trigger_workflow(
             str(refinement_request.extra.get("change_request_id") or "").strip()
             or persisted_change_request_id
         )
+        change = None
         if persisted_change_request_id:
             change = await get_artifact_store().get_change_request(
                 app_id=artifact_app_id, change_request_id=persisted_change_request_id,
@@ -3183,6 +3255,15 @@ async def trigger_workflow(
             )
             if body.context_variables != (pending_decision.get("context_variables") or {}):
                 raise HTTPException(status_code=409, detail="The decision belongs to a different request context. Submit the change again.")
+            _require_server_proposed_scope(pending_decision, change, refinement_request)
+            if source_version.lifecycle_status in _UNCONFIRMABLE_BASELINE_STATUSES:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "The build this decision was proposed for has changed since. "
+                        "Request the change again from the current build."
+                    ),
+                )
         coding_payload = trigger_payload.get("coding_request")
         if workflow_continuation:
             # Explicit workflow continuation must not try inline generation first.
@@ -3424,22 +3505,36 @@ async def trigger_workflow(
             persisted_change_request_id = persisted_change_request.id
         except Exception as persist_err:
             logger.warning("Failed to persist ChangeRequest: %s", persist_err)
-    if (
+    if persisted_change_request_id is not None:
+        trigger_payload["change_request_id"] = persisted_change_request_id
+
+    # The ChangeRequest above, the session's revision state and the run
+    # records below keep the history of every attempt. The selected build is
+    # invalidated only by an operation that changed it: an inline run that
+    # stored a child which could still become current (checked here, in the
+    # store), or a workflow run that launched (after its launch, below). A
+    # returned decision, a failed launch, or an inline run that stored no such
+    # child leaves it as it was.
+    invalidation_pending = (
         persisted_change_request_id is not None
         and refinement_request is not None
         and refinement_decision is not None
+    )
+    if (
+        invalidation_pending
+        and inline_binding is not None
+        and (coding_result is not None or surface_result is not None)
+        and await _inline_run_stored_reviewable_child(
+            artifact_store, app_id=artifact_app_id,
+            parent_build_record_id=refinement_request.build_record_id, binding=inline_binding,
+            result=coding_result if coding_result is not None else surface_result,
+        )
     ):
-        try:
-            await orchestration_control.persist_revision_invalidation(
-                refinement_request=refinement_request,
-                routing_decision=refinement_decision,
-                change_request_id=persisted_change_request_id,
-                artifact_store=artifact_store,
-            )
-        except Exception as invalidation_err:
-            logger.warning("Failed to persist artifact invalidation: %s", invalidation_err)
-    if persisted_change_request_id is not None:
-        trigger_payload["change_request_id"] = persisted_change_request_id
+        await _persist_trigger_invalidation(
+            orchestration_control, refinement_request=refinement_request, routing_decision=refinement_decision,
+            change_request_id=persisted_change_request_id, artifact_store=artifact_store,
+        )
+        invalidation_pending = False
 
     confirmed_action = action_id if refinement_request is not None else None
 
@@ -3723,6 +3818,13 @@ async def trigger_workflow(
             logger.warning("Failed to update ChangeRequest routing decision: %s", persist_err)
 
     workflow_launch = await launch_prepared_workflow(launch)
+    if invalidation_pending:
+        # The launched run revises the selected build; a launch that failed
+        # above raised before this and left the build as it was.
+        await _persist_trigger_invalidation(
+            orchestration_control, refinement_request=refinement_request, routing_decision=refinement_decision,
+            change_request_id=persisted_change_request_id, artifact_store=artifact_store,
+        )
 
     return {
         "execution_mode": "workflow",

@@ -813,6 +813,34 @@ class BuildRecordStore:
         rows = await cursor.to_list(length=max(1, int(limit)))
         return [BuildRecord.model_validate(row) for row in rows]
 
+    async def list_run_child_build_records(
+        self,
+        *,
+        app_id: str,
+        parent_build_record_id: str,
+        build_id: str,
+        limit: int = 10,
+    ) -> list[BuildRecord]:
+        """Return the children of one saved build that one registered run stored.
+
+        A refinement run's child carries the run's ``build_id`` in its commit
+        metadata, so this finds what the run left in the store even when the
+        run's result does not name it.
+        """
+        resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
+        parent_id = str(parent_build_record_id or "").strip()
+        run_id = str(build_id or "").strip()
+        if not resolved_app_id or not parent_id or not run_id:
+            raise ValueError("app_id, parent_build_record_id and build_id are required")
+        versions = await self._coll("ArtifactVersions")
+        cursor = versions.find({
+            **build_app_scope_filter(resolved_app_id),
+            "parent_build_record_id": parent_id,
+            "commit_metadata.metadata.build_id": run_id,
+        }).sort([("version_number", -1), ("created_at", -1)]).limit(max(1, int(limit)))
+        rows = await cursor.to_list(length=max(1, int(limit)))
+        return [BuildRecord.model_validate(row) for row in rows]
+
     async def mark_build_record_stale(
         self,
         *,
