@@ -132,10 +132,9 @@ def test_nonempty_or_overlapping_output_never_changes_source(workspace, spec, tm
     ("app/ui/index.js", "export const createAuthAdapter = () => {};", "auth override"),
     ("app/ui/index.js", "export * from './unknown.js';", "wildcard export"),
     ("app/ui/browser-index.js", "export const data = 1;", "reserved"),
-    ("app/ui/auth/authAdapter.js", "export const createAuthAdapter = () => {};", "Custom auth"),
     ("app/.env", "SECRET=private", "Private environment"),
     ("app/.env.example", "INTERNAL_API_KEY=real-secret-value", "secret variable"),
-    ("workflows/extended_orchestration/extension_registry.json", '{"extends":"mozaiks.default_workflow_registry"}', "inherited Factory"),
+    ("workflows/extended_orchestration/extension_registry.json", '{"extends":"vendor.unknown_registry"}', "inherited workflow registry"),
 ])
 def test_unsupported_source_fails_before_output(workspace, framework, spec, tmp_path, source_path, content, error):
     path = workspace / source_path
@@ -144,6 +143,23 @@ def test_unsupported_source_fails_before_output(workspace, framework, spec, tmp_
     with pytest.raises(delivery.AndroidDeliveryError, match=error):
         delivery.materialize_android_workspace(workspace, spec, tmp_path / "output")
     assert not (tmp_path / "output").exists()
+
+
+def test_canonical_factory_registry_overlay_is_portable(workspace, framework, spec, tmp_path):
+    registry = workspace / "workflows/extended_orchestration/extension_registry.json"
+    registry.parent.mkdir(parents=True, exist_ok=True)
+    registry.write_text(json.dumps({
+        "pack_name": "HostedOverlay",
+        "version": 1,
+        "extends": "mozaiks.default_workflow_registry",
+        "workflows": [{"id": "HostedWorkflow"}],
+        "entrypoints": [{"id": "create_app", "requiresAuth": True}],
+    }))
+    result = delivery.materialize_android_workspace(workspace, spec, tmp_path / "output")
+    mobile = Path(result["mobile_dir"])
+    exported = Path(result["workspace_dir"]) / registry.relative_to(workspace)
+    assert json.loads(exported.read_text())["extends"] == "mozaiks.default_workflow_registry"
+    delivery.verify_android_delivery(mobile)
 
 
 @pytest.mark.parametrize("newline", ["\n", "\r\n"])
@@ -159,6 +175,29 @@ def test_canonical_generated_auth_and_env_examples_are_supported(workspace, fram
     assert manifest["browser_auth"] == {"mode": "canonical_facade"}
     assert (Path(result["workspace_dir"]) / "app/.env.example").is_file()
     delivery.verify_android_delivery(Path(result["mobile_dir"]))
+
+
+def test_app_auth_adapter_is_replaced_by_native_facade(workspace, framework, spec, tmp_path):
+    auth = workspace / "app/ui/auth/productAuth.js"
+    auth.parent.mkdir()
+    auth.write_text("export function createAuthAdapter() { return { product: true }; }\n")
+    (workspace / "app/ui/index.js").write_text(
+        "export { createAuthAdapter } from './auth/productAuth.js';\nexport function register() {}\n"
+    )
+    result = delivery.materialize_android_workspace(workspace, spec, tmp_path / "output")
+    manifest = json.loads(Path(result["manifest_path"]).read_text())
+    assert manifest["browser_auth"] == {"mode": "canonical_facade"}
+    assert (Path(result["workspace_dir"]) / "app/ui/auth/productAuth.js").is_file()
+    delivery.verify_android_delivery(Path(result["mobile_dir"]))
+
+
+def test_missing_app_auth_adapter_fails_before_output(workspace, framework, spec, tmp_path):
+    (workspace / "app/ui/index.js").write_text(
+        "export { createAuthAdapter } from './auth/missing.js';\n"
+    )
+    with pytest.raises(delivery.AndroidDeliveryError, match="does not resolve"):
+        delivery.materialize_android_workspace(workspace, spec, tmp_path / "output")
+    assert not (tmp_path / "output").exists()
 
 
 @pytest.mark.parametrize("mutation", ["callback", "spec", "source_digest", "pack", "source_files", "addition", "modified_source", "framework", "helper"])
@@ -239,6 +278,9 @@ def test_git_resource_snapshot_is_pinned_and_rejects_drift(tmp_path, monkeypatch
         "web_shell/vite.config.js": b"export default {};\n",
         "chat-ui/package.json": b"{}", "chat-ui/package-lock.json": b"{}",
         "chat-ui/src/auth/authAdapter.js": b"export function createAuthAdapter() {}\n",
+        "factory_app/app/ui/index.js": b"export function register() {}\n",
+        "factory_app/app/admin/index.js": b"export function registerAdminComponents() {}\n",
+        "factory_app/app/config/onboarding.yaml": b"steps: []\n",
     }
     delivery._write_files(repo, files)
     def git(*args):
@@ -250,6 +292,7 @@ def test_git_resource_snapshot_is_pinned_and_rejects_drift(tmp_path, monkeypatch
     git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--quiet", "-m", "fixture")
     monkeypatch.setattr(delivery.resources, "resolve_web_shell_root", lambda: repo / "web_shell")
     monkeypatch.setattr(delivery.resources, "resolve_chat_ui_root", lambda: repo / "chat-ui")
+    monkeypatch.setattr(delivery.resources, "resolve_factory_app_root", lambda: repo / "factory_app")
     first, provenance = delivery._framework_snapshot()
     assert first == files
     assert len(provenance["commit"]) == 40
@@ -272,6 +315,9 @@ def test_installed_wheel_android_resources_require_recorded_revision(tmp_path, m
         "mozaiks_chat_ui/package-lock.json": b"{}",
         "mozaiks_chat_ui/src/auth/authAdapter.js": b"export function createAuthAdapter() {}\n",
         "mozaiks_chat_ui/src/assets/icon.png": b"\x89PNG\r\n\x1a\n",
+        "factory_app/app/ui/index.js": b"export function register() {}\n",
+        "factory_app/app/admin/index.js": b"export function registerAdminComponents() {}\n",
+        "factory_app/app/config/onboarding.yaml": b"steps: []\n",
         "mozaiksai/_build_revision.json": json.dumps({
             "schema_version": "mozaiks.source_revision.v1",
             "commit": "invalid" if mutation == "invalid" else commit,
@@ -313,6 +359,7 @@ def test_installed_wheel_android_resources_require_recorded_revision(tmp_path, m
 
     monkeypatch.setattr(delivery.resources, "resolve_web_shell_root", lambda: root / "web_shell")
     monkeypatch.setattr(delivery.resources, "resolve_chat_ui_root", lambda: root / "mozaiks_chat_ui")
+    monkeypatch.setattr(delivery.resources, "resolve_factory_app_root", lambda: root / "factory_app")
     monkeypatch.setattr(delivery.importlib.metadata, "distribution", lambda _: Distribution())
     if mutation == "tampered":
         (root / "mozaiksai/_build_revision.json").write_bytes(b"{}")

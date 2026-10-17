@@ -196,14 +196,15 @@ def _capture_tree(root: Path, prefix: str, *, exclude_build_artifacts: bool = Tr
     return files
 
 
-def _source_contract(files: dict[str, bytes], factory_root: Path) -> tuple[str, str, str]:
+def _source_contract(files: dict[str, bytes]) -> tuple[str, str, str]:
     registry = files.get("workflows/extended_orchestration/extension_registry.json")
     if registry is not None:
         registry_value = json.loads(registry)
         if not isinstance(registry_value, dict):
             raise AndroidDeliveryError("Workflow registry must be an object")
-        if registry_value.get("extends"):
-            raise AndroidDeliveryError("Android delivery currently requires app-owned workflows; inherited Factory workflows are unsupported")
+        inherited_registry = registry_value.get("extends")
+        if inherited_registry and inherited_registry != "mozaiks.default_workflow_registry":
+            raise AndroidDeliveryError("Android delivery does not support this inherited workflow registry")
     text_files: dict[str, str] = {}
     for name, raw in files.items():
         if not name.startswith("app/"):
@@ -230,18 +231,25 @@ def _source_contract(files: dict[str, bytes], factory_root: Path) -> tuple[str, 
         callback = contract.routes.callback
     if "?" in callback or "#" in callback:
         raise AndroidDeliveryError("Native auth callback routes must not contain a query or fragment")
-    expected = (factory_root / "build_context/webapp_builder/templates/ui/auth/authAdapter.js").read_text(encoding="utf-8")
-    adapter = text_files.get("ui/auth/authAdapter.js")
-    if adapter is not None and adapter.replace("\r\n", "\n").strip() != expected.replace("\r\n", "\n").strip():
-        raise AndroidDeliveryError("Custom auth adapters are not supported by Android delivery")
     barrel = text_files.get("ui/index.js", "")
-    canonical_export = re.compile(r"export\s*\{\s*createAuthAdapter\s*\}\s*from\s*(['\"])\./auth/authAdapter(?:\.js)?\1\s*;?")
-    remainder, count = canonical_export.subn("", barrel)
-    if count > 1 or (count and adapter is None) or "createAuthAdapter" in remainder or re.search(r"\bexport\s*\*", remainder):
+    auth_export = re.compile(
+        r"export\s*\{\s*createAuthAdapter\s*\}\s*from\s*(['\"])(?P<module>\./auth/[A-Za-z][A-Za-z0-9_-]*(?:\.js)?)\1\s*;?"
+    )
+    matches = list(auth_export.finditer(barrel))
+    remainder = auth_export.sub("", barrel)
+    if (
+        len(matches) > 1
+        or re.search(r"\bexport\b[^\n;]*\bcreateAuthAdapter\b", remainder)
+        or re.search(r"\bexport\s*\*", remainder)
+    ):
         raise AndroidDeliveryError("The app extension barrel has an unsupported auth override or wildcard export")
+    if matches:
+        module = matches[0]["module"].removeprefix("./")
+        if f"ui/{module}" not in text_files:
+            raise AndroidDeliveryError("The app auth adapter export does not resolve")
     if "ui/browser-index.js" in text_files:
         raise AndroidDeliveryError("ui/browser-index.js is reserved for disposable native composition")
-    return app_id, callback, "canonical_facade" if count else "shared_default"
+    return app_id, callback, "canonical_facade" if matches else "shared_default"
 
 
 def _resource_selected(path: str) -> bool:
@@ -250,6 +258,12 @@ def _resource_selected(path: str) -> bool:
         return relative in _WEB_ROOT_FILES
     if root == "chat-ui":
         return relative in _UI_ROOT_FILES or relative.startswith("src/")
+    if root == "factory_app":
+        return (
+            relative.startswith("app/ui/")
+            or relative.startswith("app/admin/")
+            or relative == "app/config/onboarding.yaml"
+        )
     return False
 
 
@@ -302,21 +316,45 @@ def _installed_source_commit(distribution: importlib.metadata.Distribution, root
 
 
 def _framework_snapshot() -> tuple[dict[str, bytes], dict[str, Any]]:
-    shell, ui = resources.resolve_web_shell_root(), resources.resolve_chat_ui_root()
-    if shell is None or ui is None:
+    shell = resources.resolve_web_shell_root()
+    ui = resources.resolve_chat_ui_root()
+    factory = resources.resolve_factory_app_root()
+    if shell is None or ui is None or factory is None:
         raise AndroidDeliveryError("The installed OSS distribution is missing shared-shell resources")
     _check_ancestors(shell)
     _check_ancestors(ui)
-    shell, ui = shell.resolve(), ui.resolve()
+    _check_ancestors(factory)
+    shell, ui, factory = shell.resolve(), ui.resolve(), factory.resolve()
     repo = shell.parent
     files: dict[str, bytes] = {}
     if (repo / ".git").exists():
-        if ui != repo / "chat-ui" or shell != repo / "web_shell":
+        if ui != repo / "chat-ui" or shell != repo / "web_shell" or factory != repo / "factory_app":
             raise AndroidDeliveryError("Shared-shell resource roots must belong to the same OSS revision")
         commit = _git(repo, "rev-parse", "HEAD").decode().strip()
-        if _git(repo, "status", "--porcelain", "--untracked-files=no", "--", "web_shell", "chat-ui").strip():
+        if _git(
+            repo,
+            "status",
+            "--porcelain",
+            "--untracked-files=no",
+            "--",
+            "web_shell",
+            "chat-ui",
+            "factory_app/app/ui",
+            "factory_app/app/admin",
+            "factory_app/app/config/onboarding.yaml",
+        ).strip():
             raise AndroidDeliveryError("Shared-shell resources differ from their recorded OSS revision")
-        raw = _git(repo, "archive", "--format=tar", commit, "web_shell", "chat-ui")
+        raw = _git(
+            repo,
+            "archive",
+            "--format=tar",
+            commit,
+            "web_shell",
+            "chat-ui",
+            "factory_app/app/ui",
+            "factory_app/app/admin",
+            "factory_app/app/config/onboarding.yaml",
+        )
         with tarfile.open(fileobj=io.BytesIO(raw), mode="r:") as archive:
             for entry in archive:
                 if entry.isdir():
@@ -327,7 +365,7 @@ def _framework_snapshot() -> tuple[dict[str, bytes], dict[str, Any]]:
                     raise AndroidDeliveryError("OSS build resources must be regular files")
                 stream = archive.extractfile(entry)
                 assert stream is not None
-                files[entry.name] = stream.read()
+                files[entry.name] = _canonical_resource_bytes(entry.name, stream.read())
     else:
         try:
             distribution = importlib.metadata.distribution("mozaiks")
@@ -337,7 +375,12 @@ def _framework_snapshot() -> tuple[dict[str, bytes], dict[str, Any]]:
                 mapped = name.replace("mozaiks_chat_ui/", "chat-ui/", 1)
                 if not _resource_selected(mapped):
                     continue
-                expected = (shell if mapped.startswith("web_shell/") else ui) / mapped.split("/", 1)[1]
+                if mapped.startswith("web_shell/"):
+                    expected = shell / mapped.split("/", 1)[1]
+                elif mapped.startswith("chat-ui/"):
+                    expected = ui / mapped.split("/", 1)[1]
+                else:
+                    expected = factory / mapped.split("/", 1)[1]
                 files[mapped] = _canonical_resource_bytes(
                     mapped, _verified_distribution_bytes(distribution, distribution_entry, expected)
                 )
@@ -347,7 +390,17 @@ def _framework_snapshot() -> tuple[dict[str, bytes], dict[str, Any]]:
             raise AndroidDeliveryError("Installed OSS distribution resource provenance is unavailable") from exc
     if not isinstance(commit, str) or not _COMMIT.fullmatch(commit):
         raise AndroidDeliveryError("The OSS installation must identify an exact Git commit")
-    required = {"web_shell/package.json", "web_shell/package-lock.json", "web_shell/vite.config.js", "chat-ui/package.json", "chat-ui/package-lock.json", "chat-ui/src/auth/authAdapter.js"}
+    required = {
+        "web_shell/package.json",
+        "web_shell/package-lock.json",
+        "web_shell/vite.config.js",
+        "chat-ui/package.json",
+        "chat-ui/package-lock.json",
+        "chat-ui/src/auth/authAdapter.js",
+        "factory_app/app/ui/index.js",
+        "factory_app/app/admin/index.js",
+        "factory_app/app/config/onboarding.yaml",
+    }
     if not required.issubset(files):
         raise AndroidDeliveryError("The exact OSS source is missing required build resources")
     detect_collisions(files)
@@ -394,7 +447,7 @@ def _inventory(files: dict[str, bytes]) -> list[dict[str, Any]]:
 def _render_delivery(source: dict[str, bytes], spec: AndroidDeliverySpec) -> tuple[dict[str, bytes], dict[str, bytes], dict[str, Any]]:
     """One renderer owns both initial output and verification of exported input."""
     factory_root = _factory_root()
-    app_id, callback_path, auth_mode = _source_contract(source, factory_root)
+    app_id, callback_path, auth_mode = _source_contract(source)
     source_archive = _archive(source)
     pack_root = factory_root / "build_context/mobile"
     pack = verify_pack_integrity(pack_root, "mobile")

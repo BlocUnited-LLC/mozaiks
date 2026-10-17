@@ -83,6 +83,13 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Android delivery now accepts app-owned workflow overlays that extend the
+  canonical `mozaiks.default_workflow_registry`; unknown inheritance targets
+  still fail before export.
+- Product-specific browser auth adapters can accompany Android source while the
+  generated native barrel keeps the Capacitor auth facade authoritative.
+- Hosted workspace Android builds now stage the exact revision-bound Factory UI
+  resources required by the public `@mozaiks/factory-app-ui` extension contract.
 - Messaging pack builds use canonical data contracts and additive migrations,
   retain participant-aware actions, and compose their UI registrations with
   app-owned routes. Page refinement receives the saved pack, design and domain
@@ -171,7 +178,6 @@ This project follows a practical pre-1.0 changelog format:
   state was saved is refused when its build was written after it was created,
   as every earlier proposal's build was; requesting the change again saves the
   state, and that proposal can be confirmed.
-
 ## 0.2.0 - 2026-10-16
 
 ### Added

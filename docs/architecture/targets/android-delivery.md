@@ -134,12 +134,30 @@ adds the mobile pack's native facade and renderer-owned tooling. These archives
 use deterministic ZIP construction; timestamps, installed dependencies, Android
 build directories, APKs, AABs, and signing material are excluded.
 
+App-owned workflow registries may use the canonical
+`mozaiks.default_workflow_registry` overlay contract. The overlay declaration
+is preserved as source; inherited Factory implementation files remain owned by
+the exact OSS revision and are not copied into the app workspace. Other registry
+inheritance targets fail admission.
+
+An app may export one named `createAuthAdapter` from a regular module under
+`app/ui/auth/`. The source adapter remains in the provenance-bound workspace,
+but the disposable native composition explicitly exports the mobile pack's
+Capacitor adapter, so browser-specific authentication code cannot override the
+native callback facade. Missing adapters, ambiguous exports and wildcard app
+barrels fail before compilation.
+
 `delivery.manifest.json` records the specification, source digest, mobile pack
 version and digest, framework commit and resource digest, and file inventories.
 The framework must resolve to an exact commit with matching resource bytes.
 An extracted portable workspace can restore those resources from the matching
 installed Mozaiks revision when `node mobile/build.mjs` runs; set
 `MOZAIKS_PYTHON` if that installation uses a specific Python executable.
+The revision-bound framework snapshot includes the shared shell, chat UI, and
+the first-party Factory UI registration resources used by hosted workspace
+overlays. The compiler binds `MOZAIKS_FACTORY_APP_PATH` to that staged snapshot,
+so an app that imports `@mozaiks/factory-app-ui` compiles against the same exact
+OSS commit recorded in its delivery manifest.
 
 A Git checkout reads its revision from Git, refuses changed tracked source, and
 requires every staged package input to belong to that commit.
