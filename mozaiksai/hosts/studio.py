@@ -2158,6 +2158,8 @@ def _workspace_acceptance_guard(app_id: str, version) -> AbstractAsyncContextMan
 #: Largest app-owned pack file that acceptance compares; a larger one refuses
 #: acceptance instead of being left out of the comparison.
 _APP_OWNED_CODE_COMPARE_MAX_BYTES = 8_000_000
+#: Largest total of the named entries read from one archive; past it, acceptance refuses too.
+_APP_OWNED_CODE_COMPARE_MAX_TOTAL_BYTES = 16_000_000
 _PACK_PROVENANCE_PATH = ".mozaiks/pack_provenance.json"
 
 
@@ -2167,7 +2169,8 @@ def _app_bundle_entries(zip_source: bytes, paths: set[str]) -> dict[str, bytes]:
     ``_decode_text_bundle_entries`` drops entries past its file count and size
     limits, so a comparison through it can miss an app-owned file. Here every
     named entry present is read; one that cannot be compared exactly (a
-    duplicate, a symbolic link, or an entry over the compare bound) refuses.
+    duplicate, a symbolic link, or an entry over the compare bound) refuses,
+    as do named entries whose sizes together pass the total compare bound.
     """
     with zipfile.ZipFile(io.BytesIO(zip_source), "r") as archive:
         named = [
@@ -2178,7 +2181,6 @@ def _app_bundle_entries(zip_source: bytes, paths: set[str]) -> dict[str, bytes]:
         for path, info in _strip_shared_root_prefix(named):
             if path in paths:
                 found.setdefault(path, []).append(info)
-        entries: dict[str, bytes] = {}
         for path, infos in found.items():
             if (
                 len(infos) != 1 or _zipinfo_is_symlink(infos[0])
@@ -2191,7 +2193,16 @@ def _app_bundle_entries(zip_source: bytes, paths: set[str]) -> dict[str, bytes]:
                         "compared. No version was accepted."
                     ),
                 )
-            entries[path] = archive.read(infos[0])
+        # Checked before reading: a read never yields more than the entry's declared size.
+        if sum(infos[0].file_size for infos in found.values()) > _APP_OWNED_CODE_COMPARE_MAX_TOTAL_BYTES:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"App-owned capability code ({', '.join(sorted(found))}) in this version or the current build "
+                    "is too large to compare in full. No version was accepted."
+                ),
+            )
+        entries = {path: archive.read(infos[0]) for path, infos in found.items()}
     return entries
 
 

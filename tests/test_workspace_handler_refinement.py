@@ -1223,7 +1223,7 @@ def _workspace_provenance(path):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("layout", [
     "past_file_limit", "over_file_size", "provenance_past_file_limit",
-    "unchanged_past_file_limit_in_one", "over_compare_bound",
+    "unchanged_past_file_limit_in_one", "over_compare_bound", "over_total_compare_bound",
 ])
 async def test_stale_ui_only_child_compares_app_owned_code_past_the_text_decoder_bounds(monkeypatch, layout):
     """Acceptance compares app-owned pack code in full, however large the app bundle grows."""
@@ -1246,11 +1246,19 @@ async def test_stale_ui_only_child_compares_app_owned_code_past_the_text_decoder
         ),
         "unchanged_past_file_limit_in_one": ({HANDLER: "CUSTOMIZED"}, {**_DECODER_FILLER, HANDLER: "CUSTOMIZED"}),
         "over_compare_bound": ({HANDLER: "CUSTOMIZED" * 8}, {HANDLER: "CUSTOMIZED" * 8}),
+        # Unchanged entries, each within the entry bound, that together pass the total bound.
+        "over_total_compare_bound": (
+            {PROVENANCE: _workspace_provenance(PROVENANCE_ONLY), HANDLER: "CUSTOMIZED" * 20, PROVENANCE_ONLY: "#" * 200},
+            {PROVENANCE: _workspace_provenance(PROVENANCE_ONLY), HANDLER: "CUSTOMIZED" * 20, PROVENANCE_ONLY: "#" * 200},
+        ),
     }[layout]
     store.bundle_files = {"newer_build": current, "child_1": child}
     if layout == "over_compare_bound":
         # An entry too large to compare is refused, never skipped.
         monkeypatch.setattr(studio, "_APP_OWNED_CODE_COMPARE_MAX_BYTES", 16)
+    if layout == "over_total_compare_bound":
+        # So are entries that together are too large to read for one comparison.
+        monkeypatch.setattr(studio, "_APP_OWNED_CODE_COMPARE_MAX_TOTAL_BYTES", 300)
     accept = _accept_route(monkeypatch, store)
     if layout == "unchanged_past_file_limit_in_one":
         assert (await accept("child_1"))["accepted"] is True
