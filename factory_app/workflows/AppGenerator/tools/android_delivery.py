@@ -196,14 +196,15 @@ def _capture_tree(root: Path, prefix: str, *, exclude_build_artifacts: bool = Tr
     return files
 
 
-def _source_contract(files: dict[str, bytes], factory_root: Path) -> tuple[str, str, str]:
+def _source_contract(files: dict[str, bytes]) -> tuple[str, str, str]:
     registry = files.get("workflows/extended_orchestration/extension_registry.json")
     if registry is not None:
         registry_value = json.loads(registry)
         if not isinstance(registry_value, dict):
             raise AndroidDeliveryError("Workflow registry must be an object")
-        if registry_value.get("extends"):
-            raise AndroidDeliveryError("Android delivery currently requires app-owned workflows; inherited Factory workflows are unsupported")
+        inherited_registry = registry_value.get("extends")
+        if inherited_registry and inherited_registry != "mozaiks.default_workflow_registry":
+            raise AndroidDeliveryError("Android delivery does not support this inherited workflow registry")
     text_files: dict[str, str] = {}
     for name, raw in files.items():
         if not name.startswith("app/"):
@@ -230,18 +231,25 @@ def _source_contract(files: dict[str, bytes], factory_root: Path) -> tuple[str, 
         callback = contract.routes.callback
     if "?" in callback or "#" in callback:
         raise AndroidDeliveryError("Native auth callback routes must not contain a query or fragment")
-    expected = (factory_root / "build_context/webapp_builder/templates/ui/auth/authAdapter.js").read_text(encoding="utf-8")
-    adapter = text_files.get("ui/auth/authAdapter.js")
-    if adapter is not None and adapter.replace("\r\n", "\n").strip() != expected.replace("\r\n", "\n").strip():
-        raise AndroidDeliveryError("Custom auth adapters are not supported by Android delivery")
     barrel = text_files.get("ui/index.js", "")
-    canonical_export = re.compile(r"export\s*\{\s*createAuthAdapter\s*\}\s*from\s*(['\"])\./auth/authAdapter(?:\.js)?\1\s*;?")
-    remainder, count = canonical_export.subn("", barrel)
-    if count > 1 or (count and adapter is None) or "createAuthAdapter" in remainder or re.search(r"\bexport\s*\*", remainder):
+    auth_export = re.compile(
+        r"export\s*\{\s*createAuthAdapter\s*\}\s*from\s*(['\"])(?P<module>\./auth/[A-Za-z][A-Za-z0-9_-]*(?:\.js)?)\1\s*;?"
+    )
+    matches = list(auth_export.finditer(barrel))
+    remainder = auth_export.sub("", barrel)
+    if (
+        len(matches) > 1
+        or re.search(r"\bexport\b[^\n;]*\bcreateAuthAdapter\b", remainder)
+        or re.search(r"\bexport\s*\*", remainder)
+    ):
         raise AndroidDeliveryError("The app extension barrel has an unsupported auth override or wildcard export")
+    if matches:
+        module = matches[0]["module"].removeprefix("./")
+        if f"ui/{module}" not in text_files:
+            raise AndroidDeliveryError("The app auth adapter export does not resolve")
     if "ui/browser-index.js" in text_files:
         raise AndroidDeliveryError("ui/browser-index.js is reserved for disposable native composition")
-    return app_id, callback, "canonical_facade" if count else "shared_default"
+    return app_id, callback, "canonical_facade" if matches else "shared_default"
 
 
 def _resource_selected(path: str) -> bool:
@@ -394,7 +402,7 @@ def _inventory(files: dict[str, bytes]) -> list[dict[str, Any]]:
 def _render_delivery(source: dict[str, bytes], spec: AndroidDeliverySpec) -> tuple[dict[str, bytes], dict[str, bytes], dict[str, Any]]:
     """One renderer owns both initial output and verification of exported input."""
     factory_root = _factory_root()
-    app_id, callback_path, auth_mode = _source_contract(source, factory_root)
+    app_id, callback_path, auth_mode = _source_contract(source)
     source_archive = _archive(source)
     pack_root = factory_root / "build_context/mobile"
     pack = verify_pack_integrity(pack_root, "mobile")
