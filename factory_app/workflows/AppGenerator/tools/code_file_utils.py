@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -77,10 +78,10 @@ logger = logging.getLogger(__name__)
 _PACK_PROVENANCE_PATH = ".mozaiks/pack_provenance.json"
 # The context `code_files` overlay of admitted repairs, merged last.
 ADMITTED_OVERLAY_OWNER = "app:accumulated_files"
-# Text files of each bound revision source assembly composed against, by source
-# identity, so the admitted projection composes with the same baseline. The
+# Text files of recently read bound revision sources, by source identity. The
 # whole text map is kept because composition resolves the baseline barrel's
-# imports against it; UI roots alone cannot be composed.
+# imports against it; UI roots alone cannot be composed. This only saves a read:
+# load_revision_baseline reads a missing entry again from the verified source.
 _REVISION_UI_BASELINES: dict[tuple[str, ...], dict[str, str]] = {}
 _REVISION_UI_BASELINE_LIMIT = 16
 
@@ -187,13 +188,21 @@ def save_generated_code(context_variables: Any) -> dict[str, Any]:
             contract = compile_data_contract(
                 contract, subscription_contract=subscription_contract, context_variables=context_variables,
             )
-        incoming = materialize_collection_auth(incoming, data_contract=contract)
+        bundle_contract = contract
+        if "data/contract.json" in (owned_paths or []):
+            # The owner writes data/contract.json as assembly compiles it, with
+            # the verified pack contributions, and what is checked against that
+            # file uses the same contract. Module synthesis keeps the app's
+            # contract: selected pack modules ship their verified implementation
+            # and are never synthesized, as at assembly.
+            bundle_contract = _assembled_data_contract(context_variables, subscription_contract)
+        incoming = materialize_collection_auth(incoming, data_contract=bundle_contract)
         incoming = materialize_data_contract(
-            incoming, data_contract=contract, owned_paths=owned_paths or [],
+            incoming, data_contract=bundle_contract, owned_paths=owned_paths or [],
             subscription_contract=subscription_contract, context_variables=context_variables,
         )
         policies = materialize_task_module_policies(
-            incoming, task={"owned_paths": owned_paths or []}, data_contract=contract,
+            incoming, task={"owned_paths": owned_paths or []}, data_contract=bundle_contract,
         )
         schemas = materialize_task_module_schemas(
             incoming, task={"owned_paths": owned_paths or []},
@@ -264,6 +273,36 @@ def save_generated_code(context_variables: Any) -> dict[str, Any]:
             context_variables.set(key, value)
     mark_repair_responded(context_variables, saved_paths=[*incoming, *deleted])
     return {"saved_files": sorted(incoming), "deleted_files": deleted}
+
+
+def _assembled_data_contract(context_variables: Any, subscription_contract: Any) -> Any:
+    """The approved data contract compiled as assembly compiles it, with the verified pack contributions.
+
+    A save after assembly (a bounded repair of the data/contract.json owner)
+    materializes the same contract assembly did, so the admitted bundle keeps
+    the selected packs' collections.
+    """
+    from .resolve_managed_capability_templates import (
+        ManagedCapabilityTemplateError,
+        verified_pack_data_contracts,
+        verified_pack_template_inventory,
+    )
+
+    contract = detach(context_variables.get("data_contract"))
+    try:
+        pack_data_contracts = verified_pack_data_contracts(
+            verified_pack_template_inventory(context_variables=context_variables),
+        )
+    except ManagedCapabilityTemplateError as exc:
+        raise ValueError(f"The selected capability packs' data contributions cannot be verified: {exc}") from exc
+    if contract is None and pack_data_contracts:
+        contract = {"version": "1", "surfaces": [], "shared_collections": []}
+    if not isinstance(contract, dict):
+        return contract
+    return compile_data_contract(
+        contract, subscription_contract=subscription_contract, context_variables=context_variables,
+        pack_data_contracts=pack_data_contracts,
+    )
 
 
 def selected_capability_packs(context_variables: Any) -> list[dict[str, Any]] | None:
@@ -370,7 +409,7 @@ def _revision_source_key(context_variables: Any) -> tuple[str, ...] | None:
 
 
 def remember_revision_baseline(context_variables: Any, files: dict[str, Any]) -> None:
-    """Record the text files of the bound revision source assembly just read and composed with."""
+    """Record the text files of the bound revision source, as read from its verified record."""
     key = _revision_source_key(context_variables)
     if key is None:
         return
@@ -378,6 +417,56 @@ def remember_revision_baseline(context_variables: Any, files: dict[str, Any]) ->
     _REVISION_UI_BASELINES[key] = {path: content for path, content in files.items() if isinstance(content, str)}
     while len(_REVISION_UI_BASELINES) > _REVISION_UI_BASELINE_LIMIT:
         _REVISION_UI_BASELINES.pop(next(iter(_REVISION_UI_BASELINES)))
+
+
+def _cached_revision_baseline(context_variables: Any) -> dict[str, str] | None:
+    key = _revision_source_key(context_variables)
+    if key is None:
+        return None
+    baseline = _REVISION_UI_BASELINES.pop(key, None)
+    if baseline is not None:
+        # A read keeps the entry: the source a run still uses is evicted last.
+        _REVISION_UI_BASELINES[key] = baseline
+    return baseline
+
+
+async def load_revision_baseline(context_variables: Any) -> dict[str, str] | None:
+    """The bound revision source an admitted repair copy of a pack-composed root composes with.
+
+    Assembly composes those roots against the bound revision source. The
+    admitted projection must compose a repair copy saved later against the
+    same source, so this reads it again from its verified, immutable record
+    when this process does not hold it (a restarted host, a replayed turn,
+    another worker, an evicted entry). Async validation passes the result to
+    :func:`admitted_app_file_map` as ``revision_baseline``, so the projection
+    does not depend on the process that assembled the bundle. None outside a
+    revision, when no repair copy replaces a pack-composed root, or when the
+    source cannot be read; acceptance reports an unreadable source itself.
+    """
+    from mozaiksai.core.artifacts.content_store import ContentNotFoundError
+
+    from .hydrate_app_revision_context import read_bound_revision_files, revision_baseline_required
+
+    if context_variables is None or not hasattr(context_variables, "get"):
+        return None
+    if not revision_baseline_required(context_variables):
+        return None
+    files = _generated_file_map(context_variables)
+    overlay = _overlay_file_map(context_variables)
+    if not any(path in overlay and overlay[path] != files[path] for path in _pack_composed_roots(files)):
+        return None
+    baseline = _cached_revision_baseline(context_variables)
+    if baseline is not None:
+        return baseline
+    try:
+        # Text-only read (include_binary=False), exactly as assembly reads it.
+        saved = await read_bound_revision_files(context_variables)
+    except (OSError, ValueError, zipfile.BadZipFile, ContentNotFoundError) as exc:
+        logger.warning("REVISION_BASELINE_UNAVAILABLE: the bound revision source cannot be read: %s", exc)
+        return None
+    baseline = {path: content for path, content in saved.items() if isinstance(content, str)}
+    remember_revision_baseline(context_variables, baseline)
+    return baseline
 
 
 def _pack_composed_roots(files: dict[str, str]) -> frozenset[str]:
@@ -390,6 +479,23 @@ def _pack_composed_roots(files: dict[str, str]) -> frozenset[str]:
 
 def _entries(files: dict[str, str]) -> list[dict[str, str]]:
     return [{"filename": path, "content": content} for path, content in sorted(files.items())]
+
+
+def _generated_file_map(context_variables: Any) -> dict[str, str]:
+    """The current bundle's files at safe relative paths."""
+    raw = detach(context_variables.get("generated_files"))
+    files: dict[str, str] = {}
+    if isinstance(raw, dict):
+        for path, content in raw.items():
+            safe = safe_relpath(str(path))
+            if safe and safe != "." and ":" not in safe and "\x00" not in safe:
+                files[safe] = str(content)
+    return files
+
+
+def _overlay_file_map(context_variables: Any) -> dict[str, str]:
+    """The context ``code_files`` overlay of admitted repairs."""
+    return extract_code_file_map_from_payload({"code_files": detach(context_variables.get("code_files"))})
 
 
 def _compose_repair_roots(
@@ -416,12 +522,12 @@ def _compose_repair_roots(
 
     kept = {path: roots[path] for path in sorted(replaced)}
     if revision_baseline is None and revision_baseline_required(context_variables):
-        source_key = _revision_source_key(context_variables)
-        revision_baseline = _REVISION_UI_BASELINES.get(source_key) if source_key is not None else None
+        revision_baseline = _cached_revision_baseline(context_variables)
         if revision_baseline is None:
             logger.warning(
-                "ADMITTED_UI_ROOT_NOT_COMPOSED: paths=%s; the revision baseline assembly composed with is not "
-                "available to this projection, so the assembled roots are kept until the next assembly",
+                "ADMITTED_UI_ROOT_NOT_COMPOSED: paths=%s; the revision baseline was neither passed to this "
+                "projection nor held by this process, so the assembled roots are kept. Pass the result of "
+                "load_revision_baseline, which reads it from the verified revision source.",
                 sorted(replaced),
             )
             return kept
@@ -484,22 +590,17 @@ def admitted_app_file_map(
     App-owned (``owner: workspace``) pack outputs keep the bundle's verified
     copy: an overlay copy that changes one, or a tombstone for one, is
     excluded and reported. A repair copy of a pack-composed UI root is
-    composed onto it with assembly's contributions, baseline and rules.
+    composed onto it with assembly's contributions, baseline and rules. In a
+    revision that baseline is ``revision_baseline``, which async callers load
+    with :func:`load_revision_baseline`; without it the projection uses this
+    process's copy, else keeps the assembled roots and reports them.
     """
     if context_variables is None or not hasattr(context_variables, "get"):
         return {}
-    raw = detach(context_variables.get("generated_files"))
-    files: dict[str, str] = {}
-    if isinstance(raw, dict):
-        for path, content in raw.items():
-            safe = safe_relpath(str(path))
-            if safe and safe != "." and ":" not in safe and "\x00" not in safe:
-                files[safe] = str(content)
+    files = _generated_file_map(context_variables)
     roots = {path: files[path] for path in SHARED_UI_OUTPUT_PATHS if path in files}
     composed = _pack_composed_roots(files)
-    overlay = extract_code_file_map_from_payload({
-        "code_files": detach(context_variables.get("code_files")),
-    })
+    overlay = _overlay_file_map(context_variables)
     deleted = extract_deleted_file_paths_from_payload({
         "deleted_files": detach(context_variables.get("deleted_files")),
     })
@@ -578,6 +679,7 @@ __all__ = [
     "extract_code_file_entries_from_payload",
     "extract_code_file_map_from_payload",
     "extract_deleted_file_paths_from_payload",
+    "load_revision_baseline",
     "safe_relpath",
     "save_generated_code",
 ]

@@ -36,6 +36,7 @@ from factory_app.workflows._shared.workflow_integration import (
 from factory_app.workflows.AppGenerator.tools import app_runtime_smoke
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     admitted_app_file_map,
+    load_revision_baseline,
 )
 from factory_app.workflows.AppGenerator.tools.hydrate_app_revision_context import (
     revision_asset_evidence,
@@ -234,7 +235,7 @@ async def _resolve_files(
             _context_get(context_variables, "app_id"),
         )
     return (
-        admitted_app_file_map(context_variables),
+        admitted_app_file_map(context_variables, revision_baseline=await load_revision_baseline(context_variables)),
         _context_get(context_variables, "chat_id"),
         _context_get(context_variables, "app_id"),
     )
@@ -1944,7 +1945,9 @@ async def run_app_bundle_acceptance_gate(
     if files is not None:
         generated_files = explicit_files
     else:
-        generated_files = admitted_app_file_map(context_variables)
+        generated_files = admitted_app_file_map(
+            context_variables, revision_baseline=await load_revision_baseline(context_variables),
+        )
     selected_capability_packs = (
         [pack for pack in capability_packs if isinstance(pack, dict)]
         if isinstance(capability_packs, list)
@@ -2557,15 +2560,19 @@ async def validate_app_bundle_from_request(
     if not isinstance(commands, list):
         commands = None
 
-    if "app.json" in admitted_app_file_map(context_variables):
+    # A repair copy of a pack-composed UI root composes against the bound revision
+    # source read from its verified record, never only this process's memory of it.
+    revision_baseline = await load_revision_baseline(context_variables)
+    if "app.json" in admitted_app_file_map(context_variables, revision_baseline=revision_baseline):
         try:
+            # Its projection runs before any await, while the source just loaded is held.
             await save_auth_scaffold(context_variables)
         except (AppAuthContractError, json.JSONDecodeError):
             # Keep invalid artifacts intact for the gate's diagnostics and repair routing.
             pass
     # Validate one materialized snapshot and commit it after asynchronous checks.
     # The shared bridge can be hydrated by other AG2 packet observers while we await.
-    materialized_files = admitted_app_file_map(context_variables)
+    materialized_files = admitted_app_file_map(context_variables, revision_baseline=revision_baseline)
     materialized_overlay = _context_get(context_variables, "code_files", [])
     materialized_deletions = _context_get(context_variables, "deleted_files", [])
     acceptance_result = await run_app_bundle_acceptance_gate(

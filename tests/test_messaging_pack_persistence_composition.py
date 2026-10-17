@@ -214,6 +214,63 @@ def test_data_contribution_order_is_deterministic_and_duplicate_owners_fail():
         compile_data_contract(base, pack_data_contracts=[duplicate])
 
 
+@pytest.mark.parametrize("repaired", ["nothing", "migration"])
+def test_persistence_repair_save_keeps_the_verified_pack_data_contributions(repaired):
+    from factory_app.workflows.AppGenerator.tools.code_file_utils import (
+        admitted_app_file_map,
+        save_generated_code,
+    )
+    from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import (
+        _scan_planned_data_fields,
+    )
+    from factory_app.workflows.AppGenerator.tools.repair_policy import prepare_bundle_repair
+
+    approved = {"version": "1", "surfaces": [{
+        "surface_id": "projects", "surface_kind": "module", "collections": [{
+            "name": "projects", "entity": "Project", "scope": "app", "tenancy": "per_user",
+            "owner_field": "owner", "fields": [{"name": "owner", "type": "string", "required": True}],
+        }],
+    }], "shared_collections": []}
+    migration = "data/migrations/001_projects.json"
+    task = {
+        "task_id": "data_contract", "task_type": "persistence_contract", "capability_pack_id": None,
+        "surface_id": "data_contract", "surface_kind": "module", "initial_agent": "DatabaseAgent",
+        "execution_target": "AppGenerator", "description": "Data contract", "initial_message": "Data contract",
+        "owned_paths": ["data/contract.json", migration], "depends_on": [],
+    }
+    context = _context()
+    context["app_build_plan"] = {**context["app_build_plan"], "build_tasks": [task]}
+    templates = resolve_managed_capability_templates(context["capability_packs"], context_variables=context)
+    assembled = {file["filename"]: file["content"] for file in _merge_code_files(
+        [{"code_files": templates}], app_build_plan=context["app_build_plan"], data_contract=approved,
+        context_variables={**context, "data_contract": approved},
+    )}
+    context.update({
+        "data_contract": approved, "generated_files": assembled,
+        "app_task_batch_results": {"data_contract": {"code_files": []}},
+    })
+    assert _scan_planned_data_fields(assembled, approved, context_variables=context) == []
+    # Acceptance routes a diagnostic to the task that owns data/contract.json.
+    repair = prepare_bundle_repair({"passed": False, "errors": [f"{migration}: missing projects collection"]}, context)
+    assert (repair["target_agent"], repair["active"]["allowed_paths"]) == ("DatabaseAgent", task["owned_paths"])
+    fixed = {"migration_id": "001_projects", "operations": [
+        {"type": "ensure_collection", "module_id": "projects", "entity_name": "Project"},
+    ]}
+    context["structured_output"] = {"code_files": [
+        {"filename": migration, "content": json.dumps(fixed)},
+    ] if repaired == "migration" else []}
+    saved = save_generated_code(context)
+    assert saved.get("status") != "rejected", saved
+    assert migration in saved["saved_files"] if repaired == "migration" else migration not in saved["saved_files"]
+    # The owner's save compiles the contract as assembly does, with the pack's surfaces.
+    admitted = admitted_app_file_map(context)
+    assert [surface["surface_id"] for surface in json.loads(admitted["data/contract.json"])["surfaces"]] == [
+        "projects", "messages",
+    ]
+    assert admitted["data/contract.json"] == assembled["data/contract.json"]
+    assert _scan_planned_data_fields(admitted, approved, context_variables=context) == []
+
+
 @pytest.mark.parametrize("path", ["modules/messages/backend/policy.py", "modules/messages/backend/service.py",
                                   "modules/messages/module.yaml"])
 def test_injected_pack_backend_bytes_are_rejected(path):

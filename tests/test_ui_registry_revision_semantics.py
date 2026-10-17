@@ -309,6 +309,74 @@ async def test_admitted_map_applies_a_revision_repair_saved_after_assembly(reque
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("entry,lost", [
+    ("validation_request", "restarted"), ("validation_request", "evicted"),
+    ("acceptance_gate", "restarted"), ("build_validation", "restarted"),
+])
+async def test_validation_composes_a_revision_repair_without_the_assembling_process_memory(
+    request, monkeypatch, caplog, entry, lost,
+):
+    from unittest.mock import AsyncMock
+
+    from factory_app.workflows.AppGenerator.tools import app_validation, code_file_utils
+    from mozaiksai.core.workflow.context.frozen import detach
+
+    saved = request.getfixturevalue("revision_baseline")
+    board, pack = component(path="ui/pages/custom/board.jsx"), _assembled_files()
+    _save(saved, board, pack)
+    revised = {path: saved.files[path] for path in ("ui/index.js", "ui/route_manifest.json", "ui/pages/custom/board.jsx")}
+    context = _revision_context(saved, revised)
+    result = await assemble_app_tasks(context_variables=context)
+    assert result["success"], result
+    # A bounded repair of the page task saves a shared UI root after that assembly.
+    repair = {"ui/route_manifest.json": retitled(_files(result)["ui/route_manifest.json"], "board", "Repaired later")}
+    context.set("code_files", contribution("repair", repair)["files"])
+    context.set("bundle_repair_result", {"history": [], "active": {
+        "task_id": "pages", "status": "responded", "saved_paths": ["ui/route_manifest.json"],
+    }})
+    # Its validation runs where assembly's baseline is not in memory: a restarted
+    # host, a replayed turn, another worker, or 16 other revision assemblies since.
+    if lost == "restarted":
+        code_file_utils._REVISION_UI_BASELINES.clear()
+    else:
+        for index in range(16):
+            code_file_utils.remember_revision_baseline({
+                "user_id": f"other-{index}", "artifact_version_id": "other-source",
+                "run_build_binding": {"target_app_id": "other-app", "build_registry_id": "other-registry"},
+            }, {})
+    caplog.set_level(logging.WARNING, logger="factory_app.workflows.AppGenerator.tools.code_file_utils")
+    if entry == "validation_request":
+        passed = {"passed": True}
+        acceptance = AsyncMock(return_value={
+            **{key: passed for key in (
+                "bundle_scan", "agent_backend", "module_wiring", "module_implementation", "module_runtime_quality",
+                "functional_completeness", "workflow_integration", "app_runtime_load", "app_runtime_load_worker",
+                "app_runtime_smoke",
+            )},
+            "status": "passed", "passed": True, "skipped_checks": [],
+            "bundle_repair": {"status": "passed", "target_agent": None},
+        })
+        monkeypatch.setattr(app_validation, "run_app_bundle_acceptance_gate", acceptance)
+        monkeypatch.setattr(app_validation, "validate_app_build", AsyncMock(return_value={
+            "validation_status": "passed", "validation_strategy": "skip", "success": True, "errors": [],
+        }))
+        await app_validation.validate_app_bundle_from_request({}, context_variables=context)
+        # The gates check, and validation writes back, the repaired root composed onto the pack's.
+        checked = [acceptance.await_args.kwargs["files"], detach(context.get("generated_files"))]
+    elif entry == "acceptance_gate":
+        await app_validation.run_app_bundle_acceptance_gate(context_variables=context)
+        checked = [detach(context.get("generated_files"))]
+    else:
+        files, _, _ = await app_validation._resolve_files(files=None, context_variables=context, wf_logger=None)
+        checked = [files]
+    for files in checked:
+        assert _routes(files)["board"]["meta"]["title"] == "Repaired later"
+        assert _routes(files)["messages"] == _routes(pack)["messages"]
+        assert files["ui/index.js"].count('registerComponent("Messages"') == 1
+    assert not any("ADMITTED_UI_ROOT_NOT_COMPOSED" in record.getMessage() for record in caplog.records)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("repair", ["retitle_pack_route", "reregister_pack_component"])
 async def test_admitted_map_never_patches_a_verified_pack_declaration(repair, caplog):
     task, pack = component(path="ui/pages/custom/board.jsx"), _assembled_files()
