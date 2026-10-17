@@ -970,15 +970,29 @@ async def test_a_malformed_repair_route_is_a_rejected_copy_never_a_crash(request
 
 
 @pytest.mark.asyncio
-async def test_an_auth_route_binding_error_raised_by_reassembly_routes_to_the_route_manifest_owner():
-    """Reassembly composes the auth routes too; its binding error names ui/route_manifest.json, as the gate's does."""
-    from factory_app.workflows.AppGenerator.tools.repair_policy import prepare_bundle_repair
+async def test_an_auth_route_binding_error_raised_by_reassembly_routes_to_the_route_manifest_owner(monkeypatch, tmp_path):
+    """Reassembly composes the auth routes too; its binding error names ui/route_manifest.json, as the gate's does.
 
+    The repair loop dispatches it to that file's owner, AppSchemaAgent, whose
+    own save of a manifest without the broken binding makes reassembly and
+    validation pass, with the auth contract's routes and the pack's route kept.
+    """
+    from factory_app.workflows.AppGenerator.tools import app_validation
+    from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import scan_app_contracts
+    from factory_app.workflows.AppGenerator.tools.repair_policy import prepare_bundle_repair
+    from factory_app.workflows.AppGenerator.tools.save_app_schema import save_app_schema
+
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path))
     board = component(path="ui/pages/custom/board.jsx")
+    pages = {"task_id": "pages", "task_type": "page_bundle", "initial_agent": "AppSchemaAgent",
+             "owned_paths": ["ui/index.js", "ui/route_manifest.json", "ui/pages/custom/board.jsx"], "depends_on": []}
+    selected = _context()
     context = _genesis_context(board, app_task_batch_results={
         "pages": {"code_files": contribution("task:pages", board)["files"]},
         "shell": {"manifest": {"app_name": "Board", "default_route": "/board", "auth_strategy": "basic-login"}, "pages": []},
-    })
+    }, app_task_batch_items=[pages], app_build_plan={**selected["app_build_plan"], "build_tasks": [pages], "pages": [
+        {"name": "board", "route": "/board", "ui_surface": "custom_react_page"},
+    ]})
     result = await assemble_app_tasks(context_variables=context)
     assert result["success"], result
     # A repair that also declares the sign-in route behind sign-in, then the reassembly validation runs.
@@ -993,13 +1007,36 @@ async def test_an_auth_route_binding_error_raised_by_reassembly_routes_to_the_ro
     assert not again["success"] and again["error"] == f"AppAuthContractError: {binding_error}", again
     diagnostic = context.get("app_assembly_diagnostic")
     assert diagnostic == {"code": "APP_ASSEMBLY_FAILED", "error": binding_error}
-    pages = {"task_id": "pages", "task_type": "page_bundle", "initial_agent": "AppSchemaAgent",
-             "owned_paths": ["ui/index.js", "ui/route_manifest.json", "ui/pages/custom/board.jsx"], "depends_on": []}
-    plan = {"app_build_plan": {"build_tasks": [pages]}, "app_task_batch_items": [pages],
-            "app_task_batch_results": {"pages": {"code_files": []}}}
-    repair = prepare_bundle_repair({"passed": False, "diagnostics": [diagnostic]}, plan)
+    # The diagnostic names the route manifest, so the repair loop dispatches it to that file's owner.
+    repair = prepare_bundle_repair({"passed": False, "diagnostics": [diagnostic]}, context)
     assert (repair["status"], repair["target_agent"]) == ("needs_revision", "AppSchemaAgent"), repair
     assert "ui/route_manifest.json" in repair["active"]["allowed_paths"]
+    assert context.get("bundle_repair_result")["active"]["status"] == "selected"
+    # AppSchemaAgent's save restates the board route without the broken sign-in binding.
+    fixed = {**BOARD_BUNDLE, "route_manifest": [{**BOARD_BUNDLE["route_manifest"][0], "meta": {"title": "Repaired"}}]}
+    message = save_app_schema(
+        manifest={"app_name": "Board", "default_route": "/board", "auth_strategy": "basic-login", "pages": [],
+                  "custom_routes": ["board"]},
+        pages=[], custom_route_bundle=fixed, context_variables=context,
+    )
+    assert "rejected" not in message, message
+    assert context.get("bundle_repair_result")["active"]["status"] == "responded"
+    context.set("app_ui_quality_status", "passed")
+    repaired = await assemble_app_tasks(context_variables=context)
+    assert repaired["success"], repaired
+    files = _files(repaired)
+    assert scan_app_contracts(files) == []
+    routes = _routes(files)
+    assert routes["board"]["meta"]["title"] == "Repaired"
+    assert routes["messages"] == _routes(_assembled_files())["messages"]
+    assert _auth_paths(files) == AUTH_ROUTE_PATHS
+    assert all(route["meta"]["requiresAuth"] is False for path, route in routes.items() if path in AUTH_ROUTE_PATHS)
+    # Validation checks exactly that admitted bundle and passes.
+    acceptance = _validation_mocks(monkeypatch)
+    await app_validation.validate_app_bundle_from_request({}, context_variables=context)
+    checked = acceptance.await_args.kwargs["files"]
+    assert checked == admitted_app_file_map(context) and checked["ui/route_manifest.json"] == files["ui/route_manifest.json"]
+    assert scan_app_contracts(checked) == []
 
 
 @pytest.mark.asyncio

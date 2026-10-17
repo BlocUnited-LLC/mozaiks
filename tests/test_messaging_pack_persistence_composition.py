@@ -330,21 +330,53 @@ def _imported_revision_without_an_approved_contract(request):
 
 
 @pytest.mark.asyncio
-async def test_the_carried_contract_guard_refuses_the_repair_save_its_diagnostic_dispatches(request):
-    """The data/contract.json owner's save would write the packs' contributions on an empty base; it is refused."""
-    from factory_app.workflows.AppGenerator.tools.app_validation import _assembly_failure
-    from factory_app.workflows.AppGenerator.tools.code_file_utils import save_generated_code
+@pytest.mark.parametrize("emitted", ["nothing", "app_and_pack_surfaces"])
+async def test_the_carried_contract_guard_refuses_the_repair_save_its_diagnostic_dispatches(request, emitted):
+    """The repair the guard's diagnostic requests ends in an explicit rejection, never a silent loss.
 
-    context, _, assemble_app_tasks = _imported_revision_without_an_approved_contract(request)
+    The diagnostic dispatches a bounded repair to the data/contract.json
+    owner. Its save would write the packs' contributions on an empty base
+    (whatever the agent emits, even a contract that also restates the app's
+    own surface), so it is refused with the guard's reason. Nothing is written,
+    the reassembly fails with the same reason, the repair loop then blocks the
+    run with it, and nothing admitted for validation or export holds a contract
+    that drops the app's surface.
+    """
+    from factory_app.workflows.AppGenerator.tools.app_validation import _assembly_failure
+    from factory_app.workflows.AppGenerator.tools.code_file_utils import (
+        admitted_app_file_map,
+        save_generated_code,
+    )
+
+    context, selected, assemble_app_tasks = _imported_revision_without_an_approved_contract(request)
     first = await assemble_app_tasks(context_variables=context)
     assert not first["success"] and "holds app-owned data: surface 'projects'" in first["error"], first
     repair = _assembly_failure(context, prepare_recovery=True)["bundle_repair"]
     assert (repair["target_agent"], repair["active"]["allowed_paths"]) == ("DatabaseAgent", ["data/contract.json"])
-    context.set("structured_output", {"code_files": []})
+    if emitted == "nothing":
+        code_files = []
+    else:
+        # The agent restates the app's surface beside the pack's: a manual supplement, still not an approved contract.
+        pack_only = json.loads({file["filename"]: file["content"] for file in _merge_code_files(
+            [{"code_files": resolve_managed_capability_templates(selected["capability_packs"], context_variables=selected)}],
+            app_build_plan=selected["app_build_plan"], data_contract=None, context_variables=selected,
+        )}["data/contract.json"])
+        supplemented = {**pack_only, "surfaces": [*CARRIED_APP_CONTRACT["surfaces"], *pack_only["surfaces"]]}
+        code_files = [{"filename": "data/contract.json", "content": json.dumps(supplemented)}]
+    context.set("structured_output", {"code_files": code_files})
     refused = save_generated_code(context)
     assert refused.get("status") == "rejected", refused
     assert "holds app-owned data: surface 'projects'" in refused["error"]
     assert "data/contract.json" not in {item["filename"] for item in context.get("code_files") or []}
+    # The reassembly fails explicitly with the guard's reason, and the repair loop blocks the run with it.
+    again = await assemble_app_tasks(context_variables=context)
+    assert not again["success"] and "holds app-owned data: surface 'projects'" in again["error"], again
+    blocked = _assembly_failure(context, prepare_recovery=True)["bundle_repair"]
+    assert blocked["status"] == "blocked" and blocked["active"] is None, blocked
+    assert blocked["history"][-1]["status"] == "rejected"
+    assert "holds app-owned data: surface 'projects'" in blocked["history"][-1]["error"]
+    # Nothing was assembled or saved, so validation and export have no contract that drops the app's surface.
+    assert "data/contract.json" not in admitted_app_file_map(context)
 
 
 @pytest.mark.asyncio
