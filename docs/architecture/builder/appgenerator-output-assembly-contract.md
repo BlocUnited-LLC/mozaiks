@@ -1094,7 +1094,11 @@ It must:
 - write `data/contract.json`, when DesignDocs approved a data contract, as
   assembly compiles it: with the verified pack data contributions and the
   subscription assignment stores, because the admitted projection overlays this
-  copy on the assembled bundle (a bounded repair keeps the bundle's copy)
+  copy on the assembled bundle (a bounded repair keeps the bundle's copy). When
+  the selected packs cannot be verified, or their contributions do not compose
+  with the approved contract, the save writes the approved contract instead and
+  does not fail: the app schema author cannot repair either, and assembly then
+  fails with its own `PackIntegrityError` or conflicting pack contribution error
 - store `app_manifest`, `app_pages`, `app_custom_route_bundle`, `app_theme_config_patch`, `app_shell_config`, `app_asset_manifest`, and `app_schema_ready` in workflow context
 
 It must not write directly into an active runtime-loaded app root such as a
@@ -1229,8 +1233,11 @@ crash of a synchronous caller. A copy that composes but breaks an auth route
 binding (for example a sign-in route that requires sign-in) is not held back:
 the auth routes are added without checking their bindings and
 `ADMITTED_AUTH_ROUTE_BINDING_INVALID` is logged, so the acceptance gate fails on
-that binding error, which the repair loop can act on, and export's own auth
-route composition rejects it. Without that provenance the last writer wins.
+that binding error and export's own auth route composition rejects it. The gate
+attributes a login or callback route's binding error to `ui/route_manifest.json`
+(for example `ui/route_manifest.json: Auth routes.login must declare
+meta.requiresAuth=false`), so the repair loop routes it to the task that owns
+that file. Without that provenance the last writer wins.
 Historical raw worker responses and prior generated directories cannot overwrite,
 refill, or delete that snapshot. An older foreign readback filtered by a save tool
 cannot reappear during packaging. Empty current artifacts remain empty.

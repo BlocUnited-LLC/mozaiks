@@ -50,6 +50,7 @@ from mozaiksai.core.workflow.generator_support.code_files import (
     _custom_route_bundle_code_files,
     _page_file_stem,
     auth_required_from_strategy,
+    compile_data_contract,
     data_contract_requires_auth,
     safe_relpath,
     validate_custom_page_files,
@@ -411,6 +412,36 @@ def _validate_data_contract(data_contract: Any) -> None:
             raise ValueError(f"{path}.collection is required")
         if not _is_non_empty_string(alias.get("owner_module")):
             raise ValueError(f"{path}.owner_module is required")
+
+
+def _bundle_data_contract(context_variables: Any, approved: dict[str, Any]) -> dict[str, Any]:
+    """data/contract.json as assembly compiles it, else the approved contract when the packs cannot join it.
+
+    The admitted projection overlays this copy on the assembled bundle, so the
+    approved contract alone would drop the verified pack contributions and the
+    subscription assignment stores there. When the selected packs cannot be
+    verified, or their contributions do not compose with the approved contract,
+    the app schema author cannot repair either: the approved contract is
+    written as before, and assembly fails with its own PackIntegrityError or
+    conflicting pack contribution error.
+    """
+    subscription_contract = resolve_subscription_contract(context_variables)
+    try:
+        assembled: dict[str, Any] = _assembled_data_contract(context_variables, subscription_contract)
+        return assembled
+    except ValueError as exc:
+        # Without the pack contributions the approved contract still compiles,
+        # so the packs are the reason. Its own compile error raises here.
+        compile_data_contract(
+            approved, subscription_contract=subscription_contract, context_variables=context_variables,
+        )
+        _logger.warning(
+            "APP_SCHEMA_PACK_DATA_CONTRACT_DEFERRED: the selected packs' data contributions do not compose "
+            "with the approved data contract; this save writes the approved contract and assembly "
+            "reports the failure: %s", exc,
+        )
+        return approved
+
 
 def _validate_route_auth(route_auth: Any, *, field: str) -> None:
     if route_auth is None:
@@ -1353,7 +1384,9 @@ def save_app_schema(
       - config/asset_manifest.json       → asset_manifest when set
       - data/contract.json                 → approved DesignDocs data_contract from context, compiled
                                            as assembly compiles it (verified pack contributions,
-                                           subscription assignment stores)
+                                           subscription assignment stores); as approved when
+                                           the packs cannot be verified or composed, for
+                                           assembly to report
 
     Stores in context_variables:
       - app_manifest, app_pages, app_theme_config_patch, app_shell_config,
@@ -1525,11 +1558,9 @@ def save_app_schema(
         _validate_data_contract(resolved_data_contract)
         # data/contract.json is written as assembly compiles it: the approved
         # contract with the verified pack contributions and subscription stores.
-        # The admitted projection overlays this copy on the assembled bundle,
-        # so the approved contract alone would drop those collections there.
-        bundle_data_contract = _assembled_data_contract(
-            context_variables, resolve_subscription_contract(context_variables),
-        ) if resolved_data_contract else None
+        bundle_data_contract = (
+            _bundle_data_contract(context_variables, resolved_data_contract) if resolved_data_contract else None
+        )
         app_ui_quality_warnings = dedupe(
             audit_page_schemas(page_list)
             + audit_custom_route_bundle_integrity(
@@ -1591,9 +1622,9 @@ def save_app_schema(
     if isinstance(active_repair, dict):
         # These values come from deterministic scaffolding, not the repair worker.
         # A page repair cannot replace a previously accepted scaffold version.
-        # data/contract.json is the approved contract as assembly compiled it,
-        # with the verified pack contributions and subscription stores; this
-        # save renders only the approved contract, so it keeps the bundle's copy.
+        # A page repair has no authority over data/contract.json either: the
+        # approved DesignDocs contract owns it and assembly recompiles it, so
+        # the bundle's copy is kept.
         for path in ("config/ai.json", "provenance.yaml", "config/profile.yaml", "data/contract.json"):
             if path in baseline_files:
                 rendered_files[path] = baseline_files[path]

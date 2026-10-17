@@ -893,6 +893,52 @@ async def test_genesis_app_schema_save_keeps_the_assembled_data_contributions_in
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["conflicting_contribution", "unverifiable_pack"])
+async def test_genesis_app_schema_save_leaves_pack_data_contract_failures_to_assembly(
+    tmp_path, monkeypatch, caplog, failure,
+):
+    from copy import deepcopy
+
+    from factory_app.workflows.AppGenerator.tools.save_app_schema import save_app_schema
+    from tests.test_messaging_pack_persistence_composition import CARRIED_APP_CONTRACT
+
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path))
+    approved = deepcopy(CARRIED_APP_CONTRACT)
+    selected = _context()
+    if failure == "conflicting_contribution":
+        # The approved contract declares its own surface under the pack's surface id.
+        approved["surfaces"].append({"surface_id": "messages", "surface_kind": "module", "collections": [{
+            **deepcopy(CARRIED_APP_CONTRACT["surfaces"][0]["collections"][0]), "name": "inbox", "entity": "Inbox",
+        }]})
+        expected = "ValueError: Conflicting pack data contribution for 'messages'"
+    else:
+        digest = selected["capability_packs"][0]["digest"]
+        selected["capability_packs"][0]["digest"] = digest[:-1] + ("0" if digest[-1] != "0" else "1")
+        expected = "PackIntegrityError: Pack 'messaging' selected digest does not match freshly verified source"
+    context = Context(factory_context({
+        **selected, "app_id": "genesis_schema", "chat_id": "genesis-chat", "data_contract": approved,
+        "app_build_plan": {**selected["app_build_plan"], "pages": [
+            {"name": "board", "route": "/board", "ui_surface": "custom_react_page"},
+        ]},
+    }))
+    caplog.set_level(logging.WARNING, logger="tools.save_app_schema")
+    # AppSchemaAgent cannot repair the packs or the approved contract: its save writes the approved
+    # contract unchanged, and assembly reports the failure itself.
+    message = save_app_schema(
+        manifest={"app_name": "Board", "default_route": "/board", "pages": [], "custom_routes": ["board"]},
+        pages=[], custom_route_bundle=deepcopy(BOARD_BUNDLE), context_variables=context,
+    )
+    assert "rejected" not in message, message
+    overlay = {item["filename"]: item["content"] for item in context["code_files"]}
+    assert json.loads(overlay["data/contract.json"]) == approved
+    assert any("APP_SCHEMA_PACK_DATA_CONTRACT_DEFERRED" in record.getMessage() for record in caplog.records)
+    context["app_ui_quality_status"] = "passed"
+    result = await assemble_app_tasks(context_variables=context)
+    assert not result["success"]
+    assert result["error"] == expected, result["error"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("bound", [False, True])
 async def test_a_malformed_repair_route_is_a_rejected_copy_never_a_crash(request, caplog, bound):
     from factory_app.workflows.AppGenerator.tools import code_file_utils
@@ -929,7 +975,9 @@ async def test_a_repair_breaking_an_auth_route_binding_reaches_the_gate_with_tha
     from factory_app.workflows.AppGenerator.tools.code_file_utils import compose_bundle_auth_routes
     from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import (
         _scan_auth_app_contract,
+        scan_app_contracts,
     )
+    from factory_app.workflows.AppGenerator.tools.repair_policy import prepare_bundle_repair
     from mozaiksai.core.runtime.app.auth_contract import AppAuthContractError
 
     board, pack = component(path="ui/pages/custom/board.jsx"), _assembled_files()
@@ -955,10 +1003,19 @@ async def test_a_repair_breaking_an_auth_route_binding_reaches_the_gate_with_tha
     # The gate checks the repair as written, its unrelated change included, and names the broken binding.
     assert _routes(checked)["board"]["meta"]["title"] == "Repaired"
     assert _routes(checked)["messages"] == _routes(pack)["messages"]
-    assert _scan_auth_app_contract(checked, require_generated_adapter=False) == [
-        "Auth routes.login must declare meta.requiresAuth=false",
-    ]
+    binding_error = "ui/route_manifest.json: Auth routes.login must declare meta.requiresAuth=false"
+    assert _scan_auth_app_contract(checked, require_generated_adapter=False) == [binding_error]
+    assert binding_error in scan_app_contracts(checked)
     assert any("ADMITTED_AUTH_ROUTE_BINDING_INVALID" in record.getMessage() for record in caplog.records)
+    # The diagnostic names the route manifest, so the repair loop dispatches it to that file's owner.
+    pages = {"task_id": "pages", "task_type": "page_bundle", "initial_agent": "AppSchemaAgent",
+             "owned_paths": ["ui/index.js", "ui/route_manifest.json", "ui/pages/custom/board.jsx"], "depends_on": []}
+    plan = {"app_build_plan": {"build_tasks": [pages]}, "app_task_batch_items": [pages],
+            "app_task_batch_results": {"pages": {"code_files": []}}}
+    repair = prepare_bundle_repair({"passed": False, "errors": scan_app_contracts(checked)}, plan)
+    assert (repair["status"], repair["target_agent"]) == ("needs_revision", "AppSchemaAgent"), repair
+    assert binding_error in repair["target_errors"]
+    assert "ui/route_manifest.json" in repair["active"]["allowed_paths"]
     # It never passes: export's own auth route composition rejects the same binding.
     with pytest.raises(AppAuthContractError, match=r"routes\.login must declare meta\.requiresAuth=false"):
         compose_bundle_auth_routes(dict(checked))

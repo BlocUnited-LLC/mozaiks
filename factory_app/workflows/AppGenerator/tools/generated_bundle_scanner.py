@@ -1619,11 +1619,14 @@ def _scan_auth_app_contract(
         pages = route_manifest.get("pages") if isinstance(route_manifest, dict) else None
         validate_app_auth_route_bindings(contract, pages)
     except (TypeError, ValueError) as exc:
-        errors.append(
-            str(exc)
-            if isinstance(exc, AppAuthContractError)
-            else "ui/route_manifest.json must be valid JSON for auth routes"
-        )
+        if not isinstance(exc, AppAuthContractError):
+            errors.append("ui/route_manifest.json must be valid JSON for auth routes")
+        elif str(exc).startswith("Auth routes."):
+            # A login or callback route binding is declared in the route manifest:
+            # the path routes the diagnostic to that file's owner for repair.
+            errors.append(f"ui/route_manifest.json: {exc}")
+        else:
+            errors.append(str(exc))
     if not require_generated_adapter:
         return errors
 

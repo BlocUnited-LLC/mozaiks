@@ -598,7 +598,8 @@ def _compose_repair_roots(
     assembled pack-composed roots are kept; only an app without resolvable
     packs keeps the copy as written for the acceptance gates to judge. A copy
     that composes but breaks an auth route binding is returned with the auth
-    routes added unchecked, so the acceptance gate rejects it with that error.
+    routes added unchecked, so the acceptance gate rejects it with that error,
+    attributed to ui/route_manifest.json for the repair loop to route.
     """
     from .hydrate_app_revision_context import revision_baseline_required
     from .resolve_managed_capability_templates import (
@@ -655,9 +656,11 @@ def _compose_repair_roots(
                 # The copy composes, but the manifest breaks an auth route
                 # binding. The acceptance gate checks the same bindings, so the
                 # composition reaches it with the auth routes added unchecked
-                # and fails there with this error, which the repair loop can
-                # act on; kept roots would repeat the pre-repair diagnostic.
-                # Any other auth contract error raises again and keeps them.
+                # and fails there with this error. The gate attributes a
+                # route's binding error to ui/route_manifest.json, so the
+                # repair loop routes it to that file's owner; kept roots would
+                # repeat the pre-repair diagnostic. Any other auth contract
+                # error raises again and keeps them.
                 compose_bundle_auth_routes(with_auth, validate_bindings=False)
                 logger.warning(
                     "ADMITTED_AUTH_ROUTE_BINDING_INVALID: paths=%s; the admitted repair copy breaks an auth "
