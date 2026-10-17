@@ -2293,10 +2293,10 @@ async def _require_accepted_workspace_parent(
                 "app's accepted current build. Refine the current build again. No version was accepted."
             ),
         )
-    # A refinement run marks its own parent stale, so no build is CURRENT while
-    # this child awaits review. The registry's compare-and-set run chain then
-    # decides: the child must still be the latest registered run, admitted
-    # against the parent that was current when its run began.
+    # The run that stored this child marked its own parent stale, so no build
+    # is CURRENT while the child awaits review. The registry's compare-and-set
+    # run chain then decides: the child must still be the latest registered
+    # run, admitted against the parent that was current when its run began.
     registry_record = (await _get_app_registry_service().get_app_record(
         owner_user_id=owner_user_id, build_registry_id=build_registry_id,
     )).get("app") or {}
@@ -2309,6 +2309,52 @@ async def _require_accepted_workspace_parent(
                 "made. Refine the current build again. No version was accepted."
             ),
         )
+
+
+#: The most saved builds acceptance follows from a child back to the app's current build.
+_ACCEPTANCE_LINEAGE_MAX_DEPTH = 32
+
+
+async def _require_current_build_in_lineage(version, *, app_id: str, artifact_store: Any) -> None:  # noqa: ANN001
+    """Refuse an app bundle made from a build older than the app's current build.
+
+    Acceptance replaces the whole bundle. When the app has a CURRENT app
+    bundle, it must be the child's parent or an earlier ancestor (a child of
+    a draft made from it). Otherwise the child was made before a newer build
+    was accepted, such as a sibling candidate, and accepting it would revert
+    that build. A missing ancestor or a lineage past the bound refuses too.
+    """
+    if version.build_family != "app_bundle" or not version.parent_build_record_id:
+        return
+    refs = await artifact_store.get_current_build_record_refs(app_id=app_id)
+    current_id = str((refs or {}).get(version.build_family) or "").strip()
+    if not current_id or current_id == version.id:
+        return
+    ancestor_id: str | None = version.parent_build_record_id
+    for _ in range(_ACCEPTANCE_LINEAGE_MAX_DEPTH):
+        if ancestor_id == current_id:
+            return
+        ancestor = await artifact_store.get_build_record(app_id=app_id, build_record_id=ancestor_id)
+        if ancestor is None:
+            raise HTTPException(
+                status_code=409,
+                detail="This version's lineage could not be verified against the app's current build. No version was accepted.",
+            )
+        ancestor_id = ancestor.parent_build_record_id
+        if not ancestor_id:
+            break
+    else:
+        raise HTTPException(
+            status_code=409,
+            detail="This version's lineage could not be verified against the app's current build. No version was accepted.",
+        )
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            "This version was made from an earlier build than the app's current build, and accepting it would "
+            "replace changes accepted since. Refine the current build instead. No version was accepted."
+        ),
+    )
 
 
 class GenesisAcceptanceRequest(BaseModel):
@@ -2395,16 +2441,19 @@ async def accept_build_artifact_version(
             detail="Staged refinement drafts require a promotion_ready review record before acceptance.",
         )
     async with _workspace_acceptance_guard(app_id, version):
-        if _changed_workspace_pack_paths(version):
+        current_version = version
+        if _changed_workspace_pack_paths(version) or version.build_family == "app_bundle":
             # Re-read under the guard: another acceptance may have just completed.
             current_version = await artifact_store.get_build_record(app_id=app_id, build_record_id=artifact_version_id)
             if current_version is None or current_version.lifecycle_status != ArtifactLifecycleStatus.DRAFT:
                 raise HTTPException(status_code=409, detail="Only draft artifact versions can be accepted.")
+        if _changed_workspace_pack_paths(version):
             await _require_accepted_workspace_parent(
                 current_version, app_id=app_id, owner_user_id=owner_user_id,
                 build_registry_id=build_registry_id, artifact_store=artifact_store,
             )
         await _require_current_app_owned_pack_code(version, app_id=app_id, artifact_store=artifact_store)
+        await _require_current_build_in_lineage(version, app_id=app_id, artifact_store=artifact_store)
         if refinement_review_record is not None:
             try:
                 accepted_result = await accept_staged_refinement_build_record(
