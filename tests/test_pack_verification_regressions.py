@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -48,8 +49,10 @@ def _messaging_copy(root: Path, *, version: str, extra_field: bool = False, with
     shutil.copytree(MESSAGING, root, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     context = root / "context.yaml"
     text = context.read_text(encoding="utf-8")
-    assert 'version: "0.1.13"' in text
-    context.write_text(text.replace('version: "0.1.13"', f'version: "{version}"'), encoding="utf-8")
+    # Relabel the copy whatever the shipped pack's current version is.
+    current = re.findall(r'^  version: "([^"]+)"$', text, flags=re.MULTILINE)
+    assert len(current) == 1
+    context.write_text(text.replace(f'  version: "{current[0]}"', f'  version: "{version}"'), encoding="utf-8")
     template = root / "templates" / DATA_CONTRACT
     if without_data:
         contract = root / "contract.yaml"
