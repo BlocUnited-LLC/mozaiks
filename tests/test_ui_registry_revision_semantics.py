@@ -970,6 +970,39 @@ async def test_a_malformed_repair_route_is_a_rejected_copy_never_a_crash(request
 
 
 @pytest.mark.asyncio
+async def test_an_auth_route_binding_error_raised_by_reassembly_routes_to_the_route_manifest_owner():
+    """Reassembly composes the auth routes too; its binding error names ui/route_manifest.json, as the gate's does."""
+    from factory_app.workflows.AppGenerator.tools.repair_policy import prepare_bundle_repair
+
+    board = component(path="ui/pages/custom/board.jsx")
+    context = _genesis_context(board, app_task_batch_results={
+        "pages": {"code_files": contribution("task:pages", board)["files"]},
+        "shell": {"manifest": {"app_name": "Board", "default_route": "/board", "auth_strategy": "basic-login"}, "pages": []},
+    })
+    result = await assemble_app_tasks(context_variables=context)
+    assert result["success"], result
+    # A repair that also declares the sign-in route behind sign-in, then the reassembly validation runs.
+    manifest = json.loads(retitled(board["ui/route_manifest.json"], "board", "Repaired"))
+    manifest["pages"].append({
+        "id": "login", "path": "/login", "component": "LoginPage", "meta": {"requiresAuth": True, "title": "Sign in"},
+    })
+    context.set("code_files", contribution("repair", {"ui/route_manifest.json": json.dumps(manifest)})["files"])
+    _responded_repair(context, "ui/route_manifest.json")
+    again = await assemble_app_tasks(context_variables=context)
+    binding_error = "ui/route_manifest.json: Auth routes.login must declare meta.requiresAuth=false"
+    assert not again["success"] and again["error"] == f"AppAuthContractError: {binding_error}", again
+    diagnostic = context.get("app_assembly_diagnostic")
+    assert diagnostic == {"code": "APP_ASSEMBLY_FAILED", "error": binding_error}
+    pages = {"task_id": "pages", "task_type": "page_bundle", "initial_agent": "AppSchemaAgent",
+             "owned_paths": ["ui/index.js", "ui/route_manifest.json", "ui/pages/custom/board.jsx"], "depends_on": []}
+    plan = {"app_build_plan": {"build_tasks": [pages]}, "app_task_batch_items": [pages],
+            "app_task_batch_results": {"pages": {"code_files": []}}}
+    repair = prepare_bundle_repair({"passed": False, "diagnostics": [diagnostic]}, plan)
+    assert (repair["status"], repair["target_agent"]) == ("needs_revision", "AppSchemaAgent"), repair
+    assert "ui/route_manifest.json" in repair["active"]["allowed_paths"]
+
+
+@pytest.mark.asyncio
 async def test_a_repair_breaking_an_auth_route_binding_reaches_the_gate_with_that_error(monkeypatch, caplog):
     from factory_app.workflows.AppGenerator.tools import app_validation
     from factory_app.workflows.AppGenerator.tools.code_file_utils import compose_bundle_auth_routes

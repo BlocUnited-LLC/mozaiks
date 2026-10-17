@@ -209,6 +209,13 @@ replaced without an error. An app-authored collection-level alias can come only
 from an imported or hand-edited contract, since the DesignDocs collection schema
 has no `data_alias`.
 
+Assembly checks every copy of `data/contract.json` it is given (the bundle's
+snapshot, task outputs and the repair overlay) and, in a revision, the bound
+revision source's copy, not only the copy that wins the merge. A pack-only copy
+written over the carried contract therefore cannot launder the app's data out
+of it, and a bounded repair of the `data/contract.json` owner, whose save would
+write that copy, is refused with the guard's reason.
+
 When the guard fails, assembly fails closed instead of replacing the carried
 contract, and the error names the reason. A carried contract that holds
 app-owned data (any other surface, a composition surface under another

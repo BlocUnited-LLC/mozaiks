@@ -92,7 +92,10 @@ def compose_bundle_auth_routes(files_map: dict[str, str], *, validate_bindings: 
 
     ``validate_bindings=False`` adds the same routes without checking the
     manifest's auth route bindings, for a projection that leaves that check to
-    the acceptance gate. The auth contract itself is always validated.
+    the acceptance gate. The auth contract itself is always validated. A
+    login or callback route binding error names ``ui/route_manifest.json``, as
+    the acceptance gate's does, so an assembly or reassembly that raises it
+    routes the repair to that file's owner.
     """
     raw_contract = files_map.get("config/auth.yaml")
     if raw_contract is None:
@@ -109,7 +112,12 @@ def compose_bundle_auth_routes(files_map: dict[str, str], *, validate_bindings: 
     if not isinstance(manifest, dict) or not isinstance(manifest.get("pages"), list):
         raise AppAuthContractError("ui/route_manifest.json must declare pages")
     if validate_bindings:
-        manifest["pages"] = compose_app_auth_routes(contract, manifest["pages"])
+        try:
+            manifest["pages"] = compose_app_auth_routes(contract, manifest["pages"])
+        except AppAuthContractError as exc:
+            if str(exc).startswith("Auth routes."):
+                raise AppAuthContractError(f"ui/route_manifest.json: {exc}") from exc
+            raise
     else:
         declared = {page.get("path") for page in manifest["pages"] if isinstance(page, dict)}
         manifest["pages"].extend(page for page in app_auth_route_entries(contract) if page["path"] not in declared)
@@ -356,7 +364,10 @@ def _assembled_data_contract(context_variables: Any, subscription_contract: Any)
 
     A save after assembly (a bounded repair of the data/contract.json owner)
     materializes the same contract assembly did, so the admitted bundle keeps
-    the selected packs' collections.
+    the selected packs' collections. Without an approved contract that is the
+    packs' contributions on an empty base, which, as at assembly, may not
+    replace a carried contract that holds the app's own data: the save is
+    refused with assembly's reason instead of writing a contract that drops it.
     """
     from .resolve_managed_capability_templates import (
         ManagedCapabilityTemplateError,
@@ -371,14 +382,29 @@ def _assembled_data_contract(context_variables: Any, subscription_contract: Any)
         )
     except ManagedCapabilityTemplateError as exc:
         raise ValueError(f"The selected capability packs' data contributions cannot be verified: {exc}") from exc
-    if contract is None and pack_data_contracts:
+    pack_only_base = contract is None and bool(pack_data_contracts)
+    if pack_only_base:
         contract = {"version": "1", "surfaces": [], "shared_collections": []}
     if not isinstance(contract, dict):
         return contract
-    return compile_data_contract(
+    compiled = compile_data_contract(
         contract, subscription_contract=subscription_contract, context_variables=context_variables,
         pack_data_contracts=pack_data_contracts,
     )
+    if pack_only_base:
+        from .assembly_phase import _carried_contract_conflict
+        from .hydrate_app_revision_context import revision_baseline_required
+
+        # The bundle's copy, and in a revision the bound source's copy that
+        # assembly read (held by this process; assembly rereads it anyway).
+        carried = [(detach(context_variables.get("generated_files")) or {}).get("data/contract.json")]
+        if revision_baseline_required(context_variables):
+            carried.append((_cached_revision_baseline(context_variables) or {}).get("data/contract.json"))
+        for content in dict.fromkeys(item for item in carried if isinstance(item, str)):
+            conflict = _carried_contract_conflict(content, compiled)
+            if conflict is not None:
+                raise ValueError(conflict)
+    return compiled
 
 
 def selected_capability_packs(context_variables: Any) -> list[dict[str, Any]] | None:

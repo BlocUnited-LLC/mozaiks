@@ -300,6 +300,85 @@ async def test_revision_without_approved_contract_never_replaces_the_carried_app
     assert "data/contract.json requires the approved DesignDocs data_contract" in result["error"]
 
 
+def _imported_revision_without_an_approved_contract(request):
+    """An imported app's revision: its bundle carries its own contract, but DesignDocs approved none.
+
+    The plan's persistence task owns data/contract.json, so the guard's
+    diagnostic is dispatched to it as a bounded repair.
+    """
+    from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
+    from mozaiksai.core.workflow.context.adapter import create_context_container
+
+    saved = request.getfixturevalue("revision_baseline")
+    saved.files = {
+        "app.json": json.dumps({"appId": "customer-app", "appName": "Projects"}),
+        "data/contract.json": json.dumps(CARRIED_APP_CONTRACT),
+    }
+    _replace_archive(saved, {})
+    task = {
+        "task_id": "data_contract", "task_type": "persistence_contract", "capability_pack_id": None,
+        "surface_id": "data_contract", "surface_kind": "module", "initial_agent": "DatabaseAgent",
+        "execution_target": "AppGenerator", "description": "Data contract", "initial_message": "Data contract",
+        "owned_paths": ["data/contract.json"], "depends_on": [],
+    }
+    selected = _context()
+    selected["app_build_plan"] = {**selected["app_build_plan"], "build_tasks": [task]}
+    context = create_context_container(initial={
+        **saved.context, **selected, "app_task_batch_results": {"data_contract": {"code_files": []}},
+    })
+    return context, selected, assemble_app_tasks
+
+
+@pytest.mark.asyncio
+async def test_the_carried_contract_guard_refuses_the_repair_save_its_diagnostic_dispatches(request):
+    """The data/contract.json owner's save would write the packs' contributions on an empty base; it is refused."""
+    from factory_app.workflows.AppGenerator.tools.app_validation import _assembly_failure
+    from factory_app.workflows.AppGenerator.tools.code_file_utils import save_generated_code
+
+    context, _, assemble_app_tasks = _imported_revision_without_an_approved_contract(request)
+    first = await assemble_app_tasks(context_variables=context)
+    assert not first["success"] and "holds app-owned data: surface 'projects'" in first["error"], first
+    repair = _assembly_failure(context, prepare_recovery=True)["bundle_repair"]
+    assert (repair["target_agent"], repair["active"]["allowed_paths"]) == ("DatabaseAgent", ["data/contract.json"])
+    context.set("structured_output", {"code_files": []})
+    refused = save_generated_code(context)
+    assert refused.get("status") == "rejected", refused
+    assert "holds app-owned data: surface 'projects'" in refused["error"]
+    assert "data/contract.json" not in {item["filename"] for item in context.get("code_files") or []}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("copy_over_the_carried_contract", ["repair_overlay", "task_output"])
+async def test_a_copy_over_the_carried_contract_cannot_drop_the_apps_own_data(request, copy_over_the_carried_contract):
+    """Assembly checks every copy of data/contract.json the bundle carries, not the one that wins the merge.
+
+    A pack-only copy written over the carried contract, by a repair's overlay
+    or a task's output, fails reassembly with the guard's reason, and the
+    bundle keeps the carried contract.
+    """
+    context, selected, assemble_app_tasks = _imported_revision_without_an_approved_contract(request)
+    first = await assemble_app_tasks(context_variables=context)
+    assert not first["success"] and "holds app-owned data: surface 'projects'" in first["error"], first
+    pack_only = {file["filename"]: file["content"] for file in _merge_code_files(
+        [{"code_files": resolve_managed_capability_templates(selected["capability_packs"], context_variables=selected)}],
+        app_build_plan=selected["app_build_plan"], data_contract=None, context_variables=selected,
+    )}["data/contract.json"]
+    assert [surface["surface_id"] for surface in json.loads(pack_only)["surfaces"]] == ["messages"]
+    copy = [{"filename": "data/contract.json", "content": pack_only}]
+    if copy_over_the_carried_contract == "repair_overlay":
+        context.set("code_files", copy)
+    else:
+        context.set("app_task_batch_results", {"data_contract": {"code_files": copy}})
+    again = await assemble_app_tasks(context_variables=context)
+    assert not again["success"], [surface["surface_id"] for surface in json.loads(
+        {file["filename"]: file["content"] for file in again["code_files"]}["data/contract.json"],
+    )["surfaces"]]
+    assert "holds app-owned data: surface 'projects'" in again["error"]
+    # The failed assembly keeps the bundle it had; nothing published drops the app's surface.
+    published = (context.get("generated_files") or {}).get("data/contract.json")
+    assert published is None or "projects" in [surface["surface_id"] for surface in json.loads(published)["surfaces"]]
+
+
 def test_pack_only_contract_without_approval_reassembles_only_its_own_composition():
     context = _context()
     emitted = resolve_managed_capability_templates(context["capability_packs"], context_variables=context)

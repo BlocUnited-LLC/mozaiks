@@ -202,9 +202,15 @@ def _merge_code_files(
     design_surface_map: dict[str, Any] | None = None,
     subscription_contract: dict[str, Any] | None = None,
     context_variables: Any = None,
+    carried_contracts: tuple[str, ...] = (),
 ) -> list[dict[str, str]]:
-    """Merge code_files from feature outputs, deduping by filename."""
+    """Merge code_files from feature outputs, deduping by filename.
+
+    ``carried_contracts`` are ``data/contract.json`` copies the bundle carries
+    from outside these outputs, such as the bound revision source's.
+    """
     file_map: dict[str, str] = {}
+    contract_copies = list(carried_contracts)
     for output in feature_outputs:
         for item in extract_code_file_entries_from_payload(
             output,
@@ -214,6 +220,8 @@ def _merge_code_files(
             content = item.get("content")
             if not filename or content is None:
                 continue
+            if filename == "data/contract.json":
+                contract_copies.append(str(content))
             file_map[str(filename)] = str(content)
     inventory = verified_pack_template_inventory(context_variables=context_variables)
     pack_data_contracts = verified_pack_data_contracts(inventory)
@@ -224,6 +232,10 @@ def _merge_code_files(
     # assembly or pack lifecycle composition. Otherwise the app's own surfaces,
     # collections or aliases would be silently dropped, or a derived
     # collection's stored rows silently re-pointed; the error names which.
+    # Every copy is checked, not only the one that wins the merge: a repair,
+    # overlay or task copy written over the carried contract (including the
+    # pack-only contract a data/contract.json owner's save writes) must not
+    # launder the app's own data out of it.
     pack_only_base = data_contract is None and bool(pack_data_contracts)
     if pack_only_base:
         data_contract = {"version": "1", "surfaces": [], "shared_collections": []}
@@ -232,10 +244,10 @@ def _merge_code_files(
             data_contract, subscription_contract=subscription_contract, context_variables=context_variables,
             pack_data_contracts=pack_data_contracts,
         )
-        carried = file_map.get("data/contract.json")
-        conflict = _carried_contract_conflict(carried, data_contract) if pack_only_base and carried is not None else None
-        if conflict is not None:
-            raise ValueError(conflict)
+        for carried in dict.fromkeys(contract_copies) if pack_only_base else ():
+            conflict = _carried_contract_conflict(carried, data_contract)
+            if conflict is not None:
+                raise ValueError(conflict)
     elif subscription_contract is not None:
         assignment_contract = compile_data_contract(
             {"version": "1", "surfaces": [], "shared_collections": []},
@@ -322,6 +334,7 @@ async def assemble_features(
     design_surface_map: dict[str, Any] | None = None,
     subscription_contract: dict[str, Any] | None = None,
     context_variables: Any = None,
+    carried_contracts: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """
     Merge feature outputs into a single workflow bundle.
@@ -329,6 +342,7 @@ async def assemble_features(
     Args:
         app_id: The parent application ID
         feature_outputs: List of outputs from AppGenerator(feature scope)
+        carried_contracts: data/contract.json copies carried from outside the outputs
 
     Returns:
         {
@@ -347,6 +361,7 @@ async def assemble_features(
         design_surface_map=design_surface_map,
         subscription_contract=subscription_contract,
         context_variables=context_variables,
+        carried_contracts=carried_contracts,
     )
     logger.info(
         "Assembled %d feature outputs into %d files",

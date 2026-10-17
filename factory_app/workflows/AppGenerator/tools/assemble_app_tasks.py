@@ -644,6 +644,12 @@ async def _assemble_app_tasks(
         ),
         subscription_contract=resolve_subscription_contract(context_variables),
         context_variables=context_variables,
+        # The bound revision source's contract is carried even when a later
+        # copy replaced it in generated_files or the outputs.
+        carried_contracts=tuple(
+            content for content in [(verified_source or {}).get("data/contract.json")]
+            if isinstance(content, str) and revision_baseline_required(context_variables)
+        ),
     )
 
     code_files = result.get("code_files", [])

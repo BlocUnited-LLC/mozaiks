@@ -92,13 +92,18 @@ This project follows a practical pre-1.0 changelog format:
   apps that require sign-in and for AppSchemaAgent repairs. Pack declarations
   stay strict, malformed route `navigation` or `meta` values are declaration
   errors, auth route binding errors are routed to the owner of
-  `ui/route_manifest.json`, and provenance uses the pinned build timestamp.
+  `ui/route_manifest.json` whether the acceptance gate or an assembly raises
+  them, and provenance uses the pinned build timestamp.
 - A data-contributing pack no longer replaces a carried app `data/contract.json`
   when no approved DesignDocs contract exists; a carried contract that holds only
   pack- and assignment-derived data is recomposed, and any other carried
-  contract fails with the reason. Data contract owner repairs and AppSchemaAgent
-  saves write the contract as assembly compiles it, with the verified pack
-  contributions; pack verification failures are reported by assembly.
+  contract fails with the reason. Assembly checks every carried copy, including
+  the bound revision source's, not only the copy that wins the merge, so a
+  repair overlay or task output that writes the pack-only contract cannot drop
+  the app's surfaces; a data contract owner's repair save that would write it is
+  refused with the same reason. Data contract owner repairs and AppSchemaAgent
+  saves otherwise write the contract as assembly compiles it, with the verified
+  pack contributions; pack verification failures are reported by assembly.
 - Bundle validation keeps explicitly selected packs when its context selects
   none, accepts shared roots claimed by several packs, and trusts verified
   installed pins. Community pack upgrades fail before writing when another pack
