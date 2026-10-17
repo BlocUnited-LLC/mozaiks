@@ -41,6 +41,16 @@ This project follows a practical pre-1.0 changelog format:
   pack file byte-identical. Regeneration, UI-only refinement, repairs and
   AppGenerator plan tasks cannot change it, and an unsupported request fails
   with an explicit diagnostic that names the supported path.
+- A Studio refinement request marks the selected build stale only once the
+  operation it started has changed that build: an inline run that stored a
+  child that can still be accepted (found in the artifact store by its parent
+  and the run's build id), or a workflow run that launched. A scope question
+  or confirmation prompt, a dismissed decision, rejected input, a workflow
+  launch that failed, and an inline run that stored nothing or only a child
+  that failed validation leave it current, so the confirmed or retried change
+  is still admitted against it. Change requests, session revision state,
+  refinement sessions and registry runs still record every attempt. Builds
+  already marked stale stay stale.
 
 ### Fixed
 
@@ -107,6 +117,16 @@ This project follows a practical pre-1.0 changelog format:
   refused when it would replace app-owned pack code accepted since. The
   comparison reads those files in full from the verified archives and refuses
   oversized, duplicate or linked entries instead of skipping them.
+- Accepting an app bundle is refused when the app's current build is not its
+  parent or an earlier ancestor, so an older candidate or the sibling of an
+  accepted child cannot replace newer accepted work. A child of a draft made
+  from the current build is still accepted. Studio re-reads the version under
+  its per-process acceptance lock, which coordinates one Studio process only.
+- Confirming a proposed refinement scope requires the pending decision's files
+  to equal those the trigger saved on its change request for the same build,
+  since the pending decision can also be written through the session decision
+  API. A confirmation whose build has become stale, superseded, archived or
+  deleted since the proposal is refused before the decision is used.
 
 ## 0.2.0 - 2026-10-16
 

@@ -490,9 +490,12 @@ class ScopedRefinementCodingWorker:
     async def _current_accepted_build_record_id(self, request: CodingWorkerRequest) -> str | None:
         """The app's accepted current build: the artifact store's CURRENT record of this family.
 
-        Accepting a review draft is what makes a build current, and an inline
-        run that fails changes nothing there, so a failed attempt never strands
-        a later authorized change on the accepted build.
+        Accepting a review draft makes a build current. Studio marks the
+        selected build stale only after an operation changed it: a run that
+        stored a child which can still be accepted, or a workflow that launched.
+        A run rejected before it stored a child, or one whose stored child
+        failed validation, leaves the accepted build current, so a later
+        authorized change is still admitted against it.
         """
         family = _ARTIFACT_KIND_ALIASES.get(request.build_family, request.build_family)
         artifact_store = self._artifact_store or get_artifact_store()

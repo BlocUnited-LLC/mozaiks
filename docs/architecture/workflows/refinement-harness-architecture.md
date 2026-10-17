@@ -80,11 +80,17 @@ The Workbench's **Entire app** option submits an unscoped coding request to this
 existing harness. A patch may resolve to a safe file scope; a multi-file proposal
 uses the target-scoped `PendingHarnessDecision` for confirmation. Confirmation
 must match the saved change request, revision, source artifact, request text, and
-displayed paths. The server reloads file contents from the verified artifact;
-approval does not rerun scope selection. Every continuation action must belong to
-the saved decision. The existing session router consumes that exact decision with
-a conditional update before classification or execution, so replayed or concurrent
-confirmations cannot start work twice. A workflow continuation explicitly bypasses
+displayed paths. The pending decision can also be written through the session
+decision API, so its paths must equal the paths in the harness decision that the
+trigger saved on that change request, for the same source artifact. The source
+artifact must not have become stale, superseded, archived or deleted since the
+proposal; otherwise the user requests the change again from the current build.
+These checks run before the decision is consumed. The server reloads file
+contents from the verified artifact; approval does not rerun scope selection.
+Every continuation action must belong to the saved decision. The existing session
+router consumes that exact decision with a conditional update before
+classification or execution, so replayed or concurrent confirmations cannot start
+work twice. A workflow continuation explicitly bypasses
 inline coding and contract-surface generation; a changed workflow recommendation
 requires a new decision rather than reusing the previous approval. If execution
 fails after admission, the user submits a new request; the consumed approval is
@@ -202,10 +208,17 @@ Ownership comes from those packs' pinned contracts, never from the candidate:
   that includes one returns the existing confirmation decision instead of
   applying.
 - The parent must be the app's accepted current build: the artifact store's
-  `CURRENT` record of that build family, which only acceptance changes. The
-  finalizer reads it at admission. A stale or never-accepted parent is
-  rejected. A failed inline run changes nothing there, so it never blocks a
-  later authorized change.
+  `CURRENT` record of that build family. The finalizer reads it at admission. A
+  stale or never-accepted parent is rejected. Studio marks the selected build
+  stale only after an operation changed it: an inline run that stored a child
+  that can still be accepted (validation passed, pending or skipped), or a
+  workflow run that launched. A returned decision, a launch that failed, a run
+  rejected before it stored a child, or a run whose stored child failed
+  validation leaves the parent current, so a later authorized change is
+  admitted against it. The child is found in the artifact store by its parent
+  and the run's build id, not inferred from the run's reported status. A run
+  whose child can still be accepted leaves the parent stale until a child is
+  accepted.
 - A changed workspace handler must be a thin leaf over its template base handler
   (`prove_workspace_handler_extension`): overrides of declared action methods
   with the base signatures only, reaching the service only through `super()` or
@@ -237,8 +250,8 @@ which verifies the same sources and fails the candidate.
 Acceptance rechecks a child that changed app-owned pack code before it becomes
 current. Its recorded `refinement_scope` must still be an explicit or confirmed
 selection of the changed paths in the requested registered build. The run that
-made the child marks its parent stale, so while the child awaits review the app
-normally has no `CURRENT` app bundle build: there must be none, or the
+stored the child marked its parent stale, so while the child awaits review the
+app normally has no `CURRENT` app bundle build: there must be none, or the
 `CURRENT` build must still be the child's parent. The app registry's
 `current_build_run` must also still name this child's artifact version and
 build id. Of the children that changed app-owned pack code, only the one from
@@ -253,10 +266,20 @@ either record's `capability_packs`, reading those entries in full from both
 verified archives. A difference, or an entry that cannot be compared exactly
 (a duplicate, a symbolic link or a file over 8 MB), refuses the version.
 
+An app bundle that has a parent is also refused when the app has a `CURRENT`
+app bundle that is neither its parent nor an earlier ancestor. Studio follows
+parent links within the app for at most 32 records; a missing record or a
+longer chain refuses too. A candidate made before a newer build was accepted,
+including a sibling of an accepted child, therefore cannot replace that build,
+while a child of a draft made from the current build can still be accepted.
+
 Each refusal returns 409 and nothing changes. Studio serializes app bundle
-acceptances per app with an in-process lock, so within one Studio process these
-rechecks and the acceptance they guard cannot interleave. The lock does not
-coordinate separate Studio processes.
+acceptances per app with an in-process lock and re-reads the version under it,
+so within one Studio process these rechecks and the acceptance they guard cannot
+interleave, and a second acceptance of the same version is refused. The rechecks
+and the store's acceptance write are separate reads and writes, not one
+conditional update, and the lock does not coordinate separate Studio processes:
+acceptances in two processes can still both succeed.
 
 AppGenerator never changes app-owned pack code. Its copy comes only from the
 bound verified revision source, else the admitted genesis copy, else the

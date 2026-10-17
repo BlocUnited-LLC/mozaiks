@@ -251,7 +251,16 @@ validation remain real. It saves a child review draft, verifies all unaffected
 source bytes, and runs the child through the same owned browser acceptance with
 mobile bottom-panel assertions. Only after that passes does the authenticated
 owner accept the draft through the existing endpoint. It does not promote the
-app. The pack-inclusive child repeats the same pack behavior and records hashes
+app. Before the board refinement, the harness changes the app-owned Messaging
+handler. An inferred scope returns a confirmation question that leaves the
+accepted baseline current; the owner's confirmation applies it. A scripted
+handler that the extension grammar rejects stores no child and leaves the
+accepted build current, and the owner's explicit retry applies. Each child is
+accepted. A confirmation proposed before the retry's accepted change is
+refused with 409. A sibling saved from the board child's parent is refused with
+409 after the board child is accepted. Each step's decision, invalidation, child
+ids and refusal detail are recorded in `backend-steps.json` and `result.json`.
+The pack-inclusive child repeats the same pack behavior and records hashes
 for changed and retained files, including pack outputs, contracts and routes.
 The paired baseline has no app-owned `brand/theme_config.json` and inherits the
 framework theme, recorded as `theme_source: inherited_framework`, so this run

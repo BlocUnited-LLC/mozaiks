@@ -8,11 +8,17 @@ compatibility are checked against the checkout.
 
 Only AG2 provider responses are scripted. Keycloak login, Mongo/GridFS, Studio
 authorization, scoped finalization and Docker candidate validation remain real.
-An authorized backend patch of the app-owned Messaging handler runs first and its
-review draft is accepted; the board refinement then builds on that child. The
-saved board child receives real browser acceptance, including the handler's
-send behavior, before the owner accepts its review draft. It is not promoted.
-No live model creativity is claimed.
+The backend lane runs first on the app-owned Messaging handler: an inferred
+scope returns a confirmation question that leaves the accepted baseline current,
+and the owner's confirmation applies it; a scripted handler that passes a
+privileged service flag is rejected before validation, leaving the accepted
+build current, and the owner's explicit retry applies; each child is accepted.
+A confirmation proposed before that accepted change is refused, and an older
+candidate saved from the same build is refused after the board child is
+accepted. The board refinement builds on the latest accepted handler. The saved
+board child receives real browser acceptance, including the handler's send
+behavior, before the owner accepts its review draft. It is not promoted. No live
+model creativity is claimed.
 """
 
 from __future__ import annotations
@@ -46,6 +52,19 @@ SEND_OVERRIDE = """
             ctx, thread_id=thread_id, body=" ".join(body.split()), message_type=message_type,
         )
 """
+# The explicit retry: the same normalization, restated after the rejected attempt.
+RETRY_OVERRIDE = SEND_OVERRIDE.replace(
+    "# Collapse whitespace runs before the template service validates and stores the body.",
+    "# Retried after a rejected attempt: collapse whitespace runs, then let the template service store the body.",
+)
+# Passing the service's privileged flag would let a non-participant post, so admission rejects it.
+PRIVILEGED_OVERRIDE = """
+    async def send_message(self, ctx, *, thread_id, body, message_type="text", **_):
+        return await self._service.send_message(
+            ctx, thread_id=thread_id, body=body, message_type=message_type, allow_nonparticipant_sender=True,
+        )
+"""
+OLDER_CANDIDATE_REQUEST = "Note in the board source that this revision was saved for review."
 pytestmark = pytest.mark.skipif(
     os.environ.get("MOZAIKS_PAIRED_REFINEMENT") != "1",
     reason="Set MOZAIKS_PAIRED_REFINEMENT=1 for real local refinement acceptance.",
@@ -147,6 +166,16 @@ def _normalizing_handler(source):
     assert "def send_message" not in source, "Accepted handler already overrides send_message"
     assert source.rstrip().endswith('"""'), "Accepted handler must end inside its class docstring"
     return source + SEND_OVERRIDE
+
+
+def _retried_handler(source):
+    """The explicit retry's scripted response, from the baseline's handler bytes."""
+    return _normalizing_handler(source).replace(SEND_OVERRIDE, RETRY_OVERRIDE)
+
+
+def _privileged_handler(source):
+    """A scripted response the handler extension grammar rejects before validation."""
+    return _normalizing_handler(source).replace(SEND_OVERRIDE, PRIVILEGED_OVERRIDE)
 
 
 def _template_pack_paths(files):
@@ -270,8 +299,13 @@ def _assert_delivered_context(providers, files, baseline_id):
             "theme_source": "app_artifact" if theme in files else "inherited_framework"}
 
 
-def _scripted_backend_harness(files, store, output_root):
-    """The patch lane: scripted classifier and coding provider, real worker and finalizer."""
+def _scripted_backend_harness(files, store, output_root, *, coder=None):
+    """The patch lane: scripted classifier, scope and coding providers, real worker and finalizer.
+
+    The coder's ``output`` is set before each run that reaches it; every other
+    provider returns one fixed response. Contract-surface planning is not part of
+    this lane, so it fails loudly if a request is ever routed there.
+    """
     from ag2 import Agent
 
     from mozaiksai.control_plane.config import load_control_plane_config
@@ -286,6 +320,7 @@ def _scripted_backend_harness(files, store, output_root):
     from mozaiksai.control_plane.implementations.refinement_router import (
         RefinementTriggerRouteResolver,
     )
+    from mozaiksai.control_plane.implementations.scope_proposer import ArtifactScopeProposer
     from mozaiksai.control_plane.loader import load_refinement_harness
     from mozaiksai.core.adapters.ag2_agent_runner import AG2StructuredAgentRunner
     from tests.test_ui_worker_context_acceptance import _ScriptedProvider
@@ -295,11 +330,10 @@ def _scripted_backend_harness(files, store, output_root):
     options = {"config_loader": lambda: config, "pack_loader": lambda: pack}
     outputs = {
         "classifier": {"change_class": "patch", "rationale": BACKEND_REQUEST, "confidence": 0.99, "signals": ["message_whitespace"]},
-        "coder": {"summary": BACKEND_REQUEST, "owned_paths": [HANDLER],
-                  "updated_files": [{"path": HANDLER, "content": _normalizing_handler(files[HANDLER])}],
-                  "validation_strategy": "docker", "validation_commands": [], "start_preview": False,
-                  "needs_human_review": True,
-                  "rationale": "Extend the app-owned handler; the template service keeps validation and authorization."},
+        "scope": {"resolution": "scoped_files", "selected_paths": [HANDLER], "confidence": 0.99,
+                  "rationale": "The send action that stores message bodies is the app-owned Messaging handler.",
+                  "clarification_question": None, "signals": ["message_whitespace"]},
+        "coder": coder or _coder_output(HANDLER, _normalizing_handler(files[HANDLER])),
     }
     providers = {name: _ScriptedProvider(output) for name, output in outputs.items()}
 
@@ -308,6 +342,10 @@ def _scripted_backend_harness(files, store, output_root):
             return Agent(f"scripted_{name}", system_prompt, config=providers[name], middleware=middleware)
         return AG2StructuredAgentRunner(agent_factory=factory)
 
+    class _NoSurfacePlanning:
+        async def propose(self, **_):
+            raise AssertionError("The backend lane is a scripted patch; it never plans contract surfaces")
+
     return OrchestrationControlHarness(
         refinement_resolver=RefinementTriggerRouteResolver(
             classifier=LLMChangeClassifier(agent_runner=runner("classifier"), **options), pack_loader=lambda: pack,
@@ -315,80 +353,279 @@ def _scripted_backend_harness(files, store, output_root):
         coding_worker=ScopedRefinementCodingWorker(
             agent_runner=runner("coder"), artifact_store=store, output_root=output_root, **options,
         ),
+        scope_proposer=ArtifactScopeProposer(agent_runner=runner("scope"), artifact_store=store, **options),
+        contract_surface_planner=_NoSurfacePlanning(),
         decision_policy=FirstPartyHarnessDecisionPolicy(pack_loader=lambda: pack),
         config_loader=lambda: config,
     ), providers
 
 
+def _coder_output(path, content, summary=BACKEND_REQUEST):
+    return {"summary": summary, "owned_paths": [path],
+            "updated_files": [{"path": path, "content": content}],
+            "validation_strategy": "docker", "validation_commands": [], "start_preview": False,
+            "needs_human_review": True,
+            "rationale": "Extend the app-owned handler; the template service keeps validation and authorization."}
+
+
+def _user_prompt_at(provider, index):
+    messages = [message for message in provider.calls[index]["messages"] if message["role"] == "user"]
+    content = messages[-1]["content"]
+    return content if isinstance(content, str) else "\n".join(item["text"] for item in content if item.get("type") == "text")
+
+
 async def _refine_backend(*, case_root, live, client, studio, store, registry, binding, baseline, files, packs, tokens, owner_id):
-    """Authorize, validate and accept the handler-only backend child through Studio."""
+    """Confirm, retry and accept app-owned handler changes through Studio, and record stale work being refused.
+
+    (a) An inferred scope over the handler returns a confirmation question that
+    leaves the accepted baseline current; the owner's confirmation then applies
+    it and the child is accepted. (b) A scripted handler that passes a privileged
+    service flag is rejected before validation; no child exists for that run and
+    the accepted build stays current, so the owner's explicit retry is admitted
+    and accepted. (c) A confirmation proposed before that accepted change is
+    refused before it is used. Returns the latest accepted handler child.
+    """
     from factory_app.workflows._shared.artifact_bundle import read_artifact_bundle
     from mozaiksai.core.artifacts import ArtifactLifecycleStatus, ArtifactValidationStatus
     from mozaiksai.core.artifacts.content_store import read_verified_artifact_bundle
 
+    app_id = baseline.app_id
     harness, providers = _scripted_backend_harness(files, store, Path(_json(case_root / "inputs.json")["refinement_output_root"]))
-    payload = {"build_registry_id": binding.build_registry_id, "trigger_source": "refinement",
-               "trigger_payload": {"refinement_request": {"build_family": "app_bundle", "build_key": "app_bundle",
-                                    "build_record_id": baseline.id, "raw_user_request": BACKEND_REQUEST,
-                                    "source_surface": "app_workbench"},
-                                   "coding_request": {"files": {HANDLER: ""}}}}
+    alice = {"Authorization": f"Bearer {tokens['alice']}"}
+    steps = []
+
+    def payload(parent_id, coding_request, *, request=BACKEND_REQUEST, **extra):
+        return {"build_registry_id": binding.build_registry_id, "trigger_source": "refinement",
+                "trigger_payload": {"refinement_request": {"build_family": "app_bundle", "build_key": "app_bundle",
+                                                           "build_record_id": parent_id, "raw_user_request": request,
+                                                           "source_surface": "app_workbench"},
+                                    "coding_request": coding_request, **extra}}
+
+    def confirmation(decision, parent_id):
+        return payload(parent_id, {}, change_request_id=decision["change_request_id"], revision_id=decision["revision_id"],
+                       harness_action={"action_id": "apply_proposed_scope"})
+
+    async def registry_record():
+        return (await registry.get_app_record(owner_user_id=owner_id, build_registry_id=binding.build_registry_id))["app"]
+
+    async def lifecycle(record_id):
+        record = await store.get_build_record(app_id=app_id, build_record_id=record_id)
+        return {"build_record_id": record_id, "lifecycle_status": record.lifecycle_status.value,
+                "invalidation_reason": record.invalidation_reason,
+                "stale_at": record.stale_at.isoformat() if record.stale_at else None}
+
+    async def step(name, body, parent_id, *, headers=alice):
+        before = await lifecycle(parent_id)
+        response = await client.post("/api/workflows/trigger", json=body, headers=headers)
+        live.write_json(case_root / f"backend-{name}-endpoint-result.json", {"status_code": response.status_code, "body": response.json()})
+        result = response.json() if response.status_code == 200 else {}
+        coding = result.get("coding_worker") or {}
+        run = (await registry_record()).get("current_build_run") or {}
+        children = await store.list_run_child_build_records(
+            app_id=app_id, parent_build_record_id=parent_id, build_id=run["build_id"],
+        ) if run.get("build_id") else []
+        after = await lifecycle(parent_id)
+        entry = {
+            "step": name, "status_code": response.status_code, "parent_build_record_id": parent_id,
+            "execution_mode": result.get("execution_mode"),
+            "decision_type": (result.get("harness_decision") or {}).get("decision_type"),
+            "coding_status": coding.get("status"),
+            "candidate_admission_code": ((coding.get("metadata") or {}).get("candidate_admission") or {}).get("code"),
+            "child_build_record_id": (coding.get("metadata") or {}).get("build_record_id"),
+            "registry_run": {key: run.get(key) for key in ("build_id", "status", "artifact_version_id")},
+            "children_of_registry_run": [child.id for child in children],
+            "parent_before": before, "parent_after": after,
+            "invalidation_observed": before["lifecycle_status"] != "stale" and after["lifecycle_status"] == "stale",
+            "detail": None if response.status_code == 200 else response.json().get("detail"),
+        }
+        steps.append(entry)
+        return response, entry
+
+    async def accept(name, record_id, notes):
+        accepted = await client.post(
+            f"/api/studio/build/artifacts/{record_id}/accept", params={"build_registry_id": binding.build_registry_id},
+            json={"notes": notes}, headers=alice,
+        )
+        live.write_json(case_root / f"backend-{name}-acceptance-endpoint-result.json", {"status_code": accepted.status_code, "body": accepted.json()})
+        assert accepted.status_code == 200 and accepted.json()["accepted"] is True
+        record = await store.get_build_record(app_id=app_id, build_record_id=record_id)
+        assert record.lifecycle_status == ArtifactLifecycleStatus.CURRENT
+        steps.append({"step": f"accept_{name}", "status_code": accepted.status_code, "accepted_build_record_id": record_id})
+        return record
+
+    async def handler_child(entry, *, parent, parent_files, content, scope_origin):
+        """The saved child of one authorized run, held to its parent and the pack contract."""
+        child = await store.get_build_record(app_id=app_id, build_record_id=entry["child_build_record_id"])
+        assert child.parent_build_record_id == parent.id and child.lifecycle_status == ArtifactLifecycleStatus.DRAFT
+        assert child.validation_status == ArtifactValidationStatus.PASSED and child.app_validation_status == "passed"
+        assert entry["children_of_registry_run"] == [child.id]
+        metadata = child.commit_metadata.metadata
+        assert metadata["content_backend"] == "gridfs" and metadata["applied_paths"] == [HANDLER]
+        assert metadata["refinement_scope"] == {
+            "selected_file_paths": [HANDLER], "scope_origin": scope_origin, "changed_workspace_pack_paths": [HANDLER],
+        }
+        # An app revision: the pack's source, version and digest are unchanged.
+        assert metadata["capability_packs"] == packs
+        child_files, diagnostics = await read_artifact_bundle(child, retain_svg_text=True)
+        assert not diagnostics and set(child_files) == set(files) == set(parent_files)
+        assert {path for path in parent_files if child_files[path] != parent_files[path]} == {HANDLER}
+        assert {path for path in files if child_files[path] != files[path]} == {HANDLER}
+        assert child_files[HANDLER] == content
+        assert child_files[".mozaiks/pack_provenance.json"] == files[".mozaiks/pack_provenance.json"]
+        assert all(child_files[path] == files[path] for path in _template_pack_paths(files))
+        # The run stored a reviewable child, so it invalidated its parent.
+        assert entry["invalidation_observed"] and entry["parent_after"]["invalidation_reason"].startswith("change_request:")
+        current = await registry_record()
+        assert current["lifecycle_state"] == "review" and current["current_build_run"]["artifact_version_id"] == child.id
+        return child, child_files
+
     with patch.object(studio, "get_orchestration_control_harness", return_value=harness):
-        anonymous = await client.post("/api/workflows/trigger", json=payload)
-        other = await client.post("/api/workflows/trigger", json=payload, headers={"Authorization": f"Bearer {tokens['bob']}"})
+        # (a) The inferred scope reaches the app-owned handler, so Studio asks first.
+        proposal = payload(baseline.id, {})
+        anonymous = await client.post("/api/workflows/trigger", json=proposal)
+        other = await client.post("/api/workflows/trigger", json=proposal, headers={"Authorization": f"Bearer {tokens['bob']}"})
         assert anonymous.status_code == 401 and other.status_code == 404
-        response = await client.post("/api/workflows/trigger", json=payload, headers={"Authorization": f"Bearer {tokens['alice']}"})
-    live.write_json(case_root / "backend-endpoint-result.json", {"status_code": response.status_code, "body": response.json()})
+        run_before = (await registry_record())["current_build_run"]["build_id"]
+        asked, entry = await step("confirmation_question", proposal, baseline.id)
+        assert asked.status_code == 200, "Real Studio scope proposal was rejected; inspect backend-confirmation_question-endpoint-result.json"
+        decision = asked.json()
+        assert decision["execution_mode"] == "harness_decision"
+        assert decision["harness_decision"]["decision_type"] == "clarify_scope"
+        assert decision["harness_decision"]["selected_paths"] == [HANDLER]
+        assert decision["harness_decision"]["metadata"]["confirmation_required_paths"] == [HANDLER]
+        assert "apply_proposed_scope" in [action["action_id"] for action in decision["harness_decision"]["actions"]]
+        # A question changes nothing: the accepted baseline stays current and no run began.
+        assert entry["parent_after"]["lifecycle_status"] == "current" and not entry["invalidation_observed"]
+        assert entry["registry_run"]["build_id"] == run_before and len(providers["coder"].calls) == 0
+        confirm = confirmation(decision, baseline.id)
+        confirm_anonymous = await client.post("/api/workflows/trigger", json=confirm)
+        confirm_other = await client.post("/api/workflows/trigger", json=confirm, headers={"Authorization": f"Bearer {tokens['bob']}"})
+        assert confirm_anonymous.status_code == 401 and confirm_other.status_code == 404
+        confirmed_content = providers["coder"].output["updated_files"][0]["content"]
+        confirmed, entry = await step("confirmation", confirm, baseline.id)
+        assert confirmed.status_code == 200 and confirmed.json()["coding_worker"]["status"] == "validated", confirmed.json()
+        coder = json.JSONDecoder().raw_decode(_user_prompt_at(providers["coder"], 0).split("payload_json:\n", 1)[1])[0]
+        assert coder["file_paths"] == [HANDLER] and coder["input_files"] == {HANDLER: files[HANDLER]}
+        confirmed_child, confirmed_files = await handler_child(
+            entry, parent=baseline, parent_files=files, content=confirmed_content, scope_origin="confirmed",
+        )
+        replay, entry = await step("confirmation_replay", confirm, baseline.id)
+        assert replay.status_code == 409 and len(providers["coder"].calls) == 1
+        await accept("confirmed", confirmed_child.id, "Accepted the confirmed handler-only backend refinement after canonical validation.")
+
+        # (b) A run rejected before validation stores nothing and leaves the accepted build current.
+        providers["coder"].output = _coder_output(HANDLER, _privileged_handler(files[HANDLER]))
+        rejected, entry = await step("rejected_attempt", payload(confirmed_child.id, {"files": {HANDLER: ""}}), confirmed_child.id)
+        assert rejected.status_code == 200 and entry["coding_status"] == "failed", rejected.json()
+        assert entry["candidate_admission_code"] == "WORKSPACE_HANDLER_EXTENSION_REJECTED"
+        assert entry["child_build_record_id"] is None and entry["children_of_registry_run"] == []
+        assert entry["parent_after"]["lifecycle_status"] == "current" and not entry["invalidation_observed"]
+        # A question proposed now, before the retry below changes this build.
+        asked_again, entry = await step("later_confirmation_question", payload(confirmed_child.id, {}), confirmed_child.id)
+        assert asked_again.status_code == 200 and entry["decision_type"] == "clarify_scope"
+        assert not entry["invalidation_observed"]
+        later_decision = asked_again.json()
+        retry_content = _retried_handler(files[HANDLER])
+        providers["coder"].output = _coder_output(HANDLER, retry_content)
+        response, entry = await step("explicit_retry", payload(confirmed_child.id, {"files": {HANDLER: ""}}), confirmed_child.id)
+        live.write_json(case_root / "backend-endpoint-result.json", {"status_code": response.status_code, "body": response.json()})
+        assert response.status_code == 200, "Real Studio backend retry was rejected; inspect backend-endpoint-result.json"
+        result = response.json()
+        assert result["execution_mode"] == "coding_worker" and result["coding_worker"]["status"] == "validated", result["coding_worker"]
+        coder = json.JSONDecoder().raw_decode(_user_prompt_at(providers["coder"], 2).split("payload_json:\n", 1)[1])[0]
+        assert coder["file_paths"] == [HANDLER] and coder["input_files"] == {HANDLER: confirmed_files[HANDLER]}
+        child, child_files = await handler_child(
+            entry, parent=confirmed_child, parent_files=confirmed_files, content=retry_content, scope_origin="explicit",
+        )
+        metadata = child.commit_metadata.metadata
+        (case_root / "backend-child.zip").write_bytes(await read_verified_artifact_bundle(child))
+        live.write_json(case_root / "backend-child-record.json", child.model_dump(mode="json"))
+        live.write_json(case_root / "backend-child-files.sha256.json", _hashes(child_files))
+        accepted = await client.post(
+            f"/api/studio/build/artifacts/{child.id}/accept", params={"build_registry_id": binding.build_registry_id},
+            json={"notes": "Accepted the handler-only backend refinement after canonical validation."},
+            headers=alice,
+        )
+        live.write_json(case_root / "backend-acceptance-endpoint-result.json", {"status_code": accepted.status_code, "body": accepted.json()})
+        assert accepted.status_code == 200 and accepted.json()["accepted"] is True
+        child = await store.get_build_record(app_id=app_id, build_record_id=child.id)
+        assert child.lifecycle_status == ArtifactLifecycleStatus.CURRENT
+        live.write_json(case_root / "backend-accepted-child-record.json", child.model_dump(mode="json"))
+        steps.append({"step": "accept_retry", "status_code": accepted.status_code, "accepted_build_record_id": child.id})
+
+        # (c) A genuine accepted change still refuses work made before it.
+        stale, entry = await step("stale_confirmation", confirmation(later_decision, confirmed_child.id), confirmed_child.id)
+        assert stale.status_code == 409 and "Request the change again" in entry["detail"], stale.json()
+        assert len(providers["coder"].calls) == 3 and len(providers["scope"].calls) == 2
+        chat_app_id = (await registry_record())["chat_app_id"]
+        session = await studio.get_session_router().for_target(app_id).get_session_snapshot(app_id=chat_app_id, user_id=owner_id)
+        # Refused before the decision was used: it is still pending, not consumed.
+        assert (session.get("pending_harness_decision") or {}).get("decision_id") == later_decision["change_request_id"]
+
     for name, provider in providers.items():
         requests = [{"prompt": call["prompt"], "messages": call["messages"]} for call in provider.calls]
         assert all(token not in json.dumps(requests) for token in tokens.values())
         live.write_json(case_root / f"backend-provider-{name}-requests.json", requests)
-    assert response.status_code == 200, "Real Studio backend refinement was rejected; inspect backend-endpoint-result.json"
-    result = response.json()
-    assert result["execution_mode"] == "coding_worker" and result["coding_worker"]["status"] == "validated", result["coding_worker"]
-    classifier = _user_prompt(providers["classifier"])
+    classifier = _user_prompt_at(providers["classifier"], 0)
     assert BACKEND_REQUEST in classifier and baseline.id in classifier
-    coder = json.JSONDecoder().raw_decode(_user_prompt(providers["coder"]).split("payload_json:\n", 1)[1])[0]
-    assert coder["file_paths"] == [HANDLER] and coder["input_files"] == {HANDLER: files[HANDLER]}
-    child = await store.get_build_record(app_id=baseline.app_id, build_record_id=result["coding_worker"]["metadata"]["build_record_id"])
-    assert child.parent_build_record_id == baseline.id and child.lifecycle_status == ArtifactLifecycleStatus.DRAFT
-    assert child.validation_status == ArtifactValidationStatus.PASSED and child.app_validation_status == "passed"
-    metadata = child.commit_metadata.metadata
-    assert metadata["content_backend"] == "gridfs" and metadata["applied_paths"] == [HANDLER]
-    assert metadata["refinement_scope"] == {
-        "selected_file_paths": [HANDLER], "scope_origin": "explicit", "changed_workspace_pack_paths": [HANDLER],
-    }
-    # An app revision: the pack's source, version and digest are unchanged.
-    assert metadata["capability_packs"] == packs
-    child_files, diagnostics = await read_artifact_bundle(child, retain_svg_text=True)
-    (case_root / "backend-child.zip").write_bytes(await read_verified_artifact_bundle(child))
-    live.write_json(case_root / "backend-child-record.json", child.model_dump(mode="json"))
-    live.write_json(case_root / "backend-child-files.sha256.json", _hashes(child_files))
-    assert not diagnostics and set(child_files) == set(files)
-    assert {path for path in files if child_files[path] != files[path]} == {HANDLER}
-    assert child_files[HANDLER] == providers["coder"].output["updated_files"][0]["content"]
-    assert child_files[".mozaiks/pack_provenance.json"] == files[".mozaiks/pack_provenance.json"]
-    assert all(child_files[path] == files[path] for path in _template_pack_paths(files))
-    current = (await registry.get_app_record(owner_user_id=owner_id, build_registry_id=binding.build_registry_id))["app"]
-    assert current["lifecycle_state"] == "review" and current["current_build_run"]["artifact_version_id"] == child.id
-    accepted = await client.post(
-        f"/api/studio/build/artifacts/{child.id}/accept", params={"build_registry_id": binding.build_registry_id},
-        json={"notes": "Accepted the handler-only backend refinement after canonical validation."},
-        headers={"Authorization": f"Bearer {tokens['alice']}"},
-    )
-    live.write_json(case_root / "backend-acceptance-endpoint-result.json", {"status_code": accepted.status_code, "body": accepted.json()})
-    assert accepted.status_code == 200 and accepted.json()["accepted"] is True
-    child = await store.get_build_record(app_id=baseline.app_id, build_record_id=child.id)
-    assert child.lifecycle_status == ArtifactLifecycleStatus.CURRENT
-    live.write_json(case_root / "backend-accepted-child-record.json", child.model_dump(mode="json"))
+    assert BACKEND_REQUEST in _user_prompt_at(providers["scope"], 0)
+    assert {name: len(provider.calls) for name, provider in providers.items()} == {"classifier": 5, "scope": 2, "coder": 3}
+    live.write_json(case_root / "backend-steps.json", steps)
     return child, child_files, {
         "request": BACKEND_REQUEST, "permitted_paths": [HANDLER], "changed_paths": [HANDLER],
-        "build_record_id": child.id, "parent_build_record_id": baseline.id, "review_acceptance": "accepted",
+        "build_record_id": child.id, "parent_build_record_id": confirmed_child.id, "review_acceptance": "accepted",
         "refinement_scope": metadata["refinement_scope"], "anonymous_status": anonymous.status_code,
         "non_owner_status": other.status_code, "child_files": _hashes(child_files),
+        "confirmation_anonymous_status": confirm_anonymous.status_code,
+        "confirmation_non_owner_status": confirm_other.status_code,
+        "baseline_build_record_id": baseline.id, "confirmed_child_build_record_id": confirmed_child.id,
+        "steps": steps,
         "provider_calls": {name: {"count": len(provider.calls),
                                   "requests_sha256": hashlib.sha256((case_root / f"backend-provider-{name}-requests.json").read_bytes()).hexdigest()}
                            for name, provider in providers.items()},
     }
+
+
+async def _save_older_candidate(*, case_root, live, studio, store, binding, parent, parent_files, tokens, output_root):
+    """Save a validated sibling of the board child from the same accepted handler build.
+
+    It keeps the accepted handler and changes only the board source, so the
+    app-owned code check passes; it is refused at acceptance only because the
+    board child accepted before it is not in its lineage.
+    """
+    import httpx
+
+    from factory_app.workflows._shared.artifact_bundle import read_artifact_bundle
+    from mozaiksai.core.artifacts import ArtifactLifecycleStatus, ArtifactValidationStatus
+
+    content = parent_files[PAGE] + "\n// Saved for review from the same accepted handler build as the board refinement.\n"
+    harness, providers = _scripted_backend_harness(
+        parent_files, store, output_root, coder=_coder_output(PAGE, content, summary=OLDER_CANDIDATE_REQUEST),
+    )
+    payload = {"build_registry_id": binding.build_registry_id, "trigger_source": "refinement",
+               "trigger_payload": {"refinement_request": {"build_family": "app_bundle", "build_key": "app_bundle",
+                                    "build_record_id": parent.id, "raw_user_request": OLDER_CANDIDATE_REQUEST,
+                                    "source_surface": "app_workbench"},
+                                   "coding_request": {"files": {PAGE: ""}}}}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=studio.app), base_url="http://testserver", timeout=None) as client:
+        with patch.object(studio, "get_orchestration_control_harness", return_value=harness):
+            response = await client.post("/api/workflows/trigger", json=payload, headers={"Authorization": f"Bearer {tokens['alice']}"})
+    live.write_json(case_root / "older-candidate-endpoint-result.json", {"status_code": response.status_code, "body": response.json()})
+    for name, provider in providers.items():
+        requests = [{"prompt": call["prompt"], "messages": call["messages"]} for call in provider.calls]
+        assert all(token not in json.dumps(requests) for token in tokens.values())
+        live.write_json(case_root / f"older-candidate-provider-{name}-requests.json", requests)
+    assert response.status_code == 200 and response.json()["coding_worker"]["status"] == "validated", response.json()
+    assert {name: len(provider.calls) for name, provider in providers.items()} == {"classifier": 1, "scope": 0, "coder": 1}
+    older = await store.get_build_record(app_id=parent.app_id, build_record_id=response.json()["coding_worker"]["metadata"]["build_record_id"])
+    assert older.parent_build_record_id == parent.id and older.lifecycle_status == ArtifactLifecycleStatus.DRAFT
+    assert older.validation_status == ArtifactValidationStatus.PASSED
+    older_files, diagnostics = await read_artifact_bundle(older, retain_svg_text=True)
+    assert not diagnostics and {path for path in parent_files if older_files[path] != parent_files[path]} == {PAGE}
+    assert older_files[HANDLER] == parent_files[HANDLER]
+    live.write_json(case_root / "older-candidate-record.json", older.model_dump(mode="json"))
+    return {"build_record_id": older.id, "parent_build_record_id": parent.id, "request": OLDER_CANDIDATE_REQUEST,
+            "changed_paths": [PAGE], "files": _hashes(older_files)}
 
 
 def _scripted_harness(files, store, output_root):
@@ -601,6 +838,11 @@ async def _refine(case_root, login_config):
         assert current["lifecycle_state"] == "review" and current["current_build_run"]["artifact_version_id"] == child.id
         assert result["refinement_session_id"] and result["review_continuation"] is None
         delivered_context = _assert_delivered_context(providers, parent_files, backend.id)
+        # (c) A sibling saved from the same build, after the board child; acceptance refuses it later.
+        older_candidate = await _save_older_candidate(
+            case_root=case_root, live=live, studio=studio, store=store, binding=binding, parent=backend,
+            parent_files=parent_files, tokens=tokens, output_root=Path(facts["refinement_output_root"]),
+        )
         live.write_json(case_root / "result.json", {
             "success": True, "evidence_kind": "authorized_studio_refinement_with_scripted_ag2_providers",
             "live_llm_calls": False, "browser_acceptance": "not_evaluated_for_child", "capability_packs": packs,
@@ -609,6 +851,7 @@ async def _refine(case_root, login_config):
             "retained_paths": sorted(path for path in parent_files if child_files[path] == parent_files[path]),
             "retained_pack_paths": retained_pack_paths, "baseline_files": _hashes(files),
             "design_source": replay_receipt["design_source"], "backend_refinement": backend_evidence,
+            "older_candidate": older_candidate,
             "baseline_build_record_id": baseline.id, "parent_build_record_id": backend.id,
             "child_build_record_id": child.id,
             "refinement_session_id": result["refinement_session_id"], "registry": current,
@@ -649,9 +892,23 @@ async def _accept(case_root, login_config):
                 json={"notes": "Accepted after owned desktop and mobile browser checks of the provider-scripted refinement."},
                 headers={"Authorization": f"Bearer {tokens['alice']}"},
             )
-        live.write_json(case_root / "acceptance-endpoint-result.json", {"status_code": response.status_code, "body": response.json()})
-        assert response.status_code == 200 and response.json()["accepted"] is True
+            live.write_json(case_root / "acceptance-endpoint-result.json", {"status_code": response.status_code, "body": response.json()})
+            assert response.status_code == 200 and response.json()["accepted"] is True
+            # The older candidate shares the accepted handler but was made from the
+            # board child's parent, so accepting it would revert the accepted board.
+            older_id = result["older_candidate"]["build_record_id"]
+            stale_candidate = await client.post(
+                f"/api/studio/build/artifacts/{older_id}/accept",
+                params={"build_registry_id": result["registry"]["build_registry_id"]},
+                json={"notes": "An older candidate offered after a newer accepted build."},
+                headers={"Authorization": f"Bearer {tokens['alice']}"},
+            )
+        live.write_json(case_root / "stale-candidate-acceptance-endpoint-result.json",
+                        {"status_code": stale_candidate.status_code, "body": stale_candidate.json()})
+        assert stale_candidate.status_code == 409 and "earlier build" in stale_candidate.json()["detail"]
         store = get_artifact_store()
+        older = await store.get_build_record(app_id=app_id, build_record_id=older_id)
+        assert older.lifecycle_status == ArtifactLifecycleStatus.DRAFT
         child = await store.get_build_record(app_id=app_id, build_record_id=child_id)
         assert child.lifecycle_status == ArtifactLifecycleStatus.CURRENT
         assert await read_verified_artifact_bundle(child) == (case_root / "child.zip").read_bytes()
@@ -661,7 +918,10 @@ async def _accept(case_root, login_config):
         live.write_json(case_root / "accepted-child-record.json", child.model_dump(mode="json"))
         live.write_json(case_root / "accepted-refinement-session.json", session.model_dump(mode="json"))
         result.update({"browser_acceptance": "passed", "child_browser_candidate": browser["candidate"],
-                       "review_acceptance": "accepted", "promotion": "not_requested"})
+                       "review_acceptance": "accepted", "promotion": "not_requested",
+                       "stale_candidate_acceptance": {"build_record_id": older_id, "status_code": stale_candidate.status_code,
+                                                      "detail": stale_candidate.json()["detail"],
+                                                      "lifecycle_status": older.lifecycle_status.value}})
         live.write_json(case_root / "result.json", result)
     finally:
         close_mongo_client()
@@ -771,10 +1031,12 @@ def test_accepted_board_refines_through_real_studio():
             def worker(mode):
                 log_path = private / f"{mode}-worker.log"
                 with log_path.open("wb") as log:
+                    # Refinement validates the baseline and four saved children in Docker.
                     completed = subprocess.run([sys.executable, "-P", str(Path(__file__).resolve()), f"--{mode}", str(case_root)],
                                                cwd=ROOT, env=env,
                                                input=json.dumps({key: state[key] for key in ("base_url", "auth_issuer", "users")}).encode(),
-                                               stdout=log, stderr=subprocess.STDOUT, timeout=1200, check=False)
+                                               stdout=log, stderr=subprocess.STDOUT,
+                                               timeout=3600 if mode == "refine" else 1200, check=False)
                 owned.verify(app_root=app_root, repo_root=ROOT, candidate=owned.candidate, base_url=state["base_url"])
                 assert completed.returncode == 0, f"Real {mode} failed; inspect {case_root} and {log_path}"
 
