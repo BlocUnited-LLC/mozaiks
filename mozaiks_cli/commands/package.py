@@ -18,7 +18,7 @@ def _verified_build_result(mobile_dir: Path) -> dict:
     manifest = json.loads((mobile_dir / "delivery.manifest.json").read_text(encoding="utf-8"))
     receipt = json.loads((mobile_dir / "build-result.json").read_text(encoding="utf-8"))
     if (
-        receipt.get("schema_version") != "mozaiks.android_build_result.v1"
+        receipt.get("schema_version") != "mozaiks.android_build_result.v2"
         or receipt.get("status") != "succeeded"
         or receipt.get("device_acceptance") != "not_run"
     ):
@@ -34,14 +34,24 @@ def _verified_build_result(mobile_dir: Path) -> dict:
         if not expected or receipt.get(name) != expected:
             raise ValueError(f"Android build receipt does not match {name}")
 
-    apk = receipt.get("apk")
-    if not isinstance(apk, dict) or not isinstance(apk.get("path"), str):
-        raise ValueError("Android build receipt is missing its APK")
-    relative = validate_portable_path(apk["path"]).text
+    artifact_record = receipt.get("artifact")
+    expected_artifacts = {
+        "debug": ("debug_apk", "android/app/build/outputs/apk/debug/app-debug.apk"),
+        "release": ("unsigned_release_aab", "android/app/build/outputs/bundle/release/app-release.aab"),
+    }
+    expected = expected_artifacts.get(manifest.get("spec", {}).get("build_type"))
+    if (
+        not isinstance(artifact_record, dict)
+        or not isinstance(artifact_record.get("path"), str)
+        or expected is None
+        or (artifact_record.get("kind"), artifact_record["path"]) != expected
+    ):
+        raise ValueError("Android build receipt is missing its typed artifact")
+    relative = validate_portable_path(artifact_record["path"]).text
     root = mobile_dir.resolve()
     artifact = root / relative
     if not artifact.resolve().is_relative_to(root):
-        raise ValueError("Android APK path leaves the delivery directory")
+        raise ValueError("Android artifact path leaves the delivery directory")
     for entry in (artifact, *artifact.parents):
         if entry == root:
             break
@@ -49,14 +59,14 @@ def _verified_build_result(mobile_dir: Path) -> dict:
         if stat.S_ISLNK(info.st_mode) or (
             getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
         ):
-            raise ValueError("Android APK path must not contain links")
+            raise ValueError("Android artifact path must not contain links")
     if not artifact.is_file():
-        raise ValueError("Android APK is not a regular file")
+        raise ValueError("Android artifact is not a regular file")
     with artifact.open("rb") as stream:
         size = os.fstat(stream.fileno()).st_size
         digest = hashlib.file_digest(stream, "sha256").hexdigest()
-    if apk.get("sha256") != digest or apk.get("size_bytes") != size or size == 0:
-        raise ValueError("Android APK does not match the build receipt")
+    if artifact_record.get("sha256") != digest or artifact_record.get("size_bytes") != size or size == 0:
+        raise ValueError("Android artifact does not match the build receipt")
     return receipt
 
 

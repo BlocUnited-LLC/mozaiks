@@ -12,6 +12,13 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Added
+
+- Android delivery can produce a provenance-bound unsigned release AAB for a
+  trusted product host to sign. Build receipts now use one typed artifact
+  contract for debug APK and unsigned release AAB outputs; signing keys and
+  store credentials remain outside OSS delivery inputs.
+
 ## 0.2.0 - 2026-10-16
 
 ### Added

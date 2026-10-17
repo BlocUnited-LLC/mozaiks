@@ -75,7 +75,7 @@ class AndroidDeliverySpec(BaseModel):
     version_name: str = Field(pattern=r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$", max_length=32)
     version_code: int = Field(ge=1, le=2_100_000_000)
     backend_origin: str
-    build_type: Literal["debug"]
+    build_type: Literal["debug", "release"]
 
     @field_validator("package_id")
     @classmethod
