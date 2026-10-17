@@ -165,6 +165,23 @@ class _Store:
             if record.app_id == app_id and record.lifecycle_status == ArtifactLifecycleStatus.CURRENT
         }
 
+    async def list_build_records(
+        self, *, app_id, build_family=None, build_key=None, lifecycle_status=None, updated_since=None, limit=50, **_,
+    ):
+        """The store's filters (family, key, status, last written at or after ``updated_since``), newest version first."""
+        def written_at(record):
+            moment = record.updated_at
+            return moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
+
+        records = [
+            record for record in self.records.values()
+            if record.app_id == app_id and (build_family is None or record.build_family == build_family)
+            and (build_key is None or record.build_key == build_key)
+            and (lifecycle_status is None or record.lifecycle_status == lifecycle_status)
+            and (updated_since is None or written_at(record) >= updated_since)
+        ]
+        return sorted(records, key=lambda record: record.version_number, reverse=True)[:limit]
+
     def supersede_parent_with(self, record_id):
         """Another accepted build replaced the parent as the app's current build."""
         self.records["parent"] = self.records["parent"].model_copy(
@@ -179,6 +196,16 @@ class _Store:
         record = BuildRecord(
             id=f"child_{len(self.created)}", version_number=len(self.created) + 1, lineage_root_id="parent", **kwargs,
         )
+        if record.lifecycle_status == ArtifactLifecycleStatus.CURRENT:
+            # As the store does: a record saved CURRENT supersedes the CURRENT one of its family and key.
+            for record_id, other in list(self.records.items()):
+                if (
+                    other.build_family == record.build_family and other.build_key == record.build_key
+                    and other.lifecycle_status == ArtifactLifecycleStatus.CURRENT
+                ):
+                    self.records[record_id] = other.model_copy(update={
+                        "lifecycle_status": ArtifactLifecycleStatus.SUPERSEDED, "updated_at": record.updated_at,
+                    })
         self.records[record.id] = record
         return record
 
@@ -606,11 +633,13 @@ class _StudioStore(_Store):
     Invalidation marks a record STALE as ``mark_artifact_version_stale`` does
     (anything but ARCHIVED or DELETED, stamping stale_at and updated_at), the
     current refs name CURRENT records only, a run's children are found by
-    parent and the run's build_id, acceptance supersedes the family's CURRENT
-    record and writes the commit metadata it is given, and rejection archives
-    the draft. ChangeRequests and refinement sessions are kept as written and
-    listed by the build they were made from, newest first, as the store does;
-    a workflow launch rewrites its ChangeRequest's routing decision.
+    parent and the run's build_id, acceptance supersedes the CURRENT record of
+    the accepted record's family and key and writes the commit metadata it is
+    given, and rejection archives the draft. Build records are listed by
+    family, key, status and last write, newest version first. ChangeRequests
+    and refinement sessions are kept as written and listed by the build they
+    were made from, newest first, as the store does; a workflow launch
+    rewrites its ChangeRequest's routing decision.
     """
 
     def __init__(self, **kwargs):
@@ -678,7 +707,7 @@ class _StudioStore(_Store):
         for record_id, record in list(self.records.items()):
             if (
                 record_id != build_record_id and record.build_family == target.build_family
-                and record.lifecycle_status == ArtifactLifecycleStatus.CURRENT
+                and record.build_key == target.build_key and record.lifecycle_status == ArtifactLifecycleStatus.CURRENT
             ):
                 self.records[record_id] = record.model_copy(update={
                     "lifecycle_status": ArtifactLifecycleStatus.SUPERSEDED, "updated_at": now,
@@ -697,14 +726,6 @@ class _StudioStore(_Store):
             "updated_at": datetime.now(UTC),
         })
         return True
-
-    async def list_build_records(self, *, app_id, build_family=None, lifecycle_status=None, limit=50, **_):
-        records = [
-            record for record in self.records.values()
-            if record.app_id == app_id and (build_family is None or record.build_family == build_family)
-            and (lifecycle_status is None or record.lifecycle_status == lifecycle_status)
-        ]
-        return sorted(records, key=lambda record: record.version_number, reverse=True)[:limit]
 
     async def create_refinement_session(self, **kwargs):
         self.refinement_sessions.append({"id": f"rs_{len(self.refinement_sessions) + 1}", "ended_at": None, **kwargs})
@@ -1561,6 +1582,13 @@ def test_a_stale_parent_is_admitted_only_as_the_latest_accepted_build(monkeypatc
     attempt = handler_attempt(refused)
     assert attempt["status"] == "failed", attempt
     assert attempt["metadata"].get("candidate_admission", {}).get("code") == "STALE_REFINEMENT_BASELINE", attempt
+    # Each case is refused for its own reason, not only by some other check. Studio reads the
+    # registry before a run only from a STALE build, so a SUPERSEDED parent is refused at that read.
+    _assert_stale_refusal(attempt, {
+        "never_accepted_draft": "nothing shows the parent was ever accepted",
+        "newer_accepted_build": f"build {admitted} was accepted after the parent",
+        "superseded": "no server read of the app registry was made before this run began",
+    }[case])
     if admitted is not None:
         # The newer accepted build is the one a pack change is admitted against.
         retried = handler_attempt(admitted)
@@ -1690,6 +1718,13 @@ _UNATTRIBUTABLE_CASES = {
     # Another unresolved child, from another run, or open further down the lineage.
     "open_pending_child": "made from the parent is draft with validation pending, not rejected",
     "open_descendant": "made further down from the parent, is still open",
+    # A draft refined in review is stale and can no longer be rejected, but a workflow launched from it is unresolved.
+    "workflow_from_refined_draft": (
+        "build refined_draft made from the parent is stale, and change request cr_from_draft made from it "
+        "may have launched a workflow (workflow)"
+    ),
+    # A newer accepted application: accepted after the parent, outside its lineage, and since left stale.
+    "accepted_after_parent": "build accepted_elsewhere was accepted after the parent",
     # The marker cannot be attributed to this app's own closed run.
     "no_saved_state": "saved no state of it when it began",
     "no_run_on_record": "has no inline run on record",
@@ -1738,6 +1773,24 @@ def test_a_rejected_drafts_stale_parent_is_refused_unless_nothing_else_is_open_i
         )
     elif case == "open_descendant":
         store.records["grandchild"] = _run_child("grandchild", parent=rejected, build_id="run_other")
+    elif case == "workflow_from_refined_draft":
+        store.records["refined_draft"] = _run_child(
+            "refined_draft", build_id="run_other", lifecycle=ArtifactLifecycleStatus.STALE,
+        )
+        store.change_requests["cr_from_draft"] = SimpleNamespace(
+            id="cr_from_draft", app_id="app_1", build_record_id="refined_draft", created_by_user_id="demo-user",
+            router_decision={"execution_mode": "workflow"},
+        )
+    elif case == "accepted_after_parent":
+        # Accepted while nothing was CURRENT (by an acceptance made before this check), from a build
+        # outside the parent's lineage, then left stale by a refinement of its own: CURRENT shows nothing.
+        store.records["accepted_elsewhere"] = BuildRecord(
+            id="accepted_elsewhere", app_id="app_1", build_family="app_bundle", build_key="app_bundle",
+            version_number=9, parent_build_record_id="older", lineage_root_id="older",
+            lifecycle_status=ArtifactLifecycleStatus.STALE, validation_status=ArtifactValidationStatus.PASSED,
+            commit_metadata={"metadata": {"acceptance": {"accepted_by": "demo-user", "accepted_at": later.isoformat()}}},
+            created_at=later, updated_at=later + timedelta(seconds=1),
+        )
     elif case == "no_saved_state":
         del change.router_decision["baseline_state"]
     elif case == "no_run_on_record":
@@ -1878,6 +1931,222 @@ def test_a_failed_workflow_launch_from_the_baseline_leaves_its_outcome_unresolve
         _handler_attempt(flow), f"change request {offered['change_request_id']} made from the parent may have launched a workflow",
     )
     assert flow.store.status(rejected) == ArtifactLifecycleStatus.ARCHIVED
+
+
+@pytest.mark.parametrize("refinement", ["rejected", "left_open"])
+def test_a_handler_draft_refined_in_review_does_not_lock_its_parent_once_the_refinement_is_resolved(
+    monkeypatch, tmp_path, refinement,
+):
+    """AppReview's "request changes" refines the draft under review, which marks that draft stale.
+
+    A stale draft can be neither rejected nor accepted and never becomes
+    current, so once nothing made from it is open it no longer holds its parent:
+    a handler retry from the parent is admitted and its child accepted. While
+    the refinement is still open the retry is refused, naming that open draft,
+    and rejecting it is the supported next step.
+    """
+    flow = _studio_flow(
+        monkeypatch, tmp_path,
+        outputs=[{HANDLER: NORMALIZING_HANDLER}, {PAGE: _page(1)}, {HANDLER: NORMALIZING_HANDLER},
+                 {HANDLER: NORMALIZING_HANDLER}],
+    )
+    first = _handler_attempt(flow)
+    assert first["status"] == "validated", first
+    handler_draft = first["metadata"]["build_record_id"]
+    tweak = flow.trigger({"files": {PAGE: ""}}, build_record_id=handler_draft).json()["coding_worker"]
+    assert tweak["status"] == "validated", tweak
+    refined = tweak["metadata"]["build_record_id"]
+    assert flow.store.status(handler_draft) == ArtifactLifecycleStatus.STALE
+    # The refined draft is out of reach of review: it cannot be rejected or accepted.
+    for action in (flow.reject, flow.accept):
+        response = action(handler_draft)
+        assert response.status_code == 409 and "Only draft" in response.json()["detail"], response.text
+    if refinement == "left_open":
+        _assert_stale_refusal(_handler_attempt(flow), f"draft {refined}, made further down from the parent, is still open")
+    assert flow.reject(refined).status_code == 200
+    retry = _handler_attempt(flow)
+    assert retry["status"] == "validated", retry
+    child = flow.store.records[retry["metadata"]["build_record_id"]]
+    assert child.parent_build_record_id == "parent" and _archive_files(child)[HANDLER] == NORMALIZING_HANDLER
+    accepted = flow.accept(child.id)
+    assert accepted.status_code == 200, accepted.text
+    assert flow.store.current() == [child.id]
+    assert flow.store.status(handler_draft) == ArtifactLifecycleStatus.STALE
+
+
+def _promotion_index(flow, tmp_path, monkeypatch):
+    """The App Intelligence index a promotion's background job saves, through the real indexer.
+
+    Promotion indexes the restored workspace with the default
+    ``AppIntelligenceIndexRequest``: its own build key, saved CURRENT. Context
+    registration past the app bundle record is stubbed.
+    """
+    from mozaiksai.control_plane import app_intelligence
+    from mozaiksai.hosts import studio
+
+    workspace = tmp_path / "promoted" / "app"
+    (workspace / "ui").mkdir(parents=True)
+    (workspace / "ui" / "board.jsx").write_text("export default function Board() { return null; }\n", encoding="utf-8")
+    (workspace / "main.py").write_text("print('ready')\n", encoding="utf-8")
+    registration = SimpleNamespace(
+        app_context_version_id="acv_1", indexed_file_count=2, source_context_artifact_version_id="sc_1",
+        app_intelligence_artifact_version_id="ai_1", app_context_artifact_version_id="ac_1",
+        graph_artifact_version_id="g_1", scan_health={}, health_report={}, warnings=[],
+    )
+    monkeypatch.setattr(app_intelligence, "register_app_intelligence_context", AsyncMock(return_value=registration))
+    request = studio.AppIntelligenceIndexRequest(workspace_root=str(workspace))
+    result = asyncio.run(app_intelligence.index_workspace_app_intelligence(
+        app_id="app_1", workspace_root=workspace, artifact_store=flow.store, workspace_key=request.workspace_key,
+        source_workflow="studio_app_intelligence_index", make_current=request.make_current,
+        generated_artifacts_root=tmp_path / "generated",
+    ))
+    index = flow.store.records[result.app_bundle_artifact_version_id]
+    assert (index.build_family, index.build_key, index.parent_build_record_id) == (
+        "app_bundle", "app_intelligence_workspace", None,
+    )
+    assert index.lifecycle_status == ArtifactLifecycleStatus.CURRENT
+    assert index.commit_metadata.metadata["bundle_mode"] == "app_intelligence_workspace_index"
+    # Saved under its own key, it supersedes nothing: the promoted build stays CURRENT beside it.
+    assert flow.store.current() == sorted(["parent", index.id])
+    return index.id
+
+
+@pytest.mark.parametrize("step", ["accept_page_child", "confirm_proposal", "accept_handler_child", "handler_retry"])
+def test_a_promotions_app_intelligence_index_is_not_taken_for_the_apps_build(monkeypatch, tmp_path, step):
+    """Acceptance, confirmation and admission read the app's build in its own build family and key.
+
+    After a promotion the App Intelligence index is CURRENT in the
+    ``app_bundle`` family under ``app_intelligence_workspace``, a key that
+    accepting a refinement child (``app_bundle``) never supersedes, so it is not
+    the app's current build and no refinement of the promoted build is refused
+    because of it.
+    """
+    outputs = [{PAGE: _page(1)}] if step in {"accept_page_child", "confirm_proposal"} else [{HANDLER: NORMALIZING_HANDLER}] * 2
+    flow = _studio_flow(
+        monkeypatch, tmp_path, outputs=outputs,
+        proposer=_low_confidence_page_proposer() if step == "confirm_proposal" else None,
+    )
+    index = _promotion_index(flow, tmp_path, monkeypatch)
+    if step == "confirm_proposal":
+        decision = flow.trigger({}).json()
+        assert decision["harness_decision"]["decision_type"] == "clarify_scope", decision
+        response = flow.confirm(decision)
+    else:
+        response = flow.trigger({"files": dict.fromkeys(outputs[0], "")})
+    assert response.status_code == 200, response.text
+    result = response.json()["coding_worker"]
+    assert result["status"] == "validated", result
+    child = result["metadata"]["build_record_id"]
+    if step == "handler_retry":
+        assert flow.reject(child).status_code == 200
+        assert flow.store.status("parent") == ArtifactLifecycleStatus.STALE and flow.store.current() == [index]
+        retry = _handler_attempt(flow)
+        assert retry["status"] == "validated", retry
+        child = retry["metadata"]["build_record_id"]
+    accepted = flow.accept(child)
+    assert accepted.status_code == 200, accepted.text
+    assert flow.store.current() == sorted([child, index])
+
+
+def _accepted_handler_build(flow):
+    """An authorized handler change from the parent, accepted: the app's latest accepted build."""
+    accepted = _handler_attempt(flow)
+    assert accepted["status"] == "validated", accepted
+    accepted_id = accepted["metadata"]["build_record_id"]
+    assert flow.accept(accepted_id).status_code == 200
+    return accepted_id
+
+
+def _page_draft(flow, build_record_id):
+    """A reviewable page draft of ``build_record_id``; storing it marks that build stale."""
+    result = flow.trigger({"files": {PAGE: ""}}, build_record_id=build_record_id).json()["coding_worker"]
+    assert result["status"] == "validated", result
+    assert flow.store.status(build_record_id) == ArtifactLifecycleStatus.STALE
+    return result["metadata"]["build_record_id"]
+
+
+@pytest.mark.parametrize("accepted", ["handler_change", "sibling_page_change"])
+def test_an_older_candidate_cannot_replace_an_accepted_build_after_that_build_is_marked_stale(
+    monkeypatch, tmp_path, accepted,
+):
+    """A newer accepted build that its own review draft marked stale is still newer accepted work.
+
+    Nothing is CURRENT while that draft awaits review, so acceptance reads
+    acceptance evidence, not only the CURRENT status. ``handler_change``: a
+    page candidate made afterwards from the older parent would revert the
+    accepted handler change. ``sibling_page_change``: two page siblings of the
+    parent, one accepted. Either older candidate is refused, and the accepted
+    build's own draft is still accepted.
+    """
+    if accepted == "handler_change":
+        flow = _studio_flow(
+            monkeypatch, tmp_path, outputs=[{HANDLER: NORMALIZING_HANDLER}, {PAGE: _page(1)}, {PAGE: _page(2)}],
+        )
+        accepted_id = _accepted_handler_build(flow)
+        own_draft = _page_draft(flow, accepted_id)
+        older = _page_draft(flow, "parent")
+        assert _archive_files(flow.store.records[older])[HANDLER] == TEMPLATE_HANDLER
+    else:
+        flow = _studio_flow(monkeypatch, tmp_path, outputs=[{PAGE: _page(1)}, {PAGE: _page(2)}, {PAGE: _page(3)}])
+        accepted_id, older = _page_draft(flow, "parent"), _page_draft(flow, "parent")
+        assert flow.accept(accepted_id).status_code == 200
+        own_draft = _page_draft(flow, accepted_id)
+    assert flow.store.current() == []
+
+    refused = flow.accept(older)
+    assert refused.status_code == 409, refused.text
+    detail = refused.json()["detail"]
+    assert "earlier build than the app's latest accepted build" in detail
+    assert f"build {accepted_id} was accepted after build parent" in detail
+    assert flow.store.status(older) == ArtifactLifecycleStatus.DRAFT and flow.store.current() == []
+
+    kept = flow.accept(own_draft)
+    assert kept.status_code == 200, kept.text
+    assert flow.store.current() == [own_draft]
+    if accepted == "handler_change":
+        assert _archive_files(flow.store.records[own_draft])[HANDLER] == NORMALIZING_HANDLER
+
+
+def test_a_chained_draft_of_the_latest_accepted_build_is_accepted(monkeypatch, tmp_path):
+    """A draft of a draft of the latest accepted build is in its lineage, however stale those links are."""
+    flow = _studio_flow(
+        monkeypatch, tmp_path, outputs=[{HANDLER: NORMALIZING_HANDLER}, {PAGE: _page(1)}, {PAGE: _page(2)}],
+    )
+    accepted_id = _accepted_handler_build(flow)
+    first_draft = _page_draft(flow, accepted_id)
+    chained = _page_draft(flow, first_draft)
+    assert flow.store.current() == []
+    accepted = flow.accept(chained)
+    assert accepted.status_code == 200, accepted.text
+    assert flow.store.current() == [chained]
+    assert _archive_files(flow.store.records[chained])[HANDLER] == NORMALIZING_HANDLER
+
+
+def test_a_confirmation_proposed_before_a_newer_acceptance_is_refused_after_that_build_is_marked_stale(
+    monkeypatch, tmp_path,
+):
+    flow = _studio_flow(
+        monkeypatch, tmp_path, outputs=[{HANDLER: NORMALIZING_HANDLER}, {PAGE: _page(1)}, {PAGE: _page(2)}],
+        proposer=_low_confidence_page_proposer(),
+    )
+    handler = _handler_attempt(flow)
+    assert handler["status"] == "validated", handler
+    accepted_id = handler["metadata"]["build_record_id"]
+    decision = flow.trigger({}).json()
+    assert decision["harness_decision"]["decision_type"] == "clarify_scope", decision
+    # The handler change is accepted after the proposal, then marked stale by its own review draft.
+    assert flow.accept(accepted_id).status_code == 200
+    _page_draft(flow, accepted_id)
+    assert flow.store.current() == []
+
+    refused = flow.confirm(decision)
+    assert refused.status_code == 409, refused.text
+    detail = refused.json()["detail"]
+    assert "A newer build of this app was accepted" in detail and "Request the change again" in detail
+    assert f"build {accepted_id} was accepted after build parent" in detail
+    # Refused before the decision was used: still pending, and no run began for it.
+    assert flow.session()["pending_harness_decision"]["decision_id"] == decision["change_request_id"]
+    assert flow.provider.execute.await_count == 2
 
 
 def _module_runtime(app_root, monkeypatch, files):
@@ -2207,7 +2476,9 @@ def _accept_route(monkeypatch, store):
         await asyncio.sleep(0)  # a store round-trip lets another request interleave
         target = store.records[build_record_id]
         for record_id, record in list(store.records.items()):
-            if record.lifecycle_status == ArtifactLifecycleStatus.CURRENT and record.build_family == target.build_family:
+            if record.lifecycle_status == ArtifactLifecycleStatus.CURRENT and (
+                record.build_family, record.build_key,
+            ) == (target.build_family, target.build_key):
                 store.records[record_id] = record.model_copy(update={"lifecycle_status": ArtifactLifecycleStatus.SUPERSEDED})
         store.records[build_record_id] = target.model_copy(update={"lifecycle_status": ArtifactLifecycleStatus.CURRENT})
         store.accepted.append(build_record_id)

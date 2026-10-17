@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import zipfile
+from datetime import UTC
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -59,11 +60,15 @@ class _BaselineStore:
             if app_id == "app_1" and version.lifecycle_status == ArtifactLifecycleStatus.CURRENT
         }
 
-    async def list_build_records(self, *, app_id, build_family=None, lifecycle_status=None, limit=50, **_):
+    async def list_build_records(
+        self, *, app_id, build_family=None, build_key=None, lifecycle_status=None, updated_since=None, limit=50, **_,
+    ):
         return [
             version for version in self.versions.values()
             if app_id == "app_1" and (build_family is None or version.build_family == build_family)
+            and (build_key is None or version.build_key == build_key)
             and (lifecycle_status is None or version.lifecycle_status == lifecycle_status)
+            and (updated_since is None or version.updated_at.replace(tzinfo=version.updated_at.tzinfo or UTC) >= updated_since)
         ][:limit]
 
     async def list_run_child_build_records(self, *, app_id, parent_build_record_id, build_id, limit=10):
@@ -72,6 +77,10 @@ class _BaselineStore:
             if app_id == "app_1" and version.parent_build_record_id == parent_build_record_id
             and version.commit_metadata.metadata.get("build_id") == build_id
         ]
+
+    async def list_refinement_sessions(self, **_):
+        """No refinement session of these builds was accepted."""
+        return []
 
 
 @pytest.fixture(autouse=True)
@@ -1891,6 +1900,17 @@ class _ReviewArtifactStore:
             version.build_family: version.id for version in (self.parent_version, self.child_version)
             if version.app_id == app_id and version.lifecycle_status == ArtifactLifecycleStatus.CURRENT
         }
+
+    async def list_build_records(  # noqa: ANN201
+        self, *, app_id, build_family=None, build_key=None, lifecycle_status=None, updated_since=None, limit=50, **_,  # noqa: ANN001
+    ):
+        """The store's family, key, status and last-write filters, newest version first."""
+        return sorted((
+            version for version in (self.parent_version, self.child_version)
+            if version.app_id == app_id and build_family in {None, version.build_family}
+            and build_key in {None, version.build_key} and lifecycle_status in {None, version.lifecycle_status}
+            and (updated_since is None or version.updated_at.replace(tzinfo=version.updated_at.tzinfo or UTC) >= updated_since)
+        ), key=lambda version: version.version_number, reverse=True)[:limit]
 
     async def get_change_request(self, **kwargs):  # noqa: ANN003
         if kwargs.get("change_request_id") == self.change_request.id:

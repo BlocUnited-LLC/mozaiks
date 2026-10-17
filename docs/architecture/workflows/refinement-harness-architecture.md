@@ -88,8 +88,11 @@ also saves the source artifact's lifecycle state on the change request
 `updated_at`). The confirmation compares it with the artifact now: any write
 since the proposal (made stale again by another change request, superseded,
 accepted or rejected) refuses it, and so does an archived or deleted artifact,
-a `CURRENT` build of the family that is neither the artifact nor one of its
-ancestors, or a failed read of the family's `CURRENT` builds. An artifact that was already stale when the decision was proposed,
+newer accepted work outside the artifact's lineage (read as acceptance reads
+it, below: in the artifact's build family and key, a build that is `CURRENT`,
+or that was accepted at or after the artifact or its nearest accepted ancestor, even
+if a refinement of it has since marked it stale), or a failed read or an order
+of acceptances that cannot be established. An artifact that was already stale when the decision was proposed,
 and is unchanged, is still what the user agreed to change, so the decision can
 be confirmed. A change request saved before this state was recorded has none:
 its artifact must not have been written since the change request was created.
@@ -222,7 +225,11 @@ Ownership comes from those packs' pinned contracts, never from the candidate:
   that includes one returns the existing confirmation decision instead of
   applying.
 - The parent must be the app's accepted current build: the artifact store's
-  `CURRENT` record of that build family. The finalizer reads it at admission.
+  `CURRENT` record of the parent's build family and build key, the scope in
+  which accepting a build supersedes the current one. A `CURRENT` record under
+  another key, such as the App Intelligence index that a promotion saves in the
+  `app_bundle` family under `app_intelligence_workspace`, is not the app's
+  build. The finalizer reads it at admission; a failed read refuses.
   Studio marks the selected build stale only after an operation changed it or
   left its outcome unresolved: an inline run that stored a child, not since
   rejected, whose validation passed (a reviewable draft), is pending or was
@@ -231,6 +238,10 @@ Ownership comes from those packs' pinned contracts, never from the candidate:
   validates a stored child again), but it is not "nothing changed": the
   trigger reports it as `unresolved_change`, with the same entry on the run's
   refinement session, and the supported next step is to reject that draft. A
+  draft that is refined instead (for example through AppReview's request for
+  changes, which refines the draft under review) is marked stale by that run
+  and can then be neither rejected nor accepted; it stops holding its parent
+  once nothing made from it is open (below). A
   returned decision, a launch that failed, a run rejected before it stored a
   child, or a run whose only stored child failed validation (terminal and
   durable) leaves the parent current, so a later authorized change is admitted
@@ -243,25 +254,31 @@ Ownership comes from those packs' pinned contracts, never from the candidate:
   without changing any record, only when the stale marker is this app's own
   rejected or failed refinement and nothing else is open, in flight or
   changed (`ScopedRefinementCodingWorker._stale_parent_refusal`):
-  - no build of the family is `CURRENT`, and the parent was accepted (its
-    `metadata.acceptance` marker, which Studio acceptance writes; for a build
-    accepted earlier, an `ACCEPTED` or `PROMOTED` refinement session for it,
-    or a parentless app bundle with capability packs, which only
-    AppGenerator's genesis save writes, as `CURRENT`) and no other build of the
-    family shows a later acceptance;
+  - no build of the parent's build family and key is `CURRENT`, and the
+    parent was accepted (its `metadata.acceptance` marker, which Studio
+    acceptance writes; for a build accepted earlier, an `ACCEPTED` or
+    `PROMOTED` refinement session for it, or a parentless app bundle that
+    records its capability pack selection, which only AppGenerator's genesis
+    save writes, as `CURRENT`) and no other build of that family and key was
+    accepted at or after it (the newer accepted work check acceptance uses, below);
   - its `invalidation_reason` names a change request made from it by the same
     user, recorded as an inline run or a returned decision (never a workflow
     route), that saved the parent's state as `CURRENT` when it began
     (`router_decision.baseline_state`), and whose inline run's stored draft is
-    now rejected or failed validation. A change request that began while the
+    now closed (as below). A change request that began while the
     parent was already stale is followed back, under the same conditions, to
     the one that began while it was `CURRENT`, so each rejected retry leaves
     the next one admissible;
   - every other change request made from the parent ran inline or only
     returned a decision; one recorded as a workflow route (launched, failed
-    or abandoned) is unresolved. Every draft made from the parent is rejected,
-    removed or failed validation, and no draft further down its lineage is
-    open (validation passed, pending or skipped);
+    or abandoned) is unresolved. Every build made from the parent, and every
+    build further down its lineage, is closed: rejected, removed, a draft
+    that failed validation, or a stale draft that was never accepted (a draft
+    refined in review, which can then be neither rejected nor accepted and
+    never becomes current) with no change request made from it recorded as a
+    workflow route. A draft whose validation passed, is pending or was skipped
+    is open until it is rejected, and a build that was accepted is newer
+    accepted work;
   - Studio's registry read before the run began found no other run building
     (`registry_run_state`, set by Studio after it builds the request, never
     from the client payload);
@@ -273,7 +290,8 @@ Ownership comes from those packs' pinned contracts, never from the candidate:
     family is `STALE` with no `CURRENT` record.
 
   The retry stays bound to the same parent, the authenticated user and the
-  explicit or confirmed files. A lookup failure or a scan past 200 records
+  explicit or confirmed files. A lookup failure, any scan past its bound of
+  200 records, or an acceptance that cannot be ordered against the parent's
   refuses, and the refusal names its reason in
   `candidate_admission.stale_baseline_refusal`. These are reads at admission,
   not a compare-and-set; acceptance rechecks the parent, scope and registry
@@ -310,12 +328,18 @@ Acceptance rechecks a child that changed app-owned pack code before it becomes
 current. Its recorded `refinement_scope` must still be an explicit or confirmed
 selection of the changed paths in the requested registered build. The run that
 stored the child marked its parent stale, so while the child awaits review the
-app normally has no `CURRENT` app bundle build: there must be none, or the
-`CURRENT` build must still be the child's parent. The app registry's
+app normally has no `CURRENT` app bundle build of the child's build key: there
+must be none, or the `CURRENT` build must still be the child's parent. The app registry's
 `current_build_run` must also still name this child's artifact version and
 build id. Of the children that changed app-owned pack code, only the one from
 the latest registered run can be accepted; a child of an earlier run is refused
 even when its acceptance is requested first.
+
+Each acceptance check reads the version's own build family and build key, the
+scope in which `accept_build_record` supersedes the current build, so a
+`CURRENT` record under another key (such as a promotion's App Intelligence
+index) is not the app's build. A failed read of that scope's `CURRENT` builds,
+or more than 32 of them, refuses.
 
 Every app bundle acceptance also refuses a stale version, including a UI-only
 or AppGenerator draft, that would revert app-owned pack code accepted since.
@@ -325,12 +349,25 @@ either record's `capability_packs`, reading those entries in full from both
 verified archives. A difference, or an entry that cannot be compared exactly
 (a duplicate, a symbolic link or a file over 8 MB), refuses the version.
 
-An app bundle that has a parent is also refused when the app has a `CURRENT`
-app bundle that is neither its parent nor an earlier ancestor. Studio follows
-parent links within the app for at most 32 records; a missing record or a
-longer chain refuses too. A candidate made before a newer build was accepted,
+An app bundle that has a parent is also refused when newer accepted work lies
+outside its lineage. Studio follows parent links within the app, at most 32
+records, to the version's nearest accepted ancestor: the first that is
+`CURRENT` or shows acceptance (the `metadata.acceptance` marker; for a build
+accepted earlier, an `ACCEPTED` or `PROMOTED` refinement session for it, or the
+AppGenerator genesis save). Newer accepted work is a build of the version's
+family and key, not on that path, that is `CURRENT`, or that is stale or
+superseded and was accepted at or after that ancestor was accepted. An
+accepted build is marked stale once a refinement of it is stored, so this
+reads acceptance evidence, not only the `CURRENT` status; only builds written
+since the ancestor's acceptance are read. A missing record, a longer chain,
+more than 200 `CURRENT` builds or 200 builds written since that acceptance, an
+accepted build when no ancestor shows an acceptance, or an acceptance with no
+known time refuses too. A candidate made before a newer build was accepted,
 including a sibling of an accepted child, therefore cannot replace that build,
-while a child of a draft made from the current build can still be accepted.
+even after that build has been marked stale by a draft of its own; a draft of
+a draft of the latest accepted build can still be accepted. Acceptance times
+are compared as each acceptance recorded them, so separate Studio processes
+are assumed to keep agreeing clocks.
 
 Each refusal returns 409 and nothing changes. Studio serializes app bundle
 acceptances per app with an in-process lock and re-reads the version under it,

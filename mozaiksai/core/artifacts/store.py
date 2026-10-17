@@ -789,8 +789,16 @@ class BuildRecordStore:
         build_key: str | None = None,
         lineage_root_id: str | None = None,
         lifecycle_status: ArtifactLifecycleStatus | None = None,
+        updated_since: datetime | None = None,
         limit: int = 50,
     ) -> list[BuildRecord]:
+        """Build records of an app, newest version first.
+
+        ``updated_since`` keeps only records last written at or after that
+        instant. Every write to a record (creating, accepting, superseding,
+        staling, rejecting) sets ``updated_at`` to the time of that write, so
+        this finds every record changed since then.
+        """
         resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
         if not resolved_app_id:
             raise ValueError("app_id is required")
@@ -808,6 +816,8 @@ class BuildRecordStore:
             query["lineage_root_id"] = lineage_root_id
         if lifecycle_status is not None:
             query["lifecycle_status"] = lifecycle_status.value
+        if updated_since is not None:
+            query["updated_at"] = {"$gte": updated_since}
         versions = await self._coll("ArtifactVersions")
         cursor = versions.find(query).sort([("version_number", -1), ("created_at", -1)]).limit(max(1, int(limit)))
         rows = await cursor.to_list(length=max(1, int(limit)))

@@ -85,6 +85,7 @@ from mozaiksai.control_plane.app_intelligence_jobs import (
 from mozaiksai.control_plane.contracts import RegistryRunState
 from mozaiksai.control_plane.dry_run import RefinementDryRunPlan, RefinementExecutionPlan
 from mozaiksai.control_plane.implementations.coding_worker import (
+    newer_accepted_work,
     parent_workspace_pack_paths,
     resolve_coding_validation_strategy,
 )
@@ -2220,23 +2221,56 @@ def _recorded_workspace_pack_paths(provenance_entry: bytes | None) -> set[str]:
     }
 
 
+#: The most CURRENT records of one build family and key acceptance reads.
+_CURRENT_BUILDS_SCAN_LIMIT = 32
+
+
+async def _current_builds_in_scope(version, *, app_id: str, artifact_store: Any) -> list[Any]:  # noqa: ANN001
+    """The CURRENT records of ``version``'s build family and key, sorted by id; a failed read refuses.
+
+    That is the scope in which accepting ``version`` supersedes the current
+    build (``ArtifactStore.accept_build_record``), so a CURRENT record under
+    another key of the same family, such as the App Intelligence index a
+    promotion saves under ``app_intelligence_workspace``, is not the app's
+    build here.
+    """
+    try:
+        current = await artifact_store.list_build_records(
+            app_id=app_id, build_family=version.build_family, build_key=version.build_key,
+            lifecycle_status=ArtifactLifecycleStatus.CURRENT, limit=_CURRENT_BUILDS_SCAN_LIMIT + 1,
+        )
+    except Exception as exc:
+        logger.warning("current_builds_unverified app=%s version=%s", app_id, version.id, exc_info=True)
+        raise HTTPException(
+            status_code=409,
+            detail="The app's current build could not be read. No version was accepted.",
+        ) from exc
+    if len(current) > _CURRENT_BUILDS_SCAN_LIMIT:
+        raise HTTPException(
+            status_code=409,
+            detail=f"The app has more than {_CURRENT_BUILDS_SCAN_LIMIT} current builds to check. No version was accepted.",
+        )
+    return sorted(current, key=lambda record: record.id)
+
+
 async def _require_current_app_owned_pack_code(version, *, app_id: str, artifact_store: Any) -> None:  # noqa: ANN001
     """Reject a stale version that would replace app-owned pack code accepted since its parent.
 
     Acceptance replaces the whole bundle. A version made from a build that is
-    no longer the app's accepted current build carries that older build's
-    app-owned pack code, such as a customized Messaging handler, so accepting
-    it would silently revert an authorized change accepted since.
+    no longer the app's accepted current build (the CURRENT record of its
+    build family and key) carries that older build's app-owned pack code, such
+    as a customized Messaging handler, so accepting it would silently revert an
+    authorized change accepted since.
     """
     if version.build_family != "app_bundle":
         return
-    refs = await artifact_store.get_current_build_record_refs(app_id=app_id)
-    current_id = str((refs or {}).get(version.build_family) or "").strip()
-    if not current_id or current_id in {version.id, version.parent_build_record_id}:
-        return
-    current = await artifact_store.get_build_record(app_id=app_id, build_record_id=current_id)
-    if current is None:
-        return
+    for current in await _current_builds_in_scope(version, app_id=app_id, artifact_store=artifact_store):
+        if current.id not in {version.id, version.parent_build_record_id}:
+            await _require_same_app_owned_pack_code(version, current)
+
+
+async def _require_same_app_owned_pack_code(version, current) -> None:  # noqa: ANN001
+    """Refuse ``version`` when its app-owned pack code differs from the current build's."""
     current_zip = await _verified_app_bundle(current)
     version_zip = await _verified_app_bundle(version)
     paths: set[str] = set()
@@ -2264,9 +2298,10 @@ async def _require_accepted_workspace_parent(
 
     The server-recorded scope must still be an explicit or user-confirmed
     selection of the changed paths in this registered build. The app must have
-    no accepted current build, or that build must still be the child's parent,
-    and the registry's current build run must still name this child and its
-    build. Otherwise nothing is accepted.
+    no accepted current build (a CURRENT record of the child's build family
+    and key), or that build must still be the child's parent, and the
+    registry's current build run must still name this child and its build.
+    Otherwise nothing is accepted.
     """
     changed = _changed_workspace_pack_paths(version)
     metadata = _version_metadata(version)
@@ -2284,9 +2319,10 @@ async def _require_accepted_workspace_parent(
                 "refinement of this build. No version was accepted."
             ),
         )
-    refs = await artifact_store.get_current_build_record_refs(app_id=app_id)
-    current = str((refs or {}).get(version.build_family) or "").strip() or None
-    if not version.parent_build_record_id or (current is not None and current != version.parent_build_record_id):
+    current = await _current_builds_in_scope(version, app_id=app_id, artifact_store=artifact_store)
+    if not version.parent_build_record_id or any(
+        record.id != version.parent_build_record_id for record in current
+    ):
         raise HTTPException(
             status_code=409,
             detail=(
@@ -2337,43 +2373,40 @@ def _commit_metadata_with_acceptance(version, *, accepted_by: str | None) -> dic
 
 
 async def _require_current_build_in_lineage(version, *, app_id: str, artifact_store: Any) -> None:  # noqa: ANN001
-    """Refuse an app bundle made from a build older than the app's current build.
+    """Refuse an app bundle made from a build older than the app's latest accepted work.
 
-    Acceptance replaces the whole bundle. When the app has a CURRENT app
-    bundle, it must be the child's parent or an earlier ancestor (a child of
-    a draft made from it). Otherwise the child was made before a newer build
-    was accepted, such as a sibling candidate, and accepting it would revert
-    that build. A missing ancestor or a lineage past the bound refuses too.
+    Acceptance replaces the whole bundle. Within the version's build family
+    and key (the scope acceptance supersedes in), no build outside the
+    version's lineage may be CURRENT, or have been accepted after the
+    lineage's nearest accepted build (``coding_worker.newer_accepted_work``).
+    An accepted build is marked stale once a refinement of it is stored, so
+    acceptance evidence, not only the CURRENT status, shows it. Otherwise the
+    version was made before a newer build was accepted, such as a sibling
+    candidate, and accepting it would revert that build. A chained draft of
+    the latest accepted build is still accepted. A missing ancestor, a lineage
+    past the bound, a failed read, or an acceptance whose order cannot be
+    established refuses too.
     """
     if version.build_family != "app_bundle" or not version.parent_build_record_id:
         return
-    refs = await artifact_store.get_current_build_record_refs(app_id=app_id)
-    current_id = str((refs or {}).get(version.build_family) or "").strip()
-    if not current_id or current_id == version.id:
-        return
-    ancestor_id: str | None = version.parent_build_record_id
-    for _ in range(_ACCEPTANCE_LINEAGE_MAX_DEPTH):
-        if ancestor_id == current_id:
-            return
-        ancestor = await artifact_store.get_build_record(app_id=app_id, build_record_id=ancestor_id)
-        if ancestor is None:
-            raise HTTPException(
-                status_code=409,
-                detail="This version's lineage could not be verified against the app's current build. No version was accepted.",
-            )
-        ancestor_id = ancestor.parent_build_record_id
-        if not ancestor_id:
-            break
-    else:
-        raise HTTPException(
-            status_code=409,
-            detail="This version's lineage could not be verified against the app's current build. No version was accepted.",
+    unverified = "This version's lineage could not be verified against the app's accepted builds"
+    try:
+        newer = await newer_accepted_work(
+            artifact_store, app_id=app_id, record=version, max_depth=_ACCEPTANCE_LINEAGE_MAX_DEPTH,
         )
+    except Exception as exc:
+        logger.warning("acceptance_lineage_unverified app=%s version=%s", app_id, version.id, exc_info=True)
+        raise HTTPException(status_code=409, detail=f"{unverified}. No version was accepted.") from exc
+    if newer is None:
+        return
+    if newer.kind == "unverified":
+        raise HTTPException(status_code=409, detail=f"{unverified} ({newer.reason}). No version was accepted.")
+    latest = "current build" if newer.kind == "current" else "latest accepted build"
     raise HTTPException(
         status_code=409,
         detail=(
-            "This version was made from an earlier build than the app's current build, and accepting it would "
-            "replace changes accepted since. Refine the current build instead. No version was accepted."
+            f"This version was made from an earlier build than the app's {latest} ({newer.reason}), and "
+            "accepting it would replace changes accepted since. Refine that build instead. No version was accepted."
         ),
     )
 
@@ -3058,15 +3091,22 @@ class _InlineRunEffect(NamedTuple):
     draft_build_record_id: str | None = None
 
 
+#: Next step for an open draft that cannot be accepted. A refinement of a draft
+#: marks it stale, after which it can be neither rejected nor accepted; coding
+#: admission then counts it as closed once nothing made from it is open.
+_REJECT_OPEN_DRAFT = (
+    "Reject the draft to change that build again. If the draft is refined instead, it can no longer be "
+    "rejected; it stops blocking that build once nothing made from it is open."
+)
 #: What the trigger tells the user when an inline run's outcome is unresolved.
 _UNRESOLVED_CHANGE_DETAILS = {
     "validation_pending": (
         "Validation of this draft did not complete, so it cannot be accepted. The build it was made from is "
-        "invalidated while the draft is open. Reject the draft to change that build again."
+        f"invalidated while the draft is open. {_REJECT_OPEN_DRAFT}"
     ),
     "validation_skipped": (
         "Validation of this draft was skipped, so it cannot be accepted. The build it was made from is "
-        "invalidated while the draft is open. Reject the draft to change that build again."
+        f"invalidated while the draft is open. {_REJECT_OPEN_DRAFT}"
     ),
     "child_lookup_failed": (
         "Whether this run stored a draft could not be read, so the build it was made from is invalidated "
@@ -3226,42 +3266,10 @@ def _baseline_state(version) -> dict[str, Any]:  # noqa: ANN001
     }
 
 
-async def _current_build_outside_lineage(version, *, app_id: str, artifact_store: Any) -> bool:  # noqa: ANN001
-    """Whether a CURRENT build of the family is neither this build nor one of its ancestors.
-
-    The CURRENT records are listed from the store, which raises when it cannot
-    read them; the current-refs lookup reports such a failure as "nothing
-    current", which must not let a confirmation through. A missing ancestor, a
-    lineage past the acceptance bound, or more CURRENT records than that bound
-    counts as outside.
-    """
-    current = await artifact_store.list_build_records(
-        app_id=app_id, build_family=version.build_family, lifecycle_status=ArtifactLifecycleStatus.CURRENT,
-        limit=_ACCEPTANCE_LINEAGE_MAX_DEPTH + 1,
-    )
-    if len(current) > _ACCEPTANCE_LINEAGE_MAX_DEPTH:
-        return True
-    outside = {record.id for record in current} - {version.id}
-    ancestor_id: str | None = version.parent_build_record_id
-    for _ in range(_ACCEPTANCE_LINEAGE_MAX_DEPTH):
-        if not outside:
-            return False
-        if not ancestor_id:
-            return True
-        outside.discard(ancestor_id)
-        if not outside:
-            return False
-        ancestor = await artifact_store.get_build_record(app_id=app_id, build_record_id=ancestor_id)
-        if ancestor is None:
-            return True
-        ancestor_id = ancestor.parent_build_record_id
-    return bool(outside)
-
-
 async def _require_unchanged_confirmation_baseline(
     source_version, change: Any, *, app_id: str, artifact_store: Any,  # noqa: ANN001
 ) -> None:
-    """Refuse a confirmation whose build changed after the proposal, or was replaced by newer accepted work.
+    """Refuse a confirmation whose build changed after the proposal, or was overtaken by newer accepted work.
 
     The proposal saved the build's state on its ChangeRequest (server-written,
     unlike the pending decision). A build that was already STALE when the
@@ -3271,6 +3279,14 @@ async def _require_unchanged_confirmation_baseline(
     created. Every earlier proposal staled its build right after creating its
     ChangeRequest, so such a decision is refused once; requesting the change
     again saves the state and that proposal can be confirmed.
+
+    Newer accepted work is read as acceptance does
+    (``coding_worker.newer_accepted_work``): within the build's family and key,
+    a build outside its lineage that is CURRENT, or that was accepted after
+    the lineage's nearest accepted build (the build itself when it was
+    accepted), even if that build has since been marked stale by a refinement
+    of its own. A failed read, or an order that cannot be established,
+    refuses too.
 
     An unchanged baseline grants nothing by itself: the confirmed request then
     follows the existing route for its situation. A scope that changes
@@ -3296,22 +3312,25 @@ async def _require_unchanged_confirmation_baseline(
             status_code=409,
             detail="The build this decision was proposed for has changed since the proposal. Request the change again.",
         )
+    unchecked = "The build this decision was proposed for could not be checked against the app's current build"
     try:
-        replaced = await _current_build_outside_lineage(source_version, app_id=app_id, artifact_store=artifact_store)
+        newer = await newer_accepted_work(
+            artifact_store, app_id=app_id, record=source_version, max_depth=_ACCEPTANCE_LINEAGE_MAX_DEPTH,
+        )
     except Exception as exc:
         logger.warning("confirmation_lineage_check_failed build=%s", source_version.id, exc_info=True)
-        raise HTTPException(
-            status_code=409,
-            detail="The build this decision was proposed for could not be checked against the app's current build. Request the change again.",
-        ) from exc
-    if replaced:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "A newer build of this app was accepted after this decision was proposed. "
-                "Request the change again from the app's current build."
-            ),
-        )
+        raise HTTPException(status_code=409, detail=f"{unchecked}. Request the change again.") from exc
+    if newer is None:
+        return
+    if newer.kind == "unverified":
+        raise HTTPException(status_code=409, detail=f"{unchecked} ({newer.reason}). Request the change again.")
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            "A newer build of this app was accepted outside the line of builds this decision was proposed for "
+            f"({newer.reason}). Request the change again from the app's latest accepted build."
+        ),
+    )
 
 
 def _require_server_proposed_scope(pending: dict[str, Any], change: Any, request: RefinementRequest) -> None:

@@ -44,7 +44,9 @@ This project follows a practical pre-1.0 changelog format:
   them.
 - An app-owned pack handler, such as Messaging's `handler.py`, can now be
   changed through an authorized selected-file Studio refinement of the app's
-  accepted current build, as a thin extension that keeps every template-owned
+  accepted current build (the current record of its build family and key, so
+  the App Intelligence index a promotion saves as current under its own key
+  is not taken for it), as a thin extension that keeps every template-owned
   pack file byte-identical. Regeneration, UI-only refinement, repairs and
   AppGenerator plan tasks cannot change it, and an unsupported request fails
   with an explicit diagnostic that names the supported path. When a rejected
@@ -53,18 +55,23 @@ This project follows a practical pre-1.0 changelog format:
   only if that build's stale marker is this app's own rejected or failed
   inline refinement (its change request saved the build's state as current
   when it began, ran inline, was made by the same user, and its draft is now
-  rejected or failed validation, followed back through earlier retries) and
-  nothing else is open, in flight or changed: no build was accepted after it,
-  no other change request from it is recorded as a workflow route, no draft
-  made from it is open, Studio's registry read found no other run building
-  when the run began, and no input family it depends on became current after
-  it was accepted or is stale with no current build. Anything else, including
-  a failed lookup, is refused with `STALE_REFINEMENT_BASELINE` and the reason
-  in `stale_baseline_refusal`. Studio acceptance now records
+  closed, followed back through earlier retries) and nothing else is open, in
+  flight or changed: no other build of its family and key was accepted since
+  it was, no other change request from it is recorded as a workflow route, every build
+  made from it or further down its lineage is closed (rejected, removed,
+  failed validation, or a stale draft that was never accepted, such as a draft
+  refined in review, which can then be neither rejected nor accepted, unless a
+  change request made from it is recorded as a workflow route), Studio's
+  registry read found no other run building when the run began, and no input
+  family it depends on became current after it was accepted or is stale with
+  no current build. Anything else, including a failed lookup, is refused with
+  `STALE_REFINEMENT_BASELINE` and the reason in `stale_baseline_refusal`.
+  Studio acceptance now records
   `metadata.acceptance` on the accepted record, so a build that is later
   marked stale can still be recognized as accepted (an earlier build is
   recognized by its accepted refinement session, or as the AppGenerator
-  genesis build). A surface run's change request is recorded as
+  genesis build, including one with no capability packs). A surface run's
+  change request is recorded as
   `surface_regeneration` rather than as a workflow route.
 - A Studio refinement request marks the selected build stale only once the
   operation it started has changed that build or left its outcome unresolved:
@@ -74,7 +81,9 @@ This project follows a practical pre-1.0 changelog format:
   return counts too), or a workflow run that launched. A pending or skipped
   child can never be accepted; the trigger response and the run's refinement
   session report it as `unresolved_change`, and rejecting that draft is the
-  supported next step. A scope question or confirmation prompt, a dismissed
+  supported next step (a draft refined instead is marked stale and can no
+  longer be rejected; it stops holding its build once nothing made from it is
+  open). A scope question or confirmation prompt, a dismissed
   decision, rejected input, a workflow launch that failed, and an inline run
   that stored nothing or only a child whose validation failed leave the build
   current, so the confirmed or retried change is still admitted against it.
@@ -154,24 +163,34 @@ This project follows a practical pre-1.0 changelog format:
   cannot run code at import, and service arguments must come from the
   override's own parameters. These checks are targeted guards, not
   certification of arbitrary code.
-- Accepting a version whose parent is no longer the current accepted build is
-  refused when it would replace app-owned pack code accepted since. The
-  comparison reads those files in full from the verified archives and refuses
-  oversized, duplicate or linked entries instead of skipping them.
-- Accepting an app bundle is refused when the app's current build is not its
-  parent or an earlier ancestor, so an older candidate or the sibling of an
-  accepted child cannot replace newer accepted work. A child of a draft made
-  from the current build is still accepted. Studio re-reads the version under
-  its per-process acceptance lock, which coordinates one Studio process only.
+- Accepting a version whose parent is not the current build of its build
+  family and key is refused when it would replace that current build's
+  app-owned pack code. The comparison reads those files in full from the
+  verified archives and refuses oversized, duplicate or linked entries instead
+  of skipping them.
+- Accepting an app bundle is refused when newer accepted work lies outside its
+  lineage: within its build family and key (the scope acceptance supersedes
+  in, so a current record under another key, such as the App Intelligence
+  index a promotion saves, is not the app's build), a build that is current,
+  or that was accepted at or after the version's nearest accepted ancestor,
+  including one a draft of its own has since marked stale. An older candidate
+  or the sibling of an accepted child therefore cannot replace newer accepted
+  work, and a draft of a draft of the latest accepted build is still accepted.
+  A missing or overlong lineage, a failed read, a scan past its bound, or an
+  acceptance that cannot be ordered against the ancestor's refuses. Studio
+  re-reads the version under its per-process acceptance lock, which
+  coordinates one Studio process only.
 - Confirming a proposed refinement scope requires the pending decision's files
   to equal those the trigger saved on its change request for the same build,
   since the pending decision can also be written through the session decision
   API. The proposal saves the selected build's lifecycle state on its change
   request. Before the decision is used, a confirmation is refused when that
   build has been written since (made stale again, superseded, accepted or
-  rejected), when it is rejected or removed, when a newer build outside its
-  lineage has been accepted, or when the family's current builds cannot be
-  read. A decision proposed for a build that was already
+  rejected), when it is rejected or removed, when newer accepted work lies
+  outside its lineage (read as acceptance reads it, so a newer accepted build
+  that has since been marked stale still refuses, and a current record under
+  another build key does not), or when that cannot be checked. A decision
+  proposed for a build that was already
   stale, and is unchanged, can be confirmed; it then follows its route, so a
   scope that changes app-owned pack code still needs stale-build admission and
   a workflow route launches as before. A change request proposed before the
