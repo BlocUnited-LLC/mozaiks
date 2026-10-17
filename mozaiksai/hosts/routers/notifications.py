@@ -25,8 +25,8 @@ router = APIRouter(tags=["notifications"])
 logger = get_workflow_logger("platform_app")
 
 # Fields excluded from notification list responses.
-# source_event holds the whole originating event, including provider IDs
-# (e.g. payment_provider_payment_intent_id) and message text, unless the
+# source_event holds the whole originating event, which can include provider
+# IDs (e.g. payment_provider_payment_intent_id) or message text, unless the
 # notification rule declares `source_event: reference`; then it holds only the
 # event's id, type and related type. Records stored before a rule declared it
 # keep the whole event, so the field is always excluded.

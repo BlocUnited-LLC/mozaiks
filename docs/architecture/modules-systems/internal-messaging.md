@@ -90,11 +90,17 @@ Support status is explicit:
 `messages/contracts/notifications.yaml` uses `recipient_ids` from
 `domain.messages.message_sent` to create in-app notifications. This is the
 canonical path for "operator replied" notifications. The notification holds no
-message text: it says "New message" and "Open the conversation to read it.",
-with thread and message ids in its context. Opening the conversation reads the
-message under the current participant check, so a deleted message or a revoked
-participant leaves nothing for the notification to show. Notifications stored
-before this change keep the preview they copied until the recipient clears them.
+message text. Its title is "New message" and its body "Open the conversation to
+read it."; its context holds the event's `thread_id`, `message_id`,
+`related_type` and `related_id` when the event carries them; and, because the
+rule declares `source_event: reference`, its `source_event` holds only the
+event's id, type and related type. Like every notification record it also keeps
+the event's id and type, its actor, the recipients, the channels, its status and
+creation time, and the owning app, tenant and workspace. Opening the
+conversation reads the message under the current participant check, so after a
+message is deleted or a participant is removed the notification still shows only
+its fixed title and body. Notifications stored before this change keep the
+preview they copied until the recipient clears them.
 
 `workspace_support/contracts/notifications.yaml` owns support-queue alerts that
 are not plain message-recipient delivery: new support requests, ticket-owner

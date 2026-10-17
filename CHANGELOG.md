@@ -28,15 +28,20 @@ This project follows a practical pre-1.0 changelog format:
   page sections use app spacing, and sidebar pages stack on narrow screens.
   Invalid explicit title roles and layouts report errors instead of silently
   substituting another presentation.
-- Messaging `0.1.14` notifications carry no message text: they say "New
-  message" and "Open the conversation to read it.", and their context holds the
-  thread and message ids and the thread's related-record identifiers
-  (`related_type` and `related_id`). A notification rule can declare
-  `source_event: reference` to store just
-  the originating event's id, type and related type; other rules keep storing
-  the full event. Notifications rendered by an earlier pack version (the
-  released `0.1.12` and before) keep their copied preview until the recipient
-  clears them.
+- Messaging `0.1.14` `message_sent` notifications carry no message text. A
+  stored record's title is "New message" and its body "Open the conversation
+  to read it."; its context holds the event's `thread_id`, `message_id`,
+  `related_type` and `related_id` when the event carries them; and, because
+  the rule declares `source_event: reference`, its `source_event` holds only
+  the originating event's id, type and related type. Like every notification
+  record it also keeps the event's id and type, its actor, the recipients, the
+  channels, its status and creation time, and the owning app, tenant and
+  workspace, and `notification.created` carries the same record. A rule that
+  does not declare `source_event: reference` keeps storing the full
+  originating event as `source_event`, which notification list responses never
+  return. Notifications rendered by an earlier pack version (the released
+  `0.1.12` and before) keep their copied preview until the recipient clears
+  them.
 - An app-owned pack handler, such as Messaging's `handler.py`, can now be
   changed through an authorized selected-file Studio refinement of the app's
   accepted current build, as a thin extension that keeps every template-owned

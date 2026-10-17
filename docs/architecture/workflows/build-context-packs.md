@@ -251,7 +251,9 @@ CRUD must not expose private conversations. Its additive migration uses only
 keys. Reapplying the same migration hash skips it without rewriting records.
 Account export and deletion use the same app-bound persistence collections and
 preserve messages and conversations belonging to other participants. Its
-`message_sent` notification carries no message text, and its lifecycle events
+`message_sent` notification carries no message text (a fixed title and body, a
+context of the thread, message and related-record ids, and a `source_event`
+reference), and its lifecycle events
 declare the subject app and related record as nullable, so plain direct
 conversations still dispatch them. Neither the migration nor account deletion
 touches platform notifications, so a notification rendered by a pack version
