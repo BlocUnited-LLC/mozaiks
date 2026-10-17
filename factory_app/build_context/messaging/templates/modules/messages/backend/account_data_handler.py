@@ -11,9 +11,10 @@ remaining message, or cleared when none remains. The user leaves participant_ids
 of every surviving thread, so participant checks admit only the remaining
 participants; a send never writes back the participant list it read, so one
 that overlaps the deletion cannot restore the user. created_by is a required
-string and becomes a blank marker that no actor id equals, and a non-blank
-title the user gave a surviving thread (a support thread is titled with its
-opening message) becomes a neutral title; the creator's user_id scope stamp is
+string and becomes a blank marker that no actor id equals, a non-blank title
+the user gave a surviving thread (a support thread is titled with its opening
+message) becomes a neutral title, and the annotations the user attached to it
+become an empty metadata map; the creator's user_id scope stamp is
 removed. In-app
 notifications rendered from message_sent since pack 0.1.14 hold only thread and
 message references, so deleted messages leave them nothing to show. Those
@@ -23,7 +24,9 @@ handlers.
 
 Export returns sent messages, read state, and one fixed thread projection, without
 peers' previews or participant ids, for the threads the user created and for
-every thread the user participates in.
+every thread the user participates in. A membership row carries the title only
+of a thread the user created, because another creator's title is that creator's
+text.
 """
 from __future__ import annotations
 
@@ -116,9 +119,9 @@ class AccountDataHandler:
                 {"$pull": {"participant_ids": user_id}},
             )
             memberships_removed += int(result.modified_count)
-        # A title the user wrote is their content; a support thread's title is its opening message.
+        # A title or annotation the user wrote is their content; a support thread's title is its opening message.
         for thread in await self._records(app_id, "threads", {"created_by": user_id}, ("thread_id", "title")):
-            released: dict[str, Any] = {"created_by": _RELEASED_CREATOR}
+            released: dict[str, Any] = {"created_by": _RELEASED_CREATOR, "metadata": {}}
             if str(thread.get("title") or "").strip():
                 released["title"] = _RELEASED_TITLE
             await threads.update_one({"thread_id": thread["thread_id"], "created_by": user_id}, {"$set": released})
@@ -156,7 +159,13 @@ class AccountDataHandler:
             "threads_created": await self._records(app_id, "threads", {"created_by": user_id}, _CREATED_THREAD_FIELDS),
             "messages_sent": await self._records(app_id, "messages", {"sender_id": user_id}),
             "thread_reads": await self._records(app_id, "thread_reads", {"user_id": user_id}),
-            "thread_memberships": await self._records(
-                app_id, "threads", {"participant_ids": user_id}, _THREAD_FIELDS,
-            ),
+            "thread_memberships": await self._memberships(app_id, user_id),
         }
+
+    async def _memberships(self, app_id: str, user_id: str) -> list[dict[str, Any]]:
+        rows = await self._records(app_id, "threads", {"participant_ids": user_id}, (*_THREAD_FIELDS, "created_by"))
+        for row in rows:
+            # Another creator's title is their text; a support thread's title is the requester's opening message.
+            if row.pop("created_by") != user_id:
+                del row["title"]
+        return rows

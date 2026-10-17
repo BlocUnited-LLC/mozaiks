@@ -967,6 +967,37 @@ async def test_messaging_account_deletion_anonymises_titles_of_threads_the_user_
 
 
 @pytest.mark.asyncio
+async def test_messaging_account_deletion_clears_annotations_of_threads_the_user_created(messaging_account):
+    rt = messaging_account
+    secret = "my home address is 12 Elm St"
+    thread_id = (await rt.module.create_thread(
+        rt.ctx("alice"), participant_ids=["bob"], thread_type="direct",
+        metadata=[{"key": "topic", "value": secret}],
+    ))["thread"]["thread_id"]
+    await rt.send("bob", thread_id, "bob replies")
+    await rt.send("alice", thread_id, "alice answers")
+    # Annotations a peer wrote on a thread Alice joined belong to that peer.
+    bob_thread = (await rt.module.create_thread(
+        rt.ctx("bob"), participant_ids=["alice"], thread_type="group", title="Bob's plans",
+        metadata=[{"key": "topic", "value": "bob launch plan"}],
+    ))["thread"]["thread_id"]
+    await rt.send("alice", bob_thread, "alice joins")
+
+    await rt.account("delete", "alice")
+    # Bob keeps the thread Alice created, without the annotations she wrote.
+    assert rt.stored_row(thread_id)["metadata"] == {}
+    bob_view = await rt.module.get_thread(rt.ctx("bob"), thread_id=thread_id)
+    assert (bob_view["thread"]["metadata"], [row["body"] for row in bob_view["messages"]]) == ({}, ["bob replies"])
+    assert rt.stored_row(bob_thread)["metadata"] == {"topic": "bob launch plan"}
+    assert secret not in json.dumps(await rt.module.list_threads(rt.ctx("bob")), default=str)
+    assert secret not in json.dumps(rt.snapshot(), default=str)
+    assert "alice" not in json.dumps(rt.snapshot(), default=str)
+    after = rt.snapshot()
+    await rt.account("delete", "alice")
+    assert rt.snapshot() == after
+
+
+@pytest.mark.asyncio
 async def test_messaging_account_export_of_created_threads_holds_only_the_users_own_data(messaging_account):
     rt = messaging_account
     peer_text = "bob private reply"
@@ -1004,6 +1035,45 @@ async def test_messaging_account_export_keeps_the_creators_thread_annotations(me
 
 
 @pytest.mark.asyncio
+async def test_messaging_account_export_leaves_titles_peers_wrote_out_of_membership_rows(messaging_account):
+    rt = messaging_account
+    service = rt.module._service
+    secret = "alice private support text about her medical bill"
+    # The support pack titles a support thread with the opening message, and an operator reply admits the operator.
+    support = (await service.create_thread(
+        rt.ctx("alice"), title=secret[:80], participant_ids=[], thread_type="support",
+        related_type="support.request", related_id="sr_1",
+    ))["thread"]["thread_id"]
+    assert (await service.send_message(
+        rt.ctx("alice"), thread_id=support, body=secret, allow_support_thread_sender=True,
+    ))["success"]
+    assert (await service.send_message(
+        rt.ctx("operator"), thread_id=support, body="operator reply", sender_role="operator",
+        allow_nonparticipant_sender=True, allow_support_thread_sender=True,
+    ))["success"]
+    assert rt.stored_row(support)["participant_ids"] == ["alice", "operator"]
+    group_title = "alice private group name"
+    group = (await rt.module.create_thread(
+        rt.ctx("alice"), participant_ids=["bob"], thread_type="group", title=group_title,
+    ))["thread"]["thread_id"]
+
+    for user_id, thread_id in (("operator", support), ("bob", group)):
+        exported = await rt.account("export", user_id)
+        # The member keeps the membership facts, but not the title Alice wrote.
+        stored = rt.stored_row(thread_id)
+        assert exported["thread_memberships"] == [
+            {field: stored[field] for field in THREAD_EXPORT_FIELDS - {"title"}},
+        ]
+        assert exported["threads_created"] == []
+        assert secret[:20] not in json.dumps(exported) and group_title not in json.dumps(exported)
+
+    # Alice's own export keeps the titles she wrote.
+    exported = await rt.account("export", "alice")
+    for rows in (exported["threads_created"], exported["thread_memberships"]):
+        assert {row["thread_id"]: row["title"] for row in rows} == {support: secret[:80], group: group_title}
+
+
+@pytest.mark.asyncio
 async def test_messaging_account_export_is_json_safe_and_covers_deleted_collections(messaging_account):
     rt = messaging_account
     peer_text = "bob's private last word"
@@ -1037,11 +1107,12 @@ async def test_messaging_account_export_is_json_safe_and_covers_deleted_collecti
     memberships = exported["thread_memberships"]
     assert len({row["thread_id"] for row in memberships}) == len(memberships) == 102
     assert {row["thread_id"] for row in memberships} >= {bob_thread, alice_thread, "thr_member_0", "thr_member_99"}
-    # Membership is a fixed projection: peers' previews, ids, and storage metadata stay out.
-    assert {frozenset(row) for row in memberships} == {frozenset({
-        "thread_id", "thread_type", "title", "status", "scope_type", "scope_id", "subject_app_id",
-        "related_type", "related_id", "created_at",
-    })}
+    # Membership is a fixed projection: peers' previews, ids, titles, and storage metadata stay out.
+    # Only a thread Alice created carries its title, which she wrote.
+    assert {row["thread_id"]: frozenset(row) for row in memberships} == {
+        row["thread_id"]: THREAD_EXPORT_FIELDS if row["thread_id"] == alice_thread else THREAD_EXPORT_FIELDS - {"title"}
+        for row in memberships
+    }
     assert not {peer_text, "bob", "carol"} & {value for row in memberships for value in row.values()}
     assert peer_text not in json.dumps(memberships)
 

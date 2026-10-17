@@ -201,8 +201,9 @@ preserve messages and conversations belonging to other participants. Its
 `message_sent` notification carries no message text, and its lifecycle events
 declare the subject app and related record as nullable, so plain direct
 conversations still dispatch them. Neither the migration nor account deletion
-touches platform notifications, so a notification rendered by `0.1.13` keeps its
-copied preview until the recipient clears it.
+touches platform notifications, so a notification rendered by a pack version
+before `0.1.14` (the released `0.1.12` and earlier) keeps its copied preview
+until the recipient clears it.
 
 ## Targeting
 
