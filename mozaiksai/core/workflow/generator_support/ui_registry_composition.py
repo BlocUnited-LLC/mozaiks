@@ -11,7 +11,7 @@ import json
 import logging
 import posixpath
 import re
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -310,8 +310,16 @@ class _RevisionBaseline:
     metadata: dict[str, Any]
 
 
+#: Restated overlay values a current task keeps, by the shared root that declares them.
+_RESTATED_KINDS_BY_ROOT = {
+    "ui/index.js": frozenset({"component", "export"}),
+    "ui/route_manifest.json": frozenset({"route", "metadata"}),
+}
+
+
 def _apply_admitted_overlay(
     declarations: list[_Declaration], overlay_owners: set[str], revision: _RevisionBaseline | None,
+    overlay_newer: Mapping[str, frozenset[str]] | None = None,
 ) -> list[_Declaration]:
     """Let the newest admitted app layer replace older app declarations.
 
@@ -324,8 +332,12 @@ def _apply_admitted_overlay(
     the verified baseline. An unchanged copy, such as a full root an earlier
     repair or the auth scaffold saved, carries no admitted change: it still
     replaces older snapshot values, but it can neither revert a task's approved
-    change nor make competing task declarations look carried.
+    change nor make competing task declarations look carried. Where
+    ``overlay_newer`` records that the overlay copy of a root is newer than a
+    task's output (an admitted repair of that task saved it), the overlay's
+    restatement of the baseline supersedes that task too.
     """
+    overlay_newer = overlay_newer or {}
     entries: dict[str, ComponentRegistration] = {}
     exports: dict[str, tuple[str, str]] = {}
     routes: dict[str, dict[str, Any]] = {}
@@ -371,8 +383,12 @@ def _apply_admitted_overlay(
     for owner, baseline, contents, own_entries, own_exports, manifest in declarations:
         if owner not in overlay_owners and not owner.startswith("pack:"):
             # A carried snapshot takes every overlay value; a current task keeps
-            # its own value wherever the overlay merely restates the baseline.
-            keeps = set() if baseline else restated
+            # its own value wherever the overlay merely restates the baseline,
+            # unless an admitted repair of that task saved the overlay root.
+            newer = frozenset().union(*(
+                kinds for root, kinds in _RESTATED_KINDS_BY_ROOT.items() if root in overlay_newer.get(owner, ())
+            ))
+            keeps = set() if baseline else {item for item in restated if item[0] not in newer}
             own_entries = [
                 entries[entry.key] if entry.key in entries and ("component", entry.key) not in keeps else entry
                 for entry in own_entries
@@ -384,7 +400,7 @@ def _apply_admitted_overlay(
             if manifest is not None:
                 pages = list(manifest["pages"])
                 own_routes = {route["id"]: route for route in pages}
-                moved: Collection[str] = routes.keys() if baseline else task_positioned
+                moved: Collection[str] = routes.keys() if baseline or "route" in newer else task_positioned
                 slots = [index for index, route in enumerate(pages) if route["id"] in moved]
                 for index, route_id in zip(slots, sorted((pages[index]["id"] for index in slots), key=sequence.index), strict=True):
                     pages[index] = own_routes[route_id] if ("route", route_id) in keeps else routes[route_id]
@@ -405,13 +421,16 @@ def compose_ui_registry(
     The caller admits workers, verifies pack digests, and reads revision_baseline
     from the bound immutable archive. Current snapshots cannot grant carryover.
     A contribution marked ``admitted_overlay`` is the accumulated admitted repair
-    layer. ``deleted_paths`` are admitted tombstones, already absent from files;
+    layer; a current contribution's ``overlay_supersedes`` names the shared roots
+    whose overlay copy an admitted repair of it saved, so is newer than it.
+    ``deleted_paths`` are admitted tombstones, already absent from files;
     app declarations (never pack ones) drop registrations of those files.
     """
     deleted = frozenset(deleted_paths)
     declarations: list[_Declaration] = []
     set_aside: list[dict[str, tuple[str, str]]] = []
     overlay_owners: set[str] = set()
+    overlay_newer: dict[str, frozenset[str]] = {}
     baseline_entries: set[ComponentRegistration] = set()
     baseline_exports: set[tuple[str, tuple[str, str]]] = set()
     baseline_routes: dict[str, list[dict[str, Any]]] = {}
@@ -435,6 +454,8 @@ def compose_ui_registry(
             raise ValueError(f"{owner}: a pack contribution cannot be the admitted app overlay")
         if overlay:
             overlay_owners.add(owner)
+        if contribution.get("overlay_supersedes"):
+            overlay_newer[owner] = frozenset(str(path) for path in contribution["overlay_supersedes"])
         # The overlay is carried: it never claims an active owner.
         baseline = contribution.get("baseline") is True or overlay
         contents = {item["filename"]: item["content"] for item in contribution["files"]}
@@ -463,7 +484,9 @@ def compose_ui_registry(
     revision = _RevisionBaseline(
         frozenset(baseline_entries), frozenset(baseline_exports), baseline_routes, baseline_sequence, baseline_metadata,
     ) if revision_baseline else None
-    declarations = _apply_admitted_overlay(declarations, overlay_owners, revision) if overlay_owners else declarations
+    declarations = (
+        _apply_admitted_overlay(declarations, overlay_owners, revision, overlay_newer) if overlay_owners else declarations
+    )
     # Composition is additive: an omitted carried declaration stays. Only an
     # admitted deletion of its component file removes an app registration, and
     # the app routes to that component leave with it. Pack declarations never

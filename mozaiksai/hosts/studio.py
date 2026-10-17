@@ -11,8 +11,8 @@ import io
 import os
 import stat
 import zipfile
-from asyncio import CancelledError, to_thread
-from contextlib import asynccontextmanager
+from asyncio import CancelledError, Lock, to_thread
+from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
 from datetime import UTC, datetime
 from difflib import unified_diff
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -2092,6 +2092,61 @@ class BuildArtifactAcceptanceRequest(BaseModel):
     notes: str | None = Field(default=None, max_length=2000)
 
 
+#: Per-app serialization of acceptances that change app-owned pack code, so the
+#: accepted-parent recheck and the acceptance it guards cannot interleave.
+_WORKSPACE_ACCEPTANCE_LOCKS: dict[str, Lock] = {}
+
+
+def _changed_workspace_pack_paths(version) -> list[str]:  # noqa: ANN001
+    scope = _version_metadata(version).get("refinement_scope")
+    paths = scope.get("changed_workspace_pack_paths") if isinstance(scope, dict) else None
+    return sorted(str(path) for path in paths) if isinstance(paths, list) else []
+
+
+def _workspace_acceptance_guard(app_id: str, version) -> AbstractAsyncContextManager[Any]:  # noqa: ANN001
+    if not _changed_workspace_pack_paths(version):
+        return nullcontext()
+    return _WORKSPACE_ACCEPTANCE_LOCKS.setdefault(app_id, Lock())
+
+
+async def _require_accepted_workspace_parent(
+    version, *, app_id: str, build_registry_id: str | None, artifact_store: Any,  # noqa: ANN001
+) -> None:
+    """Recheck at acceptance the authority an app-owned pack code change was admitted under.
+
+    The server-recorded scope must still be an explicit or user-confirmed
+    selection of the changed paths in this registered build, and the child's
+    parent must still be the app's accepted current build. Otherwise nothing
+    is accepted.
+    """
+    changed = _changed_workspace_pack_paths(version)
+    metadata = _version_metadata(version)
+    scope = metadata.get("refinement_scope") or {}
+    if (
+        scope.get("scope_origin") not in {"explicit", "confirmed"}
+        or not set(changed) <= set(scope.get("selected_file_paths") or [])
+        or not build_registry_id
+        or metadata.get("build_registry_id") != build_registry_id
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This change to app-owned capability code was not made in an authorized selected-file "
+                "refinement of this build. No version was accepted."
+            ),
+        )
+    refs = await artifact_store.get_current_build_record_refs(app_id=app_id)
+    current = str((refs or {}).get(version.build_family) or "").strip() or None
+    if not version.parent_build_record_id or current != version.parent_build_record_id:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This change to app-owned capability code was made from a build that is no longer the "
+                "app's accepted current build. Refine the current build again. No version was accepted."
+            ),
+        )
+
+
 @app.post("/api/studio/build/artifacts/{artifact_version_id}/accept")
 async def accept_build_artifact_version(
     artifact_version_id: str,
@@ -2125,23 +2180,32 @@ async def accept_build_artifact_version(
             status_code=409,
             detail="Staged refinement drafts require a promotion_ready review record before acceptance.",
         )
-    if refinement_review_record is not None:
-        try:
-            accepted_result = await accept_staged_refinement_build_record(
-                app_id=app_id,
-                draft_build_record_id=artifact_version_id,
-                review_record=refinement_review_record,
-                request_id=refinement_review_record.request_id,
-                record_store=artifact_store,
-                accepted_by=principal.user_id,
-                notes=body.notes if body is not None else None,
+    async with _workspace_acceptance_guard(app_id, version):
+        if _changed_workspace_pack_paths(version):
+            # Re-read under the guard: another acceptance may have just completed.
+            current_version = await artifact_store.get_build_record(app_id=app_id, build_record_id=artifact_version_id)
+            if current_version is None or current_version.lifecycle_status != ArtifactLifecycleStatus.DRAFT:
+                raise HTTPException(status_code=409, detail="Only draft artifact versions can be accepted.")
+            await _require_accepted_workspace_parent(
+                current_version, app_id=app_id, build_registry_id=build_registry_id, artifact_store=artifact_store,
             )
-        except (AcceptedStagedAppBundleBuildRecordError, ValueError) as exc:
-            logger.warning("accept_staged_refinement conflict app=%s version=%s: %s", app_id, artifact_version_id, exc)
-            raise HTTPException(status_code=409, detail="Conflict accepting artifact version.") from exc
-        accepted = accepted_result.build_record
-    else:
-        accepted = await artifact_store.accept_build_record(app_id=app_id, build_record_id=artifact_version_id)
+        if refinement_review_record is not None:
+            try:
+                accepted_result = await accept_staged_refinement_build_record(
+                    app_id=app_id,
+                    draft_build_record_id=artifact_version_id,
+                    review_record=refinement_review_record,
+                    request_id=refinement_review_record.request_id,
+                    record_store=artifact_store,
+                    accepted_by=principal.user_id,
+                    notes=body.notes if body is not None else None,
+                )
+            except (AcceptedStagedAppBundleBuildRecordError, ValueError) as exc:
+                logger.warning("accept_staged_refinement conflict app=%s version=%s: %s", app_id, artifact_version_id, exc)
+                raise HTTPException(status_code=409, detail="Conflict accepting artifact version.") from exc
+            accepted = accepted_result.build_record
+        else:
+            accepted = await artifact_store.accept_build_record(app_id=app_id, build_record_id=artifact_version_id)
     if accepted is None:
         raise HTTPException(status_code=404, detail=f"Artifact version not found: {artifact_version_id}")
 
@@ -2671,22 +2735,6 @@ async def _complete_inline_refinement(*, binding: RunBuildBinding, user_id: str,
         raise ValueError("Inline refinement was superseded before its output could be registered")
 
 
-async def _registry_current_artifact_version_id(
-    *, user_id: str, build_registry_id: str | None, workspace_pack_paths: frozenset[str] | None,
-) -> str | None:
-    """The build the registry serves, read before a refinement run supersedes it.
-
-    Only a parent that declares app-owned pack code (or whose packs cannot be
-    resolved) needs this: changing that code requires the current build.
-    """
-    if not build_registry_id or (workspace_pack_paths is not None and not workspace_pack_paths):
-        return None
-    record = (await _get_app_registry_service().get_app_record(
-        owner_user_id=user_id, build_registry_id=build_registry_id,
-    )).get("app") or {}
-    return str((record.get("current_build_run") or {}).get("artifact_version_id") or "").strip() or None
-
-
 async def _fail_inline_refinement(*, binding: RunBuildBinding, user_id: str) -> None:
     try:
         with CancelScope(shield=True):
@@ -3001,10 +3049,6 @@ async def trigger_workflow(
                         detail="This change could not be resolved within the selected files. Narrow the request, or clear the file limit to review a broader plan. No files were changed.",
                     )
                 if contract_surface_plan is not None:
-                    registry_artifact_version_id = await _registry_current_artifact_version_id(
-                        user_id=user_id, build_registry_id=build_registry_id,
-                        workspace_pack_paths=workspace_pack_paths,
-                    )
                     inline_binding = await _get_app_registry_service().begin_refinement_run(
                         owner_user_id=user_id, app_id=app_id, build_registry_id=build_registry_id,
                         workflow_name=refinement_decision.workflow_id,
@@ -3023,7 +3067,6 @@ async def trigger_workflow(
                         plan=contract_surface_plan, result=surface_result, refinement_request=refinement_request,
                         routing_decision=refinement_decision, workspace_files=baseline_files,
                         run_build_binding=inline_binding, allowed_paths=explicit_paths or None,
-                        registry_artifact_version_id=registry_artifact_version_id,
                     )
                     await _complete_inline_refinement(binding=inline_binding, user_id=user_id, result=finalized)
                     surface_result = surface_result.model_copy(update={
@@ -3069,10 +3112,6 @@ async def trigger_workflow(
                         baseline_files, skipped = _decode_text_bundle_entries(await _verified_app_bundle(source_version))
                         if skipped:
                             raise HTTPException(status_code=409, detail="Inline refinement cannot preserve every file in this bundle")
-                        registry_artifact_version_id = await _registry_current_artifact_version_id(
-                            user_id=user_id, build_registry_id=build_registry_id,
-                            workspace_pack_paths=workspace_pack_paths,
-                        )
                         inline_binding = await _get_app_registry_service().begin_refinement_run(
                             owner_user_id=user_id, app_id=app_id,
                             build_registry_id=build_registry_id,
@@ -3080,11 +3119,6 @@ async def trigger_workflow(
                         )
                         coding_request = coding_request.model_copy(update={
                             "run_build_binding": inline_binding, "baseline_files": baseline_files,
-                            "metadata": {
-                                **coding_request.metadata,
-                                **({"registry_artifact_version_id": registry_artifact_version_id}
-                                   if registry_artifact_version_id else {}),
-                            },
                         })
                         coding_result = await orchestration_control.execute_coding_request(coding_request)
                         await _complete_inline_refinement(

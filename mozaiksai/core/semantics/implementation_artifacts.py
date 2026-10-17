@@ -126,6 +126,16 @@ _EXTENSION_SAFE_BUILTINS = frozenset(
     }
 )
 
+#: Builtin type names a workspace handler annotation may name.
+_EXTENSION_ANNOTATION_BUILTINS = _EXTENSION_SAFE_BUILTINS | {"bytes", "complex", "object"}
+
+#: Expression nodes a static annotation or default may contain: no calls,
+#: comprehensions, lambdas, operators with side effects or assignments.
+_STATIC_EXPRESSION_NODES: tuple[type[ast.AST], ...] = (
+    ast.Constant, ast.Name, ast.Attribute, ast.Subscript, ast.Tuple, ast.List, ast.Slice,
+    ast.Load,
+)
+
 
 class _SourceText(Protocol):
     @property
@@ -1920,9 +1930,130 @@ def _base_service_calls(
     return calls
 
 
+def _prove_static_expression(
+    node: ast.expr, *, names: frozenset[str], where: str, annotation: bool, depth: int = 0,
+) -> None:
+    """Prove an annotation or default is a static type/value expression.
+
+    Annotations run when the class body runs (without postponed evaluation)
+    and whenever type hints are resolved, which evaluates string annotations
+    too; defaults run when the class body runs. Only names the caller allows,
+    attribute chains, subscripts, tuples/lists, constants and ``X | Y`` unions
+    may appear: no calls, comprehensions, lambdas, walrus or other operators.
+    A string annotation is parsed and held to the same grammar.
+    """
+    kind = "annotation" if annotation else "default value"
+    if isinstance(node, ast.Constant) and isinstance(node.value, str) and annotation:
+        if depth:
+            raise ImplementationArtifactError(f"{where} {kind} nests a string annotation")
+        try:
+            parsed = ast.parse(node.value.strip(), mode="eval")
+        except SyntaxError as exc:
+            raise ImplementationArtifactError(
+                f"{where} {kind} {node.value!r} is not a static type expression"
+            ) from exc
+        _prove_static_expression(parsed.body, names=names, where=where, annotation=True, depth=depth + 1)
+        return
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr) and annotation:
+        for side in (node.left, node.right):
+            _prove_static_expression(side, names=names, where=where, annotation=True, depth=depth)
+        return
+    if (
+        isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub | ast.UAdd)
+        and isinstance(node.operand, ast.Constant) and not annotation
+    ):
+        return
+    if not isinstance(node, _STATIC_EXPRESSION_NODES):
+        raise ImplementationArtifactError(
+            f"{where} {kind} uses {type(node).__name__}; an {kind} may only name types or "
+            "constants (names, attribute chains, subscripts), never compute"
+        )
+    if isinstance(node, ast.Name) and node.id not in names:
+        raise ImplementationArtifactError(f"{where} {kind} names {node.id!r}, which it may not reference")
+    if isinstance(node, ast.Attribute) and node.attr.startswith("__"):
+        raise ImplementationArtifactError(f"{where} {kind} reads dunder {node.attr!r}")
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, ast.expr):
+            _prove_static_expression(child, names=names, where=where, annotation=annotation, depth=depth)
+
+
+def _prove_signature_is_static(
+    function: ast.FunctionDef | ast.AsyncFunctionDef, *, names: frozenset[str],
+) -> None:
+    """Annotations and defaults of an override run outside its body: keep them static."""
+    where = f"override {function.name!r}"
+    if getattr(function, "type_params", None):
+        raise ImplementationArtifactError(f"{where} declares type parameters, which run at import")
+    args = function.args
+    parameters = [
+        *args.posonlyargs, *args.args, *args.kwonlyargs,
+        *(arg for arg in (args.vararg, args.kwarg) if arg is not None),
+    ]
+    for parameter in parameters:
+        if parameter.annotation is not None:
+            _prove_static_expression(
+                parameter.annotation, names=names, where=f"{where} parameter {parameter.arg!r}", annotation=True,
+            )
+    if function.returns is not None:
+        _prove_static_expression(function.returns, names=names, where=f"{where} return", annotation=True)
+    for default in [*args.defaults, *(item for item in args.kw_defaults if item is not None)]:
+        _prove_static_expression(default, names=names, where=where, annotation=False)
+
+
+def _derived_parameters(
+    nodes: list[ast.AST], params: set[str],
+) -> dict[str, frozenset[str]]:
+    """For each local, the override parameters its assigned values are computed from.
+
+    Only plain-name assignment, annotated and augmented assignment and walrus
+    targets carry derivation; any other binding (loops, ``with``, ``except``,
+    comprehensions) derives from nothing.
+    """
+    assignments: list[tuple[str, ast.expr]] = []
+    for node in nodes:
+        if isinstance(node, ast.Assign):
+            targets = [
+                name for target in node.targets for name in ast.walk(target)
+                if isinstance(name, ast.Name) and isinstance(name.ctx, ast.Store)
+            ]
+            assignments.extend((target.id, node.value) for target in targets)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
+            assignments.append((node.target.id, node.value))
+        elif isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
+            assignments.append((node.target.id, ast.BinOp(left=ast.Name(id=node.target.id, ctx=ast.Load()),
+                                                          op=node.op, right=node.value)))
+        elif isinstance(node, ast.NamedExpr):
+            assignments.append((node.target.id, node.value))
+    derived: dict[str, frozenset[str]] = {}
+    changed = True
+    while changed:
+        changed = False
+        for local, value in assignments:
+            roots = _expression_roots(value, params=params, derived=derived)
+            merged = derived.get(local, frozenset()) | roots
+            if merged != derived.get(local):
+                derived[local] = merged
+                changed = True
+    return derived
+
+
+def _expression_roots(
+    value: ast.AST, *, params: set[str], derived: Mapping[str, frozenset[str]],
+) -> frozenset[str]:
+    roots: set[str] = set()
+    for node in ast.walk(value):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+            if node.id in params:
+                roots.add(node.id)
+            roots.update(derived.get(node.id, frozenset()))
+    return frozenset(roots)
+
+
 def _prove_action_override(
     override: ast.FunctionDef | ast.AsyncFunctionDef,
     base: ast.FunctionDef | ast.AsyncFunctionDef,
+    *,
+    annotation_names: frozenset[str] = frozenset(),
 ) -> None:
     """Prove one leaf override reaches the service only as the base method does."""
     name = override.name
@@ -1934,16 +2065,33 @@ def _prove_action_override(
         raise ImplementationArtifactError(
             f"override {name!r} must keep the base method's exact parameters"
         )
+    _prove_signature_is_static(override, names=annotation_names | _EXTENSION_ANNOTATION_BUILTINS)
     self_name, ctx_name = base.args.args[0].arg, base.args.args[1].arg
     service_calls = _base_service_calls(base)
     super_keywords = frozenset().union(*(keywords for _, keywords in service_calls.values()))
     super_positional: tuple[str, ...] = (ctx_name,)
     nodes = [node for stmt in override.body for node in ast.walk(stmt)]
+    params = {arg.arg for arg in (
+        *override.args.posonlyargs, *override.args.args, *override.args.kwonlyargs,
+        *(arg for arg in (override.args.vararg, override.args.kwarg) if arg is not None),
+    )}
+    derived = _derived_parameters(nodes, params)
+    # The parameter a base service call passes for each keyword; through
+    # super() a keyword is the base method's parameter of the same name.
+    base_sources = {
+        call.func.attr: {
+            str(keyword.arg): keyword.value.id for keyword in call.keywords if isinstance(keyword.value, ast.Name)
+        }
+        for call in ast.walk(base)
+        if isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute) and call.func.attr in service_calls
+        and isinstance(call.func.value, ast.Attribute) and call.func.value.attr == "_service"
+    }
     approved: set[int] = set()
     for node in nodes:
         if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
             continue
         func = node.func
+        sources: dict[str, str] = {}
         if (
             isinstance(func.value, ast.Call)
             and isinstance(func.value.func, ast.Name)
@@ -1962,6 +2110,7 @@ def _prove_action_override(
             and func.attr in service_calls
         ):
             positional, keywords = service_calls[func.attr]
+            sources = base_sources.get(func.attr, {})
             approved.update({id(func), id(func.value), id(func.value.value)})
         else:
             continue
@@ -1982,16 +2131,29 @@ def _prove_action_override(
                 f"override {name!r} passes {', '.join(extra)} to the service, which the "
                 f"template base handler does not pass for {name!r}"
             )
+        # The template input contract validated each action parameter; a value
+        # the service receives must stay that parameter, or be computed from it.
+        for keyword in node.keywords:
+            source = sources.get(str(keyword.arg), str(keyword.arg))
+            if source not in _expression_roots(keyword.value, params=params, derived=derived):
+                raise ImplementationArtifactError(
+                    f"override {name!r} passes {keyword.arg}= a value not derived from its own "
+                    f"{source!r} parameter; the template input contract governs that value"
+                )
         approved.update(id(arg) for arg in node.args)
 
-    params = {arg.arg for arg in (
-        *override.args.posonlyargs, *override.args.args, *override.args.kwonlyargs,
-        *(arg for arg in (override.args.vararg, override.args.kwarg) if arg is not None),
-    )}
     local_names = {
         node.id for node in nodes if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)
     } | {node.name for node in nodes if isinstance(node, ast.ExceptHandler) and node.name}
     guarded = {self_name, ctx_name, "super"}
+    # A local annotation follows the annotation grammar, not the body grammar.
+    local_annotations = [node.annotation for node in nodes if isinstance(node, ast.AnnAssign)]
+    for local_annotation in local_annotations:
+        _prove_static_expression(
+            local_annotation, names=annotation_names | _EXTENSION_ANNOTATION_BUILTINS,
+            where=f"override {name!r} local", annotation=True,
+        )
+    annotation_nodes = {id(item) for local_annotation in local_annotations for item in ast.walk(local_annotation)}
     for node in nodes:
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda | ast.ClassDef):
             raise ImplementationArtifactError(f"override {name!r} defines a nested scope")
@@ -2001,7 +2163,7 @@ def _prove_action_override(
             raise ImplementationArtifactError(
                 f"override {name!r} uses {type(node).__name__}, which a handler extension cannot"
             )
-        if id(node) in approved:
+        if id(node) in approved or id(node) in annotation_nodes:
             continue
         if isinstance(node, ast.Attribute):
             if node.attr.startswith("__"):
@@ -2031,6 +2193,7 @@ def prove_workspace_handler_extension(
     base_handler_source: str,
     handler_class: str,
     action_methods: Collection[str],
+    template_handler_source: str | None = None,
 ) -> tuple[str, ...]:
     """Prove a workspace ``handler.py`` is a thin leaf over its template base.
 
@@ -2041,16 +2204,25 @@ def prove_workspace_handler_extension(
 
     - the module holds only a docstring, ``__future__``/``typing`` imports, the
       exact canonical base import and the leaf class (the existing leaf proof,
-      run for every action);
+      run for every action), and keeps ``from __future__ import annotations``
+      when the pack's template handler (``template_handler_source``) has it;
     - the class body holds only overrides of declared action methods the base
       defines, each with the base method's exact parameters;
+    - every parameter, return and local annotation and every default is a
+      static expression (names, attribute chains, subscripts, constants; no
+      calls), so nothing runs when the module loads or its hints resolve;
     - an override reaches the service only through ``super().<same method>``
       or the base method's own ``self._service`` call, passing ``ctx`` through
-      unchanged and no keyword the base method does not pass;
+      unchanged, no keyword the base method does not pass, and for each
+      keyword only the override's own same-named parameter or a value
+      computed from it;
     - an override reads no other ``self``/``ctx`` attribute, dunder, module
       global or builtin outside a small pure set, and opens no nested scope.
 
-    Returns the overridden action methods.  The source is parsed, never run.
+    These targeted checks bound a refinement; they do not certify arbitrary
+    Python as safe, so candidate validation and runtime authorization still
+    apply.  Returns the overridden action methods.  The source is parsed,
+    never run.
     """
     actions = sorted({method for method in action_methods if method})
     if not actions:
@@ -2089,9 +2261,20 @@ def prove_workspace_handler_extension(
             f"workspace handler module may only import its base and define {handler_class!r}; "
             f"line {stmt.lineno} is a {type(stmt).__name__}"
         )
+    if template_handler_source is not None and _postpones_annotations(
+        _parse_template_handler(template_handler_source)
+    ) and not _postpones_annotations(tree):
+        raise ImplementationArtifactError(
+            "workspace handler must keep 'from __future__ import annotations' like its pack "
+            "template handler"
+        )
     class_def = next(
         stmt for stmt in tree.body if isinstance(stmt, ast.ClassDef) and stmt.name == handler_class
     )
+    if getattr(class_def, "type_params", None):
+        raise ImplementationArtifactError(
+            f"workspace handler {handler_class!r} declares type parameters, which run at import"
+        )
     base_def = next(
         stmt for stmt in base_tree.body if isinstance(stmt, ast.ClassDef) and stmt.name == base_name
     )
@@ -2099,6 +2282,16 @@ def prove_workspace_handler_extension(
         stmt.name: stmt for stmt in base_def.body
         if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef)
     }
+    # Annotations may name the leaf's typing imports and the template base
+    # module's own imported names (for example its ModuleContext), never the
+    # leaf or base class or anything computed.
+    annotation_names = frozenset(
+        alias.asname or alias.name
+        for module_tree, modules in ((tree, {"typing"}), (base_tree, None))
+        for stmt in module_tree.body if isinstance(stmt, ast.ImportFrom) and stmt.module != "__future__"
+        and (modules is None or (stmt.level == 0 and stmt.module in modules))
+        for alias in stmt.names if alias.name != "*"
+    ) - {base_name, handler_class}
     overridden = []
     for index, stmt in enumerate(class_def.body):
         if (index == 0 and _is_docstring(stmt)) or isinstance(stmt, ast.Pass):
@@ -2109,9 +2302,24 @@ def prove_workspace_handler_extension(
                 f"workspace handler {handler_class!r} may only override declared action "
                 f"methods; {label!r} is not one"
             )
-        _prove_action_override(stmt, base_methods[stmt.name])
+        _prove_action_override(stmt, base_methods[stmt.name], annotation_names=annotation_names)
         overridden.append(stmt.name)
     return tuple(sorted(overridden))
+
+
+def _parse_template_handler(source: str) -> ast.Module:
+    try:
+        return ast.parse(source)
+    except SyntaxError as exc:
+        raise ImplementationArtifactError(f"pack template handler is not parseable: {exc}") from exc
+
+
+def _postpones_annotations(tree: ast.Module) -> bool:
+    return any(
+        isinstance(stmt, ast.ImportFrom) and stmt.level == 0 and stmt.module == "__future__"
+        and any(alias.name == "annotations" for alias in stmt.names)
+        for stmt in tree.body
+    )
 
 
 def _certify_module_action_export(

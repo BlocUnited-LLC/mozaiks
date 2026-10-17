@@ -302,14 +302,13 @@ class OrchestrationControlHarness:
         self, *, plan: ContractSurfacePlan, result: SurfacePlanExecutionResult,
         refinement_request: RefinementRequest, routing_decision: RefinementRoutingDecision,
         workspace_files: dict[str, str], run_build_binding: RunBuildBinding,
-        allowed_paths: list[str] | None = None, registry_artifact_version_id: str | None = None,
+        allowed_paths: list[str] | None = None,
     ) -> CodingWorkerResult:
         try:
             finalized = await self._finalize_surface_output(
                 plan=plan, result=result, refinement_request=refinement_request,
                 routing_decision=routing_decision, workspace_files=workspace_files,
                 run_build_binding=run_build_binding, allowed_paths=allowed_paths,
-                registry_artifact_version_id=registry_artifact_version_id,
             )
         except (Exception, CancelledError) as exc:
             with CancelScope(shield=True):
@@ -333,7 +332,7 @@ class OrchestrationControlHarness:
         self, *, plan: ContractSurfacePlan, result: SurfacePlanExecutionResult,
         refinement_request: RefinementRequest, routing_decision: RefinementRoutingDecision,
         workspace_files: dict[str, str], run_build_binding: RunBuildBinding,
-        allowed_paths: list[str] | None = None, registry_artifact_version_id: str | None = None,
+        allowed_paths: list[str] | None = None,
     ) -> CodingWorkerResult:
         if result.status != "success" or plan.requires_schema_migration or plan.build_family != "app_bundle":
             return CodingWorkerResult(eligible=True, status="failed", error="Surface output requires workflow completion")
@@ -351,8 +350,6 @@ class OrchestrationControlHarness:
                 self._selected_scope_origin(refinement_request) if allowed_paths else "surface_plan"
             ),
         }
-        if registry_artifact_version_id:
-            metadata["registry_artifact_version_id"] = registry_artifact_version_id
         request = CodingWorkerRequest(
             app_id=app_id, target_app_id=refinement_request.target_app_id,
             user_id=refinement_request.user_id, run_build_binding=run_build_binding,

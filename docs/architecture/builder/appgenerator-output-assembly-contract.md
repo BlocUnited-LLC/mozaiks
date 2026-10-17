@@ -202,11 +202,18 @@ for a template module; `page_bundle` owns only the pages no pack ships, and its
 message names the pack-provided pages. A worker's, repairer's or earlier
 assembly's copy of a pack-owned path is discarded with a
 `PACK_OWNED_OUTPUT_DISCARDED` log line instead of validated. Outside genesis an
-`owner: workspace` path is the app's own code and keeps its admitted copy. An
-explicit `full_rebuild` or `conceptual_replan` skips hydration; when it is bound
-to a verified revision source through the existing refinement binding, the path
-keeps that source's copy. The starter template is used only when no app copy
-exists: genesis, a newly selected pack, or a rebuild with no bound source.
+`owner: workspace` path is the app's own code, and its copy comes only from
+verified source: the bound verified revision source (through the existing
+refinement binding, including an explicit `full_rebuild` or
+`conceptual_replan` that skips hydration), else the admitted genesis copy in
+`generated_files`, else the starter template, used only when no app copy exists
+(genesis, a newly selected pack, or a rebuild with no bound source). A repair
+overlay copy or a `deleted_files` tombstone never changes it: assembly and
+`admitted_app_file_map` exclude one with a `WORKSPACE_PACK_OUTPUT_EXCLUDED`
+warning, and `save_generated_code` rejects a candidate that changes or deletes
+one (identical bytes are not a change) through `validate_repair_candidate`,
+with a `WORKSPACE_PACK_OUTPUT_CHANGE_UNSUPPORTED` diagnostic, whether or not a
+repair is active.
 Output for the path from a task that is not a current plan task owning it is
 raw history: it is ignored with a `WORKSPACE_PACK_OUTPUT_IGNORED` warning. When a
 current plan task owns the path and its output differs from the retained copy,
@@ -301,7 +308,11 @@ exports, route ids, manifest metadata, and the relative order when the
 overlay's order differs from the baseline's. An overlay value equal to the
 baseline, such as a full-root copy an earlier repair or the auth scaffold saved,
 still replaces older saved-snapshot values. It cannot revert a task's approved
-revision change or make competing task or pack declarations look carried.
+revision change or make competing task or pack declarations look carried. The
+exception is a root an admitted repair of that task saved: a responded repair
+records its `saved_paths` in `bundle_repair_result`, and such an overlay copy
+is newer than the task's output, so it supersedes that task even where it
+restates the baseline (`overlay_supersedes` on the task's contribution).
 Genesis has no baseline, so there every overlay value supersedes.
 
 Composition is additive. A carried declaration that a current task omits stays,
@@ -1176,12 +1187,18 @@ Validation and download use `admitted_app_file_map`: the current `generated_file
 map, admitted `code_files` repairs, and admitted `deleted_files` tombstones.
 When `.mozaiks/pack_provenance.json` records `ui/index.js` or
 `ui/route_manifest.json` under `composed_outputs`, a differing repair copy of
-that root is composed onto it with the overlay and deletion rules above instead
-of replacing it as a whole file. A partial repair copy therefore cannot drop the
-verified pack declarations it omits. No reassembly is needed for the repair to
-reach validation. A copy that cannot be composed still replaces the root, so the
-acceptance gates judge it as written, and an `ADMITTED_UI_ROOT_NOT_COMPOSED`
-warning names it. Without that provenance the last writer wins.
+that root is composed onto it with assembly's own contributions and rules: the
+assembled roots as the carried snapshot, every current task output, the
+admitted overlay, the verified pack templates, the admitted deletions and, in a
+revision, the same bound revision baseline (assembly records the UI roots of the
+source it read, by source identity). A partial repair copy therefore cannot drop
+the verified pack declarations it omits, a stale baseline copy cannot revert a
+task's change, and a pack declaration is never patched. No reassembly is needed
+for the repair to reach validation. When those rules reject the copy, or cannot
+be applied here (the baseline or the selected packs are unavailable), the
+assembled roots are kept and an `ADMITTED_UI_ROOT_NOT_COMPOSED` warning names
+them; only without resolvable packs does the copy replace the root for the
+acceptance gates to judge. Without that provenance the last writer wins.
 Historical raw worker responses and prior generated directories cannot overwrite,
 refill, or delete that snapshot. An older foreign readback filtered by a save tool
 cannot reappear during packaging. Empty current artifacts remain empty.

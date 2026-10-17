@@ -201,17 +201,27 @@ Ownership comes from those packs' pinned contracts, never from the candidate:
   passes the parent's workspace paths to scope resolution, so an inferred scope
   that includes one returns the existing confirmation decision instead of
   applying.
-- The parent must be the build the registry currently serves
-  (`current_build_run.artifact_version_id`, read before the refinement run
-  supersedes it). A stale or unread parent is rejected.
+- The parent must be the app's accepted current build: the artifact store's
+  `CURRENT` record of that build family, which only acceptance changes. The
+  finalizer reads it at admission. A stale or never-accepted parent is
+  rejected. A failed inline run changes nothing there, so it never blocks a
+  later authorized change.
 - A changed workspace handler must be a thin leaf over its template base handler
   (`prove_workspace_handler_extension`): overrides of declared action methods
   with the base signatures only, reaching the service only through `super()` or
-  the base method's own service call, with `ctx` passed through unchanged and no
-  keyword the base method does not pass. It reads no other `self` or `ctx`
-  attribute and adds no import, helper, event or nested scope. Validation,
-  persistence, events and Messaging membership checks therefore stay in the
-  template service.
+  the base method's own service call, with `ctx` passed through unchanged, no
+  keyword the base method does not pass, and for each keyword only the
+  override's own same-named parameter or a value computed from it (never a
+  literal the template input contract would reject). Every parameter, return
+  and local annotation and every default is a static expression (names,
+  attribute chains, subscripts, constants; no calls), and the module keeps
+  `from __future__ import annotations` when the pack's template handler has it,
+  so nothing runs when the handler loads or its type hints resolve. It reads no
+  other `self` or `ctx` attribute and adds no import, helper, event or nested
+  scope. These are targeted checks, not a certification that arbitrary Python
+  is safe: validation, persistence, events and Messaging membership checks stay
+  in the template service, and candidate validation and runtime authorization
+  still apply.
 
 A rejected candidate fails with a structured `candidate_admission` code
 (`PACK_TEMPLATE_OUTPUT_CHANGED`, `PACK_MODULE_CLOSURE_CHANGED`,
@@ -224,8 +234,19 @@ handler edit is a new app revision, not a new pack version. If the selected
 pack sources cannot be resolved, admission defers to candidate validation,
 which verifies the same sources and fails the candidate.
 
-A failed inline run leaves the registry's current run without an artifact. App-owned
-pack code cannot change again until a build is registered as current.
+Acceptance rechecks a child that changed app-owned pack code before it becomes
+current. Its recorded `refinement_scope` must still be an explicit or confirmed
+selection of the changed paths in the requested registered build, and its
+parent must still be the accepted current build. Otherwise the endpoint returns
+409 and nothing changes. Studio serializes these acceptances per app, so of two
+children made from the same parent only the first is accepted.
+
+AppGenerator never changes app-owned pack code. Its copy comes only from the
+bound verified revision source, else the admitted genesis copy, else the
+starter template. A bounded repair or task save that changes or deletes one is
+rejected whole with `WORKSPACE_PACK_OUTPUT_CHANGE_UNSUPPORTED`. An overlay copy
+or tombstone that reaches assembly or the admitted bundle is excluded with
+`WORKSPACE_PACK_OUTPUT_EXCLUDED`.
 
 #### Current readiness and promotion boundaries
 

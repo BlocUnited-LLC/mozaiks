@@ -36,10 +36,13 @@ from mozaiksai.core.workflow.generator_support.ui_registry_composition import (
 
 from .assembly_phase import assemble_features
 from .code_file_utils import (
-    admitted_app_file_map,
+    ADMITTED_OVERLAY_OWNER,
     collect_generated_app_file_entries,
     extract_code_file_entries_from_payload,
     extract_deleted_file_paths_from_payload,
+    remember_revision_baseline,
+    repair_superseded_roots,
+    task_batch_outputs,
 )
 from .hydrate_app_revision_context import (
     hydrate_app_revision_context,
@@ -54,11 +57,11 @@ from .resolve_managed_capability_templates import (
     resolve_managed_capability_templates,
 )
 from .save_app_schema import resolve_app_theme_config
+from .task_integrity import WORKSPACE_PACK_CHANGE_DIAGNOSTIC, WORKSPACE_PACK_CHANGE_REMEDY
 
 logger = logging.getLogger(__name__)
 
-# The context `code_files` overlay of admitted repairs, merged last.
-_ADMITTED_OVERLAY_OWNER = "app:accumulated_files"
+_ADMITTED_OVERLAY_OWNER = ADMITTED_OVERLAY_OWNER
 
 
 class WorkspacePackOutputChangeUnsupported(ValueError):
@@ -67,15 +70,13 @@ class WorkspacePackOutputChangeUnsupported(ValueError):
     def __init__(self, *, path: str, task_id: str, retained: str) -> None:
         super().__init__(
             f"{path}: plan task {task_id!r} changes app-owned capability pack code, which "
-            "AppGenerator cannot admit. It needs an authorized backend refinement: a Studio "
-            "selected-file patch refinement of this exact path."
+            f"AppGenerator cannot admit. {WORKSPACE_PACK_CHANGE_REMEDY}"
         )
         self.diagnostic = {
-            "code": "WORKSPACE_PACK_OUTPUT_CHANGE_UNSUPPORTED",
+            "code": WORKSPACE_PACK_CHANGE_DIAGNOSTIC["code"],
             "path": path, "task_id": task_id, "retained": retained,
-            "missing_capability": "authorized_backend_refinement",
-            # A bounded repair cannot authorize this change either.
-            "block_reason": "authorized_backend_refinement_required",
+            "missing_capability": WORKSPACE_PACK_CHANGE_DIAGNOSTIC["missing_capability"],
+            "block_reason": WORKSPACE_PACK_CHANGE_DIAGNOSTIC["block_reason"],
         }
 
 
@@ -291,35 +292,37 @@ def _selected_capability_packs(app_build_plan: Any, context_variables: Any) -> l
     return capability_packs if isinstance(capability_packs, list) else None
 
 
-async def _bound_rebuild_workspace_source(app_build_plan: Any, context_variables: Any) -> dict[str, str]:
-    """Verified revision copies of app-owned pack code that an explicit rebuild lacks.
+async def _verified_revision_source(app_build_plan: Any, context_variables: Any) -> dict[str, str] | None:
+    """Text files of the verified revision source a pack revision is bound to, else None.
 
-    ``conceptual_replan`` and ``full_rebuild`` deliberately skip hydrating the
-    old implementation, but an ``owner: workspace`` pack output is the app's
-    own code: regeneration must not reset it to the starter template. Only the
-    existing refinement binding to a verified revision source supplies it; a
-    rebuild without one keeps the template default.
+    App-owned (``owner: workspace``) pack code comes only from verified
+    source: this bound revision source (the authorized patch-lane child once it
+    is the selected source), else the admitted genesis copy, else the starter
+    template. ``conceptual_replan`` and ``full_rebuild`` skip hydrating the old
+    implementation but still keep the app's own code from this source; a run
+    without the existing refinement binding to one has none.
     """
     if (
         context_variables is None
         or context_variables.get("build_mode") != "revision"
-        or revision_baseline_required(context_variables)
         or not revision_source_artifact_id(context_variables)
+        or not _selected_capability_packs(app_build_plan, context_variables)
     ):
-        return {}
+        return None
     from factory_app.workflows._shared.platform.build_target import require_build_binding
 
-    capability_packs = _selected_capability_packs(app_build_plan, context_variables)
-    if require_build_binding(context_variables).phase != "refinement" or not capability_packs:
-        return {}
-    workspace_paths = resolve_declared_pack_output_paths(
-        capability_packs, context_variables=context_variables, owner="workspace",
-    )
-    missing = workspace_paths - set(admitted_app_file_map(context_variables))
-    if not missing:
-        return {}
+    if require_build_binding(context_variables).phase != "refinement":
+        return None
+    # Text-only read (include_binary=False); pack code and registries are text.
     saved = await read_bound_revision_files(context_variables)
-    return {path: content for path, content in saved.items() if path in missing and isinstance(content, str)}
+    return {path: content for path, content in saved.items() if isinstance(content, str)}
+
+
+def _workspace_paths(app_build_plan: Any, context_variables: Any) -> frozenset[str]:
+    capability_packs = _selected_capability_packs(app_build_plan, context_variables)
+    if not capability_packs:
+        return frozenset()
+    return resolve_declared_pack_output_paths(capability_packs, context_variables=context_variables, owner="workspace")
 
 
 def _apply_managed_capability_templates(
@@ -329,7 +332,8 @@ def _apply_managed_capability_templates(
     context_variables: Any,
     ui_contributions: list[dict[str, Any]] | None = None,
     task_files: list[tuple[str, dict[str, str]]] | None = None,
-    rebuild_source: dict[str, str] | None = None,
+    verified_source: dict[str, str] | None = None,
+    overlay_files: dict[str, str] | None = None,
 ) -> list[dict[str, str]]:
     capability_packs = _selected_capability_packs(app_build_plan, context_variables)
     if capability_packs is None:
@@ -347,7 +351,9 @@ def _apply_managed_capability_templates(
     workspace_paths = resolve_declared_pack_output_paths(
         capability_packs, context_variables=context_variables, owner="workspace",
     )
-    admitted = admitted_app_file_map(context_variables)
+    # The admitted genesis copy: the assembled bundle, never the repair overlay.
+    generated = detach(context_variables.get("generated_files")) if context_variables is not None else None
+    admitted = generated if isinstance(generated, dict) else {}
     planned_owners = {
         str(task.get("task_id") or ""): set(task.get("owned_paths") or [])
         for task in (app_build_plan.get("build_tasks") or []) if isinstance(task, dict)
@@ -358,13 +364,19 @@ def _apply_managed_capability_templates(
             file_map[path] = str(file["content"])
             continue
         # Workspace extension templates are initial defaults, never replacements
-        # for admitted app code or a bound app's verified revision source.
+        # for the app's own verified code; no repair overlay or task output is.
         retained, content = next(
             ((label, layer[path]) for label, layer in (
-                ("admitted", admitted), ("verified_revision_source", rebuild_source or {}), ("code_files", file_map),
-            ) if path in layer),
+                ("verified_revision_source", verified_source or {}), ("admitted", admitted),
+            ) if path in layer and isinstance(layer[path], str)),
             ("template", file["content"]),
         )
+        if path in (overlay_files or {}) and (overlay_files or {})[path] != content:
+            logger.warning(
+                "[AppGenerator] WORKSPACE_PACK_OUTPUT_EXCLUDED at assembly: path=%s owner=%s retained=%s; "
+                "a repair overlay copy cannot change app-owned capability pack code. %s",
+                path, _ADMITTED_OVERLAY_OWNER, retained, WORKSPACE_PACK_CHANGE_REMEDY,
+            )
         for owner, files in task_files or []:
             if path not in files or files[path] == content:
                 continue
@@ -500,26 +512,9 @@ async def _assemble_app_tasks(
         app_id = require_build_binding(context_variables).target_app_id
         inject_key = "app_task_batch_results"
 
-        merged = detach(context_variables.get(inject_key))
-        if isinstance(merged, dict):
-            candidate_values: Any = (
-                merged.get("task_results")
-                or merged.get("results")
-                or merged.get("tasks")
-                or merged
-            )
-            if isinstance(candidate_values, dict):
-                iterable = candidate_values.items()
-            elif isinstance(candidate_values, list):
-                iterable = enumerate(candidate_values)  # type: ignore[assignment]
-            else:
-                iterable = []  # type: ignore[assignment]
-            for key, value in iterable:
-                if key in {"_failed", "_meta", "failed_tasks"}:
-                    continue
-                if isinstance(value, dict):
-                    feature_outputs.append(value)
-                    ui_source_owners.append((f"task:{key}", False))
+        for key, value in task_batch_outputs(context_variables):
+            feature_outputs.append(value)
+            ui_source_owners.append((f"task:{key}", False))
 
         context_code_files = _context_code_file_output(context_variables)
         if context_code_files:
@@ -560,25 +555,40 @@ async def _assemble_app_tasks(
     # The accumulated repair overlay is the newest admitted app layer.
     ui_contributions: list[dict[str, Any]] = []
     task_files: list[tuple[str, dict[str, str]]] = []
+    overlay_files: dict[str, str] = {}
+    superseded = repair_superseded_roots(context_variables) if context_variables is not None else {}
     for output, (owner, baseline) in zip(feature_outputs, ui_source_owners, strict=True):
         files = extract_code_file_entries_from_payload(output, build_timestamp=build_timestamp)
         if owner.startswith("task:"):
             task_files.append((owner, {item["filename"]: item["content"] for item in files}))
+        if owner == _ADMITTED_OVERLAY_OWNER:
+            overlay_files = {item["filename"]: item["content"] for item in files}
         if any(item["filename"] in SHARED_UI_OUTPUT_PATHS for item in files):
             ui_contributions.append({
                 "owner": owner, "baseline": baseline, "files": files,
                 "admitted_overlay": owner == _ADMITTED_OVERLAY_OWNER,
+                **({"overlay_supersedes": superseded[owner]} if owner in superseded else {}),
             })
 
     app_build_plan = (
         detach(context_variables.get("app_build_plan"))
         if context_variables and hasattr(context_variables, "get") else None
     )
+    verified_source = await _verified_revision_source(app_build_plan, context_variables)
     template_files = _apply_managed_capability_templates(
         [], app_build_plan=app_build_plan, context_variables=context_variables,
         ui_contributions=ui_contributions, task_files=task_files,
-        rebuild_source=await _bound_rebuild_workspace_source(app_build_plan, context_variables),
+        verified_source=verified_source, overlay_files=overlay_files,
     )
+    # App-owned pack code is never deleted by a tombstone either.
+    workspace_paths = _workspace_paths(app_build_plan, context_variables) if template_files else frozenset()
+    ignored_tombstones = sorted(workspace_paths & set(_context_deleted_files(context_variables)))
+    if ignored_tombstones:
+        logger.warning(
+            "[AppGenerator] WORKSPACE_PACK_OUTPUT_EXCLUDED at assembly: deleted_files=%s; a tombstone cannot "
+            "remove app-owned capability pack code. %s", ignored_tombstones, WORKSPACE_PACK_CHANGE_REMEDY,
+        )
+    kept_paths = frozenset(pack_outputs) | workspace_paths
     if template_files:
         feature_outputs.append({"code_files": template_files})
 
@@ -595,7 +605,7 @@ async def _assemble_app_tasks(
         ]
         # Compose against the final file set: _apply_deleted_files removes these
         # tombstones below, so a registration of one cannot resolve here either.
-        deleted = frozenset(path for path in _context_deleted_files(context_variables) if path not in pack_outputs)
+        deleted = frozenset(path for path in _context_deleted_files(context_variables) if path not in kept_paths)
         file_map = {
             item["filename"]: item["content"]
             for entries in materialized for item in entries if item["filename"] not in deleted
@@ -603,8 +613,12 @@ async def _assemble_app_tasks(
         revision_baseline = None
         if revision_baseline_required(context_variables):
             # Text-only read (include_binary=False); registries are text sources.
-            saved = await read_bound_revision_files(context_variables)
-            revision_baseline = {path: content for path, content in saved.items() if isinstance(content, str)}
+            revision_baseline = verified_source
+            if revision_baseline is None:
+                saved = await read_bound_revision_files(context_variables)
+                revision_baseline = {path: content for path, content in saved.items() if isinstance(content, str)}
+            # The admitted projection composes repair copies with this same baseline.
+            remember_revision_baseline(context_variables, revision_baseline)
         shared = compose_ui_registry(
             ui_contributions, file_map, revision_baseline=revision_baseline, deleted_paths=deleted,
         )
@@ -649,7 +663,7 @@ async def _assemble_app_tasks(
     )
     code_files = _apply_module_handler_method_alignment(code_files)
     code_files = _apply_deleted_files(
-        code_files, [path for path in _context_deleted_files(context_variables) if path not in pack_outputs],
+        code_files, [path for path in _context_deleted_files(context_variables) if path not in kept_paths],
     )
     code_files = apply_entitlement_gates(
         code_files, context_variables=context_variables,

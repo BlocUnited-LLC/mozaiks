@@ -237,9 +237,102 @@ async def test_revision_plan_task_edit_of_workspace_pack_path_fails_assembly_exp
     # The planned change is neither shipped nor silently dropped behind a success.
     assert not result["success"] and "WorkspacePackOutputChangeUnsupported" in result["error"]
     assert result["diagnostic"] == {
-        "code": "WORKSPACE_PACK_OUTPUT_CHANGE_UNSUPPORTED", "path": handler, "task_id": "svc", "retained": "admitted",
+        "code": "WORKSPACE_PACK_OUTPUT_CHANGE_UNSUPPORTED", "path": handler, "task_id": "svc",
+        "retained": "verified_revision_source",
         "missing_capability": "authorized_backend_refinement", "block_reason": "authorized_backend_refinement_required",
     }
     assert context.get("app_assembly_status") == "failed"
     assert context.get("app_assembly_diagnostic")["block_reason"] == "authorized_backend_refinement_required"
     assert "Studio selected-file patch refinement" in context.get("app_assembly_diagnostic")["error"]
+
+
+def _revision_context(saved, revised, *, pages=("board",), **extra):
+    selected = _context()
+    plan = {**selected["app_build_plan"], "pages": [{"name": name, "route": f"/{name}", "ui_surface": "custom_react_page"} for name in pages],
+            "build_tasks": [{"task_id": "pages", "task_type": "page_bundle", "owned_paths": list(revised)}]}
+    return create_context_container(initial={
+        **saved.context, **selected, "app_build_plan": plan, "data_contract": EMPTY_CONTRACT,
+        "app_task_batch_results": {"pages": {"code_files": contribution("task:pages", revised)["files"]}}, **extra,
+    })
+
+
+def _stale_baseline_copy(saved):
+    return [{"filename": path, "content": saved.files[path]} for path in ("ui/index.js", "ui/route_manifest.json")]
+
+
+@pytest.mark.asyncio
+async def test_admitted_map_keeps_a_task_revision_change_over_a_stale_baseline_copy(request, caplog):
+    from factory_app.workflows.AppGenerator.tools import code_file_utils
+
+    saved = request.getfixturevalue("revision_baseline")
+    board, pack = component(path="ui/pages/custom/board.jsx"), _assembled_files()
+    _save(saved, board, pack)
+    revised = {**board, "ui/route_manifest.json": retitled(board["ui/route_manifest.json"], "board", "Approved revision")}
+    context = _revision_context(saved, revised, code_files=_stale_baseline_copy(saved))
+    result = await assemble_app_tasks(context_variables=context)
+    assert result["success"], result
+    assembled = _files(result)
+    assert _routes(assembled)["board"]["meta"]["title"] == "Approved revision"
+    # Validation, write-back and export see what assembly composed: same baseline, same rules.
+    admitted = admitted_app_file_map(context)
+    assert _routes(admitted) == _routes(assembled)
+    assert admitted["ui/index.js"] == assembled["ui/index.js"]
+    # Without the bound baseline the projection cannot apply those rules; it keeps
+    # the assembled roots rather than letting the stale copy revert the task.
+    code_file_utils._REVISION_UI_BASELINES.clear()
+    caplog.set_level(logging.WARNING, logger="factory_app.workflows.AppGenerator.tools.code_file_utils")
+    admitted = admitted_app_file_map(context)
+    assert _routes(admitted) == _routes(assembled)
+    assert any("ADMITTED_UI_ROOT_NOT_COMPOSED" in record.getMessage() and "revision baseline" in record.getMessage()
+               for record in caplog.records)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("repair", ["retitle_pack_route", "reregister_pack_component"])
+async def test_admitted_map_never_patches_a_verified_pack_declaration(repair, caplog):
+    task, pack = component(path="ui/pages/custom/board.jsx"), _assembled_files()
+    context = _genesis_context(task)
+    result = await assemble_app_tasks(context_variables=context)
+    assert result["success"], result
+    composed = _files(result)
+    if repair == "retitle_pack_route":
+        overlay = {"ui/route_manifest.json": retitled(composed["ui/route_manifest.json"], "messages", "Hijacked")}
+    else:
+        overlay = {
+            "ui/pages/custom/Evil.jsx": "export default function Evil() { return null; }",
+            "ui/index.js": "import E from './pages/custom/Evil.jsx';\nexport function register(registerComponent) { registerComponent('Messages', E, {}); }",
+        }
+    context["code_files"] = contribution("repair", overlay)["files"]
+    caplog.set_level(logging.WARNING, logger="factory_app.workflows.AppGenerator.tools.code_file_utils")
+    admitted = admitted_app_file_map(context)
+    assert _routes(admitted)["messages"] == _routes(pack)["messages"]
+    assert "Evil.jsx" not in admitted["ui/index.js"]
+    assert admitted["ui/index.js"].count('registerComponent("Messages"') == 1
+    assert any(record.getMessage().startswith("ADMITTED_UI_ROOT_NOT_COMPOSED") for record in caplog.records)
+    # Assembly rejects the same overlay.
+    reassembled = await assemble_app_tasks(context_variables=context)
+    assert not reassembled["success"] and "messages" in reassembled["error"].lower()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("evidence", ["repair_of_the_task", "none", "repair_of_another_task", "repair_without_the_root"])
+async def test_revision_repair_restoring_the_baseline_supersedes_the_task_it_repairs(request, evidence):
+    saved = request.getfixturevalue("revision_baseline")
+    board, pack = component(path="ui/pages/custom/board.jsx"), _assembled_files()
+    _save(saved, board, pack)
+    revised = {**board, "ui/route_manifest.json": retitled(board["ui/route_manifest.json"], "board", "Faulty title")}
+    records = {
+        "repair_of_the_task": {"task_id": "pages", "status": "responded", "saved_paths": ["ui/route_manifest.json"]},
+        "repair_of_another_task": {"task_id": "shell", "status": "responded", "saved_paths": ["ui/route_manifest.json"]},
+        "repair_without_the_root": {"task_id": "pages", "status": "responded", "saved_paths": ["ui/pages/custom/board.jsx"]},
+    }
+    # The repair restored the verified manifest. Only a recorded repair of this
+    # task that saved the root is newer than the task's output; a copy without
+    # that evidence (an earlier full-root save) cannot revert the task's change.
+    extra = {"bundle_repair_result": {"active": records[evidence], "history": []}} if evidence in records else {}
+    context = _revision_context(saved, revised, code_files=_stale_baseline_copy(saved)[1:], **extra)
+    result = await assemble_app_tasks(context_variables=context)
+    assert result["success"], result
+    expected = "Board" if evidence == "repair_of_the_task" else "Faulty title"
+    assert _routes(_files(result))["board"]["meta"]["title"] == expected
+    assert _routes(admitted_app_file_map(context))["board"]["meta"]["title"] == expected

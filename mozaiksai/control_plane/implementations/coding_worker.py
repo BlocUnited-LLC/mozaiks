@@ -82,8 +82,11 @@ def pack_output_owners(capability_packs: list[dict[str, Any]]) -> dict[str, str]
     """Map the declared outputs of a saved parent's verified packs to their owners.
 
     Ownership comes from the pinned pack contracts the parent selected, never
-    from the candidate. Composed shared roots are left out: assembly merges
-    pack and app declarations there. Pack provenance is template-owned.
+    from the candidate: ``templates`` and ``workspace`` as declared, and any
+    other declared owner (``generator``: model-authored output) under its own
+    name, which this admission leaves to the ordinary candidate rules.
+    Composed shared roots are left out: assembly merges pack and app
+    declarations there. Pack provenance is template-owned.
     """
     from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
         resolve_declared_pack_output_paths,
@@ -96,14 +99,30 @@ def pack_output_owners(capability_packs: list[dict[str, Any]]) -> dict[str, str]
     ]
     if not verified:
         return {}
-    workspace = resolve_declared_pack_output_paths(verified, owner="workspace")
+    owned = {
+        owner: resolve_declared_pack_output_paths(verified, owner=owner) for owner in ("templates", "workspace")
+    }
     owners = {
-        path: "workspace" if path in workspace else "templates"
+        path: next((owner for owner, paths in owned.items() if path in paths), "generator")
         for path in resolve_declared_pack_output_paths(verified)
         if path not in SHARED_PACK_OUTPUT_PATHS
     }
     owners[_PACK_PROVENANCE_PATH] = "templates"
     return owners
+
+
+def pack_template_source(capability_packs: list[dict[str, Any]], path: str) -> str | None:
+    """The verified pack template that ships ``path``, or None when no selected pack ships it."""
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        resolve_templates_for_pack,
+        verified_selected_pack_sources,
+    )
+
+    for entry in verified_selected_pack_sources(capability_packs):
+        for template in resolve_templates_for_pack(Path(entry["source_path"]), entry["pack_id"]):
+            if template["filename"] == path:
+                return str(template["content"])
+    return None
 
 
 def parent_workspace_pack_paths(capability_packs: Any) -> frozenset[str] | None:
@@ -278,7 +297,7 @@ class ScopedRefinementCodingWorker:
         if resolved_artifact_kind == "app_bundle" and merged_files:
             try:
                 capability_packs = await self._parent_capability_packs(request)
-                refinement_scope = self._admit_pack_outputs(
+                refinement_scope = await self._admit_pack_outputs(
                     request=request, capability_packs=capability_packs,
                     applied_files=applied_files, merged_files=merged_files,
                 )
@@ -468,7 +487,19 @@ class ScopedRefinementCodingWorker:
             "changed_workspace_pack_paths": [],
         }
 
-    def _admit_pack_outputs(
+    async def _current_accepted_build_record_id(self, request: CodingWorkerRequest) -> str | None:
+        """The app's accepted current build: the artifact store's CURRENT record of this family.
+
+        Accepting a review draft is what makes a build current, and an inline
+        run that fails changes nothing there, so a failed attempt never strands
+        a later authorized change on the accepted build.
+        """
+        family = _ARTIFACT_KIND_ALIASES.get(request.build_family, request.build_family)
+        artifact_store = self._artifact_store or get_artifact_store()
+        refs = await artifact_store.get_current_build_record_refs(app_id=request.artifact_app_id)
+        return str((refs or {}).get(family) or "").strip() or None
+
+    async def _admit_pack_outputs(
         self,
         *,
         request: CodingWorkerRequest,
@@ -480,10 +511,12 @@ class ScopedRefinementCodingWorker:
 
         Template-owned outputs stay byte-identical to the verified parent. An
         app-owned (``owner: workspace``) output may change only inside an
-        explicit or user-confirmed selected-file scope, from the build the
-        registry currently serves, and, for a workspace handler, only as a thin
-        extension of its template base handler. Applied paths are real changes
-        against the parent, so any owned path among them is a change.
+        explicit or user-confirmed selected-file scope, from the app's accepted
+        current build (read here, at admission), and, for a workspace handler,
+        only as a thin extension of its template base handler. Applied paths
+        are real changes against the parent, so any owned path among them is a
+        change. Acceptance rechecks the parent and scope before a child becomes
+        current.
         """
         from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
             ManagedCapabilityTemplateError,
@@ -531,26 +564,37 @@ class ScopedRefinementCodingWorker:
                 "app-owned pack code changes only inside an explicit or user-confirmed selected-file scope",
                 paths=workspace, scope_origin=scope["scope_origin"],
             )
-        current = str((request.metadata or {}).get("registry_artifact_version_id") or "").strip() or None
+        current = await self._current_accepted_build_record_id(request)
         if current is None or current != request.build_record_id:
             raise CandidateAdmissionError(
                 "STALE_REFINEMENT_BASELINE",
-                "app-owned pack code changes only from the build the registry currently serves",
+                "app-owned pack code changes only from the app's accepted current build",
                 paths=workspace, parent_build_record_id=request.build_record_id,
-                registry_artifact_version_id=current,
+                accepted_build_record_id=current,
             )
         for path in workspace:
             if path.endswith("/backend/handler.py"):
-                self._prove_handler_extension(path, owners=owners, merged_files=merged_files)
+                self._prove_handler_extension(
+                    path, owners=owners, merged_files=merged_files, capability_packs=capability_packs,
+                )
         return scope
 
     @staticmethod
-    def _prove_handler_extension(path: str, *, owners: dict[str, str], merged_files: dict[str, str]) -> None:
+    def _prove_handler_extension(
+        path: str, *, owners: dict[str, str], merged_files: dict[str, str], capability_packs: list[dict[str, Any]],
+    ) -> None:
+        from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+            ManagedCapabilityTemplateError,
+        )
+
         module_root = path[: -len("backend/handler.py")]
         base_path, manifest_path = module_root + "backend/base_handler.py", module_root + "module.yaml"
         try:
             if owners.get(base_path) != "templates" or base_path not in merged_files:
                 raise ImplementationArtifactError("a workspace handler needs its template-owned base handler")
+            template = pack_template_source(capability_packs, path)
+            if template is None:
+                raise ImplementationArtifactError("a workspace handler needs the pack template that ships it")
             manifest = yaml.safe_load(merged_files.get(manifest_path) or "") or {}
             module = manifest.get("module") if isinstance(manifest, dict) else None
             reference = str(module.get("handler") or "") if isinstance(module, dict) else ""
@@ -559,13 +603,13 @@ class ScopedRefinementCodingWorker:
                 raise ImplementationArtifactError(f"{manifest_path} must declare backend.handler:<class>")
             prove_workspace_handler_extension(
                 handler_source=merged_files[path], base_handler_source=merged_files[base_path],
-                handler_class=handler_class,
+                handler_class=handler_class, template_handler_source=template,
                 action_methods=[
                     str(action.get("handler_method") or "")
                     for action in manifest.get("actions") or [] if isinstance(action, dict)
                 ],
             )
-        except (ImplementationArtifactError, yaml.YAMLError) as exc:
+        except (ImplementationArtifactError, ManagedCapabilityTemplateError, OSError, yaml.YAMLError) as exc:
             raise CandidateAdmissionError(
                 "WORKSPACE_HANDLER_EXTENSION_REJECTED", str(exc), paths=[path],
             ) from exc

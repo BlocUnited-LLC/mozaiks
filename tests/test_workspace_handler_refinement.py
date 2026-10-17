@@ -3,13 +3,14 @@
 ``modules/messages/backend/handler.py`` is ``owner: workspace`` in the pack
 contract. Regeneration, UI refinement, raw worker output and AppGenerator plan
 tasks keep the verified copy. An explicit or user-confirmed selected-file patch
-from the build the registry serves may change it, as a thin extension of the
+from the app's accepted current build may change it, as a thin extension of the
 template base handler, leaving every pack-owned file and the Messaging
 authorization boundary as they were.
 """
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -30,6 +31,11 @@ from factory_app.workflows.AppGenerator.tools.app_validation import (
     validate_module_implementation_contract,
 )
 from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
+from factory_app.workflows.AppGenerator.tools.code_file_utils import (
+    admitted_app_file_map,
+    save_generated_code,
+)
+from factory_app.workflows.AppGenerator.tools.repair_policy import prepare_bundle_repair
 from mozaiksai.control_plane.config import ControlPlaneConfig
 from mozaiksai.control_plane.contracts import (
     ContractSurfacePlan,
@@ -47,6 +53,7 @@ from mozaiksai.control_plane.implementations.refinement_router import (
     RefinementRoutingDecision,
     RefinementTriggerRouteResolver,
 )
+from mozaiksai.core.artifacts import ArtifactLifecycleStatus
 from mozaiksai.core.artifacts.models import BuildRecord
 from mozaiksai.core.session.build_binding import RunBuildBinding
 from mozaiksai.core.workflow.context.adapter import create_context_container
@@ -77,6 +84,17 @@ PRIVILEGED_HANDLER = TEMPLATE_HANDLER + '''
         )
 '''
 BINDING = RunBuildBinding(build_registry_id="registry_1", target_app_id=APP_ID, build_id="refine_1", phase="refinement")
+_FUTURE = "from __future__ import annotations\n\n"
+# A literal the template input contract (module.yaml thread_type enum [group, direct]) never admits.
+FORGED_SUPPORT_HANDLER = TEMPLATE_HANDLER + '''
+    async def create_thread(self, ctx, *, title=None, participant_ids=None, thread_type="group", scope_type="app",
+                            scope_id=None, subject_app_id=None, related_type=None, related_id=None, metadata=None, **_):
+        return await self._service.create_thread(
+            ctx, title=title, participant_ids=participant_ids, thread_type="support", scope_type=scope_type,
+            scope_id=scope_id, subject_app_id=subject_app_id, related_type="support.request", related_id=related_id,
+            metadata=metadata,
+        )
+'''
 
 
 def _sha(content):
@@ -123,7 +141,7 @@ class _Store:
         self.app_id = app_id
         self.records = {"parent": BuildRecord(
             id="parent", app_id=app_id, build_family="app_bundle", build_key="app_bundle",
-            version_number=1, lineage_root_id="parent",
+            version_number=1, lineage_root_id="parent", lifecycle_status=ArtifactLifecycleStatus.CURRENT,
             commit_metadata={"author_user_id": "owner", "metadata": {
                 "capability_packs": deepcopy(_packs()), **(metadata or BINDING.model_dump()),
             }},
@@ -133,6 +151,22 @@ class _Store:
     async def get_build_record(self, *, app_id, build_record_id):
         record = self.records.get(build_record_id)
         return record if record is not None and record.app_id == app_id else None
+
+    async def get_current_build_record_refs(self, *, app_id):
+        """The accepted current record per build family, as the artifact store reports it."""
+        return {
+            record.build_family: record.id for record in self.records.values()
+            if record.app_id == app_id and record.lifecycle_status == ArtifactLifecycleStatus.CURRENT
+        }
+
+    def supersede_parent_with(self, record_id):
+        """Another accepted build replaced the parent as the app's current build."""
+        self.records["parent"] = self.records["parent"].model_copy(
+            update={"lifecycle_status": ArtifactLifecycleStatus.SUPERSEDED},
+        )
+        self.records[record_id] = self.records["parent"].model_copy(
+            update={"id": record_id, "version_number": 2, "lifecycle_status": ArtifactLifecycleStatus.CURRENT},
+        )
 
     async def create_build_record(self, **kwargs):
         self.created.append(kwargs)
@@ -190,8 +224,8 @@ def _routing(refinement, change_class="patch"):
     )
 
 
-async def _prepared(harness, baseline, paths, *, registry="parent", extra=None, **options):
-    """Mirror Studio: resolve the scope, then bind the run, baseline and registry read."""
+async def _prepared(harness, baseline, paths, *, extra=None, **options):
+    """Mirror Studio: resolve the scope, then bind the run and baseline."""
     refinement = _refinement(**(extra or {}))
     request = harness.build_coding_request(
         refinement_request=refinement, routing_decision=_routing(refinement),
@@ -200,8 +234,7 @@ async def _prepared(harness, baseline, paths, *, registry="parent", extra=None, 
     prepared, decision = await harness.prepare_coding_request(request, **options)
     if prepared is None:
         return None, decision
-    metadata = {**prepared.metadata, **({"registry_artifact_version_id": registry} if registry else {})}
-    return prepared.model_copy(update={"run_build_binding": BINDING, "baseline_files": baseline, "metadata": metadata}), decision
+    return prepared.model_copy(update={"run_build_binding": BINDING, "baseline_files": baseline}), decision
 
 
 @pytest.fixture(autouse=True)
@@ -250,32 +283,47 @@ def _rejected_case(case, baseline):
         await ctx.persistence.collection("messages", "messages").insert_one({"body": body})
         return await super().send_message(ctx, thread_id=thread_id, body=body, message_type=message_type)
 '''
+    # Without the future import this annotation is evaluated when the class body runs.
+    annotation_side_effect = TEMPLATE_HANDLER.replace(_FUTURE, "") + '''
+    async def send_message(self, ctx: open("pwned.txt", "w").write("ran at import"), *, thread_id, body, message_type="text", **_):
+        return await super().send_message(ctx, thread_id=thread_id, body=body, message_type=message_type)
+'''
     return {
-        "privileged_override": ({HANDLER: PRIVILEGED_HANDLER}, {}, "WORKSPACE_HANDLER_EXTENSION_REJECTED"),
-        "undeclared_helper": ({HANDLER: helper}, {}, "WORKSPACE_HANDLER_EXTENSION_REJECTED"),
-        "direct_persistence": ({HANDLER: persistence}, {}, "WORKSPACE_HANDLER_EXTENSION_REJECTED"),
-        "template_drift": ({POLICY: drifted}, {}, "PACK_TEMPLATE_OUTPUT_CHANGED"),
-        "handler_with_template_drift": ({HANDLER: NORMALIZING_HANDLER, POLICY: drifted}, {}, "PACK_TEMPLATE_OUTPUT_CHANGED"),
-        "stale_parent": ({HANDLER: NORMALIZING_HANDLER}, {"registry": "newer_build"}, "STALE_REFINEMENT_BASELINE"),
-        "registry_unread": ({HANDLER: NORMALIZING_HANDLER}, {"registry": None}, "STALE_REFINEMENT_BASELINE"),
+        "privileged_override": ({HANDLER: PRIVILEGED_HANDLER}, None, "WORKSPACE_HANDLER_EXTENSION_REJECTED"),
+        "undeclared_helper": ({HANDLER: helper}, None, "WORKSPACE_HANDLER_EXTENSION_REJECTED"),
+        "direct_persistence": ({HANDLER: persistence}, None, "WORKSPACE_HANDLER_EXTENSION_REJECTED"),
+        "annotation_side_effect": ({HANDLER: annotation_side_effect}, None, "WORKSPACE_HANDLER_EXTENSION_REJECTED"),
+        "forged_service_value": ({HANDLER: FORGED_SUPPORT_HANDLER}, None, "WORKSPACE_HANDLER_EXTENSION_REJECTED"),
+        "template_drift": ({POLICY: drifted}, None, "PACK_TEMPLATE_OUTPUT_CHANGED"),
+        "handler_with_template_drift": ({HANDLER: NORMALIZING_HANDLER, POLICY: drifted}, None, "PACK_TEMPLATE_OUTPUT_CHANGED"),
+        "stale_parent": ({HANDLER: NORMALIZING_HANDLER}, "newer_build", "STALE_REFINEMENT_BASELINE"),
+        "parent_never_accepted": ({HANDLER: NORMALIZING_HANDLER}, "", "STALE_REFINEMENT_BASELINE"),
     }[case]
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("case", [
-    "privileged_override", "undeclared_helper", "direct_persistence", "template_drift",
-    "handler_with_template_drift", "stale_parent", "registry_unread",
+    "privileged_override", "undeclared_helper", "direct_persistence", "annotation_side_effect",
+    "forged_service_value", "template_drift", "handler_with_template_drift", "stale_parent", "parent_never_accepted",
 ])
 async def test_explicit_patch_outside_the_extension_contract_is_rejected_without_a_child(tmp_path, case):
     baseline, store = _baseline(), _Store()
-    changes, options, code = _rejected_case(case, baseline)
+    changes, accepted, code = _rejected_case(case, baseline)
+    if accepted:
+        store.supersede_parent_with(accepted)
+    elif accepted == "":
+        store.records["parent"] = store.records["parent"].model_copy(
+            update={"lifecycle_status": ArtifactLifecycleStatus.DRAFT},
+        )
     harness, validate = _harness(store, tmp_path, changes)
-    request, _ = await _prepared(harness, baseline, list(changes), **options)
+    request, _ = await _prepared(harness, baseline, list(changes))
     result = await harness.execute_coding_request(request)
     assert result.status == "failed" and result.error.startswith(code)
     assert result.metadata["candidate_admission"]["code"] == code
+    if code == "STALE_REFINEMENT_BASELINE":
+        assert result.metadata["candidate_admission"]["accepted_build_record_id"] == (accepted or None)
     validate.assert_not_awaited()
-    assert store.created == []
+    assert [record for record in store.records if record.startswith("child_")] == []
 
 
 @pytest.mark.asyncio
@@ -287,7 +335,6 @@ async def test_unrecorded_scope_origin_cannot_change_the_workspace_handler(tmp_p
     request = harness.build_coding_request(
         refinement_request=refinement, routing_decision=_routing(refinement), payload={"files": {HANDLER: baseline[HANDLER]}},
     ).model_copy(update={"run_build_binding": BINDING, "baseline_files": baseline})
-    request.metadata["registry_artifact_version_id"] = "parent"
     result = await harness.execute_coding_request(request)
     assert result.metadata["candidate_admission"]["code"] == "WORKSPACE_PACK_OUTPUT_UNAUTHORIZED"
     assert result.metadata["candidate_admission"]["scope_origin"] == "unspecified"
@@ -321,7 +368,6 @@ async def test_inferred_scope_waits_for_confirmation_before_changing_the_handler
     assert decision.decision_type == "auto_patch" and prepared.metadata["scope_origin"] == "auto_proposal"
     result = await harness.execute_coding_request(prepared.model_copy(update={
         "run_build_binding": BINDING, "baseline_files": baseline,
-        "metadata": {**prepared.metadata, "registry_artifact_version_id": "parent"},
     }))
     assert result.metadata["candidate_admission"]["code"] == "WORKSPACE_PACK_OUTPUT_UNAUTHORIZED"
     assert store.created == []
@@ -395,7 +441,7 @@ async def test_surface_plan_without_a_file_limit_cannot_change_the_handler(tmp_p
         plan=_surface("module_action", "messages", module_paths),
         result=SurfacePlanExecutionResult(status="success", all_files={HANDLER: NORMALIZING_HANDLER}),
         refinement_request=refinement, routing_decision=_routing(refinement, "feature"),
-        workspace_files=baseline, run_build_binding=BINDING, registry_artifact_version_id="parent",
+        workspace_files=baseline, run_build_binding=BINDING,
     )
     assert result.status == "failed"
     assert result.metadata["candidate_admission"]["code"] == "WORKSPACE_PACK_OUTPUT_UNAUTHORIZED"
@@ -548,7 +594,7 @@ async def test_explicit_rebuild_keeps_the_handler_only_through_a_bound_verified_
     assert saved.store.get_build_record.await_count == (1 if bound_source else 0)
 
 
-def _studio_route(monkeypatch, tmp_path, *, registry_current, files_payload, proposer=None):
+def _studio_route(monkeypatch, tmp_path, *, files_payload, proposer=None, accepted="parent", registry_current="parent"):
     from mozaiksai.core.auth import reset_auth_adapter
     from mozaiksai.core.session.router import SessionRouter
     from mozaiksai.hosts import studio
@@ -564,9 +610,13 @@ def _studio_route(monkeypatch, tmp_path, *, registry_current, files_payload, pro
         for path, content in baseline.items():
             zipped.writestr(path, content)
     store = _Store(app_id="app_1", metadata={})
-    parent = _artifact_version(artifact_version_id="parent", zip_path=archive)
+    parent = _artifact_version(
+        artifact_version_id="parent", zip_path=archive, lifecycle_status=ArtifactLifecycleStatus.CURRENT,
+    )
     parent.commit_metadata.metadata["capability_packs"] = deepcopy(_packs())
     store.records["parent"] = parent
+    if accepted != "parent":
+        store.supersede_parent_with(accepted)
 
     async def accept(**kwargs):
         return SimpleNamespace(id="cr_1")
@@ -609,14 +659,14 @@ def _studio_route(monkeypatch, tmp_path, *, registry_current, files_payload, pro
     return SimpleNamespace(response=response, store=store, registry=registry, validate=validate)
 
 
-@pytest.mark.parametrize("registry_current", ["parent", "newer_build"])
-def test_studio_backend_patch_requires_the_current_build(monkeypatch, tmp_path, registry_current):
-    route = _studio_route(monkeypatch, tmp_path, registry_current=registry_current, files_payload={"files": {HANDLER: ""}})
+@pytest.mark.parametrize("accepted", ["parent", "newer_build"])
+def test_studio_backend_patch_requires_the_current_build(monkeypatch, tmp_path, accepted):
+    route = _studio_route(monkeypatch, tmp_path, accepted=accepted, files_payload={"files": {HANDLER: ""}})
     assert route.response.status_code == 200, route.response.text
     body = route.response.json()
     assert body["execution_mode"] == "coding_worker"
     status = route.registry.update_build_status.await_args.kwargs
-    if registry_current == "parent":
+    if accepted == "parent":
         assert body["coding_worker"]["status"] == "validated"
         child = route.store.records[body["coding_worker"]["metadata"]["build_record_id"]]
         assert child.commit_metadata.metadata["refinement_scope"]["scope_origin"] == "explicit"
@@ -625,9 +675,20 @@ def test_studio_backend_patch_requires_the_current_build(monkeypatch, tmp_path, 
         return
     assert body["coding_worker"]["status"] == "failed"
     assert body["coding_worker"]["metadata"]["candidate_admission"]["code"] == "STALE_REFINEMENT_BASELINE"
-    assert body["coding_worker"]["metadata"]["candidate_admission"]["registry_artifact_version_id"] == "newer_build"
+    assert body["coding_worker"]["metadata"]["candidate_admission"]["accepted_build_record_id"] == "newer_build"
     route.validate.assert_not_awaited()
     assert route.store.created == [] and status["status"] == "needs_revision"
+
+
+def test_failed_inline_run_does_not_block_a_later_authorized_handler_patch(monkeypatch, tmp_path):
+    # A failed inline run leaves the registry's current run without an artifact;
+    # the accepted build is still the parent, so an authorized retry proceeds.
+    route = _studio_route(monkeypatch, tmp_path, registry_current=None, files_payload={"files": {HANDLER: ""}})
+    assert route.response.status_code == 200, route.response.text
+    body = route.response.json()
+    assert body["coding_worker"]["status"] == "validated", body["coding_worker"]
+    child = route.store.records[body["coding_worker"]["metadata"]["build_record_id"]]
+    assert _archive_files(child)[HANDLER] == NORMALIZING_HANDLER
 
 
 def test_studio_inferred_handler_scope_returns_the_confirmation_decision(monkeypatch, tmp_path):
@@ -638,7 +699,7 @@ def test_studio_inferred_handler_scope_returns_the_confirmation_decision(monkeyp
         )),
         materialize_files=AsyncMock(side_effect=lambda **kwargs: {HANDLER: TEMPLATE_HANDLER}),
     )
-    route = _studio_route(monkeypatch, tmp_path, registry_current="parent", files_payload={}, proposer=proposer)
+    route = _studio_route(monkeypatch, tmp_path, files_payload={}, proposer=proposer)
     assert route.response.status_code == 200, route.response.text
     body = route.response.json()
     assert body["execution_mode"] == "harness_decision"
@@ -717,3 +778,331 @@ def _module_runtime(app_root, monkeypatch, files):
             f"/api/modules/messages/{action}", json={"params": params}, headers=headers,
         ),
     )
+
+
+def _grammar_options(**extra):
+    module = PACK / "templates/modules/messages"
+    return {
+        "base_handler_source": (module / "backend/base_handler.py").read_text(encoding="utf-8"),
+        "handler_class": "MessagesHandler",
+        "action_methods": ["create_thread", "list_threads", "get_thread", "send_message", "mark_thread_read"],
+        **extra,
+    }
+
+
+_PASS_THROUGH = "        return await super().send_message(ctx, thread_id=thread_id, body=body, message_type=message_type)\n"
+
+
+@pytest.mark.parametrize("variant", ["parameter", "keyword_parameter", "return", "string_parameter"])
+def test_workspace_handler_annotations_cannot_run_code_when_the_handler_loads(tmp_path, monkeypatch, variant):
+    import contextlib
+    import importlib
+    import typing
+
+    from mozaiksai.core.semantics.implementation_artifacts import (
+        ImplementationArtifactError,
+        prove_workspace_handler_extension,
+    )
+
+    marker = tmp_path / "ran.txt"
+    effect = f'open({marker.as_posix()!r}, "w").write("ran")'
+    signature = {
+        "parameter": f'(self, ctx: {effect}, *, thread_id, body, message_type="text", **_)',
+        "keyword_parameter": f'(self, ctx, *, thread_id: {effect}, body, message_type="text", **_)',
+        "return": f'(self, ctx, *, thread_id, body, message_type="text", **_) -> {effect}',
+        "string_parameter": f'(self, ctx: {effect!r}, *, thread_id, body, message_type="text", **_)',
+    }[variant]
+    # Without the future import an annotation runs when the class body runs; a
+    # string annotation runs when anything resolves the method's type hints.
+    template = TEMPLATE_HANDLER if variant == "string_parameter" else TEMPLATE_HANDLER.replace(_FUTURE, "")
+    source = template + f"    async def send_message{signature}:\n" + _PASS_THROUGH
+    package = tmp_path / f"annotated_{variant}"
+    (package / "backend").mkdir(parents=True)
+    (package / "__init__.py").write_text("")
+    (package / "backend" / "__init__.py").write_text("")
+    (package / "backend" / "base_handler.py").write_text("class MessagesBaseHandler:\n    pass\n")
+    (package / "backend" / "handler.py").write_text(source, encoding="utf-8")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    module = importlib.import_module(f"annotated_{variant}.backend.handler")
+    with contextlib.suppress(TypeError, NameError):
+        typing.get_type_hints(module.MessagesHandler.send_message)
+    assert marker.read_text() == "ran"  # the side effect is real once the handler loads
+    with pytest.raises(ImplementationArtifactError, match="annotation"):
+        prove_workspace_handler_extension(handler_source=source, **_grammar_options())
+
+
+@pytest.mark.parametrize(("handler", "reason"), [
+    # Keyword values reach the service only as the override's own same-named
+    # parameter or a value derived from it, never a literal the input contract forbids.
+    (FORGED_SUPPORT_HANDLER, "thread_type"),
+    (TEMPLATE_HANDLER + _SEND + "        return await super().send_message(ctx, thread_id=thread_id, body=body, message_type='system')\n",
+     "message_type"),
+    (TEMPLATE_HANDLER + _SEND + "        return await super().send_message(ctx, thread_id=thread_id, body=thread_id, message_type=message_type)\n",
+     "body"),
+    (TEMPLATE_HANDLER + _SEND + "        fixed = 'pinned'\n"
+     "        return await super().send_message(ctx, thread_id=thread_id, body=fixed, message_type=message_type)\n", "body"),
+    # A local annotation is walked through the same grammar.
+    (TEMPLATE_HANDLER + _SEND + "        cleaned: str(body) = body\n"
+     "        return await super().send_message(ctx, thread_id=thread_id, body=cleaned, message_type=message_type)\n",
+     "annotation"),
+])
+def test_workspace_handler_extension_grammar_bounds_service_values_and_local_annotations(handler, reason):
+    from mozaiksai.core.semantics.implementation_artifacts import (
+        ImplementationArtifactError,
+        prove_workspace_handler_extension,
+    )
+
+    with pytest.raises(ImplementationArtifactError, match=reason):
+        prove_workspace_handler_extension(handler_source=handler, **_grammar_options())
+
+
+TYPED_HANDLER = TEMPLATE_HANDLER.replace(
+    "from .base_handler import", "from typing import Any\n\nfrom .base_handler import",
+) + '''
+    async def send_message(
+        self, ctx: ModuleContext, *, thread_id: str, body: str, message_type: str = "text", **_: object,
+    ) -> dict[str, Any]:
+        cleaned: str = " ".join(body.split())
+        return await super().send_message(ctx, thread_id=thread_id, body=cleaned, message_type=message_type)
+'''
+
+
+@pytest.mark.parametrize("handler", [TEMPLATE_HANDLER, NORMALIZING_HANDLER, TYPED_HANDLER])
+def test_workspace_handler_extension_grammar_keeps_typed_and_derived_overrides(handler):
+    from mozaiksai.core.semantics.implementation_artifacts import prove_workspace_handler_extension
+
+    assert prove_workspace_handler_extension(handler_source=handler, **_grammar_options()) in {(), ("send_message",)}
+
+
+def test_workspace_handler_keeps_the_template_future_annotations_import():
+    from mozaiksai.core.semantics.implementation_artifacts import (
+        ImplementationArtifactError,
+        prove_workspace_handler_extension,
+    )
+
+    options = _grammar_options(template_handler_source=TEMPLATE_HANDLER)
+    assert prove_workspace_handler_extension(handler_source=NORMALIZING_HANDLER, **options) == ("send_message",)
+    with pytest.raises(ImplementationArtifactError, match="from __future__ import annotations"):
+        prove_workspace_handler_extension(handler_source=NORMALIZING_HANDLER.replace(_FUTURE, ""), **options)
+
+
+@pytest.mark.asyncio
+async def test_generator_owned_pack_outputs_are_not_template_owned(tmp_path):
+    import shutil
+
+    from mozaiksai.control_plane.implementations.coding_worker import (
+        pack_output_owners,
+        parent_workspace_pack_paths,
+    )
+    from tests.test_messaging_pack_persistence_composition import _context as pack_context
+
+    root = tmp_path / "messaging"
+    shutil.copytree(PACK, root, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    contract = root / "contract.yaml"
+    generated = "config/messaging_digest.yaml"
+    contract.write_text(contract.read_text(encoding="utf-8").replace(
+        "forbidden_outputs:", f"  - path: {generated}\n    owner: generator\n\nforbidden_outputs:",
+    ), encoding="utf-8")
+    packs = pack_context(root, pinned=False)["capability_packs"]
+    owners = pack_output_owners(packs)
+    assert owners[generated] == "generator"
+    assert owners[HANDLER] == "workspace" and owners["modules/messages/backend/base_handler.py"] == "templates"
+    assert owners[POLICY] == "templates" and owners[PROVENANCE] == "templates"
+    assert parent_workspace_pack_paths(packs) == frozenset({HANDLER})
+    # A Studio patch to model-authored pack output is ordinary app code, not template drift.
+    worker = ScopedRefinementCodingWorker(config_loader=_config, artifact_store=_Store(), output_root=tmp_path / "out")
+    request = SimpleNamespace(
+        metadata={}, files={generated: ""}, app_id=APP_ID, artifact_app_id=APP_ID, build_record_id="parent",
+        build_family="app_bundle",
+    )
+    scope = await worker._admit_pack_outputs(
+        request=request, capability_packs=packs, applied_files={generated: "digest: weekly\n"},
+        merged_files={generated: "digest: weekly\n"},
+    )
+    assert scope["changed_workspace_pack_paths"] == []
+
+
+EMPTY_CONTRACT = {"version": "1", "surfaces": [], "shared_collections": []}
+
+
+def _owning_task_revision(request, handler, *, task_handler=None, **extra):
+    """A revision whose plan task owns the app-owned handler, on a verified saved source."""
+    saved = request.getfixturevalue("revision_baseline")
+    saved.files = _baseline(handler)
+    _replace_archive(saved, {})
+    plan = {**_context()["app_build_plan"], "build_tasks": [
+        {"task_id": "svc", "task_type": "business_services", "initial_agent": "ServiceAgent", "owned_paths": [HANDLER]},
+    ]}
+    return _revision_context(saved, saved.files, app_build_plan=plan, data_contract=EMPTY_CONTRACT, app_task_batch_results={
+        "svc": {"code_files": [{"filename": HANDLER, "content": task_handler or handler}]},
+    }, **extra)
+
+
+def _select_handler_repair(context):
+    prepare_bundle_repair({"passed": False, "diagnostics": [
+        {"path": HANDLER, "error": f"{HANDLER}: module implementation contract failed"},
+    ]}, context)
+    active = context.get("bundle_repair_result")["active"]
+    assert active["task_id"] == "svc" and list(active["allowed_paths"]) == [HANDLER]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("baseline_handler", ["template", "customized"])
+@pytest.mark.parametrize("repair", ["privileged", "delete"])
+async def test_bounded_repair_cannot_change_the_workspace_handler(request, baseline_handler, repair):
+    verified = NORMALIZING_HANDLER if baseline_handler == "customized" else TEMPLATE_HANDLER
+    context = _owning_task_revision(request, verified)
+    assert (await assemble_app_tasks(context_variables=context))["success"]
+    _select_handler_repair(context)
+    context.set("structured_output", (
+        {"code_files": [{"filename": HANDLER, "content": PRIVILEGED_HANDLER}]} if repair == "privileged"
+        else {"code_files": [], "deleted_files": [HANDLER]}
+    ))
+    saved = save_generated_code(context)
+    # Rejected whole, with the owned diagnostic naming the authorized path.
+    assert saved["status"] == "rejected" and saved["saved_files"] == [] and saved["deleted_files"] == []
+    assert saved["diagnostic"]["code"] == "WORKSPACE_PACK_OUTPUT_CHANGE_UNSUPPORTED"
+    assert saved["diagnostic"]["paths"] == [HANDLER] and saved["diagnostic"]["task_id"] == "svc"
+    assert saved["diagnostic"]["missing_capability"] == "authorized_backend_refinement"
+    assert "Studio selected-file patch refinement" in saved["error"]
+    assert context.get("bundle_repair_result")["active"]["status"] == "rejected"
+    assert HANDLER not in {entry["filename"] for entry in context.get("code_files") or []}
+    assert HANDLER not in (context.get("deleted_files") or [])
+    assert admitted_app_file_map(context)[HANDLER] == verified
+
+
+@pytest.mark.asyncio
+async def test_repair_restating_the_verified_handler_is_admitted(request):
+    context = _owning_task_revision(request, NORMALIZING_HANDLER)
+    assert (await assemble_app_tasks(context_variables=context))["success"]
+    _select_handler_repair(context)
+    context.set("structured_output", {"code_files": [{"filename": HANDLER, "content": NORMALIZING_HANDLER}]})
+    saved = save_generated_code(context)
+    assert saved.get("status") != "rejected" and saved["saved_files"] == [HANDLER]
+    # The responded repair records what it saved: ordering evidence for later composition.
+    assert list(context.get("bundle_repair_result")["active"]["saved_paths"]) == [HANDLER]
+    assert admitted_app_file_map(context)[HANDLER] == NORMALIZING_HANDLER
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("owning_task", [False, True])
+async def test_overlay_copy_of_the_workspace_handler_never_replaces_the_verified_source(request, caplog, owning_task):
+    overlay = [{"filename": HANDLER, "content": PRIVILEGED_HANDLER}]
+    if owning_task:
+        # A task change backed by an identical overlay copy still needs the authorized path.
+        context = _owning_task_revision(request, NORMALIZING_HANDLER, task_handler=PRIVILEGED_HANDLER, code_files=overlay)
+    else:
+        saved = request.getfixturevalue("revision_baseline")
+        saved.files = _baseline(NORMALIZING_HANDLER)
+        _replace_archive(saved, {})
+        context = _revision_context(saved, saved.files, code_files=overlay, deleted_files=[HANDLER])
+    caplog.set_level(logging.WARNING, logger="factory_app.workflows.AppGenerator.tools")
+    result = await assemble_app_tasks(context_variables=context)
+    if owning_task:
+        assert not result["success"]
+        assert result["diagnostic"]["code"] == "WORKSPACE_PACK_OUTPUT_CHANGE_UNSUPPORTED"
+        assert result["diagnostic"]["retained"] == "verified_revision_source"
+        return
+    assert result["success"], result
+    assert _files(result)[HANDLER] == NORMALIZING_HANDLER
+    # The projection that validation checks and export ships keeps the verified copy too.
+    assert admitted_app_file_map(context)[HANDLER] == NORMALIZING_HANDLER
+    assert any("WORKSPACE_PACK_OUTPUT_EXCLUDED" in record.getMessage() for record in caplog.records)
+
+
+def _accept_records(store, children, *, scope=None, registry="registry_1"):
+    from mozaiksai.core.artifacts import ArtifactValidationStatus
+
+    for child in children:
+        store.records[child] = BuildRecord(
+            id=child, app_id=APP_ID, build_family="app_bundle", build_key="app_bundle", version_number=2,
+            lineage_root_id="parent", parent_build_record_id="parent", lifecycle_status=ArtifactLifecycleStatus.DRAFT,
+            validation_status=ArtifactValidationStatus.PASSED, app_validation_status="passed",
+            commit_metadata={"author_user_id": "owner", "metadata": {
+                **BINDING.model_dump(), "build_registry_id": registry,
+                "refinement_scope": scope or {
+                    "selected_file_paths": [HANDLER], "scope_origin": "explicit", "changed_workspace_pack_paths": [HANDLER],
+                },
+            }},
+        )
+
+
+def _accept_route(monkeypatch, store):
+    from mozaiksai.hosts import studio
+
+    store.accepted = []
+
+    async def accept_build_record(*, app_id, build_record_id, commit_metadata=None):
+        await asyncio.sleep(0)  # a store round-trip lets another request interleave
+        target = store.records[build_record_id]
+        for record_id, record in list(store.records.items()):
+            if record.lifecycle_status == ArtifactLifecycleStatus.CURRENT and record.build_family == target.build_family:
+                store.records[record_id] = record.model_copy(update={"lifecycle_status": ArtifactLifecycleStatus.SUPERSEDED})
+        store.records[build_record_id] = target.model_copy(update={"lifecycle_status": ArtifactLifecycleStatus.CURRENT})
+        store.accepted.append(build_record_id)
+        return store.records[build_record_id]
+
+    async def scope(principal, *, build_registry_id, app_id=None):
+        return APP_ID, principal.user_id
+
+    store.accept_build_record = accept_build_record
+    store.list_refinement_sessions = AsyncMock(return_value=[])
+    monkeypatch.setattr(studio, "get_artifact_store", lambda: store)
+    monkeypatch.setattr(studio, "_resolve_studio_artifact_scope", scope)
+    monkeypatch.setattr(studio, "_verified_review_snapshots", AsyncMock(return_value=None))
+    monkeypatch.setattr(studio, "_build_artifact_review_payload", AsyncMock(return_value={"review": {}}))
+
+    async def accept(child_id, *, registry="registry_1"):
+        return await studio.accept_build_artifact_version(
+            child_id, body=None, app_id=None, build_registry_id=registry, principal=SimpleNamespace(user_id="owner"),
+        )
+
+    return accept
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", ["stale_parent", "unauthorized_scope", "other_registry"])
+async def test_accepting_a_handler_change_rechecks_its_parent_and_authority(monkeypatch, case):
+    from fastapi import HTTPException
+
+    store = _Store()
+    _accept_records(store, ["child_1"], scope={
+        "selected_file_paths": [], "scope_origin": "auto_proposal", "changed_workspace_pack_paths": [HANDLER],
+    } if case == "unauthorized_scope" else None, registry="registry_2" if case == "other_registry" else "registry_1")
+    if case == "stale_parent":
+        store.supersede_parent_with("newer_build")
+    accept = _accept_route(monkeypatch, store)
+    before = deepcopy(store.records)
+    with pytest.raises(HTTPException) as rejected:
+        await accept("child_1")
+    assert rejected.value.status_code == 409
+    assert store.accepted == [] and store.records == before
+
+
+@pytest.mark.asyncio
+async def test_accepting_a_ui_only_child_keeps_the_existing_acceptance_rules(monkeypatch):
+    store = _Store()
+    _accept_records(store, ["child_1"], scope={
+        "selected_file_paths": [PAGE], "scope_origin": "explicit", "changed_workspace_pack_paths": [],
+    })
+    store.supersede_parent_with("newer_build")
+    accept = _accept_route(monkeypatch, store)
+    assert (await accept("child_1"))["accepted"] is True
+    assert store.accepted == ["child_1"]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_acceptance_of_two_handler_children_admits_only_one(monkeypatch):
+    from fastapi import HTTPException
+
+    store = _Store()
+    _accept_records(store, ["child_1", "child_2"])
+    accept = _accept_route(monkeypatch, store)
+    results = await asyncio.gather(accept("child_1"), accept("child_2"), return_exceptions=True)
+    accepted = [result for result in results if isinstance(result, dict)]
+    rejected = [result for result in results if isinstance(result, HTTPException)]
+    assert len(accepted) == 1 and [error.status_code for error in rejected] == [409], results
+    assert len(store.accepted) == 1
+    winner, loser = store.accepted[0], ({"child_1", "child_2"} - set(store.accepted)).pop()
+    assert store.records[winner].lifecycle_status == ArtifactLifecycleStatus.CURRENT
+    assert store.records[loser].lifecycle_status == ArtifactLifecycleStatus.DRAFT
