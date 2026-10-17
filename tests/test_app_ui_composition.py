@@ -61,7 +61,7 @@ def admitted_overlay(files):
 def retitled(manifest_source, route_id, title):
     manifest = json.loads(manifest_source)
     for route in manifest["pages"]:
-        if route["id"] == route_id:
+        if route.get("id") == route_id:  # The auth contract's own routes carry no id.
             route["meta"]["title"] = title
     return json.dumps(manifest)
 

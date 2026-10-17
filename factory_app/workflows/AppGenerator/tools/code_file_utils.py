@@ -36,6 +36,7 @@ from factory_app.workflows.AppGenerator.tools.task_integrity import (
 )
 from mozaiksai.core.runtime.app.auth_contract import (
     AppAuthContractError,
+    app_auth_route_entries,
     compose_app_auth_routes,
     validate_app_auth_contract,
 )
@@ -104,6 +105,72 @@ def compose_bundle_auth_routes(files_map: dict[str, str]) -> None:
         raise AppAuthContractError("ui/route_manifest.json must declare pages")
     manifest["pages"] = compose_app_auth_routes(contract, manifest["pages"])
     files_map["ui/route_manifest.json"] = json.dumps(manifest, indent=2, ensure_ascii=False)
+
+
+def _auth_route_projection(file_sets: list[dict[str, str]]) -> list[dict[str, Any]]:
+    """The sign-in and callback routes assembly adds for each valid auth contract in these file sets."""
+    routes: list[dict[str, Any]] = []
+    for files in file_sets:
+        raw = files.get("config/auth.yaml")
+        if not isinstance(raw, str):
+            continue
+        try:
+            contract = validate_app_auth_contract(yaml.safe_load(raw))
+        except (AppAuthContractError, yaml.YAMLError):
+            continue  # Composition reports what an unreadable contract leaves behind.
+        routes.extend(route for route in app_auth_route_entries(contract) if route not in routes)
+    return routes
+
+
+def without_auth_route_projection(
+    contributions: list[dict[str, Any]], files: dict[str, str], revision_baseline: dict[str, str] | None,
+) -> tuple[list[dict[str, Any]], dict[str, str] | None]:
+    """Shared UI contributions and revision baseline without the auth contract's own routes.
+
+    Assembly composes the shared roots first and adds the sign-in and callback
+    routes afterwards (``compose_bundle_auth_routes``). Those routes carry no
+    route id, so a carried, saved or repaired manifest that already holds them
+    cannot be composed again. Only the exact canonical projection of an auth
+    contract these files declare is set aside; any other route still composes,
+    or fails, as written. Pack contributions are never changed.
+    """
+    projection = _auth_route_projection([
+        files, revision_baseline or {},
+        *({item["filename"]: item["content"] for item in contribution["files"]} for contribution in contributions),
+    ])
+    if not projection:
+        return contributions, revision_baseline
+
+    def strip(source: str) -> str:
+        try:
+            manifest = json.loads(source)
+        except (TypeError, ValueError):
+            return source
+        if not isinstance(manifest, dict) or not isinstance(manifest.get("pages"), list):
+            return source
+        pages = [route for route in manifest["pages"] if route not in projection]
+        return source if len(pages) == len(manifest["pages"]) else json.dumps({**manifest, "pages": pages})
+
+    stripped = [
+        contribution if str(contribution["owner"]).startswith("pack:") else {**contribution, "files": [
+            {**item, "content": strip(item["content"])} if item["filename"] == "ui/route_manifest.json" else item
+            for item in contribution["files"]
+        ]}
+        for contribution in contributions
+    ]
+    if revision_baseline is not None and "ui/route_manifest.json" in revision_baseline:
+        revision_baseline = {
+            **revision_baseline, "ui/route_manifest.json": strip(revision_baseline["ui/route_manifest.json"]),
+        }
+    return stripped, revision_baseline
+
+
+def _auth_required(files: dict[str, str]) -> bool:
+    try:
+        manifest = json.loads(files.get("app.json") or "{}")
+    except ValueError:
+        return False
+    return isinstance(manifest, dict) and manifest.get("authRequired") is True
 
 
 def extract_code_file_map_from_payload(
@@ -437,11 +504,12 @@ async def load_revision_baseline(context_variables: Any) -> dict[str, str] | Non
     admitted projection must compose a repair copy saved later against the
     same source, so this reads it again from its verified, immutable record
     when this process does not hold it (a restarted host, a replayed turn,
-    another worker, an evicted entry). Async validation passes the result to
-    :func:`admitted_app_file_map` as ``revision_baseline``, so the projection
-    does not depend on the process that assembled the bundle. None outside a
-    revision, when no repair copy replaces a pack-composed root, or when the
-    source cannot be read; acceptance reports an unreadable source itself.
+    another worker, an evicted entry). Async validation and export pass the
+    result to :func:`admitted_app_file_map` as ``revision_baseline``, so the
+    projection does not depend on the process that assembled the bundle. None
+    outside a revision, when no repair copy of a pack-composed root is
+    admitted, or when the source cannot be read; acceptance reports an
+    unreadable source itself.
     """
     from mozaiksai.core.artifacts.content_store import ContentNotFoundError
 
@@ -451,9 +519,7 @@ async def load_revision_baseline(context_variables: Any) -> dict[str, str] | Non
         return None
     if not revision_baseline_required(context_variables):
         return None
-    files = _generated_file_map(context_variables)
-    overlay = _overlay_file_map(context_variables)
-    if not any(path in overlay and overlay[path] != files[path] for path in _pack_composed_roots(files)):
+    if not overlay_pack_composed_roots(context_variables):
         return None
     baseline = _cached_revision_baseline(context_variables)
     if baseline is not None:
@@ -475,6 +541,13 @@ def _pack_composed_roots(files: dict[str, str]) -> frozenset[str]:
     if not isinstance(composed, dict):
         return frozenset()
     return frozenset(path for path in SHARED_UI_OUTPUT_PATHS if path in composed and path in files)
+
+
+def overlay_pack_composed_roots(context_variables: Any) -> frozenset[str]:
+    """Pack-composed UI roots the admitted overlay holds a copy of, which the projection composes."""
+    files = _generated_file_map(context_variables)
+    overlay = _overlay_file_map(context_variables)
+    return frozenset(path for path in _pack_composed_roots(files) if path in overlay)
 
 
 def _entries(files: dict[str, str]) -> list[dict[str, str]]:
@@ -504,15 +577,17 @@ def _compose_repair_roots(
 ) -> dict[str, str]:
     """Compose admitted repair copies onto pack-composed roots with assembly's own rules.
 
-    The contributions are assembly's: the assembled roots as the carried
+    The contributions are assembly's: the bundle's roots as the carried
     snapshot, every current task output, the admitted overlay and the verified
     pack templates, composed against the same bound revision baseline (in a
-    revision) and the same admitted deletions. A repair copy therefore
-    supersedes only what it declares, a stale copy of the baseline cannot
-    revert a task's approved change, and a pack declaration is never patched.
-    When those rules cannot be applied here, or reject the copy, the assembled
-    pack-composed roots are kept; only an app without resolvable packs keeps
-    the copy as written for the acceptance gates to judge.
+    revision) and the same admitted deletions. As in assembly, the auth
+    contract's sign-in and callback routes are set aside while the roots
+    compose and added to the composed manifest afterwards. A repair copy
+    therefore supersedes only what it declares, a stale copy of the baseline
+    cannot revert a task's approved change, and a pack declaration is never
+    patched. When those rules cannot be applied here, or reject the copy, the
+    assembled pack-composed roots are kept; only an app without resolvable
+    packs keeps the copy as written for the acceptance gates to judge.
     """
     from .hydrate_app_revision_context import revision_baseline_required
     from .resolve_managed_capability_templates import (
@@ -521,34 +596,25 @@ def _compose_repair_roots(
     )
 
     kept = {path: roots[path] for path in sorted(replaced)}
+    unbound = False
     if revision_baseline is None and revision_baseline_required(context_variables):
         revision_baseline = _cached_revision_baseline(context_variables)
-        if revision_baseline is None:
-            logger.warning(
-                "ADMITTED_UI_ROOT_NOT_COMPOSED: paths=%s; the revision baseline was neither passed to this "
-                "projection nor held by this process, so the assembled roots are kept. Pass the result of "
-                "load_revision_baseline, which reads it from the verified revision source.",
-                sorted(replaced),
-            )
-            return kept
+        unbound = revision_baseline is None
     pack_outputs = pack_owned_output_paths(context_variables)
     superseded = repair_superseded_roots(context_variables)
     build_timestamp = context_variables.get("build_timestamp")
-    contributions: list[dict[str, Any]] = [
-        {"owner": "app:generated_files", "baseline": True, "files": _entries(roots)},
-    ]
+    snapshot = {"owner": "app:generated_files", "baseline": True, "files": _entries(roots)}
+    tasks: list[dict[str, Any]] = []
     for key, output in task_batch_outputs(context_variables):
         task_output, _ = discard_pack_owned_outputs(output, pack_outputs)
         entries = extract_code_file_entries_from_payload(task_output, build_timestamp=build_timestamp)
         if any(item["filename"] in SHARED_UI_OUTPUT_PATHS for item in entries):
             owner = f"task:{key}"
-            contributions.append({
+            tasks.append({
                 "owner": owner, "baseline": False, "files": entries,
                 **({"overlay_supersedes": superseded[owner]} if owner in superseded else {}),
             })
-    contributions.append({
-        "owner": ADMITTED_OVERLAY_OWNER, "baseline": True, "admitted_overlay": True, "files": _entries(overlay),
-    })
+    admitted = {"owner": ADMITTED_OVERLAY_OWNER, "baseline": True, "admitted_overlay": True, "files": _entries(overlay)}
     packs: list[dict[str, Any]] = []
     capability_packs = selected_capability_packs(context_variables)
     if capability_packs:
@@ -562,11 +628,44 @@ def _compose_repair_roots(
                 "assembled pack-composed roots are kept: %s", sorted(replaced), exc,
             )
             return kept
-    try:
+
+    def compose(contributions: list[dict[str, Any]], baseline: dict[str, str] | None) -> dict[str, str]:
+        composable, baseline = without_auth_route_projection(contributions, files, baseline)
         shared = compose_ui_registry(
-            [*contributions, *packs], files, revision_baseline=revision_baseline,
+            composable, files, revision_baseline=baseline,
             deleted_paths=[path for path in deleted if path not in pack_outputs],
         )
+        if "ui/route_manifest.json" in shared and _auth_required(files):
+            # As materialize_auth_scaffold does after assembly composes the roots.
+            with_auth = {**files, **shared}
+            compose_bundle_auth_routes(with_auth)
+            shared["ui/route_manifest.json"] = with_auth["ui/route_manifest.json"]
+        return {path: shared[path] for path in sorted(replaced) if path in shared}
+
+    if unbound:
+        # Assembly's revision rules need the bound baseline, so the assembled
+        # roots are kept. Once validation has written its composition back they
+        # hold every admitted copy already: composing the overlay onto them
+        # alone changes nothing. A repair is dropped only where it does.
+        try:
+            held = compose([snapshot, admitted, *packs], None) == kept
+        except ValueError:
+            held = False
+        if held:
+            logger.info(
+                "ADMITTED_UI_ROOT_KEPT: paths=%s; the revision baseline is not held by this process, and the "
+                "kept roots already hold the admitted repair copies.", sorted(replaced),
+            )
+        else:
+            logger.warning(
+                "ADMITTED_UI_ROOT_NOT_COMPOSED: paths=%s; the revision baseline was neither passed to this "
+                "projection nor held by this process, so the assembled roots are kept without the admitted "
+                "repair copies. Pass the result of load_revision_baseline, which reads it from the verified "
+                "revision source.", sorted(replaced),
+            )
+        return kept
+    try:
+        return compose([snapshot, *tasks, admitted, *packs], revision_baseline)
     except ValueError as exc:
         if packs:
             logger.warning(
@@ -579,7 +678,6 @@ def _compose_repair_roots(
             sorted(replaced), exc,
         )
         return {}
-    return {path: shared[path] for path in sorted(replaced) if path in shared}
 
 
 def admitted_app_file_map(
@@ -620,7 +718,10 @@ def admitted_app_file_map(
         files.pop(path, None)
     # Assembly composed these roots with verified pack declarations; a repair
     # copy is composed onto them rather than replacing them as a whole file.
-    replaced = {path for path in composed & overlay.keys() if overlay[path] != roots[path] and path not in deleted}
+    # That includes a copy equal to the bundle's root: save_app_schema also
+    # writes the roots it renders into generated_files, so until the next
+    # assembly the bundle's root can be the uncomposed repair copy itself.
+    replaced = {path for path in composed & overlay.keys() if path not in deleted}
     if replaced:
         files.update(_compose_repair_roots(context_variables, roots, overlay, files, deleted, replaced, revision_baseline))
     return files

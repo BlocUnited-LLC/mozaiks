@@ -28,7 +28,8 @@ def _files(result):
 
 
 def _routes(files):
-    return {route["id"]: route for route in json.loads(files["ui/route_manifest.json"])["pages"]}
+    # The auth contract's sign-in and callback routes carry no id; they are keyed by path.
+    return {route.get("id") or route["path"]: route for route in json.loads(files["ui/route_manifest.json"])["pages"]}
 
 
 def _save(saved, *parts):
@@ -441,9 +442,11 @@ BOARD_BUNDLE = {
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("approved", ["lists_the_pack_surface", "app_only"])
 async def test_revision_app_schema_repair_restoring_the_baseline_supersedes_the_task_it_repairs(
-    request, tmp_path, monkeypatch,
+    request, tmp_path, monkeypatch, approved,
 ):
+    from factory_app.workflows.AppGenerator.tools.code_file_utils import load_revision_baseline
     from factory_app.workflows.AppGenerator.tools.save_app_schema import save_app_schema
     from mozaiksai.core.workflow.generator_support.code_files import _custom_route_bundle_code_files
 
@@ -465,8 +468,9 @@ async def test_revision_app_schema_repair_restoring_the_baseline_supersedes_the_
         "app_build_plan": {**selected["app_build_plan"], "build_tasks": [task], "pages": [
             {"name": "board", "route": "/board", "ui_surface": "custom_react_page"},
         ]},
-        # The approved contract already names the pack surface, so the schema save re-renders it unchanged.
-        "data_contract": json.loads(pack["data/contract.json"]),
+        # Whether or not the approved contract names the pack surface, the schema
+        # save keeps the bundle's compiled data/contract.json.
+        "data_contract": json.loads(pack["data/contract.json"]) if approved == "lists_the_pack_surface" else EMPTY_CONTRACT,
         "app_task_batch_results": {"pages": {"code_files": contribution("task:pages", revised)["files"]}},
     })
     first = await assemble_app_tasks(context_variables=context)
@@ -485,6 +489,13 @@ async def test_revision_app_schema_repair_restoring_the_baseline_supersedes_the_
     )
     assert "rejected" not in message, message
     assert context.get("bundle_repair_result")["active"]["status"] == "responded"
+    assert context.get("generated_files")["data/contract.json"] == _files(first)["data/contract.json"]
+    # Validation follows the UI quality gate without reassembly. The save also
+    # wrote its uncomposed roots into generated_files; the projection composes them.
+    before = admitted_app_file_map(context, revision_baseline=await load_revision_baseline(context))
+    assert _routes(before)["board"] == _routes(board)["board"]
+    assert _routes(before)["messages"] == _routes(pack)["messages"]
+    assert before["ui/index.js"].count('registerComponent("Messages"') == 1
     context.set("app_ui_quality_status", "passed")
     result = await assemble_app_tasks(context_variables=context)
     assert result["success"], result
@@ -492,5 +503,338 @@ async def test_revision_app_schema_repair_restoring_the_baseline_supersedes_the_
     assert _routes(files)["board"] == _routes(board)["board"]
     assert _routes(files)["messages"] == _routes(pack)["messages"]
     assert files["ui/index.js"].count('registerComponent("Messages"') == 1
-    assert _routes(admitted_app_file_map(context)) == _routes(files)
+    assert _routes(admitted_app_file_map(context)) == _routes(files) == _routes(before)
     assert {"ui/index.js", "ui/route_manifest.json"} <= set(context.get("bundle_repair_result")["active"]["saved_paths"])
+
+
+AUTH_ROUTE_PATHS = ["/login", "/auth/callback"]
+_CODE_FILE_UTILS = "factory_app.workflows.AppGenerator.tools.code_file_utils"
+
+
+def _auth_paths(files):
+    return [route["path"] for route in json.loads(files["ui/route_manifest.json"])["pages"] if "id" not in route]
+
+
+def _not_composed(caplog):
+    return [record for record in caplog.records
+            if record.levelno >= logging.WARNING and "ADMITTED_UI_ROOT_NOT_COMPOSED" in record.getMessage()]
+
+
+def _validation_mocks(monkeypatch, passed=True):
+    from unittest.mock import AsyncMock
+
+    from factory_app.workflows.AppGenerator.tools import app_validation
+
+    result = {"passed": passed}
+    acceptance = AsyncMock(return_value={
+        **{key: result for key in (
+            "bundle_scan", "agent_backend", "module_wiring", "module_implementation", "module_runtime_quality",
+            "functional_completeness", "workflow_integration", "app_runtime_load", "app_runtime_load_worker",
+            "app_runtime_smoke",
+        )},
+        "status": "passed" if passed else "failed", "passed": passed, "skipped_checks": [],
+        "bundle_repair": {"status": "passed" if passed else "failed", "target_agent": None},
+    })
+    monkeypatch.setattr(app_validation, "run_app_bundle_acceptance_gate", acceptance)
+    monkeypatch.setattr(app_validation, "validate_app_build", AsyncMock(return_value={
+        "validation_status": "passed", "validation_strategy": "skip", "success": True, "errors": [],
+    }))
+    return acceptance
+
+
+def _with_auth_scaffold(files, data_contract=None):
+    """The bundle as assembly writes an auth-required app: its manifest ends with the auth contract's routes."""
+    from factory_app.workflows.AppGenerator.tools.render_auth_scaffold import (
+        materialize_auth_scaffold,
+    )
+
+    return {**files, **materialize_auth_scaffold(files, data_contract=data_contract)}
+
+
+def _responded_repair(context, *paths):
+    context.set("bundle_repair_result", {"history": [], "active": {
+        "task_id": "pages", "status": "responded", "saved_paths": list(paths),
+    }})
+
+
+def _saved_roots(saved):
+    return {path: saved.files[path] for path in ("ui/index.js", "ui/route_manifest.json", "ui/pages/custom/board.jsx")}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["revision", "genesis"])
+async def test_auth_required_pack_app_reassembles_and_composes_a_repair_with_its_auth_routes(request, caplog, mode):
+    from factory_app.workflows.AppGenerator.tools import code_file_utils
+
+    board, pack = component(path="ui/pages/custom/board.jsx"), _assembled_files()
+    if mode == "revision":
+        saved = request.getfixturevalue("revision_baseline")
+        saved.files = _with_auth_scaffold({**board, **pack, **compose(board, pack), "app.json": json.dumps({
+            "appId": "customer-app", "appName": "Board", "authRequired": True, "startup": {"landing_spot": "/board"},
+        })})
+        assert _auth_paths(saved.files) == AUTH_ROUTE_PATHS
+        _replace_archive(saved, {})
+        # The page task restates the saved roots, auth routes included.
+        context = _revision_context(saved, _saved_roots(saved))
+    else:
+        context = _genesis_context(board, app_task_batch_results={
+            "pages": {"code_files": contribution("task:pages", board)["files"]},
+            "shell": {"manifest": {"app_name": "Board", "default_route": "/board", "auth_strategy": "basic-login"}, "pages": []},
+        })
+    result = await assemble_app_tasks(context_variables=context)
+    assert result["success"], result
+    assembled = _files(result)
+    assert _auth_paths(assembled) == AUTH_ROUTE_PATHS
+    # Reassembly carries a manifest that already holds the auth routes.
+    again = await assemble_app_tasks(context_variables=context)
+    assert again["success"], again
+    assert _files(again)["ui/route_manifest.json"] == assembled["ui/route_manifest.json"]
+    # A bounded repair restates the whole assembled manifest and retitles the board.
+    repair = {"ui/route_manifest.json": retitled(assembled["ui/route_manifest.json"], "board", "Repaired later")}
+    context.set("code_files", contribution("repair", repair)["files"])
+    _responded_repair(context, "ui/route_manifest.json")
+    code_file_utils._REVISION_UI_BASELINES.clear()
+    caplog.set_level(logging.INFO, logger=_CODE_FILE_UTILS)
+    admitted = admitted_app_file_map(context, revision_baseline=await code_file_utils.load_revision_baseline(context))
+    assert _routes(admitted)["board"]["meta"]["title"] == "Repaired later"
+    assert _routes(admitted)["messages"] == _routes(pack)["messages"]
+    assert admitted["ui/index.js"].count('registerComponent("Messages"') == 1
+    assert _auth_paths(admitted) == AUTH_ROUTE_PATHS
+    assert not _not_composed(caplog)
+    reassembled = await assemble_app_tasks(context_variables=context)
+    assert reassembled["success"], reassembled
+    assert _files(reassembled)["ui/route_manifest.json"] == admitted["ui/route_manifest.json"]
+
+
+@pytest.mark.asyncio
+async def test_validation_composes_the_auth_routes_a_repair_turns_on_in_a_pack_revision(request, monkeypatch):
+    from factory_app.workflows.AppGenerator.tools import app_validation, code_file_utils
+
+    saved = request.getfixturevalue("revision_baseline")
+    board, pack = component(path="ui/pages/custom/board.jsx"), _assembled_files()
+    _save(saved, board, pack)
+    context = _revision_context(saved, _saved_roots(saved))
+    result = await assemble_app_tasks(context_variables=context)
+    assert result["success"], result
+    assert "config/auth.yaml" not in _files(result) and _auth_paths(_files(result)) == []
+    # An admitted app.json repair turns sign-in on; validation scaffolds the auth contract.
+    manifest = {**json.loads(_files(result)["app.json"]), "authRequired": True, "startup": {"landing_spot": "/board"}}
+    context.set("code_files", [{"filename": "app.json", "content": json.dumps(manifest)}])
+    _responded_repair(context, "app.json")
+    code_file_utils._REVISION_UI_BASELINES.clear()
+    acceptance = _validation_mocks(monkeypatch)
+    await app_validation.validate_app_bundle_from_request({}, context_variables=context)
+    checked = acceptance.await_args.kwargs["files"]
+    assert "config/auth.yaml" in checked
+    assert _auth_paths(checked) == AUTH_ROUTE_PATHS
+    assert _routes(checked)["board"] == _routes(board)["board"]
+    assert _routes(checked)["messages"] == _routes(pack)["messages"]
+    assert checked["ui/index.js"].count('registerComponent("Messages"') == 1
+
+
+@pytest.mark.asyncio
+async def test_a_transient_baseline_read_failure_never_replaces_the_admitted_repair_copy(request, monkeypatch):
+    from factory_app.workflows.AppGenerator.tools import app_validation, code_file_utils
+    from mozaiksai.core.workflow.context.frozen import detach
+
+    saved = request.getfixturevalue("revision_baseline")
+    board, pack = component(path="ui/pages/custom/board.jsx"), _assembled_files()
+    _save(saved, board, pack)
+    context = _revision_context(saved, _saved_roots(saved))
+    result = await assemble_app_tasks(context_variables=context)
+    assert result["success"], result
+    # The repair retitles the board and turns sign-in on, so validation scaffolds auth.
+    manifest = {**json.loads(_files(result)["app.json"]), "authRequired": True, "startup": {"landing_spot": "/board"}}
+    repair = {
+        "app.json": json.dumps(manifest),
+        "ui/route_manifest.json": retitled(_files(result)["ui/route_manifest.json"], "board", "Repaired later"),
+    }
+    context.set("code_files", contribution("repair", repair)["files"])
+    _responded_repair(context, "app.json", "ui/route_manifest.json")
+    # The first validation round cannot read the bound source.
+    code_file_utils._REVISION_UI_BASELINES.clear()
+    readable = saved.store.get_build_record.return_value
+    saved.store.get_build_record.side_effect = OSError("transient store outage")
+    _validation_mocks(monkeypatch, passed=False)
+    await app_validation.validate_app_bundle_from_request({}, context_variables=context)
+    overlay = {item["filename"]: item["content"] for item in detach(context.get("code_files"))}
+    assert overlay["ui/route_manifest.json"] == repair["ui/route_manifest.json"]
+    assert "config/auth.yaml" in overlay
+    # The source is readable again in the next round, in another process.
+    saved.store.get_build_record.side_effect = None
+    saved.store.get_build_record.return_value = readable
+    code_file_utils._REVISION_UI_BASELINES.clear()
+    acceptance = _validation_mocks(monkeypatch)
+    await app_validation.validate_app_bundle_from_request({}, context_variables=context)
+    checked = acceptance.await_args.kwargs["files"]
+    assert _routes(checked)["board"]["meta"]["title"] == "Repaired later"
+    assert _routes(checked)["messages"] == _routes(pack)["messages"]
+    assert _auth_paths(checked) == AUTH_ROUTE_PATHS
+
+
+@pytest.mark.asyncio
+async def test_a_projection_without_the_baseline_reports_only_a_dropped_repair(request, monkeypatch, caplog):
+    from factory_app.workflows.AppGenerator.tools import app_validation, code_file_utils
+    from mozaiksai.core.workflow.context.frozen import detach
+
+    saved = request.getfixturevalue("revision_baseline")
+    board, pack = component(path="ui/pages/custom/board.jsx"), _assembled_files()
+    _save(saved, board, pack)
+    context = _revision_context(saved, _saved_roots(saved))
+    result = await assemble_app_tasks(context_variables=context)
+    assert result["success"], result
+    repair = {"ui/route_manifest.json": retitled(_files(result)["ui/route_manifest.json"], "board", "Repaired later")}
+    context.set("code_files", contribution("repair", repair)["files"])
+    _responded_repair(context, "ui/route_manifest.json")
+    caplog.set_level(logging.INFO, logger=_CODE_FILE_UTILS)
+    # Before validation writes back, a projection in a process without the
+    # baseline (save_generated_code, assembly's auth scopes) drops the repair: loud.
+    code_file_utils._REVISION_UI_BASELINES.clear()
+    assert _routes(admitted_app_file_map(context))["board"]["meta"]["title"] == "Board"
+    assert len(_not_composed(caplog)) == 1
+    _validation_mocks(monkeypatch)
+    await app_validation.validate_app_bundle_from_request({}, context_variables=context)
+    validated = detach(context.get("generated_files"))
+    assert _routes(validated)["board"]["meta"]["title"] == "Repaired later"
+    # After it, the kept roots are the validated composition: nothing is dropped, nothing to report.
+    code_file_utils._REVISION_UI_BASELINES.clear()
+    caplog.clear()
+    assert admitted_app_file_map(context) == validated
+    assert not _not_composed(caplog)
+    assert any(record.getMessage().startswith("ADMITTED_UI_ROOT_KEPT") for record in caplog.records)
+
+
+class _ExportProjected(Exception):
+    pass
+
+
+async def _export_projection(monkeypatch, context):
+    """The admitted map generate_and_download bundles, captured at its call site."""
+    from factory_app.workflows.AppGenerator.tools import code_file_utils, generate_and_download
+
+    projected = []
+
+    def capture(context_variables, **kwargs):
+        projected.append(code_file_utils.admitted_app_file_map(context_variables, **kwargs))
+        raise _ExportProjected
+
+    monkeypatch.setattr(generate_and_download, "admitted_app_file_map", capture)
+    with pytest.raises(_ExportProjected):
+        await generate_and_download.generate_and_download({}, "Ready", context_variables=context)
+    return projected[0]
+
+
+@pytest.mark.asyncio
+async def test_export_composes_a_revision_repair_from_the_verified_source(request, monkeypatch, caplog):
+    from factory_app.workflows.AppGenerator.tools import code_file_utils
+
+    saved = request.getfixturevalue("revision_baseline")
+    board, pack = component(path="ui/pages/custom/board.jsx"), _assembled_files()
+    _save(saved, board, pack)
+    context = _revision_context(saved, _saved_roots(saved), chat_id="revision-chat")
+    result = await assemble_app_tasks(context_variables=context)
+    assert result["success"], result
+    repair = {"ui/route_manifest.json": retitled(_files(result)["ui/route_manifest.json"], "board", "Repaired later")}
+    context.set("code_files", contribution("repair", repair)["files"])
+    _responded_repair(context, "ui/route_manifest.json")
+    # Export runs in a process that does not hold the bound source.
+    code_file_utils._REVISION_UI_BASELINES.clear()
+    caplog.set_level(logging.WARNING, logger=_CODE_FILE_UTILS)
+    exported = await _export_projection(monkeypatch, context)
+    assert _routes(exported)["board"]["meta"]["title"] == "Repaired later"
+    assert _routes(exported)["messages"] == _routes(pack)["messages"]
+    assert not _not_composed(caplog)
+
+
+@pytest.mark.asyncio
+async def test_auth_required_messaging_revision_repair_reaches_validation_and_export(
+    request, tmp_path, monkeypatch, caplog,
+):
+    """A page repair of an auth-required Messaging revision, from diagnostic to export, without model calls."""
+    from copy import deepcopy
+
+    from factory_app.workflows.AppGenerator.tools import app_validation, code_file_utils
+    from factory_app.workflows.AppGenerator.tools.assembly_phase import _merge_code_files
+    from factory_app.workflows.AppGenerator.tools.repair_policy import prepare_bundle_repair
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        resolve_managed_capability_templates,
+    )
+    from factory_app.workflows.AppGenerator.tools.save_app_schema import save_app_schema
+    from mozaiksai.core.workflow.context.frozen import detach
+    from mozaiksai.core.workflow.generator_support.code_files import _custom_route_bundle_code_files
+    from tests.test_messaging_pack_persistence_composition import CARRIED_APP_CONTRACT
+
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path))
+    # DesignDocs approved per-user projects, so the app requires sign-in, and its
+    # contract does not list the Messaging surface: assembly composes that in.
+    approved = deepcopy(CARRIED_APP_CONTRACT)
+    selected = _context()
+    templates = resolve_managed_capability_templates(selected["capability_packs"], context_variables=selected)
+    pack = {file["filename"]: file["content"] for file in _merge_code_files(
+        [{"code_files": templates}], app_build_plan=selected["app_build_plan"], data_contract=approved,
+        context_variables={**selected, "data_contract": approved},
+    )}
+    board = {item["filename"]: item["content"] for item in _custom_route_bundle_code_files(BOARD_BUNDLE)}
+    app_manifest = {
+        "appId": "customer-app", "appName": "Board", "startup": {"landing_spot": "/board"},
+        "targets": {"web": True, "mobile": False}, "authRequired": True, "admins": [],
+    }
+    # The revision source is the bundle as an earlier assembly wrote it, auth routes included.
+    saved = request.getfixturevalue("revision_baseline")
+    saved.files = _with_auth_scaffold(
+        {**board, **pack, **compose(board, pack), "app.json": json.dumps(app_manifest, indent=2)}, approved,
+    )
+    _replace_archive(saved, {})
+    revised = {**board, "ui/route_manifest.json": retitled(board["ui/route_manifest.json"], "board", "Faulty title")}
+    task = {"task_id": "pages", "task_type": "page_bundle", "initial_agent": "AppSchemaAgent",
+            "owned_paths": sorted(revised), "depends_on": []}
+    context = create_context_container(initial={
+        **saved.context, **selected, "chat_id": "revision-chat", "app_task_batch_items": [task],
+        "app_build_plan": {**selected["app_build_plan"], "build_tasks": [task], "pages": [
+            {"name": "board", "route": "/board", "ui_surface": "custom_react_page"},
+        ]},
+        "data_contract": approved,
+        "app_task_batch_results": {"pages": {"code_files": contribution("task:pages", revised)["files"]}},
+    })
+
+    assembled = await assemble_app_tasks(context_variables=context)
+    assert assembled["success"], assembled
+    files = _files(assembled)
+    assert _routes(files)["board"]["meta"]["title"] == "Faulty title"
+    assert _auth_paths(files) == AUTH_ROUTE_PATHS
+    surfaces = [surface["surface_id"] for surface in json.loads(files["data/contract.json"])["surfaces"]]
+    assert surfaces == ["projects", "messages"]
+
+    # A path-owned diagnostic routes a bounded repair to the page task's AppSchemaAgent.
+    repair = prepare_bundle_repair({"passed": False, "errors": [
+        "ui/route_manifest.json: route 'board' must keep the approved page title",
+    ]}, context)
+    assert (repair["target_agent"], repair["active"]["allowed_paths"]) == ("AppSchemaAgent", sorted(revised))
+    repaired = deepcopy(BOARD_BUNDLE)
+    repaired["route_manifest"][0]["meta"]["title"] = "Repaired board"
+    message = save_app_schema(
+        manifest={"app_name": "Board", "default_route": "/board", "pages": [], "custom_routes": ["board"]},
+        pages=[], custom_route_bundle=repaired, context_variables=context,
+    )
+    assert "rejected" not in message, message
+    assert context.get("bundle_repair_result")["active"]["status"] == "responded"
+    context.set("app_ui_quality_status", "passed")
+
+    # Validation follows without reassembly, in a process that never held the bound source.
+    code_file_utils._REVISION_UI_BASELINES.clear()
+    caplog.set_level(logging.INFO, logger=_CODE_FILE_UTILS)
+    acceptance = _validation_mocks(monkeypatch)
+    await app_validation.validate_app_bundle_from_request({}, context_variables=context)
+    validated = acceptance.await_args.kwargs["files"]
+    assert validated == detach(context.get("generated_files"))
+    assert _routes(validated)["board"]["meta"]["title"] == "Repaired board"
+    assert _routes(validated)["messages"] == _routes(pack)["messages"]
+    assert validated["ui/index.js"].count('registerComponent("Messages"') == 1
+    assert _auth_paths(validated) == AUTH_ROUTE_PATHS
+    assert [surface["surface_id"] for surface in json.loads(validated["data/contract.json"])["surfaces"]] == surfaces
+    assert not _not_composed(caplog)
+
+    # Export, in yet another process, bundles exactly what validation checked.
+    code_file_utils._REVISION_UI_BASELINES.clear()
+    assert await _export_projection(monkeypatch, context) == validated
+    assert not _not_composed(caplog)

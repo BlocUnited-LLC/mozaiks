@@ -18,7 +18,11 @@ from mozaiksai.core.workflow.context.context_utils import context_to_dict
 from mozaiksai.core.workflow.generator_support.code_files import materialize_collection_auth
 from mozaiksai.resources import resolve_factory_app_root
 
-from .code_file_utils import admitted_app_file_map, compose_bundle_auth_routes
+from .code_file_utils import (
+    admitted_app_file_map,
+    compose_bundle_auth_routes,
+    overlay_pack_composed_roots,
+)
 
 
 def materialize_auth_scaffold(
@@ -60,12 +64,25 @@ def materialize_auth_scaffold(
     return rendered
 
 
-async def save_auth_scaffold(context_variables: Any) -> dict[str, Any]:
-    """Fill missing auth files and compose routes without replacing declared auth."""
+async def save_auth_scaffold(
+    context_variables: Any, *, revision_baseline: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Fill missing auth files and compose routes without replacing declared auth.
+
+    ``revision_baseline`` is the bound revision source the caller loaded
+    (:func:`load_revision_baseline`). An admitted repair copy of a
+    pack-composed UI root stays in the overlay as saved: the admitted
+    projection composes it and adds the auth routes itself, while a manifest
+    rendered here from a projection that could not compose it would replace
+    the repair with the pre-repair root.
+    """
     context = context_to_dict(context_variables)
     rendered = materialize_auth_scaffold(
-        admitted_app_file_map(context_variables), data_contract=context.get("data_contract"),
+        admitted_app_file_map(context_variables, revision_baseline=revision_baseline),
+        data_contract=context.get("data_contract"),
     )
+    for path in overlay_pack_composed_roots(context_variables) & rendered.keys():
+        rendered.pop(path)
 
     if not rendered:
         return {"code_files": []}

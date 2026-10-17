@@ -27,6 +27,7 @@ from factory_app.workflows.AppGenerator.tools.app_validation import run_app_bund
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     admitted_app_file_map,
     compose_bundle_auth_routes,
+    load_revision_baseline,
 )
 from factory_app.workflows.AppGenerator.tools.deployment_contract import (
     PRODUCTION_DEPLOYMENT_PROFILES,
@@ -804,7 +805,8 @@ async def generate_and_download(
     if not chat_id or not app_id:
         return {"status": "error", "message": "chat_id and app_id are required"}
 
-    files_map = admitted_app_file_map(context_variables)
+    # Compose admitted repair copies as validation does, from the verified revision source.
+    files_map = admitted_app_file_map(context_variables, revision_baseline=await load_revision_baseline(context_variables))
     if not files_map:
         return {"status": "error", "message": "No admitted app files are available to bundle."}
 

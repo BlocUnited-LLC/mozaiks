@@ -43,6 +43,7 @@ from .code_file_utils import (
     remember_revision_baseline,
     repair_superseded_roots,
     task_batch_outputs,
+    without_auth_route_projection,
 )
 from .hydrate_app_revision_context import (
     hydrate_app_revision_context,
@@ -619,8 +620,11 @@ async def _assemble_app_tasks(
                 revision_baseline = {path: content for path, content in saved.items() if isinstance(content, str)}
             # The admitted projection composes repair copies with this same baseline.
             remember_revision_baseline(context_variables, revision_baseline)
+        # The auth contract's routes carry no route id; materialize_auth_scaffold
+        # adds them back to the composed manifest below.
+        composable, composable_baseline = without_auth_route_projection(ui_contributions, file_map, revision_baseline)
         shared = compose_ui_registry(
-            ui_contributions, file_map, revision_baseline=revision_baseline, deleted_paths=deleted,
+            composable, file_map, revision_baseline=composable_baseline, deleted_paths=deleted,
         )
         feature_outputs = [{"code_files": [item for item in entries if item["filename"] not in SHARED_UI_OUTPUT_PATHS]} for entries in materialized]
         feature_outputs.append({"code_files": [{"filename": path, "content": content} for path, content in sorted(shared.items())]})

@@ -1186,17 +1186,38 @@ gate passes.
 Validation and download use `admitted_app_file_map`: the current `generated_files`
 map, admitted `code_files` repairs, and admitted `deleted_files` tombstones.
 When `.mozaiks/pack_provenance.json` records `ui/index.js` or
-`ui/route_manifest.json` under `composed_outputs`, a differing repair copy of
-that root is composed onto it with assembly's own contributions and rules: the
-assembled roots as the carried snapshot, every current task output, the
-admitted overlay, the verified pack templates, the admitted deletions and, in a
-revision, the same bound revision baseline (assembly records the UI roots of the
-source it read, by source identity). A partial repair copy therefore cannot drop
+`ui/route_manifest.json` under `composed_outputs`, a repair copy of that root
+in the admitted overlay is composed onto it with assembly's own contributions
+and rules: the bundle's roots as the carried snapshot, every current task
+output, the admitted overlay, the verified pack templates, the admitted
+deletions and, in a revision, the same bound revision baseline. That includes a
+copy equal to the bundle's root, because `save_app_schema` also writes the roots
+it renders into `generated_files`. As in assembly, the sign-in and callback
+routes of `config/auth.yaml`, which carry no route id, are set aside while the
+roots compose and added to the composed manifest afterwards when
+`app.json.authRequired` is true. A partial repair copy therefore cannot drop
 the verified pack declarations it omits, a stale baseline copy cannot revert a
 task's change, and a pack declaration is never patched. No reassembly is needed
-for the repair to reach validation. When those rules reject the copy, or cannot
-be applied here (the baseline or the selected packs are unavailable), the
-assembled roots are kept and an `ADMITTED_UI_ROOT_NOT_COMPOSED` warning names
+for the repair to reach validation.
+
+The revision baseline does not depend on the process that assembled the
+bundle. Validation and export pass `revision_baseline` from
+`load_revision_baseline`, which reads the bound revision source again from its
+verified, immutable build record (text entries only, as assembly reads them).
+The process cache that assembly fills, by source identity, only saves that
+read. When the source cannot be read, `load_revision_baseline` logs
+`REVISION_BASELINE_UNAVAILABLE` and the projection keeps the bundle's roots;
+acceptance then fails on the same unreadable source. A synchronous caller that
+passes no baseline (`save_generated_code`, assembly's auth-scope read) uses the
+cache, and without it keeps the bundle's roots: when composing the overlay onto
+them alone would change them, an `ADMITTED_UI_ROOT_NOT_COMPOSED` warning reports
+the dropped repair; when validation has already written its composition back,
+`ADMITTED_UI_ROOT_KEPT` is logged at info level. `save_auth_scaffold` never
+overwrites an overlay copy of a pack-composed root, so a projection that could
+not compose it cannot replace the repair with the pre-repair root.
+
+When the rules reject the copy, or the selected packs cannot be resolved, the
+bundle's roots are kept and an `ADMITTED_UI_ROOT_NOT_COMPOSED` warning names
 them; only without resolvable packs does the copy replace the root for the
 acceptance gates to judge. Without that provenance the last writer wins.
 Historical raw worker responses and prior generated directories cannot overwrite,

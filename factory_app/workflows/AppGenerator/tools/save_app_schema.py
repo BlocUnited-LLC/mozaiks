@@ -1578,7 +1578,10 @@ def save_app_schema(
     if isinstance(active_repair, dict):
         # These values come from deterministic scaffolding, not the repair worker.
         # A page repair cannot replace a previously accepted scaffold version.
-        for path in ("config/ai.json", "provenance.yaml", "config/profile.yaml"):
+        # data/contract.json is the approved contract as assembly compiled it,
+        # with the verified pack contributions and subscription stores; this
+        # save renders only the approved contract, so it keeps the bundle's copy.
+        for path in ("config/ai.json", "provenance.yaml", "config/profile.yaml", "data/contract.json"):
             if path in baseline_files:
                 rendered_files[path] = baseline_files[path]
             elif path not in (active_repair.get("allowed_paths") or []):

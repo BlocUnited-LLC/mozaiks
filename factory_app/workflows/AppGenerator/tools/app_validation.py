@@ -2565,11 +2565,13 @@ async def validate_app_bundle_from_request(
     revision_baseline = await load_revision_baseline(context_variables)
     if "app.json" in admitted_app_file_map(context_variables, revision_baseline=revision_baseline):
         try:
-            # Its projection runs before any await, while the source just loaded is held.
-            await save_auth_scaffold(context_variables)
+            await save_auth_scaffold(context_variables, revision_baseline=revision_baseline)
         except (AppAuthContractError, json.JSONDecodeError):
             # Keep invalid artifacts intact for the gate's diagnostics and repair routing.
             pass
+        if revision_baseline is None:
+            # The scaffold may have saved the first overlay copy of a pack-composed root.
+            revision_baseline = await load_revision_baseline(context_variables)
     # Validate one materialized snapshot and commit it after asynchronous checks.
     # The shared bridge can be hydrated by other AG2 packet observers while we await.
     materialized_files = admitted_app_file_map(context_variables, revision_baseline=revision_baseline)
