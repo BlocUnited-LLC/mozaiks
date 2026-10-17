@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import io
 import json
 import logging
 import time
@@ -1045,8 +1046,20 @@ def _accept_route(monkeypatch, store):
     async def scope(principal, *, build_registry_id, app_id=None):
         return APP_ID, principal.user_id
 
+    def bundle(files):
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            for path, content in files.items():
+                archive.writestr(f"bundle/{path}", content)
+        return buffer.getvalue()
+
+    async def verified_app_bundle(version):
+        # Every record carries the starter handler unless a test sets its own files.
+        return bundle(getattr(store, "bundle_files", {}).get(version.id, {HANDLER: "STARTER", PAGE: version.id}))
+
     store.accept_build_record = accept_build_record
     store.list_refinement_sessions = AsyncMock(return_value=[])
+    monkeypatch.setattr(studio, "_verified_app_bundle", verified_app_bundle)
     monkeypatch.setattr(studio, "get_artifact_store", lambda: store)
     monkeypatch.setattr(studio, "_resolve_studio_artifact_scope", scope)
     monkeypatch.setattr(studio, "_verified_review_snapshots", AsyncMock(return_value=None))
@@ -1080,15 +1093,30 @@ async def test_accepting_a_handler_change_rechecks_its_parent_and_authority(monk
 
 
 @pytest.mark.asyncio
-async def test_accepting_a_ui_only_child_keeps_the_existing_acceptance_rules(monkeypatch):
+@pytest.mark.parametrize("accepted_since", ["same_app_owned_code", "customized_handler"])
+async def test_accepting_a_stale_ui_only_child_cannot_revert_app_owned_pack_code(monkeypatch, accepted_since):
+    from fastapi import HTTPException
+
     store = _Store()
     _accept_records(store, ["child_1"], scope={
         "selected_file_paths": [PAGE], "scope_origin": "explicit", "changed_workspace_pack_paths": [],
     })
     store.supersede_parent_with("newer_build")
+    if accepted_since == "customized_handler":
+        # An authorized handler change was accepted after child_1's parent.
+        store.bundle_files = {"newer_build": {HANDLER: "CUSTOMIZED", PAGE: "newer_build"}}
     accept = _accept_route(monkeypatch, store)
-    assert (await accept("child_1"))["accepted"] is True
-    assert store.accepted == ["child_1"]
+    if accepted_since == "same_app_owned_code":
+        # The existing rule: a stale UI-only draft is still accepted when it
+        # carries the accepted app-owned pack code.
+        assert (await accept("child_1"))["accepted"] is True
+        assert store.accepted == ["child_1"]
+        return
+    before = deepcopy(store.records)
+    with pytest.raises(HTTPException) as rejected:
+        await accept("child_1")
+    assert rejected.value.status_code == 409 and HANDLER in rejected.value.detail
+    assert store.accepted == [] and store.records == before
 
 
 @pytest.mark.asyncio

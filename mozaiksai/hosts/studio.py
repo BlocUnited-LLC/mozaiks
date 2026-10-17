@@ -8,6 +8,7 @@ workflow triggering on top of the headless platform host.
 """
 
 import io
+import json
 import os
 import stat
 import zipfile
@@ -2134,8 +2135,8 @@ class BuildArtifactAcceptanceRequest(BaseModel):
     notes: str | None = Field(default=None, max_length=2000)
 
 
-#: Per-app serialization of acceptances that change app-owned pack code, so the
-#: accepted-parent recheck and the acceptance it guards cannot interleave.
+#: Per-app serialization of app bundle acceptances, so the app-owned pack code
+#: rechecks and the acceptance they guard cannot interleave in this process.
 _WORKSPACE_ACCEPTANCE_LOCKS: dict[str, Lock] = {}
 
 
@@ -2146,9 +2147,55 @@ def _changed_workspace_pack_paths(version) -> list[str]:  # noqa: ANN001
 
 
 def _workspace_acceptance_guard(app_id: str, version) -> AbstractAsyncContextManager[Any]:  # noqa: ANN001
-    if not _changed_workspace_pack_paths(version):
+    if version.build_family != "app_bundle" and not _changed_workspace_pack_paths(version):
         return nullcontext()
     return _WORKSPACE_ACCEPTANCE_LOCKS.setdefault(app_id, Lock())
+
+
+def _recorded_workspace_pack_paths(files: dict[str, str]) -> set[str]:
+    try:
+        provenance = json.loads(files.get(".mozaiks/pack_provenance.json") or "{}")
+    except ValueError:
+        return set()
+    packs = provenance.get("packs") if isinstance(provenance, dict) else None
+    return {
+        str(entry.get("path")) for pack in packs or [] if isinstance(pack, dict)
+        for entry in pack.get("materialized_owned_files") or []
+        if isinstance(entry, dict) and entry.get("owner") == "workspace" and entry.get("path")
+    }
+
+
+async def _require_current_app_owned_pack_code(version, *, app_id: str, artifact_store: Any) -> None:  # noqa: ANN001
+    """Reject a stale version that would replace app-owned pack code accepted since its parent.
+
+    Acceptance replaces the whole bundle. A version made from a build that is
+    no longer the app's accepted current build carries that older build's
+    app-owned pack code, such as a customized Messaging handler, so accepting
+    it would silently revert an authorized change accepted since.
+    """
+    if version.build_family != "app_bundle":
+        return
+    refs = await artifact_store.get_current_build_record_refs(app_id=app_id)
+    current_id = str((refs or {}).get(version.build_family) or "").strip()
+    if not current_id or current_id in {version.id, version.parent_build_record_id}:
+        return
+    current = await artifact_store.get_build_record(app_id=app_id, build_record_id=current_id)
+    if current is None:
+        return
+    current_files, _ = _decode_text_bundle_entries(await _verified_app_bundle(current))
+    version_files, _ = _decode_text_bundle_entries(await _verified_app_bundle(version))
+    paths = _recorded_workspace_pack_paths(current_files) | _recorded_workspace_pack_paths(version_files)
+    for record in (current, version):
+        paths |= set(parent_workspace_pack_paths(_version_metadata(record).get("capability_packs") or []) or ())
+    changed = sorted(path for path in paths if current_files.get(path) != version_files.get(path))
+    if changed:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This version was made from an earlier build and would replace app-owned capability code "
+                f"accepted since ({', '.join(changed)}). Refine the current build instead. No version was accepted."
+            ),
+        )
 
 
 async def _require_accepted_workspace_parent(
@@ -2281,6 +2328,7 @@ async def accept_build_artifact_version(
             await _require_accepted_workspace_parent(
                 current_version, app_id=app_id, build_registry_id=build_registry_id, artifact_store=artifact_store,
             )
+        await _require_current_app_owned_pack_code(version, app_id=app_id, artifact_store=artifact_store)
         if refinement_review_record is not None:
             try:
                 accepted_result = await accept_staged_refinement_build_record(
