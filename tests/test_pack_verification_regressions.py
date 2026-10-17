@@ -413,7 +413,7 @@ def test_upgrade_blocks_any_other_exclusive_data_contract_claim_in_either_order(
     v2 = _messaging_copy(tmp_path / "v2", version="0.1.14", extra_field=True)
     install_verified_local_pack(pack_source_path=v1, build_context_root=build_context_root)
     _write_app(app_root, v1, app_contract=None)
-    # Legacy or hand-edited provenance can list the same exclusive claim twice; no claim may hide another.
+    # Older or hand-edited provenance can list the same exclusive claim twice; no claim may hide another.
     provenance_path = app_root / PROVENANCE
     provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
     del provenance["composed_outputs"]

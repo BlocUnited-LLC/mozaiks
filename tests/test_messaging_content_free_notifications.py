@@ -426,14 +426,14 @@ async def test_pre_0_1_14_message_notification_keeps_copied_text_until_its_recip
         "payload": {"thread_id": thread_id, "message_id": "msg_legacy", "sender_id": "alice",
                     "sender_role": "user", "body_preview": MARKER, "recipient_ids": ["bob"]},
     }
-    legacy = {
+    earlier_record = {
         **{key: current[key] for key in ("rule_id", "module_id", "event_type", "app_id", "audience", "channels")},
         "notification_id": "ntf_legacy_preview", "source_event_id": legacy_event["id"],
         "actor": legacy_event["actor"], "title": "New message", "body": MARKER, "status": "unread",
         "created_at": "2026-10-01T00:00:00+00:00", "context": {"thread_id": thread_id},
         "source_event": legacy_event,
     }
-    await host.notifications.insert_one(deepcopy(legacy))
+    await host.notifications.insert_one(deepcopy(earlier_record))
     stored_legacy = deepcopy(host.notifications.rows[-1])
 
     # Pack upgrade: the 0.1.14 migration touches only Messaging collections, and a

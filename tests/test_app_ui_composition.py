@@ -578,7 +578,7 @@ def test_current_declaration_of_a_deleted_component_still_fails(declaration, mat
         task["ui/index.js"] = component("Old", path="ui/pages/custom/old.jsx")["ui/index.js"]
         deleted = set()
     else:
-        parts.append(contribution("pack:legacy", {"ui/index.js": component("Old", path="ui/pages/custom/old.jsx")["ui/index.js"]}))
+        parts.append(contribution("pack:former", {"ui/index.js": component("Old", path="ui/pages/custom/old.jsx")["ui/index.js"]}))
     parts.append(contribution("task:pages", task))
     files = {path: source for path, source in {**saved, **task}.items() if path != "ui/pages/custom/old.jsx"}
     with pytest.raises(ValueError, match=re.escape(match)):
