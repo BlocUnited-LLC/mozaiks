@@ -32,8 +32,9 @@ This project follows a practical pre-1.0 changelog format:
   message" and "Open the conversation to read it.", with thread and message ids
   only. A notification rule can declare `source_event: reference` to store just
   the originating event's id, type and related type; other rules keep storing
-  the full event. Notifications rendered by `0.1.13` keep their copied preview
-  until the recipient clears them.
+  the full event. Notifications rendered by an earlier pack version (the
+  released `0.1.12` and before) keep their copied preview until the recipient
+  clears them.
 - An app-owned pack handler, such as Messaging's `handler.py`, can now be
   changed through an authorized selected-file Studio refinement of the app's
   accepted current build, as a thin extension that keeps every template-owned
@@ -68,17 +69,28 @@ This project follows a practical pre-1.0 changelog format:
   Windows worktrees as well as ordinary installations.
 - Pack-composed UI roots honor admitted repairs and page deletions in both
   assembly and the admitted bundle. A repair overrides only what it changes
-  relative to the verified revision baseline. Pack declarations stay strict, and
-  provenance uses the pinned build timestamp.
+  relative to the verified revision baseline, which validation and export reread
+  from the verified source when the process does not hold it. This also holds in
+  apps that require sign-in and for AppSchemaAgent repairs. Pack declarations
+  stay strict, malformed route `navigation` or `meta` values are declaration
+  errors, auth route binding errors are routed to the owner of
+  `ui/route_manifest.json`, and provenance uses the pinned build timestamp.
+- A data-contributing pack no longer replaces a carried app `data/contract.json`
+  when no approved DesignDocs contract exists; a carried contract that holds only
+  pack- and assignment-derived data is recomposed, and any other carried
+  contract fails with the reason. Data contract owner repairs and AppSchemaAgent
+  saves write the contract as assembly compiles it, with the verified pack
+  contributions; pack verification failures are reported by assembly.
 - Bundle validation keeps explicitly selected packs when its context selects
   none, accepts shared roots claimed by several packs, and trusts verified
   installed pins. Community pack upgrades fail before writing when another pack
   owns the data contract, the app contract is malformed, or a composed UI root
   would change.
 - Messaging account deletion repoints previews away from the deleted user's
-  messages, releases their thread membership, and neutralizes thread titles they
-  authored. Export includes membership, read state and the creator's thread
-  annotations. A send no longer rewrites thread membership, and plain direct
+  messages, releases their thread membership, and neutralizes the titles and
+  metadata of threads they created. Export includes membership, read state and
+  the creator's thread annotations; membership rows omit titles written by other
+  users. A send no longer rewrites thread membership, and plain direct
   threads emit their lifecycle events again (nullable subject and related
   fields).
 - Page refinement workers see earlier surfaces' outputs in the same plan, and
@@ -92,7 +104,9 @@ This project follows a practical pre-1.0 changelog format:
   override's own parameters. These checks are targeted guards, not
   certification of arbitrary code.
 - Accepting a version whose parent is no longer the current accepted build is
-  refused when it would replace app-owned pack code accepted since.
+  refused when it would replace app-owned pack code accepted since. The
+  comparison reads those files in full from the verified archives and refuses
+  oversized, duplicate or linked entries instead of skipping them.
 
 ## 0.2.0 - 2026-10-16
 
