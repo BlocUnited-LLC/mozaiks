@@ -2315,6 +2315,26 @@ async def _require_accepted_workspace_parent(
 _ACCEPTANCE_LINEAGE_MAX_DEPTH = 32
 
 
+def _commit_metadata_with_acceptance(version, *, accepted_by: str | None) -> dict[str, Any]:  # noqa: ANN001
+    """The version's commit metadata with the ``metadata.acceptance`` marker the staged acceptance also writes.
+
+    Staling later overwrites the CURRENT status, but this marker stays, so
+    admission can tell a build that was accepted from a draft that never was.
+    """
+    commit_metadata = version.commit_metadata
+    payload = (
+        commit_metadata.model_dump(mode="python") if hasattr(commit_metadata, "model_dump")
+        else dict(commit_metadata or {})
+    )
+    metadata = dict(payload.get("metadata") or {})
+    metadata["acceptance"] = {
+        "accepted_by": accepted_by,
+        "accepted_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+    }
+    payload["metadata"] = metadata
+    return payload
+
+
 async def _require_current_build_in_lineage(version, *, app_id: str, artifact_store: Any) -> None:  # noqa: ANN001
     """Refuse an app bundle made from a build older than the app's current build.
 
@@ -2470,7 +2490,10 @@ async def accept_build_artifact_version(
                 raise HTTPException(status_code=409, detail="Conflict accepting artifact version.") from exc
             accepted = accepted_result.build_record
         else:
-            accepted = await artifact_store.accept_build_record(app_id=app_id, build_record_id=artifact_version_id)
+            accepted = await artifact_store.accept_build_record(
+                app_id=app_id, build_record_id=artifact_version_id,
+                commit_metadata=_commit_metadata_with_acceptance(current_version, accepted_by=principal.user_id),
+            )
     if accepted is None:
         raise HTTPException(status_code=404, detail=f"Artifact version not found: {artifact_version_id}")
 
@@ -3026,27 +3049,40 @@ async def _fail_inline_refinement(*, binding: RunBuildBinding, user_id: str) -> 
 async def _inline_run_stored_reviewable_child(
     artifact_store: Any, *, app_id: str, parent_build_record_id: str | None, binding: RunBuildBinding, result: Any,
 ) -> bool:
-    """Whether an inline run stored a child of its baseline that could still become current.
+    """Whether an inline run stored a child of its baseline that acceptance can make current.
 
     An inline coding or surface run's only durable output is a DRAFT child of
     the baseline whose commit metadata carries the run's build_id, and the run
     can store one even when its result reports a failure. The store, not the
-    result's status, is the evidence. A child whose validation FAILED is
-    refused at acceptance and nothing validates a stored child again, so it
-    cannot become current. Any other child, a child the result names that the
-    store does not return, or a lookup that fails counts as a change.
+    result's status, is the evidence. Acceptance admits only a child whose
+    validation PASSED (``_enforce_artifact_validation_gate``) and nothing
+    validates a stored child again, so a FAILED, PENDING or SKIPPED child can
+    never become current and is no change. A PASSED child that was not
+    rejected, a child the result names that the store does not return, or a
+    lookup that fails counts as a change. Records of another run or another
+    parent are not this run's output.
     """
     reported = str(((getattr(result, "metadata", None) or {}).get("build_record_id")) or "").strip()
+    parent_id = parent_build_record_id or ""
     try:
-        children = await artifact_store.list_run_child_build_records(
-            app_id=app_id, parent_build_record_id=parent_build_record_id or "", build_id=binding.build_id,
+        listed = await artifact_store.list_run_child_build_records(
+            app_id=app_id, parent_build_record_id=parent_id, build_id=binding.build_id,
         )
     except Exception:
         logger.warning("inline_run_child_lookup_failed build=%s", binding.build_id, exc_info=True)
         return True
+    children = [
+        child for child in listed
+        if child.parent_build_record_id == parent_id
+        and _version_metadata(child).get("build_id") == binding.build_id
+    ]
     if reported and reported not in {child.id for child in children}:
         return True
-    return any(child.validation_status != ArtifactValidationStatus.FAILED for child in children)
+    return any(
+        child.validation_status == ArtifactValidationStatus.PASSED
+        and child.lifecycle_status not in {ArtifactLifecycleStatus.ARCHIVED, ArtifactLifecycleStatus.DELETED}
+        for child in children
+    )
 
 
 async def _persist_trigger_invalidation(
@@ -3064,12 +3100,108 @@ async def _persist_trigger_invalidation(
         logger.warning("Failed to persist artifact invalidation: %s", invalidation_err)
 
 
-#: A confirmation needs its baseline still usable: a build that was made stale,
-#: replaced or removed after the proposal is not what the user agreed to change.
-_UNCONFIRMABLE_BASELINE_STATUSES = frozenset({
-    ArtifactLifecycleStatus.STALE, ArtifactLifecycleStatus.SUPERSEDED,
-    ArtifactLifecycleStatus.ARCHIVED, ArtifactLifecycleStatus.DELETED,
-})
+#: A rejected or removed build is never a baseline, whatever it was at the proposal.
+_REMOVED_BASELINE_STATUSES = frozenset({ArtifactLifecycleStatus.ARCHIVED, ArtifactLifecycleStatus.DELETED})
+
+
+def _utc_instant(value: Any) -> datetime | None:
+    """A stored timestamp as an aware UTC instant (the store may return naive UTC)."""
+    if not isinstance(value, datetime):
+        return None
+    return (value if value.tzinfo is not None else value.replace(tzinfo=UTC)).astimezone(UTC)
+
+
+def _baseline_state(version) -> dict[str, Any]:  # noqa: ANN001
+    """The selected build's lifecycle state, saved on the proposal's ChangeRequest.
+
+    Every write to a build record (staling, superseding, accepting, rejecting)
+    changes its status, its invalidation reason or its ``updated_at``, so a
+    confirmation compares this snapshot to tell whether the build changed after
+    the proposal.
+    """
+    def instant(value: Any) -> str | None:
+        moment = _utc_instant(value)
+        return moment.isoformat(timespec="milliseconds") if moment is not None else None
+
+    return {
+        "build_record_id": version.id,
+        "lifecycle_status": ArtifactLifecycleStatus(version.lifecycle_status).value,
+        "invalidation_reason": version.invalidation_reason,
+        "stale_at": instant(version.stale_at),
+        "updated_at": instant(version.updated_at),
+    }
+
+
+async def _current_build_outside_lineage(version, *, app_id: str, artifact_store: Any) -> bool:  # noqa: ANN001
+    """Whether the family's CURRENT build is neither this build nor one of its ancestors.
+
+    A missing ancestor or a lineage past the acceptance bound counts as outside.
+    """
+    refs = await artifact_store.get_current_build_record_refs(app_id=app_id)
+    current_id = str((refs or {}).get(version.build_family) or "").strip()
+    if not current_id or current_id == version.id:
+        return False
+    ancestor_id: str | None = version.parent_build_record_id
+    for _ in range(_ACCEPTANCE_LINEAGE_MAX_DEPTH):
+        if not ancestor_id:
+            return True
+        if ancestor_id == current_id:
+            return False
+        ancestor = await artifact_store.get_build_record(app_id=app_id, build_record_id=ancestor_id)
+        if ancestor is None:
+            return True
+        ancestor_id = ancestor.parent_build_record_id
+    return True
+
+
+async def _require_unchanged_confirmation_baseline(
+    source_version, change: Any, *, app_id: str, artifact_store: Any,  # noqa: ANN001
+) -> None:
+    """Refuse a confirmation whose build changed after the proposal, or was replaced by newer accepted work.
+
+    The proposal saved the build's state on its ChangeRequest (server-written,
+    unlike the pending decision). A build that was already STALE when the
+    decision was proposed, and has not been written since, is still what the
+    user agreed to change. A ChangeRequest proposed before that state was saved
+    has none: its build must not have been written since the ChangeRequest was
+    created. Every earlier proposal staled its build right after creating its
+    ChangeRequest, so such a decision is refused once; requesting the change
+    again saves the state and that proposal can be confirmed.
+    """
+    router_decision = getattr(change, "router_decision", None)
+    recorded = router_decision.get("baseline_state") if isinstance(router_decision, dict) else None
+    if isinstance(recorded, dict):
+        changed = recorded != _baseline_state(source_version)
+    else:
+        proposed_at = _utc_instant(getattr(change, "created_at", None))
+        written_at = _utc_instant(source_version.updated_at)
+        changed = proposed_at is None or written_at is None or written_at >= proposed_at
+    if source_version.lifecycle_status in _REMOVED_BASELINE_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail="The build this decision was proposed for was rejected or removed. Request the change again from a saved build.",
+        )
+    if changed:
+        raise HTTPException(
+            status_code=409,
+            detail="The build this decision was proposed for has changed since the proposal. Request the change again.",
+        )
+    try:
+        replaced = await _current_build_outside_lineage(source_version, app_id=app_id, artifact_store=artifact_store)
+    except Exception as exc:
+        logger.warning("confirmation_lineage_check_failed build=%s", source_version.id, exc_info=True)
+        raise HTTPException(
+            status_code=409,
+            detail="The build this decision was proposed for could not be checked against the app's current build. Request the change again.",
+        ) from exc
+    if replaced:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "A newer build of this app was accepted after this decision was proposed. "
+                "Request the change again from the app's current build."
+            ),
+        )
 
 
 def _require_server_proposed_scope(pending: dict[str, Any], change: Any, request: RefinementRequest) -> None:
@@ -3165,6 +3297,7 @@ async def trigger_workflow(
     surface_result = None
     inline_binding = None
     baseline_files = None
+    proposal_baseline_state = None
     persisted_change_request_id = str(trigger_payload.get("change_request_id") or "").strip() or None
     persisted_revision_id = str(trigger_payload.get("revision_id") or "").strip() or None
     action_payload = trigger_payload.get("harness_action")
@@ -3254,6 +3387,7 @@ async def trigger_workflow(
         ) if refinement_request.build_record_id else None
         if source_version is None or source_version.build_family != refinement_request.build_family:
             raise HTTPException(status_code=404, detail="Selected refinement artifact not found")
+        proposal_baseline_state = _baseline_state(source_version)
         metadata = _version_metadata(source_version)
         try:
             await require_accepted_genesis_baseline(
@@ -3305,14 +3439,9 @@ async def trigger_workflow(
             if body.context_variables != (pending_decision.get("context_variables") or {}):
                 raise HTTPException(status_code=409, detail="The decision belongs to a different request context. Submit the change again.")
             _require_server_proposed_scope(pending_decision, change, refinement_request)
-            if source_version.lifecycle_status in _UNCONFIRMABLE_BASELINE_STATUSES:
-                raise HTTPException(
-                    status_code=409,
-                    detail=(
-                        "The build this decision was proposed for has changed since. "
-                        "Request the change again from the current build."
-                    ),
-                )
+            await _require_unchanged_confirmation_baseline(
+                source_version, change, app_id=artifact_app_id, artifact_store=get_artifact_store(),
+            )
         coding_payload = trigger_payload.get("coding_request")
         if workflow_continuation:
             # Explicit workflow continuation must not try inline generation first.
@@ -3548,6 +3677,9 @@ async def trigger_workflow(
                     "harness_decision": (
                         harness_decision.model_dump(mode="python") if harness_decision is not None else None
                     ),
+                    # The selected build as this request found it, before any run:
+                    # a confirmation of a decision proposed here compares it.
+                    "baseline_state": proposal_baseline_state,
                 },
                 created_by_user_id=user_id,
             )
@@ -3560,10 +3692,10 @@ async def trigger_workflow(
     # The ChangeRequest above, the session's revision state and the run
     # records below keep the history of every attempt. The selected build is
     # invalidated only by an operation that changed it: an inline run that
-    # stored a child which could still become current (checked here, in the
-    # store), or a workflow run that launched (after its launch, below). A
-    # returned decision, a failed launch, or an inline run that stored no such
-    # child leaves it as it was.
+    # stored a child acceptance can make current, one whose validation passed
+    # (checked here, in the store), or a workflow run that launched (after its
+    # launch, below). A returned decision, a failed launch, or an inline run
+    # that stored no such child leaves it as it was.
     invalidation_pending = (
         persisted_change_request_id is not None
         and refinement_request is not None

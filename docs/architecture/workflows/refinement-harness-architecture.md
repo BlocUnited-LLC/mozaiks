@@ -82,10 +82,21 @@ uses the target-scoped `PendingHarnessDecision` for confirmation. Confirmation
 must match the saved change request, revision, source artifact, request text, and
 displayed paths. The pending decision can also be written through the session
 decision API, so its paths must equal the paths in the harness decision that the
-trigger saved on that change request, for the same source artifact. The source
-artifact must not have become stale, superseded, archived or deleted since the
-proposal; otherwise the user requests the change again from the current build.
-These checks run before the decision is consumed. The server reloads file
+trigger saved on that change request, for the same source artifact. The trigger
+also saves the source artifact's lifecycle state on the change request
+(`router_decision.baseline_state`: status, invalidation reason, `stale_at` and
+`updated_at`). The confirmation compares it with the artifact now: any write
+since the proposal (made stale again by another change request, superseded,
+accepted or rejected) refuses it, and so does an archived or deleted artifact
+or a `CURRENT` build of the family that is neither the artifact nor one of its
+ancestors. An artifact that was already stale when the decision was proposed,
+and is unchanged, is still what the user agreed to change, so the decision can
+be confirmed. A change request saved before this state was recorded has none:
+its artifact must not have been written since the change request was created.
+Every earlier proposal staled its artifact right after creating its change
+request, so such a decision is refused once and the user requests the change
+again, which records the state. These checks run before the decision is
+consumed. The server reloads file
 contents from the verified artifact; approval does not rerun scope selection.
 Every continuation action must belong to the saved decision. The existing session
 router consumes that exact decision with a conditional update before
@@ -208,17 +219,32 @@ Ownership comes from those packs' pinned contracts, never from the candidate:
   that includes one returns the existing confirmation decision instead of
   applying.
 - The parent must be the app's accepted current build: the artifact store's
-  `CURRENT` record of that build family. The finalizer reads it at admission. A
-  stale or never-accepted parent is rejected. Studio marks the selected build
-  stale only after an operation changed it: an inline run that stored a child
-  that can still be accepted (validation passed, pending or skipped), or a
-  workflow run that launched. A returned decision, a launch that failed, a run
-  rejected before it stored a child, or a run whose stored child failed
-  validation leaves the parent current, so a later authorized change is
-  admitted against it. The child is found in the artifact store by its parent
-  and the run's build id, not inferred from the run's reported status. A run
-  whose child can still be accepted leaves the parent stale until a child is
-  accepted.
+  `CURRENT` record of that build family. The finalizer reads it at admission.
+  Studio marks the selected build stale only after an operation changed it: an
+  inline run that stored a child acceptance can make current (its validation
+  passed; acceptance refuses any other status and nothing validates a stored
+  child again), or a workflow run that launched. A returned decision, a launch
+  that failed, a run rejected before it stored a child, or a run whose stored
+  child failed, is pending or was skipped leaves the parent current, so a later
+  authorized change is admitted against it. The child is found in the artifact
+  store by its parent and the run's build id, not inferred from the run's
+  reported status; a child the run names that the store does not return, or a
+  failed lookup, counts as a change.
+- Nothing makes a stale build current again, so a rejected draft or an
+  abandoned launch leaves the app with no `CURRENT` build. Admission then
+  accepts a `STALE` parent, without changing any record, only when it is still
+  the app's latest accepted build and has no pending reviewable child: it was
+  accepted (its `metadata.acceptance` marker, which Studio acceptance writes;
+  for a build accepted earlier, an `ACCEPTED` or `PROMOTED` refinement session
+  for it, or a parentless app bundle with capability packs, which only
+  AppGenerator's genesis save writes, as `CURRENT`); no other `STALE` build of
+  the family shows a later acceptance (a build accepted later that is no
+  longer `CURRENT` was staled, or superseded by one that was); and none of its
+  children is a `DRAFT` whose validation passed, from any run or workflow. A
+  never-accepted draft, a superseded build, a build with nothing showing it was
+  accepted, a family over 200 records, or a lookup failure is rejected. One
+  accepted build therefore has at most one pending change acceptance could
+  make current, and acceptance rechecks the parent as for a `CURRENT` one.
 - A changed workspace handler must be a thin leaf over its template base handler
   (`prove_workspace_handler_extension`): overrides of declared action methods
   with the base signatures only, reaching the service only through `super()` or

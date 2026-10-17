@@ -6,6 +6,7 @@ import tempfile
 import uuid
 import zipfile
 from copy import deepcopy
+from datetime import UTC, datetime
 
 logger = logging.getLogger(__name__)
 from pathlib import Path
@@ -46,6 +47,8 @@ from mozaiksai.core.artifacts import (
 )
 from mozaiksai.core.artifacts.content_store import get_artifact_content_store
 from mozaiksai.core.artifacts.models import (
+    BuildRecord,
+    RefinementSessionStatus,
     canonical_bundle_archive_path,
     resolve_canonical_bundle_entry,
 )
@@ -68,6 +71,59 @@ _PACK_PROVENANCE_PATH = ".mozaiks/pack_provenance.json"
 # Only a scope the user named, or a proposal the user confirmed, can carry a
 # change to app-owned pack code. Auto-applied proposals and surface plans cannot.
 _AUTHORIZED_SCOPE_ORIGINS = frozenset({"explicit", "confirmed"})
+#: The most build records of one family admission reads to admit a STALE
+#: parent; a larger family cannot be checked and its STALE parents are refused.
+_STALE_PARENT_FAMILY_SCAN_LIMIT = 200
+#: Acceptance evidence that names no time: the build was accepted, but when is unknown.
+_ACCEPTED_AT_UNKNOWN = object()
+
+
+def _utc_instant(value: Any) -> datetime | None:
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if not isinstance(value, datetime):
+        return None
+    return (value if value.tzinfo is not None else value.replace(tzinfo=UTC)).astimezone(UTC)
+
+
+async def _accepted_at(artifact_store: Any, *, app_id: str, record: BuildRecord) -> Any:
+    """When a build record was accepted, from what acceptance persisted, else None.
+
+    Staling overwrites a record's CURRENT status, so the status alone cannot
+    say whether a STALE build was ever accepted. The evidence, in order:
+
+    * ``commit_metadata.metadata.acceptance.accepted_at``, which Studio's
+      acceptance (and the staged-refinement acceptance) writes on the record;
+    * an app bundle with no parent that records capability packs: only
+      AppGenerator's genesis save writes one, and it saves it CURRENT;
+    * a refinement session whose result is the record and that acceptance
+      marked ACCEPTED (or a later promotion marked PROMOTED), for builds
+      accepted before the record carried the marker.
+
+    Returns the time, ``_ACCEPTED_AT_UNKNOWN`` when a session shows acceptance
+    without a time, or None when nothing shows the record was accepted.
+    """
+    metadata = record.commit_metadata.metadata
+    acceptance = metadata.get("acceptance")
+    if isinstance(acceptance, dict) and acceptance.get("accepted_at"):
+        return _utc_instant(acceptance["accepted_at"]) or _ACCEPTED_AT_UNKNOWN
+    if record.parent_build_record_id is None and metadata.get("capability_packs"):
+        return _utc_instant(record.created_at) or _ACCEPTED_AT_UNKNOWN
+    sessions = await artifact_store.list_refinement_sessions(
+        app_id=app_id, result_build_record_id=record.id, limit=20,
+    )
+    accepted = [
+        session for session in sessions
+        if session.result_build_record_id == record.id
+        and session.status in {RefinementSessionStatus.ACCEPTED, RefinementSessionStatus.PROMOTED}
+    ]
+    if not accepted:
+        return None
+    times = [_utc_instant(session.ended_at) for session in accepted]
+    return min(times) if all(times) else _ACCEPTED_AT_UNKNOWN  # type: ignore[type-var]
 
 
 class CandidateAdmissionError(ValueError):
@@ -492,15 +548,79 @@ class ScopedRefinementCodingWorker:
 
         Accepting a review draft makes a build current. Studio marks the
         selected build stale only after an operation changed it: a run that
-        stored a child which can still be accepted, or a workflow that launched.
+        stored a child whose validation passed, or a workflow that launched.
         A run rejected before it stored a child, or one whose stored child
-        failed validation, leaves the accepted build current, so a later
+        did not pass validation, leaves the accepted build current, so a later
         authorized change is still admitted against it.
         """
         family = _ARTIFACT_KIND_ALIASES.get(request.build_family, request.build_family)
         artifact_store = self._artifact_store or get_artifact_store()
         refs = await artifact_store.get_current_build_record_refs(app_id=request.artifact_app_id)
         return str((refs or {}).get(family) or "").strip() or None
+
+    async def _stale_parent_is_latest_accepted_build(self, request: CodingWorkerRequest) -> bool:
+        """Whether a STALE parent is still the app's latest accepted build while none is CURRENT.
+
+        A run that stored a reviewable child, or a workflow that launched,
+        marked the accepted build stale, and nothing makes it CURRENT again:
+        when that change is rejected or abandoned, the app has no CURRENT
+        build. The parent is then admitted, without changing any record, only
+        when all of these hold:
+
+        * it is STALE;
+        * it was accepted (see :func:`_accepted_at`);
+        * no other build of its family was accepted after it. A build accepted
+          later that is no longer CURRENT was staled, or superseded by one that
+          was, so some STALE build of the family shows a later acceptance;
+        * none of its children is a draft whose validation passed, from any
+          run or workflow: one accepted build has at most one pending change
+          that acceptance could make current.
+
+        Any lookup failure, or a family larger than the scan bound, refuses.
+        Acceptance rechecks the parent, scope and run as for a CURRENT parent.
+        """
+        family = _ARTIFACT_KIND_ALIASES.get(request.build_family, request.build_family)
+        artifact_store = self._artifact_store or get_artifact_store()
+        app_id = request.artifact_app_id
+        if not request.build_record_id:
+            return False
+        try:
+            parent = await artifact_store.get_build_record(app_id=app_id, build_record_id=request.build_record_id)
+            if (
+                parent is None or parent.build_family != family
+                or parent.lifecycle_status != ArtifactLifecycleStatus.STALE
+            ):
+                return False
+            records = await artifact_store.list_build_records(
+                app_id=app_id, build_family=family, limit=_STALE_PARENT_FAMILY_SCAN_LIMIT + 1,
+            )
+            if len(records) > _STALE_PARENT_FAMILY_SCAN_LIMIT or parent.id not in {record.id for record in records}:
+                return False
+            if any(
+                record.parent_build_record_id == parent.id
+                and record.lifecycle_status == ArtifactLifecycleStatus.DRAFT
+                and record.validation_status == ArtifactValidationStatus.PASSED
+                for record in records
+            ):
+                return False
+            accepted_at = await _accepted_at(artifact_store, app_id=app_id, record=parent)
+            if not isinstance(accepted_at, datetime):
+                return False
+            for record in records:
+                if record.id == parent.id or record.lifecycle_status != ArtifactLifecycleStatus.STALE:
+                    continue
+                written_at = _utc_instant(record.updated_at)
+                if written_at is not None and written_at < accepted_at:
+                    continue  # last written before the parent was accepted, so not accepted after it
+                other = await _accepted_at(artifact_store, app_id=app_id, record=record)
+                if other is _ACCEPTED_AT_UNKNOWN or (isinstance(other, datetime) and other >= accepted_at):
+                    return False
+            return True
+        except Exception:
+            logger.warning(
+                "STALE_PARENT_ADMISSION_UNVERIFIED app=%s parent=%s", app_id, request.build_record_id, exc_info=True,
+            )
+            return False
 
     async def _admit_pack_outputs(
         self,
@@ -515,11 +635,13 @@ class ScopedRefinementCodingWorker:
         Template-owned outputs stay byte-identical to the verified parent. An
         app-owned (``owner: workspace``) output may change only inside an
         explicit or user-confirmed selected-file scope, from the app's accepted
-        current build (read here, at admission), and, for a workspace handler,
-        only as a thin extension of its template base handler. Applied paths
-        are real changes against the parent, so any owned path among them is a
-        change. Acceptance rechecks the parent and scope before a child becomes
-        current.
+        current build (read here, at admission) or, when no build is CURRENT,
+        from a STALE parent that is still its latest accepted build with no
+        pending reviewable child (:meth:`_stale_parent_is_latest_accepted_build`),
+        and, for a workspace handler, only as a thin extension of its template
+        base handler. Applied paths are real changes against the parent, so any
+        owned path among them is a change. Acceptance rechecks the parent and
+        scope before a child becomes current.
         """
         from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
             ManagedCapabilityTemplateError,
@@ -568,10 +690,13 @@ class ScopedRefinementCodingWorker:
                 paths=workspace, scope_origin=scope["scope_origin"],
             )
         current = await self._current_accepted_build_record_id(request)
-        if current is None or current != request.build_record_id:
+        if (current is None or current != request.build_record_id) and not (
+            current is None and await self._stale_parent_is_latest_accepted_build(request)
+        ):
             raise CandidateAdmissionError(
                 "STALE_REFINEMENT_BASELINE",
-                "app-owned pack code changes only from the app's accepted current build",
+                "app-owned pack code changes only from the app's accepted current build, or from its latest "
+                "accepted build while none is current and no reviewable change of it is pending",
                 paths=workspace, parent_build_record_id=request.build_record_id,
                 accepted_build_record_id=current,
             )

@@ -592,7 +592,7 @@ Current default classifier grounding:
   Engine marks the affected persisted artifact versions `stale`, using the
   change-request id as the invalidation reason, once the operation the request
   started has changed the selected build (an inline run that stored a child
-  that can still be accepted, or a workflow run that launched); it also
+  whose validation passed, or a workflow run that launched); it also
   propagates staleness transitively to all downstream artifact families using
   the declared `artifact_dependency_graph`
   (see [Artifact Staleness and Routing](../builder/artifact-staleness-and-routing.md))

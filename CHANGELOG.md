@@ -40,15 +40,23 @@ This project follows a practical pre-1.0 changelog format:
   accepted current build, as a thin extension that keeps every template-owned
   pack file byte-identical. Regeneration, UI-only refinement, repairs and
   AppGenerator plan tasks cannot change it, and an unsupported request fails
-  with an explicit diagnostic that names the supported path.
+  with an explicit diagnostic that names the supported path. When a rejected
+  or abandoned change has left the app with no current build, such a change is
+  admitted from the build the app accepted last, provided no reviewable draft
+  of that build is pending; no record is made current again. Studio acceptance
+  now records `metadata.acceptance` on the accepted record, so a build that
+  is later marked stale can still be recognized as accepted (an earlier build
+  is recognized by its accepted refinement session, or as the AppGenerator
+  genesis build).
 - A Studio refinement request marks the selected build stale only once the
   operation it started has changed that build: an inline run that stored a
-  child that can still be accepted (found in the artifact store by its parent
-  and the run's build id), or a workflow run that launched. A scope question
-  or confirmation prompt, a dismissed decision, rejected input, a workflow
-  launch that failed, and an inline run that stored nothing or only a child
-  that failed validation leave it current, so the confirmed or retried change
-  is still admitted against it. Change requests, session revision state,
+  child that acceptance can make current, one whose validation passed (found in
+  the artifact store by its parent and the run's build id), or a workflow run
+  that launched. A scope question or confirmation prompt, a dismissed decision,
+  rejected input, a workflow launch that failed, and an inline run that stored
+  nothing or only a child whose validation failed, is pending or was skipped
+  leave it current, so the confirmed or retried change is still admitted
+  against it. Change requests, session revision state,
   refinement sessions and registry runs still record every attempt. Builds
   already marked stale stay stale.
 
@@ -125,8 +133,15 @@ This project follows a practical pre-1.0 changelog format:
 - Confirming a proposed refinement scope requires the pending decision's files
   to equal those the trigger saved on its change request for the same build,
   since the pending decision can also be written through the session decision
-  API. A confirmation whose build has become stale, superseded, archived or
-  deleted since the proposal is refused before the decision is used.
+  API. The proposal saves the selected build's lifecycle state on its change
+  request. Before the decision is used, a confirmation is refused when that
+  build has been written since (made stale again, superseded, accepted or
+  rejected), when it is rejected or removed, or when a newer build outside its
+  lineage has been accepted. A decision proposed for a build that was already
+  stale, and is unchanged, can be confirmed. A change request proposed before
+  the state was saved is refused when its build was written after it was
+  created, as every earlier proposal's build was; requesting the change again
+  saves the state, and that proposal can be confirmed.
 
 ## 0.2.0 - 2026-10-16
 

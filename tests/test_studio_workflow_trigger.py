@@ -53,6 +53,12 @@ class _BaselineStore:
         self.change_requests[change_request_id] = kwargs
         return SimpleNamespace(id=change_request_id)
 
+    async def get_current_build_record_refs(self, *, app_id):
+        return {
+            version.build_family: version.id for version in self.versions.values()
+            if app_id == "app_1" and version.lifecycle_status == ArtifactLifecycleStatus.CURRENT
+        }
+
     async def list_run_child_build_records(self, *, app_id, parent_build_record_id, build_id, limit=10):
         return [
             version for version in self.versions.values()
@@ -482,10 +488,13 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch,
                         "scope_summary": "Extend the existing app bundle within the approved concept using AppGenerator.",
                     },
                 },
+                # The selected build as the request found it, for a later confirmation to compare.
+                "baseline_state": studio_app._baseline_state(_BaselineStore.versions["av_123"]),
             },
             "created_by_user_id": "demo-user",
         }
     ]
+    assert persisted_changes[0]["router_decision"]["baseline_state"]["lifecycle_status"] == "draft"
     assert persisted_invalidations == [
         {
             "app_id": "app_1",
@@ -1482,6 +1491,91 @@ def test_studio_trigger_endpoint_returns_core_harness_decision_before_launch(mon
     assert persisted_invalidations == []
 
 
+@pytest.mark.parametrize("baseline", ["already_stale", "staled_after_proposal"])
+def test_a_core_restart_proposed_for_an_already_stale_build_is_confirmed(monkeypatch, _owned_build_target, baseline):
+    """A failed or abandoned launch leaves the build STALE; a concept change proposed after it can still launch."""
+    from mozaiksai.core.auth import reset_auth_adapter
+
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+    reset_auth_adapter()
+    from mozaiksai.hosts import studio as studio_app
+
+    _owned_build_target.repo = SimpleNamespace(get_owned_chat_binding=AsyncMock(return_value=_BINDING.model_dump()))
+    # No build is CURRENT: an earlier launched run marked the selected build stale.
+    _BaselineStore.versions["av_core_1"] = _BaselineStore.versions["av_core_1"].model_copy(update={
+        "lifecycle_status": ArtifactLifecycleStatus.STALE, "invalidation_reason": "change_request:cr_earlier",
+    })
+    launched: list[str] = []
+
+    async def fake_prepare(**kwargs):  # noqa: ANN003
+        return SimpleNamespace(
+            workflow_id="ValueEngine",
+            routing_decision=SimpleNamespace(
+                requested_workflow_id="ValueEngine", explanation="core", is_full_restart=True,
+                rerouted_by_dependency=False,
+            ),
+            journey_id=None,
+        )
+
+    async def fake_launch(launch):  # noqa: ANN001
+        launched.append(launch.workflow_id)
+        return SimpleNamespace(
+            chat_id="chat_value_1", workflow_id=launch.workflow_id, requested_workflow_id="ValueEngine",
+            journey_id=None, websocket_url="/ws/x", trigger_source="refinement", routing_explanation="core",
+            rerouted_by_dependency=False,
+        )
+
+    class _ArtifactStore(_BaselineStore):
+        async def create_change_request(self, **kwargs):
+            return self.written_change_request("cr_core_1", kwargs)
+
+        async def invalidate_artifact_version_refs(self, **kwargs):
+            return [kwargs["artifact_version_refs"]["app_bundle"]]
+
+        async def update_change_request_router_decision(self, **kwargs):
+            return True
+
+    monkeypatch.setattr(studio_app, "prepare_routed_workflow_launch", fake_prepare)
+    monkeypatch.setattr(studio_app, "launch_prepared_workflow", fake_launch)
+    monkeypatch.setattr(studio_app, "get_artifact_store", lambda: _ArtifactStore())
+    harness = studio_app.get_orchestration_control_harness()
+    monkeypatch.setattr(harness._refinement_resolver, "_classifier", SimpleNamespace(classify=AsyncMock(
+        side_effect=_async_classifier(
+            change_class="core", rationale="New product direction.", confidence=0.94, signals=["concept_shift"],
+        ),
+    )))
+    client = TestClient(studio_app.app)
+    first = client.post("/api/workflows/trigger", json={
+        "build_registry_id": "appreg_1", "trigger_source": "refinement", "source_chat_id": "review-original",
+        "trigger_payload": {"refinement_request": {
+            "artifact_kind": "app_bundle", "artifact_key": "app_bundle", "artifact_version_id": "av_core_1",
+            "raw_user_request": "Add blockchain support to the product.", "source_surface": "app_build",
+        }},
+    })
+    assert first.status_code == 200, first.text
+    assert first.json()["harness_decision"]["decision_type"] == "core_restart"
+    saved = _BaselineStore.change_requests["cr_core_1"]["router_decision"]["baseline_state"]
+    assert saved["lifecycle_status"] == "stale" and saved["invalidation_reason"] == "change_request:cr_earlier"
+    if baseline == "staled_after_proposal":
+        # Another change request invalidated the build after this proposal.
+        _BaselineStore.versions["av_core_1"] = _BaselineStore.versions["av_core_1"].model_copy(update={
+            "invalidation_reason": "change_request:cr_later",
+        })
+    confirmed = json.loads(first.request.content)
+    confirmed["trigger_payload"].update(
+        change_request_id=first.json()["change_request_id"], revision_id=first.json()["revision_id"],
+        harness_action={"action_id": "confirm_recommended_workflow"},
+    )
+    second = client.post("/api/workflows/trigger", json=confirmed)
+    if baseline == "staled_after_proposal":
+        assert second.status_code == 409 and "has changed since the proposal" in second.json()["detail"], second.text
+        assert launched == []
+        return
+    assert second.status_code == 200, second.text
+    assert second.json()["execution_mode"] == "workflow" and launched == ["ValueEngine"]
+
+
 @pytest.mark.parametrize("continuation", ["run_recommended_workflow", "confirm_recommended_workflow"])
 @pytest.mark.parametrize("mutation", [None, "request", "artifact", "revision", "action", "context", "route", "source", "source_missing"])
 def test_studio_trigger_endpoint_reuses_prelaunch_revision_intent_on_confirm(monkeypatch, _owned_build_target, mutation, continuation):
@@ -2355,6 +2449,7 @@ def test_studio_trigger_endpoint_invokes_surface_regeneration_for_feature_change
 
     persisted_sessions: list[dict] = []
     persisted_changes: list[dict] = []
+    persisted_invalidations: list[dict] = []
 
     class _ArtifactStore(_BaselineStore):
         async def create_change_request(self, **kwargs):
@@ -2366,6 +2461,7 @@ def test_studio_trigger_endpoint_invokes_surface_regeneration_for_feature_change
             return SimpleNamespace(id="rs_surface_1")
 
         async def invalidate_artifact_version_refs(self, **kwargs):
+            persisted_invalidations.append(kwargs)
             return []
 
         async def update_change_request_router_decision(self, **kwargs):
@@ -2402,8 +2498,10 @@ def test_studio_trigger_endpoint_invokes_surface_regeneration_for_feature_change
     async def _fake_finalize_surface_output(**kwargs):
         assert kwargs["run_build_binding"] == _BINDING
         assert "Dockerfile" in kwargs["workspace_files"]
+        # The surface run's stored child: a draft of the selected build, under this run's build id.
         child = _BaselineStore.versions["av_456"].model_copy(update={
-            "id": "surface_child", "validation_status": ArtifactValidationStatus(validation_status),
+            "id": "surface_child", "parent_build_record_id": "av_456",
+            "validation_status": ArtifactValidationStatus(validation_status),
         })
         child.commit_metadata = child.commit_metadata.model_copy(update={
             "metadata": {**child.commit_metadata.metadata, **_BINDING.model_dump()},
@@ -2457,6 +2555,10 @@ def test_studio_trigger_endpoint_invokes_surface_regeneration_for_feature_change
     assert persisted_sessions[0]["change_request_id"] == "cr_surface_1"
     assert persisted_sessions[0]["result_build_record_id"] == "surface_child"
     assert persisted_sessions[0]["status"].value == {"passed": "validated", "pending": "pending", "failed": "failed"}[validation_status]
+    # The store decides: only a stored child that passed validation can be accepted, so only it changes the build.
+    assert [(item["artifact_version_refs"], item["reason"]) for item in persisted_invalidations] == (
+        [({"app_bundle": "av_456"}, "change_request:cr_surface_1")] if validation_status == "passed" else []
+    )
 
 
 @pytest.mark.asyncio

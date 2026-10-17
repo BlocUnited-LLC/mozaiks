@@ -83,7 +83,7 @@ Every `BuildRecord` (formerly `ArtifactVersionDoc` — same class, retained alia
 
 A change request records every routed attempt. The `ArtifactInvalidationService`
 runs for it only once the operation it started has changed the selected build:
-in Studio, an inline run that stored a child that can still be accepted, or a
+in Studio, an inline run that stored a child whose validation passed, or a
 workflow run that launched. A request that returns a decision, a launch that
 failed, or an inline run that stored no such child marks nothing stale. When it
 runs, the service does two things:
