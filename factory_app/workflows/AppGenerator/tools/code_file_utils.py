@@ -87,8 +87,13 @@ _REVISION_UI_BASELINES: dict[tuple[str, ...], dict[str, str]] = {}
 _REVISION_UI_BASELINE_LIMIT = 16
 
 
-def compose_bundle_auth_routes(files_map: dict[str, str]) -> None:
-    """Materialize auth routes after app-schema and auth-scaffold outputs merge."""
+def compose_bundle_auth_routes(files_map: dict[str, str], *, validate_bindings: bool = True) -> None:
+    """Materialize auth routes after app-schema and auth-scaffold outputs merge.
+
+    ``validate_bindings=False`` adds the same routes without checking the
+    manifest's auth route bindings, for a projection that leaves that check to
+    the acceptance gate. The auth contract itself is always validated.
+    """
     raw_contract = files_map.get("config/auth.yaml")
     if raw_contract is None:
         return  # Missing required declarations remain validation errors.
@@ -103,7 +108,11 @@ def compose_bundle_auth_routes(files_map: dict[str, str]) -> None:
         raise AppAuthContractError("config/auth.yaml requires app.json.authRequired=true")
     if not isinstance(manifest, dict) or not isinstance(manifest.get("pages"), list):
         raise AppAuthContractError("ui/route_manifest.json must declare pages")
-    manifest["pages"] = compose_app_auth_routes(contract, manifest["pages"])
+    if validate_bindings:
+        manifest["pages"] = compose_app_auth_routes(contract, manifest["pages"])
+    else:
+        declared = {page.get("path") for page in manifest["pages"] if isinstance(page, dict)}
+        manifest["pages"].extend(page for page in app_auth_route_entries(contract) if page["path"] not in declared)
     files_map["ui/route_manifest.json"] = json.dumps(manifest, indent=2, ensure_ascii=False)
 
 
@@ -587,7 +596,9 @@ def _compose_repair_roots(
     cannot revert a task's approved change, and a pack declaration is never
     patched. When those rules cannot be applied here, or reject the copy, the
     assembled pack-composed roots are kept; only an app without resolvable
-    packs keeps the copy as written for the acceptance gates to judge.
+    packs keeps the copy as written for the acceptance gates to judge. A copy
+    that composes but breaks an auth route binding is returned with the auth
+    routes added unchecked, so the acceptance gate rejects it with that error.
     """
     from .hydrate_app_revision_context import revision_baseline_required
     from .resolve_managed_capability_templates import (
@@ -638,7 +649,20 @@ def _compose_repair_roots(
         if "ui/route_manifest.json" in shared and _auth_required(files):
             # As materialize_auth_scaffold does after assembly composes the roots.
             with_auth = {**files, **shared}
-            compose_bundle_auth_routes(with_auth)
+            try:
+                compose_bundle_auth_routes(with_auth)
+            except AppAuthContractError as exc:
+                # The copy composes, but the manifest breaks an auth route
+                # binding. The acceptance gate checks the same bindings, so the
+                # composition reaches it with the auth routes added unchecked
+                # and fails there with this error, which the repair loop can
+                # act on; kept roots would repeat the pre-repair diagnostic.
+                # Any other auth contract error raises again and keeps them.
+                compose_bundle_auth_routes(with_auth, validate_bindings=False)
+                logger.warning(
+                    "ADMITTED_AUTH_ROUTE_BINDING_INVALID: paths=%s; the admitted repair copy breaks an auth "
+                    "route binding, which the acceptance gate reports: %s", sorted(replaced), exc,
+                )
             shared["ui/route_manifest.json"] = with_auth["ui/route_manifest.json"]
         return {path: shared[path] for path in sorted(replaced) if path in shared}
 

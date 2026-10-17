@@ -706,6 +706,17 @@ def test_conflicting_route_identity_or_metadata_fails(change, match):
         compose(left, right)
 
 
+@pytest.mark.parametrize("key,value", [("navigation", "top"), ("navigation", ["main"]), ("meta", "Board")])
+def test_malformed_route_navigation_or_meta_is_a_declaration_error(key, value):
+    # Callers handle a rejected declaration as ValueError; a malformed shape must never crash them.
+    app = component()
+    manifest = json.loads(app["ui/route_manifest.json"])
+    manifest["pages"][0][key] = value
+    app["ui/route_manifest.json"] = json.dumps(manifest)
+    with pytest.raises(ValueError, match=f"route 'board' {key} must be an object or null"):
+        compose(app)
+
+
 @pytest.mark.parametrize("source,match", [
     ("import View from './missing.jsx'; export function register(registerComponent) { registerComponent('Board', View); }", "existing file"),
     ("import View from '../../outside.jsx'; export function register(registerComponent) { registerComponent('Board', View); }", "escapes"),

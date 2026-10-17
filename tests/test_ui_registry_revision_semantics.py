@@ -838,3 +838,75 @@ async def test_auth_required_messaging_revision_repair_reaches_validation_and_ex
     code_file_utils._REVISION_UI_BASELINES.clear()
     assert await _export_projection(monkeypatch, context) == validated
     assert not _not_composed(caplog)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bound", [False, True])
+async def test_a_malformed_repair_route_is_a_rejected_copy_never_a_crash(request, caplog, bound):
+    from factory_app.workflows.AppGenerator.tools import code_file_utils
+
+    saved = request.getfixturevalue("revision_baseline")
+    board, pack = component(path="ui/pages/custom/board.jsx"), _assembled_files()
+    _save(saved, board, pack)
+    context = _revision_context(saved, _saved_roots(saved))
+    result = await assemble_app_tasks(context_variables=context)
+    assert result["success"], result
+    assembled = _files(result)
+    manifest = json.loads(assembled["ui/route_manifest.json"])
+    for route in manifest["pages"]:
+        if route.get("id") == "board":
+            route["navigation"] = "top"
+    context.set("code_files", contribution("repair", {"ui/route_manifest.json": json.dumps(manifest)})["files"])
+    _responded_repair(context, "ui/route_manifest.json")
+    code_file_utils._REVISION_UI_BASELINES.clear()
+    caplog.set_level(logging.INFO, logger=_CODE_FILE_UTILS)
+    baseline = await code_file_utils.load_revision_baseline(context) if bound else None
+    assert (baseline is not None) is bound
+    # Sync callers (save_generated_code, the assembly auth-scope read) handle only ValueError and TypeError.
+    admitted = admitted_app_file_map(context, revision_baseline=baseline)
+    assert admitted["ui/route_manifest.json"] == assembled["ui/route_manifest.json"]
+    warnings = _not_composed(caplog)
+    assert len(warnings) == 1
+    if bound:
+        assert "route 'board' navigation must be an object or null" in warnings[0].getMessage()
+
+
+@pytest.mark.asyncio
+async def test_a_repair_breaking_an_auth_route_binding_reaches_the_gate_with_that_error(monkeypatch, caplog):
+    from factory_app.workflows.AppGenerator.tools import app_validation
+    from factory_app.workflows.AppGenerator.tools.code_file_utils import compose_bundle_auth_routes
+    from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import (
+        _scan_auth_app_contract,
+    )
+    from mozaiksai.core.runtime.app.auth_contract import AppAuthContractError
+
+    board, pack = component(path="ui/pages/custom/board.jsx"), _assembled_files()
+    context = _genesis_context(board, app_task_batch_results={
+        "pages": {"code_files": contribution("task:pages", board)["files"]},
+        "shell": {"manifest": {"app_name": "Board", "default_route": "/board", "auth_strategy": "basic-login"}, "pages": []},
+    })
+    result = await assemble_app_tasks(context_variables=context)
+    assert result["success"], result
+    assert _scan_auth_app_contract(_files(result), require_generated_adapter=False) == []
+    # One repair retitles the board and also declares the sign-in route behind sign-in.
+    manifest = json.loads(retitled(board["ui/route_manifest.json"], "board", "Repaired"))
+    manifest["pages"].append({
+        "id": "login", "path": "/login", "component": "LoginPage", "meta": {"requiresAuth": True, "title": "Sign in"},
+    })
+    context.set("code_files", contribution("repair", {"ui/route_manifest.json": json.dumps(manifest)})["files"])
+    _responded_repair(context, "ui/route_manifest.json")
+    caplog.set_level(logging.INFO, logger=_CODE_FILE_UTILS)
+    acceptance = _validation_mocks(monkeypatch)
+    await app_validation.validate_app_bundle_from_request({}, context_variables=context)
+    checked = acceptance.await_args.kwargs["files"]
+    assert checked == admitted_app_file_map(context)
+    # The gate checks the repair as written, its unrelated change included, and names the broken binding.
+    assert _routes(checked)["board"]["meta"]["title"] == "Repaired"
+    assert _routes(checked)["messages"] == _routes(pack)["messages"]
+    assert _scan_auth_app_contract(checked, require_generated_adapter=False) == [
+        "Auth routes.login must declare meta.requiresAuth=false",
+    ]
+    assert any("ADMITTED_AUTH_ROUTE_BINDING_INVALID" in record.getMessage() for record in caplog.records)
+    # It never passes: export's own auth route composition rejects the same binding.
+    with pytest.raises(AppAuthContractError, match=r"routes\.login must declare meta\.requiresAuth=false"):
+        compose_bundle_auth_routes(dict(checked))

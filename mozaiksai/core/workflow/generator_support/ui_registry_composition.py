@@ -295,6 +295,10 @@ def _manifest(source: str, owner: str) -> dict[str, Any]:
     for route in manifest["pages"]:
         if not isinstance(route, dict) or not all(isinstance(route.get(key), str) and route[key] for key in ("id", "path", "component")):
             raise ValueError(f"{owner}: routes require id, path and component")
+        # Composition reads navigation order; a malformed shape is a declaration error, never a crash.
+        for key in ("navigation", "meta"):
+            if route.get(key) is not None and not isinstance(route[key], dict):
+                raise ValueError(f"{owner}: route {route['id']!r} {key} must be an object or null")
     return manifest
 
 

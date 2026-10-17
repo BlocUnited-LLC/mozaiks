@@ -1219,7 +1219,14 @@ not compose it cannot replace the repair with the pre-repair root.
 When the rules reject the copy, or the selected packs cannot be resolved, the
 bundle's roots are kept and an `ADMITTED_UI_ROOT_NOT_COMPOSED` warning names
 them; only without resolvable packs does the copy replace the root for the
-acceptance gates to judge. Without that provenance the last writer wins.
+acceptance gates to judge. A malformed route declaration, such as a
+`navigation` or `meta` that is not an object, is such a rejection, never a
+crash of a synchronous caller. A copy that composes but breaks an auth route
+binding (for example a sign-in route that requires sign-in) is not held back:
+the auth routes are added without checking their bindings and
+`ADMITTED_AUTH_ROUTE_BINDING_INVALID` is logged, so the acceptance gate fails on
+that binding error, which the repair loop can act on, and export's own auth
+route composition rejects it. Without that provenance the last writer wins.
 Historical raw worker responses and prior generated directories cannot overwrite,
 refill, or delete that snapshot. An older foreign readback filtered by a save tool
 cannot reappear during packaging. Empty current artifacts remain empty.
