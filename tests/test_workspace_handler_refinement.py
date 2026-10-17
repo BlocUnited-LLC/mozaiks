@@ -595,7 +595,150 @@ async def test_explicit_rebuild_keeps_the_handler_only_through_a_bound_verified_
     assert saved.store.get_build_record.await_count == (1 if bound_source else 0)
 
 
-def _studio_route(monkeypatch, tmp_path, *, files_payload, proposer=None, accepted="parent", registry_current="parent"):
+class _StudioStore(_Store):
+    """The artifact store Studio's trigger and acceptance use, invalidating for real.
+
+    Invalidation marks a record STALE as ``mark_artifact_version_stale`` does
+    (anything but ARCHIVED or DELETED), the current refs name CURRENT records
+    only, a run's children are found by parent and the run's build_id, and
+    acceptance supersedes the family's CURRENT record. ChangeRequests are kept
+    as the trigger wrote them.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.change_requests = {}
+        self.invalidations = []
+        self.accepted = []
+        self.refinement_sessions = []
+
+    async def create_change_request(self, **kwargs):
+        change = SimpleNamespace(id=f"cr_{len(self.change_requests) + 1}", **kwargs)
+        self.change_requests[change.id] = change
+        return change
+
+    async def get_change_request(self, *, app_id, change_request_id):
+        change = self.change_requests.get(change_request_id)
+        return change if change is not None and change.app_id == app_id else None
+
+    async def invalidate_artifact_version_refs(
+        self, *, app_id, artifact_version_refs, affected_artifact_kinds=None, reason, invalidated_by_version_id=None,
+    ):
+        self.invalidations.append({"refs": dict(artifact_version_refs), "reason": reason})
+        staled = []
+        for kind in affected_artifact_kinds or list(artifact_version_refs):
+            record = self.records.get(artifact_version_refs.get(kind) or "")
+            if record is None or record.app_id != app_id or record.lifecycle_status in {
+                ArtifactLifecycleStatus.ARCHIVED, ArtifactLifecycleStatus.DELETED,
+            }:
+                continue
+            self.records[record.id] = record.model_copy(update={
+                "lifecycle_status": ArtifactLifecycleStatus.STALE, "invalidation_reason": reason,
+            })
+            staled.append(record.id)
+        return staled
+
+    async def invalidate_artifact_family(self, **kwargs):
+        # Build records carry no artifact_kind, so the store's family query matches nothing.
+        return 0
+
+    async def list_run_child_build_records(self, *, app_id, parent_build_record_id, build_id, limit=10):
+        return [
+            record for record in self.records.values()
+            if record.app_id == app_id and record.parent_build_record_id == parent_build_record_id
+            and record.commit_metadata.metadata.get("build_id") == build_id
+        ]
+
+    async def accept_build_record(self, *, app_id, build_record_id, commit_metadata=None):
+        await asyncio.sleep(0)  # a store round-trip lets another request interleave
+        target = self.records[build_record_id]
+        for record_id, record in list(self.records.items()):
+            if (
+                record_id != build_record_id and record.build_family == target.build_family
+                and record.lifecycle_status == ArtifactLifecycleStatus.CURRENT
+            ):
+                self.records[record_id] = record.model_copy(update={"lifecycle_status": ArtifactLifecycleStatus.SUPERSEDED})
+        self.records[build_record_id] = target.model_copy(update={"lifecycle_status": ArtifactLifecycleStatus.CURRENT})
+        self.accepted.append(build_record_id)
+        return self.records[build_record_id]
+
+    async def create_refinement_session(self, **kwargs):
+        self.refinement_sessions.append(kwargs)
+        return SimpleNamespace(id=f"rs_{len(self.refinement_sessions)}")
+
+    async def list_refinement_sessions(self, **kwargs):
+        return []
+
+    def status(self, record_id):
+        return self.records[record_id].lifecycle_status
+
+    def children(self):
+        return sorted(record_id for record_id, record in self.records.items() if record.parent_build_record_id)
+
+    def current(self):
+        return sorted(
+            record_id for record_id, record in self.records.items()
+            if record.lifecycle_status == ArtifactLifecycleStatus.CURRENT
+        )
+
+
+class _Registry:
+    """The app registry's run chain: a new run replaces the current run; completion is compare-and-set."""
+
+    def __init__(self, artifact_version_id="parent"):
+        self.record = {
+            "build_registry_id": "appreg_1", "app_id": "app_1", "chat_app_id": "factory", "lifecycle_state": "review",
+            "current_build_run": {"build_id": "build_0", "artifact_version_id": artifact_version_id},
+        }
+        self.begun = []
+        self.superseded = False  # a completion that loses its compare-and-set
+        self.get_app_record = AsyncMock(side_effect=self._get_app_record)
+        self.begin_refinement_run = AsyncMock(side_effect=self._begin_refinement_run)
+        self.update_build_status = AsyncMock(side_effect=self._update_build_status)
+
+    async def _get_app_record(self, *, owner_user_id, build_registry_id):
+        return {"app": deepcopy(self.record)}
+
+    async def _begin_refinement_run(self, *, owner_user_id, app_id, build_registry_id, workflow_name, chat_id=None):
+        binding = RunBuildBinding(
+            build_registry_id="appreg_1", target_app_id="app_1", build_id=f"run_{len(self.begun) + 1}", phase="refinement",
+        )
+        self.begun.append(binding.build_id)
+        self.record.update(lifecycle_state="building", current_build_run={"build_id": binding.build_id, "phase": "refinement"})
+        return binding
+
+    async def _update_build_status(self, *, owner_user_id, build_registry_id, status, expected_build_id=None,
+                                   artifact_version_id=None, **_):
+        run = self.record["current_build_run"]
+        if self.superseded or (expected_build_id is not None and run.get("build_id") != expected_build_id):
+            return {"success": False, "app": None}
+        self.record["lifecycle_state"] = status
+        if artifact_version_id:
+            run["artifact_version_id"] = artifact_version_id
+        return {"success": True, "app": deepcopy(self.record)}
+
+
+def _scope_proposer(paths=(HANDLER,)):
+    return SimpleNamespace(
+        propose=AsyncMock(return_value=ScopeProposal(
+            resolution="scoped_files", selected_paths=list(paths), rationale="The send action lives here.",
+            confidence=0.95, clarification_question=None, signals=["messages"],
+        )),
+        materialize_files=AsyncMock(side_effect=lambda **kwargs: dict.fromkeys(paths, TEMPLATE_HANDLER)),
+    )
+
+
+def _page(version):
+    return _baseline(app_id="app_1")[PAGE] + f"\n// board revision {version}\n"
+
+
+def _studio_flow(monkeypatch, tmp_path, *, outputs, proposer=None, accepted="parent", registry_current="parent"):
+    """Studio's real trigger and acceptance routes, the real coding worker, and stateful stores.
+
+    ``outputs`` are the coding provider's file changes, one per run, in order.
+    No workflow can launch: every change here goes through the inline lane.
+    """
+    from mozaiksai.control_plane.invalidation import ArtifactInvalidationService
     from mozaiksai.core.auth import reset_auth_adapter
     from mozaiksai.core.session.router import SessionRouter
     from mozaiksai.hosts import studio
@@ -610,7 +753,7 @@ def _studio_route(monkeypatch, tmp_path, *, files_payload, proposer=None, accept
     with zipfile.ZipFile(archive, "w") as zipped:
         for path, content in baseline.items():
             zipped.writestr(path, content)
-    store = _Store(app_id="app_1", metadata={})
+    store = _StudioStore(app_id="app_1", metadata={})
     parent = _artifact_version(
         artifact_version_id="parent", zip_path=archive, lifecycle_status=ArtifactLifecycleStatus.CURRENT,
     )
@@ -618,46 +761,73 @@ def _studio_route(monkeypatch, tmp_path, *, files_payload, proposer=None, accept
     store.records["parent"] = parent
     if accepted != "parent":
         store.supersede_parent_with(accepted)
-
-    async def accept(**kwargs):
-        return SimpleNamespace(id="cr_1")
-
-    store.create_change_request = accept
-    store.invalidate_artifact_version_refs = AsyncMock(return_value=[])
-    store.create_refinement_session = AsyncMock(return_value=SimpleNamespace(id="rs_1"))
-    record = {"build_registry_id": "appreg_1", "app_id": "app_1", "chat_app_id": "factory", "lifecycle_state": "review",
-              "current_build_run": {"build_id": "build_0", "artifact_version_id": registry_current}}
-    binding = RunBuildBinding(build_registry_id="appreg_1", target_app_id="app_1", build_id="build_1", phase="refinement")
-    registry = SimpleNamespace(
-        get_app_record=AsyncMock(return_value={"app": record}), begin_refinement_run=AsyncMock(return_value=binding),
-        update_build_status=AsyncMock(return_value={"success": True, "app": record}),
-    )
+    registry = _Registry(registry_current)
+    queued = [dict(changes) for changes in outputs]
+    provider = SimpleNamespace(execute=AsyncMock(side_effect=lambda *args, **kwargs: _proposal(queued.pop(0))))
     validate = AsyncMock(return_value=_evidence())
     worker = ScopedRefinementCodingWorker(
-        provider=SimpleNamespace(execute=AsyncMock(return_value=_proposal({HANDLER: NORMALIZING_HANDLER}))),
-        config_loader=_config, candidate_validation_runner=validate, artifact_store=store,
+        provider=provider, config_loader=_config, candidate_validation_runner=validate, artifact_store=store,
         output_root=tmp_path / "refinements",
     )
     harness = orchestration_control.OrchestrationControlHarness(
         refinement_resolver=RefinementTriggerRouteResolver(classifier=SimpleNamespace(classify=_async_classifier(
             change_class="patch", rationale=REQUEST, confidence=0.95, signals=["messages"],
         ))),
-        coding_worker=worker, config_loader=_config, **({"scope_proposer": proposer} if proposer else {}),
+        coding_worker=worker, config_loader=_config,
+        # Studio's session refs live under a target-scoped key, so the service finds none.
+        artifact_invalidation=ArtifactInvalidationService(session_store=SimpleNamespace(load=AsyncMock(return_value=None))),
+        **({"scope_proposer": proposer} if proposer else {}),
     )
+    router = SessionRouter(persistence=_FakePersistence())
+    launch = AsyncMock(side_effect=AssertionError("no workflow launch"))
     monkeypatch.setattr(studio, "_get_app_registry_service", lambda: registry)
     monkeypatch.setattr(studio, "_resolve_studio_scope", lambda *args, **kwargs: ("factory", "demo-user"))
-    monkeypatch.setattr(studio, "get_session_router", lambda: SessionRouter(persistence=_FakePersistence()))
+    monkeypatch.setattr(studio, "get_session_router", lambda: router)
     monkeypatch.setattr(studio, "get_artifact_store", lambda: store)
     monkeypatch.setattr(studio, "get_orchestration_control_harness", lambda: harness)
-    response = TestClient(studio.app).post("/api/workflows/trigger", json={
-        "build_registry_id": "appreg_1", "trigger_source": "refinement",
-        "trigger_payload": {
-            "refinement_request": {"build_family": "app_bundle", "build_key": "app_bundle", "build_record_id": "parent",
-                                   "raw_user_request": REQUEST, "source_surface": "app_workbench"},
-            "coding_request": files_payload,
-        },
-    })
-    return SimpleNamespace(response=response, store=store, registry=registry, validate=validate)
+    monkeypatch.setattr(studio, "prepare_routed_workflow_launch", launch)
+    monkeypatch.setattr(studio, "_verified_review_snapshots", AsyncMock(return_value=None))
+    monkeypatch.setattr(studio, "_build_artifact_review_payload", AsyncMock(return_value={"review": {}}))
+    monkeypatch.setattr(studio, "_WORKSPACE_ACCEPTANCE_LOCKS", {})
+    client = TestClient(studio.app)
+
+    def trigger(coding_request, *, build_record_id="parent", **payload):
+        return client.post("/api/workflows/trigger", json={
+            "build_registry_id": "appreg_1", "trigger_source": "refinement",
+            "trigger_payload": {
+                "refinement_request": {"build_family": "app_bundle", "build_key": "app_bundle",
+                                       "build_record_id": build_record_id, "raw_user_request": REQUEST,
+                                       "source_surface": "app_workbench"},
+                "coding_request": coding_request, **payload,
+            },
+        })
+
+    def confirm(decision, coding_request=None, action="apply_proposed_scope", build_record_id="parent"):
+        return trigger(
+            {} if coding_request is None else coding_request, build_record_id=build_record_id,
+            change_request_id=decision["change_request_id"], revision_id=decision["revision_id"],
+            harness_action={"action_id": action},
+        )
+
+    def accept(record_id):
+        return client.post(f"/api/studio/build/artifacts/{record_id}/accept", params={"build_registry_id": "appreg_1"})
+
+    def session():
+        return asyncio.run(router.for_target("app_1").get_session_snapshot(app_id="factory", user_id="demo-user"))
+
+    return SimpleNamespace(
+        store=store, registry=registry, validate=validate, provider=provider, launch=launch, router=router,
+        client=client, trigger=trigger, confirm=confirm, accept=accept, session=session,
+    )
+
+
+def _studio_route(monkeypatch, tmp_path, *, files_payload, proposer=None, accepted="parent", registry_current="parent"):
+    flow = _studio_flow(
+        monkeypatch, tmp_path, outputs=[{HANDLER: NORMALIZING_HANDLER}], proposer=proposer,
+        accepted=accepted, registry_current=registry_current,
+    )
+    flow.response = flow.trigger(files_payload)
+    return flow
 
 
 @pytest.mark.parametrize("accepted", ["parent", "newer_build"])
@@ -673,34 +843,93 @@ def test_studio_backend_patch_requires_the_current_build(monkeypatch, tmp_path, 
         assert child.commit_metadata.metadata["refinement_scope"]["scope_origin"] == "explicit"
         assert _archive_files(child)[HANDLER] == NORMALIZING_HANDLER
         assert status["status"] == "review" and status["artifact_version_id"] == child.id
+        # The run stored a reviewable child of the parent, so the parent is invalidated.
+        assert route.store.invalidations == [{"refs": {"app_bundle": "parent"}, "reason": "change_request:cr_1"}]
+        assert route.store.status("parent") == ArtifactLifecycleStatus.STALE
         return
     assert body["coding_worker"]["status"] == "failed"
     assert body["coding_worker"]["metadata"]["candidate_admission"]["code"] == "STALE_REFINEMENT_BASELINE"
     assert body["coding_worker"]["metadata"]["candidate_admission"]["accepted_build_record_id"] == "newer_build"
     route.validate.assert_not_awaited()
     assert route.store.created == [] and status["status"] == "needs_revision"
+    # Nothing was stored, so nothing is invalidated: the newer accepted build stays current.
+    assert route.store.invalidations == [] and route.store.current() == ["newer_build"]
 
 
 def test_failed_inline_run_does_not_block_a_later_authorized_handler_patch(monkeypatch, tmp_path):
-    # A failed inline run leaves the registry's current run without an artifact;
-    # the accepted build is still the parent, so an authorized retry proceeds.
-    route = _studio_route(monkeypatch, tmp_path, registry_current=None, files_payload={"files": {HANDLER: ""}})
-    assert route.response.status_code == 200, route.response.text
-    body = route.response.json()
+    """A run rejected before it stored anything leaves the parent current, so an explicit retry proceeds.
+
+    The first run's handler passes a privileged service flag and the extension
+    grammar rejects it before validation. The retry, sent by the user with the
+    same explicit scope, stores the child; acceptance then makes it current.
+    """
+    flow = _studio_flow(
+        monkeypatch, tmp_path, outputs=[{HANDLER: PRIVILEGED_HANDLER}, {HANDLER: NORMALIZING_HANDLER}],
+    )
+    first = flow.trigger({"files": {HANDLER: ""}})
+    assert first.status_code == 200, first.text
+    failed = first.json()["coding_worker"]
+    assert failed["status"] == "failed"
+    assert failed["metadata"]["candidate_admission"]["code"] == "WORKSPACE_HANDLER_EXTENSION_REJECTED"
+    assert "build_record_id" not in failed["metadata"]
+    flow.validate.assert_not_awaited()
+    assert flow.store.children() == []
+    # The attempt is recorded, but the parent was not changed and is not invalidated.
+    assert flow.store.change_requests["cr_1"].router_decision["execution_mode"] == "coding_worker"
+    assert [session["status"].value for session in flow.store.refinement_sessions] == ["failed"]
+    assert flow.registry.record["lifecycle_state"] == "needs_revision"
+    assert flow.store.invalidations == [] and flow.store.current() == ["parent"]
+
+    retry = flow.trigger({"files": {HANDLER: ""}})
+    assert retry.status_code == 200, retry.text
+    body = retry.json()
     assert body["coding_worker"]["status"] == "validated", body["coding_worker"]
-    child = route.store.records[body["coding_worker"]["metadata"]["build_record_id"]]
+    child = flow.store.records[body["coding_worker"]["metadata"]["build_record_id"]]
     assert _archive_files(child)[HANDLER] == NORMALIZING_HANDLER
+    assert child.parent_build_record_id == "parent"
+    assert flow.store.invalidations == [{"refs": {"app_bundle": "parent"}, "reason": "change_request:cr_2"}]
+
+    accepted = flow.accept(child.id)
+    assert accepted.status_code == 200, accepted.text
+    assert flow.store.current() == [child.id] and flow.store.status("parent") == ArtifactLifecycleStatus.STALE
+    # One explicit retry, no rebuild.
+    assert flow.provider.execute.await_count == 2 and flow.registry.begun == ["run_1", "run_2"]
+    flow.launch.assert_not_awaited()
+
+
+@pytest.mark.parametrize("outcome", ["failed", "skipped", "pending", "lookup_error"])
+def test_only_a_stored_child_that_can_still_be_accepted_invalidates_the_parent(monkeypatch, tmp_path, outcome):
+    """The store, not the run's status, decides: a FAILED child stays refused, anything else may become current."""
+    from mozaiksai.core.artifacts import ArtifactValidationStatus
+
+    flow = _studio_flow(monkeypatch, tmp_path, outputs=[{PAGE: _page(1)}])
+    if outcome in {"failed", "skipped", "pending"}:
+        flow.validate.return_value = {
+            **_evidence(), "validation_status": outcome, "errors": ["candidate checks did not pass"] if outcome == "failed" else [],
+            "app_validation_result": {"validation_status": outcome, "validation_strategy": "docker"},
+        }
+    else:
+        # The store cannot say what the run left, so the parent is treated as changed.
+        flow.store.list_run_child_build_records = AsyncMock(side_effect=RuntimeError("store unavailable"))
+    response = flow.trigger({"files": {PAGE: ""}})
+    assert response.status_code == 200, response.text
+    child = flow.store.records[response.json()["coding_worker"]["metadata"]["build_record_id"]]
+    assert child.parent_build_record_id == "parent" and child.lifecycle_status == ArtifactLifecycleStatus.DRAFT
+    if outcome == "failed":
+        assert child.validation_status == ArtifactValidationStatus.FAILED
+        assert response.json()["coding_worker"]["status"] == "failed"
+        assert flow.store.invalidations == [] and flow.store.current() == ["parent"]
+        # Nothing validates a stored child again, and acceptance refuses it.
+        refused = flow.accept(child.id)
+        assert refused.status_code == 409 and "validation_status='failed'" in refused.json()["detail"], refused.text
+        assert flow.store.current() == ["parent"]
+        return
+    assert flow.store.invalidations == [{"refs": {"app_bundle": "parent"}, "reason": "change_request:cr_1"}]
+    assert flow.store.status("parent") == ArtifactLifecycleStatus.STALE
 
 
 def test_studio_inferred_handler_scope_returns_the_confirmation_decision(monkeypatch, tmp_path):
-    proposer = SimpleNamespace(
-        propose=AsyncMock(return_value=ScopeProposal(
-            resolution="scoped_files", selected_paths=[HANDLER], rationale="The send action lives here.",
-            confidence=0.95, clarification_question=None, signals=["messages"],
-        )),
-        materialize_files=AsyncMock(side_effect=lambda **kwargs: {HANDLER: TEMPLATE_HANDLER}),
-    )
-    route = _studio_route(monkeypatch, tmp_path, files_payload={}, proposer=proposer)
+    route = _studio_route(monkeypatch, tmp_path, files_payload={}, proposer=_scope_proposer())
     assert route.response.status_code == 200, route.response.text
     body = route.response.json()
     assert body["execution_mode"] == "harness_decision"
@@ -710,6 +939,222 @@ def test_studio_inferred_handler_scope_returns_the_confirmation_decision(monkeyp
     assert "apply_proposed_scope" in [action["action_id"] for action in decision["actions"]]
     route.registry.begin_refinement_run.assert_not_awaited()
     assert route.store.created == []
+    # A question changes nothing: the parent stays the app's current build.
+    assert route.store.invalidations == [] and route.store.current() == ["parent"]
+
+
+def test_confirmed_handler_scope_applies_to_the_still_current_build_and_is_accepted(monkeypatch, tmp_path):
+    flow = _studio_flow(monkeypatch, tmp_path, outputs=[{HANDLER: NORMALIZING_HANDLER}], proposer=_scope_proposer())
+    proposed = flow.trigger({})
+    assert proposed.status_code == 200, proposed.text
+    decision = proposed.json()
+    assert decision["harness_decision"]["decision_type"] == "clarify_scope"
+    assert flow.store.invalidations == [] and flow.store.current() == ["parent"]
+    assert flow.registry.begun == []
+    # The attempt's history is still written: the ChangeRequest and the pending decision.
+    assert flow.store.change_requests["cr_1"].router_decision["execution_mode"] == "harness_decision"
+    assert flow.session()["pending_harness_decision"]["selected_paths"] == [HANDLER]
+
+    confirmed = flow.confirm(decision)
+    assert confirmed.status_code == 200, confirmed.text
+    result = confirmed.json()["coding_worker"]
+    assert result["status"] == "validated", result
+    child = flow.store.records[result["metadata"]["build_record_id"]]
+    assert child.commit_metadata.metadata["refinement_scope"] == {
+        "selected_file_paths": [HANDLER], "scope_origin": "confirmed", "changed_workspace_pack_paths": [HANDLER],
+    }
+    assert _archive_files(child)[HANDLER] == NORMALIZING_HANDLER
+    # The confirmed run stored the child, so the parent is invalidated under the proposal's ChangeRequest.
+    assert flow.store.invalidations == [{"refs": {"app_bundle": "parent"}, "reason": "change_request:cr_1"}]
+    assert flow.store.status("parent") == ArtifactLifecycleStatus.STALE
+    flow.provider.execute.assert_awaited_once()
+
+    accepted = flow.accept(child.id)
+    assert accepted.status_code == 200, accepted.text
+    assert flow.store.accepted == [child.id] and flow.store.current() == [child.id]
+    assert flow.store.status("parent") == ArtifactLifecycleStatus.STALE
+
+
+def _forge_pending_scope(flow, paths, *, build_record_id=None):
+    """Plant a pending decision as POST /api/session/decisions/pending does, naming other files or another build."""
+    from mozaiksai.core.session.model import PendingDecisionAction, PendingHarnessDecision
+
+    planted = deepcopy({**flow.session()["pending_harness_decision"], "selected_paths": list(paths)})
+    if build_record_id is not None:
+        planted["trigger_payload"]["refinement_request"]["build_record_id"] = build_record_id
+    planted.pop("created_at", None)
+    planted["actions"] = [PendingDecisionAction(**action) for action in planted["actions"]]
+    asyncio.run(flow.router.for_target("app_1").mark_pending_harness_decision(
+        app_id="factory", user_id="demo-user", pending_decision=PendingHarnessDecision(**planted),
+    ))
+
+
+@pytest.mark.parametrize("case", [
+    "dismissed", "unconfirmed", "invalid_input", "files_outside_scope", "forged_scope", "forged_build",
+])
+def test_declined_or_unauthorized_scope_grants_nothing_and_invalidates_nothing(monkeypatch, tmp_path, case):
+    flow = _studio_flow(monkeypatch, tmp_path, outputs=[{PAGE: _page(1)}], proposer=_scope_proposer())
+    decision = flow.trigger({}).json()
+    assert decision["harness_decision"]["decision_type"] == "clarify_scope"
+    if case == "dismissed":
+        # What POST /api/session/decisions/resolve with accepted=false does.
+        asyncio.run(flow.router.for_target("app_1").resolve_pending_harness_decision(
+            app_id="factory", user_id="demo-user", decision_id=decision["change_request_id"], accepted=False,
+        ))
+        response = flow.confirm(decision)
+        assert response.status_code == 409 and "no longer current" in response.json()["detail"], response.text
+    elif case == "unconfirmed":
+        again = flow.trigger({})
+        assert again.json()["harness_decision"]["decision_type"] == "clarify_scope"
+    elif case == "invalid_input":
+        assert flow.confirm(decision, coding_request="files").status_code == 400
+        assert flow.confirm(decision, coding_request={"validation_strategy": "unsupported"}).status_code == 400
+        # Invalid input never consumed the decision.
+        assert flow.session()["pending_harness_decision"]["selected_paths"] == [HANDLER]
+    elif case == "files_outside_scope":
+        response = flow.confirm(decision, coding_request={"files": {PAGE: ""}})
+        assert response.status_code == 409 and "do not match" in response.json()["detail"], response.text
+    elif case == "forged_scope":
+        # A decision written through the session API is not the scope the server proposed.
+        _forge_pending_scope(flow, [PAGE])
+        response = flow.confirm(decision, coding_request={"files": {PAGE: ""}})
+        assert response.status_code == 409 and "change request" in response.json()["detail"], response.text
+        assert flow.session()["pending_harness_decision"]["selected_paths"] == [PAGE]
+    else:
+        # The same files, but on a build the change request was not proposed for.
+        flow.store.records["other_build"] = flow.store.records["parent"].model_copy(
+            update={"id": "other_build", "lifecycle_status": ArtifactLifecycleStatus.DRAFT},
+        )
+        _forge_pending_scope(flow, [HANDLER], build_record_id="other_build")
+        response = flow.confirm(decision, build_record_id="other_build")
+        assert response.status_code == 409 and "change request" in response.json()["detail"], response.text
+        assert flow.store.status("other_build") == ArtifactLifecycleStatus.DRAFT
+    assert flow.store.invalidations == [] and flow.store.current() == ["parent"]
+    assert flow.registry.begun == [] and flow.store.children() == []
+    flow.provider.execute.assert_not_awaited()
+
+
+def test_an_accepted_change_rejects_older_confirmations_and_candidates(monkeypatch, tmp_path):
+    flow = _studio_flow(
+        monkeypatch, tmp_path, outputs=[{PAGE: _page(1)}, {PAGE: _page(2)}], proposer=_scope_proposer(),
+    )
+    older_decision = flow.trigger({}).json()
+    assert older_decision["harness_decision"]["decision_type"] == "clarify_scope"
+    older, newer = (flow.trigger({"files": {PAGE: ""}}).json()["coding_worker"] for _ in range(2))
+    older_id, newer_id = older["metadata"]["build_record_id"], newer["metadata"]["build_record_id"]
+    assert flow.accept(newer_id).status_code == 200
+    assert flow.store.current() == [newer_id]
+
+    # The older candidate carries the same app-owned code but would revert the newer accepted page.
+    stale_candidate = flow.accept(older_id)
+    assert stale_candidate.status_code == 409, stale_candidate.text
+    assert "earlier build" in stale_candidate.json()["detail"]
+    assert flow.store.current() == [newer_id] and flow.store.status(older_id) == ArtifactLifecycleStatus.DRAFT
+
+    # The decision proposed against the old parent is refused before it is consumed or run.
+    stale_confirmation = flow.confirm(older_decision)
+    assert stale_confirmation.status_code == 409, stale_confirmation.text
+    assert "Request the change again" in stale_confirmation.json()["detail"]
+    assert flow.session()["pending_harness_decision"]["decision_id"] == older_decision["change_request_id"]
+    assert flow.registry.begun == ["run_1", "run_2"] and flow.provider.execute.await_count == 2
+    assert flow.store.accepted == [newer_id]
+    # The proposal invalidated nothing; each run that stored a reviewable child invalidated the parent.
+    assert [item["reason"] for item in flow.store.invalidations] == ["change_request:cr_2", "change_request:cr_3"]
+
+
+@pytest.mark.parametrize("competitor", ["failed_attempt", "page_child", "accepted_page_child"])
+def test_a_run_started_after_confirmation_keeps_the_stale_child_out(monkeypatch, tmp_path, competitor):
+    second = {HANDLER: PRIVILEGED_HANDLER} if competitor == "failed_attempt" else {PAGE: _page(1)}
+    flow = _studio_flow(
+        monkeypatch, tmp_path, outputs=[{HANDLER: NORMALIZING_HANDLER}, second], proposer=_scope_proposer(),
+    )
+    decision = flow.trigger({}).json()
+    confirmed = flow.confirm(decision).json()["coding_worker"]
+    assert confirmed["status"] == "validated", confirmed
+    handler_child = confirmed["metadata"]["build_record_id"]
+    assert flow.store.status("parent") == ArtifactLifecycleStatus.STALE
+
+    competing = flow.trigger({"files": dict.fromkeys(second, "")}).json()["coding_worker"]
+    if competitor == "failed_attempt":
+        assert competing["status"] == "failed" and "build_record_id" not in competing["metadata"]
+        assert len(flow.store.invalidations) == 1
+    else:
+        assert competing["status"] == "validated", competing
+        if competitor == "accepted_page_child":
+            assert flow.accept(competing["metadata"]["build_record_id"]).status_code == 200
+
+    rejected = flow.accept(handler_child)
+    assert rejected.status_code == 409, rejected.text
+    assert handler_child not in flow.store.accepted
+    assert flow.store.status(handler_child) == ArtifactLifecycleStatus.DRAFT
+    # Nothing restores the parent the earlier run invalidated.
+    assert flow.store.status("parent") == ArtifactLifecycleStatus.STALE
+    assert flow.store.current() == (
+        [competing["metadata"]["build_record_id"]] if competitor == "accepted_page_child" else []
+    )
+
+
+def test_confirmation_is_single_use_and_its_child_is_accepted_once(monkeypatch, tmp_path):
+    flow = _studio_flow(monkeypatch, tmp_path, outputs=[{HANDLER: NORMALIZING_HANDLER}], proposer=_scope_proposer())
+    decision = flow.trigger({}).json()
+    first = flow.confirm(decision)
+    assert first.status_code == 200 and first.json()["coding_worker"]["status"] == "validated", first.text
+    replay = flow.confirm(decision)
+    assert replay.status_code == 409, replay.text
+    assert flow.provider.execute.await_count == 1 and flow.registry.begun == ["run_1"]
+    child = first.json()["coding_worker"]["metadata"]["build_record_id"]
+    assert flow.store.children() == [child] and len(flow.store.invalidations) == 1
+    assert flow.accept(child).status_code == 200
+    duplicate = flow.accept(child)
+    assert duplicate.status_code == 409, duplicate.text
+    assert flow.store.accepted == [child]
+
+
+def test_an_orphaned_child_of_an_uncertain_run_is_not_replayed_or_accepted(monkeypatch, tmp_path):
+    flow = _studio_flow(monkeypatch, tmp_path, outputs=[{HANDLER: NORMALIZING_HANDLER}], proposer=_scope_proposer())
+    decision = flow.trigger({}).json()
+    # The run stores its child, then loses the registry's compare-and-set while registering it.
+    flow.registry.superseded = True
+    lost = flow.confirm(decision)
+    assert lost.status_code == 503, lost.text
+    assert len(flow.store.children()) == 1
+    orphan = flow.store.children()[0]
+    assert flow.store.status(orphan) == ArtifactLifecycleStatus.DRAFT
+    # The run raised, so nothing was invalidated, and the consumed decision is not replayed.
+    assert flow.store.invalidations == [] and flow.store.current() == ["parent"]
+    flow.registry.superseded = False
+    replay = flow.confirm(decision)
+    assert replay.status_code == 409, replay.text
+    assert flow.provider.execute.await_count == 1
+    # The registry's run chain never named the orphan, so it cannot be accepted as if registered.
+    refused = flow.accept(orphan)
+    assert refused.status_code == 409 and "newer build run" in refused.json()["detail"], refused.text
+    assert flow.store.accepted == [] and flow.store.current() == ["parent"]
+
+
+def test_sibling_candidates_cannot_both_become_current(monkeypatch, tmp_path):
+    import httpx
+
+    from mozaiksai.hosts import studio
+
+    flow = _studio_flow(monkeypatch, tmp_path, outputs=[{PAGE: _page(1)}, {PAGE: _page(2)}])
+    siblings = [
+        flow.trigger({"files": {PAGE: ""}}).json()["coding_worker"]["metadata"]["build_record_id"] for _ in range(2)
+    ]
+
+    async def accept_both():
+        transport = httpx.ASGITransport(app=studio.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            return await asyncio.gather(*(
+                client.post(f"/api/studio/build/artifacts/{record_id}/accept", params={"build_registry_id": "appreg_1"})
+                for record_id in siblings
+            ))
+
+    responses = asyncio.run(accept_both())
+    assert sorted(response.status_code for response in responses) == [200, 409], [r.text for r in responses]
+    assert len(flow.store.accepted) == 1 and flow.store.current() == flow.store.accepted
+    loser = (set(siblings) - set(flow.store.accepted)).pop()
+    assert flow.store.status(loser) == ArtifactLifecycleStatus.DRAFT
 
 
 def _module_runtime(app_root, monkeypatch, files):
@@ -1115,23 +1560,27 @@ async def test_accepting_a_stale_ui_only_child_cannot_revert_app_owned_pack_code
         # An authorized handler change was accepted after child_1's parent.
         store.bundle_files = {"newer_build": {HANDLER: "CUSTOMIZED", PAGE: "newer_build"}}
     accept = _accept_route(monkeypatch, store)
-    if accepted_since == "same_app_owned_code":
-        # The existing rule: a stale UI-only draft is still accepted when it
-        # carries the accepted app-owned pack code.
-        assert (await accept("child_1"))["accepted"] is True
-        assert store.accepted == ["child_1"]
-        return
     before = deepcopy(store.records)
     with pytest.raises(HTTPException) as rejected:
         await accept("child_1")
-    assert rejected.value.status_code == 409 and HANDLER in rejected.value.detail
+    assert rejected.value.status_code == 409
+    if accepted_since == "same_app_owned_code":
+        # The app-owned code comparison passes, but newer_build is not in the
+        # draft's lineage: accepting it would revert what newer_build changed.
+        assert HANDLER not in rejected.value.detail and "earlier build" in rejected.value.detail
+    else:
+        assert HANDLER in rejected.value.detail
     assert store.accepted == [] and store.records == before
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("registry_run", ["this_child", "newer_run"])
 async def test_accepting_a_handler_change_whose_run_staled_its_parent(monkeypatch, registry_run):
-    """A refinement run marks its own parent stale, so no build is CURRENT during review."""
+    """The run that stored this child marked its own parent stale, so no build is CURRENT during review.
+
+    A run that stores no reviewable child leaves its parent current; see
+    test_failed_inline_run_does_not_block_a_later_authorized_handler_patch.
+    """
     from fastapi import HTTPException
 
     store = _Store()
@@ -1149,6 +1598,46 @@ async def test_accepting_a_handler_change_whose_run_staled_its_parent(monkeypatc
     with pytest.raises(HTTPException) as rejected:
         await accept("child_1")
     assert rejected.value.status_code == 409 and "newer build run" in rejected.value.detail
+    assert store.accepted == [] and store.records == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("lineage", ["draft_of_current", "missing_ancestor", "longer_than_bound"])
+async def test_a_draft_made_from_a_draft_of_the_current_build_is_accepted_only_through_a_verified_lineage(
+    monkeypatch, lineage,
+):
+    """child_2 was made from draft_1, a review draft of the still-current parent.
+
+    The parent stays CURRENT when draft_1's run stored a child that failed
+    validation. Acceptance follows child_2's parent links back to the current
+    build; a link that cannot be read, or a chain past the bound, refuses.
+    """
+    from fastapi import HTTPException
+
+    from mozaiksai.core.artifacts import ArtifactValidationStatus
+    from mozaiksai.hosts import studio
+
+    store = _Store()
+    _accept_records(store, ["draft_1", "child_2"], scope={
+        "selected_file_paths": [PAGE], "scope_origin": "explicit", "changed_workspace_pack_paths": [],
+    })
+    store.records["child_2"] = store.records["child_2"].model_copy(update={"parent_build_record_id": "draft_1"})
+    store.records["draft_1"] = store.records["draft_1"].model_copy(
+        update={"validation_status": ArtifactValidationStatus.FAILED},
+    )
+    if lineage == "missing_ancestor":
+        del store.records["draft_1"]
+    if lineage == "longer_than_bound":
+        monkeypatch.setattr(studio, "_ACCEPTANCE_LINEAGE_MAX_DEPTH", 1)
+    accept = _accept_route(monkeypatch, store)
+    if lineage == "draft_of_current":
+        assert (await accept("child_2"))["accepted"] is True
+        assert store.accepted == ["child_2"] and store.records["parent"].lifecycle_status == ArtifactLifecycleStatus.SUPERSEDED
+        return
+    before = deepcopy(store.records)
+    with pytest.raises(HTTPException) as rejected:
+        await accept("child_2")
+    assert rejected.value.status_code == 409 and "lineage could not be verified" in rejected.value.detail
     assert store.accepted == [] and store.records == before
 
 
@@ -1260,13 +1749,14 @@ async def test_stale_ui_only_child_compares_app_owned_code_past_the_text_decoder
         # So are entries that together are too large to read for one comparison.
         monkeypatch.setattr(studio, "_APP_OWNED_CODE_COMPARE_MAX_TOTAL_BYTES", 300)
     accept = _accept_route(monkeypatch, store)
-    if layout == "unchanged_past_file_limit_in_one":
-        assert (await accept("child_1"))["accepted"] is True
-        assert store.accepted == ["child_1"]
-        return
     before = deepcopy(store.records)
     with pytest.raises(HTTPException) as rejected:
         await accept("child_1")
     assert rejected.value.status_code == 409
-    assert (PROVENANCE_ONLY if layout.startswith("provenance") else HANDLER) in rejected.value.detail
+    if layout == "unchanged_past_file_limit_in_one":
+        # The full comparison found the app-owned code unchanged; the draft is
+        # refused only because newer_build is not in its lineage.
+        assert HANDLER not in rejected.value.detail and "earlier build" in rejected.value.detail
+    else:
+        assert (PROVENANCE_ONLY if layout.startswith("provenance") else HANDLER) in rejected.value.detail
     assert store.accepted == [] and store.records == before

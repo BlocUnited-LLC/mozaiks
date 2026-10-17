@@ -368,6 +368,35 @@ async def test_list_refinement_sessions_filters_by_result_build_record_id() -> N
 
 
 @pytest.mark.asyncio
+async def test_list_run_child_build_records_finds_one_runs_children_of_one_parent() -> None:
+    store = BuildRecordStore.__new__(BuildRecordStore)
+    coll = MagicMock()
+    cursor = MagicMock()
+    cursor.sort.return_value = cursor
+    cursor.limit.return_value = cursor
+    cursor.to_list = AsyncMock(return_value=[{
+        "_id": "av_child", "app_id": "app-1", "build_family": "app_bundle", "build_key": "app_bundle",
+        "version_number": 2, "lineage_root_id": "av_parent", "parent_build_record_id": "av_parent",
+        "lifecycle_status": ArtifactLifecycleStatus.DRAFT.value,
+        "validation_status": ArtifactValidationStatus.FAILED.value,
+        "commit_metadata": {"metadata": {"build_id": "build_7"}},
+    }])
+    coll.find.return_value = cursor
+    store._coll = AsyncMock(return_value=coll)
+
+    rows = await store.list_run_child_build_records(
+        app_id="app-1", parent_build_record_id="av_parent", build_id="build_7",
+    )
+
+    assert [(row.id, row.validation_status) for row in rows] == [("av_child", ArtifactValidationStatus.FAILED)]
+    coll.find.assert_called_once_with({
+        "app_id": "app-1", "parent_build_record_id": "av_parent", "commit_metadata.metadata.build_id": "build_7",
+    })
+    with pytest.raises(ValueError):
+        await store.list_run_child_build_records(app_id="app-1", parent_build_record_id="av_parent", build_id="")
+
+
+@pytest.mark.asyncio
 async def test_get_stale_artifact_families_returns_stale_without_current() -> None:
     """Families with a STALE version but no CURRENT version are returned."""
     store = BuildRecordStore.__new__(BuildRecordStore)

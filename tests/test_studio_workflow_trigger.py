@@ -34,6 +34,8 @@ _BINDING = RunBuildBinding(
 
 class _BaselineStore:
     versions = {}
+    #: The ChangeRequests a test's trigger wrote, by id, as the store returns them later.
+    change_requests = {}
 
     async def get_build_record(self, *, app_id, build_record_id):
         return self.versions.get(build_record_id) if app_id == "app_1" else None
@@ -41,7 +43,22 @@ class _BaselineStore:
     async def get_change_request(self, *, app_id, change_request_id):
         if app_id != "app_1" or change_request_id not in {"cr_core_1", "cr_scope_1"}:
             return None
-        return SimpleNamespace(id=change_request_id, created_by_user_id="demo-user")
+        written = self.change_requests.get(change_request_id) or {}
+        return SimpleNamespace(
+            id=change_request_id, created_by_user_id="demo-user",
+            build_record_id=written.get("build_record_id"), router_decision=written.get("router_decision") or {},
+        )
+
+    def written_change_request(self, change_request_id, kwargs):
+        self.change_requests[change_request_id] = kwargs
+        return SimpleNamespace(id=change_request_id)
+
+    async def list_run_child_build_records(self, *, app_id, parent_build_record_id, build_id, limit=10):
+        return [
+            version for version in self.versions.values()
+            if app_id == "app_1" and version.parent_build_record_id == parent_build_record_id
+            and version.commit_metadata.metadata.get("build_id") == build_id
+        ]
 
 
 @pytest.fixture(autouse=True)
@@ -79,6 +96,7 @@ def _owned_build_target(monkeypatch, tmp_path):
     }
     versions["av_review_1"].commit_metadata.metadata["workspace_dir"] = str(tmp_path / "staged")
     monkeypatch.setattr(_BaselineStore, "versions", versions)
+    monkeypatch.setattr(_BaselineStore, "change_requests", {})
     monkeypatch.setattr(studio, "get_artifact_store", lambda: _BaselineStore())
     return service
 
@@ -215,8 +233,10 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch,
     persisted_changes: list[dict] = []
     persisted_invalidations: list[dict] = []
     updated_router_decisions: list[dict] = []
+    order: list[str] = []
 
     async def fake_prepare_routed_workflow_launch(**kwargs):
+        order.append("prepare")
         captured_prepare.update(kwargs)
         return SimpleNamespace(
             workflow_id="AppGenerator",
@@ -229,6 +249,7 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch,
         )
 
     async def fake_launch_prepared_workflow(launch):  # noqa: ANN001
+        order.append("launch")
         return SimpleNamespace(
             chat_id="chat_refine_1",
             workflow_id=launch.workflow_id,
@@ -242,14 +263,17 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch,
 
     class _ArtifactStore(_BaselineStore):
         async def create_change_request(self, **kwargs):
+            order.append("change_request")
             persisted_changes.append(kwargs)
             return SimpleNamespace(id="cr_123")
 
         async def invalidate_artifact_version_refs(self, **kwargs):
+            order.append("invalidate")
             persisted_invalidations.append(kwargs)
             return ["av_123"]
 
         async def update_change_request_router_decision(self, **kwargs):
+            order.append("router_decision")
             updated_router_decisions.append(kwargs)
             return True
 
@@ -470,6 +494,8 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch,
             "reason": "change_request:cr_123",
         }
     ]
+    # The launched run revises the selected build, so it is invalidated once the launch succeeded.
+    assert order == ["change_request", "prepare", "router_decision", "launch", "invalidate"]
     assert updated_router_decisions == [
         {
             "app_id": "app_1",
@@ -509,6 +535,73 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch,
             },
         }
     ]
+
+
+@pytest.mark.parametrize(("failure", "status"), [("prepare_rejected", 400), ("prepare_error", 500), ("launch_error", 500)])
+def test_studio_trigger_failed_workflow_launch_leaves_the_selected_build_valid(monkeypatch, failure, status):
+    """A workflow that never launched changed nothing, so the selected build is not invalidated.
+
+    The ChangeRequest still records the attempt.
+    """
+    from mozaiksai.core.auth import reset_auth_adapter
+
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+    reset_auth_adapter()
+    from mozaiksai.hosts import studio as studio_app
+
+    persisted_changes: list[dict] = []
+    persisted_invalidations: list[dict] = []
+
+    async def fake_prepare_routed_workflow_launch(**kwargs):
+        if failure == "prepare_rejected":
+            raise ValueError("The selected build session has been superseded")
+        if failure == "prepare_error":
+            raise RuntimeError("session store unavailable")
+        return SimpleNamespace(
+            workflow_id="AppGenerator",
+            routing_decision=SimpleNamespace(
+                requested_workflow_id=None, explanation="refinement reroute",
+                is_full_restart=False, rerouted_by_dependency=False,
+            ),
+        )
+
+    async def fake_launch_prepared_workflow(launch):  # noqa: ANN001
+        raise RuntimeError("chat session could not be created")
+
+    class _ArtifactStore(_BaselineStore):
+        async def create_change_request(self, **kwargs):
+            persisted_changes.append(kwargs)
+            return SimpleNamespace(id="cr_123")
+
+        async def invalidate_artifact_version_refs(self, **kwargs):
+            persisted_invalidations.append(kwargs)
+            return ["av_123"]
+
+        async def update_change_request_router_decision(self, **kwargs):
+            return True
+
+    monkeypatch.setattr(studio_app, "prepare_routed_workflow_launch", fake_prepare_routed_workflow_launch)
+    monkeypatch.setattr(studio_app, "launch_prepared_workflow", fake_launch_prepared_workflow)
+    monkeypatch.setattr(studio_app, "get_artifact_store", lambda: _ArtifactStore())
+    harness = studio_app.get_orchestration_control_harness()
+    monkeypatch.setattr(harness._refinement_resolver, "_classifier", SimpleNamespace(classify=_async_classifier(
+        change_class="feature", rationale="Adding an export action extends the existing app bundle.",
+        confidence=0.88, signals=["new_capability"],
+    )))
+    monkeypatch.setattr(harness, "contract_surface_enabled", lambda: False)
+
+    response = TestClient(studio_app.app, raise_server_exceptions=False).post("/api/workflows/trigger", json={
+        "build_registry_id": "appreg_1", "trigger_source": "refinement",
+        "trigger_payload": {"refinement_request": {
+            "artifact_kind": "app_bundle", "artifact_key": "app_bundle", "artifact_version_id": "av_123",
+            "raw_user_request": "Add an export action", "source_surface": "app_build",
+        }},
+    })
+
+    assert response.status_code == status, response.text
+    assert [change["router_decision"]["execution_mode"] for change in persisted_changes] == ["workflow"]
+    assert persisted_invalidations == []
 
 
 def test_studio_trigger_endpoint_rejects_removed_top_level_refinement_fields(monkeypatch):
@@ -841,7 +934,9 @@ def test_studio_trigger_endpoint_can_auto_scope_before_coding_worker(monkeypatch
         assert request.run_build_binding == _BINDING
         assert "usage_context" not in request.context_seed["refinement_request"]
         assert request.metadata["scope_proposal"]["selected_paths"] == ["app/ui/pages/Dashboard.jsx"]
-        child = _BaselineStore.versions[request.build_record_id].model_copy(deep=True, update={"id": "av_child_multi_1"})
+        child = _BaselineStore.versions[request.build_record_id].model_copy(deep=True, update={
+            "id": "av_child_multi_1", "parent_build_record_id": request.build_record_id,
+        })
         child.commit_metadata.metadata.update(request.run_build_binding.model_dump())
         _BaselineStore.versions[child.id] = child
         return CodingWorkerResult.model_validate(
@@ -951,6 +1046,7 @@ def test_studio_trigger_endpoint_can_confirm_proposed_multi_file_scope(monkeypat
     from mozaiksai.hosts import studio as studio_app
 
     persisted_changes: list[dict] = []
+    persisted_invalidations: list[dict] = []
     proposal_count = 0
     execution_count = 0
 
@@ -963,9 +1059,10 @@ def test_studio_trigger_endpoint_can_confirm_proposed_multi_file_scope(monkeypat
     class _ArtifactStore(_BaselineStore):
         async def create_change_request(self, **kwargs):
             persisted_changes.append(kwargs)
-            return SimpleNamespace(id=f"cr_scope_{len(persisted_changes)}")
+            return self.written_change_request(f"cr_scope_{len(persisted_changes)}", kwargs)
 
         async def invalidate_artifact_version_refs(self, **kwargs):
+            persisted_invalidations.append(kwargs)
             return [kwargs["artifact_version_refs"]["app_bundle"]]
 
         async def create_refinement_session(self, **kwargs):
@@ -1113,6 +1210,8 @@ def test_studio_trigger_endpoint_can_confirm_proposed_multi_file_scope(monkeypat
     assert first_body["harness_decision"]["actions"][0]["action_id"] == "apply_proposed_scope"
     assert first_body["change_request_id"] == "cr_scope_1"
     assert first_body["revision_id"]
+    # A proposal changes nothing: the selected build stays valid while the user decides.
+    assert persisted_invalidations == []
     confirmed_files = dict.fromkeys(first_body["harness_decision"]["selected_paths"], "untrusted browser content")
     if confirmation == "changed_paths":
         confirmed_files = {"Dockerfile": "FROM untrusted"}
@@ -1168,6 +1267,7 @@ def test_studio_trigger_endpoint_can_confirm_proposed_multi_file_scope(monkeypat
         assert sorted(response.status_code for response in responses) == [200, 409]
         assert execution_count == 1
         assert proposal_count == 1
+        assert [item["reason"] for item in persisted_invalidations] == ["change_request:cr_scope_1"]
         return
     second = client.post("/api/workflows/trigger", json=confirmation_body)
 
@@ -1175,15 +1275,22 @@ def test_studio_trigger_endpoint_can_confirm_proposed_multi_file_scope(monkeypat
     if confirmation not in {"exact", "restore"}:
         assert second.status_code == (400 if confirmation == "malformed" else 409), second.text
         assert len(persisted_changes) == 1
+        assert persisted_invalidations == []
         return
     assert second.status_code == 200, second.text
     second_body = second.json()
     assert second_body["execution_mode"] == "coding_worker"
     assert second_body["coding_worker"]["metadata"]["build_record_id"] == "av_child_multi_1"
     assert execution_count == 1
+    # The confirmed run stored a reviewable child of the selected build, so that build is invalidated.
+    assert persisted_invalidations == [{
+        "app_id": "app_1", "artifact_version_refs": {"app_bundle": "av_scope_1"},
+        "affected_artifact_kinds": ["app_bundle"], "reason": "change_request:cr_scope_1",
+    }]
     replay = client.post("/api/workflows/trigger", json=confirmation_body)
     assert replay.status_code == 409, replay.text
     assert execution_count == 1
+    assert len(persisted_invalidations) == 1
     snapshot = asyncio.run(studio_app.get_session_router().for_target("app_1").get_session_snapshot(
         app_id="factory", user_id="demo-user",
     ))
@@ -1278,11 +1385,14 @@ def test_studio_trigger_endpoint_returns_core_harness_decision_before_launch(mon
     async def fail_launch(launch):  # noqa: ANN001
         raise AssertionError("workflow launch should not run before a core confirmation")
 
+    persisted_invalidations: list[dict] = []
+
     class _ArtifactStore(_BaselineStore):
         async def create_change_request(self, **kwargs):
-            return SimpleNamespace(id="cr_core_1")
+            return self.written_change_request("cr_core_1", kwargs)
 
         async def invalidate_artifact_version_refs(self, **kwargs):
+            persisted_invalidations.append(kwargs)
             return [kwargs["artifact_version_refs"]["app_bundle"]]
 
     monkeypatch.setattr(studio_app, "prepare_routed_workflow_launch", fail_prepare)
@@ -1368,6 +1478,8 @@ def test_studio_trigger_endpoint_returns_core_harness_decision_before_launch(mon
     assert pending["metadata"]["source_chat_id"] is None
     assert pending["requested_workflow_id"] is None
     assert "harness_action" not in pending["trigger_payload"]["refinement_request"]["extra"]
+    # Asking for confirmation changes nothing; the ChangeRequest and pending decision keep the attempt.
+    assert persisted_invalidations == []
 
 
 @pytest.mark.parametrize("continuation", ["run_recommended_workflow", "confirm_recommended_workflow"])
@@ -1412,12 +1524,15 @@ def test_studio_trigger_endpoint_reuses_prelaunch_revision_intent_on_confirm(mon
             rerouted_by_dependency=False,
         )
 
+    persisted_invalidations: list[dict] = []
+
     class _ArtifactStore(_BaselineStore):
         async def create_change_request(self, **kwargs):
             create_calls.append(kwargs)
-            return SimpleNamespace(id="cr_core_1")
+            return self.written_change_request("cr_core_1", kwargs)
 
         async def invalidate_artifact_version_refs(self, **kwargs):
+            persisted_invalidations.append(kwargs)
             return [kwargs["artifact_version_refs"]["app_bundle"]]
 
         async def update_change_request_router_decision(self, **kwargs):
@@ -1469,6 +1584,7 @@ def test_studio_trigger_endpoint_reuses_prelaunch_revision_intent_on_confirm(mon
     assert persisted_state["active_revision_id"]
     assert captured_pending_harness_decision["trigger_payload"]["refinement_request"]["build_record_id"] == "av_core_1"
     assert captured_pending_harness_decision["metadata"]["source_chat_id"] == "review-original"
+    assert persisted_invalidations == []
 
     monkeypatch.setattr(harness, "prepare_coding_request", no_inline)
     monkeypatch.setattr(harness, "prepare_contract_surface_request", no_inline)
@@ -1502,9 +1618,14 @@ def test_studio_trigger_endpoint_reuses_prelaunch_revision_intent_on_confirm(mon
         assert second.status_code == 409, second.text
         assert classifier.await_count == (2 if mutation == "route" else 1)
         assert not captured_prepare
+        assert persisted_invalidations == []
         return
     assert second.status_code == 200, second.text
     assert second.json()["execution_mode"] == "workflow"
+    # The confirmed workflow launched, so the selected build is invalidated under the proposal's ChangeRequest.
+    assert [(item["artifact_version_refs"], item["reason"]) for item in persisted_invalidations] == [
+        ({"app_bundle": "av_core_1"}, "change_request:cr_core_1"),
+    ]
     assert len(create_calls) == 1
     assert classifier.await_count == 2
     assert "coding_request" not in captured_prepare["trigger_payload"]
