@@ -16,11 +16,12 @@ the user gave a surviving thread (a support thread is titled with its opening
 message) becomes a neutral title, and the annotations the user attached to it
 become an empty metadata map; the creator's user_id scope stamp is
 removed. In-app
-notifications rendered from message_sent since pack 0.1.14 hold only thread and
-message references, so deleted messages leave them nothing to show. Those
-rendered by an earlier pack keep the body_preview they copied: they live in the
-platform notification store, which the account protocol does not give module
-handlers.
+notifications rendered from message_sent since pack 0.1.14 hold no message text:
+their context holds the thread and message ids and the thread's related-record
+identifiers (related_type and related_id), so deleted messages leave them
+nothing to show. Those rendered by an earlier pack keep the body_preview they
+copied: they live in the platform notification store, which the account
+protocol does not give module handlers.
 
 Export returns sent messages, read state, and one fixed thread projection, without
 peers' previews or participant ids, for the threads the user created and for

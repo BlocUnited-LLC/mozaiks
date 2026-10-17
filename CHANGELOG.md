@@ -29,8 +29,10 @@ This project follows a practical pre-1.0 changelog format:
   Invalid explicit title roles and layouts report errors instead of silently
   substituting another presentation.
 - Messaging `0.1.14` notifications carry no message text: they say "New
-  message" and "Open the conversation to read it.", with thread and message ids
-  only. A notification rule can declare `source_event: reference` to store just
+  message" and "Open the conversation to read it.", and their context holds the
+  thread and message ids and the thread's related-record identifiers
+  (`related_type` and `related_id`). A notification rule can declare
+  `source_event: reference` to store just
   the originating event's id, type and related type; other rules keep storing
   the full event. Notifications rendered by an earlier pack version (the
   released `0.1.12` and before) keep their copied preview until the recipient
