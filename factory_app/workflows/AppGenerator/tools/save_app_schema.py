@@ -21,6 +21,7 @@ from factory_app.workflows._shared.generated_ui_contract import (
 )
 from factory_app.workflows._shared.platform.build_target import require_build_binding
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
+    _assembled_data_contract,
     extract_code_file_map_from_payload,
 )
 from factory_app.workflows.AppGenerator.tools.default_runtime_configs import (
@@ -55,6 +56,9 @@ from mozaiksai.core.workflow.generator_support.code_files import (
 )
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     pack_owned_output_paths,
+)
+from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
+    resolve_subscription_contract,
 )
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
     _key_value_entries_to_dict as _key_value_entries_to_dict,
@@ -1347,7 +1351,9 @@ def save_app_schema(
       - brand/theme_config.json (merge)  → theme_config_patch when set
       - config/shell.json (merge)        → shell_config when set
       - config/asset_manifest.json       → asset_manifest when set
-      - data/contract.json                 → approved DesignDocs data_contract from context
+      - data/contract.json                 → approved DesignDocs data_contract from context, compiled
+                                           as assembly compiles it (verified pack contributions,
+                                           subscription assignment stores)
 
     Stores in context_variables:
       - app_manifest, app_pages, app_theme_config_patch, app_shell_config,
@@ -1517,6 +1523,13 @@ def save_app_schema(
         _validate_asset_manifest(asset_manifest)
         resolved_data_contract = detach(_context_get(context_variables, "data_contract"))
         _validate_data_contract(resolved_data_contract)
+        # data/contract.json is written as assembly compiles it: the approved
+        # contract with the verified pack contributions and subscription stores.
+        # The admitted projection overlays this copy on the assembled bundle,
+        # so the approved contract alone would drop those collections there.
+        bundle_data_contract = _assembled_data_contract(
+            context_variables, resolve_subscription_contract(context_variables),
+        ) if resolved_data_contract else None
         app_ui_quality_warnings = dedupe(
             audit_page_schemas(page_list)
             + audit_custom_route_bundle_integrity(
@@ -1561,7 +1574,7 @@ def save_app_schema(
         try:
             rendered_paths = _persist_to_filesystem(
                 staging, manifest_dict, page_list, resolved_theme_config,
-                shell_config, asset_manifest, resolved_data_contract, custom_route_bundle,
+                shell_config, asset_manifest, bundle_data_contract, custom_route_bundle,
                 context_variables=context_variables, profile_layout=_profile_layout,
             )
         except OSError as exc:

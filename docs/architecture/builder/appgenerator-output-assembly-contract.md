@@ -1091,6 +1091,10 @@ It must:
   `theme_config_patch` deltas into `brand/theme_config.json`
 - deep-merge `shell_config` into `config/shell.json`
 - deep-merge `asset_manifest` into `config/asset_manifest.json`
+- write `data/contract.json`, when DesignDocs approved a data contract, as
+  assembly compiles it: with the verified pack data contributions and the
+  subscription assignment stores, because the admitted projection overlays this
+  copy on the assembled bundle (a bounded repair keeps the bundle's copy)
 - store `app_manifest`, `app_pages`, `app_custom_route_bundle`, `app_theme_config_patch`, `app_shell_config`, `app_asset_manifest`, and `app_schema_ready` in workflow context
 
 It must not write directly into an active runtime-loaded app root such as a

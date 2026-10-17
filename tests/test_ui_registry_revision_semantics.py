@@ -841,6 +841,58 @@ async def test_auth_required_messaging_revision_repair_reaches_validation_and_ex
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("subscription", [False, True])
+async def test_genesis_app_schema_save_keeps_the_assembled_data_contributions_in_the_admitted_bundle(
+    tmp_path, monkeypatch, subscription,
+):
+    from copy import deepcopy
+
+    from factory_app.workflows.AppGenerator.tools import app_validation
+    from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import (
+        _scan_planned_data_fields,
+    )
+    from factory_app.workflows.AppGenerator.tools.save_app_schema import save_app_schema
+    from tests.test_messaging_pack_persistence_composition import (
+        CARRIED_APP_CONTRACT,
+        _assignment_store_subscription,
+    )
+
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path))
+    approved = deepcopy(CARRIED_APP_CONTRACT)
+    selected = _context()
+    context = Context(factory_context({
+        **selected, "app_id": "genesis_schema", "chat_id": "genesis-chat", "data_contract": approved,
+        "app_build_plan": {**selected["app_build_plan"], "pages": [
+            {"name": "board", "route": "/board", "ui_surface": "custom_react_page"},
+        ]},
+        **({"subscription_contract": _assignment_store_subscription()} if subscription else {}),
+    }))
+    # AppSchemaAgent's main-context save, before assembly, puts data/contract.json in the overlay.
+    message = save_app_schema(
+        manifest={"app_name": "Board", "default_route": "/board", "pages": [], "custom_routes": ["board"]},
+        pages=[], custom_route_bundle=deepcopy(BOARD_BUNDLE), context_variables=context,
+    )
+    assert "rejected" not in message, message
+    assert "data/contract.json" in {item["filename"] for item in context["code_files"]}
+    context["app_ui_quality_status"] = "passed"
+    result = await assemble_app_tasks(context_variables=context)
+    assert result["success"], result
+    assembled = _files(result)
+    surfaces = ["projects", "messages", *(["subscription_assignments"] if subscription else [])]
+    assert [surface["surface_id"] for surface in json.loads(assembled["data/contract.json"])["surfaces"]] == surfaces
+    # Validation and export read the admitted projection: the overlay copy keeps the pack's collections.
+    admitted = admitted_app_file_map(context)
+    assert admitted["data/contract.json"] == assembled["data/contract.json"]
+    assert _scan_planned_data_fields(
+        admitted, approved, subscription_contract=context.get("subscription_contract"), context_variables=context,
+    ) == []
+    acceptance = _validation_mocks(monkeypatch)
+    await app_validation.validate_app_bundle_from_request({}, context_variables=context)
+    assert acceptance.await_args.kwargs["files"]["data/contract.json"] == assembled["data/contract.json"]
+    assert await _export_projection(monkeypatch, context) == acceptance.await_args.kwargs["files"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("bound", [False, True])
 async def test_a_malformed_repair_route_is_a_rejected_copy_never_a_crash(request, caplog, bound):
     from factory_app.workflows.AppGenerator.tools import code_file_utils

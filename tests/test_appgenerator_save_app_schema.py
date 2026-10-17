@@ -1374,8 +1374,11 @@ def test_save_app_schema_writes_data_contract_from_context(monkeypatch, tmp_path
             context_variables=context,
         )
 
+    from mozaiksai.core.workflow.generator_support.code_files import compile_data_contract
+
     data_contract = json.loads((tmp_path / "data" / "contract.json").read_text(encoding="utf-8"))
-    assert data_contract == approved
+    # Written as assembly compiles the approved contract, so the overlay copy equals the assembled one.
+    assert data_contract == compile_data_contract(approved)
     assert context.get("data_contract")["policies"]["default_scope_field"] == "app_id"
     assert context.get("app_data_contract") is None
     assert context.get("app_schema_ready") is True
