@@ -153,6 +153,11 @@ The framework must resolve to an exact commit with matching resource bytes.
 An extracted portable workspace can restore those resources from the matching
 installed Mozaiks revision when `node mobile/build.mjs` runs; set
 `MOZAIKS_PYTHON` if that installation uses a specific Python executable.
+The revision-bound framework snapshot includes the shared shell, chat UI, and
+the first-party Factory UI registration resources used by hosted workspace
+overlays. The compiler binds `MOZAIKS_FACTORY_APP_PATH` to that staged snapshot,
+so an app that imports `@mozaiks/factory-app-ui` compiles against the same exact
+OSS commit recorded in its delivery manifest.
 
 A Git checkout reads its revision from Git, refuses changed tracked source, and
 requires every staged package input to belong to that commit.

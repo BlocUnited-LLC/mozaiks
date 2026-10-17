@@ -258,6 +258,12 @@ def _resource_selected(path: str) -> bool:
         return relative in _WEB_ROOT_FILES
     if root == "chat-ui":
         return relative in _UI_ROOT_FILES or relative.startswith("src/")
+    if root == "factory_app":
+        return (
+            relative.startswith("app/ui/")
+            or relative.startswith("app/admin/")
+            or relative == "app/config/onboarding.yaml"
+        )
     return False
 
 
@@ -310,21 +316,45 @@ def _installed_source_commit(distribution: importlib.metadata.Distribution, root
 
 
 def _framework_snapshot() -> tuple[dict[str, bytes], dict[str, Any]]:
-    shell, ui = resources.resolve_web_shell_root(), resources.resolve_chat_ui_root()
-    if shell is None or ui is None:
+    shell = resources.resolve_web_shell_root()
+    ui = resources.resolve_chat_ui_root()
+    factory = resources.resolve_factory_app_root()
+    if shell is None or ui is None or factory is None:
         raise AndroidDeliveryError("The installed OSS distribution is missing shared-shell resources")
     _check_ancestors(shell)
     _check_ancestors(ui)
-    shell, ui = shell.resolve(), ui.resolve()
+    _check_ancestors(factory)
+    shell, ui, factory = shell.resolve(), ui.resolve(), factory.resolve()
     repo = shell.parent
     files: dict[str, bytes] = {}
     if (repo / ".git").exists():
-        if ui != repo / "chat-ui" or shell != repo / "web_shell":
+        if ui != repo / "chat-ui" or shell != repo / "web_shell" or factory != repo / "factory_app":
             raise AndroidDeliveryError("Shared-shell resource roots must belong to the same OSS revision")
         commit = _git(repo, "rev-parse", "HEAD").decode().strip()
-        if _git(repo, "status", "--porcelain", "--untracked-files=no", "--", "web_shell", "chat-ui").strip():
+        if _git(
+            repo,
+            "status",
+            "--porcelain",
+            "--untracked-files=no",
+            "--",
+            "web_shell",
+            "chat-ui",
+            "factory_app/app/ui",
+            "factory_app/app/admin",
+            "factory_app/app/config/onboarding.yaml",
+        ).strip():
             raise AndroidDeliveryError("Shared-shell resources differ from their recorded OSS revision")
-        raw = _git(repo, "archive", "--format=tar", commit, "web_shell", "chat-ui")
+        raw = _git(
+            repo,
+            "archive",
+            "--format=tar",
+            commit,
+            "web_shell",
+            "chat-ui",
+            "factory_app/app/ui",
+            "factory_app/app/admin",
+            "factory_app/app/config/onboarding.yaml",
+        )
         with tarfile.open(fileobj=io.BytesIO(raw), mode="r:") as archive:
             for entry in archive:
                 if entry.isdir():
@@ -335,7 +365,7 @@ def _framework_snapshot() -> tuple[dict[str, bytes], dict[str, Any]]:
                     raise AndroidDeliveryError("OSS build resources must be regular files")
                 stream = archive.extractfile(entry)
                 assert stream is not None
-                files[entry.name] = stream.read()
+                files[entry.name] = _canonical_resource_bytes(entry.name, stream.read())
     else:
         try:
             distribution = importlib.metadata.distribution("mozaiks")
@@ -345,7 +375,12 @@ def _framework_snapshot() -> tuple[dict[str, bytes], dict[str, Any]]:
                 mapped = name.replace("mozaiks_chat_ui/", "chat-ui/", 1)
                 if not _resource_selected(mapped):
                     continue
-                expected = (shell if mapped.startswith("web_shell/") else ui) / mapped.split("/", 1)[1]
+                if mapped.startswith("web_shell/"):
+                    expected = shell / mapped.split("/", 1)[1]
+                elif mapped.startswith("chat-ui/"):
+                    expected = ui / mapped.split("/", 1)[1]
+                else:
+                    expected = factory / mapped.split("/", 1)[1]
                 files[mapped] = _canonical_resource_bytes(
                     mapped, _verified_distribution_bytes(distribution, distribution_entry, expected)
                 )
@@ -355,7 +390,17 @@ def _framework_snapshot() -> tuple[dict[str, bytes], dict[str, Any]]:
             raise AndroidDeliveryError("Installed OSS distribution resource provenance is unavailable") from exc
     if not isinstance(commit, str) or not _COMMIT.fullmatch(commit):
         raise AndroidDeliveryError("The OSS installation must identify an exact Git commit")
-    required = {"web_shell/package.json", "web_shell/package-lock.json", "web_shell/vite.config.js", "chat-ui/package.json", "chat-ui/package-lock.json", "chat-ui/src/auth/authAdapter.js"}
+    required = {
+        "web_shell/package.json",
+        "web_shell/package-lock.json",
+        "web_shell/vite.config.js",
+        "chat-ui/package.json",
+        "chat-ui/package-lock.json",
+        "chat-ui/src/auth/authAdapter.js",
+        "factory_app/app/ui/index.js",
+        "factory_app/app/admin/index.js",
+        "factory_app/app/config/onboarding.yaml",
+    }
     if not required.issubset(files):
         raise AndroidDeliveryError("The exact OSS source is missing required build resources")
     detect_collisions(files)

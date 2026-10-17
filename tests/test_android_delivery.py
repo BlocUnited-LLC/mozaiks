@@ -278,6 +278,9 @@ def test_git_resource_snapshot_is_pinned_and_rejects_drift(tmp_path, monkeypatch
         "web_shell/vite.config.js": b"export default {};\n",
         "chat-ui/package.json": b"{}", "chat-ui/package-lock.json": b"{}",
         "chat-ui/src/auth/authAdapter.js": b"export function createAuthAdapter() {}\n",
+        "factory_app/app/ui/index.js": b"export function register() {}\n",
+        "factory_app/app/admin/index.js": b"export function registerAdminComponents() {}\n",
+        "factory_app/app/config/onboarding.yaml": b"steps: []\n",
     }
     delivery._write_files(repo, files)
     def git(*args):
@@ -289,6 +292,7 @@ def test_git_resource_snapshot_is_pinned_and_rejects_drift(tmp_path, monkeypatch
     git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--quiet", "-m", "fixture")
     monkeypatch.setattr(delivery.resources, "resolve_web_shell_root", lambda: repo / "web_shell")
     monkeypatch.setattr(delivery.resources, "resolve_chat_ui_root", lambda: repo / "chat-ui")
+    monkeypatch.setattr(delivery.resources, "resolve_factory_app_root", lambda: repo / "factory_app")
     first, provenance = delivery._framework_snapshot()
     assert first == files
     assert len(provenance["commit"]) == 40
@@ -311,6 +315,9 @@ def test_installed_wheel_android_resources_require_recorded_revision(tmp_path, m
         "mozaiks_chat_ui/package-lock.json": b"{}",
         "mozaiks_chat_ui/src/auth/authAdapter.js": b"export function createAuthAdapter() {}\n",
         "mozaiks_chat_ui/src/assets/icon.png": b"\x89PNG\r\n\x1a\n",
+        "factory_app/app/ui/index.js": b"export function register() {}\n",
+        "factory_app/app/admin/index.js": b"export function registerAdminComponents() {}\n",
+        "factory_app/app/config/onboarding.yaml": b"steps: []\n",
         "mozaiksai/_build_revision.json": json.dumps({
             "schema_version": "mozaiks.source_revision.v1",
             "commit": "invalid" if mutation == "invalid" else commit,
@@ -352,6 +359,7 @@ def test_installed_wheel_android_resources_require_recorded_revision(tmp_path, m
 
     monkeypatch.setattr(delivery.resources, "resolve_web_shell_root", lambda: root / "web_shell")
     monkeypatch.setattr(delivery.resources, "resolve_chat_ui_root", lambda: root / "mozaiks_chat_ui")
+    monkeypatch.setattr(delivery.resources, "resolve_factory_app_root", lambda: root / "factory_app")
     monkeypatch.setattr(delivery.importlib.metadata, "distribution", lambda _: Distribution())
     if mutation == "tampered":
         (root / "mozaiksai/_build_revision.json").write_bytes(b"{}")
