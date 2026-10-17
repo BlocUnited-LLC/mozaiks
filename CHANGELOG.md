@@ -26,6 +26,8 @@ This project follows a practical pre-1.0 changelog format:
   still fail before export.
 - Product-specific browser auth adapters can accompany Android source while the
   generated native barrel keeps the Capacitor auth facade authoritative.
+- Hosted workspace Android builds now stage the exact revision-bound Factory UI
+  resources required by the public `@mozaiks/factory-app-ui` extension contract.
 
 ## 0.2.0 - 2026-10-16
 

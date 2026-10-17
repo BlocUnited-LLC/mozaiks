@@ -172,7 +172,7 @@ export function buildEnvironment(mobileRoot, manifest, { acceptance = false, env
       if (env[key] !== undefined) result[key] = env[key];
     }
   }
-  return { ...result, PLATFORM_PATH: path.join(mobileRoot, '.local/workspace/app'), MOZAIKS_APP_WORKSPACE_PATH: path.join(mobileRoot, '.local/workspace'), MOZAIKS_CHAT_UI_PATH: path.join(mobileRoot, '.local/framework/chat-ui'), MOZAIKS_HOST: 'platform', VITE_MOZAIKS_HOST: 'platform', VITE_API_URL: backend, VITE_CORE_URL: backend, VITE_WS_URL: backend.replace(/^http/, 'ws'), VITE_OIDC_REDIRECT_URI: manifest.callback_uri };
+  return { ...result, PLATFORM_PATH: path.join(mobileRoot, '.local/workspace/app'), MOZAIKS_APP_WORKSPACE_PATH: path.join(mobileRoot, '.local/workspace'), MOZAIKS_CHAT_UI_PATH: path.join(mobileRoot, '.local/framework/chat-ui'), MOZAIKS_FACTORY_APP_PATH: path.join(mobileRoot, '.local/framework/factory_app'), MOZAIKS_HOST: 'platform', VITE_MOZAIKS_HOST: 'platform', VITE_API_URL: backend, VITE_CORE_URL: backend, VITE_WS_URL: backend.replace(/^http/, 'ws'), VITE_OIDC_REDIRECT_URI: manifest.callback_uri };
 }
 
 export function verifyUnsignedBundle(bundlePath, { javaHome, env, inspect = spawnSync } = {}) {

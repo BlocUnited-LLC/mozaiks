@@ -156,6 +156,7 @@ test('build environment ignores inherited credentials and Vite overrides; accept
   assert.equal(actual.VITE_CLIENT_SECRET, undefined);
   assert.equal(actual.VITE_API_URL, f.manifest.spec.backend_origin);
   assert.equal(actual.VITE_OIDC_REDIRECT_URI, f.manifest.callback_uri);
+  assert.equal(actual.MOZAIKS_FACTORY_APP_PATH, path.join(f.root, '.local/framework/factory_app'));
   assert.throws(() => buildEnvironment(f.root, f.manifest, { env, acceptance: true }), /loopback/);
   assert.equal(buildEnvironment(f.root, f.manifest, { env: { VITE_API_URL: 'http://127.0.0.1:18443' }, acceptance: true }).VITE_WS_URL, 'ws://127.0.0.1:18443');
 });
