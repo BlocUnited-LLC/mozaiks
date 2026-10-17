@@ -17,7 +17,7 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcon
 from datetime import UTC, datetime
 from difflib import unified_diff
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import Any, Literal, TypeVar
+from typing import Any, Literal, NamedTuple, TypeVar
 from uuid import uuid4
 
 from anyio import CancelScope
@@ -82,6 +82,7 @@ from mozaiksai.control_plane.app_intelligence_jobs import (
     public_app_intelligence_index_job,
     save_app_intelligence_index_job,
 )
+from mozaiksai.control_plane.contracts import RegistryRunState
 from mozaiksai.control_plane.dry_run import RefinementDryRunPlan, RefinementExecutionPlan
 from mozaiksai.control_plane.implementations.coding_worker import (
     parent_workspace_pack_paths,
@@ -3046,21 +3047,62 @@ async def _fail_inline_refinement(*, binding: RunBuildBinding, user_id: str) -> 
         logger.exception("Could not record inline refinement failure for build=%s", binding.build_id)
 
 
-async def _inline_run_stored_reviewable_child(
+class _InlineRunEffect(NamedTuple):
+    """What an inline run left of the build it was made from, as the artifact store shows it."""
+
+    #: The run changed the build or left its outcome unresolved, so the build is invalidated.
+    changed: bool
+    #: Why the outcome is unresolved (a key of ``_UNRESOLVED_CHANGE_DETAILS``), or None.
+    unresolved: str | None = None
+    #: The draft the run stored or named, when there is one.
+    draft_build_record_id: str | None = None
+
+
+#: What the trigger tells the user when an inline run's outcome is unresolved.
+_UNRESOLVED_CHANGE_DETAILS = {
+    "validation_pending": (
+        "Validation of this draft did not complete, so it cannot be accepted. The build it was made from is "
+        "invalidated while the draft is open. Reject the draft to change that build again."
+    ),
+    "validation_skipped": (
+        "Validation of this draft was skipped, so it cannot be accepted. The build it was made from is "
+        "invalidated while the draft is open. Reject the draft to change that build again."
+    ),
+    "child_lookup_failed": (
+        "Whether this run stored a draft could not be read, so the build it was made from is invalidated "
+        "and the run's outcome is unresolved. Review the app's saved builds."
+    ),
+    "reported_child_missing": (
+        "This run named a draft the artifact store did not return, so the build it was made from is "
+        "invalidated and the run's outcome is unresolved. Review the app's saved builds."
+    ),
+}
+
+
+async def _inline_run_baseline_effect(
     artifact_store: Any, *, app_id: str, parent_build_record_id: str | None, binding: RunBuildBinding, result: Any,
-) -> bool:
-    """Whether an inline run stored a child of its baseline that acceptance can make current.
+) -> _InlineRunEffect:
+    """What an inline run left of the build it was made from, read from the store.
 
     An inline coding or surface run's only durable output is a DRAFT child of
     the baseline whose commit metadata carries the run's build_id, and the run
     can store one even when its result reports a failure. The store, not the
-    result's status, is the evidence. Acceptance admits only a child whose
-    validation PASSED (``_enforce_artifact_validation_gate``) and nothing
-    validates a stored child again, so a FAILED, PENDING or SKIPPED child can
-    never become current and is no change. A PASSED child that was not
-    rejected, a child the result names that the store does not return, or a
-    lookup that fails counts as a change. Records of another run or another
-    parent are not this run's output.
+    result's status, is the evidence. Records of another run or another parent
+    are not this run's output.
+
+    * A child whose validation PASSED and that is not rejected awaits review:
+      a change.
+    * A child whose validation is PENDING or SKIPPED is unresolved, not
+      "nothing changed". Acceptance admits only PASSED
+      (``_enforce_artifact_validation_gate``) and nothing validates a stored
+      child again, so it can never be accepted, but until it is rejected it is
+      the run's open output. It counts as a change, and the trigger reports it
+      as unresolved: rejecting the draft is the supported next step, after
+      which coding admission can admit a retry bound to the same build.
+    * A FAILED child is terminal and durable (refused at acceptance, never
+      validated again), and a rejected one is closed: no change.
+    * A lookup that fails, or a child the result names that the store does
+      not return, is unresolved: a change.
     """
     reported = str(((getattr(result, "metadata", None) or {}).get("build_record_id")) or "").strip()
     parent_id = parent_build_record_id or ""
@@ -3070,25 +3112,75 @@ async def _inline_run_stored_reviewable_child(
         )
     except Exception:
         logger.warning("inline_run_child_lookup_failed build=%s", binding.build_id, exc_info=True)
-        return True
+        return _InlineRunEffect(True, "child_lookup_failed", reported or None)
     children = [
         child for child in listed
         if child.parent_build_record_id == parent_id
         and _version_metadata(child).get("build_id") == binding.build_id
     ]
     if reported and reported not in {child.id for child in children}:
-        return True
-    return any(
-        child.validation_status == ArtifactValidationStatus.PASSED
-        and child.lifecycle_status not in {ArtifactLifecycleStatus.ARCHIVED, ArtifactLifecycleStatus.DELETED}
-        for child in children
-    )
+        return _InlineRunEffect(True, "reported_child_missing", reported)
+    open_children = [
+        child for child in children
+        if child.lifecycle_status not in {ArtifactLifecycleStatus.ARCHIVED, ArtifactLifecycleStatus.DELETED}
+    ]
+    for child in open_children:
+        if child.validation_status == ArtifactValidationStatus.PASSED:
+            return _InlineRunEffect(True, None, child.id)
+    for child in open_children:
+        if child.validation_status in {ArtifactValidationStatus.PENDING, ArtifactValidationStatus.SKIPPED}:
+            return _InlineRunEffect(
+                True, f"validation_{ArtifactValidationStatus(child.validation_status).value}", child.id,
+            )
+    return _InlineRunEffect(False)
+
+
+def _unresolved_change(
+    effect: _InlineRunEffect | None, *, baseline_build_record_id: str | None, invalidation_recorded: bool,
+) -> dict[str, Any] | None:
+    """The trigger's explicit report of an inline run whose outcome is unresolved, or None."""
+    if effect is None or effect.unresolved is None:
+        return None
+    return {
+        "reason": effect.unresolved,
+        "draft_build_record_id": effect.draft_build_record_id,
+        "baseline_build_record_id": baseline_build_record_id,
+        "baseline_invalidation_recorded": invalidation_recorded,
+        "detail": _UNRESOLVED_CHANGE_DETAILS[effect.unresolved],
+    }
+
+
+async def _registry_run_state(
+    *, user_id: str, build_registry_id: str | None, source_version: Any,
+) -> RegistryRunState | None:
+    """Studio's read of the app registry before it begins a run from a STALE build.
+
+    Coding admission admits a STALE parent only when no other run of the app
+    was building when this one began (``coding_worker._stale_parent_refusal``),
+    so it gets this server-derived read, never a value from the client. It is a
+    read before ``begin_refinement_run``, not a compare-and-set; acceptance's
+    registry run check is what binds a child to the latest run. For a parent
+    that is not STALE no read is made (None), and STALE admission refuses.
+    """
+    if source_version is None or source_version.lifecycle_status != ArtifactLifecycleStatus.STALE:
+        return None
+    try:
+        record = (await _get_app_registry_service().get_app_record(
+            owner_user_id=user_id, build_registry_id=build_registry_id,
+        )).get("app")
+    except Exception:
+        logger.warning("registry_run_state_unverified registry=%s", build_registry_id, exc_info=True)
+        return "unverified"
+    if not isinstance(record, dict):
+        return "unverified"
+    return "run_in_flight" if record.get("lifecycle_state") == "building" else "idle"
 
 
 async def _persist_trigger_invalidation(
     orchestration_control: Any, *, refinement_request: Any, routing_decision: Any,
     change_request_id: str | None, artifact_store: Any,
-) -> None:
+) -> bool:
+    """Ask the invalidation owner to mark the selected build stale; False when that write failed."""
     try:
         await orchestration_control.persist_revision_invalidation(
             refinement_request=refinement_request,
@@ -3098,6 +3190,8 @@ async def _persist_trigger_invalidation(
         )
     except Exception as invalidation_err:
         logger.warning("Failed to persist artifact invalidation: %s", invalidation_err)
+        return False
+    return True
 
 
 #: A rejected or removed build is never a baseline, whatever it was at the proposal.
@@ -3133,25 +3227,35 @@ def _baseline_state(version) -> dict[str, Any]:  # noqa: ANN001
 
 
 async def _current_build_outside_lineage(version, *, app_id: str, artifact_store: Any) -> bool:  # noqa: ANN001
-    """Whether the family's CURRENT build is neither this build nor one of its ancestors.
+    """Whether a CURRENT build of the family is neither this build nor one of its ancestors.
 
-    A missing ancestor or a lineage past the acceptance bound counts as outside.
+    The CURRENT records are listed from the store, which raises when it cannot
+    read them; the current-refs lookup reports such a failure as "nothing
+    current", which must not let a confirmation through. A missing ancestor, a
+    lineage past the acceptance bound, or more CURRENT records than that bound
+    counts as outside.
     """
-    refs = await artifact_store.get_current_build_record_refs(app_id=app_id)
-    current_id = str((refs or {}).get(version.build_family) or "").strip()
-    if not current_id or current_id == version.id:
-        return False
+    current = await artifact_store.list_build_records(
+        app_id=app_id, build_family=version.build_family, lifecycle_status=ArtifactLifecycleStatus.CURRENT,
+        limit=_ACCEPTANCE_LINEAGE_MAX_DEPTH + 1,
+    )
+    if len(current) > _ACCEPTANCE_LINEAGE_MAX_DEPTH:
+        return True
+    outside = {record.id for record in current} - {version.id}
     ancestor_id: str | None = version.parent_build_record_id
     for _ in range(_ACCEPTANCE_LINEAGE_MAX_DEPTH):
+        if not outside:
+            return False
         if not ancestor_id:
             return True
-        if ancestor_id == current_id:
+        outside.discard(ancestor_id)
+        if not outside:
             return False
         ancestor = await artifact_store.get_build_record(app_id=app_id, build_record_id=ancestor_id)
         if ancestor is None:
             return True
         ancestor_id = ancestor.parent_build_record_id
-    return True
+    return bool(outside)
 
 
 async def _require_unchanged_confirmation_baseline(
@@ -3167,6 +3271,12 @@ async def _require_unchanged_confirmation_baseline(
     created. Every earlier proposal staled its build right after creating its
     ChangeRequest, so such a decision is refused once; requesting the change
     again saves the state and that proposal can be confirmed.
+
+    An unchanged baseline grants nothing by itself: the confirmed request then
+    follows the existing route for its situation. A scope that changes
+    app-owned pack code goes through coding admission, which admits a STALE
+    parent only under ``coding_worker._stale_parent_refusal``; a workflow route
+    launches as an unconfirmed one would.
     """
     router_decision = getattr(change, "router_decision", None)
     recorded = router_decision.get("baseline_state") if isinstance(router_decision, dict) else None
@@ -3544,6 +3654,9 @@ async def trigger_workflow(
                         detail="This change could not be resolved within the selected files. Narrow the request, or clear the file limit to review a broader plan. No files were changed.",
                     )
                 if contract_surface_plan is not None:
+                    registry_run_state = await _registry_run_state(
+                        user_id=user_id, build_registry_id=build_registry_id, source_version=source_version,
+                    )
                     inline_binding = await _get_app_registry_service().begin_refinement_run(
                         owner_user_id=user_id, app_id=app_id, build_registry_id=build_registry_id,
                         workflow_name=refinement_decision.workflow_id,
@@ -3562,6 +3675,7 @@ async def trigger_workflow(
                         plan=contract_surface_plan, result=surface_result, refinement_request=refinement_request,
                         routing_decision=refinement_decision, workspace_files=baseline_files,
                         run_build_binding=inline_binding, allowed_paths=explicit_paths or None,
+                        registry_run_state=registry_run_state,
                     )
                     await _complete_inline_refinement(binding=inline_binding, user_id=user_id, result=finalized)
                     surface_result = surface_result.model_copy(update={
@@ -3607,13 +3721,19 @@ async def trigger_workflow(
                         baseline_files, skipped = _decode_text_bundle_entries(await _verified_app_bundle(source_version))
                         if skipped:
                             raise HTTPException(status_code=409, detail="Inline refinement cannot preserve every file in this bundle")
+                        registry_run_state = await _registry_run_state(
+                            user_id=user_id, build_registry_id=build_registry_id, source_version=source_version,
+                        )
                         inline_binding = await _get_app_registry_service().begin_refinement_run(
                             owner_user_id=user_id, app_id=app_id,
                             build_registry_id=build_registry_id,
                             workflow_name=refinement_decision.workflow_id,
                         )
+                        # Server-derived, set after the request is built: the client
+                        # payload cannot carry it.
                         coding_request = coding_request.model_copy(update={
                             "run_build_binding": inline_binding, "baseline_files": baseline_files,
+                            "registry_run_state": registry_run_state,
                         })
                         coding_result = await orchestration_control.execute_coding_request(coding_request)
                         await _complete_inline_refinement(
@@ -3666,6 +3786,8 @@ async def trigger_workflow(
                     "execution_mode": (
                         "coding_worker"
                         if coding_result is not None and coding_result.eligible
+                        else "surface_regeneration"
+                        if surface_result is not None
                         else "harness_decision"
                         if harness_decision is not None
                         and (
@@ -3691,31 +3813,40 @@ async def trigger_workflow(
 
     # The ChangeRequest above, the session's revision state and the run
     # records below keep the history of every attempt. The selected build is
-    # invalidated only by an operation that changed it: an inline run that
-    # stored a child acceptance can make current, one whose validation passed
+    # invalidated only by an operation that changed it or left its outcome
+    # unresolved: an inline run whose stored, unrejected child passed
+    # validation, is pending or was skipped, or whose child lookup failed
     # (checked here, in the store), or a workflow run that launched (after its
     # launch, below). A returned decision, a failed launch, or an inline run
-    # that stored no such child leaves it as it was.
+    # that stored nothing or only a child that failed validation leaves it as
+    # it was. An unresolved outcome is reported explicitly in the response.
     invalidation_pending = (
         persisted_change_request_id is not None
         and refinement_request is not None
         and refinement_decision is not None
     )
+    inline_effect = None
+    invalidation_recorded = False
     if (
         invalidation_pending
         and inline_binding is not None
         and (coding_result is not None or surface_result is not None)
-        and await _inline_run_stored_reviewable_child(
+    ):
+        inline_effect = await _inline_run_baseline_effect(
             artifact_store, app_id=artifact_app_id,
             parent_build_record_id=refinement_request.build_record_id, binding=inline_binding,
             result=coding_result if coding_result is not None else surface_result,
         )
-    ):
-        await _persist_trigger_invalidation(
-            orchestration_control, refinement_request=refinement_request, routing_decision=refinement_decision,
-            change_request_id=persisted_change_request_id, artifact_store=artifact_store,
-        )
-        invalidation_pending = False
+        if inline_effect.changed:
+            invalidation_recorded = await _persist_trigger_invalidation(
+                orchestration_control, refinement_request=refinement_request, routing_decision=refinement_decision,
+                change_request_id=persisted_change_request_id, artifact_store=artifact_store,
+            )
+            invalidation_pending = False
+    unresolved_change = _unresolved_change(
+        inline_effect, baseline_build_record_id=refinement_request.build_record_id if refinement_request else None,
+        invalidation_recorded=invalidation_recorded,
+    )
 
     confirmed_action = action_id if refinement_request is not None else None
 
@@ -3874,6 +4005,7 @@ async def trigger_workflow(
                     metadata={
                         "coding_worker": coding_result.model_dump(mode="python"),
                         "workflow_id": refinement_decision.workflow_id,
+                        **({"unresolved_change": unresolved_change} if unresolved_change else {}),
                     },
                 )
             except Exception as persist_err:
@@ -3891,6 +4023,7 @@ async def trigger_workflow(
             "refinement_session_id": coding_session.id if coding_session is not None else None,
             "harness_decision": harness_decision.model_dump(mode="python") if harness_decision is not None else None,
             "coding_worker": coding_result.model_dump(mode="python"),
+            "unresolved_change": unresolved_change,
             "review_continuation": review_continuation,
             "review_continuation_error": review_continuation_error,
         }
@@ -3918,6 +4051,7 @@ async def trigger_workflow(
                     metadata={
                         "surface_result": surface_result.model_dump(mode="python"),
                         "workflow_id": refinement_decision.workflow_id,
+                        **({"unresolved_change": unresolved_change} if unresolved_change else {}),
                     },
                 )
             except Exception as persist_err:
@@ -3934,6 +4068,7 @@ async def trigger_workflow(
             "refinement_session_id": surface_session.id if surface_session is not None else None,
             "harness_decision": harness_decision.model_dump(mode="python") if harness_decision is not None else None,
             "surface_result": surface_result.model_dump(mode="python"),
+            "unresolved_change": unresolved_change,
             "review_continuation": review_continuation,
             "review_continuation_error": review_continuation_error,
         }

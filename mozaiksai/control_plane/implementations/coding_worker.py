@@ -71,11 +71,67 @@ _PACK_PROVENANCE_PATH = ".mozaiks/pack_provenance.json"
 # Only a scope the user named, or a proposal the user confirmed, can carry a
 # change to app-owned pack code. Auto-applied proposals and surface plans cannot.
 _AUTHORIZED_SCOPE_ORIGINS = frozenset({"explicit", "confirmed"})
-#: The most build records of one family admission reads to admit a STALE
-#: parent; a larger family cannot be checked and its STALE parents are refused.
+#: The most records of one kind admission reads to admit a STALE parent: build
+#: records of its family, change requests and refinement sessions made from it,
+#: and CURRENT records of one upstream family. More cannot be checked: refused.
 _STALE_PARENT_FAMILY_SCAN_LIMIT = 200
+#: The most change requests admission follows back through the parent's
+#: invalidations to the one that began while the parent was CURRENT.
+_STALE_PARENT_ATTRIBUTION_DEPTH = 16
 #: Acceptance evidence that names no time: the build was accepted, but when is unknown.
 _ACCEPTED_AT_UNKNOWN = object()
+#: How Studio's trigger records a change request that ran inline or only
+#: returned a decision. Any other mode, such as ``workflow`` (written when a
+#: workflow route is prepared, whether or not its launch then succeeded), may
+#: have launched a workflow, whose outcome these records cannot resolve.
+_INLINE_OR_DECISION_MODES = frozenset({"coding_worker", "surface_regeneration", "harness_decision"})
+#: Refinement-session providers of Studio's inline coding and surface runs.
+_INLINE_RUN_PROVIDERS = frozenset({"control_plane_coding", "contract_surface_regeneration"})
+#: Validation statuses of a draft that is still open: reviewable (PASSED), or
+#: unresolved (PENDING or SKIPPED: never acceptable, but not rejected either).
+_OPEN_DRAFT_VALIDATION = frozenset({
+    ArtifactValidationStatus.PASSED, ArtifactValidationStatus.PENDING, ArtifactValidationStatus.SKIPPED,
+})
+_CHANGE_REQUEST_REASON_PREFIX = "change_request:"
+_REGISTRY_RUN_REFUSALS = {
+    None: "no server read of the app registry was made before this run began",
+    "run_in_flight": "another run of this app was building when this run began",
+    "unverified": "the app registry could not be read before this run began",
+}
+
+
+def _closed_child(record: BuildRecord) -> bool:
+    """A draft that can never become current and is not waiting on anyone: rejected, removed, or failed validation."""
+    return record.lifecycle_status in {ArtifactLifecycleStatus.ARCHIVED, ArtifactLifecycleStatus.DELETED} or (
+        record.lifecycle_status == ArtifactLifecycleStatus.DRAFT
+        and record.validation_status == ArtifactValidationStatus.FAILED
+    )
+
+
+def _upstream_families(family: str) -> list[str] | None:
+    """Every family ``family`` depends on, transitively, in the pack's artifact dependency graph; None when undeclared."""
+    from mozaiksai.core.workflow.pack.config import load_global_pack_graph
+
+    pack = load_global_pack_graph()
+    graph = getattr(pack, "artifact_dependency_graph", None) if pack is not None else None
+    if not isinstance(graph, dict) or family not in graph:
+        return None
+    upstream: set[str] = set()
+    queue = list(graph[family] or [])
+    while queue:
+        name = str(queue.pop())
+        if name and name != family and name not in upstream:
+            upstream.add(name)
+            queue.extend(graph.get(name) or [])
+    return sorted(upstream)
+
+
+def _made_current_at(record: BuildRecord) -> datetime | None:
+    """When a CURRENT record became current: its acceptance marker, else its creation (saved CURRENT)."""
+    acceptance = record.commit_metadata.metadata.get("acceptance")
+    if isinstance(acceptance, dict) and acceptance.get("accepted_at"):
+        return _utc_instant(acceptance["accepted_at"])
+    return _utc_instant(record.created_at)
 
 
 def _utc_instant(value: Any) -> datetime | None:
@@ -547,65 +603,85 @@ class ScopedRefinementCodingWorker:
         """The app's accepted current build: the artifact store's CURRENT record of this family.
 
         Accepting a review draft makes a build current. Studio marks the
-        selected build stale only after an operation changed it: a run that
-        stored a child whose validation passed, or a workflow that launched.
-        A run rejected before it stored a child, or one whose stored child
-        did not pass validation, leaves the accepted build current, so a later
-        authorized change is still admitted against it.
+        selected build stale only after an operation changed it or left its
+        outcome unresolved: a run that stored a child whose validation passed,
+        is pending or was skipped, or a workflow that launched. A run rejected
+        before it stored a child, or one whose only stored child failed
+        validation, leaves the accepted build current, so a later authorized
+        change is still admitted against it.
         """
         family = _ARTIFACT_KIND_ALIASES.get(request.build_family, request.build_family)
         artifact_store = self._artifact_store or get_artifact_store()
         refs = await artifact_store.get_current_build_record_refs(app_id=request.artifact_app_id)
         return str((refs or {}).get(family) or "").strip() or None
 
-    async def _stale_parent_is_latest_accepted_build(self, request: CodingWorkerRequest) -> bool:
-        """Whether a STALE parent is still the app's latest accepted build while none is CURRENT.
+    async def _stale_parent_refusal(self, request: CodingWorkerRequest) -> str | None:
+        """Why a STALE parent cannot be admitted for an app-owned pack change while no build is CURRENT; None when it can.
 
-        A run that stored a reviewable child, or a workflow that launched,
-        marked the accepted build stale, and nothing makes it CURRENT again:
-        when that change is rejected or abandoned, the app has no CURRENT
-        build. The parent is then admitted, without changing any record, only
-        when all of these hold:
+        Nothing makes a stale build current again, so a rejected draft leaves
+        the app with no CURRENT build. The stale marker that rejected draft's
+        run left is told apart from genuine invalidation, newer accepted work
+        and work still in flight using the records Studio already keeps. The
+        parent is admitted, without changing any record, only when all hold:
 
-        * it is STALE;
-        * it was accepted (see :func:`_accepted_at`);
-        * no other build of its family was accepted after it. A build accepted
-          later that is no longer CURRENT was staled, or superseded by one that
-          was, so some STALE build of the family shows a later acceptance;
-        * none of its children is a draft whose validation passed, from any
-          run or workflow: one accepted build has at most one pending change
-          that acceptance could make current.
+        * no build of its family is CURRENT, and the parent is STALE;
+        * it was accepted (:func:`_accepted_at`) and no build of the family was
+          accepted after it;
+        * attribution: its ``invalidation_reason`` names a change request made
+          from it by this user, recorded as an inline run or a returned
+          decision (never a workflow route), that saved the parent's state
+          when it began, and whose inline run's stored draft is now rejected
+          or failed validation. A change request that began while the parent
+          was already stale is followed back, under the same conditions, to
+          the one that began while the parent was CURRENT;
+        * no other work: every other change request made from the parent ran
+          inline or only returned a decision, every draft made from it is
+          rejected, removed or failed validation, no draft further down its
+          lineage is open (validation passed, pending or skipped), and every
+          refinement session of it is an inline run;
+        * nothing in flight: Studio's registry read before this run began
+          (``registry_run_state``, server-derived) found no other run building;
+        * compatible inputs: every family the parent's family depends on in the
+          pack's artifact dependency graph is unchanged since the parent was
+          accepted. A recorded input (``canonical_inputs_version``) must still
+          be CURRENT; any other CURRENT record must have become current no
+          later than the parent was accepted; a family that is STALE with no
+          CURRENT record refuses.
 
-        Any lookup failure, or a family larger than the scan bound, refuses.
-        Acceptance rechecks the parent, scope and run as for a CURRENT parent.
+        The retry stays bound to this parent, the authenticated user and the
+        explicit or confirmed file scope checked by the caller. A lookup
+        failure, a scan past its bound, or anything else unresolved refuses.
+        Acceptance rechecks the parent, scope and registry run as for a
+        CURRENT parent. These are reads at admission, not a compare-and-set.
         """
+        if request.registry_run_state != "idle":
+            return _REGISTRY_RUN_REFUSALS.get(request.registry_run_state, _REGISTRY_RUN_REFUSALS[None])
         family = _ARTIFACT_KIND_ALIASES.get(request.build_family, request.build_family)
         artifact_store = self._artifact_store or get_artifact_store()
         app_id = request.artifact_app_id
+        limit = _STALE_PARENT_FAMILY_SCAN_LIMIT
         if not request.build_record_id:
-            return False
+            return "the request names no parent build"
         try:
             parent = await artifact_store.get_build_record(app_id=app_id, build_record_id=request.build_record_id)
-            if (
-                parent is None or parent.build_family != family
-                or parent.lifecycle_status != ArtifactLifecycleStatus.STALE
-            ):
-                return False
-            records = await artifact_store.list_build_records(
-                app_id=app_id, build_family=family, limit=_STALE_PARENT_FAMILY_SCAN_LIMIT + 1,
-            )
-            if len(records) > _STALE_PARENT_FAMILY_SCAN_LIMIT or parent.id not in {record.id for record in records}:
-                return False
-            if any(
-                record.parent_build_record_id == parent.id
-                and record.lifecycle_status == ArtifactLifecycleStatus.DRAFT
-                and record.validation_status == ArtifactValidationStatus.PASSED
-                for record in records
-            ):
-                return False
+            if parent is None or parent.build_family != family:
+                return "the parent build was not found in this app's build family"
+            if parent.lifecycle_status != ArtifactLifecycleStatus.STALE:
+                return f"the parent is {ArtifactLifecycleStatus(parent.lifecycle_status).value}, not stale"
+            records = await artifact_store.list_build_records(app_id=app_id, build_family=family, limit=limit + 1)
+            if len(records) > limit:
+                return f"the build family has more than {limit} records to check"
+            by_id = {record.id: record for record in records}
+            if parent.id not in by_id:
+                return "the parent is missing from its build family's records"
+            current = sorted(record.id for record in records if record.lifecycle_status == ArtifactLifecycleStatus.CURRENT)
+            if current:
+                return f"a build of this family is current: {current[0]}"
             accepted_at = await _accepted_at(artifact_store, app_id=app_id, record=parent)
+            if accepted_at is None:
+                return "nothing shows the parent was ever accepted"
             if not isinstance(accepted_at, datetime):
-                return False
+                return "the parent's acceptance time is unknown"
             for record in records:
                 if record.id == parent.id or record.lifecycle_status != ArtifactLifecycleStatus.STALE:
                     continue
@@ -614,13 +690,148 @@ class ScopedRefinementCodingWorker:
                     continue  # last written before the parent was accepted, so not accepted after it
                 other = await _accepted_at(artifact_store, app_id=app_id, record=record)
                 if other is _ACCEPTED_AT_UNKNOWN or (isinstance(other, datetime) and other >= accepted_at):
-                    return False
-            return True
-        except Exception:
+                    return f"build {record.id} was accepted after the parent"
+            children = sorted(
+                (record for record in records if record.parent_build_record_id == parent.id), key=lambda r: r.id,
+            )
+            for child in children:
+                if not _closed_child(child):
+                    return (
+                        f"draft {child.id} made from the parent is "
+                        f"{ArtifactLifecycleStatus(child.lifecycle_status).value} with validation "
+                        f"{ArtifactValidationStatus(child.validation_status).value}, not rejected"
+                    )
+            below = [child.id for child in children]
+            seen: set[str] = set(below)
+            while below:
+                ancestor = below.pop()
+                for record in records:
+                    if record.parent_build_record_id != ancestor or record.id in seen:
+                        continue
+                    seen.add(record.id)
+                    below.append(record.id)
+                    if (
+                        record.lifecycle_status == ArtifactLifecycleStatus.DRAFT
+                        and record.validation_status in _OPEN_DRAFT_VALIDATION
+                    ):
+                        return f"draft {record.id}, made further down from the parent, is still open"
+            refusal = await self._attribution_refusal(
+                artifact_store, request=request, parent=parent, records=by_id,
+            )
+            if refusal is not None:
+                return refusal
+            return await self._upstream_input_refusal(
+                artifact_store, app_id=app_id, parent=parent, family=family, accepted_at=accepted_at,
+            )
+        except Exception as exc:
             logger.warning(
                 "STALE_PARENT_ADMISSION_UNVERIFIED app=%s parent=%s", app_id, request.build_record_id, exc_info=True,
             )
-            return False
+            return f"a record needed to check the parent could not be read ({type(exc).__name__})"
+
+    @staticmethod
+    async def _attribution_refusal(
+        artifact_store: Any, *, request: CodingWorkerRequest, parent: BuildRecord, records: dict[str, BuildRecord],
+    ) -> str | None:
+        """Whether the parent's stale marker is only this app's own closed inline runs, and no other work."""
+        limit = _STALE_PARENT_FAMILY_SCAN_LIMIT
+        app_id = request.artifact_app_id
+        reason = str(parent.invalidation_reason or "")
+        if not reason.startswith(_CHANGE_REQUEST_REASON_PREFIX):
+            return "the parent's invalidation names no change request"
+        changes = await artifact_store.list_change_requests(app_id=app_id, build_record_id=parent.id, limit=limit + 1)
+        if len(changes) > limit:
+            return f"more than {limit} change requests were made from the parent"
+        made_from_parent = {change.id: change for change in changes if change.build_record_id == parent.id}
+        sessions = await artifact_store.list_refinement_sessions(
+            app_id=app_id, build_record_id=parent.id, limit=limit + 1,
+        )
+        if len(sessions) > limit:
+            return f"the parent has more than {limit} refinement sessions"
+        runs: dict[str, list[Any]] = {}
+        for session in sessions:
+            if session.build_record_id != parent.id:
+                continue
+            if session.provider not in _INLINE_RUN_PROVIDERS:
+                return f"refinement session {session.id} of the parent is not an inline run ({session.provider})"
+            if session.change_request_id not in made_from_parent:
+                return (
+                    f"refinement session {session.id} names change request {session.change_request_id}, "
+                    "not one made from the parent"
+                )
+            runs.setdefault(session.change_request_id, []).append(session)
+
+        chain: list[str] = []
+        link = reason.removeprefix(_CHANGE_REQUEST_REASON_PREFIX)
+        for _ in range(_STALE_PARENT_ATTRIBUTION_DEPTH):
+            change = made_from_parent.get(link)
+            if change is None or link in chain:
+                return f"the parent was invalidated by {link}, which is not a change request made from it"
+            if change.created_by_user_id != request.user_id:
+                return f"change request {link} that invalidated the parent was made by another user"
+            decision = change.router_decision if isinstance(change.router_decision, dict) else {}
+            mode = decision.get("execution_mode")
+            if mode not in _INLINE_OR_DECISION_MODES:
+                return f"change request {link} that invalidated the parent may have launched a workflow ({mode})"
+            state = decision.get("baseline_state")
+            if not isinstance(state, dict) or state.get("build_record_id") != parent.id:
+                return f"change request {link} that invalidated the parent saved no state of it when it began"
+            if not runs.get(link):
+                return f"change request {link} that invalidated the parent has no inline run on record"
+            for session in runs[link]:
+                child = records.get(str(session.result_build_record_id or ""))
+                if child is None or child.parent_build_record_id != parent.id:
+                    return f"the run of change request {link} names no stored draft of the parent"
+                if not _closed_child(child):
+                    return f"draft {child.id} of change request {link} is neither rejected nor failed"
+            chain.append(link)
+            status = state.get("lifecycle_status")
+            if status == ArtifactLifecycleStatus.CURRENT.value:
+                break
+            prior = str(state.get("invalidation_reason") or "")
+            if status != ArtifactLifecycleStatus.STALE.value or not prior.startswith(_CHANGE_REQUEST_REASON_PREFIX):
+                return (
+                    f"the parent was already {status} when change request {link} began, "
+                    "and not by a change request made from it"
+                )
+            link = prior.removeprefix(_CHANGE_REQUEST_REASON_PREFIX)
+        else:
+            return f"the parent's invalidations go back more than {_STALE_PARENT_ATTRIBUTION_DEPTH} change requests"
+        for change_id, change in sorted(made_from_parent.items()):
+            decision = change.router_decision if isinstance(change.router_decision, dict) else {}
+            if change_id not in chain and decision.get("execution_mode") not in _INLINE_OR_DECISION_MODES:
+                return f"change request {change_id} made from the parent may have launched a workflow"
+        return None
+
+    @staticmethod
+    async def _upstream_input_refusal(
+        artifact_store: Any, *, app_id: str, parent: BuildRecord, family: str, accepted_at: datetime,
+    ) -> str | None:
+        """Whether a family the parent depends on changed since the parent was accepted."""
+        limit = _STALE_PARENT_FAMILY_SCAN_LIMIT
+        upstream = _upstream_families(family)
+        if upstream is None:
+            return f"the artifact dependency graph declares no inputs for {family}"
+        recorded = dict(parent.canonical_inputs_version or {})
+        for name in upstream:
+            current = await artifact_store.list_build_records(
+                app_id=app_id, build_family=name, lifecycle_status=ArtifactLifecycleStatus.CURRENT, limit=limit + 1,
+            )
+            if len(current) > limit:
+                return f"input family {name} has more than {limit} current records"
+            if name in recorded and recorded[name] not in {record.id for record in current}:
+                return f"input {name} {recorded[name]} the parent was built from is no longer current"
+            for record in current:
+                if record.id == recorded.get(name):
+                    continue
+                made_current = _made_current_at(record)
+                if made_current is None or made_current > accepted_at:
+                    return f"input {name} {record.id} became current after the parent was accepted"
+            if not current and await artifact_store.list_build_records(
+                app_id=app_id, build_family=name, lifecycle_status=ArtifactLifecycleStatus.STALE, limit=1,
+            ):
+                return f"input {name} is stale with no current build"
+        return None
 
     async def _admit_pack_outputs(
         self,
@@ -636,9 +847,10 @@ class ScopedRefinementCodingWorker:
         app-owned (``owner: workspace``) output may change only inside an
         explicit or user-confirmed selected-file scope, from the app's accepted
         current build (read here, at admission) or, when no build is CURRENT,
-        from a STALE parent that is still its latest accepted build with no
-        pending reviewable child (:meth:`_stale_parent_is_latest_accepted_build`),
-        and, for a workspace handler, only as a thin extension of its template
+        from a STALE parent whose stale marker only this app's own rejected or
+        failed inline runs left, with nothing else open, in flight or changed
+        since (:meth:`_stale_parent_refusal`), and, for a workspace handler,
+        only as a thin extension of its template
         base handler. Applied paths are real changes against the parent, so any
         owned path among them is a change. Acceptance rechecks the parent and
         scope before a child becomes current.
@@ -690,16 +902,20 @@ class ScopedRefinementCodingWorker:
                 paths=workspace, scope_origin=scope["scope_origin"],
             )
         current = await self._current_accepted_build_record_id(request)
-        if (current is None or current != request.build_record_id) and not (
-            current is None and await self._stale_parent_is_latest_accepted_build(request)
-        ):
-            raise CandidateAdmissionError(
-                "STALE_REFINEMENT_BASELINE",
-                "app-owned pack code changes only from the app's accepted current build, or from its latest "
-                "accepted build while none is current and no reviewable change of it is pending",
-                paths=workspace, parent_build_record_id=request.build_record_id,
-                accepted_build_record_id=current,
+        if current != request.build_record_id:
+            refusal = (
+                await self._stale_parent_refusal(request) if current is None
+                else f"build {current} is the app's accepted current build"
             )
+            if refusal is not None:
+                raise CandidateAdmissionError(
+                    "STALE_REFINEMENT_BASELINE",
+                    "app-owned pack code changes only from the app's accepted current build, or, while none is "
+                    "current, from a stale build whose only invalidation is this app's own rejected or failed "
+                    "change with nothing else open, in flight or changed since",
+                    paths=workspace, parent_build_record_id=request.build_record_id,
+                    accepted_build_record_id=current, stale_baseline_refusal=refusal,
+                )
         for path in workspace:
             if path.endswith("/backend/handler.py"):
                 self._prove_handler_extension(

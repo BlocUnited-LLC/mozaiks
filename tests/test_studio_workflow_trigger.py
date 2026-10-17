@@ -59,6 +59,13 @@ class _BaselineStore:
             if app_id == "app_1" and version.lifecycle_status == ArtifactLifecycleStatus.CURRENT
         }
 
+    async def list_build_records(self, *, app_id, build_family=None, lifecycle_status=None, limit=50, **_):
+        return [
+            version for version in self.versions.values()
+            if app_id == "app_1" and (build_family is None or version.build_family == build_family)
+            and (lifecycle_status is None or version.lifecycle_status == lifecycle_status)
+        ][:limit]
+
     async def list_run_child_build_records(self, *, app_id, parent_build_record_id, build_id, limit=10):
         return [
             version for version in self.versions.values()
@@ -816,6 +823,8 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch,
         "routing_explanation": "Re-entering AppGenerator to apply a scoped patch to the app bundle.",
         "rerouted_by_dependency": False,
         "refinement_session_id": "rs_code_1",
+        # The stored child passed validation: a reviewable change, nothing unresolved.
+        "unresolved_change": None,
         "review_continuation": continuation,
         "review_continuation_error": continuation_error,
             "harness_decision": {
@@ -2375,7 +2384,8 @@ def _async_coding_worker(result: dict):
     async def _run(request):  # noqa: ANN001
         result_id = result["metadata"]["build_record_id"]
         source = _BaselineStore.versions[request.build_record_id]
-        child = source.model_copy(deep=True, update={"id": result_id})
+        # The worker's stored child: a draft of the selected build under the run's build id.
+        child = source.model_copy(deep=True, update={"id": result_id, "parent_build_record_id": source.id})
         child.commit_metadata.metadata.update(request.run_build_binding.model_dump())
         _BaselineStore.versions[result_id] = child
         return CodingWorkerResult.model_validate(result)
@@ -2555,10 +2565,23 @@ def test_studio_trigger_endpoint_invokes_surface_regeneration_for_feature_change
     assert persisted_sessions[0]["change_request_id"] == "cr_surface_1"
     assert persisted_sessions[0]["result_build_record_id"] == "surface_child"
     assert persisted_sessions[0]["status"].value == {"passed": "validated", "pending": "pending", "failed": "failed"}[validation_status]
-    # The store decides: only a stored child that passed validation can be accepted, so only it changes the build.
+    # The store decides. A stored child that passed validation awaits review, and a pending one is
+    # unresolved (it can never be accepted, but it is not rejected): both invalidate the selected build.
+    # Only a child whose validation failed, terminal and never validated again, changes nothing.
     assert [(item["artifact_version_refs"], item["reason"]) for item in persisted_invalidations] == (
-        [({"app_bundle": "av_456"}, "change_request:cr_surface_1")] if validation_status == "passed" else []
+        [({"app_bundle": "av_456"}, "change_request:cr_surface_1")] if validation_status != "failed" else []
     )
+    # The surface run is recorded as one, not as a workflow route.
+    assert persisted_changes[0]["router_decision"]["execution_mode"] == "surface_regeneration"
+    unresolved = body["unresolved_change"]
+    if validation_status != "pending":
+        assert unresolved is None and "unresolved_change" not in persisted_sessions[0]["metadata"]
+        return
+    # The pending draft is reported as unresolved, with the supported next step, in the response and its session.
+    assert unresolved["reason"] == "validation_pending" and unresolved["draft_build_record_id"] == "surface_child"
+    assert unresolved["baseline_build_record_id"] == "av_456" and unresolved["baseline_invalidation_recorded"] is True
+    assert "cannot be accepted" in unresolved["detail"] and "Reject the draft" in unresolved["detail"]
+    assert persisted_sessions[0]["metadata"]["unresolved_change"] == unresolved
 
 
 @pytest.mark.asyncio

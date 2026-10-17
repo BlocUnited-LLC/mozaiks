@@ -591,8 +591,9 @@ Current default classifier grounding:
 - a persisted `ChangeRequest` records every routed attempt; the Refinement
   Engine marks the affected persisted artifact versions `stale`, using the
   change-request id as the invalidation reason, once the operation the request
-  started has changed the selected build (an inline run that stored a child
-  whose validation passed, or a workflow run that launched); it also
+  started has changed the selected build or left its outcome unresolved (an
+  inline run that stored an unrejected child whose validation passed, is
+  pending or was skipped, or a workflow run that launched); it also
   propagates staleness transitively to all downstream artifact families using
   the declared `artifact_dependency_graph`
   (see [Artifact Staleness and Routing](../builder/artifact-staleness-and-routing.md))

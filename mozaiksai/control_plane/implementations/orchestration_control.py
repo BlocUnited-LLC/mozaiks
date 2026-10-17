@@ -24,6 +24,7 @@ from mozaiksai.control_plane.contracts import (
     ContractSurfacePlan,
     HarnessDecision,
     ProposedFileChange,
+    RegistryRunState,
     StagedPatchProposal,
     SurfacePlanExecutionResult,
 )
@@ -302,13 +303,19 @@ class OrchestrationControlHarness:
         self, *, plan: ContractSurfacePlan, result: SurfacePlanExecutionResult,
         refinement_request: RefinementRequest, routing_decision: RefinementRoutingDecision,
         workspace_files: dict[str, str], run_build_binding: RunBuildBinding,
-        allowed_paths: list[str] | None = None,
+        allowed_paths: list[str] | None = None, registry_run_state: RegistryRunState | None = None,
     ) -> CodingWorkerResult:
+        """Admit, validate and store a surface run's output through the coding worker's finalizer.
+
+        ``registry_run_state`` is Studio's server-derived registry read before
+        the run began (see ``CodingWorkerRequest.registry_run_state``).
+        """
         try:
             finalized = await self._finalize_surface_output(
                 plan=plan, result=result, refinement_request=refinement_request,
                 routing_decision=routing_decision, workspace_files=workspace_files,
                 run_build_binding=run_build_binding, allowed_paths=allowed_paths,
+                registry_run_state=registry_run_state,
             )
         except (Exception, CancelledError) as exc:
             with CancelScope(shield=True):
@@ -332,7 +339,7 @@ class OrchestrationControlHarness:
         self, *, plan: ContractSurfacePlan, result: SurfacePlanExecutionResult,
         refinement_request: RefinementRequest, routing_decision: RefinementRoutingDecision,
         workspace_files: dict[str, str], run_build_binding: RunBuildBinding,
-        allowed_paths: list[str] | None = None,
+        allowed_paths: list[str] | None = None, registry_run_state: RegistryRunState | None = None,
     ) -> CodingWorkerResult:
         if result.status != "success" or plan.requires_schema_migration or plan.build_family != "app_bundle":
             return CodingWorkerResult(eligible=True, status="failed", error="Surface output requires workflow completion")
@@ -358,7 +365,7 @@ class OrchestrationControlHarness:
             raw_user_request=refinement_request.raw_user_request, change_class=plan.change_class,
             source_surface=refinement_request.source_surface,
             files={path: workspace_files.get(path, "") for path in owned_paths},
-            baseline_files=workspace_files, metadata=metadata,
+            baseline_files=workspace_files, metadata=metadata, registry_run_state=registry_run_state,
         )
         proposal = StagedPatchProposal(
             proposal_id=run_build_binding.build_id, provider_id="contract_surface_regeneration",

@@ -190,6 +190,10 @@ MAX_READ_ONLY_INSPECTION_FILES = 20
 MAX_READ_ONLY_INSPECTION_BYTES = 2_097_152
 
 
+#: Studio's read of the app registry before it began a run (``CodingWorkerRequest.registry_run_state``).
+RegistryRunState = Literal["idle", "run_in_flight", "unverified"]
+
+
 class CodingWorkerRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -198,6 +202,12 @@ class CodingWorkerRequest(BaseModel):
     target_app_id: BuildIdentity | None = None
     run_build_binding: RunBuildBinding | None = None
     baseline_files: dict[str, str] | None = None
+    #: Studio's read of the app registry just before it began this request's
+    #: run, set by Studio after it builds the request (never from the client
+    #: payload): ``idle`` when no other run was building, ``run_in_flight``
+    #: when one was, ``unverified`` when the read failed. Admission from a
+    #: STALE parent requires ``idle``; None (no such read) refuses it.
+    registry_run_state: RegistryRunState | None = None
     user_id: str | None = None
     build_family: str
     build_key: str | None = None

@@ -43,24 +43,38 @@ This project follows a practical pre-1.0 changelog format:
   pack file byte-identical. Regeneration, UI-only refinement, repairs and
   AppGenerator plan tasks cannot change it, and an unsupported request fails
   with an explicit diagnostic that names the supported path. When a rejected
-  or abandoned change has left the app with no current build, such a change is
-  admitted from the build the app accepted last, provided no reviewable draft
-  of that build is pending; no record is made current again. Studio acceptance
-  now records `metadata.acceptance` on the accepted record, so a build that
-  is later marked stale can still be recognized as accepted (an earlier build
-  is recognized by its accepted refinement session, or as the AppGenerator
-  genesis build).
+  draft has left the app with no current build, such a change is admitted from
+  the stale build it was made from, without making any record current again,
+  only if that build's stale marker is this app's own rejected or failed
+  inline refinement (its change request saved the build's state as current
+  when it began, ran inline, was made by the same user, and its draft is now
+  rejected or failed validation, followed back through earlier retries) and
+  nothing else is open, in flight or changed: no build was accepted after it,
+  no other change request from it is recorded as a workflow route, no draft
+  made from it is open, Studio's registry read found no other run building
+  when the run began, and no input family it depends on became current after
+  it was accepted or is stale with no current build. Anything else, including
+  a failed lookup, is refused with `STALE_REFINEMENT_BASELINE` and the reason
+  in `stale_baseline_refusal`. Studio acceptance now records
+  `metadata.acceptance` on the accepted record, so a build that is later
+  marked stale can still be recognized as accepted (an earlier build is
+  recognized by its accepted refinement session, or as the AppGenerator
+  genesis build). A surface run's change request is recorded as
+  `surface_regeneration` rather than as a workflow route.
 - A Studio refinement request marks the selected build stale only once the
-  operation it started has changed that build: an inline run that stored a
-  child that acceptance can make current, one whose validation passed (found in
-  the artifact store by its parent and the run's build id), or a workflow run
-  that launched. A scope question or confirmation prompt, a dismissed decision,
-  rejected input, a workflow launch that failed, and an inline run that stored
-  nothing or only a child whose validation failed, is pending or was skipped
-  leave it current, so the confirmed or retried change is still admitted
-  against it. Change requests, session revision state,
-  refinement sessions and registry runs still record every attempt. Builds
-  already marked stale stay stale.
+  operation it started has changed that build or left its outcome unresolved:
+  an inline run that stored a child, not since rejected, whose validation
+  passed, is pending or was skipped (found in the artifact store by its parent
+  and the run's build id; a failed lookup or a named child the store does not
+  return counts too), or a workflow run that launched. A pending or skipped
+  child can never be accepted; the trigger response and the run's refinement
+  session report it as `unresolved_change`, and rejecting that draft is the
+  supported next step. A scope question or confirmation prompt, a dismissed
+  decision, rejected input, a workflow launch that failed, and an inline run
+  that stored nothing or only a child whose validation failed leave the build
+  current, so the confirmed or retried change is still admitted against it.
+  Change requests, session revision state, refinement sessions and registry
+  runs still record every attempt. Builds already marked stale stay stale.
 
 ### Fixed
 
@@ -143,12 +157,15 @@ This project follows a practical pre-1.0 changelog format:
   API. The proposal saves the selected build's lifecycle state on its change
   request. Before the decision is used, a confirmation is refused when that
   build has been written since (made stale again, superseded, accepted or
-  rejected), when it is rejected or removed, or when a newer build outside its
-  lineage has been accepted. A decision proposed for a build that was already
-  stale, and is unchanged, can be confirmed. A change request proposed before
-  the state was saved is refused when its build was written after it was
-  created, as every earlier proposal's build was; requesting the change again
-  saves the state, and that proposal can be confirmed.
+  rejected), when it is rejected or removed, when a newer build outside its
+  lineage has been accepted, or when the family's current builds cannot be
+  read. A decision proposed for a build that was already
+  stale, and is unchanged, can be confirmed; it then follows its route, so a
+  scope that changes app-owned pack code still needs stale-build admission and
+  a workflow route launches as before. A change request proposed before the
+  state was saved is refused when its build was written after it was created,
+  as every earlier proposal's build was; requesting the change again saves the
+  state, and that proposal can be confirmed.
 
 ## 0.2.0 - 2026-10-16
 
