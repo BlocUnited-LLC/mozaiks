@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { buildAndroid, buildEnvironment, configureAndroid, filesUnder, prepareNativeWorkspace, readDelivery, verifyBundledAssets } from '../../factory_app/workflows/AppGenerator/tools/android_delivery_build.mjs';
+import { buildAndroid, buildEnvironment, configureAndroid, filesUnder, prepareNativeWorkspace, readDelivery, verifyBundledAssets, verifyUnsignedBundle } from '../../factory_app/workflows/AppGenerator/tools/android_delivery_build.mjs';
 
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const digest = `sha256:${'a'.repeat(64)}`;
@@ -225,7 +225,7 @@ test('release orchestration builds an unsigned AAB and cannot enable device acce
     calls.push({ command, args, options });
     if (args.includes('android') && args.includes('sync')) f.generated();
     if (args.includes('bundleRelease')) f.write('android/app/build/outputs/bundle/release/app-release.aab', 'fake unsigned AAB bytes');
-  } });
+  }, inspect() { return { status: 0, stdout: '\njar is unsigned.\n', stderr: '' }; } });
   assert.equal(result.status, 'succeeded');
   assert.equal(result.acceptance_build, false);
   assert.equal(result.artifact.kind, 'unsigned_release_aab');
@@ -241,4 +241,22 @@ test('release orchestration builds an unsigned AAB and cannot enable device acce
   assert.throws(() => buildAndroid(rejected.root, { acceptance: true, run() { rejectedCalls++; } }), /requires a debug/);
   assert.equal(rejectedCalls, 0);
   assert.equal(JSON.parse(rejected.read('build-result.json')).status, 'failed');
+});
+
+test('release AAB verification fails closed for signed, failed, or ambiguous inspection', () => {
+  const base = { javaHome: '/jdk', env: { LANG: 'C' } };
+  assert.doesNotThrow(() => verifyUnsignedBundle('/bundle.aab', {
+    ...base, inspect: (_command, args, options) => {
+      assert.ok(args.includes('-J-Duser.language=en'));
+      assert.equal(options.shell, false);
+      return { status: 0, stdout: 'jar is unsigned.\n', stderr: '' };
+    },
+  }));
+  for (const result of [
+    { status: 0, stdout: 'jar verified.\n', stderr: '' },
+    { status: 1, stdout: '', stderr: 'inspection failed' },
+    { status: 0, stdout: '', stderr: '' },
+  ]) {
+    assert.throws(() => verifyUnsignedBundle('/bundle.aab', { ...base, inspect: () => result }), /must be unsigned/);
+  }
 });

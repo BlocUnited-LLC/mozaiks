@@ -175,6 +175,18 @@ export function buildEnvironment(mobileRoot, manifest, { acceptance = false, env
   return { ...result, PLATFORM_PATH: path.join(mobileRoot, '.local/workspace/app'), MOZAIKS_APP_WORKSPACE_PATH: path.join(mobileRoot, '.local/workspace'), MOZAIKS_CHAT_UI_PATH: path.join(mobileRoot, '.local/framework/chat-ui'), MOZAIKS_HOST: 'platform', VITE_MOZAIKS_HOST: 'platform', VITE_API_URL: backend, VITE_CORE_URL: backend, VITE_WS_URL: backend.replace(/^http/, 'ws'), VITE_OIDC_REDIRECT_URI: manifest.callback_uri };
 }
 
+export function verifyUnsignedBundle(bundlePath, { javaHome, env, inspect = spawnSync } = {}) {
+  const jarsigner = javaHome
+    ? path.join(javaHome, 'bin', process.platform === 'win32' ? 'jarsigner.exe' : 'jarsigner')
+    : 'jarsigner';
+  const result = inspect(jarsigner, [
+    '-J-Duser.language=en', '-J-Duser.country=US', '-verify', bundlePath,
+  ], { env, encoding: 'utf8', shell: false });
+  if (result.error || result.status !== 0 || !/(?:^|\n)jar is unsigned\.\s*(?:\n|$)/.test(`${result.stdout || ''}\n${result.stderr || ''}`)) {
+    fail('Release Android App Bundle must be unsigned');
+  }
+}
+
 function runCommand(command, args, options) {
   const result = spawnSync(command, args, { ...options, stdio: 'inherit', shell: false });
   if (result.error || result.status !== 0) fail('Android build subprocess failed');
@@ -187,7 +199,7 @@ function npmCommand(args) {
   return ['npm', args];
 }
 
-export function buildAndroid(mobileRoot, { acceptance = false, env = process.env, run = runCommand } = {}) {
+export function buildAndroid(mobileRoot, { acceptance = false, env = process.env, run = runCommand, inspect = spawnSync } = {}) {
   mobileRoot = path.resolve(mobileRoot);
   const receiptPath = path.join(mobileRoot, 'build-result.json');
   if (existsSync(receiptPath) && !lstatSync(receiptPath).isFile()) fail('Build receipt must be a regular file');
@@ -236,6 +248,7 @@ export function buildAndroid(mobileRoot, { acceptance = false, env = process.env
     command(java, ['-classpath', path.join(mobileRoot, 'android/gradle/wrapper/gradle-wrapper.jar'), 'org.gradle.wrapper.GradleWrapperMain', '--no-daemon', gradleTask], path.join(mobileRoot, 'android'), 'compile');
     const artifactBytes = readFileSync(regularPath(mobileRoot, artifactPath));
     if (!artifactBytes.length) fail('Android compilation produced an empty artifact');
+    if (release) verifyUnsignedBundle(path.join(mobileRoot, artifactPath), { javaHome: buildEnv.JAVA_HOME, env: buildEnv, inspect });
     receipt = { ...receipt, status: 'succeeded', stage: 'complete', acceptance_build: acceptance, android: identity, assets, artifact: { kind: artifactKind, path: artifactPath, sha256: sha256(artifactBytes), size_bytes: artifactBytes.length } };
     writeJson(receiptPath, receipt);
     return receipt;

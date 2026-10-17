@@ -171,8 +171,10 @@ After compilation, `mobile/build-result.json` binds the output to those input
 identities and records one typed artifact (`debug_apk` or
 `unsigned_release_aab`) with its canonical relative path, byte size, and
 SHA-256. The CLI verifies that receipt against the actual file and requested
-build type before returning success. A failed build records failure. Release
-builds refuse the debug-only acceptance override. Compilation alone reports
+build type before returning success. The compiler also invokes the JDK signature
+verifier and refuses a release bundle unless it explicitly reports unsigned.
+A failed build records failure. Release builds refuse the debug-only acceptance
+override. Compilation alone reports
 `device_acceptance: "not_run"`; device acceptance is separate evidence.
 
 ## Canonical owners
