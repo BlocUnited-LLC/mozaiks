@@ -48,6 +48,16 @@ When you promote it, the Genesis Build's output becomes the **first
 authoritative version of your app**: the canonical state that every future
 change is measured against, and the start of your app's revision history.
 
+For an existing app, Studio can show an **imported Genesis source** in Build
+Review. Download and inspect its reserved archive, then review the exact archive
+and member-manifest SHA-256 values. Studio also shows the acceptance scope: the
+selected `app/` root passed the listed static and external probes, while event
+rejection, event emission completeness, workspace workflows, deployment, and
+the running product remain outside that result. Acceptance requires an explicit
+acknowledgment of that server-generated disclosure. It creates the initial
+brownfield baseline for later Refinement Runs; it does not deploy or replace the
+running app.
+
 If you want to see the individual build workflows behind these stages, they are
 described in [The Build Sequence](../concepts.md#the-build-sequence).
 

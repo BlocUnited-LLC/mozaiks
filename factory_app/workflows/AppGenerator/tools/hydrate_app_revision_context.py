@@ -8,6 +8,7 @@ from typing import Any
 
 from factory_app.workflows._shared.artifact_bundle import read_artifact_bundle
 from factory_app.workflows._shared.platform.build_target import require_build_binding
+from factory_app.workflows._shared.platform.genesis_import import require_accepted_genesis_baseline
 from mozaiksai.core.artifacts.models import BuildRecordStatus
 from mozaiksai.core.artifacts.store import get_artifact_store
 from mozaiksai.core.workflow.context.frozen import detach
@@ -53,6 +54,12 @@ async def read_bound_revision_files(
         or metadata.get("build_registry_id") != binding.build_registry_id
     ):
         raise ValueError("revision_baseline_owner_mismatch")
+
+    await require_accepted_genesis_baseline(
+        artifact, owner_user_id=context_variables.get("user_id"),
+        execution_app_id=context_variables.get("app_id"),
+        build_registry_id=binding.build_registry_id,
+    )
 
     # The selected version can be stale after refinement invalidation. Its
     # committed archive remains the baseline; mutable workspace copies do not.

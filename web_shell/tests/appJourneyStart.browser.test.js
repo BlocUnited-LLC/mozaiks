@@ -46,6 +46,7 @@ async function fixture(t) {
       'react-dom': path.join(shell, 'node_modules/react-dom'),
       'react-router-dom': path.join(shell, 'node_modules/react-router-dom'),
       '@mozaiks/chat-ui/platform': path.join(chatUi, 'platform/index.js'),
+      '@mozaiks/chat-ui/adapters/api.js': path.join(chatUi, 'adapters/api.js'),
     },
     define: { 'process.env': '{}', 'process.env.NODE_ENV': '"test"' },
     plugins: [{ name: 'host-context', setup(builder) {
@@ -81,10 +82,11 @@ async function fixture(t) {
   return async (subtest, {
     createFailure = false, resolveFailure = false, holdCreate = false, holdResolve = false,
     entryTransition = null, navigation = null, isAuthenticated = true, startPath = '/create',
+    githubOauth = false, githubOauthFailure = null,
   } = {}) => {
     const page = await browser.newPage({ reducedMotion: 'reduce' });
     subtest.after(() => page.close());
-    const calls = { creates: [], resolves: [], errors: [], unexpected: [] };
+    const calls = { creates: [], resolves: [], errors: [], unexpected: [], github: [], githubPages: [] };
     let releaseCreate;
     let releaseResolve;
     const creationGate = holdCreate ? new Promise(resolve => { releaseCreate = resolve; }) : Promise.resolve();
@@ -134,9 +136,28 @@ async function fixture(t) {
         assert.ok(transition);
         return json(transition);
       }
-      if (url.pathname === '/api/oauth/github/status') return json({ configured: false });
+      if (url.pathname.startsWith('/api/oauth/github/')) {
+        calls.github.push({ method: request.method(), path: url.pathname, query: Object.fromEntries(url.searchParams), headers: request.headers() });
+        if (url.pathname === '/api/oauth/github/status') return json({ configured: githubOauth });
+        if (githubOauth && url.pathname === '/api/oauth/github/start' && request.method() === 'POST') {
+          return json({ authorize_url: githubAuthorizeUrl, connection_id: 'server-connection' });
+        }
+        if (githubOauth && url.pathname === '/api/oauth/github/ready') {
+          const settled = calls.github.filter(call => call.path === url.pathname).length > 1;
+          if (settled && githubOauthFailure) return json({ ready: false, error: githubOauthFailure });
+          return json({ ready: settled });
+        }
+        if (githubOauth && url.pathname === '/api/oauth/github/repos') {
+          return json({ repos: [{ full_name: 'example/private-app', private: true, description: 'Customer app' }] });
+        }
+      }
       calls.unexpected.push(request.url());
       return route.abort();
+    });
+    // The OAuth popup is its own page; stand in for GitHub's consent screen.
+    await page.context().route('https://github.com/**', route => {
+      calls.githubPages.push(route.request().url());
+      return route.fulfill({ status: 200, contentType: 'text/html', body: '<p>GitHub consent</p>' });
     });
     await page.goto(`${baseUrl}${startPath}`);
     if (!entryTransition && !navigation) await expect(page.getByRole('heading', { name: 'Choose Your App Journey' })).toBeVisible();
@@ -144,6 +165,7 @@ async function fixture(t) {
   };
 }
 
+const githubAuthorizeUrl = 'https://github.com/login/oauth/authorize?client_id=fixture&state=server-state&scope=repo';
 const greenfield = page => page.getByRole('button', { name: /Build Something New/ });
 const brownfield = page => page.getByRole('button', { name: /Existing App/ });
 
@@ -248,6 +270,59 @@ test('registered app journeys use the normal factory selectors and shell transit
     assert.equal(final.context_variables.brownfield_build_path, 'light_integration');
     assert.equal(final.context_variables.github_repo, 'example/customer-app');
     assert.equal(Object.hasOwn(final.context_variables, 'build_registry_id'), false);
+  });
+
+  await t.test('connecting GitHub starts an authenticated flow and hands discovery only the server connection id', async subtest => {
+    const { page, calls } = await open(subtest, { githubOauth: true });
+    await brownfield(page).click();
+    await page.getByRole('button', { name: /Add AI Workflows/ }).click();
+    const popupOpened = page.waitForEvent('popup');
+    await page.getByRole('button', { name: 'Connect GitHub', exact: true }).click();
+    const popup = await popupOpened;
+    const repo = page.getByRole('button', { name: /example\/private-app/ });
+    await expect(repo).toBeVisible({ timeout: 10000 });
+    await expect.poll(() => popup.isClosed()).toBe(true);
+    assert.deepEqual(calls.githubPages, [githubAuthorizeUrl]);
+    await repo.click();
+    await page.getByRole('button', { name: 'Scan & Start Discovery', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Workflow opened' })).toBeVisible();
+
+    const [status, start, ...polls] = calls.github;
+    assert.equal(status.path, '/api/oauth/github/status');
+    assert.deepEqual([start.method, start.path], ['POST', '/api/oauth/github/start']);
+    assert.deepEqual(polls.map(call => call.path), [
+      '/api/oauth/github/ready', '/api/oauth/github/ready', '/api/oauth/github/repos',
+    ]);
+    for (const call of calls.github) {
+      assert.equal(call.headers.authorization, 'Bearer fixture-token', call.path);
+      assert.equal(Object.hasOwn(call.query, 'session_key'), false, call.path);
+    }
+    for (const call of polls) assert.deepEqual(call.query, { connection_id: 'server-connection' });
+    const final = calls.resolves.at(-1).body;
+    assert.equal(final.context_variables.github_repo, 'example/private-app');
+    assert.equal(final.context_variables.github_oauth_session, 'server-connection');
+  });
+
+  await t.test('a GitHub connection the callback refused shows the reason on the page instead of going idle', async subtest => {
+    const failure = 'This GitHub connection was started from a different browser or a different address '
+      + '(e.g. localhost vs 127.0.0.1). Start again from the same address.';
+    const { page, calls } = await open(subtest, { githubOauth: true, githubOauthFailure: failure });
+    await brownfield(page).click();
+    await page.getByRole('button', { name: /Add AI Workflows/ }).click();
+    const popupOpened = page.waitForEvent('popup');
+    await page.getByRole('button', { name: 'Connect GitHub', exact: true }).click();
+    const popup = await popupOpened;
+
+    await expect(page.getByRole('alert').filter({ hasText: 'different address' })).toHaveText(failure, { timeout: 10000 });
+    await expect.poll(() => popup.isClosed()).toBe(true);
+    await expect(page.getByRole('button', { name: 'Connect GitHub', exact: true })).toBeEnabled();
+    assert.deepEqual(calls.github.map(call => call.path), [
+      '/api/oauth/github/status', '/api/oauth/github/start', '/api/oauth/github/ready', '/api/oauth/github/ready',
+    ]);
+    // Polling stopped: no further /ready, and no repo list for a flow that failed.
+    await page.waitForTimeout(1500);
+    assert.equal(calls.github.length, 4);
+    assert.deepEqual(calls.resolves.map(call => call.body?.context_variables?.github_oauth_session).filter(Boolean), []);
   });
 
   await t.test('registration error is visible and cannot start a workflow; retry recovers', async subtest => {

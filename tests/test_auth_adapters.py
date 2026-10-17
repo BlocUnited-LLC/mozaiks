@@ -963,7 +963,7 @@ class TestProviderConfigIdentity:
             "AUTH_NAME_CLAIM", "AUTH_SCOPES_CLAIM", "AUTH_SCOPES_FORMAT", "AUTH_APP_ID_CLAIM",
             "AUTH_CHAT_ID_CLAIM", "AUTH_TENANT_ID_CLAIM", "AUTH_WORKSPACE_ID_CLAIM",
             "AUTH_CLOCK_SKEW", "AUTH_ALGORITHMS", "AUTH_AUDIENCE", "AUTH_REQUIRED_SCOPE",
-            "AUTH_USER_ID_CLAIM", "AUTH_EMAIL_CLAIM", "AUTH_ROLES_CLAIM",
+            "AUTH_USER_ID_CLAIM", "AUTH_EMAIL_CLAIM", "AUTH_EMAIL_VERIFIED_CLAIM", "AUTH_ROLES_CLAIM",
             "AUTH_JWKS_CACHE_TTL", "AUTH_DISCOVERY_CACHE_TTL", "MOZAIKS_OIDC_TENANT_ID",
             "KEYCLOAK_CLIENT_ID", "KEYCLOAK_APP_ID_CLAIM", "KEYCLOAK_TENANT_ID_CLAIM",
             "KEYCLOAK_WORKSPACE_ID_CLAIM", "SUPABASE_JWT_SECRET",
@@ -1000,6 +1000,10 @@ class TestProviderConfigIdentity:
             ("AUTH_NAME_CLAIM", "display_name"),
             ("AUTH_USER_ID_CLAIM", "oid"),
             ("AUTH_EMAIL_CLAIM", "upn"),
+            # Changed on its own, against the default email claim: a verified
+            # claim must vouch for the AUTH_EMAIL_CLAIM value, so the row above
+            # (upn) is not paired with this one.
+            ("AUTH_EMAIL_VERIFIED_CLAIM", "custom_email_verified"),
             ("AUTH_ROLES_CLAIM", "realm_access"),
             ("AUTH_APP_ID_CLAIM", "appid"),
             ("AUTH_CHAT_ID_CLAIM", "cid"),

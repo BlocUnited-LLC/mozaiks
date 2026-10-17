@@ -412,5 +412,55 @@ Do not use Keycloak's shared `account` audience for either setting. Tokens
 issued to unrelated clients can carry it, so it does not bind a token to
 the Mozaiks API.
 
+### Admin access and email verification
+
+An address in `app/app.json` `admins` grants admin only once Keycloak marks
+that email verified (the token's `email_verified` claim is `true`). The
+included local realm allows self-registration and has no mail server, so it
+does not verify email: a freshly registered account is not an admin, even with
+an allowlisted address. Otherwise anyone who registered first with an admin's
+address would become an admin.
+
+On the packaged Compose stack, mark the admin's email verified by hand:
+
+1. Open the Keycloak admin console at `http://localhost:8080/admin/` and sign
+   in as `KC_ADMIN_USER` with `KC_ADMIN_PASSWORD`. That account belongs to the
+   `master` realm.
+2. Open the realm list at the top of the left sidebar and choose **mozaiks**.
+   Accounts created through the Mozaiks sign-in page live in `mozaiks`, not in
+   `master`.
+3. Go to **Users**, search for the admin's address, and click the username.
+4. On the **Details** tab, turn **Email verified** on and click **Save**.
+5. Sign out of Mozaiks and sign in again. The new access token carries
+   `email_verified: true`.
+
+A role in the token is the other way to grant admin, but the packaged setup
+does not provide one. The realm defines no `admin` role, and the Compose
+backend uses the generic `jwt` provider. That provider reads roles only from
+the top-level claim named by `AUTH_ROLES_CLAIM` (default `roles`), not from
+Keycloak's `realm_access.roles`. To grant admin by role, in the `mozaiks`
+realm:
+
+1. **Realm roles → Create role**: name it `admin` and save.
+2. **Users → the user → Role mapping → Assign role**: assign the realm role
+   `admin`.
+3. **Clients → mozaiks-studio → Client scopes → mozaiks-studio-dedicated →
+   Add mapper → By configuration → User Realm Role**: set **Name** and
+   **Token Claim Name** to `roles`, keep **Multivalued** on, turn **Add to
+   access token** on, and save.
+4. Sign in again.
+
+The `keycloak` provider (`AUTH_PROVIDER=keycloak` with `KEYCLOAK_URL`,
+`KEYCLOAK_REALM` and `KEYCLOAK_CLIENT_ID`) reads `realm_access.roles` itself,
+so it needs the role but not the mapper.
+
+For a deployed realm, configure SMTP (**Realm settings → Email**) and turn on
+**Realm settings → Login → Verify email**, or turn off **User registration**
+and create accounts yourself. The packaged realm leaves verification off
+because Compose ships no mail server and Keycloak would block every login on
+an email it cannot send. See
+[Admin allowlist needs a verified email](../architecture/verified/auth-setup.md#admin-allowlist-needs-a-verified-email)
+for other providers.
+
 For detailed Keycloak configuration (custom domains, social login, external IdPs)
 see [Auth Setup](../architecture/verified/auth-setup.md).

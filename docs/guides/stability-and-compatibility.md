@@ -106,12 +106,13 @@ first.
 
 Current version: see `mozaiksai.__version__`.
 
-The package is pre-1.0 and not yet published to PyPI. Install from a local
-editable checkout. See [self-hosting guide](self-hosting.md) and
-[releasing.md](../releasing.md) for the current publication status.
+The package is pre-1.0 and published on PyPI. Install it with
+`python -m pip install mozaiks`; use a local editable checkout when contributing
+to the framework. See [self-hosting guide](self-hosting.md) and
+[releasing.md](../releasing.md) for release policy.
 
 Do not depend on a specific pre-1.0 `0.x.y` version as a stable API target.
-Pin to a specific git SHA for reproducible builds until 1.0.
+Pin an exact package version or git SHA for reproducible builds until 1.0.
 
 ### Workspace acceptance
 

@@ -18,6 +18,7 @@ def completed_build(tmp_path):
     mobile = tmp_path / "output" / "workspace" / "mobile"
     mobile.mkdir(parents=True)
     manifest = {
+        "spec": {"build_type": "debug"},
         "source_digest": "sha256:" + "1" * 64,
         "spec_digest": "sha256:" + "2" * 64,
         "pack": {"digest": "sha256:" + "3" * 64},
@@ -28,7 +29,7 @@ def completed_build(tmp_path):
     apk.parent.mkdir(parents=True)
     apk.write_bytes(b"fixture APK bytes; compilation is tested on the Android runner")
     receipt = {
-        "schema_version": "mozaiks.android_build_result.v1",
+        "schema_version": "mozaiks.android_build_result.v2",
         "status": "succeeded",
         "device_acceptance": "not_run",
         "source_digest": manifest["source_digest"],
@@ -36,7 +37,8 @@ def completed_build(tmp_path):
         "pack_digest": manifest["pack"]["digest"],
         "framework_commit": manifest["framework"]["commit"],
         "framework_resource_digest": manifest["framework"]["resource_digest"],
-        "apk": {
+        "artifact": {
+            "kind": "debug_apk",
             "path": apk.relative_to(mobile).as_posix(),
             "sha256": hashlib.sha256(apk.read_bytes()).hexdigest(),
             "size_bytes": apk.stat().st_size,
@@ -67,7 +69,7 @@ def test_receipt_cannot_describe_another_build(completed_build, field):
 
 @pytest.mark.parametrize("patch", [
     {"status": "failed"}, {"status": "prepared"}, {"device_acceptance": "passed"},
-    {"schema_version": "unknown"}, {"apk": None},
+    {"schema_version": "unknown"}, {"artifact": None},
 ])
 def test_incomplete_or_forged_success_receipt_is_rejected(completed_build, patch):
     mobile, receipt, _ = completed_build
@@ -80,7 +82,7 @@ def test_incomplete_or_forged_success_receipt_is_rejected(completed_build, patch
 @pytest.mark.parametrize("path", ["../outside.apk", "/outside.apk", "C:/outside.apk", "android\\outside.apk"])
 def test_receipt_cannot_select_a_nonportable_or_external_file(completed_build, path):
     mobile, receipt, _ = completed_build
-    receipt["apk"]["path"] = path
+    receipt["artifact"]["path"] = path
     (mobile / "build-result.json").write_text(json.dumps(receipt))
     with pytest.raises(ValueError):
         package_command._verified_build_result(mobile)
@@ -160,4 +162,41 @@ def test_success_runs_fixed_entrypoint_and_verifies_its_result(completed_build, 
     assert options["cwd"] == mobile and options["check"] is True
     assert options["env"]["PYTHON_DOTENV_DISABLED"] == "1"
     assert Path(options["env"]["MOZAIKS_PYTHON"]).is_file()
-    assert json.loads(capsys.readouterr().out)["apk"] == receipt["apk"]
+    assert json.loads(capsys.readouterr().out)["artifact"] == receipt["artifact"]
+
+
+def test_release_receipt_requires_the_canonical_unsigned_aab(tmp_path):
+    mobile = tmp_path / "mobile"
+    artifact = mobile / "android/app/build/outputs/bundle/release/app-release.aab"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_bytes(b"unsigned bundle")
+    manifest = {
+        "spec": {"build_type": "release"},
+        "source_digest": "sha256:" + "1" * 64,
+        "spec_digest": "sha256:" + "2" * 64,
+        "pack": {"digest": "sha256:" + "3" * 64},
+        "framework": {"commit": "4" * 40, "resource_digest": "sha256:" + "5" * 64},
+    }
+    receipt = {
+        "schema_version": "mozaiks.android_build_result.v2",
+        "status": "succeeded",
+        "device_acceptance": "not_run",
+        "source_digest": manifest["source_digest"],
+        "spec_digest": manifest["spec_digest"],
+        "pack_digest": manifest["pack"]["digest"],
+        "framework_commit": manifest["framework"]["commit"],
+        "framework_resource_digest": manifest["framework"]["resource_digest"],
+        "artifact": {
+            "kind": "unsigned_release_aab",
+            "path": artifact.relative_to(mobile).as_posix(),
+            "sha256": hashlib.sha256(artifact.read_bytes()).hexdigest(),
+            "size_bytes": artifact.stat().st_size,
+        },
+    }
+    (mobile / "delivery.manifest.json").write_text(json.dumps(manifest))
+    (mobile / "build-result.json").write_text(json.dumps(receipt))
+    assert package_command._verified_build_result(mobile) == receipt
+    receipt["artifact"]["kind"] = "debug_apk"
+    (mobile / "build-result.json").write_text(json.dumps(receipt))
+    with pytest.raises(ValueError, match="typed artifact"):
+        package_command._verified_build_result(mobile)

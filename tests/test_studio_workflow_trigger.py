@@ -1967,6 +1967,87 @@ def test_studio_artifact_accept_endpoint_marks_current_and_updates_session(monke
     assert store.update_calls[-1]["status"] == RefinementSessionStatus.ACCEPTED
 
 
+def test_imported_genesis_uses_exact_review_route_and_blocks_generic_mutations(monkeypatch, tmp_path: Path, _owned_build_target):
+    from mozaiksai.core.auth import reset_auth_adapter
+    from mozaiksai.hosts import studio
+
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+    reset_auth_adapter()
+    store = _build_review_store(tmp_path, lifecycle_status=ArtifactLifecycleStatus.DRAFT)
+    genesis_record_id = "av_" + "1" * 24
+    store.child_version = store.child_version.model_copy(update={"id": genesis_record_id})
+    store.session = store.session.model_copy(update={"result_artifact_version_id": genesis_record_id})
+    store.child_version.commit_metadata.metadata["bundle_mode"] = "brownfield_genesis_import"
+    monkeypatch.setattr(studio, "get_artifact_store", lambda: store)
+    accepted = store.child_version.model_copy(update={"lifecycle_status": ArtifactLifecycleStatus.CURRENT})
+    accept = AsyncMock(return_value=accepted)
+    monkeypatch.setattr(studio, "accept_existing_app_genesis", accept)
+    _owned_build_target.get_app_record.return_value["app"]["genesis_import"] = {"status": "accepted"}
+    _owned_build_target.get_app_record.return_value["app"]["genesis_import"].update({
+        "build_record_id": genesis_record_id, "bundle_sha256": "a" * 64,
+        "manifest_sha256": "b" * 64,
+        "bundle_name": "ExistingApp", "content_backend": "local",
+        "source_id": "managed/app-zero", "revision_id": "c" * 40, "tree_id": "d" * 40,
+    })
+    client = TestClient(studio.app)
+    path = f"/api/studio/build/artifacts/{genesis_record_id}"
+    review = client.get(f"{path}/review?build_registry_id=appreg_1")
+    assert review.status_code == 200, review.text
+    assert review.json()["genesis_import"]["manifest_sha256"] == "b" * 64
+    disclosure = review.json()["genesis_acceptance_disclosure"]
+    assert disclosure["validation_contract"] == "authored_app_root_acceptance_v2"
+    assert disclosure["excluded_observer_checks"] == ["event_rejection"]
+    assert review.json()["review"]["can_accept"] is False
+    for action in ("accept", "reject", "promote"):
+        assert client.post(f"{path}/{action}?build_registry_id=appreg_1").status_code == 409
+    assert client.post(f"{path}/accept-genesis?build_registry_id=appreg_1", json={
+        "confirm_exact_source_review": False,
+        "reviewed_bundle_sha256": "a" * 64,
+        "reviewed_manifest_sha256": "b" * 64,
+        "disclosure_version": disclosure["version"],
+        "disclosure_sha256": disclosure["sha256"],
+    }).status_code == 422
+    response = client.post(f"{path}/accept-genesis?build_registry_id=appreg_1", json={
+        "confirm_exact_source_review": True,
+        "reviewed_bundle_sha256": "a" * 64,
+        "reviewed_manifest_sha256": "b" * 64,
+        "disclosure_version": disclosure["version"],
+        "disclosure_sha256": disclosure["sha256"],
+    })
+    assert response.status_code == 200, response.text
+    assert response.json()["genesis_import"]["status"] == "accepted"
+    assert accept.await_args.kwargs["owner_user_id"] == "demo-user"
+    assert accept.await_args.kwargs["execution_app_id"] == "factory"
+    assert accept.await_args.kwargs["reviewed_bundle_sha256"] == "a" * 64
+    assert accept.await_args.kwargs["disclosure_sha256"] == disclosure["sha256"]
+
+
+def test_refinement_trigger_refuses_unaccepted_imported_genesis_before_classification(monkeypatch):
+    from mozaiksai.core.auth import reset_auth_adapter
+    from mozaiksai.hosts import studio
+
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+    reset_auth_adapter()
+    _BaselineStore.versions["av_123"].commit_metadata.metadata["bundle_mode"] = "brownfield_genesis_import"
+    classify = AsyncMock(side_effect=AssertionError("Unaccepted source reached classification"))
+    monkeypatch.setattr(
+        studio.get_orchestration_control_harness()._refinement_resolver,
+        "_classifier", SimpleNamespace(classify=classify),
+    )
+    response = TestClient(studio.app).post("/api/workflows/trigger", json={
+        "build_registry_id": "appreg_1", "trigger_source": "refinement",
+        "trigger_payload": {"refinement_request": {
+            "artifact_kind": "app_bundle", "artifact_key": "app_bundle",
+            "artifact_version_id": "av_123", "raw_user_request": "Improve this app",
+        }},
+    })
+    assert response.status_code == 409, response.text
+    assert "accepted owner review" in response.json()["detail"]
+    classify.assert_not_awaited()
+
+
 def test_studio_artifact_reject_endpoint_archives_and_updates_session(monkeypatch, tmp_path: Path):
     from mozaiksai.core.auth import reset_auth_adapter
 

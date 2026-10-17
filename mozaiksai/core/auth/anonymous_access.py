@@ -386,7 +386,7 @@ def visitor_claims(claims: UserClaims, config: ResolvedAuthConfig) -> UserClaims
     ``access_as_user`` when that is unset.
     """
     scopes = csv_setting_values(config.settings.get("AUTH_ANON_SCOPES")) or list(VISITOR_DEFAULT_SCOPES)
-    return replace(claims, email=None, roles=[], scopes=scopes, raw_claims={})
+    return replace(claims, email=None, email_verified=False, roles=[], scopes=scopes, raw_claims={})
 
 
 async def anonymous_claims(

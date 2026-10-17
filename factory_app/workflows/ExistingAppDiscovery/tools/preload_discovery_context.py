@@ -2603,7 +2603,10 @@ async def collect_prechat_discovery_context(context_variables: Any | None = None
     backend_github_repo = _first_nonempty(_ctx_get(ctx, "backend_github_repo"), discovery_inputs.get("backend_github_repo"))
     github_ref = _first_nonempty(_ctx_get(ctx, "github_ref"), discovery_inputs.get("github_ref"))
 
-    # Resolve OAuth session key -> GitHub access token (consumed once, then cleared)
+    # Resolve the GitHub OAuth connection id -> access token (consumed once, then
+    # cleared). The connection belongs to the user who connected GitHub, and only
+    # a run of that same user receives its token: user_id is the run identity the
+    # runtime seeds from the authenticated launch, never a caller-supplied input.
     github_token: str | None = None
     _oauth_session = _first_nonempty(
         _ctx_get(ctx, "github_oauth_session"),
@@ -2617,11 +2620,11 @@ async def collect_prechat_discovery_context(context_variables: Any | None = None
     if _oauth_session:
         try:
             from mozaiksai.hosts.routers.oauth_github import consume_github_token
-            github_token = consume_github_token(str(_oauth_session))
-            logger.info(
-                "[ExistingAppDiscovery] OAuth token resolved: session=%s present=%s",
-                str(_oauth_session)[:8], bool(github_token),
+            github_token = consume_github_token(
+                str(_oauth_session),
+                user_id=str(_ctx_get(ctx, "user_id") or ""),
             )
+            logger.info("[ExistingAppDiscovery] OAuth token resolved: present=%s", bool(github_token))
         except Exception as _exc:
             logger.warning("[ExistingAppDiscovery] OAuth token resolution failed: %s", _exc)
         _ctx_set(ctx, "github_oauth_session", None)

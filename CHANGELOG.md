@@ -12,6 +12,13 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Added
+
+- Android delivery can produce a provenance-bound unsigned release AAB for a
+  trusted product host to sign. Build receipts now use one typed artifact
+  contract for debug APK and unsigned release AAB outputs; signing keys and
+  store credentials remain outside OSS delivery inputs.
+
 ### Changed
 
 - Generated UI acceptance can verify a candidate against the existing local
@@ -48,10 +55,15 @@ This project follows a practical pre-1.0 changelog format:
   through directory junctions, preserving the locked sanitizer in isolated
   Windows worktrees as well as ordinary installations.
 
-## 0.2.0 - 2026-10-11
+## 0.2.0 - 2026-10-16
 
 ### Added
 
+- Added owner-reviewed imported Genesis baselines for existing app roots. Studio
+  verifies the exact archive and member digests in contained local validation,
+  discloses the app-root-only event-observer limitation, and requires the owner
+  to acknowledge that exact disclosure before later Refinement Runs can use the
+  baseline.
 - Module startup services can opt into a separate `worker` process profile;
   existing services stay on the ordinary host. Invalid worker selection aborts
   startup before serving requests. Studio preview maintenance stays on the
@@ -156,6 +168,26 @@ This project follows a practical pre-1.0 changelog format:
   honor it.
 
 ### Security
+
+- An email in `app/app.json` `admins` grants the admin role only when the
+  identity provider marked that email verified (`email_verified` is JSON
+  `true` in the access token). Before, any signed-in account with an
+  allowlisted address became an admin, so on a provider with open sign-up,
+  such as the packaged Keycloak realm, anyone who registered first with an
+  admin's address could take admin rights. A missing or false claim now gets
+  the ordinary `403 Admin access required` and an `ADMIN_EMAIL_UNVERIFIED`
+  server log line. The generic JWT adapter reads the claim named by the new
+  `AUTH_EMAIL_VERIFIED_CLAIM`. Unset, that is `email_verified` only while
+  `AUTH_EMAIL_CLAIM` is `email`; with a remapped email claim (for example
+  `preferred_username`) no email counts as verified, and the adapter logs
+  `AUTH_EMAIL_VERIFIED_CLAIM_UNSET`. Keycloak reads `email_verified`;
+  Supabase counts only a top-level `email_verified` claim, never the
+  user-writable `user_metadata` copy. Allowlist matching is ASCII-only, so a
+  lookalike such as the Kelvin sign never folds into an admin address. Admin
+  roles issued in the token, and `AUTH_ANON_ROLES` with authentication off,
+  are unchanged. On the packaged Compose stack, mark the admin's email
+  verified in the Keycloak console's `mozaiks` realm, or configure SMTP and
+  email verification for a deployed realm.
 
 - Generated messaging modules now require a verified workspace for workspace
   conversations. A signed caller cannot select another workspace through
@@ -475,6 +507,35 @@ This project follows a practical pre-1.0 changelog format:
   bound to. Dispatch without a verified identity holds only app-wide grants.
   Apps that sell tenant- or workspace-scoped plans need tokens that carry the
   tenant (`AUTH_TENANT_ID_CLAIM`) or workspace (`AUTH_WORKSPACE_ID_CLAIM`) claim.
+
+- The "Connect GitHub" flow of existing-app discovery is bound to the signed-in
+  user and to the browser that started it. Before, the `/api/oauth/github/*`
+  routes had no authentication and used a caller-chosen `session_key` as the
+  OAuth state: anyone could send a person a `/connect?session_key=` link of
+  their choosing and, once that person approved GitHub's consent screen, list
+  their repositories or start a discovery run with their `repo`-scoped token.
+  The flow now starts with an authenticated `POST /api/oauth/github/start`,
+  which returns GitHub's authorize URL and a connection id and sets a
+  short-lived HttpOnly `__Host-` cookie (`Secure`, `Path=/`), which a sibling
+  subdomain or an injected http response cannot plant. The callback accepts
+  only a state the server issued, once, before it expires, and only from the
+  browser holding that flow's cookie exactly once. `/status`, `/ready` and
+  `/repos` require a signed-in user or local development access and answer
+  only the connection's owner, and discovery receives the token only in a run
+  of that same user. When the callback refuses or fails a flow, `/ready` tells
+  the page that started it why, and the error popup stays open.
+  `GET /api/oauth/github/connect` is removed, as is
+  `/api/oauth/github/_dev/complete`, which seeded tokens without
+  authentication whenever `APP_ENV` was not `production`. The callback page no
+  longer echoes GitHub's `error_description`, which could inject script on the
+  API origin. The callback must be served on the host the page sends its API
+  calls to (ports may differ; `localhost` and `127.0.0.1` are different
+  hosts), and the page must be served over HTTPS, which Chromium and Firefox
+  also grant `http://localhost`. Only local development (authentication off,
+  a request from this machine) uses an unprefixed, non-`Secure` cookie,
+  because WebKit (Safari) can drop a `Secure` cookie on `http://localhost`.
+  The flow still requests `repo` because GitHub OAuth Apps have no read-only
+  scope for private repositories; discovery only reads.
 
 ### Changed
 

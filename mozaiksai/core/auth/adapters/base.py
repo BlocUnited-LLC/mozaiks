@@ -21,6 +21,11 @@ class UserClaims:
 
     user_id: str
     email: str | None = None
+    # True only when the identity provider asserted that ``email`` is verified
+    # (see ``claim_is_true``). Absent, false, or any other value is False, and
+    # so is every principal without an email. The app.json admins allowlist
+    # promotes only a verified email.
+    email_verified: bool = False
     name: str | None = None
     roles: list[str] = field(default_factory=list)
     scopes: list[str] = field(default_factory=list)
@@ -50,6 +55,16 @@ class UserClaims:
     def get_claim(self, claim_name: str, default: Any = None) -> Any:
         """Get a raw claim value by name."""
         return self.raw_claims.get(claim_name, default)
+
+
+def claim_is_true(raw_claims: Mapping[str, Any], claim_name: str) -> bool:
+    """True only when ``claim_name`` holds the JSON boolean ``true``.
+
+    For claims that grant something, such as ``email_verified``: a missing
+    claim, ``false``, or any other value, including the string ``"true"``, is
+    not the assertion.
+    """
+    return bool(claim_name) and raw_claims.get(claim_name) is True
 
 
 class AuthError(Exception):

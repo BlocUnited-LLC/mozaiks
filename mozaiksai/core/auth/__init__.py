@@ -51,6 +51,10 @@ Configuration (environment variables):
     AUTH_ACCESS_TOKEN_TYPE_VALUE=access
     AUTH_USER_ID_CLAIM=sub
     AUTH_EMAIL_CLAIM=email
+    # JSON true gates app.json admins. Unset: email_verified when the email
+    # claim is "email", else nothing is verified. Set it only to a claim that
+    # vouches for the AUTH_EMAIL_CLAIM value.
+    AUTH_EMAIL_VERIFIED_CLAIM=
     AUTH_ROLES_CLAIM=roles
     AUTH_SCOPES_CLAIM=scp
     AUTH_SCOPES_FORMAT=space|array

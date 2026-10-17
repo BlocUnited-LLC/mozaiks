@@ -223,6 +223,7 @@ def _prompt_admin_email() -> str:
     print("Admin portal is included in this preset.")
     print("Enter the email address for the admin account.")
     print("This is the email you will use to log in to the /admin portal.")
+    print("Your identity provider must mark it verified (email_verified) before it grants admin.")
     print("(Press Enter to skip and set it later in app/app.json admins)\n")
     try:
         email = input("Admin email: ").strip()
