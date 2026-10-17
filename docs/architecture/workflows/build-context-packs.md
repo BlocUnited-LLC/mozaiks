@@ -181,20 +181,48 @@ declared output path belongs to exactly one selected pack.
 Without an approved DesignDocs data contract, assembly composes the selected
 packs' contributions (and any subscription assignment stores) onto an empty
 contract. A `data/contract.json` the bundle already carries is not an approval,
-so that composition replaces it only when the carried contract holds nothing the
-app owns. Every carried surface must be a surface of that composition (a
-selected pack's contributed surface or the subscription assignment store
-surface) with the same `surface_kind`, and hold only collections the
-composition declares under that surface, matched by collection name and
-physical collection. Every alias must be one the composition declares, the
-contract declares no shared collections, and its other metadata matches.
-Fields inside a declared collection and surface order are not compared, so an
-earlier assembly, the pack lifecycle's recomposition, a changed pack
-contribution or a newly added assignment store all recompose. A carried contract
-holding any other surface, collection or alias (including an app surface that
-shares a pack's surface id, or an app collection placed inside a pack or
-assignment store surface) fails assembly with the approved-contract error
-instead of being silently replaced.
+so that composition replaces it only when the carried contract holds nothing
+but what the composition derives. The guard compares exactly these:
+
+- each carried surface's `surface_id` and `surface_kind` must be those of a
+  composition surface (a selected pack's contributed surface or the
+  subscription assignment store surface);
+- each collection under a carried surface must be one the composition declares
+  under that same surface, matched by collection `name` and physical collection
+  (`mongo_collection`, else `collection`, else `name`);
+- each row of the top-level `aliases` list, as an (alias, collection) pair, must
+  be a pair the composition declares;
+- `shared_collections` must be empty;
+- every other top-level key except `version` must equal the composition's.
+
+Nothing else is compared. Within a collection the composition declares, its
+`fields`, `indexes`, `tenancy`, `owner_field`, entity, lifecycle and
+collection-level aliases (`data_alias`, `primary_alias`, `shared_with`,
+`read_by`) may differ; so may surface-level keys other than `surface_id`,
+`surface_kind` and `collections`, `version`, and surface order. The carried
+contract may also lack surfaces, collections or aliases the composition adds.
+The composition's declaration replaces all of these, so an earlier assembly,
+the pack lifecycle's recomposition, a changed pack contribution or a newly added
+assignment store all recompose. It follows that a collection-level alias, or a
+changed tenancy, owner field or index, written on a declared collection is
+replaced without an error. An app-authored collection-level alias can come only
+from an imported or hand-edited contract, since the DesignDocs collection schema
+has no `data_alias`.
+
+When the guard fails, assembly fails closed instead of replacing the carried
+contract, and the error names the reason. A carried contract that holds
+app-owned data (any other surface, a composition surface under another
+`surface_kind`, a collection or top-level alias the composition does not
+declare, a shared collection or differing metadata, including an app surface
+that shares a pack's surface id or an app collection inside a pack or
+assignment store surface) is reported as holding app-owned data, naming each
+item. A carried contract whose only differences are derived data whose identity
+changed (a declared collection stored in another physical collection, a surface
+without its `surface_kind`, or a subscription assignment store or alias the
+current subscription contract no longer compiles) is reported as derived data
+that no longer matches the current pack/assignment composition, naming each
+change: its stored rows need an approved DesignDocs data contract or a
+migration, never a silent re-point.
 
 Canonical policy, schema, and CRUD synthesis still owns ordinary generated and
 partially templated modules, including OutcomeFeedback. A complete template

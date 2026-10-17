@@ -335,16 +335,7 @@ def _assignment_store_subscription():
             "selected_features_by_plan": {"free": [], "pro": []}, "module_contract_updates": []}
 
 
-@pytest.mark.parametrize("carried", [
-    "lifecycle_reordered", "gains_assignment_store", "pack_contribution_changed", "app_surface", "app_shared_collection",
-    "app_surface_with_the_pack_surface_id", "app_collection_and_alias_in_pack_surface",
-    "app_collection_in_assignment_surface", "app_alias_of_a_pack_collection",
-])
-def test_pack_only_contract_replaces_a_carried_contract_only_when_it_holds_no_app_data(tmp_path, carried):
-    from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
-        _recompose_data_contract,
-    )
-
+def _pack_only_merge():
     context = _context()
     emitted = resolve_managed_capability_templates(context["capability_packs"], context_variables=context)
 
@@ -354,7 +345,21 @@ def test_pack_only_contract_replaces_a_carried_contract_only_when_it_holds_no_ap
             [{"code_files": [*emitted, *carried_files]}], app_build_plan=context["app_build_plan"],
             data_contract=None, subscription_contract=subscription, context_variables=context,
         )}["data/contract.json"])
+    return context, merge
 
+
+@pytest.mark.parametrize("carried", [
+    "lifecycle_reordered", "gains_assignment_store", "pack_contribution_changed", "app_surface", "app_shared_collection",
+    "app_surface_with_the_pack_surface_id", "app_collection_and_alias_in_pack_surface",
+    "app_collection_in_pack_surface", "app_collection_in_assignment_surface", "app_alias_of_a_pack_collection",
+    "pack_surface_of_another_kind", "assignment_surface_of_another_kind",
+])
+def test_pack_only_contract_replaces_a_carried_contract_only_when_it_holds_no_app_data(tmp_path, carried):
+    from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
+        _recompose_data_contract,
+    )
+
+    context, merge = _pack_only_merge()
     subscription = _assignment_store_subscription()
     plain, with_store = merge(), merge(subscription=subscription)
     assert [surface["surface_id"] for surface in with_store["surfaces"]] == ["messages", "subscription_assignments"]
@@ -380,26 +385,86 @@ def test_pack_only_contract_replaces_a_carried_contract_only_when_it_holds_no_ap
         surfaces = {surface["surface_id"]: surface for surface in app_data["surfaces"]}
         if carried == "app_surface":
             app_data["surfaces"].extend(CARRIED_APP_CONTRACT["surfaces"])
+            owned = ["surface 'projects'"]
         elif carried == "app_shared_collection":
             app_data["shared_collections"] = [{"name": "notes", "entity": "Note", "scope": "app", "fields": []}]
+            owned = ["shared collections"]
         elif carried == "app_surface_with_the_pack_surface_id":
             # An imported app's own surface that happens to share the pack's surface id.
             app_data = {**deepcopy(CARRIED_APP_CONTRACT), "surfaces": [{
                 "surface_id": "messages", "surface_kind": "module",
                 "collections": [{**app_collection, "name": "inbox_items", "entity": "InboxItem"}],
             }]}
+            owned = ["collection 'inbox_items' in surface 'messages'"]
         elif carried == "app_collection_and_alias_in_pack_surface":
             surfaces["messages"]["collections"].append(app_collection)
             app_data["aliases"].append({"alias": "app.projects", "collection": "projects"})
+            owned = ["collection 'projects' in surface 'messages'", "alias 'app.projects' -> 'projects'"]
+        elif carried == "app_collection_in_pack_surface":
+            # No alias names it: the collection itself is what the composition does not declare.
+            surfaces["messages"]["collections"].append(app_collection)
+            owned = ["collection 'projects' in surface 'messages'"]
         elif carried == "app_collection_in_assignment_surface":
             surfaces["subscription_assignments"]["collections"].append(app_collection)
+            owned = ["collection 'projects' in surface 'subscription_assignments'"]
+        elif carried == "pack_surface_of_another_kind":
+            # The pack's surface id and collections under a surface_kind the composition does not declare.
+            surfaces["messages"]["surface_kind"] = "app_policy"
+            owned = ["surface 'messages' of kind 'app_policy', composed as 'module'"]
+        elif carried == "assignment_surface_of_another_kind":
+            surfaces["subscription_assignments"]["surface_kind"] = "module"
+            owned = ["surface 'subscription_assignments' of kind 'module', composed as 'app_policy'"]
         else:
             # An app alias naming a pack collection is the app's own, too.
             app_data["aliases"].append({"alias": "app.inbox", "collection": "messages"})
+            owned = ["alias 'app.inbox' -> 'messages'"]
         # Reordering never hides app data: the app's own surface would be dropped.
         app_data["surfaces"].reverse()
-        with pytest.raises(ValueError, match="requires the approved DesignDocs data_contract"):
+        with pytest.raises(ValueError, match="requires the approved DesignDocs data_contract") as raised:
             merge(json.dumps(app_data), subscription)
+        message = str(raised.value)
+        assert "holds app-owned data: " in message and "no longer matches" not in message, message
+        assert all(detail in message for detail in owned), (owned, message)
+
+
+@pytest.mark.parametrize("carried", [
+    "pack_collection_stored_elsewhere", "assignment_store_no_longer_compiled", "assignment_alias_renamed",
+    "pack_surface_without_kind",
+])
+def test_carried_derived_data_whose_identity_changed_fails_naming_that_change(carried):
+    # Nothing here is the app's own, but a derived collection no longer matches the composition.
+    # Replacing it would orphan its stored rows, so assembly fails and names what changed.
+    _, merge = _pack_only_merge()
+    subscription = _assignment_store_subscription()
+    current, earlier = subscription, merge(subscription=subscription)
+    if carried == "pack_collection_stored_elsewhere":
+        earlier["surfaces"][0]["collections"][0]["mongo_collection"] = "threads_v1"
+        changed = ["derived collection 'threads' in surface 'messages' is stored in 'threads_v1', composed as 'threads'"]
+    elif carried == "assignment_store_no_longer_compiled":
+        current = None
+        changed = [
+            "subscription assignment store 'billing_subscriptions' in surface 'subscription_assignments' is not "
+            "one the current subscription contract compiles",
+            "subscription assignment alias 'billing.subscriptions' -> 'billing_subscriptions' is not one",
+        ]
+    elif carried == "assignment_alias_renamed":
+        renamed = _assignment_store_subscription()
+        renamed["subscription_config_file"]["assignment_store"]["data_alias"] = "billing.plans"
+        earlier = merge(subscription=renamed)
+        changed = [
+            "subscription assignment store 'billing_plans' in surface 'subscription_assignments' is not one",
+            "subscription assignment alias 'billing.plans' -> 'billing_plans' is not one",
+        ]
+    else:
+        earlier["surfaces"][0].pop("surface_kind")
+        changed = ["surface 'messages' has no surface_kind, composed as 'module'"]
+    with pytest.raises(ValueError, match="requires the approved DesignDocs data_contract") as raised:
+        merge(json.dumps(earlier), current)
+    message = str(raised.value)
+    assert "the carried contract's derived data no longer matches the current pack/assignment composition" in message
+    assert all(detail in message for detail in changed), (changed, message)
+    assert "app-owned" not in message
+    assert message.endswith("Reassemble with an approved DesignDocs data_contract or migrate the stored data")
 
 
 @pytest.mark.parametrize("path", ["modules/messages/backend/policy.py", "modules/messages/backend/service.py",
