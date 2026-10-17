@@ -869,12 +869,31 @@ async def test_messaging_account_export_of_created_threads_holds_only_the_users_
 
     exported = await rt.account("export", "alice")
     (created,) = exported["threads_created"]
-    # The same fixed projection as memberships: no peer preview, participant ids, or storage metadata.
-    assert set(created) == THREAD_EXPORT_FIELDS
+    # The membership projection plus the creator's own thread annotations: no
+    # peer preview, participant ids, or storage metadata.
+    assert set(created) == THREAD_EXPORT_FIELDS | {"metadata"}
     assert created["thread_id"] == thread_id
-    assert created == next(row for row in exported["thread_memberships"] if row["thread_id"] == thread_id)
+    membership = next(row for row in exported["thread_memberships"] if row["thread_id"] == thread_id)
+    assert {key: value for key, value in created.items() if key != "metadata"} == membership
     assert peer_text not in json.dumps(exported["threads_created"])
     assert "bob" not in json.dumps(exported["threads_created"])
+
+
+@pytest.mark.asyncio
+async def test_messaging_account_export_keeps_the_creators_thread_annotations(messaging_account):
+    rt = messaging_account
+    created = await rt.module.create_thread(
+        rt.ctx("alice"), participant_ids=["bob"], thread_type="direct",
+        metadata=[{"key": "topic", "value": "alice launch plan"}],
+    )
+    thread_id = created["thread"]["thread_id"]
+
+    exported = await rt.account("export", "alice")
+    (row,) = exported["threads_created"]
+    assert row["thread_id"] == thread_id and row["metadata"] == {"topic": "alice launch plan"}
+    # Another participant's export never carries the creator's annotations.
+    (membership,) = (await rt.account("export", "bob"))["thread_memberships"]
+    assert membership["thread_id"] == thread_id and "metadata" not in membership
 
 
 @pytest.mark.asyncio

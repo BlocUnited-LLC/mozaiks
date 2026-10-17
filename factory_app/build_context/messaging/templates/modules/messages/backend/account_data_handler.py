@@ -39,6 +39,9 @@ _THREAD_FIELDS = (
     "thread_id", "thread_type", "title", "status", "scope_type", "scope_id", "subject_app_id",
     "related_type", "related_id", "created_at",
 )
+# Thread annotations are supplied by the thread's creator, so they belong in the
+# creator's export and never in another participant's membership rows.
+_CREATED_THREAD_FIELDS = (*_THREAD_FIELDS, "metadata")
 
 
 def _account_user_id(user_id: str) -> str:
@@ -150,7 +153,7 @@ class AccountDataHandler:
     async def export_user_data(self, *, app_id: str, user_id: str) -> dict[str, Any]:
         user_id = _account_user_id(user_id)
         return {
-            "threads_created": await self._records(app_id, "threads", {"created_by": user_id}, _THREAD_FIELDS),
+            "threads_created": await self._records(app_id, "threads", {"created_by": user_id}, _CREATED_THREAD_FIELDS),
             "messages_sent": await self._records(app_id, "messages", {"sender_id": user_id}),
             "thread_reads": await self._records(app_id, "thread_reads", {"user_id": user_id}),
             "thread_memberships": await self._records(
