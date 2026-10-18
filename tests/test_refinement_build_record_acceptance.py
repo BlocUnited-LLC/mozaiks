@@ -277,6 +277,16 @@ async def test_accepts_draft_app_bundle_when_review_is_promotion_ready(tmp_path:
     assert result.metadata["acceptance"]["request_id"] == context["plan"].request_id
     assert result.build_record.lifecycle_status == BuildRecordStatus.CURRENT
     assert result.build_record.commit_metadata.metadata["acceptance"]["accepted_by"] == "operator-1"
+    # The same evidence Studio's acceptance writes: the accepted record's scope and revision, the
+    # principal, the time and the transition, so readers honour it only on this record.
+    record = result.build_record
+    assert {key: result.metadata["acceptance"][key] for key in (
+        "app_id", "build_family", "build_key", "build_record_id", "accepted_by", "accepted_at", "transition",
+    )} == {
+        "app_id": record.app_id, "build_family": "app_bundle", "build_key": record.build_key,
+        "build_record_id": record.id, "accepted_by": "operator-1", "accepted_at": result.accepted_at,
+        "transition": "staged_refinement_accept",
+    }
     assert context["build_record_store"].source_record.lifecycle_status == BuildRecordStatus.SUPERSEDED
     assert load_refinement_review_record(context["staging_result"].staging_area).status == "promotion_ready"
 

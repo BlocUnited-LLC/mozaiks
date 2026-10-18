@@ -229,12 +229,15 @@ async def test_appgenerator_app_bundle_save_registers_greenfield_context(
         APP_CONTEXT_VERSION_ARTIFACT_KIND,
     }
     assert app_bundle.id == "av_app_bundle_1"
-    assert app_bundle.lifecycle_status is ArtifactLifecycleStatus.CURRENT
+    # The first build is a draft for review; only an authorized acceptance makes it current.
+    assert app_bundle.lifecycle_status is ArtifactLifecycleStatus.DRAFT
+    assert "acceptance" not in app_bundle.commit_metadata.metadata
     assert current_context is not None
     assert current_context.mode is AppContextMode.GREENFIELD
     assert any(
         ref.artifact_kind == "app_bundle"
         and ref.artifact_version_id == "av_app_bundle_1"
+        and ref.lifecycle_status == ArtifactLifecycleStatus.DRAFT.value
         for ref in current_context.artifact_refs
     )
     assert context.data["artifact_version_id"] == "av_app_bundle_1"

@@ -88,7 +88,8 @@ Studio in your browser at `http://127.0.0.1:3000/apps`. While it runs,
 1. Click **Create App**
 2. Describe what you want to build in the chat
 3. Follow the workflow — the AI guides you through the build steps
-4. Review and promote the generated app when it's ready
+4. Review the generated app: it is saved as a draft. Accept the draft when
+   it's right, then promote it to make it active
 
 In-progress builds stay in **Apps** so you can always pick up where you left off.
 

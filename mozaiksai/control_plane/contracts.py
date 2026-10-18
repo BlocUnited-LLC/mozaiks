@@ -193,6 +193,52 @@ MAX_READ_ONLY_INSPECTION_BYTES = 2_097_152
 #: Studio's read of the app registry before it began a run (``CodingWorkerRequest.registry_run_state``).
 RegistryRunState = Literal["idle", "run_in_flight", "unverified"]
 
+#: The authorized transitions that make a build record current and write its
+#: acceptance evidence: Studio's acceptance of a draft
+#: (``POST /api/studio/build/artifacts/{id}/accept``) and the staged-refinement
+#: acceptance (``accept_staged_refinement_build_record``). Generation, validation,
+#: bundle shape and session completion never write it.
+BUILD_ACCEPTANCE_TRANSITIONS = frozenset({"studio_accept", "staged_refinement_accept"})
+#: The scope and revision keys acceptance evidence names, in the order they are written.
+BUILD_ACCEPTANCE_SCOPE_KEYS = ("app_id", "build_family", "build_key", "build_record_id")
+
+
+def build_acceptance_evidence(
+    record: Any, *, accepted_by: str | None, accepted_at: str, transition: str,
+) -> dict[str, Any]:
+    """The ``commit_metadata.metadata.acceptance`` evidence an authorized acceptance writes on ``record``.
+
+    It names the accepted build's scope and revision (``app_id``,
+    ``build_family``, ``build_key``, ``build_record_id``), the principal that
+    accepted it (``accepted_by``), when (``accepted_at``) and the transition
+    (``transition``). Readers honour it only on the record it names
+    (:func:`acceptance_evidence_names`), so evidence copied into another record
+    shows nothing about that record.
+    """
+    if transition not in BUILD_ACCEPTANCE_TRANSITIONS:
+        raise ValueError(f"Unknown build acceptance transition: {transition!r}")
+    return {
+        "app_id": record.app_id,
+        "build_family": record.build_family,
+        "build_key": record.build_key,
+        "build_record_id": record.id,
+        "accepted_by": accepted_by,
+        "accepted_at": accepted_at,
+        "transition": transition,
+    }
+
+
+def acceptance_evidence_names(record: Any, evidence: Any) -> bool:
+    """Whether ``evidence`` names ``record`` itself: its app, build family, build key and record id."""
+    return isinstance(evidence, dict) and all(
+        isinstance(evidence.get(key), str) and evidence.get(key) == value
+        for key, value in zip(
+            BUILD_ACCEPTANCE_SCOPE_KEYS,
+            (record.app_id, record.build_family, record.build_key, record.id),
+            strict=True,
+        )
+    )
+
 
 class CodingWorkerRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")

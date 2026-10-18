@@ -34,6 +34,7 @@ Covers helpers NOT tested in test_artifact_promotion_pure_helpers.py:
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 from mozaiksai.control_plane.artifact_promotion import (
@@ -159,9 +160,14 @@ class TestNormalizedPolicyDecisions:
 # 4. _build_acceptance_commit_metadata
 # ---------------------------------------------------------------------------
 
+#: The accepted draft whose scope the evidence names.
+_RECORD = SimpleNamespace(id="av_1", app_id="app-1", build_family="app_bundle", build_key="app_bundle")
+
+
 class TestBuildAcceptanceCommitMetadata:
     def _call(self, **overrides) -> dict[str, Any]:
         base: dict[str, Any] = {
+            "record": _RECORD,
             "commit_metadata": {},
             "accepted_by": "mbari",
             "accepted_at": "2026-06-12T10:00:00Z",
@@ -175,6 +181,13 @@ class TestBuildAcceptanceCommitMetadata:
     def test_accepted_by_in_acceptance_block(self):
         result = self._call()
         assert result["metadata"]["acceptance"]["accepted_by"] == "mbari"
+
+    def test_acceptance_block_names_the_accepted_record_and_its_transition(self):
+        acceptance = self._call()["metadata"]["acceptance"]
+        assert {key: acceptance[key] for key in ("app_id", "build_family", "build_key", "build_record_id", "transition")} == {
+            "app_id": "app-1", "build_family": "app_bundle", "build_key": "app_bundle", "build_record_id": "av_1",
+            "transition": "staged_refinement_accept",
+        }
 
     def test_accepted_at_in_acceptance_block(self):
         result = self._call()
@@ -199,6 +212,7 @@ class TestBuildAcceptanceCommitMetadata:
     def test_existing_metadata_keys_preserved(self):
         base_meta = {"metadata": {"app_id": "my-app"}}
         result = _build_acceptance_commit_metadata(
+            record=_RECORD,
             commit_metadata=base_meta,
             accepted_by="user",
             accepted_at="2026-06-12T00:00:00Z",

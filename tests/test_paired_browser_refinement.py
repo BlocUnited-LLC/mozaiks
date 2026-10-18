@@ -8,7 +8,10 @@ compatibility are checked against the checkout.
 
 Only AG2 provider responses are scripted. Keycloak login, Mongo/GridFS, Studio
 authorization, scoped finalization and Docker candidate validation remain real.
-The backend lane runs first on the app-owned Messaging handler: an inferred
+AppGenerator's save registers the B baseline as a draft with no acceptance
+evidence; the owner accepts it through Studio's real accept route, which makes
+it current and writes the evidence naming it. The backend lane then runs on
+the app-owned Messaging handler: an inferred
 scope returns a confirmation question that leaves the accepted baseline current,
 and the owner's confirmation applies it; a scripted handler that passes a
 privileged service flag is rejected before validation, leaving the accepted
@@ -763,7 +766,9 @@ async def _refine(case_root, login_config):
                            "app_validation_status": build["validation_status"],
                            "app_validation_strategy_used": build["validation_strategy"], "app_validation_result": build},
     )
-    assert baseline.lifecycle_status == ArtifactLifecycleStatus.CURRENT
+    # Generation is not acceptance: the first build is saved as a draft, with no acceptance evidence.
+    assert baseline.lifecycle_status == ArtifactLifecycleStatus.DRAFT and baseline.parent_build_record_id is None
+    assert "acceptance" not in baseline.commit_metadata.metadata
     assert baseline.validation_status == ArtifactValidationStatus.PASSED
     assert baseline.commit_metadata.metadata["content_backend"] == "gridfs"
     assert await read_verified_artifact_bundle(baseline) == archive.read_bytes()
@@ -777,6 +782,25 @@ async def _refine(case_root, login_config):
     assert not studio.app.dependency_overrides, "Real route acceptance cannot use dependency overrides"
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=studio.app), base_url="http://testserver", timeout=None) as client:
+            # The owner accepts the draft baseline through Studio's real accept route, the authorized
+            # transition that makes it current and writes its acceptance evidence.
+            accepted_baseline = await client.post(
+                f"/api/studio/build/artifacts/{baseline.id}/accept", params={"build_registry_id": binding.build_registry_id},
+                json={"notes": "Accepted the paired B baseline before refinement."},
+                headers={"Authorization": f"Bearer {tokens['alice']}"},
+            )
+            live.write_json(case_root / "baseline-acceptance-endpoint-result.json", {
+                "status_code": accepted_baseline.status_code, "body": accepted_baseline.json(),
+            })
+            assert accepted_baseline.status_code == 200 and accepted_baseline.json()["accepted"] is True
+            baseline = await store.get_build_record(app_id=app_id, build_record_id=baseline.id)
+            assert baseline.lifecycle_status == ArtifactLifecycleStatus.CURRENT
+            evidence = dict(baseline.commit_metadata.metadata["acceptance"])
+            assert evidence.pop("accepted_at")
+            assert evidence == {
+                "app_id": app_id, "build_family": "app_bundle", "build_key": "app_bundle",
+                "build_record_id": baseline.id, "accepted_by": owner_id, "transition": "studio_accept",
+            }
             # The authorized backend child is the parent of the board refinement.
             backend, parent_files, backend_evidence = await _refine_backend(
                 case_root=case_root, live=live, client=client, studio=studio, store=store, registry=registry,

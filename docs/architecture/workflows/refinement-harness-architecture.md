@@ -95,10 +95,11 @@ if a refinement of it has since marked it stale), or a failed read or an order
 of acceptances that cannot be established. An artifact that was already stale when the decision was proposed,
 and is unchanged, is still what the user agreed to change, so the decision can
 be confirmed. A change request with no saved state (one recorded before the
-trigger saved it, or one whose routing a workflow launch has since replaced)
-cannot show whether its artifact changed, so its decision is refused with 409
-and the user requests the change again, which records the state; it is never
-compared by any other rule. An unchanged artifact grants nothing more: the
+trigger saved it, or one whose routing a workflow launch replaced before
+launches kept that state) cannot show whether its artifact changed, so its
+decision is refused with 409 and the user requests the change again, which
+records the state; it is never compared by any other rule. A workflow launch
+rewrites the change request's routing but keeps the saved state. An unchanged artifact grants nothing more: the
 confirmed request follows the route for its situation, so a scope that changes
 app-owned pack code still goes through stale-parent admission below, and a
 workflow route launches as it would unconfirmed. These checks run before the
@@ -217,17 +218,28 @@ Ownership comes from those packs' pinned contracts, never from the candidate:
   byte-identical to the parent, and a pack module keeps its exact declared file
   set. Composed shared roots (`ui/index.js`, `ui/route_manifest.json`,
   `data/contract.json`) follow registry composition instead. No refinement
-  changes a template-owned file, so Studio refuses, with 409 and before any
-  run or provider call, a scope that selects one: an explicit or confirmed
-  selection, an inferred coding scope (or its proposal), or a contract
-  surface plan whose surfaces write one. Ownership is the saved parent's
-  verified pack ownership; when it cannot be verified nothing is refused there
-  and candidate validation fails the candidate. The diagnostic names the
-  supported paths: customize through the app's own files (an app-owned page,
-  component or route, or a pack's app-owned extension file such as a
-  workspace handler), or upgrade the pack. The admission check below stays the
-  backstop for every candidate (`PACK_TEMPLATE_OUTPUT_CHANGED`, with the same
-  guidance in `candidate_admission.supported_path`).
+  changes a template-owned file, so when a decision will apply a patch and
+  every file that patch may edit is template-owned (for example a UI-only
+  refinement of a pack template page), Studio refuses it with 409: an explicit
+  or confirmed file selection, an auto-applied inferred scope, or a contract
+  surface plan whose surfaces write only such files. It avoids the coding or
+  surface provider call, validation and the registry run, not the classifier
+  or the scope proposer: an explicit or confirmed selection is refused before
+  classification, an inferred scope or a surface plan after the classifier and
+  the scope proposer or surface planner have run. A decision that applies
+  nothing (a clarification, a workflow
+  route) is not refused for a template-owned path in its proposal, and
+  neither is a scope that holds template-owned files beside files the patch
+  may change; a confirmed apply of an all-template proposal is refused before
+  the pending decision is used. Ownership is the saved parent's verified pack
+  ownership; when it cannot be verified nothing is refused there and candidate
+  validation fails the candidate. The diagnostic names the supported paths:
+  customize through the app's own files (an app-owned page, component or
+  route, or a pack's app-owned extension file such as a workspace handler), or
+  upgrade the pack. The admission check below is the backstop for every
+  candidate, refusing any changed template-owned output
+  (`PACK_TEMPLATE_OUTPUT_CHANGED`, with the same guidance in
+  `candidate_admission.supported_path`).
 - An `owner: workspace` output, such as `modules/messages/backend/handler.py`,
   may change only inside a selected-file scope the user named, or a proposed
   scope the user confirmed through the pending decision. An auto-applied
@@ -272,24 +284,24 @@ Ownership comes from those packs' pinned contracts, never from the candidate:
   rejected or failed refinement and nothing else is open, in flight or
   changed (`ScopedRefinementCodingWorker._stale_parent_refusal`):
   - no build of the parent's build family and key is `CURRENT`, and the
-    parent was accepted: it carries the `metadata.acceptance` marker
-    (`accepted_by`, `accepted_at`), which Studio acceptance, the
-    staged-refinement acceptance and AppGenerator's genesis save (which saves
-    its parentless build `CURRENT`) write in the same write that makes the
-    build current. The marker is the only evidence: a stale build without
-    one is not shown accepted, whatever else it records, so a build accepted
-    or genesis-saved before the marker was written, or accepted by brownfield
-    Genesis acceptance (which writes none), is refused here as unverifiable,
-    with the way forward (accept a new build of the app, then change its
-    app-owned pack code from that build). No other build of that family and
-    key was accepted at or after it (the newer accepted work check acceptance
-    uses, below);
+    parent was accepted: acceptance evidence names it (see "Acceptance
+    evidence" below). A stale build without such evidence is not shown
+    accepted, whatever else it records, so a build accepted before acceptance
+    named its build, one carrying evidence copied from another record, and an
+    imported Genesis build (brownfield Genesis acceptance writes no evidence
+    yet; the refusal names that dependency on the Genesis import owner) are
+    refused here as unverifiable, with the way forward (accept a new build of
+    the app, then change its app-owned pack code from that build). Evidence
+    whose time, principal or transition cannot be read refuses too. No other
+    build of that family and key was accepted at or after it (the newer
+    accepted work check acceptance uses, below);
   - its `invalidation_reason` names a change request made from it by the same
     user, recorded as an inline run or a returned decision (never a workflow
     route), that saved the parent's state as `CURRENT` when it began
     (`router_decision.baseline_state`; one recorded before change requests
-    saved that state is refused as unresolvable, naming that cause and the way
-    forward), and whose inline run's stored draft is
+    saved that state, or one whose saved state is of another build, is
+    refused as unresolvable, naming its cause and the way forward), and whose
+    inline run's stored draft is
     now closed (as below). A change request that began while the
     parent was already stale is followed back, under the same conditions, to
     the one that began while it was `CURRENT`, so each rejected retry leaves
@@ -298,12 +310,13 @@ Ownership comes from those packs' pinned contracts, never from the candidate:
     returned a decision; one recorded as a workflow route (launched, failed
     or abandoned) is unresolved. Every build made from the parent, and every
     build further down its lineage, is closed: rejected, removed, a draft
-    that failed validation, or a stale draft that was never accepted (a draft
+    that failed validation, or a stale draft shown never accepted (a draft
     refined in review, which can then be neither rejected nor accepted and
-    never becomes current) with no change request made from it recorded as a
-    workflow route. A draft whose validation passed, is pending or was skipped
-    is open until it is rejected, and a build that was accepted is newer
-    accepted work;
+    never becomes current; see "Stale builds without evidence" below) with no
+    change request made from it recorded as a workflow route. A draft whose
+    validation passed, is pending or was skipped is open until it is
+    rejected, a build that was accepted is newer accepted work, and a stale
+    build whose acceptance cannot be verified is open;
   - Studio's registry read before the run began found no other run building
     (`registry_run_state`, set by Studio after it builds the request, never
     from the client payload);
@@ -312,8 +325,9 @@ Ownership comes from those packs' pinned contracts, never from the candidate:
     input the parent recorded in `canonical_inputs_version` is still
     `CURRENT`, any other `CURRENT` input became current no later than the
     parent was accepted, judged by the latest it can have (its acceptance
-    marker, else its last write, since the write that made it current was no
-    later), and no input family is `STALE` with no `CURRENT` record.
+    evidence, else its last write, since the write that made it current was
+    no later; evidence whose time cannot be read refuses), and no input family
+    is `STALE` with no `CURRENT` record.
 
   The retry stays bound to the same parent, the authenticated user and the
   explicit or confirmed files. A lookup failure, any scan past its bound of
@@ -375,36 +389,84 @@ either record's `capability_packs`, reading those entries in full from both
 verified archives. A difference, or an entry that cannot be compared exactly
 (a duplicate, a symbolic link or a file over 8 MB), refuses the version.
 
-An app bundle that has a parent is also refused when newer accepted work lies
-outside its lineage. Studio follows parent links within the app, at most 32
-records, to the version's nearest accepted ancestor: the first that is
-`CURRENT`, `SUPERSEDED` (it was current until another acceptance replaced it),
-or carries the `metadata.acceptance` marker. A stale build without the marker
-is not shown accepted. Times are lower bounds, so ordering from them can only
-refuse more: an acceptance time is the marker's, or the record's creation when
-that is later (the genesis save stamps its marker just before the write that
-creates the record), and a `CURRENT` ancestor without the marker (saved
-`CURRENT` by a writer that records none, made current by brownfield Genesis
-acceptance, or accepted before the marker existed) is ordered from its
-creation, the earliest it can have become current. Newer accepted work is a
-build of the version's family and key, not on that path, that is `CURRENT`,
-or that is stale or superseded and was accepted at or after that ancestor was
-accepted. An accepted build is marked stale once a refinement of it is
-stored, so this reads acceptance evidence, not only the `CURRENT` status; only
-builds written since the ancestor's acceptance are read. A superseded build
-without the marker was accepted at a time nothing records, so it is never
-passed over as unaccepted: it is older work only when it was last written (its
-supersession) no later than the ancestor became current, or when the ancestor
-was made from it; otherwise it refuses. A missing record, a longer chain,
-more than 200 `CURRENT` builds or 200 builds written since that acceptance, an
-accepted build when no ancestor shows an acceptance, an acceptance with no
-known time, or a superseded build that cannot be ordered refuses too. A
-candidate made before a newer build was accepted,
+##### Acceptance evidence
+
+AppGenerator saves every app bundle it generates as a `DRAFT`, the first
+(parentless) build included, with no acceptance evidence: generation,
+validation, bundle shape and session completion are not acceptance. A build
+becomes current only through an authorized acceptance transition, which writes
+the evidence in the same write that makes it current, as
+`commit_metadata.metadata.acceptance`: `app_id`, `build_family`, `build_key`
+and `build_record_id` (the accepted build's scope and revision), `accepted_by`
+(the authenticated principal), `accepted_at` and `transition`. Two transitions
+write it, with the same shape (`contracts.build_acceptance_evidence`): Studio's
+`POST /api/studio/build/artifacts/{id}/accept` (`studio_accept`) and the
+staged-refinement acceptance (`staged_refinement_accept`, which adds the
+staged review it was accepted under). Readers honour evidence only on the
+record it names (`contracts.acceptance_evidence_names`), so a marker copied or
+inherited into another record, one naming another app, key or record, and the
+two-field marker written before acceptance named its build, show nothing about
+the record that carries them. No writer copies a parent's commit metadata into
+a child. Brownfield Genesis acceptance (`accept-genesis`,
+`BuildRecordStore.accept_genesis_build_record`, owned by Genesis import) writes
+no evidence yet, so the paths that need a stale imported Genesis build's
+acceptance stay blocked with a diagnostic naming that dependency: a pack-code
+retry from it (stale-parent admission), and acceptance or confirmation of a
+version whose lineage reaches only it, or whose scan meets it stale, while
+other work was accepted.
+
+##### Stale builds without evidence
+
+Staling overwrites the status of drafts and accepted builds alike. A `STALE`
+build without evidence naming it is decided from the state Studio saved when
+the change that staled it began: its `invalidation_reason` names a change
+request made from it, whose `router_decision.baseline_state` recorded its
+status then. `draft` shows a draft that was never accepted, so it is passed
+over; `stale` is followed back through the saved earlier invalidation (at most
+16 change requests, and at most 64 reads per check). Anything else refuses as
+unverifiable, with a diagnostic naming the cause: a saved status of `current`
+or `superseded` (a build accepted before acceptance named its build), no saved
+state or the state of another build, a change request that was not found or
+not made from it, an invalidation that names no change request, or a bound
+passed. A failed read refuses as well.
+
+##### Newer accepted work
+
+Every app bundle acceptance, including a first build with no parent, is also
+refused when newer accepted work lies outside the version's lineage. Studio
+follows parent links within the app, at most 32 records, to the version's
+nearest accepted ancestor: the first that is `CURRENT`, `SUPERSEDED` (it was
+current until another acceptance replaced it), or carries evidence naming it.
+A draft, and a stale build without evidence, is no accepted ancestor, so a
+first build's lineage has none: it is accepted only while no build of its
+scope is `CURRENT` and none is shown accepted. Times are lower bounds, so
+ordering from them can only refuse more: an acceptance time is the evidence's
+(never before the record's creation), and a `CURRENT` ancestor without
+evidence (saved `CURRENT` by a writer that records none, made current by
+brownfield Genesis acceptance, or accepted before acceptance named its build)
+is ordered from its creation, the earliest it can have become current. Newer
+accepted work is a build of the version's family and key, not on that path,
+that is `CURRENT`, or that is stale or superseded and was accepted at or after
+that ancestor was accepted. An accepted build is marked stale once a
+refinement of it is stored, so this reads acceptance evidence, not only the
+`CURRENT` status; only builds written since the ancestor's acceptance are read.
+A stale build without evidence is passed over only as a draft never accepted
+(above). A superseded build without evidence was accepted at a time nothing
+records, so it is never passed over as unaccepted: it is older work only when
+it was last written (its supersession) no later than the ancestor became
+current, or when the ancestor was made from it; otherwise it refuses. A
+missing record, a longer chain, more than 200 `CURRENT` builds or 200 builds
+written since that acceptance, an accepted build when no ancestor shows an
+acceptance, an acceptance with no known time, a stale build that cannot be
+shown never accepted, or a superseded build that cannot be ordered refuses
+too. A candidate made before a newer build was accepted,
 including a sibling of an accepted child, therefore cannot replace that build,
 even after that build has been marked stale by a draft of its own; a draft of
 a draft of the latest accepted build can still be accepted. Acceptance times
 are compared as each acceptance recorded them, so separate Studio processes
 are assumed to keep agreeing clocks.
+
+##### Acceptance serialization
 
 Each refusal returns 409 and nothing changes. Studio serializes app bundle
 acceptances per app with an in-process lock and re-reads the version under it,
@@ -413,6 +475,8 @@ interleave, and a second acceptance of the same version is refused. The rechecks
 and the store's acceptance write are separate reads and writes, not one
 conditional update, and the lock does not coordinate separate Studio processes:
 acceptances in two processes can still both succeed.
+
+##### AppGenerator and app-owned pack code
 
 AppGenerator never changes app-owned pack code. Its copy comes only from the
 bound verified revision source, else the admitted genesis copy, else the

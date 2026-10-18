@@ -69,6 +69,7 @@ SCRIPT: dict[str, Any] = {
         }
     ],
 }
+ACCEPTED = {"accepted": True, "app_id": APP, "review": {"lifecycle_status": "current"}}
 PROMOTED = {"promoted": True, "app_registry": {"success": True, "lifecycle_state": "active"}}
 FORBIDDEN_TOP_LEVEL = {
     "mozaiksai", "factory_app", "logs", "mozaiks", "mozaiks_cli", "mozaiks_chat_ui", "web_shell", "scripts",
@@ -226,6 +227,7 @@ class FakeHost:
     session_state: dict[str, Any] = field(default_factory=lambda: {
         "sequence_status": "in_progress", "journey_key": "build", "current_chat_id": None,
     })
+    accept: tuple[int, dict[str, Any]] = (200, ACCEPTED)
     promote: tuple[int, dict[str, Any]] = (200, PROMOTED)
     transitions: dict[str, dict[str, Any]] = field(default_factory=lambda: {
         "app_review": {"id": "app_review", "transition_type": "chat_session", "route_to": "AppReview"},
@@ -264,6 +266,15 @@ class FakeHost:
         async def session_state(request: Request) -> Any:
             self.log.append({"event": "session_state", "params": dict(request.query_params)})
             return {"session_state": dict(self.session_state)}
+
+        @app.post("/api/studio/build/artifacts/{artifact_version_id}/accept")
+        async def accept(artifact_version_id: str, request: Request) -> Any:
+            self.log.append({
+                "event": "accept", "artifact_version_id": artifact_version_id,
+                "params": dict(request.query_params), "body": await request.json(),
+            })
+            status, body = self.accept
+            return JSONResponse(body, status_code=status)
 
         @app.post("/api/studio/build/artifacts/{artifact_version_id}/promote")
         async def promote(artifact_version_id: str, request: Request) -> Any:
@@ -406,7 +417,10 @@ def single_step(chat_id: str, workflow: str, *actions: Any) -> FakeHost:
 # --------------------------------------------------------------------------- the whole journey
 
 
-def full_journey(*, final_state: dict[str, Any] | None = None, promote: tuple[int, dict[str, Any]] = (200, PROMOTED)) -> FakeHost:
+def full_journey(
+    *, final_state: dict[str, Any] | None = None, promote: tuple[int, dict[str, Any]] = (200, PROMOTED),
+    accept: tuple[int, dict[str, Any]] = (200, ACCEPTED),
+) -> FakeHost:
     signal = driver.PROMOTION_SIGNAL.format(artifact_version_id=ARTIFACT, build_registry_id=BUILD)
     workbench = {
         "stage": "files_ready", "artifact_version_id": ARTIFACT, "build_registry_id": BUILD,
@@ -472,6 +486,7 @@ def full_journey(*, final_state: dict[str, Any] | None = None, promote: tuple[in
             ],
         },
         promote=promote,
+        accept=accept,
     )
 
 
@@ -496,14 +511,19 @@ async def test_journey_exits_zero_only_after_the_host_reports_the_last_step_comp
     assert resolves[2]["source_chat_id"] == "c-security"
     # app_review has no options, so the driver looked it up rather than guessing.
     assert [entry["transition_id"] for entry in host.events("get_transition")] == ["app_review"]
-    # Promotion happened before the signal, for the reviewed artifact and this build.
-    ordered = [entry for entry in host.log if entry["event"] in {"promote", "received"}]
+    # The reviewed draft was accepted, then promoted, before the signal, for the reviewed artifact and this build.
+    ordered = [entry for entry in host.log if entry["event"] in {"accept", "promote", "received"}]
+    accept_at = next(i for i, entry in enumerate(ordered) if entry["event"] == "accept")
     promote_at = next(i for i, entry in enumerate(ordered) if entry["event"] == "promote")
     signal_at = next(
         i for i, entry in enumerate(ordered)
         if entry["event"] == "received" and str(entry["frame"].get("text", "")).startswith("Promotion confirmed")
     )
-    assert promote_at < signal_at
+    assert accept_at < promote_at < signal_at
+    [accept] = host.events("accept")
+    assert accept["artifact_version_id"] == ARTIFACT and accept["body"] == {}
+    assert accept["params"] == {"build_registry_id": BUILD, "app_id": APP}
+    assert run.report["acceptance"]["accepted"] is True and run.report["acceptance"]["status_code"] == 200
     [promote] = host.events("promote")
     assert promote["artifact_version_id"] == ARTIFACT
     assert promote["params"] == {"build_registry_id": BUILD, "app_id": APP}
@@ -727,6 +747,16 @@ async def test_ui_response_secrets_come_from_the_environment_and_stay_out_of_the
 # --------------------------------------------------------------------------- AppReview
 
 
+async def test_a_refused_acceptance_stops_before_promotion_and_its_signal(tmp_path: Path) -> None:
+    host = full_journey(accept=(409, {"detail": "Only draft artifact versions can be accepted."}))
+    run = await drive(host, tmp_path)
+
+    assert (run.exit_code, run.report["reason"]) == (driver.EXIT_FAILED, "acceptance_failed")
+    assert run.report["acceptance"]["status_code"] == 409 and run.report["acceptance"]["accepted"] is False
+    assert run.report["promotion"] is None and host.events("promote") == []
+    assert not any(frame.get("text", "").startswith("Promotion confirmed") for frame in host.received())
+
+
 async def test_a_refused_promotion_stops_without_a_promotion_signal(tmp_path: Path) -> None:
     host = full_journey(promote=(409, {"detail": "Only app registry records in review can be promoted."}))
     run = await drive(host, tmp_path)
@@ -747,7 +777,7 @@ async def test_the_driver_promotes_only_its_own_build_target(tmp_path: Path) -> 
     run = await drive(host, tmp_path)
 
     assert (run.exit_code, run.report["reason"]) == (driver.EXIT_FAILED, "review_target_mismatch")
-    assert host.events("promote") == []
+    assert host.events("accept") == [] and host.events("promote") == []
 
 
 async def test_review_asking_again_after_the_signal_needs_a_human(tmp_path: Path) -> None:
@@ -942,6 +972,7 @@ def test_the_named_server_signals_exist_in_the_server_source() -> None:
     transport = (ROOT / "mozaiksai" / "core" / "transport" / "simple_transport.py").read_text(encoding="utf-8")
     assert '"client.pong"' in transport
     studio = (ROOT / "mozaiksai" / "hosts" / "studio.py").read_text(encoding="utf-8")
+    assert '@app.post("/api/studio/build/artifacts/{artifact_version_id}/accept")' in studio
     assert '@app.post("/api/studio/build/artifacts/{artifact_version_id}/promote")' in studio
     assert '@app.post("/api/workflows/trigger")' in studio
     trigger_model = studio.split("class WorkflowTriggerRequest(BaseModel):", 1)[1].split("\n\n", 1)[0]
@@ -959,6 +990,10 @@ def test_the_named_server_signals_exist_in_the_server_source() -> None:
         encoding="utf-8",
     )
     assert "/api/studio/build/artifacts/" in summary and "/promote" in summary
+    workspace = (ROOT / "factory_app" / "workflows" / "AppReview" / "ui" / "AppReview" / "AppReviewWorkspace.jsx").read_text(
+        encoding="utf-8",
+    )
+    assert "/api/studio/build/artifacts/" in workspace and "/accept" in workspace
 
 
 def test_the_workbench_answer_is_its_declared_continue_action() -> None:

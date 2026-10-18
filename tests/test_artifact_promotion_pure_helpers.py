@@ -62,6 +62,8 @@ Covers sync pure helpers (no IO/filesystem):
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from pydantic import BaseModel
 
 from mozaiksai.control_plane.artifact_promotion import (
@@ -312,9 +314,13 @@ class TestCommitMetadataPayload:
 # 9. _build_acceptance_commit_metadata
 # ---------------------------------------------------------------------------
 
+_ACCEPTED_RECORD = SimpleNamespace(id="av_1", app_id="app-1", build_family="app_bundle", build_key="app_bundle")
+
+
 class TestBuildAcceptanceCommitMetadata:
     def test_acceptance_key_added(self):
         result = _build_acceptance_commit_metadata(
+            record=_ACCEPTED_RECORD,
             commit_metadata={},
             accepted_by="alice",
             accepted_at="2024-06-01T00:00:00Z",
@@ -327,9 +333,11 @@ class TestBuildAcceptanceCommitMetadata:
         assert acc["accepted_at"] == "2024-06-01T00:00:00Z"
         assert acc["request_id"] == "req-123"
         assert acc["refinement_review_status"] == "approved"
+        assert acc["build_record_id"] == "av_1" and acc["transition"] == "staged_refinement_accept"
 
     def test_notes_included_when_provided(self):
         result = _build_acceptance_commit_metadata(
+            record=_ACCEPTED_RECORD,
             commit_metadata={},
             accepted_by="bob",
             accepted_at="2024-06-01T00:00:00Z",
@@ -341,6 +349,7 @@ class TestBuildAcceptanceCommitMetadata:
 
     def test_notes_none_not_in_acceptance(self):
         result = _build_acceptance_commit_metadata(
+            record=_ACCEPTED_RECORD,
             commit_metadata={},
             accepted_by="bob",
             accepted_at="2024-06-01T00:00:00Z",
@@ -353,6 +362,7 @@ class TestBuildAcceptanceCommitMetadata:
     def test_existing_metadata_preserved(self):
         doc = {"metadata": {"existing_key": "existing_val"}}
         result = _build_acceptance_commit_metadata(
+            record=_ACCEPTED_RECORD,
             commit_metadata=doc,
             accepted_by="alice",
             accepted_at="2024-06-01T00:00:00Z",

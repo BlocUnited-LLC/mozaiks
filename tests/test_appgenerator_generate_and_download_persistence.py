@@ -252,9 +252,20 @@ def test_register_app_bundle_artifact_version_marks_failed_acceptance(monkeypatc
     assert metadata["validation_evidence"]["failed"] == ["module_wiring"]
 
 
-def test_genesis_save_records_its_acceptance_marker(monkeypatch, tmp_path: Path) -> None:
-    """A parentless genesis build is saved CURRENT, so the save records the acceptance marker every acceptance writes."""
-    from datetime import UTC, datetime
+@pytest.mark.parametrize("parent_lookup", ["no_parent", "lookup_failed"])
+def test_a_first_build_is_saved_as_a_draft_without_acceptance_evidence(monkeypatch, tmp_path: Path, parent_lookup) -> None:
+    """Generation is not acceptance: a parentless build is saved DRAFT for review, carrying no acceptance evidence.
+
+    That holds whatever its validation said, and for a revision run whose
+    parent could not be read. Only an authorized acceptance (Studio's accept)
+    makes it current and writes the evidence.
+    """
+
+    class _UnreadableContext(_Context):
+        def get(self, key, default=None):
+            if key in {"artifact_version_id", "build_mode"}:
+                raise RuntimeError("context unavailable")
+            return super().get(key, default)
 
     fake_artifact_store = _FakeArtifactStore()
     artifacts_mod = importlib.import_module("mozaiksai.core.artifacts")
@@ -264,21 +275,18 @@ def test_genesis_save_records_its_acceptance_marker(monkeypatch, tmp_path: Path)
     )
     zip_path = tmp_path / "GeneratedApp.zip"
     zip_path.write_bytes(b"fake bundle bytes")
-    before = datetime.now(UTC)
+    context_type = _Context if parent_lookup == "no_parent" else _UnreadableContext
     asyncio.run(
         generate_and_download_module._register_app_bundle_artifact_version(
             app_id="app_123", user_id="user_123", workflow_name="AppGenerator", chat_id="chat_123",
             bundle_name="GeneratedApp", zip_path=zip_path,
-            context_variables=_Context({"app_bundle_acceptance_status": "passed"}),
+            context_variables=context_type({"app_bundle_acceptance_status": "passed"}),
         )
     )
 
     (call,) = [call for call in fake_artifact_store.calls if call["build_family"] == "app_bundle"]
-    assert call["parent_build_record_id"] is None and call["lifecycle_status"].value == "current"
-    acceptance = call["commit_metadata"]["metadata"]["acceptance"]
-    assert set(acceptance) == {"accepted_by", "accepted_at"} and acceptance["accepted_by"] == "user_123"
-    accepted_at = datetime.fromisoformat(acceptance["accepted_at"].replace("Z", "+00:00"))
-    assert before <= accepted_at <= datetime.now(UTC)
+    assert call["parent_build_record_id"] is None and call["lifecycle_status"].value == "draft"
+    assert "acceptance" not in call["commit_metadata"]["metadata"]
 
 
 def test_generate_and_download_blocks_failed_acceptance_before_writing(monkeypatch) -> None:

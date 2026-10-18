@@ -557,6 +557,8 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch,
                         "scope_summary": "Extend the existing app bundle within the approved concept using AppGenerator.",
                     },
                 },
+                # The launch keeps the build's saved state: it shows what the build was when this change began.
+                "baseline_state": persisted_changes[0]["router_decision"]["baseline_state"],
             },
         }
     ]
@@ -2605,10 +2607,17 @@ def test_studio_trigger_endpoint_invokes_surface_regeneration_for_feature_change
     assert persisted_sessions[0]["metadata"]["unresolved_change"] == unresolved
 
 
-def test_a_surface_plan_that_would_edit_a_template_owned_pack_file_is_refused_before_the_run(
-    monkeypatch, _owned_build_target,
+@pytest.mark.parametrize("paths", ["template_only", "template_beside_editable"])
+def test_a_surface_plan_that_would_edit_only_template_owned_pack_files_is_refused_before_the_run(
+    monkeypatch, _owned_build_target, paths,
 ):
-    """A planned surface that writes a template-owned pack file of the saved build is refused before any surface run."""
+    """A surface plan whose every written file is a template-owned pack file of the saved build is refused before the run.
+
+    The surface planner has run; the surface execution, its finalization and
+    the registry run have not. A plan that also writes files it may change is
+    not refused here: the surface run proceeds and candidate admission refuses
+    any changed template-owned output.
+    """
     from mozaiksai.control_plane.contracts import ContractSurfacePlan, ContractSurfaceUpdate
     from mozaiksai.core.auth import reset_auth_adapter
 
@@ -2618,11 +2627,13 @@ def test_a_surface_plan_that_would_edit_a_template_owned_pack_file_is_refused_be
     from mozaiksai.hosts import studio as studio_app
 
     template_path = "app/modules/product/backend/handler.py"
+    editable_path = "app/ui/pages/product_export.yaml"
     plan = ContractSurfacePlan(
         summary="Add export action to product module", change_class="feature", artifact_kind="app_bundle",
         confidence=0.92,
         surfaces=[ContractSurfaceUpdate(
-            kind="module_action", target_id="product", target_kind="module", affected_paths=[template_path],
+            kind="module_action", target_id="product", target_kind="module",
+            affected_paths=[template_path] if paths == "template_only" else [template_path, editable_path],
             dependency_order=0, rationale="Add export action handler", confidence=0.92,
         )],
     )
@@ -2634,8 +2645,10 @@ def test_a_surface_plan_that_would_edit_a_template_owned_pack_file_is_refused_be
         confidence=0.92, signals=["new_capability", "app_extension"],
     )))
     monkeypatch.setattr(harness, "contract_surface_enabled", lambda: True)
-    monkeypatch.setattr(harness, "prepare_contract_surface_request", AsyncMock(return_value=(plan, None)))
-    execute = AsyncMock()
+    prepare = AsyncMock(return_value=(plan, None))
+    monkeypatch.setattr(harness, "prepare_contract_surface_request", prepare)
+    # Past the refusal point the surface run starts; it is stopped there, as an unavailable run would be.
+    execute = AsyncMock(side_effect=RuntimeError("surface run reached"))
     finalize = AsyncMock()
     monkeypatch.setattr(harness, "execute_surface_plan", execute)
     monkeypatch.setattr(harness, "finalize_surface_output", finalize)
@@ -2648,11 +2661,18 @@ def test_a_surface_plan_that_would_edit_a_template_owned_pack_file_is_refused_be
         }},
     })
 
+    prepare.assert_awaited_once()
+    finalize.assert_not_awaited()
+    if paths == "template_beside_editable":
+        assert response.status_code == 503 and response.json()["detail"] == "Surface refinement unavailable", response.text
+        execute.assert_awaited_once()
+        _owned_build_target.begin_refinement_run.assert_awaited_once()
+        return
     assert response.status_code == 409, response.text
     detail = response.json()["detail"]
-    assert template_path in detail and "upgrade the pack" in detail and "No files were changed" in detail
+    assert f"only template-owned capability pack files ({template_path})" in detail
+    assert "upgrade the pack" in detail and "No files were changed" in detail
     execute.assert_not_awaited()
-    finalize.assert_not_awaited()
     _owned_build_target.begin_refinement_run.assert_not_awaited()
 
 

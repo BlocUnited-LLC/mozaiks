@@ -83,7 +83,7 @@ from mozaiksai.control_plane.app_intelligence_jobs import (
     public_app_intelligence_index_job,
     save_app_intelligence_index_job,
 )
-from mozaiksai.control_plane.contracts import RegistryRunState
+from mozaiksai.control_plane.contracts import RegistryRunState, build_acceptance_evidence
 from mozaiksai.control_plane.dry_run import RefinementDryRunPlan, RefinementExecutionPlan
 from mozaiksai.control_plane.implementations.coding_worker import (
     TEMPLATE_PACK_OUTPUT_GUIDANCE,
@@ -2356,11 +2356,16 @@ async def _require_accepted_workspace_parent(
 _ACCEPTANCE_LINEAGE_MAX_DEPTH = 32
 
 
-def _commit_metadata_with_acceptance(version, *, accepted_by: str | None) -> dict[str, Any]:  # noqa: ANN001
-    """The version's commit metadata with the ``metadata.acceptance`` marker the staged acceptance also writes.
+def _commit_metadata_with_acceptance(version, *, accepted_by: str) -> dict[str, Any]:  # noqa: ANN001
+    """The version's commit metadata with the acceptance evidence this acceptance writes.
 
-    Staling later overwrites the CURRENT status, but this marker stays, so
-    admission can tell a build that was accepted from a draft that never was.
+    Acceptance is the authorized transition that makes a build current, so it
+    writes the evidence (``contracts.build_acceptance_evidence``, transition
+    ``studio_accept``): the version's app, build family, build key and record
+    id, the authenticated principal and the time. The staged-refinement
+    acceptance writes the same shape. Staling later overwrites the CURRENT
+    status, but the evidence stays, so admission can tell a build that was
+    accepted from a draft that never was.
     """
     commit_metadata = version.commit_metadata
     payload = (
@@ -2368,10 +2373,10 @@ def _commit_metadata_with_acceptance(version, *, accepted_by: str | None) -> dic
         else dict(commit_metadata or {})
     )
     metadata = dict(payload.get("metadata") or {})
-    metadata["acceptance"] = {
-        "accepted_by": accepted_by,
-        "accepted_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-    }
+    metadata["acceptance"] = build_acceptance_evidence(
+        version, accepted_by=accepted_by,
+        accepted_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"), transition="studio_accept",
+    )
     payload["metadata"] = metadata
     return payload
 
@@ -2390,8 +2395,13 @@ async def _require_current_build_in_lineage(version, *, app_id: str, artifact_st
     the latest accepted build is still accepted. A missing ancestor, a lineage
     past the bound, a failed read, or an acceptance whose order cannot be
     established refuses too.
+
+    A version with no parent (AppGenerator's first build, saved as a draft)
+    is checked the same way: its lineage holds no accepted build, so it is
+    accepted only while no build of its scope is CURRENT and none was
+    accepted (or cannot be shown never accepted) before it.
     """
-    if version.build_family != "app_bundle" or not version.parent_build_record_id:
+    if version.build_family != "app_bundle":
         return
     unverified = "This version's lineage could not be verified against the app's accepted builds"
     try:
@@ -2406,11 +2416,15 @@ async def _require_current_build_in_lineage(version, *, app_id: str, artifact_st
     if newer.kind == "unverified":
         raise HTTPException(status_code=409, detail=f"{unverified} ({newer.reason}). No version was accepted.")
     latest = "current build" if newer.kind == "current" else "latest accepted build"
+    made = (
+        f"This version was made from an earlier build than the app's {latest}" if version.parent_build_record_id
+        else f"This version is a new build with no parent, made outside the line of the app's {latest}"
+    )
     raise HTTPException(
         status_code=409,
         detail=(
-            f"This version was made from an earlier build than the app's {latest} ({newer.reason}), and "
-            "accepting it would replace changes accepted since. Refine that build instead. No version was accepted."
+            f"{made} ({newer.reason}), and accepting it would replace changes accepted since. Refine that build "
+            "instead. No version was accepted."
         ),
     )
 
@@ -3353,21 +3367,33 @@ async def _require_unchanged_confirmation_baseline(
     )
 
 
-def _refuse_template_pack_scope(template_pack_paths: frozenset[str], paths: Iterable[str]) -> None:
-    """Refuse, before any run, a refinement scope that selects a template-owned pack file of the saved parent.
+def _refuse_template_pack_patch(template_pack_paths: frozenset[str], paths: Iterable[str]) -> None:
+    """Refuse a patch that would apply to template-owned pack files of the saved parent only.
 
-    Candidate admission keeps every template-owned output byte-identical to
-    the verified parent, so such a scope could only fail after the provider
-    ran. Ownership is the parent's verified pack ownership; when it cannot be
-    verified nothing is refused here, and candidate validation fails the
-    candidate instead.
+    Called only where the decision will apply a patch: an explicit or
+    confirmed file scope, an auto-applied inferred scope, or a contract surface
+    plan about to run. ``paths`` are every file the patch may edit. When each
+    one is template-owned (for example a UI-only refinement of a pack template
+    page), candidate admission, which keeps every template-owned output
+    byte-identical to the verified parent, could only refuse the candidate, so
+    the coding or surface provider call, validation and the registry run are
+    skipped. An explicit or confirmed scope is refused before classification
+    (and before a pending decision is used); on the inferred and surface paths
+    the classifier and the scope proposer or surface planner have already run.
+
+    A decision that applies nothing (a clarification, a workflow route) is
+    never refused here, nor a scope that holds template-owned files beside
+    files the patch may change: admission stays the backstop for any changed
+    template-owned output. Ownership is the parent's verified pack ownership;
+    when it cannot be verified nothing is refused here, and candidate
+    validation fails the candidate instead.
     """
-    selected = sorted(set(paths) & template_pack_paths)
-    if selected:
+    editable = set(paths)
+    if editable and editable <= template_pack_paths:
         raise HTTPException(
             status_code=409,
             detail=(
-                f"This change would edit template-owned capability pack files ({', '.join(selected)}). "
+                f"This change would edit only template-owned capability pack files ({', '.join(sorted(editable))}). "
                 f"{TEMPLATE_PACK_OUTPUT_GUIDANCE}. No files were changed."
             ),
         )
@@ -3569,8 +3595,9 @@ async def trigger_workflow(
         # The saved parent's verified pack ownership. App-owned pack code: an
         # inferred scope that would change it waits for confirmation, and
         # changing it needs the current build. Template-owned pack files: no
-        # refinement changes them, so a scope selecting one is refused before
-        # any run (the candidate admission check stays the backstop).
+        # refinement changes them, so a patch that would apply to them only is
+        # refused before the provider runs (candidate admission stays the
+        # backstop for every candidate).
         pack_owners = parent_pack_output_owners(metadata.get("capability_packs") or [])
         workspace_pack_paths = pack_paths_owned_by(pack_owners, "workspace")
         template_pack_paths = pack_paths_owned_by(pack_owners, "templates")
@@ -3649,7 +3676,8 @@ async def trigger_workflow(
                 raise HTTPException(status_code=400, detail="Refinement file scope is not in the selected artifact")
             coding_payload = {**coding_payload, "files": {path: baseline_files[path] for path in explicit_paths}}
             trigger_payload["coding_request"] = coding_payload
-        _refuse_template_pack_scope(template_pack_paths, explicit_paths)
+        # An explicit or confirmed file scope always applies when it proceeds.
+        _refuse_template_pack_patch(template_pack_paths, explicit_paths)
         if orchestration_control.coding_enabled() and isinstance(coding_payload, dict):
             try:
                 resolve_coding_validation_strategy(coding_payload.get("validation_strategy"))
@@ -3720,7 +3748,7 @@ async def trigger_workflow(
                     )
                 if contract_surface_plan is not None:
                     if template_pack_paths:
-                        _refuse_template_pack_scope(template_pack_paths, [
+                        _refuse_template_pack_patch(template_pack_paths, [
                             path for surface in contract_surface_plan.surfaces for path in surface.affected_paths
                         ])
                     registry_run_state = await _registry_run_state(
@@ -3785,11 +3813,10 @@ async def trigger_workflow(
                     coding_request, coding_decision = await orchestration_control.prepare_coding_request(
                         coding_request, confirmation_required_paths=workspace_pack_paths,
                     )
-                    _refuse_template_pack_scope(template_pack_paths, [
-                        *coding_decision.selected_paths, *(coding_request.files if coding_request is not None else ()),
-                    ])
                     harness_decision = coding_decision
                     if coding_request is not None:
+                        # Only an applying decision (auto_patch) returns a request.
+                        _refuse_template_pack_patch(template_pack_paths, coding_request.files)
                         baseline_files, skipped = _decode_text_bundle_entries(await _verified_app_bundle(source_version))
                         if skipped:
                             raise HTTPException(status_code=409, detail="Inline refinement cannot preserve every file in this bundle")
@@ -4200,6 +4227,9 @@ async def trigger_workflow(
                     "harness_decision": (
                         harness_decision.model_dump(mode="python") if harness_decision is not None else None
                     ),
+                    # The build's state when the change began stays on record: it is what shows
+                    # whether the build this route stales was a draft never accepted.
+                    **({"baseline_state": proposal_baseline_state} if proposal_baseline_state is not None else {}),
                 },
             )
         except Exception as persist_err:

@@ -396,8 +396,32 @@ async def test_list_run_child_build_records_finds_one_runs_children_of_one_paren
         await store.list_run_child_build_records(app_id="app-1", parent_build_record_id="av_parent", build_id="")
 
 
+def _matches(document: dict, query: dict) -> bool:
+    """Whether ``document`` satisfies a Mongo filter built from equality, ``$gte``, ``$or`` and ``$and``."""
+    for key, condition in query.items():
+        if key == "$or":
+            if not any(_matches(document, branch) for branch in condition):
+                return False
+        elif key == "$and":
+            if not all(_matches(document, branch) for branch in condition):
+                return False
+        elif isinstance(condition, dict):
+            value = document.get(key)
+            if set(condition) != {"$gte"} or value is None or not value >= condition["$gte"]:
+                return False
+        elif document.get(key) != condition:
+            return False
+    return True
+
+
 @pytest.mark.asyncio
-async def test_list_build_records_filters_by_status_and_last_write() -> None:
+async def test_list_build_records_filters_by_family_key_status_and_last_write() -> None:
+    """The query keeps only the scope's records: its build family and key, status and last write.
+
+    The query is evaluated against records rather than compared to a literal,
+    so how the store spells each filter is its own; every refinement guard
+    relies on the family and key scoping.
+    """
     store = BuildRecordStore.__new__(BuildRecordStore)
     coll = MagicMock()
     cursor = MagicMock()
@@ -407,6 +431,7 @@ async def test_list_build_records_filters_by_status_and_last_write() -> None:
     coll.find.return_value = cursor
     store._coll = AsyncMock(return_value=coll)
     since = datetime(2026, 10, 17, 12, 0, 0)
+    later = datetime(2026, 10, 17, 13, 0, 0)
 
     await store.list_build_records(
         app_id="app-1", build_family="app_bundle", build_key="app_bundle",
@@ -415,16 +440,26 @@ async def test_list_build_records_filters_by_status_and_last_write() -> None:
 
     coll.find.assert_called_once()
     query = coll.find.call_args.args[0]
-    # The family and key filters are the store's own; this pins only the status and last-write filters.
-    assert query["app_id"] == "app-1"
-    assert query["lifecycle_status"] == ArtifactLifecycleStatus.STALE.value
-    assert query["updated_at"] == {"$gte": since}
+    stale = ArtifactLifecycleStatus.STALE.value
+    in_scope = {
+        "app_id": "app-1", "build_family": "app_bundle", "build_key": "app_bundle",
+        "lifecycle_status": stale, "updated_at": later,
+    }
+    assert _matches(in_scope, query)
+    for other in (
+        {"build_family": "workflow_bundle"}, {"build_key": "app_intelligence_workspace"}, {"app_id": "app-2"},
+        {"lifecycle_status": ArtifactLifecycleStatus.CURRENT.value}, {"updated_at": datetime(2026, 10, 17, 11, 0, 0)},
+    ):
+        assert not _matches({**in_scope, **other}, query), other
     cursor.sort.assert_called_once_with([("version_number", -1), ("created_at", -1)])
     cursor.limit.assert_called_once_with(5)
 
     coll.find.reset_mock()
     await store.list_build_records(app_id="app-1", build_family="app_bundle")
-    assert "updated_at" not in coll.find.call_args.args[0]
+    query = coll.find.call_args.args[0]
+    assert "updated_at" not in query
+    assert _matches({**in_scope, "build_key": "app_intelligence_workspace"}, query)
+    assert not _matches({**in_scope, "build_family": "workflow_bundle"}, query)
 
 
 @pytest.mark.asyncio

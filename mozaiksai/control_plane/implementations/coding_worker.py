@@ -16,11 +16,13 @@ import yaml
 
 from mozaiksai.control_plane.config import ControlPlaneConfig, load_control_plane_config
 from mozaiksai.control_plane.contracts import (
+    BUILD_ACCEPTANCE_TRANSITIONS,
     CodingWorkerPlan,
     CodingWorkerRequest,
     CodingWorkerResult,
     FileUpdate,
     StagedPatchProposal,
+    acceptance_evidence_names,
 )
 from mozaiksai.control_plane.implementations.acp_coding_provider import (
     ACPCodingProvider,
@@ -79,6 +81,12 @@ _STALE_PARENT_FAMILY_SCAN_LIMIT = 200
 _STALE_PARENT_ATTRIBUTION_DEPTH = 16
 #: Acceptance evidence that names no time: the build was accepted, but when is unknown.
 _ACCEPTED_AT_UNKNOWN = object()
+#: The most change requests one check reads to show, from the state they saved,
+#: that STALE records without acceptance evidence were never accepted
+#: (:func:`_never_accepted_refusal`). More cannot be checked: refused.
+_STALE_STATE_LOOKUP_LIMIT = 64
+#: What brownfield Genesis acceptance leaves on its build: no acceptance evidence.
+_GENESIS_IMPORT_BUNDLE_MODE = "brownfield_genesis_import"
 #: How Studio's trigger records a change request that ran inline or only
 #: returned a decision. Any other mode, such as ``workflow`` (written when a
 #: workflow route is prepared, whether or not its launch then succeeded), may
@@ -127,50 +135,73 @@ def _utc_instant(value: Any) -> datetime | None:
 
 
 def _accepted_at(record: BuildRecord) -> Any:
-    """When a build record was accepted, from its ``commit_metadata.metadata.acceptance`` marker; None without one.
+    """When a build record was accepted, from the acceptance evidence that names it; None without such evidence.
 
     Staling overwrites a record's CURRENT status, so the status alone cannot
-    say whether a STALE build was ever accepted; the marker can. Studio's
-    acceptance, the staged-refinement acceptance and AppGenerator's genesis
-    save (which saves its parentless build CURRENT) write it in the same write
-    that makes the build current. A build cannot have been
-    accepted before it was saved, so the time is the marker's, or the
-    record's creation when that is later (the genesis save stamps its marker
-    just before the write that creates the record).
+    say whether a STALE build was ever accepted; the evidence can. Only an
+    authorized acceptance writes it (``contracts.BUILD_ACCEPTANCE_TRANSITIONS``:
+    Studio's acceptance of a draft and the staged-refinement acceptance), in
+    the write that makes the build current, as
+    ``commit_metadata.metadata.acceptance``: the build's app, build family,
+    build key and record id, the authenticated principal, the time and the
+    transition. A newly generated build, the first one included, is a draft
+    and carries none.
 
-    The marker is the only evidence. A record without one is not shown to
-    have been accepted, whatever else it records: a build accepted before
-    acceptance was recorded on the record (by an earlier Studio, or saved by
-    an earlier genesis save) cannot be verified and is refused where
-    acceptance must be shown, and is never reinterpreted from its shape or its
-    refinement sessions. Brownfield Genesis acceptance writes no marker
-    (``accept_genesis_build_record``), so once such a build is stale it is not
-    shown accepted either.
+    Evidence counts only on the record it names
+    (``contracts.acceptance_evidence_names``). A marker copied or inherited
+    from another record, one that names another app, key or record, and one
+    written before acceptance named its build, are not this record's
+    evidence, so they show nothing about it; nor does its shape, its
+    validation or its refinement sessions. Brownfield Genesis acceptance writes
+    no evidence (``accept_genesis_build_record``, owned by Genesis import), so
+    once such a build is stale it is not shown accepted either.
 
-    Returns the time, ``_ACCEPTED_AT_UNKNOWN`` when a marker is present but its
-    time cannot be read, or None when there is no marker.
+    Returns the time (never earlier than the record's creation),
+    ``_ACCEPTED_AT_UNKNOWN`` when evidence names this record but its time,
+    principal or transition cannot be read, or None when no evidence names it.
     """
-    acceptance = record.commit_metadata.metadata.get("acceptance")
-    if acceptance is None:
+    evidence = record.commit_metadata.metadata.get("acceptance")
+    if not isinstance(evidence, dict) or not acceptance_evidence_names(record, evidence):
         return None
-    marked = _utc_instant(acceptance.get("accepted_at")) if isinstance(acceptance, dict) else None
-    if marked is None:
+    marked = _utc_instant(evidence.get("accepted_at"))
+    principal = evidence.get("accepted_by")
+    if (
+        marked is None or not isinstance(principal, str) or not principal.strip()
+        or evidence.get("transition") not in BUILD_ACCEPTANCE_TRANSITIONS
+    ):
         return _ACCEPTED_AT_UNKNOWN
     created = _utc_instant(record.created_at)
     return max(marked, created) if created is not None else marked
 
 
+def _genesis_import_without_evidence(record: BuildRecord) -> bool:
+    """Whether ``record`` is an imported Genesis build that carries no acceptance evidence naming it."""
+    return (
+        record.commit_metadata.metadata.get("bundle_mode") == _GENESIS_IMPORT_BUNDLE_MODE
+        and _accepted_at(record) is None
+    )
+
+
+def _genesis_import_dependency(record_id: str) -> str:
+    """Why a path through an imported Genesis build without evidence stays blocked, naming the owner it waits on."""
+    return (
+        f"build {record_id} is an imported Genesis build, and accepting imported Genesis "
+        "(accept-genesis, BuildRecordStore.accept_genesis_build_record, owned by Genesis import) records no "
+        "acceptance evidence yet, so this path stays blocked until that owner writes it"
+    )
+
+
 def _made_current_at(record: BuildRecord) -> Any:
     """The earliest a CURRENT record can have become current: :func:`_accepted_at`, else its creation.
 
-    A CURRENT record without the acceptance marker was saved CURRENT by a
-    writer that records none (such as AgentGenerator's workflow bundles or the
-    App Intelligence index), made current by brownfield Genesis acceptance,
-    which writes none, or accepted before the marker existed. Which one cannot
-    be told, but none can have become current before it was created, so its
-    creation is used: ordering an accepted base from that earliest time reads
-    every record written since then and counts each acceptance from then on as
-    newer, which can only refuse more, never less.
+    A CURRENT record without acceptance evidence naming it was saved CURRENT
+    by a writer that records none (such as AgentGenerator's workflow bundles
+    or the App Intelligence index), made current by brownfield Genesis
+    acceptance, which writes none, or accepted before acceptance named its
+    build. Which one cannot be told, but none can have become current before
+    it was created, so its creation is used: ordering an accepted base from
+    that earliest time reads every record written since then and counts each
+    acceptance from then on as newer, which can only refuse more, never less.
     """
     accepted = _accepted_at(record)
     if accepted is not None:
@@ -181,11 +212,11 @@ def _made_current_at(record: BuildRecord) -> Any:
 def _became_current_by(record: BuildRecord) -> Any:
     """The latest a CURRENT record can have become current: :func:`_accepted_at`, else its last write.
 
-    Without the acceptance marker, the write that made the record current was
-    no later than its last write (``updated_at``), so asking whether it became
-    current after a given time from that latest time refuses whenever it may
-    have; a record saved CURRENT and not written since has the same creation
-    and last-write time.
+    Without acceptance evidence naming it, the write that made the record
+    current was no later than its last write (``updated_at``), so asking
+    whether it became current after a given time from that latest time
+    refuses whenever it may have; a record saved CURRENT and not written since
+    has the same creation and last-write time.
     """
     accepted = _accepted_at(record)
     if accepted is not None:
@@ -211,10 +242,11 @@ def _acceptance_of(record: BuildRecord) -> Any:
     DRAFT, ARCHIVED and DELETED records were never accepted. A CURRENT record
     is accepted work since it became current (:func:`_made_current_at`). A
     SUPERSEDED record was current until another acceptance replaced it, so it
-    was accepted even when it carries no acceptance marker; then when is
+    was accepted even when no acceptance evidence names it; then when is
     unknown (``_ACCEPTED_AT_UNKNOWN``). Staling overwrites the status of drafts
     and accepted builds alike, so a STALE record shows acceptance only by its
-    marker (:func:`_accepted_at`).
+    evidence (:func:`_accepted_at`); one without it is None here, and whether it
+    was never accepted is decided by :func:`_never_accepted_refusal`.
     """
     status = record.lifecycle_status
     if status in _NEVER_ACCEPTED_STATES or status == ArtifactLifecycleStatus.DELETED:
@@ -225,6 +257,70 @@ def _acceptance_of(record: BuildRecord) -> Any:
     if accepted is None and status == ArtifactLifecycleStatus.SUPERSEDED:
         return _ACCEPTED_AT_UNKNOWN
     return accepted
+
+
+async def _never_accepted_refusal(
+    artifact_store: Any, *, app_id: str, record: BuildRecord, lookups: list[int],
+) -> str | None:
+    """Why a STALE record without acceptance evidence cannot be shown never accepted; None when it can.
+
+    Staling overwrites the status of drafts and accepted builds alike, so a
+    STALE record that no acceptance evidence names (:func:`_accepted_at`) is
+    decided from what Studio saved when the change that staled it began. Its
+    ``invalidation_reason`` names a change request made from it, whose
+    ``router_decision.baseline_state`` (server-written when the change was
+    requested) recorded the record's lifecycle status then:
+
+    * ``draft``: it was a draft that was never accepted (acceptance takes only
+      a draft to CURRENT, and writes evidence when it does), so None;
+    * ``stale``: it was already stale, so the change request named by the
+      saved ``invalidation_reason`` is followed back the same way, at most
+      ``_STALE_PARENT_ATTRIBUTION_DEPTH`` change requests;
+    * anything else refuses: a saved state that shows it was ``current`` or
+      ``superseded`` (so accepted, at a time nothing records), no saved state
+      or one of another build, a change request that was not found or not made
+      from it, an invalidation that names no change request, or more reads
+      than the ``lookups`` budget this check shares with its caller.
+
+    Returns the cause as a clause about the record ("it carries ..."). A lookup
+    error propagates, and every caller refuses on it.
+    """
+    cause: str | None = None
+    reason = str(record.invalidation_reason or "")
+    for _ in range(_STALE_PARENT_ATTRIBUTION_DEPTH):
+        if not reason.startswith(_CHANGE_REQUEST_REASON_PREFIX):
+            cause = "its invalidation names no change request that saved its state"
+            break
+        link = reason.removeprefix(_CHANGE_REQUEST_REASON_PREFIX)
+        if lookups[0] <= 0:
+            cause = f"more than {_STALE_STATE_LOOKUP_LIMIT} change requests would have to be read to show it was never accepted"
+            break
+        lookups[0] -= 1
+        change = await artifact_store.get_change_request(app_id=app_id, change_request_id=link)
+        if change is None:
+            cause = f"change request {link} that staled it was not found"
+            break
+        if getattr(change, "build_record_id", None) != record.id:
+            cause = f"change request {link} that staled it is not one made from it"
+            break
+        decision = change.router_decision if isinstance(change.router_decision, dict) else {}
+        state = decision.get("baseline_state")
+        if not isinstance(state, dict) or state.get("build_record_id") != record.id:
+            cause = f"change request {link} that staled it saved no state of it when it began"
+            break
+        status = state.get("lifecycle_status")
+        if status == ArtifactLifecycleStatus.DRAFT.value:
+            return None
+        if status != ArtifactLifecycleStatus.STALE.value:
+            cause = f"change request {link} that staled it began while it was {status}, not a draft"
+            break
+        reason = str(state.get("invalidation_reason") or "")
+    else:
+        cause = f"its invalidations go back more than {_STALE_PARENT_ATTRIBUTION_DEPTH} change requests"
+    refusal = f"it carries no acceptance evidence naming it, and {cause}"
+    if record.commit_metadata.metadata.get("bundle_mode") == _GENESIS_IMPORT_BUNDLE_MODE:
+        refusal += f" ({_genesis_import_dependency(record.id)})"
+    return refusal
 
 
 async def _ancestor_ids(artifact_store: Any, *, app_id: str, record: BuildRecord, max_depth: int) -> frozenset[str]:
@@ -268,29 +364,35 @@ async def newer_accepted_work(
 
     The accepted base is the nearest record of the lineage, ``record`` itself
     first and then its parents, that shows acceptance (:func:`_acceptance_of`:
-    CURRENT, SUPERSEDED, or carrying the acceptance marker). A CURRENT base
-    without the marker is ordered from its creation, the earliest it can have
-    become current (:func:`_made_current_at`), so the scan below reads more,
-    never less. Newer accepted work is a record of the scope that is not in
-    the lineage up to that base and that is CURRENT, or that is STALE or
-    SUPERSEDED and was accepted at or after the base was accepted (an accepted
-    build is marked stale once a refinement of it is stored, so CURRENT alone
-    does not show it). Every write to a record sets its ``updated_at``, so only
-    records written since the base was accepted are read, newest first.
+    CURRENT, SUPERSEDED, or carrying acceptance evidence that names it). A
+    draft, the first build included, shows none, so a lineage of drafts has
+    no base. A CURRENT base without evidence is ordered from its creation, the
+    earliest it can have become current (:func:`_made_current_at`), so the
+    scan below reads more, never less. Newer accepted work is a record of the
+    scope that is not in the lineage up to that base and that is CURRENT, or
+    that is STALE or SUPERSEDED and was accepted at or after the base was
+    accepted (an accepted build is marked stale once a refinement of it is
+    stored, so CURRENT alone does not show it). Every write to a record sets
+    its ``updated_at``, so only records written since the base was accepted
+    are read, newest first.
 
-    A STALE record without the marker is not shown accepted and is passed
-    over. A SUPERSEDED record without one was accepted, at a time nothing
-    records, so it is never passed over as unaccepted: it is older work only
-    when its last write (the supersession) was no later than the base became
-    current, or when it is one of the builds the base was made from (whose
-    acceptance the base's own acceptance superseded); otherwise it refuses.
+    A STALE record without evidence naming it is passed over only when the
+    state its invalidating change request saved shows it was a draft never
+    accepted (:func:`_never_accepted_refusal`); otherwise whether it was
+    accepted cannot be verified and it refuses. A SUPERSEDED record without
+    evidence was accepted, at a time nothing records, so it is never passed
+    over as unaccepted: it is older work only when its last write (the
+    supersession) was no later than the base became current, or when it is
+    one of the builds the base was made from (whose acceptance the base's own
+    acceptance superseded); otherwise it refuses.
 
     Fails closed (``unverified``): a missing record or a lineage longer than
     ``max_depth`` before its accepted base; more CURRENT records, or records
-    written since the base was accepted, than the scan bound; or an accepted
-    record whose acceptance cannot be ordered against the base's (no base in
-    the lineage, an acceptance with no known time, or a superseded record with
-    no acceptance marker as above). Lookup errors propagate.
+    written since the base was accepted, than the scan bound; a STALE record
+    that cannot be shown never accepted, as above; or an accepted record whose
+    acceptance cannot be ordered against the base's (no base in the lineage,
+    an acceptance with no known time, or a superseded record without evidence
+    as above). Lookup errors propagate.
     """
     family, key = record.build_family, record.build_key
     lineage: dict[str, BuildRecord] = {record.id: record}
@@ -334,6 +436,7 @@ async def newer_accepted_work(
             "unverified", f"more than {limit} builds of {family}/{key} were written since its accepted base",
         )
     base_ancestors: frozenset[str] | None = None
+    lookups = [_STALE_STATE_LOOKUP_LIMIT]
     for other in written:
         if other.id in lineage or other.lifecycle_status not in {
             ArtifactLifecycleStatus.STALE, ArtifactLifecycleStatus.SUPERSEDED,
@@ -344,16 +447,26 @@ async def newer_accepted_work(
             continue  # last written before the base was accepted, so not accepted after it
         other_at = _acceptance_of(other)
         if other_at is None:
-            continue  # STALE with no acceptance marker: not shown accepted
+            # STALE without evidence naming it: passed over only as a draft that was never accepted.
+            refusal = await _never_accepted_refusal(artifact_store, app_id=app_id, record=other, lookups=lookups)
+            if refusal is None:
+                continue
+            return NewerAcceptedWork(
+                "unverified",
+                f"build {other.id} is stale, {refusal}, so its acceptance cannot be verified; refine the app from "
+                f"build {other.id} or a build made from it instead",
+                other.id,
+            )
         if base is None:
+            imported = next((node.id for node in lineage.values() if _genesis_import_without_evidence(node)), None)
             return NewerAcceptedWork(
                 "unverified",
                 f"build {other.id} was accepted, and nothing in this build's lineage shows an acceptance "
-                "to order it against",
+                "to order it against" + (f" ({_genesis_import_dependency(imported)})" if imported else ""),
                 other.id,
             )
         if _accepted_at(other) is None:
-            # Superseded, so once accepted, but with no marker saying when.
+            # Superseded, so once accepted, but with no evidence saying when.
             if since is not None and written_at is not None and written_at <= since:
                 continue  # superseded no later than the base became current, so accepted before it
             if base_ancestors is None:
@@ -362,7 +475,7 @@ async def newer_accepted_work(
                 continue  # a build the base was made from: work this lineage contains
             return NewerAcceptedWork(
                 "unverified",
-                f"build {other.id} was superseded, so it was once accepted, but it carries no acceptance marker, "
+                f"build {other.id} was superseded, so it was once accepted, but no acceptance evidence names it, "
                 f"so whether it was accepted after build {base.id} cannot be verified",
                 other.id,
             )
@@ -383,15 +496,19 @@ async def _open_work(artifact_store: Any, *, app_id: str, record: BuildRecord) -
     """What keeps a build made from a stale parent open, as ``(kind, detail)``; None when it is closed.
 
     Closed: rejected or removed, a draft whose validation failed, or a STALE
-    build that was never accepted. A refinement of a draft under review marks
-    that draft stale, after which it can be neither accepted nor rejected and
-    never becomes current; what was made from it is checked as the parent's
-    other descendants are, and a change request made from it recorded as a
-    workflow route (launched, failed or abandoned) keeps it open for good,
-    since nothing records that workflow's outcome. Open: a draft whose
-    validation passed, is pending or was skipped (``open_draft``: it can be
-    rejected), and any build that was accepted (``accepted``: CURRENT,
-    SUPERSEDED, or STALE with the acceptance marker, :func:`_accepted_at`).
+    build shown never accepted (no acceptance evidence names it, and the state
+    its invalidating change request saved shows it was a draft,
+    :func:`_never_accepted_refusal`). A refinement of a draft under review
+    marks that draft stale, after which it can be neither accepted nor
+    rejected and never becomes current; what was made from it is checked as
+    the parent's other descendants are, and a change request made from it
+    recorded as a workflow route (launched, failed or abandoned) keeps it open
+    for good, since nothing records that workflow's outcome. Open: a draft
+    whose validation passed, is pending or was skipped (``open_draft``: it can
+    be rejected), any build that was accepted (``accepted``: CURRENT,
+    SUPERSEDED, or STALE with acceptance evidence naming it,
+    :func:`_accepted_at`), and a STALE build without evidence that cannot be
+    shown never accepted (``unverified``).
     """
     status = ArtifactLifecycleStatus(record.lifecycle_status)
     if status in {ArtifactLifecycleStatus.ARCHIVED, ArtifactLifecycleStatus.DELETED}:
@@ -416,6 +533,13 @@ async def _open_work(artifact_store: Any, *, app_id: str, record: BuildRecord) -
                 f"is stale, and change request {change.id} made from it may have launched a workflow ({mode}), "
                 f"whose outcome is not on record; {_ACCEPT_A_NEW_BUILD}"
             )
+    refusal = await _never_accepted_refusal(
+        artifact_store, app_id=app_id, record=record, lookups=[_STALE_STATE_LOOKUP_LIMIT],
+    )
+    if refusal is not None:
+        return "unverified", (
+            f"is stale, {refusal}, so its acceptance cannot be verified; {_ACCEPT_A_NEW_BUILD}"
+        )
     return None
 
 
@@ -913,10 +1037,12 @@ class ScopedRefinementCodingWorker:
 
         * no build of its build family and key is CURRENT (the scope accepting
           supersedes in), and the parent is STALE;
-        * it carries the acceptance marker (:func:`_accepted_at`; a stale
-          build without one, including one accepted before acceptance was
-          recorded on builds, is not shown accepted) and no build of that
-          scope was accepted after it (:func:`newer_accepted_work`);
+        * acceptance evidence names it (:func:`_accepted_at`: written by an
+          authorized acceptance; a stale build without it, including one
+          accepted before acceptance named its build, one carrying evidence
+          copied from another build, and an imported Genesis build, whose
+          acceptance writes none yet, is not shown accepted) and no build of
+          that scope was accepted after it (:func:`newer_accepted_work`);
         * attribution: its ``invalidation_reason`` names a change request made
           from it by this user, recorded as an inline run or a returned
           decision (never a workflow route), that saved the parent's state
@@ -927,11 +1053,11 @@ class ScopedRefinementCodingWorker:
         * no other work: every other change request made from the parent ran
           inline or only returned a decision, every build made from it, and
           every build further down its lineage, is closed: rejected, removed,
-          a draft that failed validation, or a stale draft that was never
+          a draft that failed validation, or a stale draft shown never
           accepted (a draft refined in review, which can then be neither
-          rejected nor accepted) with no change request made from it recorded
-          as a workflow route; and every refinement session of the parent is an
-          inline run;
+          rejected nor accepted, as the state its change request saved shows)
+          with no change request made from it recorded as a workflow route;
+          and every refinement session of the parent is an inline run;
         * nothing in flight: Studio's registry read before this run began
           (``registry_run_state``, server-derived) found no other run building;
         * compatible inputs: every family the parent's family depends on in the
@@ -939,7 +1065,7 @@ class ScopedRefinementCodingWorker:
           accepted. A recorded input (``canonical_inputs_version``) must still
           be CURRENT; any other CURRENT record must have become current no
           later than the parent was accepted, judged by the latest it can have
-          (:func:`_became_current_by`: its acceptance marker, else its last
+          (:func:`_became_current_by`: its acceptance evidence, else its last
           write); a family that is STALE with no CURRENT record refuses.
 
         The retry stays bound to this parent, the authenticated user and the
@@ -979,13 +1105,19 @@ class ScopedRefinementCodingWorker:
                 return f"a build of this family and key is current: {current[0]}"
             accepted_at = _accepted_at(parent)
             if accepted_at is None:
+                if _genesis_import_without_evidence(parent):
+                    return f"nothing shows the parent was ever accepted: {_genesis_import_dependency(parent.id)}"
                 return (
-                    "nothing shows the parent was ever accepted: it carries no acceptance marker, so it is a draft "
-                    "that was never accepted, or a build accepted before acceptance was recorded on it, which cannot "
-                    f"be verified; {_ACCEPT_A_NEW_BUILD}"
+                    "nothing shows the parent was ever accepted: no acceptance evidence names it (evidence "
+                    "copied from another build, or written before acceptance named its build, does not count), so "
+                    "it is a draft that was never accepted, or a build whose acceptance cannot be verified; "
+                    f"{_ACCEPT_A_NEW_BUILD}"
                 )
             if not isinstance(accepted_at, datetime):
-                return f"the parent's acceptance time is unknown; {_ACCEPT_A_NEW_BUILD}"
+                return (
+                    "the parent's acceptance time is unknown: its acceptance evidence names no readable time, "
+                    f"principal or transition; {_ACCEPT_A_NEW_BUILD}"
+                )
             newer = await newer_accepted_work(artifact_store, app_id=app_id, record=parent)
             if newer is not None:
                 return (
@@ -1082,10 +1214,16 @@ class ScopedRefinementCodingWorker:
                     f"whose outcome is not on record; {_ACCEPT_A_NEW_BUILD}"
                 )
             state = decision.get("baseline_state")
-            if not isinstance(state, dict) or state.get("build_record_id") != parent.id:
+            if not isinstance(state, dict):
                 return (
                     f"change request {link} that invalidated the parent saved no state of it when it began: it was "
                     "recorded before change requests saved the state of their build, so what it changed cannot be "
+                    f"resolved; {_ACCEPT_A_NEW_BUILD}"
+                )
+            if state.get("build_record_id") != parent.id:
+                return (
+                    f"change request {link} that invalidated the parent saved the state of build "
+                    f"{state.get('build_record_id')}, not of the parent, so what it changed in the parent cannot be "
                     f"resolved; {_ACCEPT_A_NEW_BUILD}"
                 )
             if not runs.get(link):
@@ -1164,9 +1302,11 @@ class ScopedRefinementCodingWorker:
     ) -> dict[str, Any]:
         """Hold the candidate to the saved parent's pack ownership before validation.
 
-        Template-owned outputs stay byte-identical to the verified parent
-        (Studio refuses a scope that selects one before any run; this is the
-        backstop for every candidate, whatever chose its scope). An
+        Template-owned outputs stay byte-identical to the verified parent.
+        Studio refuses, before the coding or surface provider runs, a patch
+        that would apply to template-owned files only; this is the backstop for
+        every candidate, whatever chose its scope, including a scope that
+        holds template files beside editable ones. An
         app-owned (``owner: workspace``) output may change only inside an
         explicit or user-confirmed selected-file scope, from the app's accepted
         current build (the CURRENT record of the parent's build family and key,

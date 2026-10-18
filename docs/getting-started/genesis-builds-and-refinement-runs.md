@@ -41,12 +41,16 @@ During a Genesis Build, Mozaiks:
    code.
 5. **Validates the result.** Generated artifacts are checked against the
    contracts Mozaiks apps are built on before anything is presented to you.
-6. **Presents it for review.** You inspect the result in Studio and promote it
-   when you are satisfied.
+6. **Presents it for review.** The result is saved as a draft. You inspect it
+   in Studio, accept the draft when you are satisfied, and then promote it to
+   make it active.
 
-When you promote it, the Genesis Build's output becomes the **first
-authoritative version of your app**: the canonical state that every future
-change is measured against, and the start of your app's revision history.
+Generating and validating the app does not accept it. When you accept the
+draft, the Genesis Build's output becomes the **first authoritative version of
+your app**: the canonical state that every future change is measured against,
+and the start of your app's revision history. Studio records your acceptance
+on that version (who accepted which build, and when); later refinements build
+on the accepted version, and only an accepted version can be promoted.
 
 For an existing app, Studio can show an **imported Genesis source** in Build
 Review. Download and inspect its reserved archive, then review the exact archive

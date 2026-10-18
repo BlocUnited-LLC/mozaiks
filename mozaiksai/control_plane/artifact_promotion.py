@@ -16,6 +16,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from mozaiksai.control_plane.contracts import build_acceptance_evidence
 from mozaiksai.control_plane.dry_run import RefinementExecutionPlan
 from mozaiksai.control_plane.promotion import RefinementPromotionResult
 from mozaiksai.control_plane.promotion_policy import PromotionPolicyDecision
@@ -397,6 +398,7 @@ def _commit_metadata_payload(commit_metadata: Any) -> dict[str, Any]:
 
 def _build_acceptance_commit_metadata(
     *,
+    record: Any,
     commit_metadata: Any,
     accepted_by: str | None,
     accepted_at: str,
@@ -406,11 +408,19 @@ def _build_acceptance_commit_metadata(
     validation_override: bool = False,
     validation_status: ArtifactValidationStatus | None = None,
 ) -> dict[str, Any]:
+    """``commit_metadata`` with the acceptance evidence the staged-refinement acceptance writes on ``record``.
+
+    The evidence has the shape Studio's acceptance writes
+    (:func:`~mozaiksai.control_plane.contracts.build_acceptance_evidence`,
+    transition ``staged_refinement_accept``), plus the staged review it was
+    accepted under.
+    """
     payload = _commit_metadata_document(commit_metadata)
     metadata = dict(payload.get("metadata") or {})
     acceptance: dict[str, Any] = {
-        "accepted_by": accepted_by,
-        "accepted_at": accepted_at,
+        **build_acceptance_evidence(
+            record, accepted_by=accepted_by, accepted_at=accepted_at, transition="staged_refinement_accept",
+        ),
         "refinement_review_status": review_status,
         "request_id": request_id,
         "validation_override": bool(validation_override),
@@ -815,6 +825,7 @@ async def accept_staged_refinement_artifact_version(
     accepted_by_resolved = str(accepted_by or loaded_review.reviewer or review_record.reviewer or "").strip() or None
     accepted_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     commit_metadata_update = _build_acceptance_commit_metadata(
+        record=artifact_version,
         commit_metadata=artifact_version.commit_metadata,
         accepted_by=accepted_by_resolved,
         accepted_at=accepted_at,
@@ -1302,6 +1313,7 @@ async def accept_staged_refinement_build_record(
     accepted_by_resolved = str(accepted_by or loaded_review.reviewer or review_record.reviewer or "").strip() or None
     accepted_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     commit_metadata_update = _build_acceptance_commit_metadata(
+        record=build_record,
         commit_metadata=build_record.commit_metadata,
         accepted_by=accepted_by_resolved,
         accepted_at=accepted_at,

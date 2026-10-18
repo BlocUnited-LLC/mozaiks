@@ -571,7 +571,6 @@ async def _register_app_bundle_artifact_version(
 
     parent_version_id = None
     validation_status_raw = None
-    lifecycle_status = None
     app_validation_status = None
     app_validation_strategy = None
     sandbox_session_id = None
@@ -597,11 +596,11 @@ async def _register_app_bundle_artifact_version(
             parent_version_id = None
             validation_status_raw = None
 
-    lifecycle_status = (
-        ArtifactLifecycleStatus.DRAFT
-        if parent_version_id
-        else ArtifactLifecycleStatus.CURRENT
-    )
+    # Every build this saves, the first (parentless) one included, is a draft
+    # for review. Generation is not acceptance: the build becomes current only
+    # through an authorized acceptance (Studio's accept, or the staged
+    # refinement acceptance), which writes the acceptance evidence.
+    lifecycle_status = ArtifactLifecycleStatus.DRAFT
 
     normalized_status = str(validation_status_raw or "").strip().lower()
     validation_status = ArtifactValidationStatus.PENDING
@@ -678,14 +677,6 @@ async def _register_app_bundle_artifact_version(
         bundle_content_metadata["integration_test_result"] = integration_test_result
     if generated_files_manifest:
         bundle_content_metadata["accepted_file_manifest"] = generated_files_manifest
-    if lifecycle_status == ArtifactLifecycleStatus.CURRENT:
-        # A parentless genesis build is saved CURRENT: this save is its
-        # acceptance. Record it as every acceptance does, so the build is
-        # still shown accepted once a refinement marks it stale.
-        bundle_content_metadata["acceptance"] = {
-            "accepted_by": user_id,
-            "accepted_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-        }
     content_store = get_artifact_content_store()
     if content_store.backend_name != "local":
         try:

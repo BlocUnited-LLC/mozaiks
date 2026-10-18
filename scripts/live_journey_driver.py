@@ -3,8 +3,9 @@
 The driver uses only the running host's existing APIs, the ones the chat UI
 uses. It starts the journey through the host's entry routes, follows every
 step over the workflow WebSocket, answers the pauses its prompt file scripts,
-promotes the reviewed build through Studio's promote endpoint, and stops on
-every terminal event.
+accepts the reviewed draft through Studio's accept endpoint and then promotes
+it through the promote endpoint, as the review's "Accept this draft" and
+Promote buttons do, and stops on every terminal event.
 
 It has no execution, retry, promotion-policy or lifecycle authority. It never
 restarts or resumes a run, never resends a refused request, never cancels
@@ -21,8 +22,8 @@ Usage::
 
 With sign-in enabled, set ``MOZAIKS_DRIVER_ACCESS_TOKEN`` to a bearer token
 issued to ``--user-id``. With sign-in off, the host trusts the user id the
-driver sends, and Studio's promote endpoint acts for the host's default user
-(``MOZAIKS_DEFAULT_USER_ID``), so ``--user-id`` must be that user.
+driver sends, and Studio's accept and promote endpoints act for the host's
+default user (``MOZAIKS_DEFAULT_USER_ID``), so ``--user-id`` must be that user.
 
 The pricing file uses the ``mozaiks.usage_pricing.v1`` catalog shape
 (``mozaiksai/core/usage/catalogs/usage-pricing.generated.json`` in the
@@ -57,9 +58,12 @@ Prompt file (JSON, schema ``mozaiks.journey_script.v1``)::
 - Validation and review agents never receive text from the driver. The one
   exception is the AppReview promotion signal below.
 - AppWorkbench is answered by the driver with its "Continue" action.
-- When AppReview's ReviewAgent pauses, the driver calls the promote endpoint
-  for the reviewed artifact and, only after a 200 that reports the promotion,
-  sends ``PROMOTION_SIGNAL`` once.
+- When AppReview's ReviewAgent pauses, the driver calls the accept endpoint for
+  the reviewed artifact (AppGenerator saves every build, the first included,
+  as a draft; accepting it is the authorized transition that makes it current),
+  then, only after a 200 that reports the acceptance, the promote endpoint,
+  and, only after a 200 that reports the promotion, sends ``PROMOTION_SIGNAL``
+  once.
 - A transition with options needs a ``transition_options`` entry; one without
   options (such as ``app_review``) resolves without one.
 - A UI response value ``{"$env": "NAME"}`` is read from the environment when it
@@ -644,6 +648,7 @@ class JourneyDriver:
         self.steps: list[Step] = []
         self.transitions: list[dict[str, Any]] = []
         self.human_assists: list[dict[str, Any]] = []
+        self.acceptance: dict[str, Any] | None = None
         self.promotion: dict[str, Any] | None = None
         self.prompt_sent_to: dict[str, Any] | None = None
         self.session_state: dict[str, Any] | None = None
@@ -1274,6 +1279,29 @@ class JourneyDriver:
                 f"The build summary does not allow promotion: {_short(review)}",
                 review=review,
             )
+        # The reviewed build is a draft: the owner's acceptance makes it current, and only a current
+        # build can be promoted. The driver accepts exactly the reviewed artifact, once.
+        accept_status, accept_body = await self._request(
+            "POST",
+            f"/api/studio/build/artifacts/{quote(artifact_version_id, safe='')}/accept",
+            params={"build_registry_id": build_registry_id, "app_id": self.config.app_id},
+            body={},
+        )
+        accepted = isinstance(accept_body, dict) and accept_body.get("accepted") is True
+        self.acceptance = {
+            "artifact_version_id": artifact_version_id,
+            "build_registry_id": build_registry_id,
+            "status_code": accept_status,
+            "accepted": accepted,
+            "detail": None if accepted else accept_body,
+        }
+        if accept_status != 200 or not accepted:
+            raise JourneyStop(
+                EXIT_FAILED,
+                "acceptance_failed",
+                f"The accept endpoint answered {accept_status}: {_short(accept_body)}",
+                acceptance=self.acceptance,
+            )
         status, body = await self._request(
             "POST",
             f"/api/studio/build/artifacts/{quote(artifact_version_id, safe='')}/promote",
@@ -1430,6 +1458,7 @@ def _exit_report(
         "human_assist_needed": len(driver.human_assists) if driver else 0,
         "human_assists": driver.human_assists if driver else [],
         "prompt_sent_to": driver.prompt_sent_to if driver else None,
+        "acceptance": driver.acceptance if driver else None,
         "promotion": driver.promotion if driver else None,
         "session_state": driver.session_state if driver else None,
         "terminal_event": driver.terminal_event if driver else None,
