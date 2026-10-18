@@ -42,13 +42,29 @@ def _read_yaml(path: Path) -> dict[str, Any]:
     return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
 
-def _pack_descriptor(pack_dir: Path, pack_id: str) -> dict[str, Any]:
-    """Build a capability_packs descriptor from a local fixture pack directory."""
+def _pack_descriptor(pack_dir: Path, pack_id: str, *, verifiable: bool = True) -> dict[str, Any]:
+    """Build a capability_packs descriptor from a local fixture pack directory.
+
+    A community pack is an external source, so it is selected with the version
+    and digest its bytes verify to. A deliberately malformed pack cannot
+    verify: it gets placeholder pins, so the materializer's own integrity
+    check is what refuses it.
+    """
+    if verifiable:
+        from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+            verify_pack_integrity,
+        )
+
+        metadata = verify_pack_integrity(pack_dir, pack_id)
+        pins = {"version": metadata["version"], "digest": metadata["digest"]}
+    else:
+        pins = {"version": "0.1.0", "digest": "sha256:" + "0" * 64}
     return {
         "id": pack_id,
         "pack_id": pack_id,
         "pack_source_path": str(pack_dir),
         "capability_source": "generated_module",
+        **pins,
     }
 
 
@@ -372,7 +388,7 @@ def test_catalog_schema_validation_rejects_untrusted_keys_at_materialization(
     templates_dir = pack_dir / "templates"
     templates_dir.mkdir()
 
-    desc = _pack_descriptor(pack_dir, "adversarial")
+    desc = _pack_descriptor(pack_dir, "adversarial", verifiable=False)
     with pytest.raises(ManagedCapabilityTemplateError, match="schema validation"):
         _materialize(desc)
 
@@ -392,7 +408,7 @@ def test_missing_declared_asset_rejected_before_materialization(tmp_path: Path) 
         encoding="utf-8",
     )
     with pytest.raises(PackIntegrityError, match="Declared pack asset not found"):
-        _materialize(_pack_descriptor(pack_dir, "missing_asset"))
+        _materialize(_pack_descriptor(pack_dir, "missing_asset", verifiable=False))
 
 
 def test_contract_unknown_runtime_affecting_field_rejected(tmp_path: Path) -> None:
@@ -414,7 +430,7 @@ def test_contract_unknown_runtime_affecting_field_rejected(tmp_path: Path) -> No
         encoding="utf-8",
     )
     with pytest.raises(PackIntegrityError, match="unsupported fields"):
-        _materialize(_pack_descriptor(pack_dir, "bad_contract"))
+        _materialize(_pack_descriptor(pack_dir, "bad_contract", verifiable=False))
 
 
 def test_declared_surface_ownership_allows_pack_materialization(tmp_path: Path) -> None:
@@ -462,7 +478,7 @@ def test_malformed_surface_ownership_rejected_before_pack_materialization(
     (pack_dir / "contract.yaml").write_text(yaml.safe_dump(contract), encoding="utf-8")
 
     with pytest.raises(PackIntegrityError, match=diagnostic):
-        _materialize(_pack_descriptor(pack_dir, "greetings"))
+        _materialize(_pack_descriptor(pack_dir, "greetings", verifiable=False))
 
 
 # ---------------------------------------------------------------------------

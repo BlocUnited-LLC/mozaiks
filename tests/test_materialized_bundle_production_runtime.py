@@ -183,6 +183,7 @@ async def test_exact_materialized_file_map_validates_boots_and_executes_http(
     assert page["sections"][0]["config"]["api_endpoint"] == "/api/modules/reports/list_reports"
 
     assert scan_generated_bundle(files_one, capability_packs=_selected_packs(), context_variables=context) == []
+    assert scan_generated_bundle(files_one, capability_packs=_selected_packs()) == []
     assert scan_functional_generated_app(files_one, capability_packs=_selected_packs()) == []
     validation = validate_generated_app_bundle(
         GeneratedAppValidationRequest(
@@ -191,14 +192,8 @@ async def test_exact_materialized_file_map_validates_boots_and_executes_http(
             capability_packs=_selected_packs(),
         )
     )
-    # operator_readiness renders its .j2 templates from the build's context: the facade, which has
-    # none, cannot verify those outputs and fails closed on exactly them.
-    errors = [item.message for item in validation.diagnostics if item.severity == "error"]
-    assert {error.split(":", 1)[0] for error in errors} == {
-        "config/operator_readiness.yaml", "docs/operations/operator-readiness.md",
-        "scripts/check_operator_readiness_local.ps1",
-    }, validation.diagnostics
-    assert all("renders from build context, and this scan has none" in error for error in errors)
+    # Validation never renders operator_readiness's .j2 templates, so the facade needs no build context.
+    assert validation.passed is True, validation.diagnostics
     acceptance = await run_app_bundle_acceptance_gate(
         files=files_one,
         context_variables=context,

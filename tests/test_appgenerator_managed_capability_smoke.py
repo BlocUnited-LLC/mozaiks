@@ -616,11 +616,15 @@ def wallet_pack_root(tmp_path: Path) -> Path:
 
 @pytest.fixture()
 def pack_sources(wallet_pack_root: Path) -> list[dict[str, Any]]:
+    # An external pack is selected with the version and digest its bytes verify to.
+    metadata = _load_resolver().verify_pack_integrity(wallet_pack_root, "wallet")
     return [
         {
             "id": "wallet",
             "capability_source": "managed_capability",
             "pack_source_path": str(wallet_pack_root),
+            "version": metadata["version"],
+            "digest": metadata["digest"],
         }
     ]
 

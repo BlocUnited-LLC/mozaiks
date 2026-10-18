@@ -726,12 +726,19 @@ async def test_actual_revision_assembly_retains_verified_archive_workspace_handl
 
 
 def test_unverified_external_source_cannot_opt_out_of_compilation(tmp_path):
+    """An unpinned external copy is never resolved, so it can neither own a backend nor reach compilation."""
     root = tmp_path / "messaging"
     shutil.copytree(PACK, root, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-    context = _context(root, pinned=False)
-    inventory = verified_pack_template_inventory(context_variables=context)
-    with pytest.raises(PackIntegrityError, match="verified source pin"):
-        verified_template_module_ids(_assembled_files(), inventory)
+    with pytest.raises(PackIntegrityError, match="without version and digest pins"):
+        verified_pack_template_inventory(context_variables=_context(root, pinned=False))
+    # Pinned, the same copy is vouched for by its pins and owns its complete backend.
+    inventory = verified_pack_template_inventory(context_variables=_context(root))
+    assert inventory[0]["authority"] == "selected_pins"
+    assert verified_template_module_ids(_assembled_files(), inventory) == {"messages"}
+    # An inventory entry without a resolver authority (built by hand) still cannot own one.
+    unvouched = [{key: value for key, value in inventory[0].items() if key != "authority"}]
+    with pytest.raises(PackIntegrityError, match="complete backend requires a source"):
+        verified_template_module_ids(_assembled_files(), unvouched)
 
 
 @pytest.mark.parametrize("key,value", [("version", "0.0.0"), ("digest", "sha256:" + "0" * 64)])
@@ -750,8 +757,13 @@ def test_unresolvable_factory_root_trusts_only_pinned_packs(monkeypatch, pinned)
 
     monkeypatch.setattr(resolver, "resolve_factory_app_root", lambda: None)
     context = _context(pinned=pinned)
+    if not pinned:
+        # Without a factory catalog to vouch for it, the shipped directory is just an external source.
+        with pytest.raises(PackIntegrityError, match=r"resolve_factory_app_root\(\) resolved nothing"):
+            resolver.verified_selected_pack_sources(context_variables=context)
+        return
     [entry] = resolver.verified_selected_pack_sources(context_variables=context)
-    assert entry["implementation_trusted"] is pinned
+    assert (entry["resolution"], entry["authority"]) == ("explicit", "selected_pins")
 
 
 def test_mutated_source_after_selection_fails_fresh_digest_check(tmp_path):

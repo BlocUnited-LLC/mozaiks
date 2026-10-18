@@ -908,7 +908,15 @@ def _hosted_billing_pack(root: Path) -> dict[str, str]:
         encoding="utf-8",
     )
     (source / "contract.yaml").write_text("contract_type: build_pack_instructions\n", encoding="utf-8")
-    return {"id": "hosted_billing", "capability_source": "managed_capability", "pack_source_path": str(source)}
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        verify_pack_integrity,
+    )
+
+    metadata = verify_pack_integrity(source, "hosted_billing")
+    return {
+        "id": "hosted_billing", "capability_source": "managed_capability", "pack_source_path": str(source),
+        "version": metadata["version"], "digest": metadata["digest"],
+    }
 
 
 @pytest.mark.asyncio

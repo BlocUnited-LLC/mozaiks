@@ -495,9 +495,12 @@ async def _admit_offline_fixture(monkeypatch, context, files, *, module_actions,
         "app_kind": "saas" if saas else "internal_app", "auth_strategy": "basic-login" if saas else "public",
         "roles": [], "entities": [],
         "pages": [{"name": page.title(), "route": f"/{page}", "purpose": "Use the declared module actions."}],
+        # The self-managed provider module is app-authored: without a capability_source, an id the
+        # factory catalog ships (entitlement_dispatch) would select that pack instead of planning a module.
         "capability_packs": [{
             "capability_pack_id": module_id, "surface_id": module_id, "surface_kind": "module",
             "operations": actions,
+            **({"capability_source": "generated_module"} if module_id == "entitlement_dispatch" else {}),
         } for module_id, actions in module_actions.items()],
         "build_tasks": tasks, "generation_order": [task["task_id"] for task in tasks],
         "agent_backend_required": False,

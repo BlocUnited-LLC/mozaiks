@@ -478,8 +478,17 @@ def test_registered_operator_pack_survives_typed_plan_and_template_materializati
         "assets": [{"path": "templates/", "kind": "templates"}],
         "pack": {"id": "reports", "version": "0.1.0", "status": "active", "capability_source": "operator_pack"},
     }), encoding="utf-8")
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        verify_pack_integrity,
+    )
+
+    # A registered pack outside the factory catalog is an external source: it is selected with its pins.
+    metadata = verify_pack_integrity(root, "reports")
     context = _context()
-    context.set("capability_packs", [{"id": "reports", "capability_source": "operator_pack", "pack_source_path": str(root)}])
+    context.set("capability_packs", [{
+        "id": "reports", "capability_source": "operator_pack", "pack_source_path": str(root),
+        "version": metadata["version"], "digest": metadata["digest"],
+    }])
     plan = _plan()
     plan["capability_packs"][0]["capability_source"] = "operator_pack"
     result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
@@ -488,7 +497,10 @@ def test_registered_operator_pack_survives_typed_plan_and_template_materializati
 
     packs = detach(context.get("app_build_plan"))["capability_packs"]
     assert packs[0]["capability_source"] == "operator_pack"
-    assert packs[0]["pack_source_path"] == str(root)
+    # The source's pins travel with its path into the plan row.
+    assert (packs[0]["pack_source_path"], packs[0]["version"], packs[0]["digest"]) == (
+        str(root), metadata["version"], metadata["digest"],
+    )
     rendered = resolve_managed_capability_templates(packs, context_variables={"report_label": "Reports"})
     files = {item["filename"]: item["content"] for item in rendered}
     assert files["config/reports.yaml"] == "label: Reports"

@@ -25,17 +25,20 @@ def _materialized_files(pack: Path, pack_id: str) -> dict[str, str]:
     """The pack's files plus the shared UI roots the canonical composer builds from its contribution."""
     from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
         resolve_managed_capability_templates,
+        verify_pack_integrity,
     )
     from mozaiksai.core.workflow.generator_support.ui_registry_composition import (
         compose_ui_registry,
     )
 
+    # An external source is selected with the version and digest its bytes verify to.
+    metadata = verify_pack_integrity(pack, pack_id)
+    selected = {"id": pack_id, "pack_id": pack_id, "pack_source_path": str(pack),
+                "version": metadata["version"], "digest": metadata["digest"]}
     contributions: list[dict] = []
     files = {
         item["filename"]: item["content"]
-        for item in resolve_managed_capability_templates(
-            [{"id": pack_id, "pack_id": pack_id, "pack_source_path": str(pack)}], ui_contributions=contributions,
-        )
+        for item in resolve_managed_capability_templates([selected], ui_contributions=contributions)
     }
     files.update(compose_ui_registry(contributions, files))
     return files

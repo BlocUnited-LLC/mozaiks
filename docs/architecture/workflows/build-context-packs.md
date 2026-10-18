@@ -247,7 +247,8 @@ dependency closure, current source identity, declared output closure, and exact
 template bytes are verified. The factory's shipped packs are trusted sources;
 external sources require matching version and digest pins, either on the
 selected pack or from installed Community Component state verified against the
-source's current bytes. A workspace-owned `backend/handler.py` may extend the
+source's current bytes, and an external source without them is not resolved at
+all. A workspace-owned `backend/handler.py` may extend the
 verified template base handler. Missing, changed, or undeclared implementation
 files fail admission; the exemption does not skip runtime, schema,
 implementation, or browser validation. How a selected row resolves to a
@@ -458,7 +459,10 @@ Before materialization, a selected local pack must pass deterministic checks for
 The digest is one `sha256:` value computed from `context.yaml` and every
 declared asset file. It excludes timestamps, absolute paths, worktree location,
 and transient generated metadata. The same pack content produces the same
-digest; material pack-content changes produce a different digest.
+digest; material pack-content changes produce a different digest. It hashes raw
+file bytes, so a checkout's line endings are part of it: a pin or recorded
+digest is compared on the host that computed it, never across checkouts (see
+[Pack identity authority](#pack-identity-authority)).
 
 Cross-repository generator inputs use the same content-addressed principle
 through `mozaiks.contract_identity.v1`. The identity records the immutable
@@ -625,22 +629,54 @@ order:
    `resolve_factory_app_root()/build_context/<id>`, when `<id>` is a safe
    identifier and that directory holds a `context.yaml` with a `pack` block.
 
-`verify_pack_integrity` then computes a fresh version and digest from the
-resolved source. Any `version` or `digest` on the row (and, for an installed
-pack, the pins workspace state recorded) must equal them. The resolver records
-`{pack_id, version, digest, source, resolution}`; `resolution` names the step
-that found the source, and `source` stays the pack's declared source. A pack
-selected by several rows resolves once, and only when they agree.
+A caller may omit `version` and `digest` only where an authority vouches for
+the source, and the resolved identity records which one did (`authority`):
 
-A row claims a pack when it carries a `version`, `digest` or `source`, or its
-`capability_source` is `managed_capability`, `operator_pack` or
-`framework_pack`. A claiming row that none of the three steps resolves fails
-with `PackIntegrityError`, naming the reason: an unsafe id (`../mozaikspay`), an
-id the catalog does not ship, or a host where `resolve_factory_app_root()`
+- `factory_build_context`: the source is a pack the shipped catalog holds, a
+  direct child of `resolve_factory_app_root()/build_context`, whether the row
+  names it by id or by that path;
+- `installed`: the source is the installed Community Component with the row's
+  id, verified against the version and digest workspace state pinned, whether
+  the row names it by id or by its source path;
+- `selected_pins`: any other `pack_source_path` (a directory outside the
+  catalog, a workspace build-context pack that is not installed, a lifecycle
+  upgrade candidate) must be selected with both `version` and `digest`, and
+  its bytes must verify to them.
+
+An explicit source with neither authority nor both pins fails with
+`PackIntegrityError` before its contract is read: a directory's own contract
+never vouches for itself, so it grants no capability, layout or output
+ownership. `verify_pack_integrity` then computes a fresh version and digest
+from the resolved source. Any `version` or `digest` on the row (and, for an
+installed pack, the pins workspace state recorded) must equal them. The
+resolver records `{pack_id, version, digest, source, resolution, authority}`;
+`resolution` names the step that found the source, and `source` stays the
+pack's declared source. A pack selected by several rows resolves once, and
+only when they agree.
+
+The digest hashes the declared files' raw bytes, so it is a same-host
+identity: a CRLF and an LF checkout of the same pack have different digests.
+Row-level digest pins (and installed-state pins) keep comparing against
+`compute_pack_digest` of the resolved source on the validating host, so a pin
+is meaningful on the host and checkout that recorded it. Across hosts, the
+portable identity is the pack id and version, and content is compared as
+described below.
+
+A row claims a pack, and must resolve or fail, when it carries a `version`,
+`digest` or `source`; when its `capability_source` is a registered pack source
+of the AppBuildPlan schema (`managed_capability`, `operator_pack`,
+`framework_pack`, `config_file` or `operator_extension`); or when it is not a
+`generated_module` row and its id names a pack the shipped catalog holds. A row
+whose id names an installed component resolves from installed state whatever
+its source. A claiming row that none of the three steps resolves fails with
+`PackIntegrityError`, naming the reason: an unsafe id (`../mozaikspay`), an id
+the catalog does not ship, or a host where `resolve_factory_app_root()`
 resolves nothing. No warning admits an unverified, unresolvable, mismatched or
-omitted pack. A `generated_module` plan row that resolves from neither its own
-path nor installed state is a planned module, not a pack selection: it selects
-no pack and grants no layout extension, capability or output ownership.
+omitted pack. A `generated_module` row is a planned app-owned module, whatever
+its id: unless its own path or installed state resolves it, it selects no pack
+and grants no layout extension, capability or output ownership. A row with no
+registered source whose id names no shipped or installed pack names no pack to
+omit, and selects nothing.
 
 The bundle scanner resolves the selection the same way (the build context's
 selection when it has one, else the caller's rows) and passes only the resolved
@@ -650,18 +686,44 @@ the MozaiksPay and Mozaiks Cloud contracts, and the `entitlement_dispatch`
 exemption. `forbidden_outputs` and `provides_capabilities` come only from the
 verified contract; a caller row's inline values are never read. A caller row
 for a pack the build context selected adds nothing but pins, which must match;
-one for any other pack may not carry its own `pack_source_path`.
+one for any other pack may not carry its own `pack_source_path`. The
+validation facade and the app-bundle acceptance gate pass the same resolved
+packs to the functional checks (`scan_functional_generated_app`), so a row
+that selects no pack requires no pack facade either.
+
+Plan coverage, the discard of worker copies of pack-owned files and assembly
+read the same selection through the same resolver
+(`module_action_inventory._selected_packs` calls it), so an id-only row, such
+as the default MozaiksPay row an OSS SaaS plan adds when no build context
+selects MozaiksPay, owns exactly the outputs assembly materializes. While
+`app_build_plan` builds a plan whose packs the build context does not select,
+it releases the pack-owned paths of the plan's own rows.
 
 The bundle's provenance cannot vouch for itself. For each resolved pack the
 scanner requires that every `.mozaiks/pack_provenance.json` entry for that pack
-records the resolved version and digest, and that every template-owned output
-the pack renders (the composed shared roots aside) is present with exactly the
-bytes `resolve_templates_for_pack` renders. A template-owned migration is
-compared after the migration compilation assembly applies. A `.j2` template
-renders from the build's context, so its output is verified only when the scan
-has that context; without it, the output fails closed. The validation facade
+records the resolved version (its recorded digest is not compared, because it
+is a same-host identity), and that every template-owned output the pack ships
+(the composed shared roots aside) is present. The output of each static
+template, any template that needs no build-time context (every file but
+`.j2`), must equal the verified template text with line endings normalized; a
+template-owned migration is compared after the migration compilation assembly
+applies. Validation never renders a template: a `.j2` template renders from the
+build's template variables, which no validation caller has, so its output is
+verified through the pack's declared outputs (present, inside the declared
+output lanes, not forbidden) and its pinned identity. The validation facade
 returns the resolved identities as
 `GeneratedAppValidationResult.resolved_capability_packs`.
+
+A pack version bump changes what the current pack ships. After an upgrade of
+the installed `mozaiks` package (or any shipped pack version bump), an
+unchanged bundle built from the previous version no longer matches the current
+pack: its provenance records the old version, and its pack-owned files may
+differ from the current templates. Validation then refuses it, and so do the
+hosted gate and Studio refinement candidates of that bundle, whose build-record
+rows resolve to the current pack. This is intended. For a shipped pack the
+remedy is an AppGenerator revision of the app (or a regeneration), which
+re-materializes the pack at the current version; the Community Component
+lifecycle upgrade applies only to installed components.
 
 ### Hosted bundle gate authority (mozaiks-app)
 
@@ -677,19 +739,21 @@ that row is:
 2. `managed_capability` claims a pack, so the row must resolve or fail;
 3. the installed `mozaiks` package's catalog,
    `resolve_factory_app_root()/build_context/mozaikspay`, resolves it
-   (`resolution: factory_build_context`), and `verify_pack_integrity`
-   recomputes the version and digest from those shipped bytes;
+   (`resolution` and `authority`: `factory_build_context`), and
+   `verify_pack_integrity` recomputes the version and digest from those
+   shipped bytes;
 4. its inline `provides_capabilities` is ignored: the `entitlement_dispatch`
    exemption and the forbidden outputs (such as `modules/wallet/`) come from the
    shipped `contract.yaml`;
-5. the bundle's provenance entry and template-owned files are compared with that
-   identity, and the facade returns it.
+5. the bundle's provenance version and template-owned files are compared with
+   that pack, and the facade returns its identity.
 
 A genuine MozaiksPay bundle built from the same package version passes
-unchanged. A bundle built from another pack version fails until it is
-regenerated or upgraded, as does a tampered template-owned file or a forbidden
-output. A hosted bundle of a pack whose templates render from build context
-(`operator_readiness`) fails closed through the facade.
+unchanged, whichever line endings the building or validating checkout uses. A
+bundle built from another pack version fails until it is regenerated, as does a
+tampered template-owned file or a forbidden output. A bundle of a pack whose
+templates render from build context (`operator_readiness`) passes the facade:
+those outputs are checked through the pack's declared outputs, never rendered.
 
 Migration items for the mozaiks-app owner (not changed in this repository):
 
@@ -698,9 +762,13 @@ Migration items for the mozaiks-app owner (not changed in this repository):
 - drop the inline `provides_capabilities` claim, which grants nothing;
 - remove the dead reads of `capability_packs` from the app record,
   `app_build_plan`, `build_plan` and `metadata`, which no hosted record fills;
-- store `resolved_capability_packs` with the hosting record;
-- plan for version skew: after an OSS pin bump, a bundle built from the previous
-  pack version fails the gate until it is regenerated or upgraded;
+- store the returned `resolved_capability_packs` with the hosting record, and
+  compare a stored identity across hosts by `pack_id` and `version` only: the
+  `digest` hashes the validating host's raw source bytes (see above);
+- plan for version skew: after an OSS pin bump, a bundle built from the
+  previous pack version fails the gate until an AppGenerator revision (or a
+  regeneration) re-materializes the pack at the new version; a shipped pack
+  has no lifecycle upgrade;
 - bundles built before shared-root composition, whose provenance claims a
   shared root as an exclusive file, fail every scan (the hosted gate included)
   until they are reassembled or regenerated.

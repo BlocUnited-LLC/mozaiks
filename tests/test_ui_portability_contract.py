@@ -58,10 +58,14 @@ def _load_ui_contract():
 
 
 def _pack_descriptor(pack_id: str, pack_root: Path, capability_source: str = "generated_module") -> dict[str, Any]:
+    """Select an external fixture pack with the version and digest its bytes verify to."""
+    metadata = _load_resolver().verify_pack_integrity(pack_root, pack_id)
     return {
         "id": pack_id,
         "capability_source": capability_source,
         "pack_source_path": str(pack_root),
+        "version": metadata["version"],
+        "digest": metadata["digest"],
     }
 
 

@@ -2327,17 +2327,23 @@ def test_workspace_handler_keeps_the_template_future_annotations_import():
 
 
 @pytest.mark.asyncio
-async def test_generator_owned_pack_outputs_are_not_template_owned(tmp_path):
+async def test_generator_owned_pack_outputs_are_not_template_owned(tmp_path, monkeypatch):
     import shutil
 
+    from factory_app.workflows.AppGenerator.tools import (
+        resolve_managed_capability_templates as resolver,
+    )
     from mozaiksai.control_plane.implementations.coding_worker import (
         pack_output_owners,
         parent_workspace_pack_paths,
     )
     from tests.test_messaging_pack_persistence_composition import _context as pack_context
 
-    root = tmp_path / "messaging"
+    # The saved parent names the pack by its catalog path; this catalog ships the modified messaging pack.
+    factory_root = tmp_path / "factory_app"
+    root = factory_root / "build_context" / "messaging"
     shutil.copytree(PACK, root, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    monkeypatch.setattr(resolver, "resolve_factory_app_root", lambda: factory_root)
     contract = root / "contract.yaml"
     generated = "config/messaging_digest.yaml"
     contract.write_text(contract.read_text(encoding="utf-8").replace(

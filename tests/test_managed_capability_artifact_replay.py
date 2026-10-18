@@ -22,6 +22,7 @@ from factory_app.workflows.AppGenerator.tools.generate_and_download import (
 from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import scan_generated_bundle
 from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
     resolve_managed_capability_templates,
+    verify_pack_integrity,
 )
 from mozaiksai.core.billing.fulfillment import BillingFulfillmentCommand, BillingFulfillmentService
 from mozaiksai.core.capabilities.simple_llm import SimpleLLMCapabilityService
@@ -101,12 +102,16 @@ def _write_wallet_pack(root: Path) -> dict[str, Any]:
         ).lstrip(),
         encoding="utf-8",
     )
+    # An external pack is selected with the version and digest its bytes verify to.
+    metadata = verify_pack_integrity(pack_root, "wallet")
     return {
         "id": "wallet",
         "capability_source": "managed_capability",
         "surface_kind": "external_integration",
         "implementation_mode": "external_integration",
         "pack_source_path": str(pack_root),
+        "version": metadata["version"],
+        "digest": metadata["digest"],
         "capabilities": [
             {"capability_id": "wallet.view", "module": "wallet"},
             {"capability_id": "wallet.payout", "module": "wallet"},

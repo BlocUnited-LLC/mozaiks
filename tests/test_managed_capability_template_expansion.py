@@ -72,6 +72,17 @@ def _write_pack(root: Path, pack_id: str, files: dict[str, str], *, status: str 
     return pack_root
 
 
+def _pinned(pack_root: Path, pack_id: str, **extra: Any) -> dict[str, Any]:
+    """Select an external pack directory as every external source must be selected: with verified pins."""
+    metadata = _load_resolver().verify_pack_integrity(pack_root, pack_id)
+    return {"id": pack_id, "pack_source_path": str(pack_root), "version": metadata["version"],
+            "digest": metadata["digest"], **extra}
+
+
+# Pins for a directory that cannot verify: the materializer's own integrity check is what refuses it.
+UNVERIFIABLE_PINS = {"version": "0.1.0", "digest": "sha256:" + "0" * 64}
+
+
 def test_null_capability_packs_return_empty(resolver) -> None:
     assert resolver.resolve_managed_capability_templates(None) == []
     assert resolver.resolve_managed_capability_templates([]) == []
@@ -88,7 +99,7 @@ def test_selected_pack_materializes_all_templates(resolver, tmp_path: Path) -> N
     )
 
     result = resolver.resolve_managed_capability_templates(
-        [{"id": "wallet", "capability_source": "managed_capability", "pack_source_path": str(pack_root)}]
+        [_pinned(pack_root, "wallet", capability_source="managed_capability")]
     )
 
     files = {item["filename"]: item["content"] for item in result
@@ -109,13 +120,7 @@ def test_selected_pack_renders_jinja_templates_and_strips_suffix(resolver, tmp_p
     )
 
     result = resolver.resolve_managed_capability_templates(
-        [
-            {
-                "id": "operator_readiness",
-                "capability_source": "config_file",
-                "pack_source_path": str(pack_root),
-            }
-        ],
+        [_pinned(pack_root, "operator_readiness", capability_source="config_file")],
         context_variables={
             "readiness_profile": "host_operator_platform",
             "evidence_ledger_path": "docs/operations/evidence-log.json",
@@ -152,7 +157,7 @@ def test_selected_pack_ignores_cache_and_bytecode_files(resolver, tmp_path: Path
     hidden_file.write_text("not a template", encoding="utf-8")
 
     result = resolver.resolve_managed_capability_templates(
-        [{"id": "mozaikspay", "capability_source": "managed_capability", "pack_source_path": str(pack_root)}]
+        [_pinned(pack_root, "mozaikspay", capability_source="managed_capability")]
     )
 
     template_files = [f for f in result if f["filename"] != ".mozaiks/pack_provenance.json"]
@@ -179,13 +184,7 @@ async def test_assemble_app_tasks_overlays_selected_pack_template(tmp_path: Path
                 ],
                 "build_tasks": [{"task_id": "wallet_adapter"}],
             },
-            "capability_packs": [
-                {
-                    "id": "wallet",
-                    "capability_source": "managed_capability",
-                    "pack_source_path": str(pack_root),
-                }
-            ],
+            "capability_packs": [_pinned(pack_root, "wallet", capability_source="managed_capability")],
             "app_task_batch_results": {
                 "wallet_adapter": {
                     "code_files": [
@@ -212,16 +211,14 @@ def test_inactive_pack_is_not_materialized(resolver, tmp_path: Path) -> None:
         status="inactive",
     )
 
-    result = resolver.resolve_managed_capability_templates(
-        [{"id": "wallet", "pack_source_path": str(pack_root)}]
-    )
+    result = resolver.resolve_managed_capability_templates([_pinned(pack_root, "wallet")])
     assert result == []
 
 
 def test_missing_pack_context_raises(resolver, tmp_path: Path) -> None:
     with pytest.raises(resolver.ManagedCapabilityTemplateError, match="pack context"):
         resolver.resolve_managed_capability_templates(
-            [{"id": "wallet", "pack_source_path": str(tmp_path)}]
+            [{"id": "wallet", "pack_source_path": str(tmp_path), **UNVERIFIABLE_PINS}]
         )
 
 
@@ -253,8 +250,8 @@ def test_conflicting_selected_pack_templates_raise(resolver, tmp_path: Path) -> 
     with pytest.raises(resolver.ManagedCapabilityTemplateError, match="Multiple selected"):
         resolver.resolve_managed_capability_templates(
             [
-                {"id": "wallet", "pack_source_path": str(wallet_root)},
-                {"id": "mozaikspay", "pack_source_path": str(pay_root)},
+                _pinned(wallet_root, "wallet"),
+                _pinned(pay_root, "mozaikspay"),
             ]
         )
 

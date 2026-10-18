@@ -751,6 +751,11 @@ rendered YAML/JSON stop materialization with the pack and template path in the
 error. Optional values must declare their defaults in the template. String
 substitutions in YAML must be serialized, for example with Jinja's `tojson`
 filter, so punctuation does not change the YAML structure or scalar type.
+Validation never renders a template: the bundle scanner compares the output of
+each static (non-`.j2`) pack template with the verified template text, line
+endings normalized, and checks a `.j2` output through the pack's declared
+outputs and pinned identity (see Pack identity authority in
+`build-context-packs.md`).
 
 `generate_and_download` runs `run_app_bundle_acceptance_gate` on the assembled
 files before packaging. That gate is the deterministic check of generated

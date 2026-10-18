@@ -35,13 +35,16 @@ from factory_app.workflows.AppGenerator.tools.module_persistence_guard import (
     scan_module_persistence,
 )
 from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+    AUTHORITY_FACTORY_BUILD_CONTEXT,
+    AUTHORITY_INSTALLED,
+    AUTHORITY_SELECTED_PINS,
     ManagedCapabilityTemplateError,
     PackIntegrityError,
     declared_output_owners,
     pack_identity,
-    render_pack_templates_for_verification,
     resolve_declared_pack_output_paths,
     selected_pack_id,
+    static_pack_templates,
     verified_pack_data_contracts,
     verified_pack_template_inventory,
     verified_selected_pack_sources,
@@ -2453,10 +2456,17 @@ def _provenance_pack_records(files_map: dict[str, str]) -> list[tuple[int, dict[
     ) else []
 
 
+def _normalized_text(value: str) -> str:
+    """Text with CRLF and CR line endings as LF, so a checkout's line endings never decide a comparison."""
+    return value.replace("\r\n", "\n").replace("\r", "\n")
+
+
 def _template_bytes_match(path: str, actual: Any, rendered: str, managed_owners: set[str]) -> bool:
-    if actual == rendered:
+    if not isinstance(actual, str):
+        return False
+    if _normalized_text(actual) == _normalized_text(rendered):
         return True
-    if path.startswith("data/migrations/") and path.endswith(".json") and isinstance(actual, str):
+    if path.startswith("data/migrations/") and path.endswith(".json"):
         # Assembly compiles a migration template (headers, index names, managed owners); compare that form.
         try:
             compiled = materialize_data_migrations({path: rendered}, managed_owners=managed_owners)[path]
@@ -2466,20 +2476,39 @@ def _template_bytes_match(path: str, actual: Any, rendered: str, managed_owners:
     return False
 
 
+_PACK_REMEDIES = {
+    AUTHORITY_FACTORY_BUILD_CONTEXT: (
+        "This pack ships with the installed mozaiks package: run an AppGenerator revision (or regenerate the app) "
+        "so assembly re-materializes it at this version."
+    ),
+    AUTHORITY_INSTALLED: (
+        "Regenerate the bundle, or upgrade the installed component through the pack lifecycle, with this pack version."
+    ),
+    AUTHORITY_SELECTED_PINS: (
+        "Regenerate the bundle from the pinned source, or select the source and pins the bundle was built from."
+    ),
+}
+
+
 def _scan_resolved_pack_outputs(
     files_map: dict[str, str],
     entries: list[dict[str, Any]],
     *,
-    context_variables: Any,
     managed_owners: set[str],
 ) -> list[str]:
-    """Hold the bundle to each resolved pack's verified identity and template bytes.
+    """Hold the bundle to each resolved pack's verified identity and template content.
 
-    The bundle's provenance cannot vouch for itself: every provenance entry
-    for a resolved pack must record that pack's resolved version and digest,
-    and every template-owned output the pack renders (shared composition roots
-    aside) must be present with exactly the rendered bytes. An output rendered
-    from build context fails closed when the scan has no context.
+    The bundle's provenance cannot vouch for itself. Every provenance entry for
+    a resolved pack must record that pack's resolved version; the digest it
+    records is not compared, because the pack digest hashes the source's raw
+    bytes and so differs between checkouts with different line endings. The
+    content is rechecked instead: every template-owned output the pack ships
+    (shared composition roots aside) must be present, and the output of every
+    static template (one that renders without build-time context, any file
+    but ``.j2``) must equal the verified template text, line endings
+    normalized. A ``.j2`` output renders from the build's template variables,
+    which validation never has, so nothing is rendered here: it is verified
+    through the pack's declared outputs and its pinned identity.
     """
     errors: list[str] = []
     records = _provenance_pack_records(files_map)
@@ -2487,42 +2516,33 @@ def _scan_resolved_pack_outputs(
         pack_id = entry["pack_id"]
         label = (
             f"selected pack '{pack_id}' {entry['version']} ({entry['digest']}, resolved from "
-            f"{entry['resolution']})"
+            f"{entry['resolution']}, vouched for by {entry['authority']})"
         )
-        remedy = "Regenerate the bundle, or upgrade it through the pack lifecycle, with this pack version."
+        remedy = _PACK_REMEDIES[entry["authority"]]
         for index, record in records:
             if record.get("pack_id") != pack_id:
                 continue
-            mismatched = [key for key in ("version", "digest") if record.get(key) != entry[key]]
-            if mismatched:
-                recorded = ", ".join(f"{key} {record.get(key)!r}" for key in mismatched)
+            if record.get("version") != entry["version"]:
                 errors.append(
-                    f"{_PACK_PROVENANCE_PATH}: packs[{index}] records pack '{pack_id}' with {recorded}, but the "
-                    f"{label} differs. {remedy}"
+                    f"{_PACK_PROVENANCE_PATH}: packs[{index}] records pack '{pack_id}' with version "
+                    f"{record.get('version')!r}, but the {label} differs. {remedy}"
                 )
         source = Path(entry["source_path"])
         try:
-            rendered, context_outputs = render_pack_templates_for_verification(
-                source, pack_id, context_variables=context_variables,
-            )
+            static, context_outputs = static_pack_templates(source, pack_id)
             owners = declared_output_owners(source)
         except ManagedCapabilityTemplateError as exc:
-            errors.append(f"Selected pack '{pack_id}' templates cannot be rendered to verify the bundle: {exc}")
+            errors.append(f"Selected pack '{pack_id}' templates cannot be read to verify the bundle: {exc}")
             continue
-        for path in sorted({*rendered, *context_outputs}):
+        for path in sorted({*static, *context_outputs}):
             if path in SHARED_PACK_OUTPUT_PATHS or owners.get(path, "templates") != "templates":
                 continue
-            if path in context_outputs:
-                errors.append(
-                    f"{path}: template-owned output of the {label} renders from build context, and this scan "
-                    "has none, so its bytes cannot be verified. Validate the bundle with its build's context."
-                )
-            elif path not in files_map:
+            if path not in files_map:
                 errors.append(f"{path}: template-owned output of the {label} is missing. {remedy}")
-            elif not _template_bytes_match(path, files_map[path], rendered[path], managed_owners):
+            elif path in static and not _template_bytes_match(path, files_map[path], static[path], managed_owners):
                 errors.append(
                     f"{path}: differs from the verified template of the {label}. A template-owned pack output "
-                    f"must be the verified bytes, whatever the bundle's provenance records. {remedy}"
+                    f"must be the verified template content, whatever the bundle's provenance records. {remedy}"
                 )
     return errors
 
@@ -2621,9 +2641,7 @@ def scan_generated_bundle(
     auth_errors = _scan_auth_app_contract(scannable_files_map)
     errors.extend(error for error in auth_errors if error not in errors)
     errors.extend(_scan_pack_provenance_manifest(scannable_files_map))
-    errors.extend(_scan_resolved_pack_outputs(
-        files_map, entries, context_variables=context_variables, managed_owners=managed_owners,
-    ))
+    errors.extend(_scan_resolved_pack_outputs(files_map, entries, managed_owners=managed_owners))
     errors.extend(_scan_route_manifest_component_files(scannable_files_map))
     errors.extend(
         _scan_selected_managed_capability_boundaries(

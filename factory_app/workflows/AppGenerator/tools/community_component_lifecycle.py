@@ -508,7 +508,11 @@ def apply_component_upgrade(
         )
 
     candidate = _component_entry_from_verified_pack(candidate_source, pack_id)
-    descriptors = [{"id": pack_id, "pack_id": pack_id, "pack_source_path": str(candidate_source)}]
+    # The candidate is an external source: select it with the identity just verified, as any external pack.
+    descriptors = [{
+        "id": pack_id, "pack_id": pack_id, "pack_source_path": str(candidate_source),
+        "version": candidate["version"], "digest": candidate["digest"],
+    }]
     rendered = _files_by_name(resolve_managed_capability_templates(descriptors))
     provenance = _merged_provenance(app_root, json.loads(rendered.pop(_PROVENANCE_PATH)), pack_id)
     # Validate the upgraded provenance against the app as it will be, before anything is written.

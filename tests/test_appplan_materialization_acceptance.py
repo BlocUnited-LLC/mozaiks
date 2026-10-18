@@ -104,7 +104,12 @@ class _FakeMongoClient:
 
 def _load_fixture_plan() -> dict[str, Any]:
     raw = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
-    return raw["AppBuildPlan"] if "AppBuildPlan" in raw else raw
+    plan = raw["AppBuildPlan"] if "AppBuildPlan" in raw else raw
+    # The capture predates the required capability_source; its capabilities are app-authored modules.
+    # Without it, a row whose id the factory catalog ships (entitlement_dispatch) would select that pack.
+    for pack in plan.get("capability_packs") or []:
+        pack.setdefault("capability_source", "generated_module")
+    return plan
 
 
 def _validation_pages(plan: dict[str, Any], files: dict[str, str] | None = None) -> list[dict[str, Any]]:

@@ -1980,6 +1980,7 @@ async def run_app_bundle_acceptance_gate(
     if "app.json" not in generated_files:
         required_bundle_errors.append("Generated app bundles must include app.json.")
 
+    resolved_capability_packs: list[dict[str, str]] = []
     scanner_errors = scan_generated_bundle(
         generated_files,
         capability_packs=selected_capability_packs,
@@ -1990,6 +1991,7 @@ async def run_app_bundle_acceptance_gate(
             generated_files,
             context_variables,
         ),
+        resolved_capability_packs=resolved_capability_packs,
     )
     planned_diagnostics = planned_artifact_diagnostics(context_variables, generated_files)
     all_scan_errors = [*required_bundle_errors, *scanner_errors]
@@ -2024,9 +2026,10 @@ async def run_app_bundle_acceptance_gate(
     _context_set(context_variables, "wiring_validation_result", wiring_result)
     module_implementation_result = validate_module_implementation_contract(generated_files)
     runtime_quality_result = _runtime_quality_result(generated_files)
+    # The functional checks see the packs the scanner resolved and verified, never the raw selection rows.
     functional_diagnostics = scan_functional_generated_app(
         generated_files,
-        capability_packs=selected_capability_packs,
+        capability_packs=[{"id": identity["pack_id"], **identity} for identity in resolved_capability_packs],
     )
     functional_errors = [item for item in functional_diagnostics if item.severity == "error"]
     functional_result = {

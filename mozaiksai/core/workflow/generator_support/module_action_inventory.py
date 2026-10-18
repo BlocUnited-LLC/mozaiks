@@ -280,14 +280,39 @@ class _SelectedPack(NamedTuple):
     contracts: list[dict[str, Any]]
 
 
+def _selected_pack_root(pack: Mapping[str, Any], pack_id: str, context_variables: Any) -> Path | None:
+    """The source assembly's canonical pack resolver selects for this row, or None.
+
+    The resolver lives with the AppGenerator assembly that applies the templates;
+    it is imported here so plan coverage and the discard of worker copies see
+    exactly the packs assembly materializes, id-only rows included. A row the
+    resolver refuses is reported by assembly; here it falls back to the
+    projected operator contracts so authoring keeps checking its pages.
+    """
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        ManagedCapabilityTemplateError,
+        resolved_pack_source_root,
+    )
+
+    try:
+        return resolved_pack_source_root(dict(pack), context_variables=context_variables)
+    except (ManagedCapabilityTemplateError, OSError) as exc:
+        logger.warning("SELECTED_PACK_UNRESOLVED pack=%s: %s; assembly reports it", pack_id or "<unnamed>", exc)
+        return None
+
+
 def _selected_packs(context_variables: Any) -> list[_SelectedPack]:
     """Every selected pack whose templates assembly applies, with its contract declarations.
 
     Assembly reads the selected packs from ``capability_packs`` and falls back to
-    the approved plan's packs. A pack with a source path is read from disk, and
-    its own ``context.yaml`` says whether it is active; a pack selected by id
-    alone is read from the ``operator_contracts`` the build context projected,
-    the same way the managed facade inventory resolves it.
+    the approved plan's packs, and resolves each row with its canonical pack
+    resolver: the row's own source path, the workspace's installed component,
+    or, for an id-only row that claims a pack (such as the default MozaiksPay
+    row of an OSS SaaS plan), the installed factory catalog. A resolved pack is
+    read from disk, and its own ``context.yaml`` says whether it is active; a
+    row that resolves to no pack is read from the ``operator_contracts`` the
+    build context projected, the same way the managed facade inventory
+    resolves it.
     """
     if context_variables is None:
         return []
@@ -300,9 +325,9 @@ def _selected_packs(context_variables: Any) -> list[_SelectedPack]:
     for pack in packs:
         if not isinstance(pack, Mapping):
             continue
-        pack_id = str(pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id") or "")
-        source = pack.get("pack_source_path")
-        root = Path(str(source)) if source else None
+        # The resolver's one pack-identity precedence (selected_pack_id).
+        pack_id = str(pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id") or "").strip()
+        root = _selected_pack_root(pack, pack_id, context_variables)
         if root is not None and (root / "context.yaml").is_file():
             try:
                 config = load_build_context(root / "context.yaml")
