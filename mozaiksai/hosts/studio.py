@@ -2287,12 +2287,22 @@ async def _require_same_app_owned_pack_code(version, current) -> None:  # noqa: 
         declared = parent_workspace_pack_paths(_version_metadata(record).get("capability_packs") or [])
         if declared is None:
             # Its pack selection cannot be verified, so the app-owned paths it declares are unknown.
+            if record is current:
+                way_forward = (
+                    f"Accept an AppGenerator revision made from build {record.id} first (it records a build whose "
+                    "packs verify), then make further changes from that build."
+                )
+            else:
+                way_forward = (
+                    f"Make the change from the current build {current.id} instead, or accept an AppGenerator "
+                    "revision of it first."
+                )
             raise HTTPException(
                 status_code=409,
                 detail=(
                     f"Build {record.id}'s capability packs cannot be resolved to verified sources, so its app-owned "
-                    "capability code cannot be compared with this version's. Run an AppGenerator revision (or "
-                    "regenerate the app) so the build selects packs that verify. No version was accepted."
+                    f"capability code cannot be compared with the other build's. {way_forward} No version was "
+                    "accepted."
                 ),
             )
         paths |= set(declared)

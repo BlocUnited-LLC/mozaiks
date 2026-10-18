@@ -1472,15 +1472,27 @@ def test_a_workspace_root_that_is_the_shipped_catalog_records_its_packs_as_selec
     assert resolver.pin_workspace_pack_selections([row], [identity], context_variables=context) == [row]
 
 
-def test_unloadable_shipped_declarations_vouch_for_no_workspace_pack(tmp_path, monkeypatch):
+@pytest.mark.parametrize("error", ["context_authority", "value", "validation"])
+def test_unloadable_shipped_declarations_vouch_for_no_workspace_pack(tmp_path, monkeypatch, error):
+    """Whatever an invalid declaration raises while the policy is built, the workspace authority refuses with a
+    diagnostic instead of escaping (Studio would answer 500)."""
+    from pydantic import BaseModel
+
     from mozaiksai.core.workflow.context.authority import ContextAuthorityError
 
     workspace = tmp_path / "workspace" / "build_context"
     root = _workspace_operator_pack(workspace)
     context = _workspace_root_from(monkeypatch, workspace, "context")
 
+    class _Declaration(BaseModel):
+        writer_id: int
+
     def refuse(**kwargs):
-        raise ContextAuthorityError("context_authority.invalid_declaration")
+        if error == "context_authority":
+            raise ContextAuthorityError("context_authority.invalid_declaration")
+        if error == "value":
+            raise ValueError("runtime context must be immutable_runtime_authority")
+        _Declaration(writer_id="not-a-writer")
 
     monkeypatch.setattr("mozaiksai.core.workflow.context.authority.build_context_authority_policy", refuse)
     row = {"id": "greetings", "capability_source": "operator_pack", "pack_source_path": str(root), "version": "0.1.0"}

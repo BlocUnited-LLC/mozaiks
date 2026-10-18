@@ -776,15 +776,13 @@ def _assembling_workflow_policy() -> Any | None:
     definitions = declarations.get("definitions") if isinstance(declarations, dict) else None
     if not isinstance(definitions, dict):
         return None
-    from mozaiksai.core.workflow.context.authority import (
-        ContextAuthorityError,
-        build_context_authority_policy,
-    )
+    from mozaiksai.core.workflow.context.authority import build_context_authority_policy
 
     try:
         return build_context_authority_policy(workflow_name=_ASSEMBLING_WORKFLOW, definitions=definitions)
-    except ContextAuthorityError:
-        # Declarations the runtime could not load either: no registration can be checked.
+    except ValueError:
+        # ContextAuthorityError, a declaration validation error or another invalid declaration: the runtime
+        # could not load these either, so no registration can be checked.
         return None
 
 

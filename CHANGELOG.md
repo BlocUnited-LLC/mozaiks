@@ -181,8 +181,10 @@ This project follows a practical pre-1.0 changelog format:
   when the loader registers a pack with its id at that path; a root the
   loader refuses vouches for nothing. The selection must carry the
   registered version, which is compared with the fresh source. A recorded
-  build pins every row that names a pack directly under the workspace root to
-  the version and digest its acceptance verified, and refinement and Studio read
+  build pins every row that names a pack directly under the workspace root
+  (unless that root is the shipped catalog itself, whose packs stay
+  catalog-selected) to the version and digest its acceptance verified, and
+  refinement and Studio read
   recorded rows back only with those pins, so they verify that identity
   again.
 - A pack's digest now always covers its `contract.yaml`, which decides output

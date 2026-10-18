@@ -3307,6 +3307,12 @@ async def test_accepting_refuses_when_app_owned_code_cannot_be_compared_for_an_u
     assert rejected.value.detail.startswith(
         f"Build {target}'s capability packs cannot be resolved to verified sources",
     ), rejected.value.detail
+    # The way forward names what the owner can actually do next.
+    if unverifiable == "current_build":
+        assert "Accept an AppGenerator revision made from build newer_build first" in rejected.value.detail
+    else:
+        assert "Make the change from the current build newer_build instead" in rejected.value.detail
+    assert "regenerate the app" not in rejected.value.detail
     assert store.accepted == [] and store.records == before
 
 

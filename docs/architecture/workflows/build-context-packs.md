@@ -662,7 +662,9 @@ the source, and the resolved identity records which one did (`authority`):
   the fresh source, and the fresh digest is recorded. Because the registry
   vouches at a version only, and a pack's bytes can change in place without
   a version change, a recorded build pins every row that names a pack
-  directly under the workspace root to the `version` and `digest` its
+  directly under the workspace root (unless that root is the shipped catalog
+  itself, whose packs follow the installed catalog like any other workspace's
+  and are recorded as selected) to the `version` and `digest` its
   acceptance verified, whatever authority acceptance resolved it through
   (`pin_workspace_pack_selections`, from the acceptance gate's
   `resolved_capability_packs`). Refinement admission and Studio's ownership
