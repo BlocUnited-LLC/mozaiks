@@ -89,9 +89,6 @@ import './registry/coreComponents';
 // Theme hook
 export { default as useTheme } from './styles/useTheme';
 
-// Branding provider
-export { default as BrandingProvider } from './providers/BrandingProvider';
-
 // Theme utilities
 export * as themeProvider from './styles/themeProvider';
 export { loadBrand } from './theme/loadBrand';
