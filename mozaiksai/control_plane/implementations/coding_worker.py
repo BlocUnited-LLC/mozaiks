@@ -649,16 +649,17 @@ def pack_output_owners(capability_packs: list[dict[str, Any]]) -> dict[str, str]
 
     The parent's rows are verified once, as saved (their pins, and the
     authority that vouches for each source), and the declared outputs are read
-    from those verified entries; no row is re-selected without its pins. A
-    selection that cannot be resolved or verified raises
-    ``ManagedCapabilityTemplateError``.
+    from those verified entries; no row is re-selected without its pins. They
+    are verified as a recorded selection, so a workspace pack must carry the
+    digest its build recorded. A selection that cannot be resolved or verified
+    raises ``ManagedCapabilityTemplateError``.
     """
     from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
         verified_pack_output_paths,
         verified_selected_pack_sources,
     )
 
-    entries = verified_selected_pack_sources(capability_packs)
+    entries = verified_selected_pack_sources(capability_packs, recorded=True)
     if not entries:
         return {}
     owned = {owner: verified_pack_output_paths(entries, owner=owner) for owner in ("templates", "workspace")}
@@ -678,7 +679,7 @@ def pack_template_source(capability_packs: list[dict[str, Any]], path: str) -> s
         verified_selected_pack_sources,
     )
 
-    for entry in verified_selected_pack_sources(capability_packs):
+    for entry in verified_selected_pack_sources(capability_packs, recorded=True):
         for template in resolve_templates_for_pack(Path(entry["source_path"]), entry["pack_id"]):
             if template["filename"] == path:
                 return str(template["content"])

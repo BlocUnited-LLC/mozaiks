@@ -384,22 +384,6 @@ def _merge_trusted_projection(target: dict[str, Any], projected: Mapping[str, An
             raise BuildContextError(f"Conflicting trusted build-context projections for {key!r}")
 
 
-# The only capability_packs projection rules that register a context's validated pack declarations.
-_PACK_REGISTRATION_RULES: tuple[Any, ...] = ("capability_packs", {"from": "capability_packs"})
-
-
-def projects_registered_packs(config: Mapping[str, Any]) -> bool:
-    """Whether a context's ``capability_packs`` projection registers its pack declarations.
-
-    :func:`load_trusted_build_context` registers a context's packs only through
-    this projection; any other rule is refused, and a context without one
-    registers no pack.
-    """
-    projections = config.get("projections")
-    rules = projections.get("context_variables") if isinstance(projections, Mapping) else None
-    return isinstance(rules, Mapping) and rules.get("capability_packs") in _PACK_REGISTRATION_RULES
-
-
 def _trusted_projection(
     policy: ContextAuthorityPolicy, context_path: Path, config: Mapping[str, Any],
 ) -> dict[str, Any]:
@@ -420,7 +404,7 @@ def _trusted_projection(
         elif not isinstance(rule, str) or not rule.strip():
             raise BuildContextError(f"Malformed build-context projection {key!r}")
         # Registration comes from validated pack declarations, never descriptive text.
-        if key == "capability_packs" and rule not in _PACK_REGISTRATION_RULES:
+        if key == "capability_packs" and rule not in ("capability_packs", {"from": "capability_packs"}):
             raise BuildContextError("capability_packs must project registered pack declarations")
         selected[key] = rule
     if not selected:
@@ -509,7 +493,6 @@ __all__ = [
     "merge_build_context",
     "normalize_pack_descriptor",
     "project_build_context",
-    "projects_registered_packs",
     "resolve_build_context_root",
     "resolve_context_asset_path",
 ]

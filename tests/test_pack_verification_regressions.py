@@ -1210,12 +1210,12 @@ def test_a_registered_workspace_operator_pack_assembles_and_validates_through_th
         or "pack_provenance" in error
         for error in errors
     ), errors
-    # Studio refinement verifies the saved row the same way: only where the workspace root is the launch root.
-    owners = parent_workspace_pack_paths([row])
-    if root_from == "environment":
-        assert owners == frozenset({"modules/greetings/backend/handler.py"})
-    else:
-        assert owners is None
+    # Studio refinement reads the saved row as a recorded selection: the unpinned projection row shows no bytes, so
+    # it grants no ownership; the row the build records, pinned to the identity acceptance verified, does, with or
+    # without the workspace root in the environment (its own pins then vouch for it).
+    assert parent_workspace_pack_paths([row]) is None
+    [recorded] = resolver.pin_workspace_pack_selections([row], resolved, context_variables=context)
+    assert parent_workspace_pack_paths([recorded]) == frozenset({"modules/greetings/backend/handler.py"})
 
 
 def test_a_workspace_pack_selection_whose_version_differs_from_the_registry_fails(tmp_path, monkeypatch):
@@ -1267,7 +1267,7 @@ def test_an_inactive_workspace_registration_vouches_for_nothing(tmp_path, monkey
     root = _workspace_operator_pack(workspace, status="inactive")
     context = _workspace_root_from(monkeypatch, workspace, "context")
     row = {"id": "greetings", "capability_source": "operator_pack", "pack_source_path": str(root), "version": "0.1.0"}
-    with pytest.raises(resolver.PackIntegrityError, match="registers no active pack 'greetings'"):
+    with pytest.raises(resolver.PackIntegrityError, match="load_trusted_build_context registers no pack 'greetings' at this path"):
         resolver.verified_selected_pack_sources([row], context_variables=context)
 
 
@@ -1281,14 +1281,28 @@ def _loader_registers(workspace: Path) -> list[str]:
         return []
 
 
+def _sibling_context(workspace: Path, name: str, text: str) -> None:
+    (workspace / name).mkdir(parents=True)
+    # Schema-valid apart from what each case varies.
+    (workspace / name / "context.yaml").write_text("assets: []\n" + text, encoding="utf-8")
+
+
+_APPGENERATOR_SIBLING = "context_id: {name}\napplies_to_workflows:\n  - AppGenerator\n"
+
+
 @pytest.mark.parametrize("registration", [
     "registered", "other_workflow_only", "no_projection", "projection_from_value", "inactive",
+    "sibling_other_workflow_bad_projection",
+    "own_undeclared_projection", "sibling_undeclared_projection", "sibling_capability_packs_value",
+    "sibling_operator_capabilities_scalar", "pack_id_registered_twice",
 ])
 def test_the_workspace_authority_vouches_exactly_for_what_the_trusted_loader_registers(
     tmp_path, monkeypatch, registration,
 ):
-    """A context retargeted to another workflow, or one that no longer projects its packs, registers nothing for
-    AppGenerator; the workspace authority then vouches for nothing either, and only both pins select the copy."""
+    """The trusted loader itself decides. A context retargeted to another workflow, one that no longer projects its
+    packs, an inactive pack, and any root the loader refuses (an undeclared or malformed projection anywhere in it,
+    an invalid operator_capabilities value, a pack id registered twice) register nothing for AppGenerator; the
+    workspace authority then vouches for nothing either, and only both pins select the copy."""
     workspace = tmp_path / "workspace" / "build_context"
     root = _workspace_operator_pack(workspace, status="inactive" if registration == "inactive" else "active")
     manifest = root / "context.yaml"
@@ -1301,12 +1315,33 @@ def test_the_workspace_authority_vouches_exactly_for_what_the_trusted_loader_reg
         text = text.replace(projection, "")
     elif registration == "projection_from_value":
         text = text.replace(projection, "projections:\n  context_variables:\n    capability_packs:\n      value: []\n")
+    elif registration == "own_undeclared_projection":
+        text = text.replace(projection, projection + "    bogus_key: foo\n")
+    elif registration == "sibling_other_workflow_bad_projection":
+        # A context for another workflow is not part of AppGenerator's registration, so it does not refuse the root.
+        _sibling_context(workspace, "other", "context_id: other\napplies_to_workflows:\n  - AgentGenerator\n"
+                         "projections:\n  context_variables:\n    bogus_key: foo\n")
+    elif registration == "sibling_undeclared_projection":
+        _sibling_context(workspace, "other", _APPGENERATOR_SIBLING.format(name="other")
+                         + "projections:\n  context_variables:\n    bogus_key: foo\n")
+    elif registration == "sibling_capability_packs_value":
+        _sibling_context(workspace, "other", _APPGENERATOR_SIBLING.format(name="other")
+                         + "projections:\n  context_variables:\n    capability_packs:\n      value: []\n")
+    elif registration == "sibling_operator_capabilities_scalar":
+        _sibling_context(workspace, "ops", _APPGENERATOR_SIBLING.format(name="ops")
+                         + "projections:\n  context_variables:\n    operator_capabilities: some_scalar\n"
+                         "values:\n  some_scalar: 5\n")
+    elif registration == "pack_id_registered_twice":
+        _workspace_operator_pack(workspace / "copy")
+        shutil.move(str(workspace / "copy" / "greetings"), str(workspace / "greetings_copy"))
+        (workspace / "copy").rmdir()
     manifest.write_text(text, encoding="utf-8")
     context = _workspace_root_from(monkeypatch, workspace, "context")
     row = {"id": "greetings", "capability_source": "operator_pack", "pack_source_path": str(root), "version": "0.1.0"}
 
     registered = _loader_registers(workspace)
-    assert registered == (["greetings"] if registration == "registered" else [])
+    vouched = registration in {"registered", "sibling_other_workflow_bad_projection"}
+    assert registered == (["greetings"] if vouched else [])
     if registered:
         [entry] = resolver.verified_selected_pack_sources([row], context_variables=context)
         assert entry["authority"] == "workspace_build_context"
@@ -1314,6 +1349,18 @@ def test_the_workspace_authority_vouches_exactly_for_what_the_trusted_loader_reg
     with pytest.raises(resolver.PackIntegrityError, match="without digest pin") as refused:
         resolver.verified_selected_pack_sources([row], context_variables=context)
     assert "it is directly under it, but" in str(refused.value)
+    reason = {
+        "other_workflow_only": "registers no pack 'greetings' at this path",
+        "no_projection": "registers no pack 'greetings' at this path",
+        "inactive": "registers no pack 'greetings' at this path",
+        "projection_from_value": "capability_packs must project registered pack declarations",
+        "own_undeclared_projection": "Undeclared build-context projection 'bogus_key'",
+        "sibling_undeclared_projection": "Undeclared build-context projection 'bogus_key'",
+        "sibling_capability_packs_value": "capability_packs must project registered pack declarations",
+        "sibling_operator_capabilities_scalar": "Invalid trusted build-context value for 'operator_capabilities'",
+        "pack_id_registered_twice": "Conflicting registered capability pack 'greetings'",
+    }[registration]
+    assert reason in str(refused.value), str(refused.value)
     errors = scanner.scan_generated_bundle({"app.json": "{}"}, capability_packs=[row], context_variables=context)
     assert len(errors) == 1 and "An unverified pack is never admitted" in errors[0], errors
     [pinned] = resolver.verified_selected_pack_sources([{**row, **_pinned("greetings", root)}], context_variables=context)
@@ -1373,6 +1420,106 @@ def test_a_recorded_build_pins_its_workspace_packs_to_the_identity_acceptance_ve
     retargeted = {**recorded_row, "digest": resolver.verify_pack_integrity(root, "greetings")["digest"]}
     [pinned] = resolver.verified_selected_pack_sources([retargeted])
     assert pinned["authority"] == "selected_pins"
+
+
+def test_a_recorded_selection_of_a_workspace_pack_must_carry_its_digest(tmp_path, monkeypatch):
+    """A build recorded before builds pinned workspace packs (or a refinement that copied its rows) shows no bytes, so
+    its rows are refused when read back as a recorded selection, while a launch selection still resolves."""
+    from mozaiksai.control_plane.implementations.coding_worker import (
+        pack_output_owners,
+        pack_template_source,
+    )
+
+    workspace = tmp_path / "workspace" / "build_context"
+    _workspace_operator_pack(workspace)
+    [row] = _registered_rows(workspace)
+    _workspace_root_from(monkeypatch, workspace, "environment")
+    [entry] = resolver.verified_selected_pack_sources([row])
+    assert entry["authority"] == "workspace_build_context"
+    for read in (
+        lambda: resolver.verified_selected_pack_sources([row], recorded=True),
+        lambda: pack_output_owners([row]),
+        lambda: pack_template_source([row], "modules/greetings/module.yaml"),
+    ):
+        with pytest.raises(resolver.PackIntegrityError, match="carries no digest.*Run an AppGenerator revision"):
+            read()
+    [pinned] = resolver.pin_workspace_pack_selections([row], [resolver.pack_identity(entry)])
+    assert resolver.verified_selected_pack_sources([pinned], recorded=True)[0]["digest"] == entry["digest"]
+
+
+def test_every_recorded_row_under_the_workspace_root_is_pinned_whatever_authority_resolved_it(tmp_path, monkeypatch):
+    """A pack installed in place under the workspace root is accepted as `installed` when the caller names the
+    build_context_root, but a later reader without it resolves the same directory through the registry: the recorded
+    row must still carry the digest acceptance verified."""
+    workspace = tmp_path / "workspace" / "build_context"
+    root = _workspace_operator_pack(workspace)
+    [row] = _registered_rows(workspace)
+    context = _workspace_root_from(monkeypatch, workspace, "context")
+    fresh = resolver.verify_pack_integrity(root, "greetings")
+    installed = {**{key: fresh[key] for key in ("pack_id", "version", "digest", "source")},
+                 "resolution": "explicit", "authority": "installed"}
+    [recorded] = resolver.pin_workspace_pack_selections([row], [installed], context_variables=context)
+    assert (recorded["version"], recorded["digest"]) == (fresh["version"], fresh["digest"])
+
+
+def _undeclared_contract_pack(workspace: Path) -> Path:
+    """The greetings pack, registered under a workspace, whose context does not declare contract.yaml as an asset."""
+    root = _workspace_operator_pack(workspace)
+    manifest = root / "context.yaml"
+    text = manifest.read_text(encoding="utf-8")
+    declared = "  - path: contract.yaml\n    kind: contract\n"
+    assert declared in text
+    manifest.write_text(text.replace(declared, ""), encoding="utf-8")
+    return root
+
+
+def test_the_pack_digest_covers_contract_yaml_even_when_the_context_does_not_declare_it(tmp_path, monkeypatch):
+    """contract.yaml decides output ownership whether or not it is a declared asset, so an in-place edit of it that
+    keeps the version changes the digest, and a recorded row pinned to the old digest no longer verifies."""
+    workspace = tmp_path / "workspace" / "build_context"
+    root = _undeclared_contract_pack(workspace)
+    [row] = _registered_rows(workspace)
+    _workspace_root_from(monkeypatch, workspace, "environment")
+    [entry] = resolver.verified_selected_pack_sources([row])
+    [recorded] = resolver.pin_workspace_pack_selections([row], [resolver.pack_identity(entry)])
+    contract = root / "contract.yaml"
+    contract.write_bytes(contract.read_bytes() + b"\n# owner re-declared in place\n")
+    after = resolver.verify_pack_integrity(root, "greetings")
+    assert after["version"] == entry["version"] and after["digest"] != entry["digest"]
+    with pytest.raises(resolver.PackIntegrityError, match="selected digest does not match freshly verified source"):
+        resolver.verified_selected_pack_sources([recorded], recorded=True)
+
+
+def test_every_shipped_pack_declares_its_contract_so_its_digest_is_unchanged_by_the_contract_rule():
+    """The digest always covers contract.yaml; every shipped pack already declares it, so no shipped identity moved."""
+    import yaml
+
+    undeclared = []
+    for context_path in sorted(BUILD_CONTEXT.glob("*/context.yaml")):
+        context = yaml.safe_load(context_path.read_text(encoding="utf-8")) or {}
+        if not isinstance(context.get("pack"), dict) or not (context_path.parent / "contract.yaml").is_file():
+            continue
+        assets = {(str(a.get("path")), str(a.get("kind"))) for a in context.get("assets") or [] if isinstance(a, dict)}
+        if ("contract.yaml", "contract") not in assets:
+            undeclared.append(context_path.parent.name)
+    assert undeclared == []
+
+
+def test_a_contract_asset_that_is_not_a_file_is_an_integrity_diagnostic(tmp_path):
+    root = tmp_path / "greetings"
+    shutil.copytree(GREETINGS, root, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    manifest = root / "context.yaml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace(
+            "  - path: contract.yaml\n    kind: contract\n", "  - path: templates/\n    kind: contract\n",
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(resolver.PackIntegrityError, match="Contract asset must be a file"):
+        resolver.verify_pack_integrity(root, "greetings")
+    row = {"id": "greetings", "pack_source_path": str(root), "version": "0.1.0", "digest": "sha256:" + "0" * 64}
+    errors = scanner.scan_generated_bundle({"app.json": "{}"}, capability_packs=[row])
+    assert len(errors) == 1 and "Contract asset must be a file" in errors[0], errors
 
 
 def test_a_workspace_pack_without_an_identity_from_acceptance_cannot_be_recorded(tmp_path, monkeypatch):

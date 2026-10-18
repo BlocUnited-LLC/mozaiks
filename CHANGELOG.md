@@ -176,12 +176,22 @@ This project follows a practical pre-1.0 changelog format:
   directly under the workspace build context (`build_context_root`, else
   `MOZAIKS_BUILD_CONTEXT_PATH` or `MOZAIKS_APP_WORKSPACE_PATH/build_context`)
   resolves with authority `workspace_build_context`, so the documented
-  operator-pack flow assembles. The context must apply to AppGenerator and
-  project `capability_packs` from its pack declarations
-  (`projects_registered_packs`), and the selection must carry the registered
-  version, which is compared with the fresh source. A recorded build pins
-  each such row to the version and digest its acceptance verified, so
-  refinement and Studio verify that identity again.
+  operator-pack flow assembles. The resolver runs the loader itself, with
+  AppGenerator's shipped build-context declarations, and trusts a row only
+  when the loader registers a pack with its id at that path; a root the
+  loader refuses vouches for nothing. The selection must carry the
+  registered version, which is compared with the fresh source. A recorded
+  build pins every row that names a pack under the workspace root to the
+  version and digest its acceptance verified, and refinement and Studio read
+  recorded rows back only with those pins, so they verify that identity
+  again.
+- A pack's digest now always covers its `contract.yaml`, which decides output
+  ownership and dependencies, even when the context does not declare it as a
+  contract asset. Every shipped pack declares it, so no shipped digest
+  changes; installed-state or selection pins recorded for a pack that does
+  not declare it no longer verify until the pack is reinstalled or the
+  selection is pinned again. A contract or catalog asset that is not a file
+  is an integrity diagnostic.
 - Generated bundle validation never renders pack templates. Each resolved
   pack's provenance must record its version, every template-owned output must
   be present, and the output of every static (non-`.j2`) template must equal
@@ -328,10 +338,8 @@ This project follows a practical pre-1.0 changelog format:
 - Unverified pack paths: the silent skip of a selected row that resolves to
   no source, inline `provides_capabilities` and `forbidden_outputs` claims on
   selected rows, a caller-claimed `capability_source` for a resolved pack,
-  the scanner's integrity-only use of a caller's own `pack_source_path`
-  outside the verified selection, and the `implementation_trusted` entry
-  flag, replaced by the recorded `authority`. `resolved_pack_source_root` is
-  removed; use `verified_pack_selection`.
+  and the scanner's integrity-only use of a caller's own `pack_source_path`
+  outside the verified selection.
 - The template resolver's flat mode, which wrote `ui/index.js` and
   `ui/route_manifest.json` as pack files, and the Community Component
   upgrade's in-place rewrite of an exclusively claimed UI root and migration
@@ -416,16 +424,19 @@ This project follows a practical pre-1.0 changelog format:
   principal for both acceptances.
 - A selected pack's own `pack_source_path` is trusted without pins only
   inside the shipped factory catalog, as the verified source of the installed
-  component with that id, or as a pack registered for AppGenerator directly
-  under the workspace build context. Any other source, including a copy of a
-  workspace pack elsewhere and a lifecycle upgrade candidate, must be selected
-  with matching `version` and `digest` pins, or it is refused before its
-  contract is read, so its own contract grants no capability, layout or output
-  ownership. A context retargeted to another workflow or no longer projecting
-  its packs vouches for nothing, and a workspace pack edited in place after a
-  build was recorded fails that build's later refinements, instead of
-  releasing its template-owned files, until an AppGenerator revision
-  re-assembles it.
+  component with that id, or as a pack that `load_trusted_build_context`
+  registers for AppGenerator directly under the workspace build context. Any
+  other source, including a copy of a workspace pack elsewhere and a lifecycle
+  upgrade candidate, must be selected with matching `version` and `digest`
+  pins, or it is refused before its contract is read, so its own contract
+  grants no capability, layout or output ownership. A workspace pack edited
+  in place after a build was recorded, including an edit of an undeclared
+  `contract.yaml`, fails that build's later refinements with
+  `PACK_OWNERSHIP_UNRESOLVED` instead of releasing its template-owned files,
+  until an AppGenerator revision re-assembles it. A build recorded before
+  builds pinned workspace packs, and every refinement that copied its rows,
+  carries no digest for them and is refused the same way: run an
+  AppGenerator revision to record a pinned build.
 - A row that claims a pack but cannot be resolved, or whose pins do not
   match, fails with a diagnostic; no warning admits an unverified,
   unresolvable, mismatched or omitted pack. The bundle scanner refuses an

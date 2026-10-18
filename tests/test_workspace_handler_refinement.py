@@ -2833,7 +2833,7 @@ def _installed_messaging(tmp_path):
     return resolve_installed_component_descriptors(build_context_root=build_context_root, selected_pack_ids=["messaging"])
 
 
-def _recorded_workspace_messaging(tmp_path, monkeypatch):
+def _recorded_workspace_messaging(tmp_path, monkeypatch, *, pinned=True):
     """The parent's selection of a Messaging copy registered under the workspace build context, as the build recorded it.
 
     The rows are what the trusted build-context loader projects for
@@ -2862,7 +2862,7 @@ def _recorded_workspace_messaging(tmp_path, monkeypatch):
     rows = [dict(row) for row in load_trusted_build_context(policy)["capability_packs"]]
     identities = [resolver.pack_identity(entry) for entry in resolver.verified_selected_pack_sources(rows)]
     assert [identity["authority"] for identity in identities] == ["workspace_build_context"]
-    return resolver.pin_workspace_pack_selections(rows, identities)
+    return resolver.pin_workspace_pack_selections(rows, identities) if pinned else rows
 
 
 _PACK_SELECTIONS = {
@@ -2950,6 +2950,7 @@ async def test_an_authorized_handler_change_is_admitted_for_every_authority(tmp_
 @pytest.mark.asyncio
 @pytest.mark.parametrize("fault", [
     "unpinned_external", "bytes_changed_since_saved", "unresolvable_claim", "workspace_pack_changed_in_place",
+    "workspace_record_without_digest",
 ])
 async def test_an_unverifiable_saved_selection_refuses_every_candidate(tmp_path, monkeypatch, fault, caplog):
     """No ownership, no admission: a parent selection that cannot be verified never admits a candidate unchecked.
@@ -2958,6 +2959,9 @@ async def test_an_unverifiable_saved_selection_refuses_every_candidate(tmp_path,
     after the parent was recorded, keeping its version: its contract now
     declares the template-owned policy app-owned. The recorded digest no
     longer verifies, so the edit cannot release the parent's policy.
+    ``workspace_record_without_digest`` is a parent recorded before builds
+    pinned workspace packs (or a refinement that copied its rows): nothing
+    shows which bytes it was verified against, even with the pack unchanged.
     """
     from pathlib import Path
 
@@ -2971,6 +2975,8 @@ async def test_an_unverifiable_saved_selection_refuses_every_candidate(tmp_path,
         declared = "  - path: modules/messages/backend/policy.py\n    owner: templates\n"
         assert declared in text
         contract.write_text(text.replace(declared, declared.replace("templates", "workspace")), encoding="utf-8")
+    elif fault == "workspace_record_without_digest":
+        packs = _recorded_workspace_messaging(tmp_path, monkeypatch, pinned=False)
     elif fault == "unpinned_external":
         packs = [{key: value for key, value in packs[0].items() if key not in {"version", "digest"}}]
     elif fault == "bytes_changed_since_saved":
