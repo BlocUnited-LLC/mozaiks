@@ -168,6 +168,27 @@ def test_an_app_with_schema_page_routes_without_ids_composes_with_a_ui_contribut
             compose_ui_registry([{"owner": "app:generated_files", "files": [
                 {"filename": "ui/route_manifest.json", "content": json.dumps({"pages": pages_})},
             ]}], {})
+    # The path: prefix keys routes without an id, so no declared id may use it, even with no collision present.
+    with pytest.raises(ValueError, match="cannot start with 'path:'"):
+        compose_ui_registry([{"owner": "app:generated_files", "files": [
+            {"filename": "ui/route_manifest.json",
+             "content": json.dumps({"pages": [{"id": "path:/x", "path": "/y", "component": "SchemaPage"}]})},
+        ]}], {})
+
+
+def test_the_functional_route_check_accepts_the_shells_core_components() -> None:
+    """A composed route to a shell core component needs no ui/index.js registration in the functional check
+    either, while a route to a component nobody registers is still reported."""
+    from mozaiksai.core.validation.functional_generated_app import scan_functional_generated_app
+    from mozaiksai.core.workflow.generator_support.ui_registry_composition import (
+        SHELL_CORE_COMPONENTS,
+    )
+
+    pages = [{"path": f"/core{index}", "component": name} for index, name in enumerate(sorted(SHELL_CORE_COMPONENTS - {"SchemaPage"}))]
+    pages.append({"path": "/reports", "component": "ReportsPage"})
+    files = {"app.json": json.dumps({"appName": "Core"}), "ui/route_manifest.json": json.dumps({"pages": pages})}
+    missing = [d for d in scan_functional_generated_app(files) if d.code == "MISSING_ROUTE_COMPONENT"]
+    assert len(missing) == 1 and "ReportsPage" in missing[0].message, [d.message for d in missing]
 
 
 def test_the_composer_and_scanner_accept_exactly_the_shells_core_components() -> None:

@@ -182,7 +182,10 @@ A composed route may target one of the shell's own core components
 (`SchemaPage`, `ChatPage`, `ProfilePage` and the others chat-ui's
 `CORE_COMPONENTS` lists) without a `ui/index.js` registration, and a route may
 omit its `id`: composition then matches it by path and keeps it as written.
-Any other route component must be registered by a contribution.
+An id-less route's path is its identity, so a revision that changes the path
+adds a route rather than moving it (give the route an id to move it), and an
+id may not start with `path:`. Any other route component must be registered
+by a contribution.
 
 The resolver never materializes a shared root as one pack's file, whoever calls
 it. It leaves the root out of its output and lists it under `composed_outputs`
@@ -814,8 +817,9 @@ pack: its provenance records the old version, and its pack-owned files may
 differ from the current templates. Validation then refuses it, and so do the
 hosted gate and Studio refinement candidates of that bundle, whose build-record
 rows resolve to the current pack. This is intended. For a shipped pack the
-remedy is an AppGenerator revision of the app (or a regeneration), which
-re-materializes the pack at the current version; the Community Component
+remedy is an AppGenerator revision of the build, accepted, which
+re-materializes the pack at the current version (a regeneration only for an
+app with no accepted build); the Community Component
 lifecycle upgrade applies only to installed components.
 
 ### Hosted bundle gate authority (mozaiks-app)
@@ -843,7 +847,8 @@ that row is:
 
 A genuine MozaiksPay bundle built from the same package version passes
 unchanged, whichever line endings the building or validating checkout uses. A
-bundle built from another pack version fails until it is regenerated, as does a
+bundle built from another pack version fails until an AppGenerator revision
+re-materializes the pack, as does a
 tampered template-owned file or a forbidden output. A bundle of a pack whose
 templates render from build context (`operator_readiness`) passes the facade:
 those outputs are checked through the pack's declared outputs, never rendered.
@@ -859,8 +864,9 @@ Migration items for the mozaiks-app owner (not changed in this repository):
   compare a stored identity across hosts by `pack_id` and `version` only: the
   `digest` hashes the validating host's raw source bytes (see above);
 - plan for version skew: after an OSS pin bump, a bundle built from the
-  previous pack version fails the gate until an AppGenerator revision (or a
-  regeneration) re-materializes the pack at the new version; a shipped pack
+  previous pack version fails the gate until an AppGenerator revision of the
+  build (a regeneration only for an app with no accepted build)
+  re-materializes the pack at the new version; a shipped pack
   has no lifecycle upgrade;
 - bundles built before shared-root composition, whose provenance claims a
   shared root as an exclusive file, fail every scan (the hosted gate included)

@@ -223,12 +223,14 @@ def approved_workflow_surface_ids(context_variables: Any) -> list[str]:
 def managed_pack_contracts(context_variables: Any) -> list[dict[str, Any]]:
     """The contract declarations of the selected managed packs, read only from verified sources.
 
-    Each selected ``managed_capability`` row (and each managed pack a design
-    surface references from the installed factory catalog without selecting
-    it) goes through the canonical resolver first (:func:`_verified_pack_entry`:
-    pins compared, authority recorded), and its declarations come from the
-    verified source's declared contract assets. A row that selects no pack is
-    read from the ``operator_contracts`` the trusted build context projected.
+    Each selected row (and each managed pack a design surface references from
+    the installed factory catalog without selecting it) goes through the
+    canonical resolver first (:func:`_verified_pack_entry`: pins compared,
+    authority recorded). A resolved pack is managed when its own context
+    declares ``managed_capability``, whatever the row claims, as the bundle
+    scanner decides, and its declarations come from the verified source's
+    declared contract assets. A ``managed_capability`` row that selects no pack
+    is read from the ``operator_contracts`` the trusted build context projected.
     A row's own inline ``facades`` are never read. Its consumers enforce what
     a managed pack owns (surface ownership, managed data owners, facade
     actions), so a managed row the resolver refuses is never silently
@@ -254,17 +256,24 @@ def managed_pack_contracts(context_variables: Any) -> list[dict[str, Any]]:
             packs.append({**config.get("pack", {}), "pack_source_path": str(registry.parent)})
     result: list[dict[str, Any]] = []
     for pack in packs:
-        if pack.get("capability_source") != "managed_capability" or pack.get("status", "active") != "active":
+        if pack.get("status", "active") != "active":
             continue
+        claims_managed = pack.get("capability_source") == "managed_capability"
         entry, refusal = _verified_pack_entry(pack, context_variables)
         if refusal is not None:
+            if not claims_managed:
+                continue  # Assembly refuses it; it claims no managed ownership to enforce here.
             raise ValueError(
                 f"Selected managed pack '{_row_pack_id(pack) or '<unnamed>'}' cannot be verified, so what it "
                 f"owns cannot be read: {refusal}"
             )
         if entry is not None:
+            if entry.get("capability_source") != "managed_capability":
+                continue  # The pack's own declaration decides, never the row's label.
             root = Path(entry["source_path"])
             result.extend(load_contract_descriptors(root, load_build_context(root / "context.yaml")))
+            continue
+        if not claims_managed:
             continue
         pack_id = _row_pack_id(pack)
         result.extend(

@@ -1180,8 +1180,9 @@ def verified_pack_selection(
             if _has_value(pins.get(key)) and str(pins[key]) != metadata[key]:
                 raise PackIntegrityError(
                     f"Pack '{pack_id}' {label} {key} does not match freshly verified source: the {label} pin is "
-                    f"{pins[key]!r}, the {resolved.resolution} source at {root} is {metadata[key]!r}. Regenerate "
-                    "or upgrade the build with this pack version, or select the source the pin names."
+                    f"{pins[key]!r}, the {resolved.resolution} source at {root} is {metadata[key]!r}. Run an "
+                    "AppGenerator revision of the build with this pack version and accept it, or select the source "
+                    "the pin names."
                 )
     return {
         **metadata,

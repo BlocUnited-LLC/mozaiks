@@ -322,6 +322,8 @@ def _manifest(source: str, owner: str) -> dict[str, Any]:
             raise ValueError(f"{owner}: routes require path and component")
         if "id" in route and not (isinstance(route["id"], str) and route["id"]):
             raise ValueError(f"{owner}: a route id must be a non-empty string")
+        if isinstance(route.get("id"), str) and route["id"].startswith("path:"):
+            raise ValueError(f"{owner}: a route id cannot start with 'path:', which keys routes without an id")
         # Composition reads navigation order; a malformed shape is a declaration error, never a crash.
         for key in ("navigation", "meta"):
             if route.get(key) is not None and not isinstance(route[key], dict):

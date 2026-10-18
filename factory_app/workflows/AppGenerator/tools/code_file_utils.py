@@ -146,9 +146,10 @@ def without_auth_route_projection(
     """Shared UI contributions and revision baseline without the auth contract's own routes.
 
     Assembly composes the shared roots first and adds the sign-in and callback
-    routes afterwards (``compose_bundle_auth_routes``). Those routes carry no
-    route id, so a carried, saved or repaired manifest that already holds them
-    cannot be composed again. Only the exact canonical projection of an auth
+    routes afterwards (``compose_bundle_auth_routes``). A carried, saved or
+    repaired manifest that already holds them would otherwise declare them
+    once per contribution, which composition refuses as competing owners of
+    the same routes. Only the exact canonical projection of an auth
     contract these files declare is set aside; any other route still composes,
     or fails, as written. Pack contributions are never changed.
     """

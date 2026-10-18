@@ -235,6 +235,9 @@ This project follows a practical pre-1.0 changelog format:
   an id, which it matches by path and keeps as written. Schema-native
   community packs and apps with such routes therefore compose beside a
   UI-contributing pack; a route to a component nobody registers still fails.
+  The functional route check accepts the same core components, and planning
+  decides whether a selected pack is managed from the verified pack's own
+  declaration, as the bundle scanner does.
   The bundle scanner rejects pack provenance that lists a shared root in a
   pack's `materialized_owned_files` (written before composition) and asks for
   a reassembly. A Community Component upgrade blocks before writing anything
@@ -257,8 +260,9 @@ This project follows a practical pre-1.0 changelog format:
   leaves the shared UI roots out. The pack-only data contract guard checks
   the bundle's copy, which revision hydration loads from the bound source.
 - Assembly reads task outputs only from the task batch result map. A key that
-  is not a task id of the approved plan fails assembly with a diagnostic that
-  asks for the batch to be rerun.
+  is not a task id of the approved plan, including the `task_results`,
+  `results` and `tasks` wrappers assembly used to unwrap, fails assembly with
+  a diagnostic that asks for the batch to be rerun.
 - Runtime smoke get checks read the get action's declared output schema, as
   create and list do. A get response whose record the schema does not
   declare fails `get_missing`, `a_get` and `b_get_isolated` explicitly; a 404
@@ -354,6 +358,10 @@ This project follows a practical pre-1.0 changelog format:
   provenance that claims one blocks the upgrade until the app is
   reassembled.
 - `save_app_schema`'s write of its uncomposed render into `generated_files`.
+- Assembly's tolerance of task batch results nested under `task_results`,
+  `results` or `tasks`, of list results and of a top-level `failed_tasks`
+  key; such maps now fail with a diagnostic that asks for the batch to be
+  rerun.
 - The hardcoded `item` reads of runtime smoke get checks, and
   `scripts/generated_ui_acceptance.normalize_ui_acceptance_findings`, which
   had no callers.

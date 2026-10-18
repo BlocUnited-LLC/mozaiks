@@ -402,7 +402,9 @@ async def drive(
 def fast_driver(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(driver, "REPLY_SETTLE_SECONDS", 0.0)
     monkeypatch.setattr(driver, "SESSION_POLL_SECONDS", 0.05)
-    monkeypatch.setattr(driver, "HANDOFF_WINDOW_SECONDS", 1.0)
+    # Short enough to keep stall tests fast, long enough that a loaded machine does not stall a journey whose
+    # driver is still accepting and promoting (production waits 30 seconds).
+    monkeypatch.setattr(driver, "HANDOFF_WINDOW_SECONDS", 5.0)
     monkeypatch.delenv(driver.ACCESS_TOKEN_ENV, raising=False)
 
 

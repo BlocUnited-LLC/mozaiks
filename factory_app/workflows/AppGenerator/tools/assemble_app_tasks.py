@@ -620,8 +620,8 @@ async def _assemble_app_tasks(
                 revision_baseline = {path: content for path, content in saved.items() if isinstance(content, str)}
             # The admitted projection composes repair copies with this same baseline.
             remember_revision_baseline(context_variables, revision_baseline)
-        # The auth contract's routes carry no route id; materialize_auth_scaffold
-        # adds them back to the composed manifest below.
+        # The auth contract's routes are composed once, by materialize_auth_scaffold
+        # below; carried copies would compete as owners of the same routes.
         composable, composable_baseline = without_auth_route_projection(ui_contributions, file_map, revision_baseline)
         shared = compose_ui_registry(
             composable, file_map, revision_baseline=composable_baseline, deleted_paths=deleted,

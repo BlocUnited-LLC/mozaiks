@@ -219,7 +219,7 @@ def test_upgrade_refuses_an_installed_source_changed_in_place(tmp_path: Path) ->
     service.write_text(service.read_text(encoding="utf-8") + "\n# changed in place\n", encoding="utf-8")
     app_root = tmp_path / "app"
     app_root.mkdir()
-    with pytest.raises(CommunityComponentLifecycleError, match="no longer matches its pinned state"):
+    with pytest.raises(CommunityComponentLifecycleError, match="no longer matches its pinned state.*now version 0.2.0"):
         plan_component_upgrade(build_context_root=build_context_root, candidate_pack_source_path=source)
     with pytest.raises(CommunityComponentLifecycleError, match="no longer matches its pinned state"):
         apply_component_upgrade(
@@ -227,6 +227,12 @@ def test_upgrade_refuses_an_installed_source_changed_in_place(tmp_path: Path) ->
         )
     assert list(app_root.iterdir()) == []
     assert (state.read_bytes() if state.exists() else None) == before
+    # The same version with other bytes (an in-place edit, or a re-checkout with other line endings) is named so.
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace('version: "0.2.0"', 'version: "0.1.0"'), encoding="utf-8",
+    )
+    with pytest.raises(CommunityComponentLifecycleError, match="its bytes changed since installation"):
+        plan_component_upgrade(build_context_root=build_context_root, candidate_pack_source_path=source)
 
 
 def test_upgrade_plan_detects_workspace_owned_file_collision(tmp_path: Path) -> None:

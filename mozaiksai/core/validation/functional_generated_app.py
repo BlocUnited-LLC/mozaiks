@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 import yaml
 
 from mozaiksai.core.runtime.app.auth_contract import APP_AUTH_COMPONENTS
+from mozaiksai.core.workflow.generator_support.ui_registry_composition import SHELL_CORE_COMPONENTS
 
 
 @dataclass(frozen=True)
@@ -34,12 +35,9 @@ _PLACEHOLDER_RE = re.compile(
     re.IGNORECASE,
 )
 
-_BUILT_IN_ROUTE_COMPONENTS = {
-    "SchemaPage",
-    "DashboardPortalPage",
-    "AdminPortal",
-    "ProfilePage",
-} | APP_AUTH_COMPONENTS
+# The shell's core components (shared with UI registry composition), the platform portal pages and the
+# auth pages: a route may target one without a ui/index.js registration.
+_BUILT_IN_ROUTE_COMPONENTS = SHELL_CORE_COMPONENTS | {"DashboardPortalPage", "AdminPortal"} | APP_AUTH_COMPONENTS
 
 
 def _javascript_lexical_view(source: str) -> tuple[str, frozenset[int]]:

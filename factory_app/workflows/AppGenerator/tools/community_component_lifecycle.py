@@ -399,11 +399,16 @@ def _plan_upgrade(
     # verify to the version and digest installed state pinned, as installed resolution requires.
     old_metadata = verify_pack_integrity(old_source, pack_id)
     if (old_metadata["version"], old_metadata["digest"]) != (current["version"], current["digest"]):
+        cause = (
+            "its bytes changed since installation (an in-place edit, or a re-checkout with other line endings)"
+            if old_metadata["version"] == current["version"]
+            else f"it is now version {old_metadata['version']}"
+        )
         raise CommunityComponentLifecycleError(
             f"Installed pack '{pack_id}' source {old_source} no longer matches its pinned state (installed "
             f"{current['version']} {current['digest']}, source now {old_metadata['version']} "
-            f"{old_metadata['digest']}), so the app's files cannot be compared with the content they were "
-            "materialized from. Restore that source at the installed version, and plan the upgrade from a "
+            f"{old_metadata['digest']}): {cause}, so the app's files cannot be compared with the content they "
+            "were materialized from. Restore that source as it was installed, and plan the upgrade from a "
             "separate candidate directory. Nothing was changed."
         )
     old_files, old_ui_roots, old_data = _render_pack(old_source, pack_id)

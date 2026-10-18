@@ -897,6 +897,25 @@ def test_a_pack_that_declares_no_capability_source_is_never_managed_whatever_the
         assert layout_extensions_from_selected_packs(rows) == ()
 
 
+def test_planning_decides_managed_from_the_verified_pack_not_the_row_label(tmp_path):
+    """Planning's managed contract inventory follows the verified pack's own declaration, as the scanner does: a
+    managed claim on a pack that declares none contributes nothing, and an id-only shipped managed pack counts
+    without the row naming its source."""
+    from mozaiksai.core.workflow.generator_support import module_action_inventory as inventory
+
+    source = tmp_path / "greetings"
+    shutil.copytree(GREETINGS, source, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    manifest = source / "context.yaml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace("  capability_source: generated_module\n", ""), encoding="utf-8",
+    )
+    claimed = {"id": "greetings", "pack_source_path": str(source), "capability_source": "managed_capability",
+               **_pinned("greetings", source)}
+    assert inventory.managed_pack_contracts({"capability_packs": [claimed]}) == []
+    unlabelled = inventory.managed_pack_contracts({"capability_packs": [{"id": "mozaikspay"}]})
+    assert "mozaikspay" in {contract["contract_id"] for contract in unlabelled}
+
+
 def test_one_pack_identity_precedence_across_resolver_scanner_and_layout():
     from mozaiksai.core.runtime.app.layout_validation import layout_extensions_from_selected_packs
 
