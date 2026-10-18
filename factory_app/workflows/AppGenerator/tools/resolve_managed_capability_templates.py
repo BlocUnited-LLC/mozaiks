@@ -21,7 +21,9 @@ from mozaiksai.core.session.build_context import (
 )
 from mozaiksai.core.session.build_context_schema import validate_pack_context
 from mozaiksai.core.workflow.context.frozen import detach
-from mozaiksai.core.workflow.generator_support.module_action_inventory import SHARED_UI_OUTPUT_PATHS
+from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    SHARED_PACK_OUTPUT_PATHS,
+)
 from mozaiksai.resources import resolve_factory_app_root
 
 logger = logging.getLogger(__name__)
@@ -68,6 +70,28 @@ class PackDependencyError(ManagedCapabilityTemplateError):
 
 class PackIntegrityError(ManagedCapabilityTemplateError):
     """Raised when a local pack fails deterministic trust/integrity verification."""
+
+
+def selected_pack_id(pack: dict[str, Any]) -> str:
+    """The pack id a selected ``capability_packs`` row names: ``id``, then ``pack_id``, then ``capability_pack_id``."""
+    return str(pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id") or "").strip()
+
+
+def _require_unpinned_unresolved_selection(pack: dict[str, Any], pack_id: str) -> None:
+    """Refuse a selected row whose version or digest pins name a source nothing resolves.
+
+    A row that names no ``pack_source_path`` is resolved only from the
+    workspace's installed components, through ``build_context_root``. Without
+    either, its pins cannot be compared with any source bytes, so they fail
+    here instead of silently passing.
+    """
+    pins = [key for key in ("version", "digest") if pack.get(key) is not None]
+    if pins:
+        raise PackIntegrityError(
+            f"Pack '{pack_id}' selected {' and '.join(pins)} pin cannot be checked: the selection names no "
+            "pack_source_path and no build_context_root resolves an installed source. Select the pack with "
+            "its source path, select it from the workspace's installed components, or remove the pins."
+        )
 
 
 def _normalized_source(pack: dict[str, Any], context: dict[str, Any]) -> str:
@@ -212,7 +236,7 @@ def _validate_pack_dependencies(
     for pack in capability_packs:
         if not isinstance(pack, dict):
             continue
-        pid = str(pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id") or "").strip()
+        pid = selected_pack_id(pack)
         if pid:
             available_pack_ids.add(pid)
 
@@ -245,7 +269,7 @@ def _validate_pack_dependencies(
     for pack in capability_packs:
         if not isinstance(pack, dict):
             continue
-        pack_id = str(pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id") or "").strip()
+        pack_id = selected_pack_id(pack)
         raw_path, _pins = _resolve_pack_source_from_installed_state(pack, context_variables=context_variables)
         if not raw_path or not pack_id:
             continue
@@ -657,7 +681,7 @@ def _resolve_pack_source_from_installed_state(
     raw_path = pack.get("pack_source_path")
     if raw_path:
         return str(raw_path), {}
-    pack_id = str(pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id") or "").strip()
+    pack_id = selected_pack_id(pack)
     build_context_root = _context_build_context_root(context_variables)
     if not pack_id or build_context_root is None:
         return None, {}
@@ -713,12 +737,16 @@ def resolve_declared_pack_output_paths(
     for pack in capability_packs or []:
         if not isinstance(pack, dict):
             continue
-        pack_id = str(pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id") or "").strip()
+        pack_id = selected_pack_id(pack)
         raw_path, _pins = _resolve_pack_source_from_installed_state(
             pack,
             context_variables=context_variables,
         )
-        if not pack_id or not raw_path:
+        if not pack_id:
+            continue
+        if not raw_path:
+            # An unresolved id-only row declares no outputs here; its pins are refused.
+            _require_unpinned_unresolved_selection(pack, pack_id)
             continue
         pack_source_path = Path(raw_path)
         verify_pack_integrity(pack_source_path, pack_id)
@@ -801,6 +829,13 @@ def verified_selected_pack_sources(
     This does not render templates, so callers that only need verified source
     paths (layout and declared-output checks) do not require the approved
     build context that template variables come from.
+
+    A row that names no ``pack_source_path`` resolves only from the
+    workspace's installed components (``build_context_root``). When nothing
+    resolves it, a row carrying version or digest pins is refused, and an
+    id-only row is not verified: it is logged as ``UNVERIFIED_PACK_SELECTION``
+    and left out of the result, and its id still selects the id-keyed managed
+    capability checks.
     """
     if capability_packs is None and context_variables is not None:
         capability_packs = detach(context_variables.get("capability_packs")) or []
@@ -818,9 +853,18 @@ def verified_selected_pack_sources(
     for pack in capability_packs:
         if not isinstance(pack, dict):
             continue
-        pack_id = str(pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id") or "").strip()
+        pack_id = selected_pack_id(pack)
         source, installed_pins = _resolve_pack_source_from_installed_state(pack, context_variables=context_variables)
-        if not source or not pack_id:
+        if not pack_id:
+            continue
+        if not source:
+            _require_unpinned_unresolved_selection(pack, pack_id)
+            logger.warning(
+                "UNVERIFIED_PACK_SELECTION: pack '%s' names no pack_source_path and no build_context_root "
+                "resolves an installed source, so its source, templates and declared outputs are not verified "
+                "here; only checks keyed by its id apply.",
+                pack_id,
+            )
             continue
         root = Path(source).resolve()
         metadata = verify_pack_integrity(root, pack_id)
@@ -933,9 +977,21 @@ def resolve_managed_capability_templates(
        rendered.  Missing deps raise :class:`PackDependencyError` with structured
        diagnostics.
 
-    3. **Provenance manifest** — after all templates are rendered a
+    3. **Composed shared roots** — a pack never materializes a shared
+       composition root (``SHARED_PACK_OUTPUT_PATHS``: ``data/contract.json``,
+       ``ui/index.js`` and ``ui/route_manifest.json``) as its own file. Assembly
+       composes each one from the app's declarations and every selected pack's
+       contribution, so the root is left out of the result and recorded under
+       the provenance ``composed_outputs`` with the identity of every pack that
+       contributes to it. A caller that composes the UI roots passes
+       ``ui_contributions``, which receives each pack's rendered templates as a
+       ``pack:<id>`` contribution for ``compose_ui_registry``.
+
+    4. **Provenance manifest** — after all templates are rendered a
        ``.mozaiks/pack_provenance.json`` entry is appended to the result so the
-       generated app bundle can answer "which pack produced this file?"
+       generated app bundle can answer "which pack produced this file?". Every
+       pack that ships a file or contributes to a composed root has an entry,
+       so each composed-root contributor names a selected pack identity.
     """
     if not capability_packs:
         return []
@@ -958,14 +1014,16 @@ def resolve_managed_capability_templates(
                 "files": metadata["files"],
             })
         pack_files: list[str] = []
+        contributes = False
         for file in metadata["files"]:
             filename = file["filename"]
             content = file["content"]
-            if filename == "data/contract.json" or (ui_contributions is not None and filename in SHARED_UI_OUTPUT_PATHS):
+            if filename in SHARED_PACK_OUTPUT_PATHS:
                 composed_outputs.setdefault(filename, []).append({
                     "pack_id": pack_id, "version": metadata["version"],
                     "digest": metadata["digest"], "source": metadata["source"],
                 })
+                contributes = True
                 continue
             existing = results_by_filename.get(filename)
             if existing is not None and existing != content:
@@ -975,7 +1033,7 @@ def resolve_managed_capability_templates(
             results_by_filename[filename] = content
             pack_files.append(filename)
 
-        if pack_files:
+        if pack_files or contributes:
             provenance_entries.append((metadata, owner_map, pack_files))
 
     # --- Step 3: emit provenance manifest ---
@@ -1016,6 +1074,7 @@ __all__ = [
     "resolve_managed_capability_templates",
     "resolve_declared_pack_output_paths",
     "resolve_templates_for_pack",
+    "selected_pack_id",
     "verify_pack_integrity",
     "verified_pack_template_inventory",
     "verified_selected_pack_sources",

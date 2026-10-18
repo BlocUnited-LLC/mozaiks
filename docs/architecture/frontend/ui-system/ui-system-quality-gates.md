@@ -45,10 +45,13 @@ Purpose:
 
 Runner:
 
-- `scripts/generated_ui_acceptance.py`
-- `npm --prefix web_shell run test:generated-ui:app`
+- `scripts/generated_ui_acceptance.py`, the only runner whose result is a
+  controller decision
+- `npm --prefix web_shell run test:generated-ui:app` runs the same mocked
+  Playwright specifications directly, as a local rendering smoke with no
+  controller result
 
-Output:
+Output of `scripts/generated_ui_acceptance.py`:
 
 - `validation_run` with ordered gate results and canonical issues
 - `repair_decision` with `accept`, `repair`, or `block`
@@ -70,7 +73,10 @@ Browser findings are structured:
 
 The canonical acceptance controller owns the bounded routing decision:
 
-- `accept` -> continue delivery
+- `accept` -> continue delivery, only for a real-host run on an owned launch
+  (`runtime_identity: verified_owned_launch`); an `accept` in
+  `mocked_rendering_smoke` mode is rendering smoke evidence and accepts no
+  candidate
 - `repair` -> revise generated artifacts within budget
 - `block` -> user/operator review
 
@@ -89,20 +95,20 @@ catalog rules.
 
 ## Current Playwright Targets
 
-Fixture acceptance:
+Fixture rendering smoke:
 
 ```powershell
 npm --prefix web_shell run test:generated-ui
 ```
 
-Generated app root acceptance:
+Generated app root rendering smoke:
 
 ```powershell
 $env:MOZAIKS_GENERATED_UI_APP_ROOT="generated/apps/{app_id}/{build_id}/app"
 npm --prefix web_shell run test:generated-ui:app
 ```
 
-Structured readiness output:
+Structured rendering-smoke result:
 
 ```powershell
 python scripts/generated_ui_acceptance.py `
@@ -112,7 +118,10 @@ python scripts/generated_ui_acceptance.py `
 
 The default mode is `mocked_rendering_smoke`. The generic specification uses
 mocked shell/API responses and visits declarative routes. Its result is rendering
-smoke evidence, not full-app or custom-JSX acceptance.
+smoke evidence, not full-app or custom-JSX acceptance, and it never accepts a
+candidate: only a real-host run on an owned launch can. The Playwright
+configuration retries no test in either mode, so a run that passes only on a
+retry is never recorded as a pass.
 
 The Python runner rejects missing/malformed JSON, inconsistent reporter totals,
 zero executed cases, required skips and failed attempts (including a later retry
@@ -235,9 +244,11 @@ requests or starting workflows.
 Browser success does not replace `validate_generated_app_candidate`. The
 canonical candidate validator also checks reachable declared write actions,
 module quality, contained loading, real runtime behavior and compilation. The
-create/list smoke checks resolve response members from each action's declared
-output schema and still match the returned identity to a real stored record.
-Undeclared, ambiguous or malformed response members fail the check. The
+create, list and get smoke checks resolve response members from each action's
+declared output schema and still match the returned identity to a real stored
+record. Undeclared, ambiguous or malformed response members fail the check,
+including a get response that the isolation and not-found checks could
+otherwise read as empty; a 404 for a missing record still passes. The
 module quality owner treats TODO comments, docstrings and explanatory messages
 as unfinished code while allowing the exact `todo` domain value in defaults and
 enumerations; other placeholder and fake-data checks remain unchanged.

@@ -63,6 +63,27 @@ def _files_map(*pack_descs: dict[str, Any]) -> dict[str, str]:
     return {f["filename"]: f["content"] for f in _materialize(*pack_descs)}
 
 
+def _single_pack_bundle(pack_desc: dict[str, Any]) -> dict[str, str]:
+    """One pack's files plus the shared UI roots it alone contributes, written as their composed root."""
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        resolve_managed_capability_templates,
+    )
+    from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+        SHARED_UI_OUTPUT_PATHS,
+    )
+
+    contributions: list[dict[str, Any]] = []
+    files = {
+        f["filename"]: f["content"]
+        for f in resolve_managed_capability_templates([pack_desc], ui_contributions=contributions)
+    }
+    # The resolver holds shared roots back; with one contributor the composed root is its declaration.
+    assert not SHARED_UI_OUTPUT_PATHS & set(files)
+    [contribution] = contributions
+    files.update({f["filename"]: f["content"] for f in contribution["files"] if f["filename"] in SHARED_UI_OUTPUT_PATHS})
+    return files
+
+
 # ---------------------------------------------------------------------------
 # 1. Pack identity: valid id/version/author/license/source pass schema
 # ---------------------------------------------------------------------------
@@ -691,7 +712,7 @@ def test_bundle_scanner_accepts_valid_provenance_manifest() -> None:
     )
 
     greetings = _pack_descriptor(GREETINGS_PACK, "greetings")
-    files = _files_map(greetings)
+    files = _single_pack_bundle(greetings)
 
     errors = scan_generated_bundle(files)
     # No provenance-specific errors for a valid manifest
@@ -844,7 +865,7 @@ def test_fixture_pack_passes_generated_bundle_validation() -> None:
     )
 
     greetings = _pack_descriptor(GREETINGS_PACK, "greetings")
-    files = _files_map(greetings)
+    files = _single_pack_bundle(greetings)
 
     errors = scan_generated_bundle(files)
     # Filter errors unrelated to our fixture (the fixture doesn't claim to be a

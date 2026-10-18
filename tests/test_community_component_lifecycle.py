@@ -22,16 +22,26 @@ def _install(pack: Path, build_context_root: Path):
 
 
 def _materialized_files(pack: Path, pack_id: str) -> dict[str, str]:
+    """The pack's files plus each shared UI root it alone contributes, as its composed root."""
     from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
         resolve_managed_capability_templates,
     )
+    from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+        SHARED_UI_OUTPUT_PATHS,
+    )
 
-    return {
+    contributions: list[dict] = []
+    files = {
         item["filename"]: item["content"]
         for item in resolve_managed_capability_templates(
-            [{"id": pack_id, "pack_id": pack_id, "pack_source_path": str(pack)}]
+            [{"id": pack_id, "pack_id": pack_id, "pack_source_path": str(pack)}], ui_contributions=contributions,
         )
     }
+    [contribution] = contributions
+    files.update({
+        item["filename"]: item["content"] for item in contribution["files"] if item["filename"] in SHARED_UI_OUTPUT_PATHS
+    })
+    return files
 
 
 def _write_app_root_from_pack(app_root: Path, pack: Path, pack_id: str) -> None:

@@ -178,6 +178,15 @@ owned template files. Several selected packs may declare the same shared root
 (`data/contract.json`, `ui/index.js`, `ui/route_manifest.json`); any other
 declared output path belongs to exactly one selected pack.
 
+The resolver never materializes a shared root as one pack's file, whoever calls
+it. It leaves the root out of its output and lists it under `composed_outputs`
+with every contributing pack's identity; a pack whose templates are only shared
+roots still gets a provenance entry, so each contributor names a selected pack.
+Assembly composes the roots from those contributions. Provenance that lists a
+shared root in a pack's `materialized_owned_files` predates composition: the
+bundle scanner rejects it and asks for a reassembly, which rewrites the
+provenance.
+
 Without an approved DesignDocs data contract, assembly composes the selected
 packs' contributions (and any subscription assignment stores) onto an empty
 contract. A `data/contract.json` the bundle already carries is not an approval,
@@ -238,7 +247,14 @@ dependency closure, current source identity, declared output closure, and exact
 template bytes are verified. The factory's shipped packs are trusted sources;
 external sources require matching version and digest pins, either on the
 selected pack or from installed Community Component state verified against the
-source's current bytes. A workspace-owned
+source's current bytes. A selected row whose version or digest pins cannot be
+resolved to a source (no `pack_source_path`, and no `build_context_root` that
+resolves an installed component) is refused with a diagnostic. An unresolved
+id-only row, such as a hosted bundle gate's selection, is not verified: the
+resolver logs it as `UNVERIFIED_PACK_SELECTION`, and only checks keyed by its
+id apply. The bundle scanner also refuses an explicit caller row that carries a
+`pack_source_path` or pins outside the verified selection, because its source
+was never compared with the selected one. A workspace-owned
 `backend/handler.py` may extend the verified template base handler. Missing,
 changed, or undeclared implementation files fail admission; the exemption does
 not skip runtime, schema, implementation, or browser validation.
@@ -485,9 +501,21 @@ Generated bundles retain pack metadata in the existing
         { "path": "modules/greetings/module.yaml", "owner": "templates" }
       ]
     }
-  ]
+  ],
+  "composed_outputs": {
+    "ui/route_manifest.json": [
+      {
+        "pack_id": "greetings",
+        "version": "0.1.0",
+        "source": "https://example.com/community-packs/greetings",
+        "digest": "sha256:..."
+      }
+    ]
+  }
 }
 ```
+
+`materialized_owned_files` never lists a shared root.
 
 Local installation pins a verified Community Component in workspace
 build-context metadata:
@@ -538,11 +566,19 @@ installed A@v1 + verified local candidate A@v2 -> UpgradePlan
 ```
 
 The plan reports exact version/digest movement, dependency changes, added,
-removed, and changed owned files, and potential conflicts. Applying an upgrade
-is allowed only when the operation can compare the workspace files against the
-old pack's rendered content. It refuses to overwrite locally modified owned
-files, files owned by another installed pack, or workspace-owned/custom files.
-It does not execute migration scripts.
+removed, and changed owned files, and potential conflicts. Shared roots are
+never owned files. Applying an upgrade is allowed only when the operation can
+compare the workspace files against the old pack's rendered content. It refuses
+to overwrite locally modified owned files, files owned by another installed
+pack, or workspace-owned/custom files. It validates the upgraded provenance
+against the app as it will be before it writes anything. It does not execute
+migration scripts.
+
+When the app's provenance claims any shared root as a pack's exclusive file,
+whichever pack claims it and in any entry order, the plan blocks with
+`exclusive_shared_root_claim` before anything is written. That provenance
+predates composition; reassemble the app to recompose its shared roots, then
+plan the upgrade again.
 
 `data/contract.json` is never an owned file. When a pack's data contribution
 changes, the plan lists it in `recomposed_files`, and applying replaces only
@@ -553,20 +589,18 @@ contract template, even one that declares no surfaces. In that case it writes
 the same empty contract (`"surfaces": []`) that assembly composes for the pack
 when no approved DesignDocs contract exists. If the new version ships no data
 contract template, no contract is created. The plan blocks before anything is
-written when any installed pack other than the upgraded one claims the contract
-as an exclusive file in its provenance, in any entry order and even when the
-upgraded pack claims it too (`owned_by_other_pack`), when a pack surface was
-modified locally (`locally_modified_composed_output`), or when the app contract
-fails the runtime data contract loader or conflicts with the contribution
+written when a pack surface was modified locally
+(`locally_modified_composed_output`), or when the app contract fails the
+runtime data contract loader or conflicts with the contribution
 (`composed_output_conflict`).
 
-Provenance keeps other packs' composed contributors, and a root the app
-already composes stays composed. A composed shared UI root (`ui/index.js`,
-`ui/route_manifest.json` under `composed_outputs`) merges the app's and every
+Provenance keeps other packs' composed contributors. A shared UI root
+(`ui/index.js`, `ui/route_manifest.json`) merges the app's and every
 contributing pack's declarations into one file, so the lifecycle does not
 recompose it. An unchanged template only updates the contributor identity, and
-a root the pack owns exclusively upgrades as an ordinary owned file. When an
-upgrade adds, changes, or removes the pack's template for a composed root, the
+only when the app has that root and its provenance records the pack as one of
+its contributors. When an upgrade adds, changes, or removes the pack's template
+for a shared UI root, or the app's root was not composed with the pack, the
 plan blocks with `composed_output_requires_reassembly` and nothing is written.
 
 For an installed Community Component, that block currently has no supported

@@ -112,33 +112,42 @@ def test_greetings_pack_has_route_manifest() -> None:
     assert greetings_page["component"] == "SchemaPage"
 
 
-def test_greetings_pack_schema_native_page_materializes_from_pack() -> None:
-    """Materializing the greetings pack must produce the schema-native page and route manifest."""
+def _greetings_resolution() -> tuple[dict[str, str], dict[str, Any]]:
+    """Resolve the greetings pack as assembly does: its files and its pack:greetings UI contribution."""
     resolver = _load_resolver()
-    descriptor = _pack_descriptor("greetings", GREETINGS_PACK)
-    all_files = resolver.resolve_managed_capability_templates([descriptor])
-    filenames = {f["filename"] for f in all_files}
+    contributions: list[dict[str, Any]] = []
+    all_files = resolver.resolve_managed_capability_templates(
+        [_pack_descriptor("greetings", GREETINGS_PACK)], ui_contributions=contributions,
+    )
+    [contribution] = contributions
+    return {f["filename"]: f["content"] for f in all_files}, contribution
 
-    assert "ui/pages/greetings.yaml" in filenames, (
+
+def test_greetings_pack_schema_native_page_materializes_from_pack() -> None:
+    """The pack ships its schema-native page; its route manifest is a contribution, never a pack file."""
+    files, contribution = _greetings_resolution()
+
+    assert "ui/pages/greetings.yaml" in files, (
         "greetings pack materialization must include ui/pages/greetings.yaml"
     )
-    assert "ui/route_manifest.json" in filenames, (
-        "greetings pack materialization must include ui/route_manifest.json"
-    )
+    # Shared UI roots are composed from every contributor, so the resolver never
+    # materializes one, whichever caller asks.
+    assert "ui/route_manifest.json" not in files
+    assert "ui/route_manifest.json" not in {
+        f["filename"] for f in _load_resolver().resolve_managed_capability_templates(
+            [_pack_descriptor("greetings", GREETINGS_PACK)],
+        )
+    }
+    assert contribution["owner"] == "pack:greetings"
+    declared = {f["filename"]: f["content"] for f in contribution["files"]}
+    assert {page["path"] for page in json.loads(declared["ui/route_manifest.json"])["pages"]} == {"/greetings"}
 
 
 def test_greetings_pack_ui_files_appear_in_provenance() -> None:
-    """Provenance manifest must record UI files produced by the greetings pack."""
-    resolver = _load_resolver()
-    descriptor = _pack_descriptor("greetings", GREETINGS_PACK)
-    all_files = resolver.resolve_managed_capability_templates([descriptor])
+    """Provenance records the pack's page as its file and the route manifest as a composed root it contributes to."""
+    files, _contribution = _greetings_resolution()
 
-    provenance_file = next(
-        (f for f in all_files if f["filename"] == ".mozaiks/pack_provenance.json"), None
-    )
-    assert provenance_file is not None, "Provenance manifest missing after materialization"
-
-    provenance = json.loads(provenance_file["content"])
+    provenance = json.loads(files[".mozaiks/pack_provenance.json"])
     pack_entry = next(
         (p for p in provenance.get("packs", []) if p.get("pack_id") == "greetings"), None
     )
@@ -148,22 +157,16 @@ def test_greetings_pack_ui_files_appear_in_provenance() -> None:
     assert "ui/pages/greetings.yaml" in pack_file_paths, (
         "provenance does not record ui/pages/greetings.yaml"
     )
-    assert "ui/route_manifest.json" in pack_file_paths, (
-        "provenance does not record ui/route_manifest.json"
-    )
+    assert "ui/route_manifest.json" not in pack_file_paths
+    identity = {key: pack_entry[key] for key in ("pack_id", "version", "source", "digest")}
+    assert provenance["composed_outputs"]["ui/route_manifest.json"] == [identity]
 
 
 def test_greetings_pack_ui_files_have_templates_owner_in_provenance() -> None:
-    """UI files from the greetings pack must be recorded with owner=templates."""
-    resolver = _load_resolver()
-    descriptor = _pack_descriptor("greetings", GREETINGS_PACK)
-    all_files = resolver.resolve_managed_capability_templates([descriptor])
+    """The pack's UI files are recorded with owner=templates."""
+    files, _contribution = _greetings_resolution()
 
-    provenance_file = next(
-        (f for f in all_files if f["filename"] == ".mozaiks/pack_provenance.json"), None
-    )
-    assert provenance_file is not None
-    provenance = json.loads(provenance_file["content"])
+    provenance = json.loads(files[".mozaiks/pack_provenance.json"])
     pack_entry = next(
         (p for p in provenance.get("packs", []) if p.get("pack_id") == "greetings"), None
     )
@@ -171,20 +174,20 @@ def test_greetings_pack_ui_files_have_templates_owner_in_provenance() -> None:
 
     owner_by_path = {f["path"]: f.get("owner") for f in pack_entry.get("materialized_owned_files", [])}
     assert owner_by_path.get("ui/pages/greetings.yaml") == "templates"
-    assert owner_by_path.get("ui/route_manifest.json") == "templates"
+    assert "ui/route_manifest.json" not in owner_by_path
 
 
 def test_greetings_pack_materialized_bundle_passes_scanner() -> None:
-    """The scanner must accept the greetings pack materialized bundle (no errors)."""
-    resolver = _load_resolver()
+    """The scanner accepts the greetings bundle with its route manifest composed from its only contributor."""
     scanner = _load_scanner()
-
-    descriptor = _pack_descriptor("greetings", GREETINGS_PACK)
-    all_files = resolver.resolve_managed_capability_templates([descriptor])
-    files_map = {f["filename"]: f["content"] for f in all_files}
+    files, contribution = _greetings_resolution()
+    declared = {f["filename"]: f["content"] for f in contribution["files"]}
+    files_map = {**files, "ui/route_manifest.json": declared["ui/route_manifest.json"]}
 
     errors = scanner.scan_generated_bundle(files_map)
     assert errors == [], f"Scanner found errors in greetings pack bundle: {errors}"
+    # Without the composed root the provenance names a root the bundle does not have.
+    assert any("must identify a present shared composition root" in error for error in scanner.scan_generated_bundle(files))
 
 
 def test_schema_native_page_inherits_theme_via_primitive_renderer() -> None:

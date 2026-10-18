@@ -22,7 +22,9 @@ export default defineConfig({
     ] }),
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
-  retries: realHost ? 0 : process.env.CI ? 2 : 0,
+  // A passing retry hides a failed attempt; neither the rendering smoke nor a
+  // real-host probe counts one as evidence (scripts/generated_ui_acceptance.py).
+  retries: 0,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: {
     baseURL: realHost?.baseURL ?? 'http://127.0.0.1:4174',

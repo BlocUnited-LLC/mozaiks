@@ -173,16 +173,18 @@ test('real-host collection contains each required route in both projects and no 
     generatedUiProjects.map((project) => [`real-host route ${route}`, project])).sort());
 });
 
-test('mocked mode retains the existing server and excludes the real-host spec', () => {
-  const env = { ...process.env };
+test('mocked mode retains the existing server, retries nothing and excludes the real-host spec', () => {
+  const env = { ...process.env, CI: '1' };
   for (const key of Object.keys(env)) if (key.startsWith('MOZAIKS_GENERATED_UI_')) delete env[key];
   const result = spawnSync(process.execPath, ['--input-type=module', '-e', `
     import config from './playwright.generated-ui.config.js';
-    console.log(JSON.stringify({ command: config.webServer.command, match: config.testMatch }));
+    console.log(JSON.stringify({ command: config.webServer.command, match: config.testMatch, retries: config.retries }));
   `], { cwd: shellRoot, env, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   const config = JSON.parse(result.stdout);
   assert.match(config.command, /npm run build/);
+  // A pass on a retry hides a failed attempt, even under CI.
+  assert.equal(config.retries, 0);
   assert.deepEqual(config.match, [
     '**/generated-app.acceptance.spec.js', '**/generated-app.generic.acceptance.spec.js',
     '**/entitlement-upgrade.spec.js', '**/token-depletion.spec.js',

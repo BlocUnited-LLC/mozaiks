@@ -10,7 +10,6 @@ import json
 import os
 import shutil
 import subprocess
-from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -342,36 +341,6 @@ def _finding(
         ),
         repair_owner=None if category in _HARNESS_FAILURES else "AppSchemaAgent",
     )
-
-
-def normalize_ui_acceptance_findings(value: Any) -> list[ValidationIssue]:
-    """Normalize arbitrary finding payloads into canonical validation issues."""
-
-    if value is None:
-        return []
-    if isinstance(value, str):
-        text = value.strip()
-        return [_finding(message=text)] if text else []
-    if isinstance(value, dict):
-        message = _string(value.get("message") or value.get("error") or value.get("title"))
-        if not message:
-            return []
-        return [
-            _finding(
-                message=message,
-                severity=_string(value.get("severity")) or "error",
-                route=_string(value.get("route")) or None,
-                category=_string(value.get("category")) or "render",
-                source=_string(value.get("source")) or "playwright",
-                suggested_fix=_string(value.get("suggested_fix")) or None,
-            )
-        ]
-    if isinstance(value, Iterable):
-        findings: list[ValidationIssue] = []
-        for item in value:
-            findings.extend(normalize_ui_acceptance_findings(item))
-        return findings
-    return [_finding(message=str(value))]
 
 
 def parse_playwright_json_report(report: dict[str, Any]) -> list[ValidationIssue]:
@@ -746,7 +715,6 @@ if __name__ == "__main__":
 
 
 __all__ = [
-    "normalize_ui_acceptance_findings",
     "parse_playwright_json_report",
     "run_playwright_acceptance",
     "validate_real_host_profile",

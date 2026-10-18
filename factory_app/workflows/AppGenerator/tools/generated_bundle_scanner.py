@@ -36,7 +36,9 @@ from factory_app.workflows.AppGenerator.tools.module_persistence_guard import (
 )
 from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
     ManagedCapabilityTemplateError,
+    PackIntegrityError,
     resolve_declared_pack_output_paths,
+    selected_pack_id,
     verified_pack_data_contracts,
     verified_pack_template_inventory,
     verified_selected_pack_sources,
@@ -1805,6 +1807,15 @@ def _scan_pack_provenance_manifest(files_map: dict[str, str]) -> list[str]:
                     errors.append(
                         f"{_PACK_PROVENANCE_PATH}: packs[{i}].materialized_owned_files must be a JSON array"
                     )
+                for file in files if isinstance(files, list) else []:
+                    if isinstance(file, dict) and file.get("path") in SHARED_PACK_OUTPUT_PATHS:
+                        errors.append(
+                            f"{_PACK_PROVENANCE_PATH}: packs[{i}] claims shared composition root "
+                            f"{file['path']!r} as an exclusive materialized_owned_files entry. A shared root is "
+                            "composed from the app's and every pack's declarations and recorded under "
+                            "composed_outputs; this provenance predates composition. Reassemble the app to "
+                            "recompose its shared roots."
+                        )
 
     composed = manifest.get("composed_outputs", {})
     if not isinstance(composed, dict):
@@ -1833,12 +1844,6 @@ def _scan_pack_provenance_manifest(files_map: dict[str, str]) -> list[str]:
                 if pack_id in seen:
                     errors.append(f"{location} contains duplicate contributors")
                 seen.add(pack_id)
-            if any(
-                isinstance(entry.get("materialized_owned_files"), list)
-                and any(isinstance(file, dict) and file.get("path") == path for file in entry["materialized_owned_files"])
-                for entry in pack_entries
-            ):
-                errors.append(f"{location} cannot also claim exclusive template file ownership")
 
     return errors
 
@@ -2405,13 +2410,28 @@ def scan_generated_bundle(
         # Plan rows identify generated modules; selected pack context owns the
         # verified source and its exact declared output paths.
         output_packs = [dict(pack) for pack in capability_packs or [] if isinstance(pack, dict)]
+        verified_ids: set[str] = set()
         for entry in verified_selected_pack_sources(context_variables=persistence_context):
-            matches = [pack for pack in output_packs if _pack_id_from_descriptor(pack) == entry["pack_id"]]
+            verified_ids.add(entry["pack_id"])
+            matches = [pack for pack in output_packs if selected_pack_id(pack) == entry["pack_id"]]
             if not matches:
                 matches = [{"id": entry["pack_id"]}]
                 output_packs.extend(matches)
             for pack in matches:
                 pack["pack_source_path"] = entry["source_path"]
+        # A caller row outside the verified selection never supplies its own source:
+        # its path and pins were never compared with the selected, installed source.
+        unverified = sorted({
+            selected_pack_id(pack) or "<unnamed>" for pack in output_packs
+            if selected_pack_id(pack) not in verified_ids
+            and any(pack.get(key) is not None for key in ("pack_source_path", "version", "digest"))
+        })
+        if unverified:
+            raise PackIntegrityError(
+                f"explicit capability_packs rows {unverified} carry a pack_source_path or version/digest pins "
+                "outside the verified pack selection. Select those packs in the build context so their source "
+                "is verified, or pass them by id only."
+            )
         selected_layout_extensions = _layout_extensions_for_selected_packs(output_packs)
     except ManagedCapabilityTemplateError as exc:
         return [f"Selected CapabilityPack output contract is invalid: {exc}"]
@@ -2427,12 +2447,13 @@ def scan_generated_bundle(
         )
     )
     scannable_files_map = filter_layout_scannable_file_map(files_map, layout_report)
-    for theme_path in ("brand/theme_config.json", "app/brand/theme_config.json"):
-        if theme_path in scannable_files_map:
-            try:
-                validate_page_title_theme(json.loads(scannable_files_map[theme_path]))
-            except ValueError as exc:
-                errors.append(f"{theme_path}: {exc}")
+    # Scanner inputs are bundle-relative; layout rejects a workspace-prefixed copy.
+    theme_path = "brand/theme_config.json"
+    if theme_path in scannable_files_map:
+        try:
+            validate_page_title_theme(json.loads(scannable_files_map[theme_path]))
+        except ValueError as exc:
+            errors.append(f"{theme_path}: {exc}")
     errors.extend(
         _scan_canonical_app_paths(
             scannable_files_map,

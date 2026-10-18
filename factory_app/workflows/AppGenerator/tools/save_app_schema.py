@@ -414,21 +414,21 @@ def _validate_data_contract(data_contract: Any) -> None:
             raise ValueError(f"{path}.owner_module is required")
 
 
-def _bundle_data_contract(context_variables: Any, approved: dict[str, Any]) -> dict[str, Any]:
-    """data/contract.json as assembly compiles it, else the approved contract when the packs cannot join it.
+def _bundle_data_contract(context_variables: Any, approved: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
+    """data/contract.json as assembly compiles it, or None and the reason it cannot be compiled here.
 
     The admitted projection overlays this copy on the assembled bundle, so the
     approved contract alone would drop the verified pack contributions and the
     subscription assignment stores there. When the selected packs cannot be
     verified, or their contributions do not compose with the approved contract,
-    the app schema author cannot repair either: the approved contract is
-    written as before, and assembly fails with its own PackIntegrityError or
-    conflicting pack contribution error.
+    the app schema author cannot repair either, and no contract compiled
+    without them is written: this save leaves data/contract.json to assembly,
+    which fails with the same pack error, and returns the reason.
     """
     subscription_contract = resolve_subscription_contract(context_variables)
     try:
         assembled: dict[str, Any] = _assembled_data_contract(context_variables, subscription_contract)
-        return assembled
+        return assembled, None
     except ValueError as exc:
         # Without the pack contributions the approved contract still compiles,
         # so the packs are the reason. Its own compile error raises here.
@@ -436,11 +436,11 @@ def _bundle_data_contract(context_variables: Any, approved: dict[str, Any]) -> d
             approved, subscription_contract=subscription_contract, context_variables=context_variables,
         )
         _logger.warning(
-            "APP_SCHEMA_PACK_DATA_CONTRACT_DEFERRED: the selected packs' data contributions do not compose "
-            "with the approved data contract; this save writes the approved contract and assembly "
-            "reports the failure: %s", exc,
+            "APP_SCHEMA_PACK_DATA_CONTRACT_NOT_WRITTEN: the selected packs' data contributions do not compose "
+            "with the approved data contract, so this save writes no data/contract.json; assembly reports "
+            "the pack failure: %s", exc,
         )
-        return approved
+        return None, str(exc)
 
 
 def _validate_route_auth(route_auth: Any, *, field: str) -> None:
@@ -1384,14 +1384,19 @@ def save_app_schema(
       - config/asset_manifest.json       → asset_manifest when set
       - data/contract.json                 → approved DesignDocs data_contract from context, compiled
                                            as assembly compiles it (verified pack contributions,
-                                           subscription assignment stores); as approved when
-                                           the packs cannot be verified or composed, for
-                                           assembly to report
+                                           subscription assignment stores); not written when the
+                                           packs cannot be verified or composed, for assembly to
+                                           report
 
     Stores in context_variables:
       - app_manifest, app_pages, app_theme_config_patch, app_shell_config,
         app_asset_manifest, app_custom_route_bundle,
         app_schema_ready
+      - code_files: the rendered files, in the admitted repair overlay.
+        generated_files stays the last assembled bundle: the rendered
+        ui/index.js and ui/route_manifest.json hold only the app's routes, and
+        assembly (or the admitted projection) composes them with the selected
+        packs' declarations.
 
     Compile explicit module/action references against the closed inventory,
     validate runtime schemas, and persist only the accepted canonical artifacts.
@@ -1558,8 +1563,9 @@ def save_app_schema(
         _validate_data_contract(resolved_data_contract)
         # data/contract.json is written as assembly compiles it: the approved
         # contract with the verified pack contributions and subscription stores.
-        bundle_data_contract = (
-            _bundle_data_contract(context_variables, resolved_data_contract) if resolved_data_contract else None
+        bundle_data_contract, data_contract_deferred = (
+            _bundle_data_contract(context_variables, resolved_data_contract) if resolved_data_contract
+            else (None, None)
         )
         app_ui_quality_warnings = dedupe(
             audit_page_schemas(page_list)
@@ -1672,7 +1678,6 @@ def save_app_schema(
                     {"filename": path, "content": content}
                     for path, content in sorted(code_files.items())
                 ],
-                "generated_files": {**baseline_files, **rendered_files},
             }
             for key, value in values.items():
                 if isinstance(context_variables, dict):
@@ -1689,6 +1694,11 @@ def save_app_schema(
 
     msg = (agent_message or "App schema persisted.").strip()
     files_written = f"\nFiles written: {', '.join(written)}" if written else ""
+    if data_contract_deferred:
+        files_written += (
+            "\ndata/contract.json not written: the selected capability packs' data contributions cannot be "
+            f"composed with the approved data contract ({data_contract_deferred}); assembly reports this pack failure."
+        )
     return (
         f"{msg}\n\n"
         f"App: {manifest_dict.get('app_name')}\n"

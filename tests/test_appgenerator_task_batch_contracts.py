@@ -603,3 +603,22 @@ class TicketsModule:
     assert parsed["actions"][0]["handler_method"] == "update_status"
 
 
+
+
+def test_task_batch_outputs_read_only_the_canonical_result_map() -> None:
+    """Every key but _meta and _failed is a task id; no wrapper, list or extra exclusion is guessed."""
+    from factory_app.workflows.AppGenerator.tools.code_file_utils import task_batch_outputs
+
+    output = {"code_files": [{"filename": "modules/a/module.yaml", "content": "id: a\n"}]}
+    canonical = {
+        "results": output, "tasks": output, "task_results": output, "failed_tasks": output, "pages": output,
+        "_meta": {"status": "completed", "failed_tasks": []}, "_failed": {"broken": {"error": "x"}},
+    }
+    assert task_batch_outputs({"app_task_batch_results": canonical}) == [
+        (key, output) for key in ("results", "tasks", "task_results", "failed_tasks", "pages")
+    ]
+    assert task_batch_outputs({}) == []
+    with pytest.raises(ValueError, match="app_task_batch_results must be the task batch result map"):
+        task_batch_outputs({"app_task_batch_results": [output]})
+    with pytest.raises(ValueError, match=r"app_task_batch_results\['pages'\] must be that task's output object"):
+        task_batch_outputs({"app_task_batch_results": {"pages": [output]}})

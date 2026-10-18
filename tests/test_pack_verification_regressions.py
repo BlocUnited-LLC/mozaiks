@@ -25,6 +25,7 @@ from mozaiksai.core.workflow.generator_support.code_files import compile_data_co
 from mozaiksai.core.workflow.generator_support.persistence_artifacts import (
     materialize_data_migrations,
 )
+from mozaiksai.core.workflow.generator_support.ui_registry_composition import compose_ui_registry
 
 BUILD_CONTEXT = Path(__file__).resolve().parents[1] / "factory_app/build_context"
 MESSAGING = BUILD_CONTEXT / "messaging"
@@ -74,13 +75,15 @@ def _contributions(pack_root: Path) -> list[dict]:
 
 
 def _write_app(app_root: Path, pack_root: Path, *, app_contract: dict | None) -> None:
-    """Write pack templates and the composed data contract, as assembly does."""
+    """Write pack templates and the composed UI roots and data contract, as assembly does."""
+    ui_contributions: list[dict] = []
     files = {
         item["filename"]: item["content"]
         for item in resolver.resolve_managed_capability_templates(
-            [{"id": "messaging", "pack_source_path": str(pack_root)}]
+            [{"id": "messaging", "pack_source_path": str(pack_root)}], ui_contributions=ui_contributions,
         )
     }
+    files.update(compose_ui_registry(ui_contributions, files))
     contributions = _contributions(pack_root)
     if contributions or app_contract is not None:
         compiled = compile_data_contract(app_contract or EMPTY_CONTRACT, pack_data_contracts=contributions)
@@ -131,7 +134,7 @@ def _write_composed_greetings_app(app_root: Path, pack_root: Path) -> None:
 
 
 def _greetings_v2(tmp_path: Path, change: str) -> Path:
-    """Copy greetings as 0.2.0 whose route manifest template is changed or removed."""
+    """Copy greetings as 0.2.0 whose route manifest template is unchanged, changed or removed."""
     v2 = tmp_path / "greetings_v2"
     shutil.copytree(GREETINGS, v2)
     (v2 / "context.yaml").write_text(
@@ -140,6 +143,8 @@ def _greetings_v2(tmp_path: Path, change: str) -> Path:
     service = v2 / "templates/modules/greetings/backend/service.py"
     service.write_text(service.read_text(encoding="utf-8") + "# v2\n", encoding="utf-8")
     template = v2 / "templates" / ROUTE_MANIFEST
+    if change == "unchanged":
+        return v2
     if change == "changed":
         manifest = json.loads(template.read_text(encoding="utf-8"))
         manifest["pages"][0]["label"] = "Greetings v2"
@@ -284,27 +289,16 @@ def test_upgrade_blocks_locally_modified_pack_data_surface(tmp_path):
 
 
 def test_upgrade_keeps_an_app_composed_root_composed(tmp_path):
-    greetings = Path(__file__).resolve().parent / "fixtures/community_packs/greetings"
-    build_context_root, app_root, root = tmp_path / "build_context", tmp_path / "app", "ui/route_manifest.json"
-    v2 = tmp_path / "greetings_v2"
-    shutil.copytree(greetings, v2)
-    (v2 / "context.yaml").write_text(
-        (v2 / "context.yaml").read_text(encoding="utf-8").replace('version: "0.1.0"', 'version: "0.2.0"'), encoding="utf-8",
-    )
-    service = v2 / "templates/modules/greetings/backend/service.py"
-    service.write_text(service.read_text(encoding="utf-8") + "# v2\n", encoding="utf-8")
-    install_verified_local_pack(pack_source_path=greetings, build_context_root=build_context_root)
-    for item in resolver.resolve_managed_capability_templates([{"id": "greetings", "pack_source_path": str(greetings)}]):
-        (app_root / item["filename"]).parent.mkdir(parents=True, exist_ok=True)
-        (app_root / item["filename"]).write_text(item["content"], encoding="utf-8")
+    build_context_root, app_root, root = tmp_path / "build_context", tmp_path / "app", ROUTE_MANIFEST
+    v2 = _greetings_v2(tmp_path, "unchanged")
+    install_verified_local_pack(pack_source_path=GREETINGS, build_context_root=build_context_root)
+    _write_composed_greetings_app(app_root, GREETINGS)
     # Assembly composed the route manifest from this pack and another contributor.
-    provenance_path = app_root / ".mozaiks/pack_provenance.json"
+    provenance_path = app_root / PROVENANCE
     provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
-    entry = provenance["packs"][0]
-    entry["materialized_owned_files"] = [row for row in entry["materialized_owned_files"] if row["path"] != root]
     other = OTHER_PACK
     provenance["packs"].append({**other, "materialized_owned_files": []})
-    provenance["composed_outputs"] = {root: [{key: entry[key] for key in other}, other]}
+    provenance["composed_outputs"][root].append(other)
     provenance_path.write_text(json.dumps(provenance), encoding="utf-8")
 
     apply_component_upgrade(
@@ -323,34 +317,66 @@ def test_upgrade_keeps_an_app_composed_root_composed(tmp_path):
     }) == []
 
 
+def _claim_shared_roots_exclusively(app_root: Path, claims: dict[str, list[str]]) -> None:
+    """Rewrite the app's provenance in the pre-composition shape: shared roots as exclusive files."""
+    provenance_path = app_root / PROVENANCE
+    provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+    composed = provenance.pop("composed_outputs")
+    entries = {pack["pack_id"]: pack for pack in [*provenance["packs"], {**OTHER_PACK, "materialized_owned_files": []}]}
+    for owner, paths in claims.items():
+        entries[owner]["materialized_owned_files"].extend({"path": path, "owner": "templates"} for path in paths)
+        for path in paths:
+            composed.pop(path, None)
+    if composed:
+        provenance["composed_outputs"] = composed
+    provenance["packs"] = list(entries.values())
+    provenance_path.write_text(json.dumps(provenance), encoding="utf-8")
+
+
+def _bundle(app_root: Path) -> dict[str, str]:
+    return {path.relative_to(app_root).as_posix(): path.read_text(encoding="utf-8") for path in app_root.rglob("*") if path.is_file()}
+
+
 @pytest.mark.parametrize("contract_owner", ["other_pack", "messaging"])
-def test_upgrade_checks_exclusive_data_contract_claims_before_writing(tmp_path, contract_owner):
+def test_upgrade_blocks_an_exclusive_data_contract_claim_before_writing(tmp_path, contract_owner):
+    """Pre-composition provenance claims the contract as one pack's file; it is never migrated in place."""
     build_context_root, app_root = tmp_path / "build_context", tmp_path / "app"
     v1 = _messaging_copy(tmp_path / "v1", version="0.1.13")
     v2 = _messaging_copy(tmp_path / "v2", version="0.1.14", extra_field=True)
     install_verified_local_pack(pack_source_path=v1, build_context_root=build_context_root)
     _write_app(app_root, v1, app_contract=None)
-    # Earlier resolvers recorded a pack's data contract as one pack's exclusive file.
-    provenance_path = app_root / PROVENANCE
-    provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
-    del provenance["composed_outputs"]
-    provenance["packs"].append({**OTHER_PACK, "materialized_owned_files": []})
-    owner = next(pack for pack in provenance["packs"] if pack["pack_id"] == contract_owner)
-    owner["materialized_owned_files"].append({"path": DATA_CONTRACT, "owner": "templates"})
-    provenance_path.write_text(json.dumps(provenance), encoding="utf-8")
+    _claim_shared_roots_exclusively(app_root, {contract_owner: [DATA_CONTRACT]})
 
-    if contract_owner == "other_pack":
-        _assert_upgrade_blocked_before_writing(build_context_root, v2, app_root, [
-            {"path": DATA_CONTRACT, "kind": "owned_by_other_pack", "owner": "other_pack"},
-        ])
-        return
-    # The upgraded pack's own earlier claim becomes a composed contribution.
-    apply_component_upgrade(
-        build_context_root=build_context_root, candidate_pack_source_path=v2, workspace_app_root=app_root,
+    _assert_upgrade_blocked_before_writing(build_context_root, v2, app_root, [
+        {"path": DATA_CONTRACT, "owner": contract_owner, "kind": "exclusive_shared_root_claim"},
+    ])
+    with pytest.raises(CommunityComponentConflictError, match="Reassemble the app to recompose its shared roots"):
+        apply_component_upgrade(
+            build_context_root=build_context_root, candidate_pack_source_path=v2, workspace_app_root=app_root,
+        )
+    errors = scanner._scan_pack_provenance_manifest(_bundle(app_root))
+    assert any(
+        f"claims shared composition root {DATA_CONTRACT!r}" in error and "Reassemble the app" in error for error in errors
+    ), errors
+
+
+def test_upgrade_blocks_a_pre_composition_ui_root_claim_even_when_the_root_is_unchanged(tmp_path):
+    """A flat-era UI root claim blocks the whole upgrade before anything is written, not half way."""
+    build_context_root, app_root = tmp_path / "build_context", tmp_path / "app"
+    install_verified_local_pack(pack_source_path=GREETINGS, build_context_root=build_context_root)
+    _write_composed_greetings_app(app_root, GREETINGS)
+    _claim_shared_roots_exclusively(app_root, {"greetings": [ROUTE_MANIFEST]})
+    # Only service.py changes; the route manifest template is the same.
+    v2 = _greetings_v2(tmp_path, "unchanged")
+
+    _assert_upgrade_blocked_before_writing(build_context_root, v2, app_root, [
+        {"path": ROUTE_MANIFEST, "owner": "greetings", "kind": "exclusive_shared_root_claim"},
+        {"path": ROUTE_MANIFEST, "kind": "composed_output_requires_reassembly"},
+    ])
+    assert any(
+        f"claims shared composition root {ROUTE_MANIFEST!r}" in error
+        for error in scanner._scan_pack_provenance_manifest(_bundle(app_root))
     )
-    updated = json.loads(provenance_path.read_text(encoding="utf-8"))
-    assert [row["version"] for row in updated["composed_outputs"][DATA_CONTRACT]] == ["0.1.14"]
-    assert not any(file["path"] == DATA_CONTRACT for pack in updated["packs"] for file in pack["materialized_owned_files"])
 
 
 @pytest.mark.parametrize("malform", [
@@ -389,7 +415,8 @@ def test_upgrade_does_not_create_a_data_contract_with_nothing_to_compose(tmp_pat
 
     assert (plan.status, plan.recomposed_files) == ("ready", [])
     assert not (app_root / DATA_CONTRACT).exists()
-    assert "composed_outputs" not in json.loads((app_root / PROVENANCE).read_text(encoding="utf-8"))
+    composed = json.loads((app_root / PROVENANCE).read_text(encoding="utf-8"))["composed_outputs"]
+    assert DATA_CONTRACT not in composed and set(composed) == {"ui/index.js", ROUTE_MANIFEST}
 
 
 @pytest.mark.parametrize("change", ["changed", "removed"])
@@ -407,26 +434,69 @@ def test_upgrade_blocks_a_pack_change_to_a_composed_ui_root(tmp_path, change):
 @pytest.mark.parametrize("claim_order", [
     ("other_pack", "messaging"), ("messaging", "other_pack"),
 ], ids=["upgraded_listed_last", "upgraded_listed_first"])
-def test_upgrade_blocks_any_other_exclusive_data_contract_claim_in_either_order(tmp_path, claim_order):
+def test_upgrade_blocks_every_exclusive_data_contract_claim_in_either_order(tmp_path, claim_order):
     build_context_root, app_root = tmp_path / "build_context", tmp_path / "app"
     v1 = _messaging_copy(tmp_path / "v1", version="0.1.13")
     v2 = _messaging_copy(tmp_path / "v2", version="0.1.14", extra_field=True)
     install_verified_local_pack(pack_source_path=v1, build_context_root=build_context_root)
     _write_app(app_root, v1, app_contract=None)
     # Older or hand-edited provenance can list the same exclusive claim twice; no claim may hide another.
+    _claim_shared_roots_exclusively(app_root, {pack_id: [DATA_CONTRACT] for pack_id in claim_order})
     provenance_path = app_root / PROVENANCE
     provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
-    del provenance["composed_outputs"]
-    entries = {pack["pack_id"]: pack for pack in [*provenance["packs"], {**OTHER_PACK, "materialized_owned_files": []}]}
-    assert sorted(entries) == sorted(claim_order)
-    for entry in entries.values():
-        entry["materialized_owned_files"].append({"path": DATA_CONTRACT, "owner": "templates"})
-    provenance["packs"] = [entries[pack_id] for pack_id in claim_order]
+    provenance["packs"] = sorted(provenance["packs"], key=lambda pack: claim_order.index(pack["pack_id"]))
     provenance_path.write_text(json.dumps(provenance), encoding="utf-8")
 
     _assert_upgrade_blocked_before_writing(build_context_root, v2, app_root, [
-        {"path": DATA_CONTRACT, "kind": "owned_by_other_pack", "owner": "other_pack"},
+        {"path": DATA_CONTRACT, "owner": "messaging", "kind": "exclusive_shared_root_claim"},
+        {"path": DATA_CONTRACT, "owner": "other_pack", "kind": "exclusive_shared_root_claim"},
     ])
+
+
+def test_an_exclusive_claim_blocks_even_an_upgrade_that_composes_no_data(tmp_path):
+    """Another pack's exclusive contract claim blocks before writing whatever the upgraded pack contributes."""
+    build_context_root, app_root = tmp_path / "build_context", tmp_path / "app"
+    install_verified_local_pack(pack_source_path=GREETINGS, build_context_root=build_context_root)
+    _write_composed_greetings_app(app_root, GREETINGS)
+    (app_root / DATA_CONTRACT).parent.mkdir(parents=True, exist_ok=True)
+    (app_root / DATA_CONTRACT).write_text(json.dumps(EMPTY_CONTRACT), encoding="utf-8")
+    provenance_path = app_root / PROVENANCE
+    provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+    provenance["packs"].append({**OTHER_PACK, "materialized_owned_files": [{"path": DATA_CONTRACT, "owner": "templates"}]})
+    provenance_path.write_text(json.dumps(provenance), encoding="utf-8")
+
+    _assert_upgrade_blocked_before_writing(build_context_root, _greetings_v2(tmp_path, "unchanged"), app_root, [
+        {"path": DATA_CONTRACT, "owner": "other_pack", "kind": "exclusive_shared_root_claim"},
+    ])
+
+
+def test_resolver_never_materializes_a_shared_root_and_records_every_contributor(tmp_path):
+    """No caller gets a shared root as a pack file, and a shared-root-only pack still has an identity."""
+    shared_only = tmp_path / "shared_only"
+    shutil.copytree(GREETINGS, shared_only)
+    for path in (shared_only / "templates").rglob("*"):
+        if path.is_file() and path.relative_to(shared_only / "templates").as_posix() != ROUTE_MANIFEST:
+            path.unlink()
+    contract = shared_only / "contract.yaml"
+    contract.write_text(re.sub(
+        r"  - path: (?!ui/route_manifest\.json)[^\n]*\n    owner: [^\n]*\n", "", contract.read_text(encoding="utf-8"),
+    ), encoding="utf-8")
+
+    for ui_contributions in (None, []):
+        files = {
+            item["filename"]: item["content"]
+            for item in resolver.resolve_managed_capability_templates(
+                [{"id": "greetings", "pack_source_path": str(shared_only)}], ui_contributions=ui_contributions,
+            )
+        }
+        assert set(files) == {PROVENANCE}, files
+        provenance = json.loads(files[PROVENANCE])
+        [entry] = provenance["packs"]
+        assert (entry["pack_id"], entry["materialized_owned_files"]) == ("greetings", [])
+        identity = {key: entry[key] for key in ("pack_id", "version", "source", "digest")}
+        assert provenance["composed_outputs"] == {ROUTE_MANIFEST: [identity]}
+    manifest = (shared_only / "templates" / ROUTE_MANIFEST).read_text(encoding="utf-8")
+    assert scanner._scan_pack_provenance_manifest({PROVENANCE: files[PROVENANCE], ROUTE_MANIFEST: manifest}) == []
 
 
 def test_upgrade_writes_the_empty_contract_assembly_composes_for_a_zero_surface_template(tmp_path):
@@ -515,3 +585,50 @@ def test_verified_installed_pin_trusts_complete_template_backend(tmp_path, monke
     (source / "templates/modules/messages/backend/policy.py").write_text("# replaced policy\n", encoding="utf-8")
     with pytest.raises(resolver.ManagedCapabilityTemplateError, match="no longer matches pinned state"):
         resolver.verified_selected_pack_sources(context_variables=context)
+
+
+@pytest.mark.parametrize("pins", [{"digest": "sha256:" + "0" * 64}, {"version": "9.9.9"}, {"version": "1.0.0", "digest": "sha256:" + "1" * 64}])
+@pytest.mark.parametrize("pack_id", ["messaging", "does_not_exist"])
+def test_an_unresolvable_selection_with_pins_fails_instead_of_skipping(pins, pack_id):
+    """Pins on a row nothing resolves to a source can never be compared, so they fail closed."""
+    selected = [{"id": pack_id, **pins}]
+    with pytest.raises(resolver.PackIntegrityError, match=f"Pack '{pack_id}' selected .*pin cannot be checked"):
+        resolver.verified_selected_pack_sources(selected)
+    with pytest.raises(resolver.PackIntegrityError, match="pin cannot be checked"):
+        resolver.resolve_declared_pack_output_paths(selected)
+    errors = scanner.scan_generated_bundle({"app.json": "{}"}, capability_packs=selected)
+    assert any("Selected CapabilityPack output contract is invalid" in error and "pin cannot be checked" in error for error in errors)
+
+
+def test_an_unresolved_id_only_selection_is_reported_as_unverified(caplog):
+    """The hosted gate's id-only rows keep working, but are never silently treated as verified."""
+    hosted = [{"id": "mozaikspay", "capability_source": "managed_capability", "provides_capabilities": ["subscription_write_path"]}]
+    caplog.set_level("WARNING", logger=resolver.__name__)
+    assert resolver.verified_selected_pack_sources(hosted) == []
+    assert [record.getMessage().split(":", 1)[0] for record in caplog.records] == ["UNVERIFIED_PACK_SELECTION"]
+    assert "'mozaikspay'" in caplog.records[0].getMessage()
+    errors = scanner.scan_generated_bundle({"app.json": "{}"}, capability_packs=hosted)
+    assert not any("CapabilityPack output contract" in error for error in errors), errors
+
+
+def test_an_explicit_row_outside_the_verified_selection_cannot_supply_its_own_source():
+    """Context selection is authoritative: a caller row with a path or pins it does not select is refused."""
+    context = {"capability_packs": [_factory_pack("messaging")]}
+    explicit = [_factory_pack("messaging"), _factory_pack("operator_readiness", digest="sha256:" + "0" * 64)]
+    errors = scanner.scan_generated_bundle({"app.json": "{}"}, capability_packs=explicit, context_variables=context)
+    assert any(
+        "explicit capability_packs rows ['operator_readiness']" in error and "outside the verified pack selection" in error
+        for error in errors
+    ), errors
+    # The same row, selected by the context itself, is verified against its pins.
+    selected = {"capability_packs": explicit}
+    errors = scanner.scan_generated_bundle({"app.json": "{}"}, capability_packs=explicit, context_variables=selected)
+    assert any("selected digest does not match freshly verified source" in error for error in errors), errors
+
+
+def test_an_explicit_row_matches_its_verified_selection_by_the_resolver_pack_id():
+    """A row naming the pack by ``id`` and a different ``capability_pack_id`` takes the verified source of its ``id``."""
+    explicit = [{**_factory_pack("messaging"), "capability_pack_id": "messages", "capability_source": "generated_module"}]
+    context = {"capability_packs": [_factory_pack("messaging")]}
+    errors = scanner.scan_generated_bundle({"app.json": "{}"}, capability_packs=explicit, context_variables=context)
+    assert not any("duplicate pack output claims" in error or "CapabilityPack output contract" in error for error in errors), errors

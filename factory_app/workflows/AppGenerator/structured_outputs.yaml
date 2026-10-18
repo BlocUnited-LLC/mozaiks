@@ -6349,9 +6349,10 @@ models:
         - 'null'
         description: >
           Partial brand/theme artifact patch merged into brand/theme_config.json by
-          save_app_schema. This may include `theme`, `primitives`, and semantic
-          `ui.chat` / `ui.shell` / `ui.page` visual tokens. Null to inherit the
-          platform default brand.
+          save_app_schema. It accepts only `theme` selectors, `identity`, `fonts`,
+          and `ui.page.title` deltas; primitives, colors, shadows, and semantic
+          ui.chat / ui.shell / ui.page spacing come from captured_theme_config or
+          the platform defaults. Null to inherit the platform default brand.
       shell_config:
         type: union
         variants:

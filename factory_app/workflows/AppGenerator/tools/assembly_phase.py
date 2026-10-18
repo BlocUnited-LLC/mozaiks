@@ -17,7 +17,7 @@ import logging
 from typing import Any
 
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
-    admitted_app_file_map,
+    admitted_module_file_map,
     extract_code_file_entries_from_payload,
 )
 from factory_app.workflows.AppGenerator.tools.module_api_template import get_module_api_template
@@ -278,7 +278,7 @@ def _merge_code_files(
     # pre-merge admitted bundle (or the canonical scaffold) can approve scopes.
     admitted_scopes = (
         auth_contract_scopes(
-            admitted_app_file_map(context_variables),
+            admitted_module_file_map(context_variables),
             app_build_plan=app_build_plan,
             data_contract=data_contract,
         ) if app_build_plan is not None else None

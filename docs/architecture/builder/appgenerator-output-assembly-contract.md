@@ -331,9 +331,15 @@ drop. A pack registration of a deleted file, or an app registration of a file
 that is absent without an admitted deletion, fails with the existing explicit
 error. Pack-owned template paths are never tombstoned.
 
-Pack provenance identifies contributors to the two composed roots under
-`composed_outputs`; they are not listed as exact template-owned final files.
-Other pack implementation files retain their existing template ownership.
+Pack provenance identifies contributors to the composed roots
+(`data/contract.json`, `ui/index.js`, `ui/route_manifest.json`) under
+`composed_outputs`; they are never listed as exact template-owned final files.
+The resolver holds them back for every caller, and a pack that contributes only
+composed roots still has a provenance entry. The bundle scanner rejects
+provenance that lists a shared root in a pack's `materialized_owned_files`
+(written before composition) and asks for a reassembly, which rewrites the
+provenance. Other pack implementation files retain their existing template
+ownership.
 
 ### Workflow and action reachability
 
@@ -883,7 +889,7 @@ models retain the existing optional-field default semantics.
 
 Two artifacts handle visual and behavioral customization:
 
-- `theme_config_patch` → visual tokens only: colors, typography, spacing scale, shadows, density, `ui.chat` / `ui.shell` / `ui.page` semantic styling
+- `theme_config_patch` → visual token deltas only, limited to what `AppThemeConfigPatch` accepts: compact `theme` selectors (`primary`, `variant`, `radius`, `font`, `font_heading`, `appearance`, `density`, `branding`), `identity`, `fonts`, and `ui.page.title`. Primitives, colors, shadows, and semantic `ui.chat` / `ui.shell` / `ui.page` spacing and sizing come from `captured_theme_config` or the platform defaults and cannot be patched.
 - `shell_config` → shell behavior only: header logo/actions, canonical `shortcuts`, `navigation.policy`, non-page-owned `navigation.items`, and `chrome` mode overrides
 
 `shell_preset_hint` is not an artifact. It is prompt-time AppGenerator guidance
@@ -892,7 +898,7 @@ uses it to choose page `navigation`, page `shell_mode`, and whether a compact
 `shell_config` override is necessary. The preset id is never written into the
 generated app bundle.
 
-Do not mix them. Raw spacing/width/density tokens belong in `theme_config_patch`.
+Do not mix them. Raw spacing, width, and sizing tokens belong to the captured theme, never to `shell_config`.
 Header action labels and app-wide shell placement rules belong in `shell_config`.
 
 Rules:
@@ -902,7 +908,7 @@ Rules:
 - `theme_config_patch` is a partial patch for `brand/theme_config.json`
 - `shell_config` is a partial patch for `config/shell.json`
 - `asset_manifest` is a partial patch for `config/asset_manifest.json`
-- raw spacing, width, density, and sizing tokens belong in `theme_config_patch`, not `shell_config`
+- raw spacing, width, and sizing tokens come from `captured_theme_config`; neither `theme_config_patch` nor `shell_config` carries them
 - generated `shell_config.shortcuts` may only contain `header`, `profile`, `mobile`, `footer`, and `footerHideOnMobile`
 - do not emit custom shortcut catalogs or shell fields outside `AppShellConfigPatch`
 - shell actions may use semantic `variants[].when` for context-aware label/target changes; do not emit path-prefix, wildcard, or query-param override rules
@@ -1096,10 +1102,18 @@ It must:
   subscription assignment stores, because the admitted projection overlays this
   copy on the assembled bundle (a bounded repair keeps the bundle's copy). When
   the selected packs cannot be verified, or their contributions do not compose
-  with the approved contract, the save writes the approved contract instead and
-  does not fail: the app schema author cannot repair either, and assembly then
-  fails with its own `PackIntegrityError` or conflicting pack contribution error
+  with the approved contract, the save writes no `data/contract.json` and does
+  not fail: the app schema author cannot repair either. It logs
+  `APP_SCHEMA_PACK_DATA_CONTRACT_NOT_WRITTEN` and reports the pack failure in
+  its result, the bundle keeps its assembled contract, and assembly then fails
+  with its own `PackIntegrityError` or conflicting pack contribution error. A
+  contract compiled without the pack contributions is never written
 - store `app_manifest`, `app_pages`, `app_custom_route_bundle`, `app_theme_config_patch`, `app_shell_config`, `app_asset_manifest`, and `app_schema_ready` in workflow context
+- add the rendered files to the admitted `code_files` overlay, and leave
+  `generated_files` as the last assembled bundle: the rendered `ui/index.js`
+  and `ui/route_manifest.json` hold only the app's own routes, so they reach
+  the bundle only through assembly or the admitted projection, which compose
+  them with the selected packs' declarations
 
 It must not write directly into an active runtime-loaded app root such as a
 workspace's `app/` bundle or `factory_app/app`. Activation requires an
@@ -1198,9 +1212,9 @@ When `.mozaiks/pack_provenance.json` records `ui/index.js` or
 in the admitted overlay is composed onto it with assembly's own contributions
 and rules: the bundle's roots as the carried snapshot, every current task
 output, the admitted overlay, the verified pack templates, the admitted
-deletions and, in a revision, the same bound revision baseline. That includes a
-copy equal to the bundle's root, because `save_app_schema` also writes the roots
-it renders into `generated_files`. As in assembly, the sign-in and callback
+deletions and, in a revision, the same bound revision baseline. `generated_files`
+holds only assembled roots: `save_app_schema` and `save_generated_code` write
+repair copies to the overlay only. As in assembly, the sign-in and callback
 routes of `config/auth.yaml`, which carry no route id, are set aside while the
 roots compose and added to the composed manifest afterwards when
 `app.json.authRequired` is true. A partial repair copy therefore cannot drop
@@ -1212,15 +1226,22 @@ The revision baseline does not depend on the process that assembled the
 bundle. Validation and export pass `revision_baseline` from
 `load_revision_baseline`, which reads the bound revision source again from its
 verified, immutable build record (text entries only, as assembly reads them).
-The process cache that assembly fills, by source identity, only saves that
-read. When the source cannot be read, `load_revision_baseline` logs
-`REVISION_BASELINE_UNAVAILABLE` and the projection keeps the bundle's roots;
-acceptance then fails on the same unreadable source. A synchronous caller that
-passes no baseline (`save_generated_code`, assembly's auth-scope read) uses the
-cache, and without it keeps the bundle's roots: when composing the overlay onto
-them alone would change them, an `ADMITTED_UI_ROOT_NOT_COMPOSED` warning reports
-the dropped repair; when validation has already written its composition back,
-`ADMITTED_UI_ROOT_KEPT` is logged at info level. `save_auth_scaffold` never
+A memo inside `load_revision_baseline`, keyed by the immutable source identity
+and primed by assembly's own read, only saves that read; nothing else reads it.
+When the source cannot be read, `load_revision_baseline` logs
+`REVISION_BASELINE_UNAVAILABLE` and the projection, given no baseline, keeps the
+bundle's roots; acceptance then fails on the same unreadable source. When
+composing the overlay onto those roots alone would change them, an
+`ADMITTED_UI_ROOT_NOT_COMPOSED` warning reports the dropped repair; when
+validation has already written its composition back, `ADMITTED_UI_ROOT_KEPT`
+is logged at info level. Synchronous callers that read only module, config and
+data files (`save_generated_code`'s module action closure and implementations,
+assembly's auth-scope read) use `admitted_module_file_map`, the same projection
+without the shared UI roots, so their result never depends on process memory.
+`save_generated_code`'s pack-only data contract guard checks the bundle's
+`data/contract.json`, which in a revision is the bound source's copy that
+revision hydration loads before any agent reasons, or an assembled composition
+already checked against it; assembly checks the source's copy again. `save_auth_scaffold` never
 overwrites an overlay copy of a pack-composed root, so a projection that could
 not compose it cannot replace the repair with the pre-repair root.
 

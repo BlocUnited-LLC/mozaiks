@@ -44,6 +44,7 @@ from mozaiksai.core.runtime.persistence.mongo import (
     MongoPersistenceContext,
 )
 from mozaiksai.core.workflow.generator_support.code_files import compile_data_contract
+from mozaiksai.core.workflow.generator_support.ui_registry_composition import compose_ui_registry
 from tests.test_appgenerator_revision_baseline import _replace_archive
 from tests.test_appgenerator_revision_baseline import baseline as revision_baseline  # noqa: F401
 from tests.test_runtime_database_migrations import FakeCursor, FakeDatabase, FakeMongoClient
@@ -64,10 +65,16 @@ def _context(root=PACK, *, pinned=True):
 
 
 def _assembled_files():
+    """The messaging pack assembled alone: its files, its composed UI roots and the compiled contract."""
     context = _context()
-    emitted = resolve_managed_capability_templates(context["capability_packs"], context_variables=context)
+    ui_contributions: list[dict[str, Any]] = []
+    emitted = resolve_managed_capability_templates(
+        context["capability_packs"], context_variables=context, ui_contributions=ui_contributions,
+    )
+    shared = compose_ui_registry(ui_contributions, {file["filename"]: file["content"] for file in emitted})
     return {file["filename"]: file["content"] for file in _merge_code_files(
-        [{"code_files": emitted}], app_build_plan=context["app_build_plan"],
+        [{"code_files": emitted}, {"code_files": [{"filename": path, "content": content} for path, content in sorted(shared.items())]}],
+        app_build_plan=context["app_build_plan"],
         data_contract={"version": "1", "surfaces": [], "shared_collections": []}, context_variables=context,
     )}
 
@@ -337,18 +344,27 @@ async def test_the_carried_contract_guard_refuses_the_repair_save_its_diagnostic
     The diagnostic dispatches a bounded repair to the data/contract.json
     owner. Its save would write the packs' contributions on an empty base
     (whatever the agent emits, even a contract that also restates the app's
-    own surface), so it is refused with the guard's reason. Nothing is written,
-    the reassembly fails with the same reason, the repair loop then blocks the
-    run with it, and nothing admitted for validation or export holds a contract
-    that drops the app's surface.
+    own surface), so it is refused with the guard's reason. The guard reads the
+    bundle's copy, which in a revision is the bound source's contract that the
+    run's revision hydration loads before any agent reasons and that a failed
+    assembly leaves in place; it never depends on this process's memory of the
+    source. Nothing is written, the reassembly fails with the same reason, the
+    repair loop then blocks the run with it, and what validation and export
+    admit still holds the app's surface.
     """
+    from factory_app.workflows.AppGenerator.tools import code_file_utils
     from factory_app.workflows.AppGenerator.tools.app_validation import _assembly_failure
     from factory_app.workflows.AppGenerator.tools.code_file_utils import (
         admitted_app_file_map,
         save_generated_code,
     )
+    from factory_app.workflows.AppGenerator.tools.hydrate_app_revision_context import (
+        hydrate_app_revision_context,
+    )
 
     context, selected, assemble_app_tasks = _imported_revision_without_an_approved_contract(request)
+    # The workflow's before_chat lifecycle tool loads the bound revision source.
+    await hydrate_app_revision_context(context)
     first = await assemble_app_tasks(context_variables=context)
     assert not first["success"] and "holds app-owned data: surface 'projects'" in first["error"], first
     repair = _assembly_failure(context, prepare_recovery=True)["bundle_repair"]
@@ -364,6 +380,8 @@ async def test_the_carried_contract_guard_refuses_the_repair_save_its_diagnostic
         supplemented = {**pack_only, "surfaces": [*CARRIED_APP_CONTRACT["surfaces"], *pack_only["surfaces"]]}
         code_files = [{"filename": "data/contract.json", "content": json.dumps(supplemented)}]
     context.set("structured_output", {"code_files": code_files})
+    # The save runs where the process holds no memory of the bound source.
+    code_file_utils._REVISION_UI_BASELINES.clear()
     refused = save_generated_code(context)
     assert refused.get("status") == "rejected", refused
     assert "holds app-owned data: surface 'projects'" in refused["error"]
@@ -375,8 +393,8 @@ async def test_the_carried_contract_guard_refuses_the_repair_save_its_diagnostic
     assert blocked["status"] == "blocked" and blocked["active"] is None, blocked
     assert blocked["history"][-1]["status"] == "rejected"
     assert "holds app-owned data: surface 'projects'" in blocked["history"][-1]["error"]
-    # Nothing was assembled or saved, so validation and export have no contract that drops the app's surface.
-    assert "data/contract.json" not in admitted_app_file_map(context)
+    # Nothing was assembled or saved, so validation and export admit the source's contract with the app's surface.
+    assert json.loads(admitted_app_file_map(context)["data/contract.json"]) == CARRIED_APP_CONTRACT
 
 
 @pytest.mark.asyncio

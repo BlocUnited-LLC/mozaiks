@@ -331,7 +331,7 @@ def _apply_managed_capability_templates(
     *,
     app_build_plan: Any,
     context_variables: Any,
-    ui_contributions: list[dict[str, Any]] | None = None,
+    ui_contributions: list[dict[str, Any]],
     task_files: list[tuple[str, dict[str, str]]] | None = None,
     verified_source: dict[str, str] | None = None,
     overlay_files: dict[str, str] | None = None,

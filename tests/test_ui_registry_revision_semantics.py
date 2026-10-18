@@ -1,6 +1,7 @@
 """Actual pack-app assembly: repair overlays, page deletion, provenance and workspace paths."""
 import json
 import logging
+from pathlib import Path
 
 import pytest
 import yaml
@@ -275,12 +276,13 @@ async def test_admitted_map_keeps_a_task_revision_change_over_a_stale_baseline_c
     assembled = _files(result)
     assert _routes(assembled)["board"]["meta"]["title"] == "Approved revision"
     # Validation, write-back and export see what assembly composed: same baseline, same rules.
-    admitted = admitted_app_file_map(context)
+    admitted = admitted_app_file_map(context, revision_baseline=await code_file_utils.load_revision_baseline(context))
     assert _routes(admitted) == _routes(assembled)
     assert admitted["ui/index.js"] == assembled["ui/index.js"]
     # Without the bound baseline the projection cannot apply those rules; it keeps
-    # the assembled roots rather than letting the stale copy revert the task.
-    code_file_utils._REVISION_UI_BASELINES.clear()
+    # the assembled roots rather than letting the stale copy revert the task. It
+    # never reads this process's memo of the source, which assembly still holds.
+    assert code_file_utils._REVISION_UI_BASELINES
     caplog.set_level(logging.WARNING, logger="factory_app.workflows.AppGenerator.tools.code_file_utils")
     admitted = admitted_app_file_map(context)
     assert _routes(admitted) == _routes(assembled)
@@ -290,6 +292,8 @@ async def test_admitted_map_keeps_a_task_revision_change_over_a_stale_baseline_c
 
 @pytest.mark.asyncio
 async def test_admitted_map_applies_a_revision_repair_saved_after_assembly(request, caplog):
+    from factory_app.workflows.AppGenerator.tools.code_file_utils import load_revision_baseline
+
     saved = request.getfixturevalue("revision_baseline")
     board, pack = component(path="ui/pages/custom/board.jsx"), _assembled_files()
     _save(saved, board, pack)
@@ -302,7 +306,7 @@ async def test_admitted_map_applies_a_revision_repair_saved_after_assembly(reque
     repair = {"ui/route_manifest.json": retitled(_files(result)["ui/route_manifest.json"], "board", "Repaired later")}
     context.set("code_files", contribution("repair", repair)["files"])
     caplog.set_level(logging.WARNING, logger="factory_app.workflows.AppGenerator.tools.code_file_utils")
-    admitted = admitted_app_file_map(context)
+    admitted = admitted_app_file_map(context, revision_baseline=await load_revision_baseline(context))
     assert _routes(admitted)["board"]["meta"]["title"] == "Repaired later"
     assert _routes(admitted)["messages"] == _routes(pack)["messages"]
     assert admitted["ui/index.js"].count('registerComponent("Messages"') == 1
@@ -423,9 +427,12 @@ async def test_revision_repair_restoring_the_baseline_supersedes_the_task_it_rep
     context = _revision_context(saved, revised, code_files=_stale_baseline_copy(saved)[1:], **extra)
     result = await assemble_app_tasks(context_variables=context)
     assert result["success"], result
+    from factory_app.workflows.AppGenerator.tools.code_file_utils import load_revision_baseline
+
     expected = "Board" if evidence == "repair_of_the_task" else "Faulty title"
     assert _routes(_files(result))["board"]["meta"]["title"] == expected
-    assert _routes(admitted_app_file_map(context))["board"]["meta"]["title"] == expected
+    admitted = admitted_app_file_map(context, revision_baseline=await load_revision_baseline(context))
+    assert _routes(admitted)["board"]["meta"]["title"] == expected
 
 
 BOARD_BUNDLE = {
@@ -489,9 +496,15 @@ async def test_revision_app_schema_repair_restoring_the_baseline_supersedes_the_
     )
     assert "rejected" not in message, message
     assert context.get("bundle_repair_result")["active"]["status"] == "responded"
-    assert context.get("generated_files")["data/contract.json"] == _files(first)["data/contract.json"]
-    # Validation follows the UI quality gate without reassembly. The save also
-    # wrote its uncomposed roots into generated_files; the projection composes them.
+    # The save reaches the admitted overlay only: generated_files stays the assembled
+    # bundle, with its composed roots and its compiled data/contract.json.
+    assert context.get("generated_files") == _files(first)
+    assert context.get("generated_files")["ui/index.js"].count('registerComponent("Messages"') == 1
+    # A projection that cannot compose (no baseline) keeps those composed roots, never the app-only render.
+    unbound = admitted_app_file_map(context)
+    assert unbound["ui/index.js"].count('registerComponent("Messages"') == 1
+    assert _routes(unbound)["messages"] == _routes(pack)["messages"]
+    # Validation follows the UI quality gate without reassembly and composes the saved copies.
     before = admitted_app_file_map(context, revision_baseline=await load_revision_baseline(context))
     assert _routes(before)["board"] == _routes(board)["board"]
     assert _routes(before)["messages"] == _routes(pack)["messages"]
@@ -687,10 +700,16 @@ async def test_a_projection_without_the_baseline_reports_only_a_dropped_repair(r
     context.set("code_files", contribution("repair", repair)["files"])
     _responded_repair(context, "ui/route_manifest.json")
     caplog.set_level(logging.INFO, logger=_CODE_FILE_UTILS)
-    # Before validation writes back, a projection in a process without the
-    # baseline (save_generated_code, assembly's auth scopes) drops the repair: loud.
-    code_file_utils._REVISION_UI_BASELINES.clear()
+    # Before validation writes back, a projection given no baseline (the source could
+    # not be read) drops the repair: loud. This process's memo of the source, which
+    # assembly filled, is never read in its place.
+    assert code_file_utils._REVISION_UI_BASELINES
     assert _routes(admitted_app_file_map(context))["board"]["meta"]["title"] == "Board"
+    assert len(_not_composed(caplog)) == 1
+    # Synchronous module, config and data readers get the projection without the UI roots.
+    module_files = code_file_utils.admitted_module_file_map(context)
+    assert not {"ui/index.js", "ui/route_manifest.json"} & set(module_files)
+    assert module_files["ui/pages/custom/board.jsx"] == _files(result)["ui/pages/custom/board.jsx"]
     assert len(_not_composed(caplog)) == 1
     _validation_mocks(monkeypatch)
     await app_validation.validate_app_bundle_from_request({}, context_variables=context)
@@ -762,6 +781,9 @@ async def test_auth_required_messaging_revision_repair_reaches_validation_and_ex
     from factory_app.workflows.AppGenerator.tools.save_app_schema import save_app_schema
     from mozaiksai.core.workflow.context.frozen import detach
     from mozaiksai.core.workflow.generator_support.code_files import _custom_route_bundle_code_files
+    from mozaiksai.core.workflow.generator_support.ui_registry_composition import (
+        compose_ui_registry,
+    )
     from tests.test_messaging_pack_persistence_composition import CARRIED_APP_CONTRACT
 
     monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path))
@@ -769,9 +791,14 @@ async def test_auth_required_messaging_revision_repair_reaches_validation_and_ex
     # contract does not list the Messaging surface: assembly composes that in.
     approved = deepcopy(CARRIED_APP_CONTRACT)
     selected = _context()
-    templates = resolve_managed_capability_templates(selected["capability_packs"], context_variables=selected)
+    ui_contributions: list = []
+    templates = resolve_managed_capability_templates(
+        selected["capability_packs"], context_variables=selected, ui_contributions=ui_contributions,
+    )
+    shared = compose_ui_registry(ui_contributions, {file["filename"]: file["content"] for file in templates})
     pack = {file["filename"]: file["content"] for file in _merge_code_files(
-        [{"code_files": templates}], app_build_plan=selected["app_build_plan"], data_contract=approved,
+        [{"code_files": templates}, {"code_files": [{"filename": path, "content": content} for path, content in shared.items()]}],
+        app_build_plan=selected["app_build_plan"], data_contract=approved,
         context_variables={**selected, "data_contract": approved},
     )}
     board = {item["filename"]: item["content"] for item in _custom_route_bundle_code_files(BOARD_BUNDLE)}
@@ -900,21 +927,9 @@ async def test_genesis_app_schema_save_leaves_pack_data_contract_failures_to_ass
     from copy import deepcopy
 
     from factory_app.workflows.AppGenerator.tools.save_app_schema import save_app_schema
-    from tests.test_messaging_pack_persistence_composition import CARRIED_APP_CONTRACT
 
     monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path))
-    approved = deepcopy(CARRIED_APP_CONTRACT)
-    selected = _context()
-    if failure == "conflicting_contribution":
-        # The approved contract declares its own surface under the pack's surface id.
-        approved["surfaces"].append({"surface_id": "messages", "surface_kind": "module", "collections": [{
-            **deepcopy(CARRIED_APP_CONTRACT["surfaces"][0]["collections"][0]), "name": "inbox", "entity": "Inbox",
-        }]})
-        expected = "ValueError: Conflicting pack data contribution for 'messages'"
-    else:
-        digest = selected["capability_packs"][0]["digest"]
-        selected["capability_packs"][0]["digest"] = digest[:-1] + ("0" if digest[-1] != "0" else "1")
-        expected = "PackIntegrityError: Pack 'messaging' selected digest does not match freshly verified source"
+    approved, selected, expected = _pack_data_contract_failure(failure)
     context = Context(factory_context({
         **selected, "app_id": "genesis_schema", "chat_id": "genesis-chat", "data_contract": approved,
         "app_build_plan": {**selected["app_build_plan"], "pages": [
@@ -922,20 +937,84 @@ async def test_genesis_app_schema_save_leaves_pack_data_contract_failures_to_ass
         ]},
     }))
     caplog.set_level(logging.WARNING, logger="tools.save_app_schema")
-    # AppSchemaAgent cannot repair the packs or the approved contract: its save writes the approved
-    # contract unchanged, and assembly reports the failure itself.
+    # AppSchemaAgent cannot repair the packs or the approved contract: its save writes no
+    # data/contract.json at all (never one compiled without the packs) and reports why,
+    # and assembly reports the failure itself.
     message = save_app_schema(
         manifest={"app_name": "Board", "default_route": "/board", "pages": [], "custom_routes": ["board"]},
         pages=[], custom_route_bundle=deepcopy(BOARD_BUNDLE), context_variables=context,
     )
     assert "rejected" not in message, message
+    assert "data/contract.json not written" in message and expected.split(": ", 1)[1] in message
     overlay = {item["filename"]: item["content"] for item in context["code_files"]}
-    assert json.loads(overlay["data/contract.json"]) == approved
-    assert any("APP_SCHEMA_PACK_DATA_CONTRACT_DEFERRED" in record.getMessage() for record in caplog.records)
+    assert "data/contract.json" not in overlay
+    assert "data/contract.json" not in context.get("generated_files", {})
+    assert not (Path(context["generated_app_dir"]) / "data" / "contract.json").exists()
+    assert any("APP_SCHEMA_PACK_DATA_CONTRACT_NOT_WRITTEN" in record.getMessage() for record in caplog.records)
     context["app_ui_quality_status"] = "passed"
     result = await assemble_app_tasks(context_variables=context)
     assert not result["success"]
     assert result["error"] == expected, result["error"]
+
+
+def _pack_data_contract_failure(failure):
+    """An approved contract and pack selection whose data contributions cannot be composed, and assembly's error."""
+    from copy import deepcopy
+
+    from tests.test_messaging_pack_persistence_composition import CARRIED_APP_CONTRACT
+
+    approved = deepcopy(CARRIED_APP_CONTRACT)
+    selected = _context()
+    if failure == "conflicting_contribution":
+        # The approved contract declares its own surface under the pack's surface id.
+        approved["surfaces"].append({"surface_id": "messages", "surface_kind": "module", "collections": [{
+            **deepcopy(CARRIED_APP_CONTRACT["surfaces"][0]["collections"][0]), "name": "inbox", "entity": "Inbox",
+        }]})
+        return approved, selected, "ValueError: Conflicting pack data contribution for 'messages'"
+    digest = selected["capability_packs"][0]["digest"]
+    selected["capability_packs"][0]["digest"] = digest[:-1] + ("0" if digest[-1] != "0" else "1")
+    return approved, selected, "PackIntegrityError: Pack 'messaging' selected digest does not match freshly verified source"
+
+
+@pytest.mark.parametrize("failure", ["conflicting_contribution", "unverifiable_pack"])
+def test_a_page_repair_is_not_rejected_for_a_pack_data_contract_failure(tmp_path, monkeypatch, failure):
+    """A bounded page repair keeps the bundle's contract; a pack failure it cannot fix never rejects it."""
+    from copy import deepcopy
+
+    from factory_app.workflows.AppGenerator.tools.save_app_schema import save_app_schema
+    from mozaiksai.core.workflow.generator_support.code_files import _custom_route_bundle_code_files
+
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path))
+    approved, selected, _expected = _pack_data_contract_failure(failure)
+    board = {item["filename"]: item["content"] for item in _custom_route_bundle_code_files(BOARD_BUNDLE)}
+    bundle_contract = json.dumps(approved, indent=2)
+    allowed = sorted([*board, "app.json"])
+    task = {"task_id": "pages", "task_type": "page_bundle", "initial_agent": "AppSchemaAgent",
+            "owned_paths": allowed, "depends_on": []}
+    context = Context(factory_context({
+        **selected, "app_id": "repair_schema", "chat_id": "repair-chat", "data_contract": approved,
+        "app_build_plan": {**selected["app_build_plan"], "build_tasks": [task], "pages": [
+            {"name": "board", "route": "/board", "ui_surface": "custom_react_page"},
+        ]},
+        "app_task_batch_items": [task], "generated_files": {**board, "data/contract.json": bundle_contract},
+        "bundle_repair_target": "AppSchemaAgent",
+        "bundle_repair_result": {"active": {
+            "task_id": "pages", "target_agent": "AppSchemaAgent", "request_id": "pages-repair-1",
+            "allowed_paths": allowed, "status": "selected",
+        }, "history": []},
+    }))
+    repaired = deepcopy(BOARD_BUNDLE)
+    repaired["route_manifest"][0]["meta"]["title"] = "Repaired board"
+    message = save_app_schema(
+        manifest={"app_name": "Board", "default_route": "/board", "pages": [], "custom_routes": ["board"]},
+        pages=[], custom_route_bundle=repaired, context_variables=context,
+    )
+    assert "rejected" not in message, message
+    assert context["bundle_repair_result"]["active"]["status"] == "responded"
+    overlay = {item["filename"]: item["content"] for item in context["code_files"]}
+    assert json.loads(overlay["ui/route_manifest.json"])["pages"][0]["meta"]["title"] == "Repaired board"
+    assert overlay.get("data/contract.json", bundle_contract) == bundle_contract
+    assert context["generated_files"]["data/contract.json"] == bundle_contract
 
 
 @pytest.mark.asyncio

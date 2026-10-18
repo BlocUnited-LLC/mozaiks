@@ -106,3 +106,59 @@ def test_page_header_font_override_uses_only_existing_slots(workflow_models):
             assert model.model_validate({"title": "Case Preserved", "title_font": value}).title == "Case Preserved"
         with pytest.raises(ValidationError):
             model.model_validate({"title": "Case Preserved", "title_font": "fantasy"})
+
+
+def _patch_payload(path: str) -> dict:
+    """A theme_config_patch that sets exactly the dotted ``path``."""
+    payload: dict = {}
+    node = payload
+    parts = path.split(".")
+    for part in parts[:-1]:
+        node = node.setdefault(part, {})
+    node[parts[-1]] = None
+    return payload
+
+
+def _accepts(patch_model, path: str) -> bool:
+    try:
+        patch_model.model_validate(_patch_payload(path))
+    except ValidationError:
+        return False
+    return True
+
+
+def test_theme_patch_guidance_names_only_what_the_patch_accepts(workflow_models):
+    """The AppSchemaAgent prompt and the provider-facing field description name exactly the patchable keys."""
+    import re
+
+    models = workflow_models["AppGenerator"]
+    patch = models["AppThemeConfigPatch"]
+    selectors = set(models["AppThemeCorePatch"].model_fields)
+    agents = (ROOT / "factory_app/workflows/AppGenerator/agents.yaml").read_text(encoding="utf-8")
+    bullet = next(line for line in agents.splitlines() if "`theme_config_patch` owns visual tokens only" in line)
+    accepted, refused = bullet.split("It cannot patch", 1)
+    named_selectors = set(re.findall(r"`([^`]+)`", re.search(r"compact `theme` selectors \(([^)]*)\)", accepted)[1]))
+    assert named_selectors == selectors
+    for key in ("identity", "fonts", "ui.page.title", *(f"theme.{name}" for name in selectors)):
+        assert f"`{key.removeprefix('theme.')}`" in accepted
+        assert _accepts(patch, key), key
+    for key in ("primitives", "colors", "shadows", "ui.chat", "ui.shell", "ui.page.sectionGap"):
+        assert not _accepts(patch, key), key
+    for key in ("primitives", "colors", "shadows", "ui.chat", "ui.shell"):
+        assert f"`{key}`" in refused
+    outputs = yaml.safe_load((ROOT / "factory_app/workflows/AppGenerator/structured_outputs.yaml").read_text(encoding="utf-8"))
+    description = " ".join(outputs["models"]["AppSchemaOutput"]["fields"]["theme_config_patch"]["description"].split())
+    assert "accepts only `theme` selectors, `identity`, `fonts`, and `ui.page.title` deltas" in description
+    assert "This may include `theme`, `primitives`" not in description
+
+
+def test_scanner_reads_only_the_bundle_relative_theme_path():
+    """A workspace-prefixed theme copy is rejected by layout, never title-validated as a second path."""
+    bad = json.dumps({"ui": {"page": {"title": {"size": "huge"}}}})
+    errors = scan_generated_bundle({"app.json": "{}", "app/brand/theme_config.json": bad})
+    assert any("app/brand/theme_config.json" in error and "canonical app planes" in error for error in errors), errors
+    assert not any("ui.page.title" in error for error in errors), errors
+    assert any(
+        "brand/theme_config.json: ui.page.title" in error
+        for error in scan_generated_bundle({"app.json": "{}", "brand/theme_config.json": bad})
+    )
