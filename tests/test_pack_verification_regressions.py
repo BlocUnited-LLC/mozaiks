@@ -1271,6 +1271,131 @@ def test_an_inactive_workspace_registration_vouches_for_nothing(tmp_path, monkey
         resolver.verified_selected_pack_sources([row], context_variables=context)
 
 
+def _loader_registers(workspace: Path) -> list[str]:
+    """The pack ids load_trusted_build_context registers for AppGenerator from ``workspace``; none when it refuses."""
+    from mozaiksai.core.session.build_context import BuildContextError
+
+    try:
+        return [row["id"] for row in _registered_rows(workspace)]
+    except (BuildContextError, KeyError):
+        return []
+
+
+@pytest.mark.parametrize("registration", [
+    "registered", "other_workflow_only", "no_projection", "projection_from_value", "inactive",
+])
+def test_the_workspace_authority_vouches_exactly_for_what_the_trusted_loader_registers(
+    tmp_path, monkeypatch, registration,
+):
+    """A context retargeted to another workflow, or one that no longer projects its packs, registers nothing for
+    AppGenerator; the workspace authority then vouches for nothing either, and only both pins select the copy."""
+    workspace = tmp_path / "workspace" / "build_context"
+    root = _workspace_operator_pack(workspace, status="inactive" if registration == "inactive" else "active")
+    manifest = root / "context.yaml"
+    text = manifest.read_text(encoding="utf-8")
+    projection = "projections:\n  context_variables:\n    capability_packs:\n      from: capability_packs\n"
+    assert projection in text
+    if registration == "other_workflow_only":
+        text = text.replace("applies_to_workflows:\n  - AppGenerator\n", "applies_to_workflows:\n  - AgentGenerator\n")
+    elif registration == "no_projection":
+        text = text.replace(projection, "")
+    elif registration == "projection_from_value":
+        text = text.replace(projection, "projections:\n  context_variables:\n    capability_packs:\n      value: []\n")
+    manifest.write_text(text, encoding="utf-8")
+    context = _workspace_root_from(monkeypatch, workspace, "context")
+    row = {"id": "greetings", "capability_source": "operator_pack", "pack_source_path": str(root), "version": "0.1.0"}
+
+    registered = _loader_registers(workspace)
+    assert registered == (["greetings"] if registration == "registered" else [])
+    if registered:
+        [entry] = resolver.verified_selected_pack_sources([row], context_variables=context)
+        assert entry["authority"] == "workspace_build_context"
+        return
+    with pytest.raises(resolver.PackIntegrityError, match="without digest pin") as refused:
+        resolver.verified_selected_pack_sources([row], context_variables=context)
+    assert "it is directly under it, but" in str(refused.value)
+    errors = scanner.scan_generated_bundle({"app.json": "{}"}, capability_packs=[row], context_variables=context)
+    assert len(errors) == 1 and "An unverified pack is never admitted" in errors[0], errors
+    [pinned] = resolver.verified_selected_pack_sources([{**row, **_pinned("greetings", root)}], context_variables=context)
+    assert pinned["authority"] == "selected_pins"
+
+
+def test_a_recorded_build_pins_its_workspace_packs_to_the_identity_acceptance_verified(tmp_path, monkeypatch):
+    """The registry vouches at a version; the recorded rows carry the digest acceptance verified, so an in-place edit
+    that keeps the version fails every later use instead of being trusted on the registry alone."""
+    from mozaiksai.control_plane.implementations.coding_worker import (
+        pack_output_owners,
+        parent_pack_output_owners,
+    )
+
+    workspace = tmp_path / "workspace" / "build_context"
+    root = _workspace_operator_pack(workspace)
+    [row] = _registered_rows(workspace)
+    catalog_row = dict(HOSTED_MOZAIKSPAY_ROW)
+    _workspace_root_from(monkeypatch, workspace, "environment")
+    resolved: list[dict] = []
+    scanner.scan_generated_bundle(
+        {"app.json": "{}"}, capability_packs=[row, catalog_row], resolved_capability_packs=resolved,
+    )
+    assert {identity["pack_id"]: identity["authority"] for identity in resolved} == {
+        "greetings": "workspace_build_context", "mozaikspay": "factory_build_context",
+    }
+    fresh = resolver.verify_pack_integrity(root, "greetings")
+
+    recorded_row, recorded_catalog = resolver.pin_workspace_pack_selections([row, catalog_row], resolved)
+    assert (recorded_row["version"], recorded_row["digest"]) == (fresh["version"], fresh["digest"])
+    assert {key: value for key, value in recorded_row.items() if key != "digest"} == row
+    # A shipped catalog row is the installed package: it is recorded as selected, without a host-dependent digest.
+    assert recorded_catalog == catalog_row
+    owners = pack_output_owners([recorded_row])
+    assert parent_pack_output_owners([recorded_row]) == owners
+    [entry] = resolver.verified_selected_pack_sources([recorded_row])
+    assert entry["authority"] == "workspace_build_context"
+
+    # The same version, edited in place: the recorded digest no longer verifies, for admission and for Studio.
+    template = sorted(path for path in (root / "templates").rglob("*") if path.is_file())[0]
+    original = template.read_bytes()
+    template.write_bytes(original + b"\n# edited in place\n")
+    assert resolver.verify_pack_integrity(root, "greetings")["version"] == fresh["version"]
+    with pytest.raises(resolver.PackIntegrityError, match="selected digest does not match freshly verified source"):
+        resolver.verified_selected_pack_sources([recorded_row])
+    with pytest.raises(resolver.PackIntegrityError, match="selected digest does not match"):
+        pack_output_owners([recorded_row])
+    assert parent_pack_output_owners([recorded_row]) is None
+    errors = scanner.scan_generated_bundle({"app.json": "{}"}, capability_packs=[recorded_row])
+    assert len(errors) == 1 and "does not match freshly verified source" in errors[0], errors
+
+    # Restored, the recorded row stays verifiable even after its registration is withdrawn: its own pins vouch.
+    template.write_bytes(original)
+    manifest = root / "context.yaml"
+    withdrawn = manifest.read_bytes().replace(b"  - AppGenerator", b"  - AgentGenerator")
+    manifest.write_bytes(withdrawn)
+    retargeted = {**recorded_row, "digest": resolver.verify_pack_integrity(root, "greetings")["digest"]}
+    [pinned] = resolver.verified_selected_pack_sources([retargeted])
+    assert pinned["authority"] == "selected_pins"
+
+
+def test_a_workspace_pack_without_an_identity_from_acceptance_cannot_be_recorded(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace" / "build_context"
+    _workspace_operator_pack(workspace)
+    [row] = _registered_rows(workspace)
+    context = _workspace_root_from(monkeypatch, workspace, "context")
+    for identities in (None, [], [{"pack_id": "other", "authority": "workspace_build_context"}]):
+        with pytest.raises(resolver.PackIntegrityError, match="acceptance recorded no verified identity"):
+            resolver.pin_workspace_pack_selections([row], identities, context_variables=context)
+    [identity] = [
+        resolver.pack_identity(entry)
+        for entry in resolver.verified_selected_pack_sources([row], context_variables=context)
+    ]
+    with pytest.raises(resolver.PackIntegrityError, match="differs from the .* acceptance verified"):
+        resolver.pin_workspace_pack_selections([{**row, "version": "0.0.9"}], [identity], context_variables=context)
+    # Rows that name no workspace pack need no identity: a generated module, or a catalog row.
+    generated = {"id": "notes", "capability_source": "generated_module"}
+    assert resolver.pin_workspace_pack_selections(
+        [generated, dict(HOSTED_MOZAIKSPAY_ROW)], None, context_variables=context,
+    ) == [generated, dict(HOSTED_MOZAIKSPAY_ROW)]
+
+
 # ------------------------------------------------------------------ planning reads only verified packs
 
 

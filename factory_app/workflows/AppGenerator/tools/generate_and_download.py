@@ -43,6 +43,9 @@ from factory_app.workflows.AppGenerator.tools.hydrate_app_revision_context impor
     revision_source_artifact_id,
 )
 from factory_app.workflows.AppGenerator.tools.requirements_scanner import scan_requirements
+from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+    pin_workspace_pack_selections,
+)
 from factory_app.workflows.AppGenerator.tools.schema_migration import inject_migration_into_bundle
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.app_context.store import register_greenfield_app_context_version
@@ -645,10 +648,16 @@ async def _register_app_bundle_artifact_version(
 
     # Persist to content store if a non-local backend is configured.  The local
     # backend is skipped because artifact_path already covers that path.
+    acceptance_result = _context_get(context_variables, "app_bundle_acceptance_result")
     bundle_content_metadata: dict[str, Any] = {
         "artifact_path": str(zip_path.resolve()),
         "bundle_name": bundle_name,
-        "capability_packs": _selected_capability_packs(context_variables),
+        # Workspace packs are recorded with the identity acceptance verified, so later uses recheck it.
+        "capability_packs": pin_workspace_pack_selections(
+            _selected_capability_packs(context_variables),
+            acceptance_result.get("resolved_capability_packs") if isinstance(acceptance_result, dict) else None,
+            context_variables=context_variables,
+        ),
     }
     if app_dir is not None:
         bundle_content_metadata["workspace_dir"] = str(app_dir.resolve())
@@ -663,7 +672,6 @@ async def _register_app_bundle_artifact_version(
             pass
     if isinstance(cf_report, dict):
         bundle_content_metadata["carry_forward_report"] = cf_report
-    acceptance_result = _context_get(context_variables, "app_bundle_acceptance_result")
     validation_evidence = _context_get(context_variables, "app_bundle_validation_evidence")
     if isinstance(acceptance_result, dict):
         bundle_content_metadata["app_bundle_acceptance"] = acceptance_result

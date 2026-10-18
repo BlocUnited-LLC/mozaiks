@@ -39,7 +39,10 @@ class GeneratedAppValidationResult:
     the source was found (``explicit``, ``installed`` or
     ``factory_build_context``); ``authority`` says what vouched for it (the
     shipped catalog ``factory_build_context``, verified ``installed`` state,
-    or matching ``selected_pins``). ``digest`` hashes the resolved source's
+    the ``workspace_build_context`` registry, or matching ``selected_pins``).
+    The workspace registry vouches at a version only, so a caller that
+    records a selection keeps this ``digest`` with it and verifies it again
+    on the same host before reuse. ``digest`` hashes the resolved source's
     raw bytes on the validating host, so compare it only with digests that
     host computed; ``pack_id`` and ``version`` are the portable identity. The
     list is empty when no pack was selected or the selection could not be

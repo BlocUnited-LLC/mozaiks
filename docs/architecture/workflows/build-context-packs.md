@@ -245,7 +245,8 @@ partially templated modules, including OutcomeFeedback. A complete template
 implementation keeps its own actions and participant-aware policy only when
 dependency closure, current source identity, declared output closure, and exact
 template bytes are verified. The factory's shipped packs and the packs
-registered directly under the workspace build context are trusted sources;
+registered for AppGenerator directly under the workspace build context are
+trusted sources;
 any other source requires matching version and digest pins, either on the
 selected pack or from installed Community Component state verified against the
 source's current bytes, and an external source without them is not resolved at
@@ -643,12 +644,32 @@ the source, and the resolved identity records which one did (`authority`):
   the trusted workspace build-context root (the context's `build_context_root`,
   else the root `load_trusted_build_context` registers packs from:
   `MOZAIKS_BUILD_CONTEXT_PATH`, then `MOZAIKS_APP_WORKSPACE_PATH/build_context`)
-  whose `context.yaml` passes the build-context schema and projects an active
-  pack with the row's id. This is the documented operator-pack flow: the
-  build-context projection (`normalize_pack_descriptor`) carries the pack's
+  that `load_trusted_build_context` registers for AppGenerator: its
+  `context.yaml` passes the build-context schema, applies to AppGenerator
+  (`applies_to_workflows`), projects `capability_packs` from its pack
+  declarations (`projects_registered_packs`, the rule the loader enforces),
+  and declares an active pack with the row's id. A context retargeted to
+  another workflow, or one that no longer projects its packs, vouches for
+  nothing. This is the documented operator-pack flow: the build-context
+  projection (`normalize_pack_descriptor`) carries the pack's
   `pack_source_path` and `version` but no digest, because the pack block
   cannot hold one. The row must carry that `version`, which is compared with
-  the fresh source, and the fresh digest is recorded;
+  the fresh source, and the fresh digest is recorded. Because the registry
+  vouches at a version only, and a pack's bytes can change in place without
+  a version change, a recorded build pins each such row to the `version` and
+  `digest` its acceptance verified (`pin_workspace_pack_selections`, from the
+  acceptance gate's `resolved_capability_packs`). Refinement admission and
+  Studio's ownership checks verify the recorded rows again, so a pack edited
+  in place after the build was recorded fails with `PackIntegrityError`
+  (`PACK_OWNERSHIP_UNRESOLVED` at admission) instead of being trusted on the
+  registry alone; an AppGenerator revision re-assembles from the edited pack.
+  A recorded row whose registration was later withdrawn still verifies
+  through its own pins (`selected_pins`). A build cannot be recorded with a
+  workspace pack row that acceptance verified no identity for. The registry
+  match is on the resolved path, so a pack reached through a junction or
+  symbolic link directly under the root resolves to its target outside the
+  root and needs both pins, although the loader registers it: link the pack's
+  files, not its directory, or select it pinned;
 - `selected_pins`: any other `pack_source_path` (a directory outside the
   catalog and outside the workspace build context, such as a copy of a
   workspace pack elsewhere or a lifecycle upgrade candidate) must be selected

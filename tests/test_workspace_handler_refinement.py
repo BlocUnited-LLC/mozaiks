@@ -2833,10 +2833,43 @@ def _installed_messaging(tmp_path):
     return resolve_installed_component_descriptors(build_context_root=build_context_root, selected_pack_ids=["messaging"])
 
 
+def _recorded_workspace_messaging(tmp_path, monkeypatch):
+    """The parent's selection of a Messaging copy registered under the workspace build context, as the build recorded it.
+
+    The rows are what the trusted build-context loader projects for
+    AppGenerator (version, no digest); the build pins them to the identity
+    acceptance verified. Studio and the coding worker read the workspace root
+    from the launch environment, as they do in production.
+    """
+    import shutil
+
+    import yaml
+
+    from factory_app.workflows.AppGenerator.tools import (
+        resolve_managed_capability_templates as resolver,
+    )
+    from mozaiksai.core.session.build_context import load_trusted_build_context
+    from mozaiksai.core.workflow.context.authority import build_context_authority_policy
+
+    workspace = tmp_path / "workspace" / "build_context"
+    shutil.copytree(PACK, workspace / "messaging", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    monkeypatch.delenv("MOZAIKS_APP_WORKSPACE_PATH", raising=False)
+    monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(workspace))
+    definitions = yaml.safe_load(
+        (PACK.parent.parent / "workflows/AppGenerator/context_variables.yaml").read_text(encoding="utf-8"),
+    )["definitions"]
+    policy = build_context_authority_policy(workflow_name="AppGenerator", definitions=definitions)
+    rows = [dict(row) for row in load_trusted_build_context(policy)["capability_packs"]]
+    identities = [resolver.pack_identity(entry) for entry in resolver.verified_selected_pack_sources(rows)]
+    assert [identity["authority"] for identity in identities] == ["workspace_build_context"]
+    return resolver.pin_workspace_pack_selections(rows, identities)
+
+
 _PACK_SELECTIONS = {
-    "catalog": lambda tmp_path: _packs(),
-    "pinned_external": _pinned_external_messaging,
-    "installed_descriptor": _installed_messaging,
+    "catalog": lambda tmp_path, monkeypatch: _packs(),
+    "pinned_external": lambda tmp_path, monkeypatch: _pinned_external_messaging(tmp_path),
+    "installed_descriptor": lambda tmp_path, monkeypatch: _installed_messaging(tmp_path),
+    "workspace_recorded": _recorded_workspace_messaging,
 }
 
 
@@ -2868,7 +2901,9 @@ async def _admit(tmp_path, packs, applied, *, store=None, scope_origin=None):
     ("stale_baseline_handler", "STALE_REFINEMENT_BASELINE"),
     ("privileged_handler", "WORKSPACE_HANDLER_EXTENSION_REJECTED"),
 ])
-async def test_pack_ownership_is_enforced_for_every_authority_the_parent_selected(tmp_path, selection, case, code):
+async def test_pack_ownership_is_enforced_for_every_authority_the_parent_selected(
+    tmp_path, monkeypatch, selection, case, code,
+):
     """Pinned, installed and catalog selections keep their identities through admission, so every check applies.
 
     The parent's rows are verified once, as saved (pins and authority kept),
@@ -2877,7 +2912,7 @@ async def test_pack_ownership_is_enforced_for_every_authority_the_parent_selecte
     and its app-owned handler changes only in an explicit scope, from the
     accepted current build, as a thin extension.
     """
-    packs = _PACK_SELECTIONS[selection](tmp_path)
+    packs = _PACK_SELECTIONS[selection](tmp_path, monkeypatch)
     store, scope_origin = _Store(), None
     if case == "policy_rewrite":
         applied = {POLICY: (PACK / "templates" / POLICY).read_text(encoding="utf-8") + "\n# drift\n"}
@@ -2899,11 +2934,12 @@ async def test_pack_ownership_is_enforced_for_every_authority_the_parent_selecte
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("selection", sorted(_PACK_SELECTIONS))
-async def test_an_authorized_handler_change_is_admitted_for_every_authority(tmp_path, selection):
-    """The catalog Messaging pack, and the same pack pinned or installed, admit the explicit handler extension."""
+async def test_an_authorized_handler_change_is_admitted_for_every_authority(tmp_path, monkeypatch, selection):
+    """The catalog Messaging pack, and the same pack pinned, installed or recorded from the workspace registry, admit
+    the explicit handler extension."""
     from mozaiksai.control_plane.implementations.coding_worker import parent_workspace_pack_paths
 
-    packs = _PACK_SELECTIONS[selection](tmp_path)
+    packs = _PACK_SELECTIONS[selection](tmp_path, monkeypatch)
     assert parent_workspace_pack_paths(packs) == frozenset({HANDLER})
     scope = await _admit(tmp_path, packs, {HANDLER: NORMALIZING_HANDLER}, scope_origin="explicit")
     assert scope == {
@@ -2912,15 +2948,30 @@ async def test_an_authorized_handler_change_is_admitted_for_every_authority(tmp_
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("fault", ["unpinned_external", "bytes_changed_since_saved", "unresolvable_claim"])
-async def test_an_unverifiable_saved_selection_refuses_every_candidate(tmp_path, fault, caplog):
-    """No ownership, no admission: a parent selection that cannot be verified never admits a candidate unchecked."""
+@pytest.mark.parametrize("fault", [
+    "unpinned_external", "bytes_changed_since_saved", "unresolvable_claim", "workspace_pack_changed_in_place",
+])
+async def test_an_unverifiable_saved_selection_refuses_every_candidate(tmp_path, monkeypatch, fault, caplog):
+    """No ownership, no admission: a parent selection that cannot be verified never admits a candidate unchecked.
+
+    ``workspace_pack_changed_in_place`` is a registered workspace pack edited
+    after the parent was recorded, keeping its version: its contract now
+    declares the template-owned policy app-owned. The recorded digest no
+    longer verifies, so the edit cannot release the parent's policy.
+    """
     from pathlib import Path
 
     from mozaiksai.control_plane.implementations.coding_worker import parent_workspace_pack_paths
 
     packs = _pinned_external_messaging(tmp_path)
-    if fault == "unpinned_external":
+    if fault == "workspace_pack_changed_in_place":
+        packs = _recorded_workspace_messaging(tmp_path, monkeypatch)
+        contract = Path(packs[0]["pack_source_path"]) / "contract.yaml"
+        text = contract.read_text(encoding="utf-8")
+        declared = "  - path: modules/messages/backend/policy.py\n    owner: templates\n"
+        assert declared in text
+        contract.write_text(text.replace(declared, declared.replace("templates", "workspace")), encoding="utf-8")
+    elif fault == "unpinned_external":
         packs = [{key: value for key, value in packs[0].items() if key not in {"version", "digest"}}]
     elif fault == "bytes_changed_since_saved":
         source = Path(packs[0]["pack_source_path"]) / "templates" / POLICY

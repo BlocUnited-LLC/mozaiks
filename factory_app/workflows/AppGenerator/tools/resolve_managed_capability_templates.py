@@ -16,9 +16,11 @@ from factory_app.workflows._shared.surface_ownership import SurfaceOwnershipRule
 from mozaiksai.core.runtime.app.provenance import resolve_build_timestamp
 from mozaiksai.core.session.build_context import (
     BuildContextError,
+    discover_build_context_files,
     discover_pack_descriptors,
     iter_context_assets,
     load_build_context,
+    projects_registered_packs,
     resolve_build_context_root,
     resolve_context_asset_path,
 )
@@ -86,8 +88,9 @@ AUTHORITY_FACTORY_BUILD_CONTEXT = "factory_build_context"
 AUTHORITY_INSTALLED = "installed"
 # Version and digest pins on the selected row, which the source matched.
 AUTHORITY_SELECTED_PINS = "selected_pins"
-# The workspace build-context registry: a pack directly under the trusted build_context_root
-# whose context.yaml registers it (what load_trusted_build_context projects), at the row's version.
+# The workspace build-context registry: a pack directly under the trusted build_context_root that
+# load_trusted_build_context registers for AppGenerator, at the row's version. A build records the
+# digest acceptance verified on the row (pin_workspace_pack_selections), so later uses recheck it.
 AUTHORITY_WORKSPACE_BUILD_CONTEXT = "workspace_build_context"
 PACK_AUTHORITIES: frozenset[str] = frozenset({
     AUTHORITY_FACTORY_BUILD_CONTEXT, AUTHORITY_INSTALLED, AUTHORITY_SELECTED_PINS, AUTHORITY_WORKSPACE_BUILD_CONTEXT,
@@ -743,17 +746,32 @@ def _workspace_build_context_root(context_variables: Any | None) -> Path | None:
     return root.resolve() if root is not None and root.is_dir() else None
 
 
-def _workspace_registration_refusal(root: Path, pack_id: str) -> str | None:
-    """Why ``root``, directly under the workspace build-context root, is not its registered pack ``pack_id``.
+# The workflow that assembles selected packs; workspace registration is decided for it.
+_ASSEMBLING_WORKFLOW = "AppGenerator"
 
-    None when its ``context.yaml`` passes the build-context schema and
-    projects an active pack descriptor with that id, which is what
-    :func:`load_trusted_build_context` registers from it.
+
+def _workspace_registration_refusal(root: Path, pack_id: str, workspace_root: Path) -> str | None:
+    """Why ``root``, directly under ``workspace_root``, is not a pack ``pack_id`` registered for AppGenerator.
+
+    None only when :func:`load_trusted_build_context` registers it for
+    AppGenerator from that root: its ``context.yaml`` passes the build-context
+    schema and applies to AppGenerator (:func:`discover_build_context_files`),
+    its ``capability_packs`` projection registers its pack declarations
+    (:func:`projects_registered_packs`), and it declares an active pack with
+    that id. A context retargeted to another workflow, or one that no longer
+    projects its packs, vouches for nothing.
     """
+    context_path = (root / "context.yaml").resolve()
     try:
-        descriptors = discover_pack_descriptors(root, load_build_context(root / "context.yaml"))
+        applicable = {path.resolve() for path in discover_build_context_files(workspace_root, _ASSEMBLING_WORKFLOW)}
+        config = load_build_context(context_path)
+        descriptors = discover_pack_descriptors(root, config)
     except BuildContextError as exc:
-        return f"its context.yaml does not register a pack: {exc}"
+        return f"the workspace build context does not register it: {exc}"
+    if context_path not in applicable:
+        return f"its context.yaml does not apply to {_ASSEMBLING_WORKFLOW}"
+    if not projects_registered_packs(config):
+        return "its context.yaml does not project capability_packs from its pack declarations"
     if not any(str(descriptor.get("id") or "") == pack_id for descriptor in descriptors):
         return f"its context.yaml registers no active pack '{pack_id}'"
     return None
@@ -849,11 +867,12 @@ def _explicit_source(
     package's shipped catalog holds (a direct child of
     ``resolve_factory_app_root()/build_context``); the source of the installed
     Community Component with the row's id, which workspace state verified
-    against its pinned version and digest; and a pack registered directly under
-    the trusted workspace build-context root (:func:`_workspace_build_context_root`),
-    whose ``context.yaml`` projects an active pack with the row's id, selected
-    with the ``version`` its registration declares (the build-context
-    projection carries it; the fresh digest is recorded). Any other directory
+    against its pinned version and digest; and a pack directly under the
+    trusted workspace build-context root (:func:`_workspace_build_context_root`)
+    that :func:`load_trusted_build_context` registers for AppGenerator
+    (:func:`_workspace_registration_refusal`), selected with the ``version``
+    its registration declares (the build-context projection carries it; the
+    fresh digest is recorded, and a recorded build pins it on the row). Any other directory
     must be selected with matching ``version`` and ``digest`` pins; its own
     contract never vouches for itself.
     """
@@ -872,7 +891,7 @@ def _explicit_source(
         return _ResolvedSource(str(root), RESOLUTION_EXPLICIT, AUTHORITY_INSTALLED, _installed_pins(installed))
     workspace_refusal = None
     if workspace_root is not None and root.parent == workspace_root:
-        workspace_refusal = _workspace_registration_refusal(root, pack_id)
+        workspace_refusal = _workspace_registration_refusal(root, pack_id, workspace_root)
         if workspace_refusal is None:
             if not _has_value(pack.get("version")):
                 raise PackIntegrityError(
@@ -903,6 +922,59 @@ def _explicit_source(
         "workspace build context, or select a pack the installed factory catalog ships. An unverified pack is "
         "never admitted."
     )
+
+
+def pin_workspace_pack_selections(
+    capability_packs: list[dict[str, Any]],
+    resolved_identities: list[dict[str, Any]] | None,
+    *,
+    context_variables: Any | None = None,
+) -> list[dict[str, Any]]:
+    """The selection rows a build records, each workspace build-context pack pinned to the identity acceptance verified.
+
+    The workspace registry (:data:`AUTHORITY_WORKSPACE_BUILD_CONTEXT`) vouches
+    for a pack at its declared version, but the pack's bytes can change in
+    place without a version change. A recorded build therefore carries, on
+    each row whose pack acceptance resolved through the registry, the
+    ``version`` and ``digest`` acceptance verified the bundle against
+    (``resolved_identities``, the scanner's resolved rows). Every later use of
+    the recorded rows (refinement admission, Studio's ownership checks)
+    re-verifies that identity: :func:`verified_pack_selection` compares the
+    fresh source with the pins, and a changed pack fails instead of being
+    trusted on the registry alone. Rows of other authorities are recorded as
+    selected: the shipped catalog is the installed package, and installed
+    state and selection pins already pin the digest. A row that names a pack
+    directly under the workspace build-context root without an identity
+    acceptance verified cannot be recorded.
+    """
+    rows = [dict(row) for row in capability_packs if isinstance(row, dict)]
+    by_id = {
+        str(identity.get("pack_id") or ""): identity
+        for identity in resolved_identities or [] if isinstance(identity, dict)
+    }
+    workspace_root = _workspace_build_context_root(context_variables)
+    for row in rows:
+        raw_path = row.get("pack_source_path")
+        if workspace_root is None or not raw_path or Path(str(raw_path)).expanduser().resolve().parent != workspace_root:
+            continue
+        pack_id = selected_pack_id(row)
+        identity = by_id.get(pack_id)
+        if identity is None:
+            raise PackIntegrityError(
+                f"Selected pack '{pack_id or '<unnamed>'}' names the workspace build-context pack {raw_path}, but "
+                "acceptance recorded no verified identity for it, so the build cannot record which bytes it was "
+                "verified against. Run the app bundle acceptance gate on this selection before recording the build."
+            )
+        if identity.get("authority") != AUTHORITY_WORKSPACE_BUILD_CONTEXT:
+            continue
+        for key in ("version", "digest"):
+            if _has_value(row.get(key)) and str(row[key]) != str(identity[key]):
+                raise PackIntegrityError(
+                    f"Pack '{pack_id}' selected {key} {row[key]!r} differs from the {identity[key]!r} acceptance "
+                    "verified; the build cannot record a selection its acceptance did not verify."
+                )
+            row[key] = str(identity[key])
+    return rows
 
 
 def _non_canonical_pack_id_refusal(pack: dict[str, Any]) -> str | None:
@@ -1478,6 +1550,7 @@ __all__ = [
     "PackDependencyError",
     "PackIntegrityError",
     "pack_identity",
+    "pin_workspace_pack_selections",
     "resolve_managed_capability_templates",
     "resolve_declared_pack_output_paths",
     "resolve_templates_for_pack",

@@ -2219,6 +2219,8 @@ async def run_app_bundle_acceptance_gate(
         "skipped_checks": skipped_checks,
         "failed_tests": failed_tests,
         "warnings": warnings,
+        # The identities the bundle was verified against; the recorded build pins workspace packs to them.
+        "resolved_capability_packs": resolved_capability_packs,
         **subresults,
     }
     repair_diagnostics = [
