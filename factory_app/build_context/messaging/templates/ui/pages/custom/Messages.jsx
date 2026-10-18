@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { PageHeader } from "@mozaiks/chat-ui/ui";
 import { moduleAction } from "../../lib/moduleApi.js";
 
 const EMPTY_THREAD = { title: "", participantIds: "" };
@@ -113,92 +114,96 @@ export default function Messages() {
   }
 
   return (
-    <main className="messages-page grid grid-cols-1 md:grid-cols-[minmax(0,320px)_minmax(0,1fr)]" style={{ minHeight: "100vh" }}>
-      <aside style={{ minWidth: 0, borderRight: "1px solid var(--border-color, #d1d5db)", padding: 16 }}>
-        <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-          <h1 style={{ margin: 0, fontSize: 24 }}>Messages</h1>
-          <button type="button" onClick={loadThreads} disabled={loading}>
-            Refresh
-          </button>
-        </header>
+    <main className="messages-page" style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
+      <PageHeader
+        className="p-4"
+        title="Messages"
+        actions={[{ id: "refresh", label: "Refresh", disabled: loading }]}
+        onAction={(actionId) => {
+          if (actionId === "refresh") loadThreads();
+        }}
+      />
 
-        <form onSubmit={createThread} style={{ display: "grid", gap: 8, marginTop: 16 }}>
-          <input
-            value={newThread.title}
-            onChange={(event) => setNewThread((current) => ({ ...current, title: event.target.value }))}
-            placeholder="Thread title"
-          />
-          <input
-            value={newThread.participantIds}
-            onChange={(event) => setNewThread((current) => ({ ...current, participantIds: event.target.value }))}
-            placeholder="Participant ids, comma separated"
-          />
-          <button type="submit">Start conversation</button>
-        </form>
+      <div className="grid grid-cols-1 md:grid-cols-[minmax(0,320px)_minmax(0,1fr)]" style={{ borderTop: "1px solid var(--color-border)", flex: 1, minHeight: 0 }}>
+        <aside style={{ minWidth: 0, borderRight: "1px solid var(--color-border)", padding: 16 }}>
+          <form onSubmit={createThread} style={{ display: "grid", gap: 8 }}>
+            <input
+              value={newThread.title}
+              onChange={(event) => setNewThread((current) => ({ ...current, title: event.target.value }))}
+              placeholder="Thread title"
+            />
+            <input
+              value={newThread.participantIds}
+              onChange={(event) => setNewThread((current) => ({ ...current, participantIds: event.target.value }))}
+              placeholder="Participant ids, comma separated"
+            />
+            <button type="submit">Start conversation</button>
+          </form>
 
-        {error && <p style={{ color: "var(--destructive, #dc2626)" }}>{error}</p>}
+          {error && <p style={{ color: "var(--color-error)" }}>{error}</p>}
 
-        <div style={{ display: "grid", gap: 8, marginTop: 16 }}>
-          {threads.map((thread) => (
-            <button
-              key={thread.thread_id}
-              type="button"
-              onClick={() => setSelectedThreadId(thread.thread_id)}
-              style={{
-                padding: 12,
-                textAlign: "left",
-                border: selectedThreadId === thread.thread_id ? "1px solid var(--primary, #2563eb)" : "1px solid var(--border-color, #d1d5db)",
-                background: selectedThreadId === thread.thread_id ? "var(--color-surface-alt)" : "transparent",
-                color: "var(--color-text-primary)",
-              }}
-            >
-              <strong><ThreadTitle thread={thread} /></strong>
-              <span style={{ display: "block", color: "var(--color-text-secondary)", fontSize: 12 }}>
-                {thread.thread_type || "group"} - {thread.status || "open"}
-              </span>
-              {thread.last_message?.body_preview && (
-                <span style={{ display: "block", marginTop: 4, fontSize: 12 }}>
-                  {thread.last_message.body_preview}
+          <div style={{ display: "grid", gap: 8, marginTop: 16 }}>
+            {threads.map((thread) => (
+              <button
+                key={thread.thread_id}
+                type="button"
+                onClick={() => setSelectedThreadId(thread.thread_id)}
+                style={{
+                  padding: 12,
+                  textAlign: "left",
+                  border: selectedThreadId === thread.thread_id ? "1px solid var(--color-primary)" : "1px solid var(--color-border)",
+                  background: selectedThreadId === thread.thread_id ? "var(--color-surface-alt)" : "transparent",
+                  color: "var(--color-text-primary)",
+                }}
+              >
+                <strong><ThreadTitle thread={thread} /></strong>
+                <span style={{ display: "block", color: "var(--color-text-secondary)", fontSize: 12 }}>
+                  {thread.thread_type || "group"} - {thread.status || "open"}
                 </span>
-              )}
+                {thread.last_message?.body_preview && (
+                  <span style={{ display: "block", marginTop: 4, fontSize: 12 }}>
+                    {thread.last_message.body_preview}
+                  </span>
+                )}
+              </button>
+            ))}
+            {!loading && threads.length === 0 && <p>No conversations yet.</p>}
+          </div>
+        </aside>
+
+        <section style={{ display: "grid", gridTemplateRows: "auto 1fr auto", minWidth: 0, minHeight: 0 }}>
+          <header style={{ borderBottom: "1px solid var(--color-border)", padding: 16 }}>
+            <h2 style={{ margin: 0 }}>
+              {selectedThread ? <ThreadTitle thread={selectedThread} /> : "Select a conversation"}
+            </h2>
+          </header>
+
+          <div style={{ overflow: "auto", padding: 16 }}>
+            {detailLoading && <p>Loading messages...</p>}
+            {!detailLoading && selectedMessages.length === 0 && selectedThread && <p>No messages yet.</p>}
+            {!selectedThread && <p>Pick a conversation or start a new one.</p>}
+            {selectedMessages.map((message) => (
+              <article key={message.message_id} style={{ marginBottom: 12 }}>
+                <strong>{message.sender_role || "user"}</strong>
+                <p style={{ margin: "4px 0 0" }}>{message.body}</p>
+              </article>
+            ))}
+          </div>
+
+          <form onSubmit={sendMessage} className="p-4 pr-20 md:pr-4" style={{ borderTop: "1px solid var(--color-border)", display: "flex", gap: 8 }}>
+            <input
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              disabled={!selectedThread}
+              placeholder={selectedThread ? "Type a message" : "Select a conversation first"}
+              style={{ flex: 1, minWidth: 0 }}
+            />
+            <button type="submit" disabled={!selectedThread || !draft.trim()}>
+              Send
             </button>
-          ))}
-          {!loading && threads.length === 0 && <p>No conversations yet.</p>}
-        </div>
-      </aside>
-
-      <section style={{ display: "grid", gridTemplateRows: "auto 1fr auto", minWidth: 0, minHeight: 0 }}>
-        <header style={{ borderBottom: "1px solid var(--border-color, #d1d5db)", padding: 16 }}>
-          <h2 style={{ margin: 0 }}>
-            {selectedThread ? <ThreadTitle thread={selectedThread} /> : "Select a conversation"}
-          </h2>
-        </header>
-
-        <div style={{ overflow: "auto", padding: 16 }}>
-          {detailLoading && <p>Loading messages...</p>}
-          {!detailLoading && selectedMessages.length === 0 && selectedThread && <p>No messages yet.</p>}
-          {!selectedThread && <p>Pick a conversation or start a new one.</p>}
-          {selectedMessages.map((message) => (
-            <article key={message.message_id} style={{ marginBottom: 12 }}>
-              <strong>{message.sender_role || "user"}</strong>
-              <p style={{ margin: "4px 0 0" }}>{message.body}</p>
-            </article>
-          ))}
-        </div>
-
-        <form onSubmit={sendMessage} className="p-4 pr-20 md:pr-4" style={{ borderTop: "1px solid var(--border-color, #d1d5db)", display: "flex", gap: 8 }}>
-          <input
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            disabled={!selectedThread}
-            placeholder={selectedThread ? "Type a message" : "Select a conversation first"}
-            style={{ flex: 1, minWidth: 0 }}
-          />
-          <button type="submit" disabled={!selectedThread || !draft.trim()}>
-            Send
-          </button>
-        </form>
-      </section>
+          </form>
+        </section>
+      </div>
     </main>
   );
 }

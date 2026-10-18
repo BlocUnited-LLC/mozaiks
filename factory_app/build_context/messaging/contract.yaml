@@ -110,9 +110,10 @@ runtime_boundaries:
     rule: >
       The default DM entrypoint is one profile-owned messaging workspace declared
       in modules/messages/contracts/profile.yaml and registered through ui/index.js.
-      The workspace keeps friends (when the social pack is selected), conversations,
-      search, and the selected thread in one surface. Selecting a thread or friend
-      renders the conversation inline; /messages remains a hidden deep-link and
+      The workspace renders only the list_threads result: conversations, search,
+      and the selected thread in one surface. Selecting a thread renders the
+      conversation inline. It does not list friends; a friends roster is the
+      social pack's own profile tab. /messages remains a hidden deep-link and
       support fallback, never a global shell item or profile shortcut by default.
 
 facades: []
