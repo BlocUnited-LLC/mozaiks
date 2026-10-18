@@ -181,15 +181,15 @@ This project follows a practical pre-1.0 changelog format:
   when the loader registers a pack with its id at that path; a root the
   loader refuses vouches for nothing. The selection must carry the
   registered version, which is compared with the fresh source. A recorded
-  build pins every row that names a pack under the workspace root to the
-  version and digest its acceptance verified, and refinement and Studio read
+  build pins every row that names a pack directly under the workspace root to
+  the version and digest its acceptance verified, and refinement and Studio read
   recorded rows back only with those pins, so they verify that identity
   again.
 - A pack's digest now always covers its `contract.yaml`, which decides output
   ownership and dependencies, even when the context does not declare it as a
   contract asset. Every shipped pack declares it, so no shipped digest
   changes; installed-state or selection pins recorded for a pack that does
-  not declare it no longer verify until the pack is reinstalled or the
+  not declare it no longer verify until the pack is upgraded or the
   selection is pinned again. A contract or catalog asset that is not a file
   is an integrity diagnostic.
 - Generated bundle validation never renders pack templates. Each resolved
@@ -436,7 +436,10 @@ This project follows a practical pre-1.0 changelog format:
   until an AppGenerator revision re-assembles it. A build recorded before
   builds pinned workspace packs, and every refinement that copied its rows,
   carries no digest for them and is refused the same way: run an
-  AppGenerator revision to record a pinned build.
+  AppGenerator revision to record a pinned build. Studio refuses such a
+  patch with 409 before any provider call, and refuses to accept a version
+  when the app-owned code of it or of the current build it would replace
+  cannot be compared because a pack selection cannot be verified.
 - A row that claims a pack but cannot be resolved, or whose pins do not
   match, fails with a diagnostic; no warning admits an unverified,
   unresolvable, mismatched or omitted pack. The bundle scanner refuses an

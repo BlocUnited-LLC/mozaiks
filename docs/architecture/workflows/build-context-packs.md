@@ -653,7 +653,9 @@ the source, and the resolved identity records which one did (`authority`):
   for AppGenerator, an invalid `operator_capabilities` value, a pack id
   registered twice) vouches for nothing, and neither does a context
   retargeted to another workflow, one that no longer projects its packs, or
-  an inactive pack. This is the documented operator-pack flow: the build-context
+  an inactive pack. A workspace pack must therefore apply to AppGenerator,
+  which assembles it: a pack registered only for another workflow, such as
+  DesignDocs, is selected with both pins. This is the documented operator-pack flow: the build-context
   projection (`normalize_pack_descriptor`) carries the pack's
   `pack_source_path` and `version` but no digest, because the pack block
   cannot hold one. The row must carry that `version`, which is compared with

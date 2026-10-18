@@ -3000,6 +3000,40 @@ async def test_an_unverifiable_saved_selection_refuses_every_candidate(tmp_path,
     assert not [record for record in caplog.records if "CANDIDATE_PACK_OWNERSHIP_UNRESOLVED" in record.getMessage()]
 
 
+_UNRESOLVABLE_PACK_ROW = {"id": "acme_messages", "capability_source": "operator_pack"}
+
+
+@pytest.mark.parametrize("selection", ["workspace_record_without_digest", "unresolvable_claim"])
+def test_studio_refuses_a_patch_before_the_provider_when_the_parents_pack_ownership_cannot_be_verified(
+    monkeypatch, tmp_path, selection,
+):
+    """A parent whose pack selection cannot be verified admits no candidate, so Studio refuses every applying patch
+    (an explicit app-owned or app file scope, and an auto-applied inferred scope) with 409 before the provider
+    call and the registry run, naming the way forward."""
+    if selection == "workspace_record_without_digest":
+        packs = _recorded_workspace_messaging(tmp_path, monkeypatch, pinned=False)
+    else:
+        packs = [dict(_UNRESOLVABLE_PACK_ROW)]
+    attempts = {
+        "handler": lambda flow: _handler_attempt(flow),
+        "page": lambda flow: _attempt(flow, lambda: flow.trigger({"files": {PAGE: ""}})),
+        "inferred": lambda flow: _attempt(flow, lambda: flow.trigger({})),
+    }
+    for name, send in attempts.items():
+        (tmp_path / name).mkdir()
+        flow = _studio_flow(
+            monkeypatch, tmp_path / name, outputs=[{HANDLER: NORMALIZING_HANDLER}], capability_packs=packs,
+            proposer=_scope_proposer() if name == "inferred" else None,
+        )
+        refused = send(flow)
+        assert refused["status"] == "refused", (name, refused)
+        assert refused["detail"].startswith(
+            "This change cannot be checked: the capability packs the parent build selected cannot be resolved",
+        ), refused["detail"]
+        assert "run an AppGenerator revision" in refused["detail"] and refused["detail"].endswith("No files were changed.")
+        flow.provider.execute.assert_not_awaited()
+
+
 def test_studio_keeps_a_pinned_external_packs_ownership_from_proposal_to_acceptance(monkeypatch, tmp_path):
     """Studio's route with a parent that selected a pinned external Messaging copy.
 
@@ -3241,6 +3275,38 @@ async def test_accepting_a_stale_ui_only_child_cannot_revert_app_owned_pack_code
         assert HANDLER not in rejected.value.detail and "earlier build" in rejected.value.detail
     else:
         assert HANDLER in rejected.value.detail
+    assert store.accepted == [] and store.records == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unverifiable", ["current_build", "version"])
+async def test_accepting_refuses_when_app_owned_code_cannot_be_compared_for_an_unverifiable_selection(
+    monkeypatch, unverifiable,
+):
+    """Acceptance compares the app-owned pack code of a version made from an earlier build with the current build's.
+    When either build's pack selection cannot be verified, the paths it declares app-owned are unknown, so the
+    comparison cannot be made and nothing is accepted (it never narrows to bundle provenance alone)."""
+    from fastapi import HTTPException
+
+    store = _Store()
+    _accept_records(store, ["child_1"], scope={
+        "selected_file_paths": [PAGE], "scope_origin": "explicit", "changed_workspace_pack_paths": [],
+    })
+    store.supersede_parent_with("newer_build")
+    target = "newer_build" if unverifiable == "current_build" else "child_1"
+    record = store.records[target]
+    metadata = {**record.commit_metadata.metadata, "capability_packs": [dict(_UNRESOLVABLE_PACK_ROW)]}
+    store.records[target] = record.model_copy(update={
+        "commit_metadata": record.commit_metadata.model_copy(update={"metadata": metadata}),
+    })
+    accept = _accept_route(monkeypatch, store)
+    before = deepcopy(store.records)
+    with pytest.raises(HTTPException) as rejected:
+        await accept("child_1")
+    assert rejected.value.status_code == 409
+    assert rejected.value.detail.startswith(
+        f"Build {target}'s capability packs cannot be resolved to verified sources",
+    ), rejected.value.detail
     assert store.accepted == [] and store.records == before
 
 

@@ -86,6 +86,7 @@ from mozaiksai.control_plane.app_intelligence_jobs import (
 from mozaiksai.control_plane.contracts import RegistryRunState, build_acceptance_evidence
 from mozaiksai.control_plane.dry_run import RefinementDryRunPlan, RefinementExecutionPlan
 from mozaiksai.control_plane.implementations.coding_worker import (
+    PACK_OWNERSHIP_UNRESOLVED_GUIDANCE,
     TEMPLATE_PACK_OUTPUT_GUIDANCE,
     PackCodeBaseline,
     newer_accepted_work,
@@ -2283,7 +2284,18 @@ async def _require_same_app_owned_pack_code(version, current) -> None:  # noqa: 
     for archive, record in ((current_zip, current), (version_zip, version)):
         provenance = _app_bundle_entries(archive, {_PACK_PROVENANCE_PATH}).get(_PACK_PROVENANCE_PATH)
         paths |= _recorded_workspace_pack_paths(provenance)
-        paths |= set(parent_workspace_pack_paths(_version_metadata(record).get("capability_packs") or []) or ())
+        declared = parent_workspace_pack_paths(_version_metadata(record).get("capability_packs") or [])
+        if declared is None:
+            # Its pack selection cannot be verified, so the app-owned paths it declares are unknown.
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Build {record.id}'s capability packs cannot be resolved to verified sources, so its app-owned "
+                    "capability code cannot be compared with this version's. Run an AppGenerator revision (or "
+                    "regenerate the app) so the build selects packs that verify. No version was accepted."
+                ),
+            )
+        paths |= set(declared)
     current_files = _app_bundle_entries(current_zip, paths)
     version_files = _app_bundle_entries(version_zip, paths)
     changed = sorted(path for path in paths if current_files.get(path) != version_files.get(path))
@@ -3392,8 +3404,8 @@ def _refuse_template_pack_patch(template_pack_paths: frozenset[str], paths: Iter
     never refused here, nor a scope that holds template-owned files beside
     files the patch may change: admission stays the backstop for any changed
     template-owned output. Ownership is the parent's verified pack ownership;
-    when it cannot be verified nothing is refused here, and candidate
-    validation fails the candidate instead.
+    when it cannot be verified, :func:`_refuse_unverifiable_pack_patch`
+    refuses the patch instead.
     """
     editable = set(paths)
     if editable and editable <= template_pack_paths:
@@ -3403,6 +3415,27 @@ def _refuse_template_pack_patch(template_pack_paths: frozenset[str], paths: Iter
                 f"This change would edit only template-owned capability pack files ({', '.join(sorted(editable))}). "
                 f"{TEMPLATE_PACK_OUTPUT_GUIDANCE}. No files were changed."
             ),
+        )
+
+
+def _refuse_unverifiable_pack_patch(pack_owners: dict[str, str] | None, paths: Iterable[str]) -> None:
+    """Refuse a patch, before the provider runs, when the saved parent's pack ownership cannot be verified.
+
+    Called where :func:`_refuse_template_pack_patch` is, only where the
+    decision will apply a patch. ``pack_owners`` is None when the parent
+    selected capability packs whose sources cannot be resolved and verified,
+    for example a build recorded before builds pinned workspace packs, or a
+    workspace pack edited in place since. Candidate admission refuses every
+    candidate of such a parent (``PACK_OWNERSHIP_UNRESOLVED``), so the coding
+    or surface provider call, validation and the registry run are skipped. A
+    decision that applies nothing, such as a clarification or a workflow route
+    (the AppGenerator revision that records a verifiable build), is never
+    refused here.
+    """
+    if pack_owners is None and set(paths):
+        raise HTTPException(
+            status_code=409,
+            detail=f"This change cannot be checked: {PACK_OWNERSHIP_UNRESOLVED_GUIDANCE}. No files were changed.",
         )
 
 
@@ -3726,6 +3759,7 @@ async def trigger_workflow(
             coding_payload = {**coding_payload, "files": {path: baseline_files[path] for path in explicit_paths}}
             trigger_payload["coding_request"] = coding_payload
         # An explicit or confirmed file scope always applies when it proceeds.
+        _refuse_unverifiable_pack_patch(pack_owners, explicit_paths)
         _refuse_template_pack_patch(template_pack_paths, explicit_paths)
         await _refuse_pack_code_from_an_unadmitted_baseline(
             workspace_pack_paths, explicit_paths, source_version=source_version, artifact_app_id=artifact_app_id,
@@ -3800,10 +3834,12 @@ async def trigger_workflow(
                         detail="This change could not be resolved within the selected files. Narrow the request, or clear the file limit to review a broader plan. No files were changed.",
                     )
                 if contract_surface_plan is not None:
-                    if template_pack_paths:
-                        _refuse_template_pack_patch(template_pack_paths, [
+                    if pack_owners is None or template_pack_paths:
+                        surface_paths = [
                             path for surface in contract_surface_plan.surfaces for path in surface.affected_paths
-                        ])
+                        ]
+                        _refuse_unverifiable_pack_patch(pack_owners, surface_paths)
+                        _refuse_template_pack_patch(template_pack_paths, surface_paths)
                     registry_run_state = await _registry_run_state(
                         user_id=user_id, build_registry_id=build_registry_id, source_version=source_version,
                     )
@@ -3869,6 +3905,7 @@ async def trigger_workflow(
                     harness_decision = coding_decision
                     if coding_request is not None:
                         # Only an applying decision (auto_patch) returns a request.
+                        _refuse_unverifiable_pack_patch(pack_owners, coding_request.files)
                         _refuse_template_pack_patch(template_pack_paths, coding_request.files)
                         baseline_files, skipped = _decode_text_bundle_entries(await _verified_app_bundle(source_version))
                         if skipped:

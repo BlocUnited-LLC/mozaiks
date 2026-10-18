@@ -1462,6 +1462,32 @@ def test_every_recorded_row_under_the_workspace_root_is_pinned_whatever_authorit
     assert (recorded["version"], recorded["digest"]) == (fresh["version"], fresh["digest"])
 
 
+def test_a_workspace_root_that_is_the_shipped_catalog_records_its_packs_as_selected(monkeypatch):
+    """Shipped packs follow the installed catalog across upgrades in every workspace, including one rooted at it."""
+    shipped = resolver.verify_pack_integrity(MESSAGING, "messaging")
+    row = {"id": "messaging", "pack_source_path": str(MESSAGING), "version": shipped["version"]}
+    identity = {**{key: shipped[key] for key in ("pack_id", "version", "digest", "source")},
+                "resolution": "explicit", "authority": "factory_build_context"}
+    context = {"build_context_root": str(BUILD_CONTEXT)}
+    assert resolver.pin_workspace_pack_selections([row], [identity], context_variables=context) == [row]
+
+
+def test_unloadable_shipped_declarations_vouch_for_no_workspace_pack(tmp_path, monkeypatch):
+    from mozaiksai.core.workflow.context.authority import ContextAuthorityError
+
+    workspace = tmp_path / "workspace" / "build_context"
+    root = _workspace_operator_pack(workspace)
+    context = _workspace_root_from(monkeypatch, workspace, "context")
+
+    def refuse(**kwargs):
+        raise ContextAuthorityError("context_authority.invalid_declaration")
+
+    monkeypatch.setattr("mozaiksai.core.workflow.context.authority.build_context_authority_policy", refuse)
+    row = {"id": "greetings", "capability_source": "operator_pack", "pack_source_path": str(root), "version": "0.1.0"}
+    with pytest.raises(resolver.PackIntegrityError, match="build-context declarations could not be read"):
+        resolver.verified_selected_pack_sources([row], context_variables=context)
+
+
 def _undeclared_contract_pack(workspace: Path) -> Path:
     """The greetings pack, registered under a workspace, whose context does not declare contract.yaml as an asset."""
     root = _workspace_operator_pack(workspace)

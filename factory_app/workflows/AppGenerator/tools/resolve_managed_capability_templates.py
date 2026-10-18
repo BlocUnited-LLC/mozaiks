@@ -776,9 +776,16 @@ def _assembling_workflow_policy() -> Any | None:
     definitions = declarations.get("definitions") if isinstance(declarations, dict) else None
     if not isinstance(definitions, dict):
         return None
-    from mozaiksai.core.workflow.context.authority import build_context_authority_policy
+    from mozaiksai.core.workflow.context.authority import (
+        ContextAuthorityError,
+        build_context_authority_policy,
+    )
 
-    return build_context_authority_policy(workflow_name=_ASSEMBLING_WORKFLOW, definitions=definitions)
+    try:
+        return build_context_authority_policy(workflow_name=_ASSEMBLING_WORKFLOW, definitions=definitions)
+    except ContextAuthorityError:
+        # Declarations the runtime could not load either: no registration can be checked.
+        return None
 
 
 def _workspace_registration_refusal(root: Path, pack_id: str, workspace_root: Path) -> str | None:
@@ -979,8 +986,9 @@ def pin_workspace_pack_selections(
     them as recorded (:func:`verified_pack_selection` with ``recorded=True``):
     the fresh source must match the pins, so a changed pack fails instead of
     being trusted on the registry alone. Other rows are recorded as selected:
-    the shipped catalog is the installed package, and installed state and
-    selection pins already pin the digest. A row that names a pack directly
+    the shipped catalog is the installed package (also when the workspace
+    root is the shipped catalog itself), and installed state and selection
+    pins already pin the digest. A row that names a pack directly
     under the workspace build-context root without an identity acceptance
     verified cannot be recorded.
     """
@@ -990,6 +998,10 @@ def pin_workspace_pack_selections(
         for identity in resolved_identities or [] if isinstance(identity, dict)
     }
     workspace_root = _workspace_build_context_root(context_variables)
+    # A workspace root that is the shipped catalog itself holds the installed package's packs, which the
+    # catalog authority follows across upgrades like any other workspace's; they are recorded as selected.
+    if workspace_root is not None and workspace_root == _factory_contexts_root():
+        workspace_root = None
     for row in rows:
         raw_path = row.get("pack_source_path")
         if workspace_root is None or not raw_path or Path(str(raw_path)).expanduser().resolve().parent != workspace_root:
