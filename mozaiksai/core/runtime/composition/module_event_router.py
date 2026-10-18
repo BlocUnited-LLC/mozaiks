@@ -1457,12 +1457,11 @@ def _notification_source_reference(
     notification.created event must not retain event content such as message
     text, because the producing module owns that content, its deletion, and who
     may read it. related_type stays because notification reads classify
-    support conversations by it.
+    support conversations by it; it is read only from the event payload (a flat
+    event's top-level fields already form that payload).
     """
     reference: dict[str, Any] = {"id": envelope.get("id"), "type": event_type}
     related_type = payload.get("related_type")
-    if not isinstance(related_type, str):
-        related_type = envelope.get("related_type")
     if isinstance(related_type, str) and related_type.strip():
         reference["related_type"] = related_type
     return reference

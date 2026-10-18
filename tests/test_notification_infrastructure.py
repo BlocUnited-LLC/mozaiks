@@ -545,6 +545,21 @@ class TestContextFieldsBehaviour:
             "id": "evt_flat", "type": "task.created", "related_type": "workspace_support.request",
         }
 
+    def test_source_event_reference_reads_related_type_only_from_the_payload(self):
+        rule = {
+            "id": "task.created.notify",
+            "event_type": "task.created",
+            "source_event": "reference",
+            "template": {"title": "Task created", "body": ""},
+        }
+        router, stored, asyncio = self._make_router_and_store(rule)
+        envelope = self._envelope({"task_id": "tsk_abc"})
+        envelope["related_type"] = "workspace_support.request"
+        asyncio.run(router.handle_event("task.created", envelope))
+        # A structured event names its related_type in the payload; a top-level
+        # copy beside a payload is not read.
+        assert stored[0]["source_event"] == {"id": "evt_001", "type": "task.created"}
+
 
 # ---------------------------------------------------------------------------
 # context_fields — platform projection must NOT strip context
