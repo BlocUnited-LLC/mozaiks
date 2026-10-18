@@ -431,12 +431,14 @@ class OrchestrationControlHarness:
         self,
         request: CodingWorkerRequest,
         *,
-        confirmation_required_paths: Collection[str] = (),
+        confirmation_required_paths: Collection[str],
     ) -> tuple[CodingWorkerRequest | None, HarnessDecision]:
         """Resolve the write scope and record who chose it.
 
         ``confirmation_required_paths`` (app-owned pack code of the saved
-        parent) keeps an inferred scope from applying without the user.
+        parent) keeps an inferred scope from applying without the user. It is
+        required: a caller states the parent's protected paths, or ``()`` when
+        it has none, so no caller gets the unprompted path by omission.
         """
         if not self.coding_enabled():
             raise RuntimeError("Refinement coding worker is disabled in app/config/refinement_policy.yaml")
@@ -457,6 +459,7 @@ class OrchestrationControlHarness:
                 proposal=None,
                 selected_paths=explicit_paths,
                 explicit_scope=True,
+                confirmation_required_paths=confirmation_required_paths,
             )
             metadata = dict(request.metadata or {})
             metadata["selected_file_paths"] = explicit_paths
@@ -484,13 +487,12 @@ class OrchestrationControlHarness:
                 refinement_request=refinement_request,
                 selected_paths=proposal.selected_paths,
             )
-        protected = sorted(set(resolved_files) & set(confirmation_required_paths))
         decision = self._decision_policy.for_scope_resolution(
             routing_decision=routing_decision,
             proposal=proposal,
             selected_paths=sorted(resolved_files.keys()),
             explicit_scope=False,
-            **({"confirmation_required_paths": protected} if protected else {}),
+            confirmation_required_paths=confirmation_required_paths,
         )
         metadata = dict(request.metadata or {})
         metadata["scope_proposal"] = proposal.model_dump(mode="python")

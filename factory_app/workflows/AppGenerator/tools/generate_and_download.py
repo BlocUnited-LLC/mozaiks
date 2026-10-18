@@ -678,6 +678,14 @@ async def _register_app_bundle_artifact_version(
         bundle_content_metadata["integration_test_result"] = integration_test_result
     if generated_files_manifest:
         bundle_content_metadata["accepted_file_manifest"] = generated_files_manifest
+    if lifecycle_status == ArtifactLifecycleStatus.CURRENT:
+        # A parentless genesis build is saved CURRENT: this save is its
+        # acceptance. Record it as every acceptance does, so the build is
+        # still shown accepted once a refinement marks it stale.
+        bundle_content_metadata["acceptance"] = {
+            "accepted_by": user_id,
+            "accepted_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        }
     content_store = get_artifact_content_store()
     if content_store.backend_name != "local":
         try:

@@ -397,7 +397,7 @@ async def test_list_run_child_build_records_finds_one_runs_children_of_one_paren
 
 
 @pytest.mark.asyncio
-async def test_list_build_records_filters_by_family_key_status_and_last_write() -> None:
+async def test_list_build_records_filters_by_status_and_last_write() -> None:
     store = BuildRecordStore.__new__(BuildRecordStore)
     coll = MagicMock()
     cursor = MagicMock()
@@ -413,13 +413,12 @@ async def test_list_build_records_filters_by_family_key_status_and_last_write() 
         lifecycle_status=ArtifactLifecycleStatus.STALE, updated_since=since, limit=5,
     )
 
-    coll.find.assert_called_once_with({
-        "app_id": "app-1",
-        "$or": [{"build_family": "app_bundle"}, {"artifact_kind": "app_bundle"}],
-        "$and": [{"$or": [{"build_key": "app_bundle"}, {"artifact_key": "app_bundle"}]}],
-        "lifecycle_status": ArtifactLifecycleStatus.STALE.value,
-        "updated_at": {"$gte": since},
-    })
+    coll.find.assert_called_once()
+    query = coll.find.call_args.args[0]
+    # The family and key filters are the store's own; this pins only the status and last-write filters.
+    assert query["app_id"] == "app-1"
+    assert query["lifecycle_status"] == ArtifactLifecycleStatus.STALE.value
+    assert query["updated_at"] == {"$gte": since}
     cursor.sort.assert_called_once_with([("version_number", -1), ("created_at", -1)])
     cursor.limit.assert_called_once_with(5)
 

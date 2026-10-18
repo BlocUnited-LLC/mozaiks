@@ -13,6 +13,7 @@ import os
 import stat
 import zipfile
 from asyncio import CancelledError, Lock, to_thread
+from collections.abc import Iterable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
 from datetime import UTC, datetime
 from difflib import unified_diff
@@ -85,7 +86,10 @@ from mozaiksai.control_plane.app_intelligence_jobs import (
 from mozaiksai.control_plane.contracts import RegistryRunState
 from mozaiksai.control_plane.dry_run import RefinementDryRunPlan, RefinementExecutionPlan
 from mozaiksai.control_plane.implementations.coding_worker import (
+    TEMPLATE_PACK_OUTPUT_GUIDANCE,
     newer_accepted_work,
+    pack_paths_owned_by,
+    parent_pack_output_owners,
     parent_workspace_pack_paths,
     resolve_coding_validation_strategy,
 )
@@ -3091,22 +3095,33 @@ class _InlineRunEffect(NamedTuple):
     draft_build_record_id: str | None = None
 
 
-#: Next step for an open draft that cannot be accepted. A refinement of a draft
-#: marks it stale, after which it can be neither rejected nor accepted; coding
-#: admission then counts it as closed once nothing made from it is open.
-_REJECT_OPEN_DRAFT = (
-    "Reject the draft to change that build again. If the draft is refined instead, it can no longer be "
-    "rejected; it stops blocking that build once nothing made from it is open."
+#: What an open draft that cannot be accepted still blocks, and the next step.
+#: The run marked its build stale, and nothing makes a stale build current
+#: again, rejection included. Ordinary refinements of that build go on, and a
+#: validated one can be accepted; only an app-owned pack-code change from it
+#: needs every draft made from it closed (coding admission's stale-parent
+#: rule), so rejecting this draft is the next step for that change. A
+#: refinement of the draft marks it stale, after which it can be neither
+#: rejected nor accepted; admission then counts it as closed once nothing made
+#: from it is open, unless a change request made from it took a workflow
+#: route, whose outcome is never on record: then only a newly accepted build
+#: lets that code change again.
+_OPEN_DRAFT_NEXT_STEP = (
+    "The build it was made from is now stale and stays stale, even after this draft is rejected; it can "
+    "still be refined, and a validated refinement of it accepted. Only changing that build's app-owned "
+    "capability code (such as a pack's workspace handler) needs this draft closed first: reject the draft. "
+    "If the draft is refined instead, it can no longer be rejected; it stops blocking that change once "
+    "nothing made from it is open, unless a refinement of it took a workflow route (even one whose launch "
+    "failed), which keeps it open: then accept a new build of the app before changing its app-owned "
+    "capability code."
 )
 #: What the trigger tells the user when an inline run's outcome is unresolved.
 _UNRESOLVED_CHANGE_DETAILS = {
     "validation_pending": (
-        "Validation of this draft did not complete, so it cannot be accepted. The build it was made from is "
-        f"invalidated while the draft is open. {_REJECT_OPEN_DRAFT}"
+        f"Validation of this draft did not complete, so it cannot be accepted. {_OPEN_DRAFT_NEXT_STEP}"
     ),
     "validation_skipped": (
-        "Validation of this draft was skipped, so it cannot be accepted. The build it was made from is "
-        f"invalidated while the draft is open. {_REJECT_OPEN_DRAFT}"
+        f"Validation of this draft was skipped, so it cannot be accepted. {_OPEN_DRAFT_NEXT_STEP}"
     ),
     "child_lookup_failed": (
         "Whether this run stored a draft could not be read, so the build it was made from is invalidated "
@@ -3137,8 +3152,10 @@ async def _inline_run_baseline_effect(
       (``_enforce_artifact_validation_gate``) and nothing validates a stored
       child again, so it can never be accepted, but until it is rejected it is
       the run's open output. It counts as a change, and the trigger reports it
-      as unresolved: rejecting the draft is the supported next step, after
-      which coding admission can admit a retry bound to the same build.
+      as unresolved (``_OPEN_DRAFT_NEXT_STEP``): the build stays stale, its
+      ordinary refinements go on, and before an app-owned pack-code change
+      from it the draft must be rejected, after which coding admission can
+      admit that change as a retry bound to the same build.
     * A FAILED child is terminal and durable (refused at acceptance, never
       validated again), and a rejected one is closed: no change.
     * A lookup that fails, or a child the result names that the store does
@@ -3271,14 +3288,14 @@ async def _require_unchanged_confirmation_baseline(
 ) -> None:
     """Refuse a confirmation whose build changed after the proposal, or was overtaken by newer accepted work.
 
-    The proposal saved the build's state on its ChangeRequest (server-written,
-    unlike the pending decision). A build that was already STALE when the
-    decision was proposed, and has not been written since, is still what the
-    user agreed to change. A ChangeRequest proposed before that state was saved
-    has none: its build must not have been written since the ChangeRequest was
-    created. Every earlier proposal staled its build right after creating its
-    ChangeRequest, so such a decision is refused once; requesting the change
-    again saves the state and that proposal can be confirmed.
+    The proposal saved the build's state on its ChangeRequest
+    (``router_decision.baseline_state``, server-written, unlike the pending
+    decision). A build that was already STALE when the decision was proposed,
+    and has not been written since, is still what the user agreed to change.
+    A ChangeRequest with no saved state (recorded before Studio saved it, or
+    whose routing a workflow launch has since replaced) cannot show whether
+    its build changed, so its decision is refused; requesting the change
+    again saves the state, and that proposal can be confirmed.
 
     Newer accepted work is read as acceptance does
     (``coding_worker.newer_accepted_work``): within the build's family and key,
@@ -3296,18 +3313,21 @@ async def _require_unchanged_confirmation_baseline(
     """
     router_decision = getattr(change, "router_decision", None)
     recorded = router_decision.get("baseline_state") if isinstance(router_decision, dict) else None
-    if isinstance(recorded, dict):
-        changed = recorded != _baseline_state(source_version)
-    else:
-        proposed_at = _utc_instant(getattr(change, "created_at", None))
-        written_at = _utc_instant(source_version.updated_at)
-        changed = proposed_at is None or written_at is None or written_at >= proposed_at
     if source_version.lifecycle_status in _REMOVED_BASELINE_STATUSES:
         raise HTTPException(
             status_code=409,
             detail="The build this decision was proposed for was rejected or removed. Request the change again from a saved build.",
         )
-    if changed:
+    if not isinstance(recorded, dict):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "The change request this decision was proposed with saved no state of its build (it was recorded "
+                "before Studio saved that state, or a workflow route has since replaced its routing), so whether "
+                "the build changed since the proposal cannot be checked. Request the change again."
+            ),
+        )
+    if recorded != _baseline_state(source_version):
         raise HTTPException(
             status_code=409,
             detail="The build this decision was proposed for has changed since the proposal. Request the change again.",
@@ -3331,6 +3351,26 @@ async def _require_unchanged_confirmation_baseline(
             f"({newer.reason}). Request the change again from the app's latest accepted build."
         ),
     )
+
+
+def _refuse_template_pack_scope(template_pack_paths: frozenset[str], paths: Iterable[str]) -> None:
+    """Refuse, before any run, a refinement scope that selects a template-owned pack file of the saved parent.
+
+    Candidate admission keeps every template-owned output byte-identical to
+    the verified parent, so such a scope could only fail after the provider
+    ran. Ownership is the parent's verified pack ownership; when it cannot be
+    verified nothing is refused here, and candidate validation fails the
+    candidate instead.
+    """
+    selected = sorted(set(paths) & template_pack_paths)
+    if selected:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"This change would edit template-owned capability pack files ({', '.join(selected)}). "
+                f"{TEMPLATE_PACK_OUTPUT_GUIDANCE}. No files were changed."
+            ),
+        )
 
 
 def _require_server_proposed_scope(pending: dict[str, Any], change: Any, request: RefinementRequest) -> None:
@@ -3526,9 +3566,14 @@ async def trigger_workflow(
             )
         except (GenesisImportError, ValueError, OSError, ContentNotFoundError) as exc:
             raise HTTPException(status_code=409, detail="Selected imported Genesis source has no accepted owner review") from exc
-        # App-owned pack code of the saved parent: an inferred scope that would
-        # change it waits for confirmation, and changing it needs the current build.
-        workspace_pack_paths = parent_workspace_pack_paths(metadata.get("capability_packs") or [])
+        # The saved parent's verified pack ownership. App-owned pack code: an
+        # inferred scope that would change it waits for confirmation, and
+        # changing it needs the current build. Template-owned pack files: no
+        # refinement changes them, so a scope selecting one is refused before
+        # any run (the candidate admission check stays the backstop).
+        pack_owners = parent_pack_output_owners(metadata.get("capability_packs") or [])
+        workspace_pack_paths = pack_paths_owned_by(pack_owners, "workspace")
+        template_pack_paths = pack_paths_owned_by(pack_owners, "templates")
         # Filesystem roots and baseline contracts come from the saved version,
         # not from caller context or copied workbench metadata.
         safe_extra = {
@@ -3604,6 +3649,7 @@ async def trigger_workflow(
                 raise HTTPException(status_code=400, detail="Refinement file scope is not in the selected artifact")
             coding_payload = {**coding_payload, "files": {path: baseline_files[path] for path in explicit_paths}}
             trigger_payload["coding_request"] = coding_payload
+        _refuse_template_pack_scope(template_pack_paths, explicit_paths)
         if orchestration_control.coding_enabled() and isinstance(coding_payload, dict):
             try:
                 resolve_coding_validation_strategy(coding_payload.get("validation_strategy"))
@@ -3673,6 +3719,10 @@ async def trigger_workflow(
                         detail="This change could not be resolved within the selected files. Narrow the request, or clear the file limit to review a broader plan. No files were changed.",
                     )
                 if contract_surface_plan is not None:
+                    if template_pack_paths:
+                        _refuse_template_pack_scope(template_pack_paths, [
+                            path for surface in contract_surface_plan.surfaces for path in surface.affected_paths
+                        ])
                     registry_run_state = await _registry_run_state(
                         user_id=user_id, build_registry_id=build_registry_id, source_version=source_version,
                     )
@@ -3733,8 +3783,11 @@ async def trigger_workflow(
                 inline_binding = None
                 try:
                     coding_request, coding_decision = await orchestration_control.prepare_coding_request(
-                        coding_request, confirmation_required_paths=workspace_pack_paths or (),
+                        coding_request, confirmation_required_paths=workspace_pack_paths,
                     )
+                    _refuse_template_pack_scope(template_pack_paths, [
+                        *coding_decision.selected_paths, *(coding_request.files if coding_request is not None else ()),
+                    ])
                     harness_decision = coding_decision
                     if coding_request is not None:
                         baseline_files, skipped = _decode_text_bundle_entries(await _verified_app_bundle(source_version))

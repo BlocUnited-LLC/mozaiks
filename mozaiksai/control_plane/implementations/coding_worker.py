@@ -48,7 +48,6 @@ from mozaiksai.core.artifacts import (
 from mozaiksai.core.artifacts.content_store import get_artifact_content_store
 from mozaiksai.core.artifacts.models import (
     BuildRecord,
-    RefinementSessionStatus,
     canonical_bundle_archive_path,
     resolve_canonical_bundle_entry,
 )
@@ -93,6 +92,9 @@ _REGISTRY_RUN_REFUSALS = {
     "run_in_flight": "another run of this app was building when this run began",
     "unverified": "the app registry could not be read before this run began",
 }
+#: The way forward from a stale build no retry from it can resolve: a newly
+#: accepted build is current, and app-owned pack code is admitted against it.
+_ACCEPT_A_NEW_BUILD = "accept a new build of the app, then change its app-owned capability code from that build"
 
 
 def _upstream_families(family: str) -> list[str] | None:
@@ -113,14 +115,6 @@ def _upstream_families(family: str) -> list[str] | None:
     return sorted(upstream)
 
 
-def _made_current_at(record: BuildRecord) -> datetime | None:
-    """When a CURRENT record became current: its acceptance marker, else its creation (saved CURRENT)."""
-    acceptance = record.commit_metadata.metadata.get("acceptance")
-    if isinstance(acceptance, dict) and acceptance.get("accepted_at"):
-        return _utc_instant(acceptance["accepted_at"])
-    return _utc_instant(record.created_at)
-
-
 def _utc_instant(value: Any) -> datetime | None:
     if isinstance(value, str):
         try:
@@ -132,43 +126,71 @@ def _utc_instant(value: Any) -> datetime | None:
     return (value if value.tzinfo is not None else value.replace(tzinfo=UTC)).astimezone(UTC)
 
 
-async def _accepted_at(artifact_store: Any, *, app_id: str, record: BuildRecord) -> Any:
-    """When a build record was accepted, from what acceptance persisted, else None.
+def _accepted_at(record: BuildRecord) -> Any:
+    """When a build record was accepted, from its ``commit_metadata.metadata.acceptance`` marker; None without one.
 
     Staling overwrites a record's CURRENT status, so the status alone cannot
-    say whether a STALE build was ever accepted. The evidence, in order:
+    say whether a STALE build was ever accepted; the marker can. Studio's
+    acceptance, the staged-refinement acceptance and AppGenerator's genesis
+    save (which saves its parentless build CURRENT) write it in the same write
+    that makes the build current. A build cannot have been
+    accepted before it was saved, so the time is the marker's, or the
+    record's creation when that is later (the genesis save stamps its marker
+    just before the write that creates the record).
 
-    * ``commit_metadata.metadata.acceptance.accepted_at``, which Studio's
-      acceptance (and the staged-refinement acceptance) writes on the record;
-    * an app bundle with no parent that records its capability pack selection
-      (``capability_packs``, even an empty list): only AppGenerator's genesis
-      save writes one, and it saves it CURRENT, so it became current when it
-      was created;
-    * a refinement session whose result is the record and that acceptance
-      marked ACCEPTED (or a later promotion marked PROMOTED), for builds
-      accepted before the record carried the marker.
+    The marker is the only evidence. A record without one is not shown to
+    have been accepted, whatever else it records: a build accepted before
+    acceptance was recorded on the record (by an earlier Studio, or saved by
+    an earlier genesis save) cannot be verified and is refused where
+    acceptance must be shown, and is never reinterpreted from its shape or its
+    refinement sessions. Brownfield Genesis acceptance writes no marker
+    (``accept_genesis_build_record``), so once such a build is stale it is not
+    shown accepted either.
 
-    Returns the time, ``_ACCEPTED_AT_UNKNOWN`` when a session shows acceptance
-    without a time, or None when nothing shows the record was accepted.
+    Returns the time, ``_ACCEPTED_AT_UNKNOWN`` when a marker is present but its
+    time cannot be read, or None when there is no marker.
     """
-    metadata = record.commit_metadata.metadata
-    acceptance = metadata.get("acceptance")
-    if isinstance(acceptance, dict) and acceptance.get("accepted_at"):
-        return _utc_instant(acceptance["accepted_at"]) or _ACCEPTED_AT_UNKNOWN
-    if record.parent_build_record_id is None and isinstance(metadata.get("capability_packs"), list):
-        return _utc_instant(record.created_at) or _ACCEPTED_AT_UNKNOWN
-    sessions = await artifact_store.list_refinement_sessions(
-        app_id=app_id, result_build_record_id=record.id, limit=20,
-    )
-    accepted = [
-        session for session in sessions
-        if session.result_build_record_id == record.id
-        and session.status in {RefinementSessionStatus.ACCEPTED, RefinementSessionStatus.PROMOTED}
-    ]
-    if not accepted:
+    acceptance = record.commit_metadata.metadata.get("acceptance")
+    if acceptance is None:
         return None
-    times = [_utc_instant(session.ended_at) for session in accepted]
-    return min(times) if all(times) else _ACCEPTED_AT_UNKNOWN  # type: ignore[type-var]
+    marked = _utc_instant(acceptance.get("accepted_at")) if isinstance(acceptance, dict) else None
+    if marked is None:
+        return _ACCEPTED_AT_UNKNOWN
+    created = _utc_instant(record.created_at)
+    return max(marked, created) if created is not None else marked
+
+
+def _made_current_at(record: BuildRecord) -> Any:
+    """The earliest a CURRENT record can have become current: :func:`_accepted_at`, else its creation.
+
+    A CURRENT record without the acceptance marker was saved CURRENT by a
+    writer that records none (such as AgentGenerator's workflow bundles or the
+    App Intelligence index), made current by brownfield Genesis acceptance,
+    which writes none, or accepted before the marker existed. Which one cannot
+    be told, but none can have become current before it was created, so its
+    creation is used: ordering an accepted base from that earliest time reads
+    every record written since then and counts each acceptance from then on as
+    newer, which can only refuse more, never less.
+    """
+    accepted = _accepted_at(record)
+    if accepted is not None:
+        return accepted
+    return _utc_instant(record.created_at) or _ACCEPTED_AT_UNKNOWN
+
+
+def _became_current_by(record: BuildRecord) -> Any:
+    """The latest a CURRENT record can have become current: :func:`_accepted_at`, else its last write.
+
+    Without the acceptance marker, the write that made the record current was
+    no later than its last write (``updated_at``), so asking whether it became
+    current after a given time from that latest time refuses whenever it may
+    have; a record saved CURRENT and not written since has the same creation
+    and last-write time.
+    """
+    accepted = _accepted_at(record)
+    if accepted is not None:
+        return accepted
+    return _utc_instant(record.updated_at) or _ACCEPTED_AT_UNKNOWN
 
 
 #: Lifecycle states of a record that was never accepted: acceptance takes only a
@@ -183,13 +205,43 @@ NEWER_ACCEPTED_WORK_MAX_DEPTH = 32
 _NEWER_ACCEPTED_WORK_SCAN_LIMIT = 200
 
 
-async def _acceptance_of(artifact_store: Any, *, app_id: str, record: BuildRecord) -> Any:
-    """When a record became accepted work: CURRENT (since it was made current) or :func:`_accepted_at`; None if never."""
-    if record.lifecycle_status in _NEVER_ACCEPTED_STATES or record.lifecycle_status == ArtifactLifecycleStatus.DELETED:
+def _acceptance_of(record: BuildRecord) -> Any:
+    """When a record became accepted work, for ordering; None if nothing shows it ever was.
+
+    DRAFT, ARCHIVED and DELETED records were never accepted. A CURRENT record
+    is accepted work since it became current (:func:`_made_current_at`). A
+    SUPERSEDED record was current until another acceptance replaced it, so it
+    was accepted even when it carries no acceptance marker; then when is
+    unknown (``_ACCEPTED_AT_UNKNOWN``). Staling overwrites the status of drafts
+    and accepted builds alike, so a STALE record shows acceptance only by its
+    marker (:func:`_accepted_at`).
+    """
+    status = record.lifecycle_status
+    if status in _NEVER_ACCEPTED_STATES or status == ArtifactLifecycleStatus.DELETED:
         return None
-    if record.lifecycle_status == ArtifactLifecycleStatus.CURRENT:
-        return _made_current_at(record) or _ACCEPTED_AT_UNKNOWN
-    return await _accepted_at(artifact_store, app_id=app_id, record=record)
+    if status == ArtifactLifecycleStatus.CURRENT:
+        return _made_current_at(record)
+    accepted = _accepted_at(record)
+    if accepted is None and status == ArtifactLifecycleStatus.SUPERSEDED:
+        return _ACCEPTED_AT_UNKNOWN
+    return accepted
+
+
+async def _ancestor_ids(artifact_store: Any, *, app_id: str, record: BuildRecord, max_depth: int) -> frozenset[str]:
+    """The builds ``record`` was made from, following parent links, at most ``max_depth``; lookup errors propagate.
+
+    A parent that is not found, or a link back into the chain, ends the walk:
+    what could not be read is left out, so it is never counted as an ancestor.
+    """
+    found: list[str] = []
+    parent_id = record.parent_build_record_id
+    while parent_id and parent_id != record.id and parent_id not in found and len(found) < max_depth:
+        parent = await artifact_store.get_build_record(app_id=app_id, build_record_id=parent_id)
+        if parent is None:
+            break
+        found.append(parent.id)
+        parent_id = parent.parent_build_record_id
+    return frozenset(found)
 
 
 class NewerAcceptedWork(NamedTuple):
@@ -215,20 +267,30 @@ async def newer_accepted_work(
     the app's build here.
 
     The accepted base is the nearest record of the lineage, ``record`` itself
-    first and then its parents, that is CURRENT or shows acceptance
-    (:func:`_accepted_at`). Newer accepted work is a record of the scope that
-    is not in the lineage up to that base and that is CURRENT, or that is
-    STALE or SUPERSEDED and was accepted at or after the base was accepted
-    (an accepted build is marked stale once a refinement of it is stored, so
-    CURRENT alone does not show it). Every write to a record sets its
-    ``updated_at``, so only records written since the base was accepted are
-    read, newest first.
+    first and then its parents, that shows acceptance (:func:`_acceptance_of`:
+    CURRENT, SUPERSEDED, or carrying the acceptance marker). A CURRENT base
+    without the marker is ordered from its creation, the earliest it can have
+    become current (:func:`_made_current_at`), so the scan below reads more,
+    never less. Newer accepted work is a record of the scope that is not in
+    the lineage up to that base and that is CURRENT, or that is STALE or
+    SUPERSEDED and was accepted at or after the base was accepted (an accepted
+    build is marked stale once a refinement of it is stored, so CURRENT alone
+    does not show it). Every write to a record sets its ``updated_at``, so only
+    records written since the base was accepted are read, newest first.
+
+    A STALE record without the marker is not shown accepted and is passed
+    over. A SUPERSEDED record without one was accepted, at a time nothing
+    records, so it is never passed over as unaccepted: it is older work only
+    when its last write (the supersession) was no later than the base became
+    current, or when it is one of the builds the base was made from (whose
+    acceptance the base's own acceptance superseded); otherwise it refuses.
 
     Fails closed (``unverified``): a missing record or a lineage longer than
     ``max_depth`` before its accepted base; more CURRENT records, or records
     written since the base was accepted, than the scan bound; or an accepted
     record whose acceptance cannot be ordered against the base's (no base in
-    the lineage, or an acceptance with no known time). Lookup errors propagate.
+    the lineage, an acceptance with no known time, or a superseded record with
+    no acceptance marker as above). Lookup errors propagate.
     """
     family, key = record.build_family, record.build_key
     lineage: dict[str, BuildRecord] = {record.id: record}
@@ -236,7 +298,7 @@ async def newer_accepted_work(
     base_at: Any = None
     node = record
     while True:
-        accepted = await _acceptance_of(artifact_store, app_id=app_id, record=node)
+        accepted = _acceptance_of(node)
         if accepted is not None:
             base, base_at = node, accepted
             break
@@ -271,6 +333,7 @@ async def newer_accepted_work(
         return NewerAcceptedWork(
             "unverified", f"more than {limit} builds of {family}/{key} were written since its accepted base",
         )
+    base_ancestors: frozenset[str] | None = None
     for other in written:
         if other.id in lineage or other.lifecycle_status not in {
             ArtifactLifecycleStatus.STALE, ArtifactLifecycleStatus.SUPERSEDED,
@@ -279,14 +342,28 @@ async def newer_accepted_work(
         written_at = _utc_instant(other.updated_at)
         if since is not None and written_at is not None and written_at < since:
             continue  # last written before the base was accepted, so not accepted after it
-        other_at = await _accepted_at(artifact_store, app_id=app_id, record=other)
+        other_at = _acceptance_of(other)
         if other_at is None:
-            continue
+            continue  # STALE with no acceptance marker: not shown accepted
         if base is None:
             return NewerAcceptedWork(
                 "unverified",
                 f"build {other.id} was accepted, and nothing in this build's lineage shows an acceptance "
                 "to order it against",
+                other.id,
+            )
+        if _accepted_at(other) is None:
+            # Superseded, so once accepted, but with no marker saying when.
+            if since is not None and written_at is not None and written_at <= since:
+                continue  # superseded no later than the base became current, so accepted before it
+            if base_ancestors is None:
+                base_ancestors = await _ancestor_ids(artifact_store, app_id=app_id, record=base, max_depth=max_depth)
+            if other.id in base_ancestors:
+                continue  # a build the base was made from: work this lineage contains
+            return NewerAcceptedWork(
+                "unverified",
+                f"build {other.id} was superseded, so it was once accepted, but it carries no acceptance marker, "
+                f"so whether it was accepted after build {base.id} cannot be verified",
                 other.id,
             )
         if not isinstance(other_at, datetime) or not isinstance(base_at, datetime):
@@ -310,9 +387,11 @@ async def _open_work(artifact_store: Any, *, app_id: str, record: BuildRecord) -
     that draft stale, after which it can be neither accepted nor rejected and
     never becomes current; what was made from it is checked as the parent's
     other descendants are, and a change request made from it recorded as a
-    workflow route (launched, failed or abandoned) keeps it open. Open: a draft
-    whose validation passed, is pending or was skipped (``open_draft``: it can
-    be rejected), and any build that was accepted (``accepted``).
+    workflow route (launched, failed or abandoned) keeps it open for good,
+    since nothing records that workflow's outcome. Open: a draft whose
+    validation passed, is pending or was skipped (``open_draft``: it can be
+    rejected), and any build that was accepted (``accepted``: CURRENT,
+    SUPERSEDED, or STALE with the acceptance marker, :func:`_accepted_at`).
     """
     status = ArtifactLifecycleStatus(record.lifecycle_status)
     if status in {ArtifactLifecycleStatus.ARCHIVED, ArtifactLifecycleStatus.DELETED}:
@@ -323,7 +402,7 @@ async def _open_work(artifact_store: Any, *, app_id: str, record: BuildRecord) -
         return "open_draft", f"draft with validation {ArtifactValidationStatus(record.validation_status).value}"
     if status != ArtifactLifecycleStatus.STALE:
         return "accepted", f"was accepted and is {status.value}"
-    if await _accepted_at(artifact_store, app_id=app_id, record=record) is not None:
+    if _accepted_at(record) is not None:
         return "accepted", "was accepted and is now stale"
     limit = _STALE_PARENT_FAMILY_SCAN_LIMIT
     changes = await artifact_store.list_change_requests(app_id=app_id, build_record_id=record.id, limit=limit + 1)
@@ -333,7 +412,10 @@ async def _open_work(artifact_store: Any, *, app_id: str, record: BuildRecord) -
         decision = change.router_decision if isinstance(change.router_decision, dict) else {}
         mode = decision.get("execution_mode")
         if change.build_record_id == record.id and mode not in _INLINE_OR_DECISION_MODES:
-            return "workflow", f"is stale, and change request {change.id} made from it may have launched a workflow ({mode})"
+            return "workflow", (
+                f"is stale, and change request {change.id} made from it may have launched a workflow ({mode}), "
+                f"whose outcome is not on record; {_ACCEPT_A_NEW_BUILD}"
+            )
     return None
 
 
@@ -407,8 +489,8 @@ def pack_template_source(capability_packs: list[dict[str, Any]], path: str) -> s
     return None
 
 
-def parent_workspace_pack_paths(capability_packs: Any) -> frozenset[str] | None:
-    """App-owned pack extension paths a saved parent declares; None when unverifiable."""
+def parent_pack_output_owners(capability_packs: Any) -> dict[str, str] | None:
+    """The owners of a saved parent's verified pack outputs (:func:`pack_output_owners`); None when unverifiable."""
     from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
         ManagedCapabilityTemplateError,
     )
@@ -416,11 +498,29 @@ def parent_workspace_pack_paths(capability_packs: Any) -> frozenset[str] | None:
     if not isinstance(capability_packs, list) or any(not isinstance(pack, dict) for pack in capability_packs):
         return None
     try:
-        owners = pack_output_owners(capability_packs)
+        return pack_output_owners(capability_packs)
     except (ManagedCapabilityTemplateError, OSError, yaml.YAMLError) as exc:
         logger.warning("PARENT_PACK_OWNERSHIP_UNRESOLVED: %s", exc)
         return None
-    return frozenset(path for path, owner in owners.items() if owner == "workspace")
+
+
+def pack_paths_owned_by(owners: dict[str, str] | None, owner: str) -> frozenset[str]:
+    """The pack output paths ``owners`` assigns to ``owner``; none when ownership is unverified (None)."""
+    return frozenset(path for path, declared in (owners or {}).items() if declared == owner)
+
+
+def parent_workspace_pack_paths(capability_packs: Any) -> frozenset[str] | None:
+    """App-owned pack extension paths a saved parent declares; None when unverifiable."""
+    owners = parent_pack_output_owners(capability_packs)
+    return None if owners is None else pack_paths_owned_by(owners, "workspace")
+
+
+#: What to do instead of changing a template-owned pack output: the supported paths.
+TEMPLATE_PACK_OUTPUT_GUIDANCE = (
+    "Template-owned capability pack files are rendered from the pack's verified templates, so a refinement "
+    "cannot change them: customize the app through its own files (an app-owned page, component or route, or "
+    "a pack's app-owned extension file such as a workspace handler), or upgrade the pack"
+)
 
 
 def resolve_coding_validation_strategy(raw: str | None) -> str:
@@ -813,8 +913,10 @@ class ScopedRefinementCodingWorker:
 
         * no build of its build family and key is CURRENT (the scope accepting
           supersedes in), and the parent is STALE;
-        * it was accepted (:func:`_accepted_at`) and no build of that scope
-          was accepted after it (:func:`newer_accepted_work`);
+        * it carries the acceptance marker (:func:`_accepted_at`; a stale
+          build without one, including one accepted before acceptance was
+          recorded on builds, is not shown accepted) and no build of that
+          scope was accepted after it (:func:`newer_accepted_work`);
         * attribution: its ``invalidation_reason`` names a change request made
           from it by this user, recorded as an inline run or a returned
           decision (never a workflow route), that saved the parent's state
@@ -836,8 +938,9 @@ class ScopedRefinementCodingWorker:
           pack's artifact dependency graph is unchanged since the parent was
           accepted. A recorded input (``canonical_inputs_version``) must still
           be CURRENT; any other CURRENT record must have become current no
-          later than the parent was accepted; a family that is STALE with no
-          CURRENT record refuses.
+          later than the parent was accepted, judged by the latest it can have
+          (:func:`_became_current_by`: its acceptance marker, else its last
+          write); a family that is STALE with no CURRENT record refuses.
 
         The retry stays bound to this parent, the authenticated user and the
         explicit or confirmed file scope checked by the caller. A lookup
@@ -874,11 +977,15 @@ class ScopedRefinementCodingWorker:
             )
             if current:
                 return f"a build of this family and key is current: {current[0]}"
-            accepted_at = await _accepted_at(artifact_store, app_id=app_id, record=parent)
+            accepted_at = _accepted_at(parent)
             if accepted_at is None:
-                return "nothing shows the parent was ever accepted"
+                return (
+                    "nothing shows the parent was ever accepted: it carries no acceptance marker, so it is a draft "
+                    "that was never accepted, or a build accepted before acceptance was recorded on it, which cannot "
+                    f"be verified; {_ACCEPT_A_NEW_BUILD}"
+                )
             if not isinstance(accepted_at, datetime):
-                return "the parent's acceptance time is unknown"
+                return f"the parent's acceptance time is unknown; {_ACCEPT_A_NEW_BUILD}"
             newer = await newer_accepted_work(artifact_store, app_id=app_id, record=parent)
             if newer is not None:
                 return (
@@ -970,10 +1077,17 @@ class ScopedRefinementCodingWorker:
             decision = change.router_decision if isinstance(change.router_decision, dict) else {}
             mode = decision.get("execution_mode")
             if mode not in _INLINE_OR_DECISION_MODES:
-                return f"change request {link} that invalidated the parent may have launched a workflow ({mode})"
+                return (
+                    f"change request {link} that invalidated the parent may have launched a workflow ({mode}), "
+                    f"whose outcome is not on record; {_ACCEPT_A_NEW_BUILD}"
+                )
             state = decision.get("baseline_state")
             if not isinstance(state, dict) or state.get("build_record_id") != parent.id:
-                return f"change request {link} that invalidated the parent saved no state of it when it began"
+                return (
+                    f"change request {link} that invalidated the parent saved no state of it when it began: it was "
+                    "recorded before change requests saved the state of their build, so what it changed cannot be "
+                    f"resolved; {_ACCEPT_A_NEW_BUILD}"
+                )
             if not runs.get(link):
                 return f"change request {link} that invalidated the parent has no inline run on record"
             for session in runs[link]:
@@ -1002,7 +1116,10 @@ class ScopedRefinementCodingWorker:
         for change_id, change in sorted(made_from_parent.items()):
             decision = change.router_decision if isinstance(change.router_decision, dict) else {}
             if change_id not in chain and decision.get("execution_mode") not in _INLINE_OR_DECISION_MODES:
-                return f"change request {change_id} made from the parent may have launched a workflow"
+                return (
+                    f"change request {change_id} made from the parent may have launched a workflow, whose outcome "
+                    f"is not on record; {_ACCEPT_A_NEW_BUILD}"
+                )
         return None
 
     @staticmethod
@@ -1026,8 +1143,10 @@ class ScopedRefinementCodingWorker:
             for record in current:
                 if record.id == recorded.get(name):
                     continue
-                made_current = _made_current_at(record)
-                if made_current is None or made_current > accepted_at:
+                made_current = _became_current_by(record)
+                if not isinstance(made_current, datetime):
+                    return f"when input {name} {record.id} became current is unknown"
+                if made_current > accepted_at:
                     return f"input {name} {record.id} became current after the parent was accepted"
             if not current and await artifact_store.list_build_records(
                 app_id=app_id, build_family=name, lifecycle_status=ArtifactLifecycleStatus.STALE, limit=1,
@@ -1045,7 +1164,9 @@ class ScopedRefinementCodingWorker:
     ) -> dict[str, Any]:
         """Hold the candidate to the saved parent's pack ownership before validation.
 
-        Template-owned outputs stay byte-identical to the verified parent. An
+        Template-owned outputs stay byte-identical to the verified parent
+        (Studio refuses a scope that selects one before any run; this is the
+        backstop for every candidate, whatever chose its scope). An
         app-owned (``owner: workspace``) output may change only inside an
         explicit or user-confirmed selected-file scope, from the app's accepted
         current build (the CURRENT record of the parent's build family and key,
@@ -1077,8 +1198,9 @@ class ScopedRefinementCodingWorker:
         if drifted:
             raise CandidateAdmissionError(
                 "PACK_TEMPLATE_OUTPUT_CHANGED",
-                "template-owned capability pack outputs must stay byte-identical to the verified parent",
-                paths=drifted,
+                "template-owned capability pack outputs must stay byte-identical to the verified parent "
+                "(customize through app-owned files or a pack upgrade)",
+                paths=drifted, supported_path=TEMPLATE_PACK_OUTPUT_GUIDANCE,
             )
         module_roots = {
             "/".join(path.split("/")[:2]) + "/" for path in owners if path.startswith("modules/")

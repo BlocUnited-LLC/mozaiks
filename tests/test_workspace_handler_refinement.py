@@ -90,6 +90,9 @@ PRIVILEGED_HANDLER = TEMPLATE_HANDLER + '''
         )
 '''
 BINDING = RunBuildBinding(build_registry_id="registry_1", target_app_id=APP_ID, build_id="refine_1", phase="refinement")
+#: The acceptance marker AppGenerator's genesis save writes on the parentless build it saves CURRENT,
+#: stamped just before the save (so the build's acceptance time is its creation).
+GENESIS_ACCEPTANCE = {"accepted_by": "owner", "accepted_at": "2026-01-01T00:00:00Z"}
 _FUTURE = "from __future__ import annotations\n\n"
 # A literal the template input contract (module.yaml thread_type enum [group, direct]) never admits.
 FORGED_SUPPORT_HANDLER = TEMPLATE_HANDLER + '''
@@ -149,7 +152,8 @@ class _Store:
             id="parent", app_id=app_id, build_family="app_bundle", build_key="app_bundle",
             version_number=1, lineage_root_id="parent", lifecycle_status=ArtifactLifecycleStatus.CURRENT,
             commit_metadata={"author_user_id": "owner", "metadata": {
-                "capability_packs": deepcopy(_packs()), **(metadata or BINDING.model_dump()),
+                "capability_packs": deepcopy(_packs()), "acceptance": dict(GENESIS_ACCEPTANCE),
+                **(metadata or BINDING.model_dump()),
             }},
         )}
         self.created = []
@@ -257,14 +261,20 @@ def _routing(refinement, change_class="patch"):
     )
 
 
-async def _prepared(harness, baseline, paths, *, extra=None, **options):
-    """Mirror Studio: resolve the scope, then bind the run and baseline."""
+async def _prepared(harness, baseline, paths, *, extra=None, confirmation_required_paths=None):
+    """Mirror Studio: resolve the scope (naming the parent's app-owned pack paths), then bind the run and baseline."""
+    from mozaiksai.control_plane.implementations.coding_worker import parent_workspace_pack_paths
+
     refinement = _refinement(**(extra or {}))
     request = harness.build_coding_request(
         refinement_request=refinement, routing_decision=_routing(refinement),
         payload={"files": {path: baseline[path] for path in paths}},
     )
-    prepared, decision = await harness.prepare_coding_request(request, **options)
+    if confirmation_required_paths is None:
+        confirmation_required_paths = parent_workspace_pack_paths(_packs())
+    prepared, decision = await harness.prepare_coding_request(
+        request, confirmation_required_paths=confirmation_required_paths,
+    )
     if prepared is None:
         return None, decision
     return prepared.model_copy(update={"run_build_binding": BINDING, "baseline_files": baseline}), decision
@@ -353,6 +363,10 @@ async def test_explicit_patch_outside_the_extension_contract_is_rejected_without
     result = await harness.execute_coding_request(request)
     assert result.status == "failed" and result.error.startswith(code)
     assert result.metadata["candidate_admission"]["code"] == code
+    if code == "PACK_TEMPLATE_OUTPUT_CHANGED":
+        # The backstop for any scope Studio did not refuse first names the supported path.
+        assert "pack upgrade" in result.error
+        assert "upgrade the pack" in result.metadata["candidate_admission"]["supported_path"]
     if code == "STALE_REFINEMENT_BASELINE":
         assert result.metadata["candidate_admission"]["accepted_build_record_id"] == (accepted or None)
     validate.assert_not_awaited()
@@ -396,8 +410,8 @@ async def test_inferred_scope_waits_for_confirmation_before_changing_the_handler
     assert [action.action_id for action in decision.actions] == ["apply_proposed_scope", "clarify_scope"]
     assert decision.metadata["confirmation_required_paths"] == [HANDLER]
 
-    # A caller that skipped that routing still cannot apply an inferred scope.
-    prepared, decision = await harness.prepare_coding_request(inferred)
+    # A caller that names no protected paths still cannot apply an inferred scope.
+    prepared, decision = await harness.prepare_coding_request(inferred, confirmation_required_paths=())
     assert decision.decision_type == "auto_patch" and prepared.metadata["scope_origin"] == "auto_proposal"
     result = await harness.execute_coding_request(prepared.model_copy(update={
         "run_build_binding": BINDING, "baseline_files": baseline,
@@ -840,7 +854,9 @@ def _studio_flow(
     parent = _artifact_version(
         artifact_version_id="parent", zip_path=archive, lifecycle_status=ArtifactLifecycleStatus.CURRENT,
     )
+    # The AppGenerator genesis build: saved CURRENT, with its pack selection and acceptance marker.
     parent.commit_metadata.metadata["capability_packs"] = deepcopy(_packs())
+    parent.commit_metadata.metadata["acceptance"] = dict(GENESIS_ACCEPTANCE)
     store.records["parent"] = parent
     if accepted != "parent":
         store.supersede_parent_with(accepted)
@@ -1062,7 +1078,8 @@ def test_a_stored_child_invalidates_its_parent_unless_its_validation_failed(monk
     # Unresolved, stated explicitly: in the response and on the run's refinement session.
     assert body["coding_worker"]["status"] == "planned"
     assert unresolved["reason"] == f"validation_{outcome}" and unresolved["draft_build_record_id"] == child.id
-    assert unresolved["baseline_build_record_id"] == "parent" and "Reject the draft" in unresolved["detail"]
+    assert unresolved["baseline_build_record_id"] == "parent" and "reject the draft" in unresolved["detail"]
+    assert "stays stale" in unresolved["detail"] and "workflow route" in unresolved["detail"]
     (session,) = flow.store.refinement_sessions
     assert session["status"] == RefinementSessionStatus.PENDING and session["metadata"]["unresolved_change"] == unresolved
     # It never becomes current: acceptance refuses it.
@@ -1442,8 +1459,7 @@ def test_a_decision_proposed_for_an_already_stale_build_can_be_confirmed(monkeyp
 
 
 @pytest.mark.parametrize("case", [
-    "restaled_after_proposal", "newer_current_build", "removed", "current_lookup_failed",
-    "legacy_written_after_proposal", "legacy_unchanged",
+    "restaled_after_proposal", "newer_current_build", "removed", "current_lookup_failed", "no_baseline_state",
 ])
 def test_a_confirmation_is_refused_only_when_its_build_changed_or_was_replaced(monkeypatch, tmp_path, case):
     flow = _studio_flow(
@@ -1474,16 +1490,12 @@ def test_a_confirmation_is_refused_only_when_its_build_changed_or_was_replaced(m
         flow.store.list_build_records = AsyncMock(side_effect=RuntimeError("store unavailable"))
         expected = "could not be checked against the app's current build"
     else:
-        # A ChangeRequest proposed before the build's state was saved on it.
+        # A ChangeRequest with no saved state of its build (one recorded before Studio saved it) cannot
+        # show whether the build changed, even when the build was never written since: refused, never
+        # compared by some other rule.
         del change.router_decision["baseline_state"]
-        change.created_at = datetime.now(UTC)
-        if case == "legacy_written_after_proposal":
-            # Every earlier proposal invalidated its build right after writing its ChangeRequest.
-            parent = flow.store.records["parent"]
-            flow.store.records["parent"] = parent.model_copy(update={
-                "invalidation_reason": f"change_request:{change.id}", "updated_at": change.created_at + timedelta(seconds=1),
-            })
-            expected = "has changed since the proposal"
+        assert flow.store.records["parent"].updated_at < datetime.now(UTC)
+        expected = "saved no state of its build"
     response = flow.confirm(decision)
     if expected is None:
         assert response.status_code == 200 and response.json()["coding_worker"]["status"] == "validated", response.text
@@ -1598,32 +1610,52 @@ def test_a_stale_parent_is_admitted_only_as_the_latest_accepted_build(monkeypatc
         assert flow.store.records[retried["metadata"]["build_record_id"]].parent_build_record_id == admitted
 
 
-@pytest.mark.parametrize("evidence", ["refinement_session", "none"])
-def test_a_build_accepted_before_the_acceptance_marker_is_recognized_by_its_refinement_session(
-    monkeypatch, tmp_path, evidence,
+def _without_acceptance_marker(store, record_id):
+    """The record as a build accepted before acceptance was recorded on builds would be: no marker."""
+    record = store.records[record_id]
+    metadata = {key: value for key, value in record.commit_metadata.metadata.items() if key != "acceptance"}
+    store.records[record_id] = record.model_copy(update={
+        "commit_metadata": record.commit_metadata.model_copy(update={"metadata": metadata}),
+    })
+
+
+def test_a_stale_build_without_the_acceptance_marker_is_not_shown_accepted_even_with_an_accepted_session(
+    monkeypatch, tmp_path,
 ):
-    """A build accepted earlier carries no ``acceptance`` marker; its ACCEPTED refinement session shows it."""
+    """Only the ``metadata.acceptance`` marker shows a stale build was accepted.
+
+    A build accepted before the marker was written keeps an ACCEPTED refinement
+    session, but that is not acceptance evidence: the stale build is refused
+    as unverifiable, with the way forward, before validation.
+    """
     flow = _studio_flow(monkeypatch, tmp_path, outputs=[{PAGE: _page(1)}, {PAGE: _page(2)}, {HANDLER: NORMALIZING_HANDLER}])
     first = flow.trigger({"files": {PAGE: ""}}).json()["coding_worker"]["metadata"]["build_record_id"]
     assert flow.accept(first).status_code == 200
-    record = flow.store.records[first]
-    assert record.commit_metadata.metadata["acceptance"]["accepted_at"]
-    metadata = {key: value for key, value in record.commit_metadata.metadata.items() if key != "acceptance"}
-    flow.store.records[first] = record.model_copy(update={
-        "commit_metadata": record.commit_metadata.model_copy(update={"metadata": metadata}),
-    })
+    assert flow.store.records[first].commit_metadata.metadata["acceptance"]["accepted_at"]
+    _without_acceptance_marker(flow.store, first)
     sessions = [session for session in flow.store.refinement_sessions if session.get("result_build_record_id") == first]
     assert [session["status"] for session in sessions] == [RefinementSessionStatus.ACCEPTED]
-    if evidence == "none":
-        flow.store.refinement_sessions.remove(sessions[0])
     second = flow.trigger({"files": {PAGE: ""}}, build_record_id=first).json()["coding_worker"]["metadata"]["build_record_id"]
     assert flow.reject(second).status_code == 200
     attempt = flow.trigger({"files": {HANDLER: ""}}, build_record_id=first).json()["coding_worker"]
-    if evidence == "refinement_session":
-        assert attempt["status"] == "validated", attempt
-    else:
-        # Nothing shows the STALE build was accepted, so it is refused as a draft would be.
-        assert attempt["metadata"]["candidate_admission"]["code"] == "STALE_REFINEMENT_BASELINE", attempt
+    _assert_stale_refusal(attempt, "nothing shows the parent was ever accepted")
+    assert "accept a new build of the app" in attempt["metadata"]["candidate_admission"]["stale_baseline_refusal"]
+    assert flow.validate.await_count == 2
+
+
+def test_a_genesis_build_without_the_acceptance_marker_is_not_shown_accepted_once_stale(monkeypatch, tmp_path):
+    """A genesis build saved before the genesis save recorded acceptance has only its pack selection: refused.
+
+    The marker the current genesis save writes is the evidence; a parentless
+    build that records ``capability_packs`` is not accepted by its shape.
+    """
+    flow = _studio_flow(monkeypatch, tmp_path, outputs=[{HANDLER: NORMALIZING_HANDLER}] * 2)
+    _rejected_handler_draft(flow)
+    _without_acceptance_marker(flow.store, "parent")
+    parent = flow.store.records["parent"]
+    assert parent.parent_build_record_id is None and parent.commit_metadata.metadata["capability_packs"] == _packs()
+    _assert_stale_refusal(_handler_attempt(flow), "nothing shows the parent was ever accepted")
+    assert flow.validate.await_count == 1
 
 
 def test_a_current_build_outside_its_lineage_still_refuses_the_retried_handler_child_at_acceptance(monkeypatch, tmp_path):
@@ -1679,11 +1711,14 @@ def _workflow_proposer():
     )
 
 
-def _upstream(record_id, *, family="design_docs", lifecycle=ArtifactLifecycleStatus.CURRENT, created_at=None):
+def _upstream(
+    record_id, *, family="design_docs", lifecycle=ArtifactLifecycleStatus.CURRENT, created_at=None, updated_at=None,
+):
+    """An input record, saved as given: with no ``updated_at``, last written when it was created."""
+    times = {} if created_at is None else {"created_at": created_at, "updated_at": updated_at or created_at}
     return BuildRecord(
         id=record_id, app_id="app_1", build_family=family, build_key=family, version_number=1,
-        lineage_root_id=record_id, lifecycle_status=lifecycle,
-        **({"created_at": created_at} if created_at is not None else {}),
+        lineage_root_id=record_id, lifecycle_status=lifecycle, **times,
     )
 
 
@@ -1720,20 +1755,27 @@ _UNATTRIBUTABLE_CASES = {
     # Another unresolved child, from another run, or open further down the lineage.
     "open_pending_child": "made from the parent is draft with validation pending, not rejected",
     "open_descendant": "made further down from the parent, is still open",
-    # A draft refined in review is stale and can no longer be rejected, but a workflow launched from it is unresolved.
+    # A draft refined in review is stale and can no longer be rejected, but a workflow launched from it is
+    # unresolved for good: only a newly accepted build lets app-owned code change again.
     "workflow_from_refined_draft": (
         "build refined_draft made from the parent is stale, and change request cr_from_draft made from it "
-        "may have launched a workflow (workflow)"
+        "may have launched a workflow (workflow), whose outcome is not on record; accept a new build of the app"
     ),
     # A newer accepted application: accepted after the parent, outside its lineage, and since left stale.
     "accepted_after_parent": "build accepted_elsewhere was accepted after the parent",
-    # The marker cannot be attributed to this app's own closed run.
-    "no_saved_state": "saved no state of it when it began",
+    # The marker cannot be attributed to this app's own closed run. A change request recorded before change
+    # requests saved their build's state fails closed, naming the cause and the way forward.
+    "no_saved_state": (
+        "saved no state of it when it began: it was recorded before change requests saved the state of their "
+        "build, so what it changed cannot be resolved; accept a new build of the app"
+    ),
     "no_run_on_record": "has no inline run on record",
     "another_user": "was made by another user",
     "stale_before_it_began": "the parent was already stale when change request cr_1 began",
     # Genuine upstream invalidation: an input changed after the parent was accepted, or is stale.
     "input_accepted_since": "input design_docs dd_2 became current after the parent was accepted",
+    # Saved before the parent was accepted but made current (no marker) only after: its last write decides.
+    "input_made_current_since": "input design_docs dd_2 became current after the parent was accepted",
     "input_stale": "input design_docs is stale with no current build",
     "recorded_input_replaced": "input design_docs dd_1 the parent was built from is no longer current",
     # Unreadable or unbounded records refuse.
@@ -1805,6 +1847,8 @@ def test_a_rejected_drafts_stale_parent_is_refused_unless_nothing_else_is_open_i
         }
     elif case == "input_accepted_since":
         store.records["dd_2"] = _upstream("dd_2", created_at=later)
+    elif case == "input_made_current_since":
+        store.records["dd_2"] = _upstream("dd_2", created_at=parent.created_at - timedelta(hours=1), updated_at=later)
     elif case == "input_stale":
         store.records["dd_1"] = _upstream("dd_1", lifecycle=ArtifactLifecycleStatus.STALE)
     elif case == "recorded_input_replaced":
@@ -2762,3 +2806,224 @@ async def test_stale_ui_only_child_compares_app_owned_code_past_the_text_decoder
     else:
         assert (PROVENANCE_ONLY if layout.startswith("provenance") else HANDLER) in rejected.value.detail
     assert store.accepted == [] and store.records == before
+
+
+# --- Acceptance evidence and newer accepted work: every fail-closed branch decides on its own. ---
+
+_T0 = datetime(2026, 10, 1, tzinfo=UTC)
+
+
+def _at(seconds):
+    return _T0 + timedelta(seconds=seconds)
+
+
+def _evidence_record(
+    record_id, *, parent=None, status=ArtifactLifecycleStatus.STALE, accepted=None, created=0, written=None, version=1,
+):
+    """An app bundle record; ``accepted`` is its acceptance marker's time (seconds after T0, or a raw value)."""
+    metadata = {}
+    if accepted is not None:
+        stamp = _at(accepted).isoformat() if isinstance(accepted, int | float) else accepted
+        metadata["acceptance"] = {"accepted_by": "demo-user", "accepted_at": stamp}
+    return BuildRecord(
+        id=record_id, app_id=APP_ID, build_family="app_bundle", build_key="app_bundle", version_number=version,
+        parent_build_record_id=parent, lineage_root_id=parent or record_id, lifecycle_status=status,
+        validation_status=ArtifactValidationStatus.PASSED, commit_metadata={"metadata": metadata},
+        created_at=_at(created), updated_at=_at(created if written is None else written),
+    )
+
+
+def _evidence_store(*records):
+    store = _Store()
+    store.records = {record.id: record for record in records}
+    return store
+
+
+_STALE, _DRAFT = ArtifactLifecycleStatus.STALE, ArtifactLifecycleStatus.DRAFT
+_CURRENT, _SUPERSEDED = ArtifactLifecycleStatus.CURRENT, ArtifactLifecycleStatus.SUPERSEDED
+
+_NEWER_WORK_CASES = {
+    # No build in the lineage shows acceptance, and another build was accepted: it cannot be ordered.
+    "accepted_without_a_base": (
+        [_evidence_record("p", status=_STALE, written=5), _evidence_record("v", parent="p", status=_DRAFT, created=6),
+         _evidence_record("x", status=_STALE, accepted=3, created=1, written=4)],
+        ("unverified", "nothing in this build's lineage shows an acceptance to order it against"),
+    ),
+    # An acceptance marker whose time cannot be read.
+    "unknown_acceptance_time": (
+        [_evidence_record("p", accepted=1, written=5), _evidence_record("v", parent="p", status=_DRAFT, created=6),
+         _evidence_record("x", accepted="not a time", created=2, written=6)],
+        ("unverified", "when build x was accepted, relative to build p, is unknown"),
+    ),
+    # Superseded, so accepted once, with no marker saying when, and not a build the base was made from.
+    "superseded_without_marker": (
+        [_evidence_record("p", accepted=1, written=5), _evidence_record("v", parent="p", status=_DRAFT, created=6),
+         _evidence_record("x", status=_SUPERSEDED, created=2, written=7)],
+        ("unverified", "build x was superseded, so it was once accepted, but it carries no acceptance marker"),
+    ),
+    # The build the base was made from, superseded by the base's own acceptance (written just after its stamp).
+    "superseded_without_marker_ancestor": (
+        [_evidence_record("a", status=_SUPERSEDED, written=10),
+         _evidence_record("b", parent="a", status=_CURRENT, accepted=9, created=5, written=10, version=2),
+         _evidence_record("v", parent="b", status=_DRAFT, created=11, version=3)],
+        None,
+    ),
+    # Superseded at the instant a parentless base was saved CURRENT, its marker stamped just before that save.
+    "superseded_when_the_base_was_saved": (
+        [_evidence_record("x", status=_SUPERSEDED, written=5),
+         _evidence_record("g", status=_CURRENT, accepted=4.5, created=5, version=2),
+         _evidence_record("v", parent="g", status=_DRAFT, created=6, version=3)],
+        None,
+    ),
+    # A stale draft with no marker (refined in review) was never accepted.
+    "stale_draft_never_accepted": (
+        [_evidence_record("p", accepted=1, written=5), _evidence_record("v", parent="p", status=_DRAFT, created=6),
+         _evidence_record("x", parent="p", status=_STALE, created=2, written=7)],
+        None,
+    ),
+    # A CURRENT base with no marker is ordered from its creation, the earliest it can have become current.
+    "unmarked_current_base_ordered_from_creation": (
+        [_evidence_record("b", status=_CURRENT, created=0, written=10),
+         _evidence_record("v", parent="b", status=_DRAFT, created=11),
+         _evidence_record("x", status=_STALE, accepted=5, created=4, written=12)],
+        ("accepted", "build x was accepted after build b"),
+    ),
+    "lineage_cycle": (
+        [_evidence_record("v", parent="a", status=_DRAFT), _evidence_record("a", parent="v", status=_DRAFT)],
+        ("unverified", "its lineage returns to build v"),
+    ),
+    "missing_ancestor": (
+        [_evidence_record("v", parent="gone", status=_DRAFT)],
+        ("unverified", "build gone in its lineage was not found"),
+    ),
+    "lineage_past_bound": (
+        [_evidence_record("v", parent="d1", status=_DRAFT), _evidence_record("d1", parent="d2", status=_DRAFT),
+         _evidence_record("d2", parent="d3", status=_DRAFT), _evidence_record("d3", status=_DRAFT)],
+        ("unverified", "its lineage has more than 2 builds before one that was accepted"),
+    ),
+    "current_past_bound": (
+        [_evidence_record("c1", status=_CURRENT), _evidence_record("c2", status=_CURRENT),
+         _evidence_record("v", parent="c1", status=_DRAFT, created=6)],
+        ("unverified", "more than 1 builds of app_bundle/app_bundle are current"),
+    ),
+    "written_past_bound": (
+        [_evidence_record("p", accepted=1, written=5), _evidence_record("v", parent="p", status=_DRAFT, created=6),
+         _evidence_record("x", status=_STALE, created=2, written=7)],
+        ("unverified", "more than 1 builds of app_bundle/app_bundle were written since its accepted base"),
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(_NEWER_WORK_CASES))
+def test_newer_accepted_work_orders_only_what_acceptance_evidence_shows(monkeypatch, case):
+    from mozaiksai.control_plane.implementations import coding_worker
+
+    records, expected = _NEWER_WORK_CASES[case]
+    if case.endswith("_past_bound") and case != "lineage_past_bound":
+        monkeypatch.setattr(coding_worker, "_NEWER_ACCEPTED_WORK_SCAN_LIMIT", 1)
+    store = _evidence_store(*records)
+    found = asyncio.run(coding_worker.newer_accepted_work(
+        store, app_id=APP_ID, record=store.records["v"], max_depth=2 if case == "lineage_past_bound" else 32,
+    ))
+    if expected is None:
+        assert found is None, found
+        return
+    assert found is not None and found.kind == expected[0] and expected[1] in found.reason, found
+
+
+def test_only_the_acceptance_marker_shows_that_a_build_was_accepted():
+    from mozaiksai.control_plane.implementations.coding_worker import (
+        _ACCEPTED_AT_UNKNOWN,
+        _accepted_at,
+    )
+
+    def record(metadata):
+        return BuildRecord(
+            id="g", app_id=APP_ID, build_family="app_bundle", build_key="app_bundle", version_number=1,
+            lineage_root_id="g", lifecycle_status=_STALE, commit_metadata={"metadata": metadata}, created_at=_at(5),
+        )
+
+    assert _accepted_at(record({"acceptance": {"accepted_by": "demo-user", "accepted_at": _at(10).isoformat()}})) == _at(10)
+    # A marker stamped just before the save that created the record (the genesis save): accepted when created.
+    assert _accepted_at(record({"acceptance": {"accepted_by": "demo-user", "accepted_at": "2026-10-01T00:00:00Z"}})) == _at(5)
+    # The shape of a parentless genesis build is not evidence, nor is anything else but the marker.
+    assert _accepted_at(record({"capability_packs": []})) is None
+    assert _accepted_at(record({"capability_packs": _packs()})) is None
+    # A marker whose time cannot be read still shows acceptance, at an unknown time.
+    assert _accepted_at(record({"acceptance": {"accepted_by": "demo-user"}})) is _ACCEPTED_AT_UNKNOWN
+    assert _accepted_at(record({"acceptance": "accepted"})) is _ACCEPTED_AT_UNKNOWN
+
+
+def test_acceptance_refuses_a_version_whose_lineage_shows_no_acceptance_to_order_newer_work_against(
+    monkeypatch, tmp_path,
+):
+    """A genesis saved before the genesis save recorded acceptance is no accepted base once stale."""
+    flow = _studio_flow(monkeypatch, tmp_path, outputs=[{PAGE: _page(1)}, {PAGE: _page(2)}, {PAGE: _page(3)}])
+    _without_acceptance_marker(flow.store, "parent")
+
+    def page_child(build_record_id):
+        result = flow.trigger({"files": {PAGE: ""}}, build_record_id=build_record_id).json()["coding_worker"]
+        assert result["status"] == "validated", result
+        return result["metadata"]["build_record_id"]
+
+    first = page_child("parent")
+    # Nothing else was accepted yet, so there is nothing newer to order: accepted.
+    assert flow.accept(first).status_code == 200
+    page_child(first)  # a refinement of the accepted build marks it stale
+    sibling = page_child("parent")
+    refused = flow.accept(sibling)
+    assert refused.status_code == 409, refused.text
+    assert "to order it against" in refused.json()["detail"]
+    assert flow.store.status(sibling) == ArtifactLifecycleStatus.DRAFT and flow.store.accepted == [first]
+
+
+def test_acceptance_refuses_when_the_apps_current_builds_cannot_be_read(monkeypatch, tmp_path):
+    flow = _studio_flow(monkeypatch, tmp_path, outputs=[{PAGE: _page(1)}])
+    child = flow.trigger({"files": {PAGE: ""}}).json()["coding_worker"]["metadata"]["build_record_id"]
+    listed = flow.store.list_build_records
+
+    async def current_unreadable(**kwargs):
+        if kwargs.get("lifecycle_status") == ArtifactLifecycleStatus.CURRENT:
+            raise RuntimeError("store unavailable")
+        return await listed(**kwargs)
+
+    flow.store.list_build_records = current_unreadable
+    refused = flow.accept(child)
+    assert refused.status_code == 409, refused.text
+    assert refused.json()["detail"] == "The app's current build could not be read. No version was accepted."
+    assert flow.store.accepted == [] and flow.store.status(child) == ArtifactLifecycleStatus.DRAFT
+
+
+@pytest.mark.asyncio
+async def test_admission_refuses_when_the_apps_current_build_cannot_be_read(tmp_path):
+    baseline, store = _baseline(), _Store()
+    harness, validate = _harness(store, tmp_path, {HANDLER: NORMALIZING_HANDLER})
+    request, _ = await _prepared(harness, baseline, [HANDLER])
+    store.list_build_records = AsyncMock(side_effect=RuntimeError("store unavailable"))
+    result = await harness.execute_coding_request(request)
+    admission = result.metadata["candidate_admission"]
+    assert result.status == "failed" and admission["code"] == "STALE_REFINEMENT_BASELINE", result
+    assert admission["stale_baseline_refusal"] == "the app's current build could not be read (RuntimeError)"
+    validate.assert_not_awaited()
+    assert store.created == []
+
+
+TEMPLATE_PAGE = "ui/pages/custom/Messages.jsx"
+
+
+@pytest.mark.parametrize("scope", ["explicit", "inferred"])
+def test_a_scope_selecting_a_template_owned_pack_file_is_refused_before_any_run(monkeypatch, tmp_path, scope):
+    """No refinement can change a template-owned pack file, so Studio refuses such a scope before any provider call."""
+    flow = _studio_flow(
+        monkeypatch, tmp_path, outputs=[{TEMPLATE_PAGE: "export default function Messages() { return null; }\n"}],
+        proposer=_scope_proposer((TEMPLATE_PAGE,)) if scope == "inferred" else None,
+    )
+    response = flow.trigger({"files": {TEMPLATE_PAGE: ""}} if scope == "explicit" else {})
+    assert response.status_code == 409, response.text
+    detail = response.json()["detail"]
+    assert TEMPLATE_PAGE in detail and "customize the app through its own files" in detail
+    assert "upgrade the pack" in detail and "No files were changed" in detail
+    flow.provider.execute.assert_not_awaited()
+    flow.validate.assert_not_awaited()
+    assert flow.registry.begun == [] and flow.store.children() == [] and flow.store.change_requests == {}
+    assert flow.store.invalidations == [] and flow.store.current() == ["parent"]

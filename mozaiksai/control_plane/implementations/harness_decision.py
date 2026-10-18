@@ -107,8 +107,14 @@ class FirstPartyHarnessDecisionPolicy:
         proposal: ScopeProposal | None,
         selected_paths: list[str],
         explicit_scope: bool,
-        confirmation_required_paths: Collection[str] = (),
+        confirmation_required_paths: Collection[str],
     ) -> HarnessDecision:
+        """The decision for a resolved write scope.
+
+        ``confirmation_required_paths`` (the saved parent's app-owned pack
+        code, or ``()``) is required: an inferred scope that includes one of
+        them waits for the user's confirmation instead of applying.
+        """
         if explicit_scope:
             return HarnessDecision(
                 decision_type="auto_patch",

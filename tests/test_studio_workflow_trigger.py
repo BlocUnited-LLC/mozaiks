@@ -79,7 +79,7 @@ class _BaselineStore:
         ]
 
     async def list_refinement_sessions(self, **_):
-        """No refinement session of these builds was accepted."""
+        """No refinement sessions are recorded for these builds."""
         return []
 
 
@@ -2600,8 +2600,60 @@ def test_studio_trigger_endpoint_invokes_surface_regeneration_for_feature_change
     # The pending draft is reported as unresolved, with the supported next step, in the response and its session.
     assert unresolved["reason"] == "validation_pending" and unresolved["draft_build_record_id"] == "surface_child"
     assert unresolved["baseline_build_record_id"] == "av_456" and unresolved["baseline_invalidation_recorded"] is True
-    assert "cannot be accepted" in unresolved["detail"] and "Reject the draft" in unresolved["detail"]
+    assert unresolved["detail"] == studio_app._UNRESOLVED_CHANGE_DETAILS["validation_pending"]
+    assert "cannot be accepted" in unresolved["detail"] and "reject the draft" in unresolved["detail"]
     assert persisted_sessions[0]["metadata"]["unresolved_change"] == unresolved
+
+
+def test_a_surface_plan_that_would_edit_a_template_owned_pack_file_is_refused_before_the_run(
+    monkeypatch, _owned_build_target,
+):
+    """A planned surface that writes a template-owned pack file of the saved build is refused before any surface run."""
+    from mozaiksai.control_plane.contracts import ContractSurfacePlan, ContractSurfaceUpdate
+    from mozaiksai.core.auth import reset_auth_adapter
+
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+    reset_auth_adapter()
+    from mozaiksai.hosts import studio as studio_app
+
+    template_path = "app/modules/product/backend/handler.py"
+    plan = ContractSurfacePlan(
+        summary="Add export action to product module", change_class="feature", artifact_kind="app_bundle",
+        confidence=0.92,
+        surfaces=[ContractSurfaceUpdate(
+            kind="module_action", target_id="product", target_kind="module", affected_paths=[template_path],
+            dependency_order=0, rationale="Add export action handler", confidence=0.92,
+        )],
+    )
+    # The saved build's verified pack ownership declares that file as the pack template's.
+    monkeypatch.setattr(studio_app, "parent_pack_output_owners", lambda capability_packs: {template_path: "templates"})
+    harness = studio_app.get_orchestration_control_harness()
+    monkeypatch.setattr(harness._refinement_resolver, "_classifier", SimpleNamespace(classify=_async_classifier(
+        change_class="feature", rationale="Adding an export action extends the existing app bundle.",
+        confidence=0.92, signals=["new_capability", "app_extension"],
+    )))
+    monkeypatch.setattr(harness, "contract_surface_enabled", lambda: True)
+    monkeypatch.setattr(harness, "prepare_contract_surface_request", AsyncMock(return_value=(plan, None)))
+    execute = AsyncMock()
+    finalize = AsyncMock()
+    monkeypatch.setattr(harness, "execute_surface_plan", execute)
+    monkeypatch.setattr(harness, "finalize_surface_output", finalize)
+
+    response = TestClient(studio_app.app).post("/api/workflows/trigger", json={
+        "build_registry_id": "appreg_1", "trigger_source": "refinement",
+        "trigger_payload": {"refinement_request": {
+            "artifact_kind": "app_bundle", "artifact_key": "app_bundle", "artifact_version_id": "av_456",
+            "raw_user_request": "Add an export action to the product module", "source_surface": "app_build",
+        }},
+    })
+
+    assert response.status_code == 409, response.text
+    detail = response.json()["detail"]
+    assert template_path in detail and "upgrade the pack" in detail and "No files were changed" in detail
+    execute.assert_not_awaited()
+    finalize.assert_not_awaited()
+    _owned_build_target.begin_refinement_run.assert_not_awaited()
 
 
 @pytest.mark.asyncio
