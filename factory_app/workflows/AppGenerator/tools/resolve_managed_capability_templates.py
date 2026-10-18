@@ -16,7 +16,10 @@ from factory_app.workflows._shared.surface_ownership import SurfaceOwnershipRule
 from mozaiksai.core.runtime.app.provenance import resolve_build_timestamp
 from mozaiksai.core.session.build_context import (
     BuildContextError,
+    discover_pack_descriptors,
     iter_context_assets,
+    load_build_context,
+    resolve_build_context_root,
     resolve_context_asset_path,
 )
 from mozaiksai.core.session.build_context_schema import validate_pack_context
@@ -83,9 +86,15 @@ AUTHORITY_FACTORY_BUILD_CONTEXT = "factory_build_context"
 AUTHORITY_INSTALLED = "installed"
 # Version and digest pins on the selected row, which the source matched.
 AUTHORITY_SELECTED_PINS = "selected_pins"
+# The workspace build-context registry: a pack directly under the trusted build_context_root
+# whose context.yaml registers it (what load_trusted_build_context projects), at the row's version.
+AUTHORITY_WORKSPACE_BUILD_CONTEXT = "workspace_build_context"
 PACK_AUTHORITIES: frozenset[str] = frozenset({
-    AUTHORITY_FACTORY_BUILD_CONTEXT, AUTHORITY_INSTALLED, AUTHORITY_SELECTED_PINS,
+    AUTHORITY_FACTORY_BUILD_CONTEXT, AUTHORITY_INSTALLED, AUTHORITY_SELECTED_PINS, AUTHORITY_WORKSPACE_BUILD_CONTEXT,
 })
+# Keys some readers once took as a pack id. No producer of capability_packs rows emits them, so a
+# row that names its pack only under one of them is malformed (never silently a non-selection).
+NON_CANONICAL_PACK_ID_KEYS: tuple[str, ...] = ("capability_id", "module_id")
 # The identity a verified selection records and returns to callers.
 PACK_IDENTITY_FIELDS: tuple[str, ...] = ("pack_id", "version", "digest", "source", "resolution", "authority")
 # Registered pack sources of the AppBuildPlan schema: a row with one of them selects a pack.
@@ -135,7 +144,7 @@ def claims_pack(pack: dict[str, Any]) -> bool:
 
 
 def pack_identity(entry: dict[str, Any]) -> dict[str, str]:
-    """The recorded identity of a verified selection: ``{pack_id, version, digest, source, resolution}``."""
+    """The recorded identity of a verified selection (:data:`PACK_IDENTITY_FIELDS`)."""
     return {key: str(entry[key]) for key in PACK_IDENTITY_FIELDS}
 
 
@@ -717,6 +726,39 @@ def _context_build_context_root(context_variables: Any | None) -> Path | None:
     return None
 
 
+def _workspace_build_context_root(context_variables: Any | None) -> Path | None:
+    """The trusted workspace build-context root, or None when none names an existing directory.
+
+    The context's ``build_context_root`` when it carries one; otherwise the
+    root :func:`load_trusted_build_context` itself registers packs from at
+    launch (``resolve_build_context_root``: ``MOZAIKS_BUILD_CONTEXT_PATH``,
+    else ``MOZAIKS_APP_WORKSPACE_PATH``/build_context).
+    """
+    root = _context_build_context_root(context_variables)
+    if root is None:
+        try:
+            root = resolve_build_context_root()
+        except BuildContextError:
+            return None
+    return root.resolve() if root is not None and root.is_dir() else None
+
+
+def _workspace_registration_refusal(root: Path, pack_id: str) -> str | None:
+    """Why ``root``, directly under the workspace build-context root, is not its registered pack ``pack_id``.
+
+    None when its ``context.yaml`` passes the build-context schema and
+    projects an active pack descriptor with that id, which is what
+    :func:`load_trusted_build_context` registers from it.
+    """
+    try:
+        descriptors = discover_pack_descriptors(root, load_build_context(root / "context.yaml"))
+    except BuildContextError as exc:
+        return f"its context.yaml does not register a pack: {exc}"
+    if not any(str(descriptor.get("id") or "") == pack_id for descriptor in descriptors):
+        return f"its context.yaml registers no active pack '{pack_id}'"
+    return None
+
+
 class _ResolvedSource:
     """Where a selected row's source was found, before its bytes are verified.
 
@@ -794,16 +836,25 @@ def _installed_pins(installed: dict[str, Any]) -> dict[str, str]:
 
 
 def _explicit_source(
-    pack: dict[str, Any], raw_path: Any, *, pack_id: str, build_context_root: Path | None,
+    pack: dict[str, Any],
+    raw_path: Any,
+    *,
+    pack_id: str,
+    build_context_root: Path | None,
+    workspace_root: Path | None,
 ) -> _ResolvedSource:
     """Resolve a row's own ``pack_source_path``, naming what vouches for it.
 
-    Without pins, only two sources are trusted: a pack the installed package's
-    shipped catalog holds (a direct child of
-    ``resolve_factory_app_root()/build_context``), and the source of the
-    installed Community Component with the row's id, which workspace state
-    verified against its pinned version and digest. Any other directory must
-    be selected with matching ``version`` and ``digest`` pins; its own
+    Without both pins, only three sources are trusted: a pack the installed
+    package's shipped catalog holds (a direct child of
+    ``resolve_factory_app_root()/build_context``); the source of the installed
+    Community Component with the row's id, which workspace state verified
+    against its pinned version and digest; and a pack registered directly under
+    the trusted workspace build-context root (:func:`_workspace_build_context_root`),
+    whose ``context.yaml`` projects an active pack with the row's id, selected
+    with the ``version`` its registration declares (the build-context
+    projection carries it; the fresh digest is recorded). Any other directory
+    must be selected with matching ``version`` and ``digest`` pins; its own
     contract never vouches for itself.
     """
     if not pack_id:
@@ -819,17 +870,54 @@ def _explicit_source(
     installed = _installed_descriptor(pack_id, build_context_root)
     if installed is not None and Path(str(installed["pack_source_path"])).resolve() == root:
         return _ResolvedSource(str(root), RESOLUTION_EXPLICIT, AUTHORITY_INSTALLED, _installed_pins(installed))
+    workspace_refusal = None
+    if workspace_root is not None and root.parent == workspace_root:
+        workspace_refusal = _workspace_registration_refusal(root, pack_id)
+        if workspace_refusal is None:
+            if not _has_value(pack.get("version")):
+                raise PackIntegrityError(
+                    f"Selected pack '{pack_id}' names the workspace build-context pack {root} without the version "
+                    "its registration declares. Select it with the version its context.yaml declares, as the "
+                    "build-context projection does, so the fresh source is compared with it. An unverified pack "
+                    "is never admitted."
+                )
+            return _ResolvedSource(str(root), RESOLUTION_EXPLICIT, AUTHORITY_WORKSPACE_BUILD_CONTEXT)
     if all(_has_value(pack.get(key)) for key in ("version", "digest")):
         return _ResolvedSource(str(root), RESOLUTION_EXPLICIT, AUTHORITY_SELECTED_PINS)
     missing = [key for key in ("version", "digest") if not _has_value(pack.get(key))]
+    workspace = (
+        f"not a pack registered directly under the workspace build context ({workspace_root}"
+        + (f"; it is directly under it, but {workspace_refusal}" if workspace_refusal else "")
+        + ")"
+        if workspace_root is not None
+        else "not in a workspace build context (no build_context_root, MOZAIKS_BUILD_CONTEXT_PATH or "
+        "MOZAIKS_APP_WORKSPACE_PATH names an existing build_context directory)"
+    )
     raise PackIntegrityError(
         f"Selected pack '{pack_id}' names the external source {root} without "
         f"{' and '.join(missing)} pin{'s' if len(missing) > 1 else ''}. A pack_source_path outside the installed "
         "factory catalog"
         + (f" ({catalog})" if catalog is not None else " (resolve_factory_app_root() resolved nothing)")
-        + " and outside the workspace's verified installed components must be selected with the version and "
-        "digest its bytes verify to. Pin the selection, install the pack into the workspace build context, or "
-        "select a pack the installed factory catalog ships. An unverified pack is never admitted."
+        + f", outside the workspace's verified installed components and {workspace} must be selected with the "
+        "version and digest its bytes verify to. Pin the selection, register or install the pack in the "
+        "workspace build context, or select a pack the installed factory catalog ships. An unverified pack is "
+        "never admitted."
+    )
+
+
+def _non_canonical_pack_id_refusal(pack: dict[str, Any]) -> str | None:
+    """The diagnostic for a row that names its pack only under a non-canonical key; None otherwise."""
+    if selected_pack_id(pack):
+        return None
+    named = [(key, str(pack[key]).strip()) for key in NON_CANONICAL_PACK_ID_KEYS if str(pack.get(key) or "").strip()]
+    if not named:
+        return None
+    keys = ", ".join(f"{key} {value!r}" for key, value in named)
+    return (
+        f"Malformed capability_packs row: it names a pack only under {keys}, which no pack selection uses. A row "
+        "names its pack under 'id' (or 'pack_id', or an AppBuildPlan row's 'capability_pack_id'), and no "
+        "producer of capability_packs rows emits this shape: correct the caller that built it. The row selects "
+        "nothing until it is corrected, and it is never silently ignored."
     )
 
 
@@ -870,10 +958,12 @@ def _resolve_selected_pack_source(
 ) -> _ResolvedSource | None:
     """Find a selected row's source, in order, without copying local paths into AppBuildPlan.
 
-    1. ``explicit``: the row's own ``pack_source_path``, trusted without pins
-       only inside the installed factory catalog or as the verified source of
-       the installed component with the row's id; any other directory needs
-       matching ``version`` and ``digest`` pins (:func:`_explicit_source`).
+    1. ``explicit``: the row's own ``pack_source_path``, trusted without both
+       pins only inside the installed factory catalog, as the verified source
+       of the installed component with the row's id, or as a pack registered
+       directly under the trusted workspace build-context root (selected with
+       its registered version); any other directory needs matching
+       ``version`` and ``digest`` pins (:func:`_explicit_source`).
     2. ``installed``: the workspace's installed component with the row's id,
        under ``build_context_root``, whose source workspace state verified
        against its pinned version and digest.
@@ -884,16 +974,23 @@ def _resolve_selected_pack_source(
 
     Each result names its authority (:data:`PACK_AUTHORITIES`). A row that
     claims a pack and resolves from none of these raises
-    :class:`PackIntegrityError`, as does an unpinned external source. Any
-    other unresolved row is not a pack selection and returns None. The caller
-    verifies the source's bytes.
+    :class:`PackIntegrityError`, as does an unpinned external source and a
+    malformed row that names its pack only under a non-canonical key
+    (:data:`NON_CANONICAL_PACK_ID_KEYS`). Any other unresolved row is not a
+    pack selection and returns None. The caller verifies the source's bytes.
     """
 
+    malformed = _non_canonical_pack_id_refusal(pack)
+    if malformed is not None:
+        raise PackIntegrityError(malformed)
     pack_id = selected_pack_id(pack)
     build_context_root = _context_build_context_root(context_variables)
     raw_path = pack.get("pack_source_path")
     if raw_path:
-        return _explicit_source(pack, raw_path, pack_id=pack_id, build_context_root=build_context_root)
+        return _explicit_source(
+            pack, raw_path, pack_id=pack_id, build_context_root=build_context_root,
+            workspace_root=_workspace_build_context_root(context_variables),
+        )
     installed = _installed_descriptor(pack_id, build_context_root)
     if installed is not None:
         return _ResolvedSource(
@@ -907,19 +1004,6 @@ def _resolve_selected_pack_source(
     raise PackIntegrityError(_unresolvable_pack_message(pack, pack_id, build_context_root))
 
 
-def resolved_pack_source_root(pack: dict[str, Any], *, context_variables: Any | None = None) -> Path | None:
-    """The source directory the canonical resolver selects for one row, before its bytes are verified.
-
-    The same resolution assembly applies (:func:`_resolve_selected_pack_source`):
-    None when the row selects no pack; :class:`PackIntegrityError` when a
-    claimed or external pack cannot be resolved to a trusted source. Callers
-    that act on the pack's contents verify them through
-    :func:`verified_selected_pack_sources`.
-    """
-    resolved = _resolve_selected_pack_source(pack, context_variables=context_variables)
-    return Path(resolved.path).resolve() if resolved is not None else None
-
-
 def _declared_capability_source(context_root: Path, pack_id: str) -> str:
     pack_block = _read_pack_context(context_root, pack_id).get("pack")
     return str((pack_block or {}).get("capability_source") or "").strip() if isinstance(pack_block, dict) else ""
@@ -930,18 +1014,25 @@ def _factory_contexts_root() -> Path | None:
     return (Path(factory_root) / "build_context").resolve() if factory_root is not None else None
 
 
-def _verified_selection(
+def verified_pack_selection(
     pack: dict[str, Any],
     *,
-    context_variables: Any | None,
+    context_variables: Any | None = None,
 ) -> dict[str, Any] | None:
     """Resolve and verify one selected row; None when it selects no pack.
 
-    The resolved source's fresh version and digest must equal any pins on the
-    row and, for an installed pack, the pins workspace state recorded. Digest
-    pins compare with :func:`compute_pack_digest` of the resolved source on
-    this host, over its raw bytes, so a pin is meaningful on the host (and
-    checkout) that recorded it.
+    The canonical per-row resolution (:func:`_resolve_selected_pack_source`)
+    followed by :func:`verify_pack_integrity`. The resolved source's fresh
+    version and digest must equal any pins on the row and, for an installed
+    pack, the pins workspace state recorded. Digest pins compare with
+    :func:`compute_pack_digest` of the resolved source on this host, over its
+    raw bytes, so a pin is meaningful on the host (and checkout) that recorded
+    it. The entry records the identity (:data:`PACK_IDENTITY_FIELDS`, with the
+    ``authority`` that vouched for it), ``source_path`` and the declared
+    ``capability_source``; a caller acts on the pack's contents only through
+    it. It does not check the selection's pack dependencies
+    (:func:`verified_selected_pack_sources` does). A row that claims a pack
+    and cannot be resolved or verified raises :class:`PackIntegrityError`.
     """
     resolved = _resolve_selected_pack_source(pack, context_variables=context_variables)
     if resolved is None:
@@ -1000,15 +1091,27 @@ def resolve_declared_pack_output_paths(
     outputs are preserved across regeneration).
     """
 
+    # Only a verified selection declares outputs; a claimed pack that does not resolve raises.
+    entries = [
+        entry for pack in capability_packs or [] if isinstance(pack, dict)
+        if (entry := verified_pack_selection(pack, context_variables=context_variables)) is not None
+    ]
+    return verified_pack_output_paths(entries, owner=owner)
+
+
+def verified_pack_output_paths(entries: list[dict[str, Any]], *, owner: str | None = None) -> frozenset[str]:
+    """Exact safe required_outputs paths of already verified selections, as :func:`resolve_declared_pack_output_paths`.
+
+    ``entries`` are verified selections (:func:`verified_pack_selection` or
+    :func:`verified_selected_pack_sources`), each keeping the identity and
+    authority that vouched for it, so a caller that verified a saved
+    selection reads its declared outputs without re-selecting rows from it.
+    """
     paths: set[str] = set()
-    for pack in capability_packs or []:
-        if not isinstance(pack, dict):
-            continue
-        # Only a verified selection declares outputs; a claimed pack that does not resolve raises.
-        entry = _verified_selection(pack, context_variables=context_variables)
-        if entry is None:
-            continue
+    for entry in entries:
         pack_id = entry["pack_id"]
+        if entry.get("authority") not in PACK_AUTHORITIES:
+            raise PackIntegrityError(f"Pack '{pack_id}' declared outputs require a verified selection with an authority")
         contract = _read_pack_contract(Path(entry["source_path"]))
         for index, output in enumerate(contract.get("required_outputs") or []):
             if not isinstance(output, dict) or not str(output.get("path") or "").strip():
@@ -1128,10 +1231,11 @@ def verified_selected_pack_sources(
     :func:`verify_pack_integrity` then computes a fresh version and digest,
     which any pins on the row must equal. Each entry records the identity
     (:data:`PACK_IDENTITY_FIELDS`, whose ``authority`` names what vouches for
-    it: the shipped catalog, verified installed state, or the selection's own
-    matching pins), ``source_path`` and the pack's declared
-    ``capability_source``. A claimed pack that resolves from none of these,
-    or an external source without both pins, raises
+    it: the shipped catalog, verified installed state, the workspace
+    build-context registry, or the selection's own matching pins),
+    ``source_path`` and the pack's declared ``capability_source``. A claimed
+    pack that resolves from none of these, or an external source without an
+    authority or both pins, raises
     :class:`PackIntegrityError`; a row that claims no pack and resolves from
     neither its own path nor installed state selects nothing and is left out.
     A pack selected by several rows is returned once, and only when they all
@@ -1150,7 +1254,7 @@ def verified_selected_pack_sources(
     for pack in capability_packs:
         if not isinstance(pack, dict):
             continue
-        entry = _verified_selection(pack, context_variables=context_variables)
+        entry = verified_pack_selection(pack, context_variables=context_variables)
         if entry is None:
             continue
         prior = by_id.get(entry["pack_id"])
@@ -1173,9 +1277,9 @@ def verified_pack_template_inventory(
     """Resolve dependency-closed templates and check fresh bytes against selected pins.
 
     Every entry carries the authority that vouched for its source (the shipped
-    catalog, verified installed state or matching selection pins); no other
-    source resolves, so only those packs can own a complete backend
-    implementation.
+    catalog, verified installed state, the workspace build-context registry or
+    matching selection pins); no other source resolves, so only those packs
+    can own a complete backend implementation.
     """
     inventory = []
     for entry in verified_selected_pack_sources(capability_packs, context_variables=context_variables):
@@ -1204,7 +1308,7 @@ def verified_template_module_ids(files: dict[str, str], inventory: list[dict[str
             if pack.get("authority") not in PACK_AUTHORITIES:
                 raise PackIntegrityError(
                     f"Pack '{pack['pack_id']}' complete backend requires a source the shipped catalog, verified "
-                    "installed state or matching selection pins vouch for"
+                    "installed state, the workspace build-context registry or matching selection pins vouch for"
                 )
             declared = {path: owner for path, owner in owners.items() if path.startswith(prefix)}
             template_paths = {path for path in rendered if path.startswith(prefix)}
@@ -1359,6 +1463,8 @@ __all__ = [
     "AUTHORITY_FACTORY_BUILD_CONTEXT",
     "AUTHORITY_INSTALLED",
     "AUTHORITY_SELECTED_PINS",
+    "AUTHORITY_WORKSPACE_BUILD_CONTEXT",
+    "NON_CANONICAL_PACK_ID_KEYS",
     "PACK_AUTHORITIES",
     "PACK_CLAIM_SOURCES",
     "PACK_IDENTITY_FIELDS",
@@ -1375,7 +1481,8 @@ __all__ = [
     "resolve_managed_capability_templates",
     "resolve_declared_pack_output_paths",
     "resolve_templates_for_pack",
-    "resolved_pack_source_root",
+    "verified_pack_output_paths",
+    "verified_pack_selection",
     "declared_output_owners",
     "selected_pack_id",
     "static_pack_templates",

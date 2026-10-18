@@ -1128,3 +1128,218 @@ async def test_the_acceptance_gate_applies_functional_pack_requirements_only_to_
         files=dict(files), context_variables={"app_id": "billing"}, capability_packs=[dict(HOSTED_MOZAIKSPAY_ROW)],
     )
     assert facade_missing(hosted), hosted["failed_tests"]
+
+
+# ------------------------------------------------------------------ workspace build-context operator packs
+
+
+def _workspace_operator_pack(workspace: Path, *, status: str = "active", source: Path = GREETINGS) -> Path:
+    """A pack (the greetings fixture by default) registered as an operator pack directly under a workspace build context."""
+    root = workspace / source.name
+    shutil.copytree(source, root, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    context = root / "context.yaml"
+    text = context.read_text(encoding="utf-8").replace(
+        "capability_source: generated_module", "capability_source: operator_pack",
+    )
+    context.write_text(text.replace("status: active", f"status: {status}"), encoding="utf-8")
+    return root
+
+
+def _registered_rows(workspace: Path) -> list[dict]:
+    """The capability_packs rows the trusted build-context loader projects for AppGenerator from the workspace."""
+    import yaml
+
+    from mozaiksai.core.session.build_context import load_trusted_build_context
+    from mozaiksai.core.workflow.context.authority import build_context_authority_policy
+
+    definitions = yaml.safe_load(
+        (BUILD_CONTEXT.parent / "workflows/AppGenerator/context_variables.yaml").read_text(encoding="utf-8"),
+    )["definitions"]
+    policy = build_context_authority_policy(workflow_name="AppGenerator", definitions=definitions)
+    return [dict(row) for row in load_trusted_build_context(policy, build_context_root=workspace)["capability_packs"]]
+
+
+def _workspace_root_from(monkeypatch, workspace: Path, root_from: str) -> dict | None:
+    """The trusted workspace root as a caller's build_context_root, or as the environment the launch loader reads."""
+    monkeypatch.delenv("MOZAIKS_APP_WORKSPACE_PATH", raising=False)
+    if root_from == "context":
+        monkeypatch.delenv("MOZAIKS_BUILD_CONTEXT_PATH", raising=False)
+        return {"build_context_root": str(workspace)}
+    monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(workspace))
+    return None
+
+
+@pytest.mark.parametrize("root_from", ["context", "environment"])
+def test_a_registered_workspace_operator_pack_assembles_and_validates_through_the_workspace_registry(
+    tmp_path, monkeypatch, root_from,
+):
+    """The documented flow: the projection carries pack_source_path and version, never a digest (the pack block
+    cannot hold one), and the workspace registry vouches for the pack; the fresh digest is recorded."""
+    from mozaiksai.control_plane.implementations.coding_worker import parent_workspace_pack_paths
+
+    workspace = tmp_path / "workspace" / "build_context"
+    root = _workspace_operator_pack(workspace)
+    [row] = _registered_rows(workspace)
+    assert (row["pack_source_path"], row["version"], row["capability_source"]) == (str(root), "0.1.0", "operator_pack")
+    assert "digest" not in row
+    context = _workspace_root_from(monkeypatch, workspace, root_from)
+    fresh = resolver.verify_pack_integrity(root, "greetings")
+    identity = {
+        **{key: fresh[key] for key in ("pack_id", "version", "digest", "source")},
+        "resolution": "explicit", "authority": "workspace_build_context",
+    }
+    [entry] = resolver.verified_selected_pack_sources([row], context_variables=context)
+    assert resolver.pack_identity(entry) == identity
+
+    contributions: list[dict] = []
+    files = {
+        item["filename"]: item["content"]
+        for item in resolver.resolve_managed_capability_templates(
+            [row], context_variables=context, ui_contributions=contributions,
+        )
+    }
+    files.update(compose_ui_registry(contributions, files))
+    assert "modules/greetings/module.yaml" in files and "ui/pages/custom/GreetingsPage.jsx" in files
+    resolved: list[dict] = []
+    errors = scanner.scan_generated_bundle(
+        files, capability_packs=[row], context_variables=context, resolved_capability_packs=resolved,
+    )
+    assert resolved == [identity]
+    assert not any(
+        "Selected CapabilityPack" in error or "verified template" in error or "template-owned output" in error
+        or "pack_provenance" in error
+        for error in errors
+    ), errors
+    # Studio refinement verifies the saved row the same way: only where the workspace root is the launch root.
+    owners = parent_workspace_pack_paths([row])
+    if root_from == "environment":
+        assert owners == frozenset({"modules/greetings/backend/handler.py"})
+    else:
+        assert owners is None
+
+
+def test_a_workspace_pack_selection_whose_version_differs_from_the_registry_fails(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace" / "build_context"
+    root = _workspace_operator_pack(workspace)
+    [row] = _registered_rows(workspace)
+    context = _workspace_root_from(monkeypatch, workspace, "context")
+    with pytest.raises(resolver.PackIntegrityError, match="selected version does not match freshly verified source"):
+        resolver.verified_selected_pack_sources([{**row, "version": "0.0.9"}], context_variables=context)
+    # The registry moved on after the selection was recorded: the recorded version no longer verifies.
+    manifest = root / "context.yaml"
+    manifest.write_text(manifest.read_text(encoding="utf-8").replace('version: "0.1.0"', 'version: "0.2.0"'), encoding="utf-8")
+    with pytest.raises(resolver.PackIntegrityError, match="selected version does not match freshly verified source"):
+        resolver.resolve_declared_pack_output_paths([row], context_variables=context)
+    errors = scanner.scan_generated_bundle({"app.json": "{}"}, capability_packs=[row], context_variables=context)
+    assert len(errors) == 1 and "does not match freshly verified source" in errors[0], errors
+    # A selection without the registered version is refused, never trusted on the registry alone.
+    unversioned = {key: value for key, value in row.items() if key != "version"}
+    with pytest.raises(resolver.PackIntegrityError, match="without the version its registration declares"):
+        resolver.verified_selected_pack_sources([unversioned], context_variables=context)
+
+
+def test_a_workspace_pack_outside_the_registry_needs_both_pins(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace" / "build_context"
+    root = _workspace_operator_pack(workspace)
+    [row] = _registered_rows(workspace)
+    context = _workspace_root_from(monkeypatch, workspace, "context")
+    elsewhere = tmp_path / "elsewhere" / "greetings"
+    nested = workspace / "vendor" / "greetings"
+    for copy in (elsewhere, nested):
+        shutil.copytree(root, copy)
+        selection = {**row, "pack_source_path": str(copy)}
+        with pytest.raises(resolver.PackIntegrityError, match="without digest pin") as refused:
+            resolver.verified_selected_pack_sources([selection], context_variables=context)
+        assert "not a pack registered directly under the workspace build context" in str(refused.value)
+        errors = scanner.scan_generated_bundle({"app.json": "{}"}, capability_packs=[selection], context_variables=context)
+        assert len(errors) == 1 and "An unverified pack is never admitted" in errors[0], errors
+        # With both pins the copy is an ordinary pinned external source.
+        [entry] = resolver.verified_selected_pack_sources([{**selection, **_pinned("greetings", copy)}], context_variables=context)
+        assert entry["authority"] == "selected_pins"
+    # Without a workspace root, the registered pack is an external source like any other.
+    monkeypatch.delenv("MOZAIKS_BUILD_CONTEXT_PATH", raising=False)
+    with pytest.raises(resolver.PackIntegrityError, match="not in a workspace build context"):
+        resolver.verified_selected_pack_sources([row])
+
+
+def test_an_inactive_workspace_registration_vouches_for_nothing(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace" / "build_context"
+    root = _workspace_operator_pack(workspace, status="inactive")
+    context = _workspace_root_from(monkeypatch, workspace, "context")
+    row = {"id": "greetings", "capability_source": "operator_pack", "pack_source_path": str(root), "version": "0.1.0"}
+    with pytest.raises(resolver.PackIntegrityError, match="registers no active pack 'greetings'"):
+        resolver.verified_selected_pack_sources([row], context_variables=context)
+
+
+# ------------------------------------------------------------------ planning reads only verified packs
+
+
+def test_planning_reads_a_selected_pack_only_after_the_resolver_verified_it(caplog):
+    """Pack-owned outputs, facades and managed contracts come only from a verified selection, never a fallback."""
+    from mozaiksai.core.workflow.generator_support import module_action_inventory as inventory
+
+    shipped = resolver.verify_pack_integrity(MOZAIKSPAY, "mozaikspay")
+    pinned = {**HOSTED_MOZAIKSPAY_ROW, "version": shipped["version"], "digest": shipped["digest"]}
+    [selected] = inventory._selected_packs({"capability_packs": [pinned]})
+    assert selected.identity == {
+        **{key: shipped[key] for key in ("pack_id", "version", "digest", "source")},
+        "resolution": "factory_build_context", "authority": "factory_build_context",
+    }
+    assert "ui/pages/pricing.yaml" in inventory.pack_owned_output_paths({"capability_packs": [pinned]})
+    assert "billing_portal" in inventory.managed_facade_actions({"capability_packs": [pinned]})
+
+    # A selection the resolver refuses (here a digest pin the source does not verify to) yields nothing to plan
+    # with: not its unverified source, not the projected operator contracts, not its inline facades.
+    caplog.set_level("WARNING", logger=inventory.__name__)
+    projected = [{"contract_id": "mozaikspay", "required_outputs": [{"path": "ui/pages/pricing.yaml", "owner": "templates"}]}]
+    facades = [{"module_id": "billing_portal", "pages": [{"primary_actions": ["list_plans"]}]}]
+    refused = {**pinned, "digest": "sha256:" + "0" * 64, "facades": facades}
+    context = {"capability_packs": [refused], "operator_contracts": projected}
+    assert inventory._selected_packs(context) == []
+    assert inventory.pack_owned_output_paths(context) == frozenset()
+    assert inventory.pack_facade_directories(context) == []
+    assert any("SELECTED_PACK_UNRESOLVED pack=mozaikspay" in record.getMessage() for record in caplog.records)
+    # What a managed pack owns (ownership, managed data, facade actions) is enforced from its contract, so a
+    # refused managed selection is never silently omitted there: it raises with the resolver's diagnostic.
+    for read in (inventory.managed_pack_contracts, inventory.managed_facade_actions):
+        with pytest.raises(ValueError, match="Selected managed pack 'mozaikspay' cannot be verified.*selected digest"):
+            read(context)
+
+    # A managed row that resolves nowhere grants no facade from its own inline declaration.
+    inline = {"id": "acme_pay", "capability_source": "managed_capability", "facades": facades}
+    with pytest.raises(ValueError, match="Selected managed pack 'acme_pay' cannot be verified"):
+        inventory.managed_pack_contracts({"capability_packs": [inline]})
+    # The id-only managed row's contracts are the shipped catalog's verified contract assets.
+    contracts = inventory.managed_pack_contracts({"capability_packs": [dict(HOSTED_MOZAIKSPAY_ROW)]})
+    assert "mozaikspay" in {contract["contract_id"] for contract in contracts}
+
+
+# ------------------------------------------------------------------ malformed rows
+
+
+@pytest.mark.parametrize("row", [
+    {"capability_id": "mozaikspay"},
+    {"module_id": "mozaikspay", "capability_source": "managed_capability"},
+    {"module_id": "orders", "capability_source": "generated_module"},
+], ids=["capability_id", "module_id_managed", "module_id_planned"])
+def test_a_row_naming_its_pack_only_under_a_non_canonical_key_is_refused_as_malformed(row, caplog):
+    """No producer emits such a row, so it is malformed: refused with a diagnostic, never silently a non-selection."""
+    from mozaiksai.core.workflow.generator_support import module_action_inventory as inventory
+
+    message = "Malformed capability_packs row: it names a pack only under"
+    with pytest.raises(resolver.PackIntegrityError, match=message):
+        resolver.verified_selected_pack_sources([dict(row)])
+    with pytest.raises(resolver.PackIntegrityError, match=message):
+        resolver.resolve_declared_pack_output_paths([dict(row)])
+    errors = scanner.scan_generated_bundle({"app.json": "{}"}, capability_packs=[dict(row)])
+    assert len(errors) == 1 and message in errors[0], errors
+    result = _hosted_facade(_hosted_mozaikspay_bundle(), [row])
+    assert not result.passed and result.resolved_capability_packs == []
+    caplog.set_level("WARNING", logger=inventory.__name__)
+    assert inventory.pack_owned_output_paths({"capability_packs": [dict(row)]}) == frozenset()
+    assert any(message in record.getMessage() for record in caplog.records)
+
+
+def test_a_canonical_id_beside_a_non_canonical_key_is_an_ordinary_selection():
+    [entry] = resolver.verified_selected_pack_sources([{"id": "mozaikspay", "module_id": "billing_portal"}])
+    assert (entry["pack_id"], entry["authority"]) == ("mozaikspay", "factory_build_context")

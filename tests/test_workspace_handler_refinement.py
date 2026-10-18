@@ -47,7 +47,10 @@ from mozaiksai.control_plane.contracts import (
     SurfacePlanExecutionResult,
 )
 from mozaiksai.control_plane.implementations import orchestration_control
-from mozaiksai.control_plane.implementations.coding_worker import ScopedRefinementCodingWorker
+from mozaiksai.control_plane.implementations.coding_worker import (
+    CandidateAdmissionError,
+    ScopedRefinementCodingWorker,
+)
 from mozaiksai.control_plane.implementations.refinement_router import (
     ChangeIntent,
     ImpactSet,
@@ -860,7 +863,7 @@ def _page(version):
 
 def _studio_flow(
     monkeypatch, tmp_path, *, outputs, proposer=None, accepted="parent", registry_current="parent", launches=False,
-    first_build=False,
+    first_build=False, capability_packs=None,
 ):
     """Studio's real trigger and acceptance routes, the real coding worker, and stateful stores.
 
@@ -869,7 +872,8 @@ def _studio_flow(
     registry run as a workflow does, and ``launched`` records it. The parent is
     AppGenerator's first build, already accepted through Studio (CURRENT, with
     the acceptance evidence that acceptance writes); with ``first_build`` it is
-    still the draft AppGenerator saved, with no evidence.
+    still the draft AppGenerator saved, with no evidence. ``capability_packs``
+    replaces the parent's saved pack selection (the catalog Messaging row).
     """
     from mozaiksai.control_plane.invalidation import ArtifactInvalidationService
     from mozaiksai.core.auth import reset_auth_adapter
@@ -893,7 +897,7 @@ def _studio_flow(
     )
     # AppGenerator's first build: saved as a draft with its pack selection; Studio's acceptance made it
     # current and wrote the evidence naming it.
-    parent.commit_metadata.metadata["capability_packs"] = deepcopy(_packs())
+    parent.commit_metadata.metadata["capability_packs"] = deepcopy(_packs() if capability_packs is None else capability_packs)
     if not first_build:
         parent.commit_metadata.metadata["acceptance"] = _acceptance_evidence(
             "parent", app_id="app_1", accepted_by="demo-user",
@@ -2707,7 +2711,8 @@ def test_workspace_handler_keeps_the_template_future_annotations_import():
 
 
 @pytest.mark.asyncio
-async def test_generator_owned_pack_outputs_are_not_template_owned(tmp_path, monkeypatch):
+@pytest.mark.parametrize("source", ["catalog_path", "pinned_external"])
+async def test_generator_owned_pack_outputs_are_not_template_owned(tmp_path, monkeypatch, source):
     import shutil
 
     from factory_app.workflows.AppGenerator.tools import (
@@ -2719,17 +2724,21 @@ async def test_generator_owned_pack_outputs_are_not_template_owned(tmp_path, mon
     )
     from tests.test_messaging_pack_persistence_composition import _context as pack_context
 
-    # The saved parent names the pack by its catalog path; this catalog ships the modified messaging pack.
-    factory_root = tmp_path / "factory_app"
-    root = factory_root / "build_context" / "messaging"
+    if source == "catalog_path":
+        # The saved parent names the pack by its catalog path; this catalog ships the modified messaging pack.
+        factory_root = tmp_path / "factory_app"
+        root = factory_root / "build_context" / "messaging"
+        monkeypatch.setattr(resolver, "resolve_factory_app_root", lambda: factory_root)
+    else:
+        # The saved parent selected an external copy with the pins its bytes verify to.
+        root = tmp_path / "external" / "messaging"
     shutil.copytree(PACK, root, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-    monkeypatch.setattr(resolver, "resolve_factory_app_root", lambda: factory_root)
     contract = root / "contract.yaml"
     generated = "config/messaging_digest.yaml"
     contract.write_text(contract.read_text(encoding="utf-8").replace(
         "forbidden_outputs:", f"  - path: {generated}\n    owner: generator\n\nforbidden_outputs:",
     ), encoding="utf-8")
-    packs = pack_context(root, pinned=False)["capability_packs"]
+    packs = pack_context(root, pinned=source == "pinned_external")["capability_packs"]
     owners = pack_output_owners(packs)
     assert owners[generated] == "generator"
     assert owners[HANDLER] == "workspace" and owners["modules/messages/backend/base_handler.py"] == "templates"
@@ -2746,6 +2755,180 @@ async def test_generator_owned_pack_outputs_are_not_template_owned(tmp_path, mon
         merged_files={generated: "digest: weekly\n"},
     )
     assert scope["changed_workspace_pack_paths"] == []
+
+
+def _pinned_external_messaging(tmp_path):
+    """The parent's selection of an external Messaging copy, with the version and digest its bytes verify to."""
+    import shutil
+
+    from tests.test_messaging_pack_persistence_composition import _context as pack_context
+
+    root = tmp_path / "external" / "messaging"
+    shutil.copytree(PACK, root, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    return pack_context(root, pinned=True)["capability_packs"]
+
+
+def _installed_messaging(tmp_path):
+    """The parent's selection as installed Community Component state describes it (pins on the row)."""
+    import shutil
+
+    from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
+        install_verified_local_pack,
+        resolve_installed_component_descriptors,
+    )
+
+    source, build_context_root = tmp_path / "installed_source" / "messaging", tmp_path / "build_context"
+    shutil.copytree(PACK, source, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    build_context_root.mkdir()
+    install_verified_local_pack(pack_source_path=source, build_context_root=build_context_root)
+    return resolve_installed_component_descriptors(build_context_root=build_context_root, selected_pack_ids=["messaging"])
+
+
+_PACK_SELECTIONS = {
+    "catalog": lambda tmp_path: _packs(),
+    "pinned_external": _pinned_external_messaging,
+    "installed_descriptor": _installed_messaging,
+}
+
+
+def _admission_request(paths, *, scope_origin=None):
+    metadata = {} if scope_origin is None else {"selected_file_paths": sorted(paths), "scope_origin": scope_origin}
+    return SimpleNamespace(
+        metadata=metadata, files=dict.fromkeys(paths, ""), app_id=APP_ID, artifact_app_id=APP_ID,
+        build_record_id="parent", build_family="app_bundle", build_key="app_bundle", user_id="owner",
+        registry_run_state=None,
+    )
+
+
+async def _admit(tmp_path, packs, applied, *, store=None, scope_origin=None):
+    worker = ScopedRefinementCodingWorker(
+        config_loader=_config, artifact_store=store or _Store(), output_root=tmp_path / "out",
+    )
+    return await worker._admit_pack_outputs(
+        request=_admission_request(applied, scope_origin=scope_origin), capability_packs=packs,
+        applied_files=applied, merged_files={**_baseline(), **applied},
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("selection", sorted(_PACK_SELECTIONS))
+@pytest.mark.parametrize(("case", "code"), [
+    ("policy_rewrite", "PACK_TEMPLATE_OUTPUT_CHANGED"),
+    ("undeclared_module_file", "PACK_MODULE_CLOSURE_CHANGED"),
+    ("unauthorized_handler", "WORKSPACE_PACK_OUTPUT_UNAUTHORIZED"),
+    ("stale_baseline_handler", "STALE_REFINEMENT_BASELINE"),
+    ("privileged_handler", "WORKSPACE_HANDLER_EXTENSION_REJECTED"),
+])
+async def test_pack_ownership_is_enforced_for_every_authority_the_parent_selected(tmp_path, selection, case, code):
+    """Pinned, installed and catalog selections keep their identities through admission, so every check applies.
+
+    The parent's rows are verified once, as saved (pins and authority kept),
+    and their declared outputs decide ownership: a pinned external pack's
+    template-owned policy cannot change, its module keeps its exact file set,
+    and its app-owned handler changes only in an explicit scope, from the
+    accepted current build, as a thin extension.
+    """
+    packs = _PACK_SELECTIONS[selection](tmp_path)
+    store, scope_origin = _Store(), None
+    if case == "policy_rewrite":
+        applied = {POLICY: (PACK / "templates" / POLICY).read_text(encoding="utf-8") + "\n# drift\n"}
+    elif case == "undeclared_module_file":
+        applied = {"modules/messages/backend/extra.py": "x = 1\n"}
+    elif case == "unauthorized_handler":
+        applied = {HANDLER: NORMALIZING_HANDLER}
+    elif case == "stale_baseline_handler":
+        applied, scope_origin = {HANDLER: NORMALIZING_HANDLER}, "explicit"
+        store.supersede_parent_with("newer_build")
+    else:
+        applied, scope_origin = {HANDLER: PRIVILEGED_HANDLER}, "explicit"
+    with pytest.raises(CandidateAdmissionError) as refused:
+        await _admit(tmp_path, packs, applied, store=store, scope_origin=scope_origin)
+    assert refused.value.details["code"] == code, refused.value.details
+    if code == "STALE_REFINEMENT_BASELINE":
+        assert refused.value.details["accepted_build_record_id"] == "newer_build"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("selection", sorted(_PACK_SELECTIONS))
+async def test_an_authorized_handler_change_is_admitted_for_every_authority(tmp_path, selection):
+    """The catalog Messaging pack, and the same pack pinned or installed, admit the explicit handler extension."""
+    from mozaiksai.control_plane.implementations.coding_worker import parent_workspace_pack_paths
+
+    packs = _PACK_SELECTIONS[selection](tmp_path)
+    assert parent_workspace_pack_paths(packs) == frozenset({HANDLER})
+    scope = await _admit(tmp_path, packs, {HANDLER: NORMALIZING_HANDLER}, scope_origin="explicit")
+    assert scope == {
+        "selected_file_paths": [HANDLER], "scope_origin": "explicit", "changed_workspace_pack_paths": [HANDLER],
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault", ["unpinned_external", "bytes_changed_since_saved", "unresolvable_claim"])
+async def test_an_unverifiable_saved_selection_refuses_every_candidate(tmp_path, fault, caplog):
+    """No ownership, no admission: a parent selection that cannot be verified never admits a candidate unchecked."""
+    from pathlib import Path
+
+    from mozaiksai.control_plane.implementations.coding_worker import parent_workspace_pack_paths
+
+    packs = _pinned_external_messaging(tmp_path)
+    if fault == "unpinned_external":
+        packs = [{key: value for key, value in packs[0].items() if key not in {"version", "digest"}}]
+    elif fault == "bytes_changed_since_saved":
+        source = Path(packs[0]["pack_source_path"]) / "templates" / POLICY
+        source.write_text(source.read_text(encoding="utf-8") + "\n# changed after the parent was saved\n", encoding="utf-8")
+    else:
+        packs = [{"id": "acme_messages", "capability_source": "operator_pack"}]
+    assert parent_workspace_pack_paths(packs) is None
+    for applied, scope_origin in (
+        ({PAGE: "export default function View() { return 'board'; }"}, "explicit"),
+        ({POLICY: "# rewritten\n"}, None),
+        ({HANDLER: PRIVILEGED_HANDLER}, None),
+    ):
+        with pytest.raises(CandidateAdmissionError) as refused:
+            await _admit(tmp_path, packs, applied, scope_origin=scope_origin)
+        details = refused.value.details
+        assert details["code"] == "PACK_OWNERSHIP_UNRESOLVED", details
+        assert details["paths"] == sorted(applied) and details["parent_build_record_id"] == "parent"
+        assert "cannot be resolved to verified sources" in details["message"]
+        assert "run an AppGenerator revision" in details["message"] and details["resolution_error"]
+    assert not [record for record in caplog.records if "CANDIDATE_PACK_OWNERSHIP_UNRESOLVED" in record.getMessage()]
+
+
+def test_studio_keeps_a_pinned_external_packs_ownership_from_proposal_to_acceptance(monkeypatch, tmp_path):
+    """Studio's route with a parent that selected a pinned external Messaging copy.
+
+    An inferred handler scope still waits for the owner's confirmation, a
+    change from a build that is no longer the accepted current build is
+    refused before the provider runs, and the explicit change from the accepted
+    build is validated and accepted.
+    """
+    packs = _pinned_external_messaging(tmp_path)
+    for name in ("inferred", "stale", "authorized"):
+        (tmp_path / name).mkdir()
+    flow = _studio_flow(
+        monkeypatch, tmp_path / "inferred", outputs=[{HANDLER: NORMALIZING_HANDLER}], proposer=_scope_proposer(),
+        capability_packs=packs,
+    )
+    asked = flow.trigger({}).json()
+    assert asked["harness_decision"]["decision_type"] == "clarify_scope", asked
+    flow.provider.execute.assert_not_awaited()
+
+    stale = _studio_flow(
+        monkeypatch, tmp_path / "stale", outputs=[{HANDLER: NORMALIZING_HANDLER}], accepted="newer_build",
+        capability_packs=packs,
+    )
+    refused = _handler_attempt(stale)
+    _assert_stale_refusal(refused, "build newer_build is the app's accepted current build")
+
+    authorized = _studio_flow(
+        monkeypatch, tmp_path / "authorized", outputs=[{HANDLER: NORMALIZING_HANDLER}], capability_packs=packs,
+    )
+    result = _handler_attempt(authorized)
+    assert result["status"] == "validated", (result.get("error"), result["metadata"].get("candidate_admission"))
+    child = authorized.store.records[result["metadata"]["build_record_id"]]
+    assert child.commit_metadata.metadata["refinement_scope"]["changed_workspace_pack_paths"] == [HANDLER]
+    assert child.commit_metadata.metadata["capability_packs"] == packs
+    assert authorized.accept(child.id).status_code == 200
 
 
 EMPTY_CONTRACT = {"version": "1", "surfaces": [], "shared_collections": []}

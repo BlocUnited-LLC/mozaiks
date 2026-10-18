@@ -1,27 +1,51 @@
 """Residual app data needs a domain owner, even when a selected facade is app-owned."""
 
+import os
 from copy import deepcopy
+from pathlib import Path
 
 import pytest
 import yaml
 
 from factory_app.workflows._shared.surface_ownership import normalize_surface_ownership
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
-from mozaiksai.core.workflow.context.frozen import detach
+
+
+@pytest.fixture(autouse=True)
+def _workspace_build_context(tmp_path, monkeypatch):
+    """The workspace build context the launch loader registers packs from (MOZAIKS_BUILD_CONTEXT_PATH)."""
+    workspace = tmp_path / "build_context"
+    workspace.mkdir()
+    monkeypatch.delenv("MOZAIKS_APP_WORKSPACE_PATH", raising=False)
+    monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(workspace))
+    return workspace
 
 
 def _context(facade_id="billing_portal", *, ownership_rules=(), platform_hints=()):
-    return ContextVariablesBridge({
-        "capability_packs": [{"id": "managed_billing", "capability_source": "managed_capability"}],
-        "operator_contracts": [{
-            "contract_id": "managed_billing",
-            # Facade declarations are authoritative even without ownership rules.
-            "surface_ownership": list(ownership_rules),
-            "facades": [{
-                "module_id": facade_id, "provider_module": "billing_provider",
-                "pages": [{"primary_actions": ["read_billing"]}],
-            }],
+    """managed_billing registered in the workspace build context and selected as the projection selects it."""
+    contract = {
+        "contract_id": "managed_billing", "contract_type": "build_pack_instructions",
+        # Facade declarations are authoritative even without ownership rules.
+        "surface_ownership": list(ownership_rules),
+        "facades": [{
+            "module_id": facade_id, "provider_module": "billing_provider",
+            "pages": [{"primary_actions": ["read_billing"]}],
         }],
+    }
+    root = Path(os.environ["MOZAIKS_BUILD_CONTEXT_PATH"]) / "managed_billing"
+    root.mkdir(exist_ok=True)
+    (root / "context.yaml").write_text(yaml.safe_dump({
+        "context_id": "managed_billing", "applies_to_workflows": ["DesignDocs", "AppGenerator"],
+        "assets": [{"kind": "contract", "path": "contract.yaml"}],
+        "pack": {"id": "managed_billing", "version": "1.0.0", "status": "active", "capability_source": "managed_capability"},
+    }), encoding="utf-8")
+    (root / "contract.yaml").write_text(yaml.safe_dump(contract), encoding="utf-8")
+    return ContextVariablesBridge({
+        "capability_packs": [{
+            "id": "managed_billing", "capability_source": "managed_capability", "version": "1.0.0",
+            "pack_source_path": str(root),
+        }],
+        "operator_contracts": [contract],
         "concept_blueprint": {"surface_candidate_hints": list(platform_hints)},
     })
 
@@ -80,23 +104,32 @@ def test_live_selected_facade_does_not_compete_for_residual_app_data(facade_id, 
     assert records[0]["split_collections"][0]["target_surface_id"] == "tasks"
 
 
-def test_live_facade_exclusion_loads_selected_pack_contract_from_source_path(tmp_path):
+def test_live_facade_exclusion_loads_selected_pack_contract_from_source_path():
+    """The facade comes from the verified source's own contract, not from a projected copy."""
     context = _context()
-    (tmp_path / "context.yaml").write_text(yaml.safe_dump({
-        "context_id": "managed_billing", "assets": [{"kind": "contract", "path": "contract.yaml"}],
-    }), encoding="utf-8")
-    (tmp_path / "contract.yaml").write_text(
-        yaml.safe_dump(detach(context.get("operator_contracts"))[0]), encoding="utf-8",
-    )
-    packs = detach(context.get("capability_packs"))
-    packs[0]["pack_source_path"] = str(tmp_path)
-    context.set("capability_packs", packs)
     context.set("operator_contracts", [])
     surface_map, data_contract = _design(_surface("tasks"), _surface("billing_portal", actions=["read_billing"]))
 
     normalize_surface_ownership(surface_map, context_variables=context, data_contract=data_contract)
 
     _assert_task_split(surface_map, data_contract, "preferences")
+
+
+@pytest.mark.parametrize("fault", ["unregistered", "id_only"])
+def test_an_unverifiable_selected_managed_pack_refuses_normalization(monkeypatch, fault):
+    """A managed selection the resolver cannot verify is never silently omitted, or replaced by its projection."""
+    context = _context()
+    if fault == "unregistered":
+        monkeypatch.delenv("MOZAIKS_BUILD_CONTEXT_PATH")
+    else:
+        context.set("capability_packs", [{"id": "managed_billing", "capability_source": "managed_capability"}])
+    surface_map, data_contract = _design(_surface("tasks"), _surface("billing_portal", actions=["read_billing"]))
+    submitted = deepcopy((surface_map, data_contract))
+
+    with pytest.raises(ValueError, match="Selected managed pack 'managed_billing' cannot be verified"):
+        normalize_surface_ownership(surface_map, context_variables=context, data_contract=data_contract)
+
+    assert (surface_map, data_contract) == submitted
 
 
 def test_live_two_domain_modules_still_reject_residual_ownership_atomically():

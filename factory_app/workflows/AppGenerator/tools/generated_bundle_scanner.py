@@ -38,6 +38,7 @@ from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templat
     AUTHORITY_FACTORY_BUILD_CONTEXT,
     AUTHORITY_INSTALLED,
     AUTHORITY_SELECTED_PINS,
+    AUTHORITY_WORKSPACE_BUILD_CONTEXT,
     ManagedCapabilityTemplateError,
     PackIntegrityError,
     declared_output_owners,
@@ -2486,6 +2487,11 @@ _PACK_REMEDIES = {
     ),
     AUTHORITY_SELECTED_PINS: (
         "Regenerate the bundle from the pinned source, or select the source and pins the bundle was built from."
+    ),
+    AUTHORITY_WORKSPACE_BUILD_CONTEXT: (
+        "This pack is registered in the workspace build context: run an AppGenerator revision (or regenerate the "
+        "app) so assembly re-materializes it at this version, or restore the registered pack the bundle was built "
+        "from."
     ),
 }
 

@@ -219,16 +219,38 @@ def test_invented_capability_is_dropped_and_the_plan_passes() -> None:
     validate_plan_origins(plan, context)
 
 
-def test_a_registered_managed_capability_is_kept() -> None:
+def _registered_provider_pack(workspace: Path) -> dict[str, Any]:
+    """A notifications_pack provider registered in the workspace build context, as the trusted loader projects it."""
+    import yaml
+
+    from mozaiksai.core.session.build_context import discover_pack_descriptors
+
+    root = workspace / "notifications_pack"
+    root.mkdir(parents=True)
+    config = {
+        "context_id": "notifications_pack", "applies_to_workflows": ["AppGenerator"],
+        "assets": [{"path": "contract.yaml", "kind": "contract"}],
+        "pack": {"id": "notifications_pack", "version": "1.0.0", "status": "active",
+                 "capability_source": "managed_capability"},
+    }
+    (root / "context.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+    (root / "contract.yaml").write_text(yaml.safe_dump({
+        "contract_id": "notifications_pack", "contract_type": "build_pack_instructions",
+    }), encoding="utf-8")
+    return discover_pack_descriptors(root, config)[0]
+
+
+def test_a_registered_managed_capability_is_kept(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Dropping is for capabilities with no provider, not for managed ones."""
     plan = _plan_with_an_invented_capability()
+    workspace = tmp_path / "build_context"
+    monkeypatch.delenv("MOZAIKS_APP_WORKSPACE_PATH", raising=False)
+    monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(workspace))
     context = _Context(
         {
             "design_surface_map": _design_surface_map(),
-            # A real provider pack exists for it, so it is legitimate.
-            "capability_packs": [
-                {"id": "notifications_pack", "capability_source": "managed_capability"}
-            ],
+            # A real provider pack is registered for it, so it is legitimate.
+            "capability_packs": [_registered_provider_pack(workspace)],
         }
     )
 

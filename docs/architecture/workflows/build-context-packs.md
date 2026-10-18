@@ -244,8 +244,9 @@ Canonical policy, schema, and CRUD synthesis still owns ordinary generated and
 partially templated modules, including OutcomeFeedback. A complete template
 implementation keeps its own actions and participant-aware policy only when
 dependency closure, current source identity, declared output closure, and exact
-template bytes are verified. The factory's shipped packs are trusted sources;
-external sources require matching version and digest pins, either on the
+template bytes are verified. The factory's shipped packs and the packs
+registered directly under the workspace build context are trusted sources;
+any other source requires matching version and digest pins, either on the
 selected pack or from installed Community Component state verified against the
 source's current bytes, and an external source without them is not resolved at
 all. A workspace-owned `backend/handler.py` may extend the
@@ -638,10 +639,20 @@ the source, and the resolved identity records which one did (`authority`):
 - `installed`: the source is the installed Community Component with the row's
   id, verified against the version and digest workspace state pinned, whether
   the row names it by id or by its source path;
+- `workspace_build_context`: the row's `pack_source_path` is a direct child of
+  the trusted workspace build-context root (the context's `build_context_root`,
+  else the root `load_trusted_build_context` registers packs from:
+  `MOZAIKS_BUILD_CONTEXT_PATH`, then `MOZAIKS_APP_WORKSPACE_PATH/build_context`)
+  whose `context.yaml` passes the build-context schema and projects an active
+  pack with the row's id. This is the documented operator-pack flow: the
+  build-context projection (`normalize_pack_descriptor`) carries the pack's
+  `pack_source_path` and `version` but no digest, because the pack block
+  cannot hold one. The row must carry that `version`, which is compared with
+  the fresh source, and the fresh digest is recorded;
 - `selected_pins`: any other `pack_source_path` (a directory outside the
-  catalog, a workspace build-context pack that is not installed, a lifecycle
-  upgrade candidate) must be selected with both `version` and `digest`, and
-  its bytes must verify to them.
+  catalog and outside the workspace build context, such as a copy of a
+  workspace pack elsewhere or a lifecycle upgrade candidate) must be selected
+  with both `version` and `digest`, and its bytes must verify to them.
 
 An explicit source with neither authority nor both pins fails with
 `PackIntegrityError` before its contract is read: a directory's own contract
@@ -676,7 +687,30 @@ omitted pack. A `generated_module` row is a planned app-owned module, whatever
 its id: unless its own path or installed state resolves it, it selects no pack
 and grants no layout extension, capability or output ownership. A row with no
 registered source whose id names no shipped or installed pack names no pack to
-omit, and selects nothing.
+omit, and selects nothing. A row that names its pack only under `capability_id`
+or `module_id` is malformed: no producer of `capability_packs` rows (the
+build-context projection, installed-component descriptors, AppBuildPlan and
+ExistingAppDiscovery plan rows, the scanner's resolved rows) emits that shape,
+so the resolver refuses it with a diagnostic naming the key, rather than
+treating it as a non-selection.
+
+Every consumer acts on a pack only through a verified entry. Planning
+(`module_action_inventory`: pack-owned outputs, facade directories, template
+module contracts and the managed contract inventory) reads a row's contents
+only after `verified_pack_selection` compared its pins and recorded its
+authority. A row the resolver refuses contributes no pack-owned output,
+facade directory or template contract (assembly refuses it with the same
+diagnostic). The managed contract inventory (`managed_pack_contracts`) feeds
+what a managed pack owns (surface ownership, managed data owners and facade
+actions), so a refused managed row raises there with the resolver's
+diagnostic, and DesignDocs refuses the design rather than saving it without
+the pack's ownership; a row's own inline `facades` are never read. Studio
+refinement admission verifies the saved parent's rows once, as saved, and
+reads declared outputs from those verified entries
+(`verified_pack_output_paths`), so a pack selected with pins keeps them. When
+the saved selection cannot be resolved or verified, ownership is unknown and
+the candidate is refused with `PACK_OWNERSHIP_UNRESOLVED`; it is never
+admitted unchecked.
 
 The bundle scanner resolves the selection the same way (the build context's
 selection when it has one, else the caller's rows) and passes only the resolved
@@ -692,8 +726,9 @@ packs to the functional checks (`scan_functional_generated_app`), so a row
 that selects no pack requires no pack facade either.
 
 Plan coverage, the discard of worker copies of pack-owned files and assembly
-read the same selection through the same resolver
-(`module_action_inventory._selected_packs` calls it), so an id-only row, such
+read the same selection through the same resolver and the same verification
+(`module_action_inventory._selected_packs` calls `verified_pack_selection`), so
+an id-only row, such
 as the default MozaiksPay row an OSS SaaS plan adds when no build context
 selects MozaiksPay, owns exactly the outputs assembly materializes. While
 `app_build_plan` builds a plan whose packs the build context does not select,
@@ -707,12 +742,22 @@ is a same-host identity), and that every template-owned output the pack ships
 template, any template that needs no build-time context (every file but
 `.j2`), must equal the verified template text with line endings normalized; a
 template-owned migration is compared after the migration compilation assembly
-applies. Validation never renders a template: a `.j2` template renders from the
-build's template variables, which no validation caller has, so its output is
-verified through the pack's declared outputs (present, inside the declared
-output lanes, not forbidden) and its pinned identity. The validation facade
-returns the resolved identities as
+applies. These output checks never render a template: a `.j2` template renders
+from the build's template variables, which no validation caller has, so its
+output is verified through the pack's declared outputs (present, inside the
+declared output lanes, not forbidden) and its pinned identity. Its content is
+not compared with anything; `operator_readiness` (a config YAML, a docs page
+and a PowerShell script) is the only shipped pack with `.j2` templates. The
+validation facade returns the resolved identities as
 `GeneratedAppValidationResult.resolved_capability_packs`.
+
+One check still renders templates, for data rather than output bytes: when
+the caller passes the build's planned data contract (only AppGenerator's own
+acceptance gate does, from its full build context), the planned-data check
+recomposes it with the packs' data contributions through
+`verified_pack_template_inventory`, which renders every selected pack's
+templates with that context. The validation facade and Studio refinement
+candidates pass no planned data contract, so they render nothing.
 
 A pack version bump changes what the current pack ships. After an upgrade of
 the installed `mozaiks` package (or any shipped pack version bump), an

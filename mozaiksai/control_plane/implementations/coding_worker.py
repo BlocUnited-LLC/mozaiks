@@ -646,24 +646,25 @@ def pack_output_owners(capability_packs: list[dict[str, Any]]) -> dict[str, str]
     name, which this admission leaves to the ordinary candidate rules.
     Composed shared roots are left out: assembly merges pack and app
     declarations there. Pack provenance is template-owned.
+
+    The parent's rows are verified once, as saved (their pins, and the
+    authority that vouches for each source), and the declared outputs are read
+    from those verified entries; no row is re-selected without its pins. A
+    selection that cannot be resolved or verified raises
+    ``ManagedCapabilityTemplateError``.
     """
     from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
-        resolve_declared_pack_output_paths,
+        verified_pack_output_paths,
         verified_selected_pack_sources,
     )
 
-    verified = [
-        {"id": entry["pack_id"], "pack_source_path": entry["source_path"]}
-        for entry in verified_selected_pack_sources(capability_packs)
-    ]
-    if not verified:
+    entries = verified_selected_pack_sources(capability_packs)
+    if not entries:
         return {}
-    owned = {
-        owner: resolve_declared_pack_output_paths(verified, owner=owner) for owner in ("templates", "workspace")
-    }
+    owned = {owner: verified_pack_output_paths(entries, owner=owner) for owner in ("templates", "workspace")}
     owners = {
         path: next((owner for owner, paths in owned.items() if path in paths), "generator")
-        for path in resolve_declared_pack_output_paths(verified)
+        for path in verified_pack_output_paths(entries)
         if path not in SHARED_PACK_OUTPUT_PATHS
     }
     owners[_PACK_PROVENANCE_PATH] = "templates"
@@ -709,6 +710,14 @@ def parent_workspace_pack_paths(capability_packs: Any) -> frozenset[str] | None:
     owners = parent_pack_output_owners(capability_packs)
     return None if owners is None else pack_paths_owned_by(owners, "workspace")
 
+
+#: Why a candidate is refused when the saved parent's pack selection cannot be verified, and the way forward.
+PACK_OWNERSHIP_UNRESOLVED_GUIDANCE = (
+    "the capability packs the parent build selected cannot be resolved to verified sources, so no candidate is "
+    "admitted against them (pack ownership decides which files a refinement may change). Restore the pack "
+    "source the parent was built from at the version and digest it selected, or run an AppGenerator revision "
+    "(or regenerate the app) so the build selects packs that verify"
+)
 
 #: What to do instead of changing a template-owned pack output: the supported paths.
 TEMPLATE_PACK_OUTPUT_GUIDANCE = (
@@ -1398,7 +1407,10 @@ class ScopedRefinementCodingWorker:
         only as a thin extension of its template
         base handler. Applied paths are real changes against the parent, so any
         owned path among them is a change. Acceptance rechecks the parent and
-        scope before a child becomes current.
+        scope before a child becomes current. When the parent's saved pack
+        selection cannot be resolved and verified (its pins and authority
+        kept), ownership is unknown and the candidate is refused
+        (``PACK_OWNERSHIP_UNRESOLVED``); it is never admitted unchecked.
         """
         from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
             ManagedCapabilityTemplateError,
@@ -1407,14 +1419,16 @@ class ScopedRefinementCodingWorker:
         scope = self._refinement_scope(request)
         if not capability_packs:
             return scope
+        changed = sorted(applied_files)
         try:
             owners = pack_output_owners(capability_packs)
         except (ManagedCapabilityTemplateError, OSError, yaml.YAMLError) as exc:
-            # Candidate validation verifies the same selected sources and fails
-            # this candidate, so it is saved as failed and never promotable.
-            logger.warning("CANDIDATE_PACK_OWNERSHIP_UNRESOLVED app=%s: %s", request.app_id, exc)
-            return scope
-        changed = sorted(applied_files)
+            # No ownership, no admission: an unverifiable selection could hide
+            # template drift, an undeclared module file or app-owned code.
+            raise CandidateAdmissionError(
+                "PACK_OWNERSHIP_UNRESOLVED", PACK_OWNERSHIP_UNRESOLVED_GUIDANCE,
+                paths=changed, parent_build_record_id=request.build_record_id, resolution_error=str(exc),
+            ) from exc
         drifted = [path for path in changed if owners.get(path) == "templates"]
         if drifted:
             raise CandidateAdmissionError(

@@ -642,7 +642,9 @@ async def test_offline_generated_build_acceptance_blocks_unwired_page_endpoint()
             "app_build_plan": {
                 "capability_packs": [
                     {
-                        "module_id": "orders",
+                        # An AppBuildPlan row names its module under capability_pack_id.
+                        "capability_pack_id": "orders",
+                        "capability_source": "generated_module",
                         "actions": ["list_orders", "create_order"],
                     }
                 ]
@@ -687,7 +689,9 @@ class OrdersService:
             "app_build_plan": {
                 "capability_packs": [
                     {
-                        "module_id": "orders",
+                        # An AppBuildPlan row names its module under capability_pack_id.
+                        "capability_pack_id": "orders",
+                        "capability_source": "generated_module",
                         "actions": ["list_orders", "create_order"],
                     }
                 ]
