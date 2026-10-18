@@ -87,7 +87,9 @@ from mozaiksai.control_plane.contracts import RegistryRunState, build_acceptance
 from mozaiksai.control_plane.dry_run import RefinementDryRunPlan, RefinementExecutionPlan
 from mozaiksai.control_plane.implementations.coding_worker import (
     TEMPLATE_PACK_OUTPUT_GUIDANCE,
+    PackCodeBaseline,
     newer_accepted_work,
+    pack_code_baseline_refusal,
     pack_paths_owned_by,
     parent_pack_output_owners,
     parent_workspace_pack_paths,
@@ -3229,9 +3231,11 @@ async def _registry_run_state(
     Coding admission admits a STALE parent only when no other run of the app
     was building when this one began (``coding_worker._stale_parent_refusal``),
     so it gets this server-derived read, never a value from the client. It is a
-    read before ``begin_refinement_run``, not a compare-and-set; acceptance's
-    registry run check is what binds a child to the latest run. For a parent
-    that is not STALE no read is made (None), and STALE admission refuses.
+    read before ``begin_refinement_run`` (and, for an app-owned pack scope,
+    before classification, for the same check), not a compare-and-set;
+    acceptance's registry run check is what binds a child to the latest run.
+    For a parent that is not STALE no read is made (None), and STALE admission
+    refuses.
     """
     if source_version is None or source_version.lifecycle_status != ArtifactLifecycleStatus.STALE:
         return None
@@ -3306,10 +3310,11 @@ async def _require_unchanged_confirmation_baseline(
     (``router_decision.baseline_state``, server-written, unlike the pending
     decision). A build that was already STALE when the decision was proposed,
     and has not been written since, is still what the user agreed to change.
-    A ChangeRequest with no saved state (recorded before Studio saved it, or
-    whose routing a workflow launch has since replaced) cannot show whether
-    its build changed, so its decision is refused; requesting the change
-    again saves the state, and that proposal can be confirmed.
+    A ChangeRequest with no saved state (recorded before Studio kept that
+    state: every proposal saves it, and a workflow launch keeps it when it
+    rewrites the routing) cannot show whether its build changed, so its
+    decision is refused; requesting the change again saves the state, and that
+    proposal can be confirmed.
 
     Newer accepted work is read as acceptance does
     (``coding_worker.newer_accepted_work``): within the build's family and key,
@@ -3320,10 +3325,12 @@ async def _require_unchanged_confirmation_baseline(
     refuses too.
 
     An unchanged baseline grants nothing by itself: the confirmed request then
-    follows the existing route for its situation. A scope that changes
-    app-owned pack code goes through coding admission, which admits a STALE
-    parent only under ``coding_worker._stale_parent_refusal``; a workflow route
-    launches as an unconfirmed one would.
+    follows the existing route for its situation. A scope that includes
+    app-owned pack code goes through the baseline rule
+    (``coding_worker.pack_code_baseline_refusal``) before any provider call and
+    again at coding admission, which admit a STALE parent only under
+    ``coding_worker._stale_parent_refusal``; a workflow route launches as an
+    unconfirmed one would.
     """
     router_decision = getattr(change, "router_decision", None)
     recorded = router_decision.get("baseline_state") if isinstance(router_decision, dict) else None
@@ -3337,8 +3344,8 @@ async def _require_unchanged_confirmation_baseline(
             status_code=409,
             detail=(
                 "The change request this decision was proposed with saved no state of its build (it was recorded "
-                "before Studio saved that state, or a workflow route has since replaced its routing), so whether "
-                "the build changed since the proposal cannot be checked. Request the change again."
+                "before Studio kept that state), so whether the build changed since the proposal cannot be "
+                "checked. Request the change again."
             ),
         )
     if recorded != _baseline_state(source_version):
@@ -3395,6 +3402,48 @@ def _refuse_template_pack_patch(template_pack_paths: frozenset[str], paths: Iter
             detail=(
                 f"This change would edit only template-owned capability pack files ({', '.join(sorted(editable))}). "
                 f"{TEMPLATE_PACK_OUTPUT_GUIDANCE}. No files were changed."
+            ),
+        )
+
+
+async def _refuse_pack_code_from_an_unadmitted_baseline(
+    workspace_pack_paths: frozenset[str], paths: Iterable[str], *, source_version: Any, artifact_app_id: str,
+    user_id: str, build_registry_id: str | None,
+) -> None:
+    """Refuse an app-owned pack change that candidate admission would refuse for its baseline, before any provider call.
+
+    Called with an explicit or confirmed file scope: the only scope that can
+    carry an app-owned pack change, and one that always applies when it
+    proceeds (to the coding worker, or to the contract surface run for a
+    design or feature change). When it includes app-owned pack paths of the
+    saved build, that build must pass admission's baseline rule
+    (``coding_worker.pack_code_baseline_refusal``, ``STALE_REFINEMENT_BASELINE``):
+    it is the app's accepted current build or, while none is current, a stale
+    build admission admits. A draft, such as the app's first build before the
+    owner accepts it, is refused with the way forward: accept it first.
+
+    The refusal comes before classification, before a pending decision is
+    used, and before the registry run and any coding or surface provider
+    call. Candidate admission runs the same rule on the candidate as the
+    backstop, for anything that changed while the provider ran. Reads only; a
+    failed read refuses.
+    """
+    changed = sorted(set(paths) & workspace_pack_paths)
+    if not changed:
+        return
+    registry_run_state = await _registry_run_state(
+        user_id=user_id, build_registry_id=build_registry_id, source_version=source_version,
+    )
+    refusal = await pack_code_baseline_refusal(get_artifact_store(), PackCodeBaseline(
+        artifact_app_id=artifact_app_id, build_family=source_version.build_family,
+        build_record_id=source_version.id, user_id=user_id, registry_run_state=registry_run_state,
+    ))
+    if refusal is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"App-owned capability pack code ({', '.join(changed)}) cannot be changed from build "
+                f"{source_version.id}: {refusal.reason}. No files were changed."
             ),
         )
 
@@ -3678,6 +3727,10 @@ async def trigger_workflow(
             trigger_payload["coding_request"] = coding_payload
         # An explicit or confirmed file scope always applies when it proceeds.
         _refuse_template_pack_patch(template_pack_paths, explicit_paths)
+        await _refuse_pack_code_from_an_unadmitted_baseline(
+            workspace_pack_paths, explicit_paths, source_version=source_version, artifact_app_id=artifact_app_id,
+            user_id=user_id, build_registry_id=build_registry_id,
+        )
         if orchestration_control.coding_enabled() and isinstance(coding_payload, dict):
             try:
                 resolve_coding_validation_strategy(coding_payload.get("validation_strategy"))

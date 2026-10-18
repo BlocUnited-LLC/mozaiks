@@ -204,19 +204,22 @@ BUILD_ACCEPTANCE_SCOPE_KEYS = ("app_id", "build_family", "build_key", "build_rec
 
 
 def build_acceptance_evidence(
-    record: Any, *, accepted_by: str | None, accepted_at: str, transition: str,
+    record: Any, *, accepted_by: str, accepted_at: str, transition: str,
 ) -> dict[str, Any]:
     """The ``commit_metadata.metadata.acceptance`` evidence an authorized acceptance writes on ``record``.
 
     It names the accepted build's scope and revision (``app_id``,
-    ``build_family``, ``build_key``, ``build_record_id``), the principal that
-    accepted it (``accepted_by``), when (``accepted_at``) and the transition
-    (``transition``). Readers honour it only on the record it names
-    (:func:`acceptance_evidence_names`), so evidence copied into another record
-    shows nothing about that record.
+    ``build_family``, ``build_key``, ``build_record_id``), the authenticated
+    principal that accepted it (``accepted_by``, required: the caller passes
+    its own principal, never a name read from a stored record), when
+    (``accepted_at``) and the transition (``transition``). Readers honour it
+    only on the record it names (:func:`acceptance_evidence_names`), so
+    evidence copied into another record shows nothing about that record.
     """
     if transition not in BUILD_ACCEPTANCE_TRANSITIONS:
         raise ValueError(f"Unknown build acceptance transition: {transition!r}")
+    if not isinstance(accepted_by, str) or not accepted_by.strip():
+        raise ValueError("Build acceptance evidence requires the authenticated principal that accepted the build")
     return {
         "app_id": record.app_id,
         "build_family": record.build_family,

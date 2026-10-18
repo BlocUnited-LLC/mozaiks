@@ -21,6 +21,7 @@ from mozaiksai.control_plane.contracts import (
     CodingWorkerRequest,
     CodingWorkerResult,
     FileUpdate,
+    RegistryRunState,
     StagedPatchProposal,
     acceptance_evidence_names,
 )
@@ -276,11 +277,22 @@ async def _never_accepted_refusal(
     * ``stale``: it was already stale, so the change request named by the
       saved ``invalidation_reason`` is followed back the same way, at most
       ``_STALE_PARENT_ATTRIBUTION_DEPTH`` change requests;
-    * anything else refuses: a saved state that shows it was ``current`` or
-      ``superseded`` (so accepted, at a time nothing records), no saved state
-      or one of another build, a change request that was not found or not made
-      from it, an invalidation that names no change request, or more reads
-      than the ``lookups`` budget this check shares with its caller.
+    * anything else refuses, naming which: a saved state that shows it was
+      ``current`` or ``superseded`` (so accepted, at a time nothing records),
+      no saved state, a saved state of another build, a change request that
+      was not found or was made from another build, an invalidation that names
+      no change request, or more reads than the ``lookups`` budget this check
+      shares with its caller.
+
+    Studio's trigger stales the build its change request was made from. The
+    invalidation service's other paths stale no build record today: its
+    downstream family propagation (``store.invalidate_artifact_family``)
+    filters on ``artifact_kind`` and ``artifact_key``, which a build record
+    never stores, and the session refs it reads are looked up under the
+    artifact app without a target, where Studio keeps no session. A record
+    staled by a change request made from another build therefore refuses
+    (nothing saved its state); if either path is made live, what it stales
+    must be decided by that owner's own evidence.
 
     Returns the cause as a clause about the record ("it carries ..."). A lookup
     error propagates, and every caller refuses on it.
@@ -300,13 +312,20 @@ async def _never_accepted_refusal(
         if change is None:
             cause = f"change request {link} that staled it was not found"
             break
-        if getattr(change, "build_record_id", None) != record.id:
-            cause = f"change request {link} that staled it is not one made from it"
+        made_from = getattr(change, "build_record_id", None)
+        if made_from != record.id:
+            cause = f"change request {link} that staled it is not one made from it (it was made from build {made_from})"
             break
         decision = change.router_decision if isinstance(change.router_decision, dict) else {}
         state = decision.get("baseline_state")
-        if not isinstance(state, dict) or state.get("build_record_id") != record.id:
+        if not isinstance(state, dict):
             cause = f"change request {link} that staled it saved no state of it when it began"
+            break
+        if state.get("build_record_id") != record.id:
+            cause = (
+                f"change request {link} that staled it saved the state of build {state.get('build_record_id')}, "
+                "not of it, when it began"
+            )
             break
         status = state.get("lifecycle_status")
         if status == ArtifactLifecycleStatus.DRAFT.value:
@@ -556,6 +575,58 @@ async def _open_work_refusal(
         return None
     kind, detail = found
     return open_draft if kind == "open_draft" else f"build {record.id} {where} {detail}"
+
+
+class PackCodeBaseline(NamedTuple):
+    """The build an app-owned pack change would be made from, as admission reads it (:func:`pack_code_baseline_refusal`)."""
+
+    #: The app whose build records hold the build (``CodingWorkerRequest.artifact_app_id``).
+    artifact_app_id: str
+    build_family: str
+    build_record_id: str | None
+    #: The authenticated user making the change.
+    user_id: str | None
+    #: Studio's server-derived registry read before the run (``CodingWorkerRequest.registry_run_state``).
+    registry_run_state: RegistryRunState | None
+
+    @classmethod
+    def of(cls, request: CodingWorkerRequest) -> PackCodeBaseline:
+        """The build a coding request is made from."""
+        return cls(
+            request.artifact_app_id, request.build_family, request.build_record_id, request.user_id,
+            request.registry_run_state,
+        )
+
+
+class PackCodeBaselineRefusal(NamedTuple):
+    """Why app-owned pack code cannot change from a build (:func:`pack_code_baseline_refusal`)."""
+
+    reason: str
+    #: The app's accepted current build, when that is another build.
+    accepted_build_record_id: str | None = None
+
+
+#: The baseline rule for app-owned pack code: what ``STALE_REFINEMENT_BASELINE`` refuses.
+PACK_CODE_BASELINE_RULE = (
+    "app-owned pack code changes only from the app's accepted current build, or, while none is current, from a "
+    "stale build whose only invalidation is this app's own rejected or failed change with nothing else open, in "
+    "flight or changed since"
+)
+#: The way forward from the app's first build while it is still the draft AppGenerator saved.
+_ACCEPT_THE_FIRST_BUILD = "accept the first build before changing its app-owned capability code"
+
+
+def _draft_parent_refusal(parent: BuildRecord) -> str:
+    """Why app-owned pack code cannot change from a draft, with the way forward: accept it first."""
+    if not parent.parent_build_record_id:
+        return (
+            f"the parent {parent.id} is the app's first build, a draft that has not been accepted; "
+            f"{_ACCEPT_THE_FIRST_BUILD}"
+        )
+    return (
+        f"the parent {parent.id} is a draft that has not been accepted; accept it before changing its app-owned "
+        "capability code"
+    )
 
 
 class CandidateAdmissionError(ValueError):
@@ -993,7 +1064,8 @@ class ScopedRefinementCodingWorker:
             "changed_workspace_pack_paths": [],
         }
 
-    async def _current_accepted_build_record_id(self, request: CodingWorkerRequest) -> str | None:
+    @staticmethod
+    async def _current_accepted_build_record_id(artifact_store: Any, baseline: PackCodeBaseline) -> str | None:
         """The app's accepted current build: the CURRENT record of the parent's build family and key.
 
         That is the scope in which accepting a build supersedes the current
@@ -1010,13 +1082,14 @@ class ScopedRefinementCodingWorker:
         validation, leaves the accepted build current, so a later authorized
         change is still admitted against it.
         """
-        artifact_store = self._artifact_store or get_artifact_store()
-        app_id = request.artifact_app_id
-        parent_id = str(request.build_record_id or "").strip()
-        parent = await artifact_store.get_build_record(app_id=app_id, build_record_id=parent_id) if parent_id else None
+        app_id = baseline.artifact_app_id
+        parent_id = str(baseline.build_record_id or "").strip()
+        parent: BuildRecord | None = (
+            await artifact_store.get_build_record(app_id=app_id, build_record_id=parent_id) if parent_id else None
+        )
         if parent is None:
             raise ValueError("Refinement parent build record was not found for the target app")
-        current = sorted(
+        current: list[str] = sorted(
             record.id for record in await artifact_store.list_build_records(
                 app_id=app_id, build_family=parent.build_family, build_key=parent.build_key,
                 lifecycle_status=ArtifactLifecycleStatus.CURRENT, limit=_STALE_PARENT_FAMILY_SCAN_LIMIT + 1,
@@ -1026,11 +1099,14 @@ class ScopedRefinementCodingWorker:
             return parent.id
         return next((record_id for record_id in current if record_id != parent.id), None)
 
-    async def _stale_parent_refusal(self, request: CodingWorkerRequest) -> str | None:
+    @classmethod
+    async def _stale_parent_refusal(cls, artifact_store: Any, baseline: PackCodeBaseline) -> str | None:
         """Why a STALE parent cannot be admitted for an app-owned pack change while no build is CURRENT; None when it can.
 
-        Nothing makes a stale build current again, so a rejected draft leaves
-        the app with no CURRENT build. The stale marker that rejected draft's
+        A DRAFT parent, such as the app's first build before the owner accepts
+        it, was never accepted, so it is refused with the way forward: accept
+        it first. Nothing makes a stale build current again, so a rejected
+        draft leaves the app with no CURRENT build. The stale marker that rejected draft's
         run left is told apart from genuine invalidation, newer accepted work
         and work still in flight using the records Studio already keeps. The
         parent is admitted, without changing any record, only when all hold:
@@ -1072,22 +1148,24 @@ class ScopedRefinementCodingWorker:
         explicit or confirmed file scope checked by the caller. A lookup
         failure, a scan past its bound, or anything else unresolved refuses.
         Acceptance rechecks the parent, scope and registry run as for a
-        CURRENT parent. These are reads at admission, not a compare-and-set.
+        CURRENT parent. These are reads (Studio's check before the provider
+        call, then admission's), not a compare-and-set.
         """
-        if request.registry_run_state != "idle":
-            return _REGISTRY_RUN_REFUSALS.get(request.registry_run_state, _REGISTRY_RUN_REFUSALS[None])
-        family = _ARTIFACT_KIND_ALIASES.get(request.build_family, request.build_family)
-        artifact_store = self._artifact_store or get_artifact_store()
-        app_id = request.artifact_app_id
+        family = _ARTIFACT_KIND_ALIASES.get(baseline.build_family, baseline.build_family)
+        app_id = baseline.artifact_app_id
         limit = _STALE_PARENT_FAMILY_SCAN_LIMIT
-        if not request.build_record_id:
+        if not baseline.build_record_id:
             return "the request names no parent build"
         try:
-            parent = await artifact_store.get_build_record(app_id=app_id, build_record_id=request.build_record_id)
+            parent = await artifact_store.get_build_record(app_id=app_id, build_record_id=baseline.build_record_id)
             if parent is None or parent.build_family != family:
                 return "the parent build was not found in this app's build family"
+            if parent.lifecycle_status == ArtifactLifecycleStatus.DRAFT:
+                return _draft_parent_refusal(parent)
             if parent.lifecycle_status != ArtifactLifecycleStatus.STALE:
                 return f"the parent is {ArtifactLifecycleStatus(parent.lifecycle_status).value}, not stale"
+            if baseline.registry_run_state != "idle":
+                return _REGISTRY_RUN_REFUSALS.get(baseline.registry_run_state, _REGISTRY_RUN_REFUSALS[None])
             records = await artifact_store.list_build_records(app_id=app_id, build_family=family, limit=limit + 1)
             if len(records) > limit:
                 return f"the build family has more than {limit} records to check"
@@ -1152,27 +1230,27 @@ class ScopedRefinementCodingWorker:
                     )
                     if refusal is not None:
                         return refusal
-            refusal = await self._attribution_refusal(
-                artifact_store, request=request, parent=parent, records=by_id,
+            refusal = await cls._attribution_refusal(
+                artifact_store, baseline=baseline, parent=parent, records=by_id,
             )
             if refusal is not None:
                 return refusal
-            return await self._upstream_input_refusal(
+            return await cls._upstream_input_refusal(
                 artifact_store, app_id=app_id, parent=parent, family=family, accepted_at=accepted_at,
             )
         except Exception as exc:
             logger.warning(
-                "STALE_PARENT_ADMISSION_UNVERIFIED app=%s parent=%s", app_id, request.build_record_id, exc_info=True,
+                "STALE_PARENT_ADMISSION_UNVERIFIED app=%s parent=%s", app_id, baseline.build_record_id, exc_info=True,
             )
             return f"a record needed to check the parent could not be read ({type(exc).__name__})"
 
     @staticmethod
     async def _attribution_refusal(
-        artifact_store: Any, *, request: CodingWorkerRequest, parent: BuildRecord, records: dict[str, BuildRecord],
+        artifact_store: Any, *, baseline: PackCodeBaseline, parent: BuildRecord, records: dict[str, BuildRecord],
     ) -> str | None:
         """Whether the parent's stale marker is only this app's own closed inline runs, and no other work."""
         limit = _STALE_PARENT_FAMILY_SCAN_LIMIT
-        app_id = request.artifact_app_id
+        app_id = baseline.artifact_app_id
         reason = str(parent.invalidation_reason or "")
         if not reason.startswith(_CHANGE_REQUEST_REASON_PREFIX):
             return "the parent's invalidation names no change request"
@@ -1204,7 +1282,7 @@ class ScopedRefinementCodingWorker:
             change = made_from_parent.get(link)
             if change is None or link in chain:
                 return f"the parent was invalidated by {link}, which is not a change request made from it"
-            if change.created_by_user_id != request.user_id:
+            if change.created_by_user_id != baseline.user_id:
                 return f"change request {link} that invalidated the parent was made by another user"
             decision = change.router_decision if isinstance(change.router_decision, dict) else {}
             mode = decision.get("execution_mode")
@@ -1313,7 +1391,10 @@ class ScopedRefinementCodingWorker:
         read here, at admission) or, when none is CURRENT, from a STALE parent
         whose stale marker only this app's own rejected or failed inline runs
         left, with nothing else open, in flight or changed since
-        (:meth:`_stale_parent_refusal`); a failed read refuses. For a workspace handler,
+        (:func:`pack_code_baseline_refusal`); a failed read refuses. Studio
+        runs the same baseline check before any coding or surface provider
+        call for such a scope, so this is the backstop for what changed while
+        the provider ran. For a workspace handler,
         only as a thin extension of its template
         base handler. Applied paths are real changes against the parent, so any
         owned path among them is a change. Acceptance rechecks the parent and
@@ -1366,27 +1447,15 @@ class ScopedRefinementCodingWorker:
                 "app-owned pack code changes only inside an explicit or user-confirmed selected-file scope",
                 paths=workspace, scope_origin=scope["scope_origin"],
             )
-        current: str | None = None
-        lookup_refusal: str | None = None
-        try:
-            current = await self._current_accepted_build_record_id(request)
-        except Exception as exc:
-            logger.warning("CURRENT_BUILD_UNVERIFIED app=%s parent=%s", request.app_id, request.build_record_id, exc_info=True)
-            lookup_refusal = f"the app's current build could not be read ({type(exc).__name__})"
-        if lookup_refusal is not None or current != request.build_record_id:
-            refusal = lookup_refusal or (
-                await self._stale_parent_refusal(request) if current is None
-                else f"build {current} is the app's accepted current build"
+        refusal = await pack_code_baseline_refusal(
+            self._artifact_store or get_artifact_store(), PackCodeBaseline.of(request),
+        )
+        if refusal is not None:
+            raise CandidateAdmissionError(
+                "STALE_REFINEMENT_BASELINE", PACK_CODE_BASELINE_RULE,
+                paths=workspace, parent_build_record_id=request.build_record_id,
+                accepted_build_record_id=refusal.accepted_build_record_id, stale_baseline_refusal=refusal.reason,
             )
-            if refusal is not None:
-                raise CandidateAdmissionError(
-                    "STALE_REFINEMENT_BASELINE",
-                    "app-owned pack code changes only from the app's accepted current build, or, while none is "
-                    "current, from a stale build whose only invalidation is this app's own rejected or failed "
-                    "change with nothing else open, in flight or changed since",
-                    paths=workspace, parent_build_record_id=request.build_record_id,
-                    accepted_build_record_id=current, stale_baseline_refusal=refusal,
-                )
         for path in workspace:
             if path.endswith("/backend/handler.py"):
                 self._prove_handler_extension(
@@ -1622,6 +1691,38 @@ class ScopedRefinementCodingWorker:
         except (TypeError, ValueError):
             number = default
         return max(minimum, min(number, maximum))
+
+
+async def pack_code_baseline_refusal(
+    artifact_store: Any, baseline: PackCodeBaseline,
+) -> PackCodeBaselineRefusal | None:
+    """Why app-owned pack code cannot change from ``baseline``'s build; None when it can.
+
+    The baseline rule of candidate admission (``STALE_REFINEMENT_BASELINE``,
+    :data:`PACK_CODE_BASELINE_RULE`): the build must be the app's accepted
+    current build (the CURRENT record of its build family and key), or, while
+    none is CURRENT, a STALE build that
+    :meth:`ScopedRefinementCodingWorker._stale_parent_refusal` admits. A draft,
+    such as the app's first build before the owner accepts it, is refused
+    with the way forward: accept it first. Studio runs this before any coding
+    or surface provider call when an explicit or confirmed scope includes
+    app-owned pack paths; admission runs it again on the candidate as the
+    backstop. Reads only; a failed read refuses.
+    """
+    try:
+        current = await ScopedRefinementCodingWorker._current_accepted_build_record_id(artifact_store, baseline)
+    except Exception as exc:
+        logger.warning(
+            "CURRENT_BUILD_UNVERIFIED app=%s parent=%s", baseline.artifact_app_id, baseline.build_record_id,
+            exc_info=True,
+        )
+        return PackCodeBaselineRefusal(f"the app's current build could not be read ({type(exc).__name__})")
+    if current == baseline.build_record_id:
+        return None
+    if current is not None:
+        return PackCodeBaselineRefusal(f"build {current} is the app's accepted current build", current)
+    refusal = await ScopedRefinementCodingWorker._stale_parent_refusal(artifact_store, baseline)
+    return None if refusal is None else PackCodeBaselineRefusal(refusal)
 
 
 _coding_worker: ScopedRefinementCodingWorker | None = None

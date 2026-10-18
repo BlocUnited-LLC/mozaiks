@@ -281,6 +281,30 @@ async def test_accepts_draft_app_bundle_when_review_is_promotion_ready(tmp_path:
     assert load_refinement_review_record(context["staging_result"].staging_area).status == "promotion_ready"
 
 
+@pytest.mark.parametrize("accepted_by", [None, "", "   "])
+@pytest.mark.asyncio
+async def test_acceptance_without_the_callers_principal_is_refused_not_credited_to_the_reviewer(
+    tmp_path: Path, accepted_by,
+) -> None:
+    """The caller's authenticated principal is the authority; the review record's reviewer name is never used."""
+    context = await _build_acceptance_context(tmp_path)
+    assert context["review_record"].reviewer == "reviewer_1"
+    with pytest.raises(AcceptedStagedAppBundleArtifactVersionError, match="authenticated principal"):
+        await accept_staged_refinement_artifact_version(
+            app_id=context["app_id"],
+            draft_artifact_version_id=context["draft_result"].artifact_version_id,
+            review_record=context["review_record"],
+            request_id=context["plan"].request_id,
+            artifact_store=context["artifact_store"],
+            accepted_by=accepted_by,
+        )
+    store = context["artifact_store"]
+    assert store.accept_calls == []
+    assert store.created_version.lifecycle_status == ArtifactLifecycleStatus.DRAFT
+    assert "acceptance" not in store.created_version.commit_metadata.metadata
+    assert store.source_version.lifecycle_status == ArtifactLifecycleStatus.CURRENT
+
+
 @pytest.mark.asyncio
 async def test_acceptance_requires_override_for_skipped_validation(tmp_path: Path) -> None:
     context = await _build_acceptance_context(tmp_path)

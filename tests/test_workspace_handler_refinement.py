@@ -178,6 +178,12 @@ class _Store:
         change = self.change_requests.get(change_request_id)
         return change if change is not None and change.app_id == app_id else None
 
+    async def list_change_requests(self, *, app_id, build_record_id=None, limit=50, **_):
+        return [
+            change for change in self.change_requests.values()
+            if change.app_id == app_id and (build_record_id is None or change.build_record_id == build_record_id)
+        ][:limit]
+
     async def get_current_build_record_refs(self, *, app_id):
         """The accepted current record per build family, as the artifact store reports it."""
         return {
@@ -389,6 +395,12 @@ async def test_explicit_patch_outside_the_extension_contract_is_rejected_without
         assert "upgrade the pack" in result.metadata["candidate_admission"]["supported_path"]
     if code == "STALE_REFINEMENT_BASELINE":
         assert result.metadata["candidate_admission"]["accepted_build_record_id"] == (accepted or None)
+        # The backstop names the same way forward Studio's check before the provider call does.
+        assert result.metadata["candidate_admission"]["stale_baseline_refusal"] == (
+            "build newer_build is the app's accepted current build" if accepted else
+            "the parent parent is the app's first build, a draft that has not been accepted; accept the first build "
+            "before changing its app-owned capability code"
+        )
     validate.assert_not_awaited()
     assert [record for record in store.records if record.startswith("child_")] == []
 
@@ -995,27 +1007,60 @@ def _studio_route(monkeypatch, tmp_path, *, files_payload, proposer=None, accept
 @pytest.mark.parametrize("accepted", ["parent", "newer_build"])
 def test_studio_backend_patch_requires_the_current_build(monkeypatch, tmp_path, accepted):
     route = _studio_route(monkeypatch, tmp_path, accepted=accepted, files_payload={"files": {HANDLER: ""}})
+    if accepted == "newer_build":
+        # Admission's baseline rule runs before any provider call: refused with its reason, before
+        # classification, the registry run, validation and any record; the newer accepted build stays current.
+        assert route.response.status_code == 409, route.response.text
+        assert route.response.json()["detail"] == (
+            f"App-owned capability pack code ({HANDLER}) cannot be changed from build parent: build newer_build is "
+            "the app's accepted current build. No files were changed."
+        )
+        route.provider.execute.assert_not_awaited()
+        route.validate.assert_not_awaited()
+        route.registry.begin_refinement_run.assert_not_awaited()
+        assert route.store.created == [] and route.store.change_requests == {} and route.store.invalidations == []
+        assert route.store.current() == ["newer_build"]
+        return
     assert route.response.status_code == 200, route.response.text
     body = route.response.json()
     assert body["execution_mode"] == "coding_worker"
     status = route.registry.update_build_status.await_args.kwargs
-    if accepted == "parent":
-        assert body["coding_worker"]["status"] == "validated"
-        child = route.store.records[body["coding_worker"]["metadata"]["build_record_id"]]
-        assert child.commit_metadata.metadata["refinement_scope"]["scope_origin"] == "explicit"
-        assert _archive_files(child)[HANDLER] == NORMALIZING_HANDLER
-        assert status["status"] == "review" and status["artifact_version_id"] == child.id
-        # The run stored a reviewable child of the parent, so the parent is invalidated.
-        assert route.store.invalidations == [{"refs": {"app_bundle": "parent"}, "reason": "change_request:cr_1"}]
-        assert route.store.status("parent") == ArtifactLifecycleStatus.STALE
-        return
-    assert body["coding_worker"]["status"] == "failed"
-    assert body["coding_worker"]["metadata"]["candidate_admission"]["code"] == "STALE_REFINEMENT_BASELINE"
-    assert body["coding_worker"]["metadata"]["candidate_admission"]["accepted_build_record_id"] == "newer_build"
-    route.validate.assert_not_awaited()
-    assert route.store.created == [] and status["status"] == "needs_revision"
-    # Nothing was stored, so nothing is invalidated: the newer accepted build stays current.
-    assert route.store.invalidations == [] and route.store.current() == ["newer_build"]
+    assert body["coding_worker"]["status"] == "validated"
+    child = route.store.records[body["coding_worker"]["metadata"]["build_record_id"]]
+    assert child.commit_metadata.metadata["refinement_scope"]["scope_origin"] == "explicit"
+    assert _archive_files(child)[HANDLER] == NORMALIZING_HANDLER
+    assert status["status"] == "review" and status["artifact_version_id"] == child.id
+    # The run stored a reviewable child of the parent, so the parent is invalidated.
+    assert route.store.invalidations == [{"refs": {"app_bundle": "parent"}, "reason": "change_request:cr_1"}]
+    assert route.store.status("parent") == ArtifactLifecycleStatus.STALE
+
+
+def test_admission_still_refuses_a_baseline_overtaken_while_the_provider_ran(monkeypatch, tmp_path):
+    """The baseline check before the provider call is not the last word: candidate admission is the backstop.
+
+    The parent is the app's accepted current build when the change is
+    requested, so Studio's check admits it and the provider runs. Meanwhile
+    another build is accepted; admission reads the baseline again on the
+    candidate and refuses it before validation, storing nothing.
+    """
+    flow = _studio_flow(monkeypatch, tmp_path, outputs=[{HANDLER: NORMALIZING_HANDLER}])
+    proposal = _proposal({HANDLER: NORMALIZING_HANDLER})
+
+    async def overtaken_while_running(*args, **kwargs):
+        flow.store.supersede_parent_with("newer_build")
+        return proposal
+
+    flow.provider.execute.side_effect = overtaken_while_running
+    response = flow.trigger({"files": {HANDLER: ""}})
+    assert response.status_code == 200, response.text
+    coding = response.json()["coding_worker"]
+    admission = coding["metadata"]["candidate_admission"]
+    assert coding["status"] == "failed" and admission["code"] == "STALE_REFINEMENT_BASELINE", coding
+    assert admission["accepted_build_record_id"] == "newer_build"
+    assert admission["stale_baseline_refusal"] == "build newer_build is the app's accepted current build"
+    flow.provider.execute.assert_awaited_once()
+    flow.validate.assert_not_awaited()
+    assert flow.store.created == [] and flow.store.invalidations == [] and flow.store.current() == ["newer_build"]
 
 
 def test_failed_inline_run_does_not_block_a_later_authorized_handler_patch(monkeypatch, tmp_path):
@@ -1117,12 +1162,10 @@ def test_a_stored_child_invalidates_its_parent_unless_its_validation_failed(monk
     # It never becomes current: acceptance refuses it.
     refused = flow.accept(child.id)
     assert refused.status_code == 409 and "validation_status='passed' is required" in refused.json()["detail"], refused.text
-    # While the draft is open, a handler change from the stale parent is refused, before validation.
+    # While the draft is open, a handler change from the stale parent is refused, before any provider call.
     flow.validate.return_value = _evidence()
-    blocked = flow.trigger({"files": {HANDLER: ""}}).json()["coding_worker"]
-    admission = blocked["metadata"]["candidate_admission"]
-    assert admission["code"] == "STALE_REFINEMENT_BASELINE", blocked
-    assert f"draft {child.id} made from the parent is draft with validation {outcome}" in admission["stale_baseline_refusal"]
+    blocked = _handler_attempt(flow)
+    _assert_stale_refusal(blocked, f"draft {child.id} made from the parent is draft with validation {outcome}")
     assert flow.validate.await_count == 1
     # Rejecting it is the supported next step: the retry, bound to the same parent, is admitted and accepted.
     assert flow.reject(child.id).status_code == 200
@@ -1363,7 +1406,8 @@ def test_an_accepted_change_rejects_older_confirmations_and_candidates(monkeypat
 
 @pytest.mark.parametrize("competitor", ["failed_attempt", "page_child", "accepted_page_child"])
 def test_a_run_started_after_confirmation_keeps_the_stale_child_out(monkeypatch, tmp_path, competitor):
-    second = {HANDLER: PRIVILEGED_HANDLER} if competitor == "failed_attempt" else {PAGE: _page(1)}
+    # A page run; the failed attempt's provider writes outside the page scope, so that run fails storing nothing.
+    second = {HANDLER: NORMALIZING_HANDLER} if competitor == "failed_attempt" else {PAGE: _page(1)}
     flow = _studio_flow(
         monkeypatch, tmp_path, outputs=[{HANDLER: NORMALIZING_HANDLER}, second], proposer=_scope_proposer(),
     )
@@ -1373,7 +1417,8 @@ def test_a_run_started_after_confirmation_keeps_the_stale_child_out(monkeypatch,
     handler_child = confirmed["metadata"]["build_record_id"]
     assert flow.store.status("parent") == ArtifactLifecycleStatus.STALE
 
-    competing = flow.trigger({"files": dict.fromkeys(second, "")}).json()["coding_worker"]
+    competing = flow.trigger({"files": {PAGE: ""}}).json()["coding_worker"]
+    assert flow.registry.begun == ["run_1", "run_2"]
     if competitor == "failed_attempt":
         assert competing["status"] == "failed" and "build_record_id" not in competing["metadata"]
         assert len(flow.store.invalidations) == 1
@@ -1522,17 +1567,21 @@ def test_a_confirmation_is_refused_only_when_its_build_changed_or_was_replaced(m
         flow.store.list_build_records = AsyncMock(side_effect=RuntimeError("store unavailable"))
         expected = "could not be checked against the app's current build"
     else:
-        # A ChangeRequest with no saved state of its build (one recorded before Studio saved it) cannot
+        # A ChangeRequest with no saved state of its build (one recorded before Studio kept it) cannot
         # show whether the build changed, even when the build was never written since: refused, never
-        # compared by some other rule.
+        # compared by some other rule. A workflow launch keeps the state, so the refusal names no such cause.
         del change.router_decision["baseline_state"]
         assert flow.store.records["parent"].updated_at < datetime.now(UTC)
-        expected = "saved no state of its build"
+        expected = (
+            "The change request this decision was proposed with saved no state of its build (it was recorded before "
+            "Studio kept that state), so whether the build changed since the proposal cannot be checked."
+        )
     response = flow.confirm(decision)
     if expected is None:
         assert response.status_code == 200 and response.json()["coding_worker"]["status"] == "validated", response.text
         return
     assert response.status_code == 409 and expected in response.json()["detail"], response.text
+    assert "workflow" not in response.json()["detail"], response.text
     assert "Request the change again" in response.json()["detail"]
     # Refused before the decision was used: it is still pending, and no run began for it.
     assert flow.session()["pending_harness_decision"]["decision_id"] == decision["change_request_id"]
@@ -1585,11 +1634,9 @@ def test_a_pending_reviewable_child_keeps_its_stale_parent_closed_to_another_pac
     )
     pending = flow.confirm(flow.trigger({}).json()).json()["coding_worker"]["metadata"]["build_record_id"]
     assert flow.store.status("parent") == ArtifactLifecycleStatus.STALE and flow.store.current() == []
-    blocked = flow.trigger({"files": {HANDLER: ""}})
-    assert blocked.status_code == 200, blocked.text
-    coding = blocked.json()["coding_worker"]
-    assert coding["status"] == "failed" and coding["metadata"]["candidate_admission"]["code"] == "STALE_REFINEMENT_BASELINE"
-    # Admitted before validation: nothing was validated or stored, and nothing more was invalidated.
+    blocked = _handler_attempt(flow)
+    _assert_stale_refusal(blocked, f"draft {pending} made from the parent is draft with validation passed, not rejected")
+    # Refused before any provider call: nothing was validated or stored, and nothing more was invalidated.
     assert flow.validate.await_count == 1 and flow.store.children() == [pending]
     assert len(flow.store.invalidations) == 1
 
@@ -1608,9 +1655,7 @@ def test_a_stale_parent_is_admitted_only_as_the_latest_accepted_build(monkeypatc
         return result["metadata"]["build_record_id"]
 
     def handler_attempt(build_record_id):
-        response = flow.trigger({"files": {HANDLER: ""}}, build_record_id=build_record_id)
-        assert response.status_code == 200, response.text
-        return response.json()["coding_worker"]
+        return _handler_attempt(flow, build_record_id)
 
     if case == "superseded":
         # The parent was replaced by a newer accepted build, which a rejected change then left stale.
@@ -1626,14 +1671,11 @@ def test_a_stale_parent_is_admitted_only_as_the_latest_accepted_build(monkeypatc
         refused, admitted = (first, None) if case == "never_accepted_draft" else ("parent", first)
     assert flow.store.current() == []
     attempt = handler_attempt(refused)
-    assert attempt["status"] == "failed", attempt
-    assert attempt["metadata"].get("candidate_admission", {}).get("code") == "STALE_REFINEMENT_BASELINE", attempt
-    # Each case is refused for its own reason, not only by some other check. Studio reads the
-    # registry before a run only from a STALE build, so a SUPERSEDED parent is refused at that read.
+    # Each case is refused for its own reason, not only by some other check.
     _assert_stale_refusal(attempt, {
         "never_accepted_draft": "nothing shows the parent was ever accepted",
         "newer_accepted_build": f"build {admitted} was accepted after the parent",
-        "superseded": "no server read of the app registry was made before this run began",
+        "superseded": "the parent is superseded, not stale",
     }[case])
     if admitted is not None:
         # The newer accepted build is the one a pack change is admitted against.
@@ -1676,9 +1718,9 @@ def test_a_stale_build_accepted_before_evidence_named_it_is_not_shown_accepted_e
     assert [session["status"] for session in sessions] == [RefinementSessionStatus.ACCEPTED]
     second = flow.trigger({"files": {PAGE: ""}}, build_record_id=first).json()["coding_worker"]["metadata"]["build_record_id"]
     assert flow.reject(second).status_code == 200
-    attempt = flow.trigger({"files": {HANDLER: ""}}, build_record_id=first).json()["coding_worker"]
+    attempt = _handler_attempt(flow, first)
     _assert_stale_refusal(attempt, "nothing shows the parent was ever accepted: no acceptance evidence names it")
-    assert "accept a new build of the app" in attempt["metadata"]["candidate_admission"]["stale_baseline_refusal"]
+    assert "accept a new build of the app" in attempt["detail"]
     assert flow.validate.await_count == 2
 
 
@@ -1734,10 +1776,15 @@ def test_a_first_build_is_a_draft_until_the_owner_accepts_it_through_studio(monk
     assert asyncio.run(newer_accepted_work(flow.store, app_id="app_1", record=draft)) is None
     refused = flow.promote("parent")
     assert refused.status_code == 409 and "Only accepted current" in refused.json()["detail"], refused.text
-    # A handler change from the unaccepted draft is refused at admission, before validation.
+    # A handler change from the unaccepted draft is refused before any provider call, saying what to do.
     blocked = _handler_attempt(flow)
-    assert blocked["metadata"]["candidate_admission"]["code"] == "STALE_REFINEMENT_BASELINE", blocked
+    _assert_stale_refusal(blocked, (
+        "the parent parent is the app's first build, a draft that has not been accepted; accept the first build "
+        "before changing its app-owned capability code"
+    ))
+    flow.provider.execute.assert_not_awaited()
     assert flow.validate.await_count == 0 and flow.store.status("parent") == ArtifactLifecycleStatus.DRAFT
+    assert flow.registry.begun == [] and flow.store.change_requests == {} and flow.store.invalidations == []
 
     before = datetime.now(UTC)
     accepted = flow.accept("parent")
@@ -1873,9 +1920,7 @@ def test_an_imported_genesis_build_without_evidence_keeps_its_stale_paths_blocke
     _rejected_handler_draft(flow)
     attempt = _handler_attempt(flow)
     _assert_stale_refusal(attempt, "build parent is an imported Genesis build")
-    assert "accept_genesis_build_record, owned by Genesis import" in (
-        attempt["metadata"]["candidate_admission"]["stale_baseline_refusal"]
-    )
+    assert "accept_genesis_build_record, owned by Genesis import" in attempt["detail"]
     assert flow.validate.await_count == 1
 
 
@@ -1898,17 +1943,33 @@ def test_a_current_build_outside_its_lineage_still_refuses_the_retried_handler_c
     assert flow.store.status(retried["metadata"]["build_record_id"]) == ArtifactLifecycleStatus.DRAFT
 
 
-def _handler_attempt(flow, build_record_id="parent", **coding_request):
-    response = flow.trigger({"files": {HANDLER: ""}, **coding_request}, build_record_id=build_record_id)
+def _attempt(flow, send):
+    """One refinement request: the coding worker's result, or Studio's refusal when it refused before any run.
+
+    A refusal (409) comes before the coding provider is called and before any
+    registry run begins, which this checks.
+    """
+    calls, runs = flow.provider.execute.await_count, list(flow.registry.begun)
+    response = send()
+    if response.status_code == 409:
+        assert flow.provider.execute.await_count == calls and flow.registry.begun == runs, response.text
+        return {"status": "refused", "detail": response.json()["detail"]}
     assert response.status_code == 200, response.text
     return response.json()["coding_worker"]
 
 
+def _handler_attempt(flow, build_record_id="parent", **coding_request):
+    """An explicit handler change from ``build_record_id`` (see :func:`_attempt`)."""
+    return _attempt(flow, lambda: flow.trigger({"files": {HANDLER: ""}, **coding_request}, build_record_id=build_record_id))
+
+
 def _assert_stale_refusal(attempt, expected):
-    admission = attempt["metadata"].get("candidate_admission") or {}
-    assert attempt["status"] == "failed" and admission.get("code") == "STALE_REFINEMENT_BASELINE", attempt
-    assert expected in admission["stale_baseline_refusal"], admission
-    assert "build_record_id" not in attempt["metadata"]
+    """Refused for its baseline, before any provider call, with admission's own reason (``STALE_REFINEMENT_BASELINE``)."""
+    assert attempt["status"] == "refused", attempt
+    detail = attempt["detail"]
+    assert detail.startswith(f"App-owned capability pack code ({HANDLER}) cannot be changed from build "), detail
+    assert detail.endswith(". No files were changed."), detail
+    assert expected in detail, detail
 
 
 def _rejected_handler_draft(flow):
@@ -2030,7 +2091,7 @@ _UNATTRIBUTABLE_CASES = {
 def test_a_rejected_drafts_stale_parent_is_refused_unless_nothing_else_is_open_in_flight_or_changed(
     monkeypatch, tmp_path, case,
 ):
-    """Each condition of stale-parent admission refuses on its own, before validation, changing no record."""
+    """Each condition of stale-parent admission refuses on its own, before any provider call, changing no record."""
     from mozaiksai.control_plane.implementations import coding_worker
 
     flow = _studio_flow(monkeypatch, tmp_path, outputs=[{HANDLER: NORMALIZING_HANDLER}] * 2)
@@ -2046,7 +2107,7 @@ def test_a_rejected_drafts_stale_parent_is_refused_unless_nothing_else_is_open_i
         reads = []
 
         async def unreadable_at_run_start(**kwargs):
-            # The request's scope check reads the registry first; the read before the run fails.
+            # The request's scope check reads the registry first; the baseline check's read then fails.
             reads.append(kwargs)
             if len(reads) == 2:
                 raise RuntimeError("registry unavailable")
@@ -2138,7 +2199,7 @@ def test_a_rejected_drafts_stale_parent_is_refused_unless_nothing_else_is_open_i
     records_before = {record_id: record.model_dump() for record_id, record in store.records.items()}
     validations = flow.validate.await_count
     _assert_stale_refusal(_handler_attempt(flow, **extra), _UNATTRIBUTABLE_CASES[case])
-    # Refused at admission: nothing was validated or stored, and no record was changed.
+    # Refused before any provider call: nothing was validated or stored, and no record was changed.
     assert flow.validate.await_count == validations
     assert {record_id: record.model_dump() for record_id, record in store.records.items()} == records_before
     assert store.records["parent"].invalidation_reason == "change_request:cr_1"
@@ -2149,12 +2210,13 @@ def test_a_rejected_drafts_stale_parent_is_refused_unless_nothing_else_is_open_i
 def test_a_confirmed_retry_on_an_unchanged_stale_parent_is_still_refused_for_competing_work(
     monkeypatch, tmp_path, competing,
 ):
-    """A confirmation proposed after the rejection is unchanged, so it proceeds, and admission still refuses.
+    """A confirmation proposed after the rejection is unchanged, but the baseline check still refuses it.
 
     The decision was proposed on the stale parent and nothing wrote that build
     since, so the confirmation is not refused as changed; the work that
     competes with it (another run building, another open draft, an input
-    accepted since) is what admission refuses, before validation.
+    accepted since) is what admission's baseline rule refuses, before any
+    provider call and before the decision is used.
     """
     flow = _studio_flow(
         monkeypatch, tmp_path, outputs=[{HANDLER: NORMALIZING_HANDLER}] * 2, proposer=_scope_proposer(),
@@ -2173,10 +2235,10 @@ def test_a_confirmed_retry_on_an_unchanged_stale_parent_is_still_refused_for_com
     else:
         flow.store.records["dd_2"] = _upstream("dd_2", created_at=datetime.now(UTC) + timedelta(seconds=5))
         expected = "input design_docs dd_2 became current after the parent was accepted"
-    confirmed = flow.confirm(asked)
-    assert confirmed.status_code == 200, confirmed.text
-    _assert_stale_refusal(confirmed.json()["coding_worker"], expected)
+    _assert_stale_refusal(_attempt(flow, lambda: flow.confirm(asked)), expected)
     assert flow.validate.await_count == 1 and flow.store.records["parent"].invalidation_reason == "change_request:cr_1"
+    # Refused before the decision was used: it is still pending.
+    assert flow.session()["pending_harness_decision"]["decision_id"] == asked["change_request_id"]
 
 
 def test_an_input_the_parent_recorded_is_compatible_while_it_stays_current(monkeypatch, tmp_path):
@@ -2194,9 +2256,9 @@ def test_a_workflow_on_the_baseline_keeps_its_stale_marker_unresolved_for_pack_c
     """A launched (or failed, or abandoned) workflow is genuine invalidation: no pack-code retry is admitted after it.
 
     Its change request is recorded as a workflow route, so a confirmation on
-    the unchanged stale build is not refused as changed (it follows its
-    route), but its pack scope is refused at admission, and a workflow route
-    on the same build launches as before.
+    the unchanged stale build is not refused as changed, but its pack scope is
+    refused by admission's baseline rule before any provider call, and a
+    workflow route on the same build launches as before.
     """
     proposer = _workflow_proposer()
     flow = _studio_flow(monkeypatch, tmp_path, outputs=[{HANDLER: NORMALIZING_HANDLER}] * 2, proposer=proposer, launches=True)
@@ -2216,11 +2278,9 @@ def test_a_workflow_on_the_baseline_keeps_its_stale_marker_unresolved_for_pack_c
     proposer.propose.return_value = _scope_proposer().propose.return_value
     asked = flow.trigger({}).json()
     assert asked["harness_decision"]["decision_type"] == "clarify_scope", asked
-    confirmed = flow.confirm(asked)
-    # The build is unchanged since the proposal, so the confirmation proceeds down its route ...
-    assert confirmed.status_code == 200, confirmed.text
-    # ... and pack-code admission still refuses the stale marker it cannot attribute.
-    _assert_stale_refusal(confirmed.json()["coding_worker"], "may have launched a workflow")
+    # The build is unchanged since the proposal, so the confirmation is not refused as changed, but the
+    # baseline check still refuses the stale marker it cannot attribute.
+    _assert_stale_refusal(_attempt(flow, lambda: flow.confirm(asked)), "may have launched a workflow")
     assert flow.store.children() == [] and flow.validate.await_count == 0
 
     proposer.propose.return_value = _workflow_proposer().propose.return_value
@@ -3224,7 +3284,7 @@ _NEWER_WORK_CASES = {
     ),
     "stale_with_the_state_of_another_build": (
         [*_ACCEPTED_BASE, _stale_elsewhere(), _staling_change("cr_x", "x", "draft", state_of="y")],
-        ("unverified", "change request cr_x that staled it saved no state of it when it began"),
+        ("unverified", "change request cr_x that staled it saved the state of build y, not of it, when it began"),
     ),
     "stale_by_no_change_request": (
         [*_ACCEPTED_BASE, _evidence_record("x", created=2, written=7)],
@@ -3236,7 +3296,7 @@ _NEWER_WORK_CASES = {
     ),
     "stale_by_a_change_request_of_another_build": (
         [*_ACCEPTED_BASE, _stale_elsewhere(), _staling_change("cr_x", "y", "draft")],
-        ("unverified", "change request cr_x that staled it is not one made from it"),
+        ("unverified", "change request cr_x that staled it is not one made from it (it was made from build y)"),
     ),
     "stale_invalidations_past_depth": (
         [*_ACCEPTED_BASE, _stale_elsewhere(), _staling_change("cr_x", "x", "stale", prior="cr_1"),
@@ -3289,6 +3349,22 @@ _NEWER_WORK_CASES = {
          _evidence_record("x", status=_STALE, accepted=5, created=4, written=12)],
         ("accepted", "build x was accepted after build b"),
     ),
+    # A rejected (ARCHIVED) build was never accepted work, whatever evidence it carries, even evidence
+    # naming itself. Outside the lineage: an acceptance "after" the base, if it counted, would refuse.
+    "archived_with_its_own_evidence_outside_the_lineage": (
+        [*_ACCEPTED_BASE, _evidence_record("x", status=ArtifactLifecycleStatus.ARCHIVED, accepted=6, created=2,
+                                           written=7)],
+        None,
+    ),
+    # In the lineage: if it counted as the base, x (accepted before it, after p) would be older work; the base
+    # is p, so x is newer accepted work.
+    "archived_with_its_own_evidence_in_the_lineage": (
+        [_evidence_record("p", accepted=1, written=5),
+         _evidence_record("a", parent="p", status=ArtifactLifecycleStatus.ARCHIVED, accepted=4, created=3, written=8),
+         _evidence_record("v", parent="a", status=_DRAFT, created=9),
+         _evidence_record("x", parent="p", accepted=3, created=2, written=6)],
+        ("accepted", "build x was accepted after build p"),
+    ),
     # A first build is a draft with no base: accepted only while nothing else of its scope is accepted.
     "first_build_draft_alone": ([_evidence_record("v", status=_DRAFT)], None),
     "first_build_draft_beside_a_current_build": (
@@ -3339,6 +3415,76 @@ def test_newer_accepted_work_orders_only_what_acceptance_evidence_shows(monkeypa
         assert found is None, found
         return
     assert found is not None and found.kind == expected[0] and expected[1] in found.reason, found
+
+
+def test_a_draft_staled_by_a_change_request_made_from_another_build_refuses_naming_that_cause():
+    """A stale draft that no evidence names, staled by a change request made from another build, is unverifiable.
+
+    Only the state saved by a change request made from the record itself shows
+    it was a draft never accepted; here (the shape downstream propagation would
+    leave: an accepted build ``f``, a draft ``d`` of it staled by change request
+    ``cr_dd`` made from an upstream record) nothing saved ``d``'s state. Newer
+    accepted work and the stale-parent scan of what was made from ``f`` both
+    refuse, naming that cause, never passing ``d`` over. Today no writer stales
+    a build this way (see ``_never_accepted_refusal``).
+    """
+    from mozaiksai.control_plane.implementations import coding_worker
+
+    store = _evidence_store(
+        _evidence_record("f", accepted=1, written=5),
+        _evidence_record("d", parent="f", created=2, written=7, staled_by="cr_dd"),
+        _evidence_record("g", parent="f", status=_DRAFT, created=8),
+        _staling_change("cr_dd", "dd", "current"),
+    )
+    cause = "change request cr_dd that staled it is not one made from it (it was made from build dd)"
+    found = asyncio.run(coding_worker.newer_accepted_work(store, app_id=APP_ID, record=store.records["g"]))
+    assert found is not None and found.kind == "unverified" and found.build_record_id == "d", found
+    assert f"build d is stale, it carries no acceptance evidence naming it, and {cause}" in found.reason
+    kind, detail = asyncio.run(coding_worker._open_work(store, app_id=APP_ID, record=store.records["d"]))
+    assert kind == "unverified" and cause in detail, detail
+
+
+_BASELINE_CASES = {
+    # The build is the app's accepted current build: admitted.
+    "current": ([_evidence_record("v", status=_CURRENT, accepted=1)], None),
+    # AppGenerator's first build, still a draft: refused with the way forward, whatever the registry read.
+    "first_build_draft": (
+        [_evidence_record("v", status=_DRAFT)],
+        ("the parent v is the app's first build, a draft that has not been accepted; accept the first build "
+         "before changing its app-owned capability code", None),
+    ),
+    # A later draft while nothing is current: accept it first.
+    "revision_draft": (
+        [_evidence_record("p", accepted=1, written=5), _evidence_record("v", parent="p", status=_DRAFT, created=6)],
+        ("the parent v is a draft that has not been accepted; accept it before changing its app-owned capability "
+         "code", None),
+    ),
+    # Another build is the app's accepted current build: changed from that one.
+    "draft_beside_the_current_build": (
+        [_evidence_record("c", status=_CURRENT, accepted=1), _evidence_record("v", status=_DRAFT, created=6)],
+        ("build c is the app's accepted current build", "c"),
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(_BASELINE_CASES))
+def test_the_pack_code_baseline_rule_names_the_way_forward(case):
+    """Studio's check before any provider call and candidate admission share one baseline rule."""
+    from mozaiksai.control_plane.implementations.coding_worker import (
+        PackCodeBaseline,
+        pack_code_baseline_refusal,
+    )
+
+    records, expected = _BASELINE_CASES[case]
+    store = _evidence_store(*records)
+    refusal = asyncio.run(pack_code_baseline_refusal(store, PackCodeBaseline(
+        artifact_app_id=APP_ID, build_family="app_bundle", build_record_id="v", user_id="demo-user",
+        registry_run_state=None,
+    )))
+    if expected is None:
+        assert refusal is None, refusal
+        return
+    assert refusal is not None and (refusal.reason, refusal.accepted_build_record_id) == expected, refusal
 
 
 def test_a_stale_build_whose_saved_state_cannot_be_read_propagates_the_lookup_error():

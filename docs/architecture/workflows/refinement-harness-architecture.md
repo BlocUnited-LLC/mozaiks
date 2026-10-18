@@ -253,6 +253,18 @@ Ownership comes from those packs' pinned contracts, never from the candidate:
   another key, such as the App Intelligence index that a promotion saves in the
   `app_bundle` family under `app_intelligence_workspace`, is not the app's
   build. The finalizer reads it at admission; a failed read refuses.
+  Studio applies the same baseline rule (`coding_worker.pack_code_baseline_refusal`,
+  shared with admission) before any provider call: when an explicit or
+  confirmed file scope includes an app-owned pack path of the saved build, a
+  build that is not the accepted current build, and is not a stale build that
+  admission would admit (below), is refused with 409 before classification,
+  before a pending decision is used, and before the registry run and any
+  coding or surface provider call. The detail names admission's reason. A
+  draft, such as the app's first build before the owner accepts it, is
+  refused with the way forward ("accept the first build before changing its
+  app-owned capability code"). Admission runs the rule again on the
+  candidate as the backstop, for anything that changed while the provider
+  ran (`STALE_REFINEMENT_BASELINE`).
   Studio marks the selected build stale only after an operation changed it or
   left its outcome unresolved: an inline run that stored a child, not since
   rejected, whose validation passed (a reviewable draft), is pending or was
@@ -332,10 +344,11 @@ Ownership comes from those packs' pinned contracts, never from the candidate:
   The retry stays bound to the same parent, the authenticated user and the
   explicit or confirmed files. A lookup failure, any scan past its bound of
   200 records, or an acceptance that cannot be ordered against the parent's
-  refuses, and the refusal names its reason in
-  `candidate_admission.stale_baseline_refusal`. These are reads at admission,
-  not a compare-and-set; acceptance rechecks the parent, scope and registry
-  run as for a `CURRENT` parent.
+  refuses, and the refusal names its reason: in Studio's 409 detail before
+  any provider call, or in `candidate_admission.stale_baseline_refusal` when
+  admission refuses the candidate. These are reads, before the provider call
+  and again at admission, not a compare-and-set; acceptance rechecks the
+  parent, scope and registry run as for a `CURRENT` parent.
 - A changed workspace handler must be a thin leaf over its template base handler
   (`prove_workspace_handler_extension`): overrides of declared action methods
   with the base signatures only, reaching the service only through `super()` or
@@ -402,7 +415,11 @@ and `build_record_id` (the accepted build's scope and revision), `accepted_by`
 write it, with the same shape (`contracts.build_acceptance_evidence`): Studio's
 `POST /api/studio/build/artifacts/{id}/accept` (`studio_accept`) and the
 staged-refinement acceptance (`staged_refinement_accept`, which adds the
-staged review it was accepted under). Readers honour evidence only on the
+staged review it was accepted under). `accepted_by` is the caller's
+authenticated principal, which the caller must pass (Studio passes the
+request's principal for both): the evidence builder refuses an empty one, and
+the staged-refinement acceptance refuses without one rather than taking a
+reviewer name from the staged review record. Readers honour evidence only on the
 record it names (`contracts.acceptance_evidence_names`), so a marker copied or
 inherited into another record, one naming another app, key or record, and the
 two-field marker written before acceptance named its build, show nothing about
@@ -426,9 +443,23 @@ over; `stale` is followed back through the saved earlier invalidation (at most
 16 change requests, and at most 64 reads per check). Anything else refuses as
 unverifiable, with a diagnostic naming the cause: a saved status of `current`
 or `superseded` (a build accepted before acceptance named its build), no saved
-state or the state of another build, a change request that was not found or
-not made from it, an invalidation that names no change request, or a bound
-passed. A failed read refuses as well.
+state, the state of another build (naming that build), a change request that
+was not found or was made from another build (naming that build), an
+invalidation that names no change request, or a bound passed. A failed read
+refuses as well.
+
+Only Studio's trigger stales build records today, and it stales the build
+its change request was made from. The invalidation service's other paths
+stale no build record: its downstream family propagation
+(`ArtifactInvalidationService` calling `store.invalidate_artifact_family`)
+filters on `artifact_kind` and `artifact_key`, which a `BuildRecord` never
+stores, so it matches none, and the session refs it reads are looked up under
+the artifact app without a target, where Studio keeps no session. A record
+staled by a change request made from another build therefore cannot arise in
+production now; if it did, it would refuse as above (nothing saved its
+state). If the artifact-store owner makes propagation live, the records it
+stales must be decided by that owner's own evidence of what it staled (a
+dependency on that owner, not a reason to pass such records over here).
 
 ##### Newer accepted work
 

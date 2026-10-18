@@ -291,6 +291,35 @@ async def test_accepts_draft_app_bundle_when_review_is_promotion_ready(tmp_path:
     assert load_refinement_review_record(context["staging_result"].staging_area).status == "promotion_ready"
 
 
+@pytest.mark.parametrize("accepted_by", [None, "", "   "])
+@pytest.mark.asyncio
+async def test_acceptance_without_the_callers_principal_is_refused_not_credited_to_the_reviewer(
+    tmp_path: Path, accepted_by,
+) -> None:
+    """The evidence names the authority for the transition: the caller's principal, never the review's reviewer.
+
+    The promotion-ready review record names ``reviewer_1``, but that stored
+    name is not who is accepting now, so an acceptance without a principal is
+    refused and nothing is written: the draft stays a draft, unaccepted.
+    """
+    context = await _build_acceptance_context(tmp_path)
+    assert context["review_record"].reviewer == "reviewer_1"
+    with pytest.raises(AcceptedStagedAppBundleBuildRecordError, match="authenticated principal"):
+        await accept_staged_refinement_build_record(
+            app_id=context["app_id"],
+            draft_build_record_id=context["draft_result"].build_record_id,
+            review_record=context["review_record"],
+            request_id=context["plan"].request_id,
+            record_store=context["build_record_store"],
+            accepted_by=accepted_by,
+        )
+    store = context["build_record_store"]
+    assert store.accept_calls == []
+    assert store.created_record.lifecycle_status == BuildRecordStatus.DRAFT
+    assert "acceptance" not in store.created_record.commit_metadata.metadata
+    assert store.source_record.lifecycle_status == BuildRecordStatus.CURRENT
+
+
 @pytest.mark.asyncio
 async def test_acceptance_requires_override_for_skipped_validation(tmp_path: Path) -> None:
     context = await _build_acceptance_context(tmp_path)

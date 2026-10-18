@@ -2676,6 +2676,64 @@ def test_a_surface_plan_that_would_edit_only_template_owned_pack_files_is_refuse
     _owned_build_target.begin_refinement_run.assert_not_awaited()
 
 
+def test_app_owned_pack_code_of_a_first_build_draft_is_refused_before_any_provider_call(
+    monkeypatch, _owned_build_target,
+):
+    """An explicit scope holding app-owned pack code of the app's first build, still a draft, is refused first.
+
+    AppGenerator saves the first build as a draft, and app-owned pack code
+    changes only from an accepted baseline. The refusal names the way
+    forward and comes before classification, so neither the coding provider
+    (a patch) nor the contract surface planner or run (a feature change)
+    is called, no registry run begins and no change request is recorded.
+    """
+    from mozaiksai.core.auth import reset_auth_adapter
+
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+    reset_auth_adapter()
+    from mozaiksai.hosts import studio as studio_app
+
+    handler = "app/modules/product/backend/handler.py"
+    draft = _BaselineStore.versions["av_456"]
+    assert draft.lifecycle_status == ArtifactLifecycleStatus.DRAFT and draft.parent_build_record_id is None
+    # The saved build's verified pack ownership declares the handler app-owned (owner: workspace).
+    monkeypatch.setattr(studio_app, "parent_pack_output_owners", lambda capability_packs: {handler: "workspace"})
+    harness = studio_app.get_orchestration_control_harness()
+    monkeypatch.setattr(harness, "coding_enabled", lambda: True)
+    monkeypatch.setattr(harness, "contract_surface_enabled", lambda: True)
+    calls = {name: AsyncMock(side_effect=AssertionError(f"{name} reached")) for name in (
+        "route_refinement_request", "prepare_coding_request", "execute_coding_request",
+        "prepare_contract_surface_request", "execute_surface_plan", "finalize_surface_output",
+    )}
+    for name, mock in calls.items():
+        monkeypatch.setattr(harness, name, mock)
+
+    response = TestClient(studio_app.app).post("/api/workflows/trigger", json={
+        "build_registry_id": "appreg_1", "trigger_source": "refinement",
+        "trigger_payload": {
+            "refinement_request": {
+                "artifact_kind": "app_bundle", "artifact_key": "app_bundle", "artifact_version_id": "av_456",
+                "raw_user_request": "Trim message bodies before they are stored",
+                "source_surface": "app_build",
+            },
+            "coding_request": {"files": {handler: ""}},
+        },
+    })
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == (
+        f"App-owned capability pack code ({handler}) cannot be changed from build av_456: the parent av_456 is the "
+        "app's first build, a draft that has not been accepted; accept the first build before changing its "
+        "app-owned capability code. No files were changed."
+    )
+    for mock in calls.values():
+        mock.assert_not_awaited()
+    _owned_build_target.begin_refinement_run.assert_not_awaited()
+    assert _BaselineStore.change_requests == {}
+    assert _BaselineStore.versions["av_456"].lifecycle_status == ArtifactLifecycleStatus.DRAFT
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("cancel_at", ["coding", "surface_execution", "surface_finalization"])
 async def test_cancelled_inline_refinement_releases_bound_build_without_promotion(

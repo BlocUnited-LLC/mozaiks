@@ -37,6 +37,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
 from mozaiksai.control_plane.artifact_promotion import (
     _build_acceptance_commit_metadata,
     _commit_metadata_document,
@@ -188,6 +190,12 @@ class TestBuildAcceptanceCommitMetadata:
             "app_id": "app-1", "build_family": "app_bundle", "build_key": "app_bundle", "build_record_id": "av_1",
             "transition": "staged_refinement_accept",
         }
+
+    @pytest.mark.parametrize("accepted_by", [None, "", "  "])
+    def test_evidence_without_the_accepting_principal_is_never_built(self, accepted_by):
+        # The single evidence builder refuses evidence that names no authority for the transition.
+        with pytest.raises(ValueError, match="authenticated principal"):
+            self._call(accepted_by=accepted_by)
 
     def test_accepted_at_in_acceptance_block(self):
         result = self._call()
