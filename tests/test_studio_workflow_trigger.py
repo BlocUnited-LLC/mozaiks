@@ -2734,6 +2734,104 @@ def test_app_owned_pack_code_of_a_first_build_draft_is_refused_before_any_provid
     assert _BaselineStore.versions["av_456"].lifecycle_status == ArtifactLifecycleStatus.DRAFT
 
 
+def test_an_explicit_scope_on_a_parent_whose_pack_ownership_cannot_be_verified_is_refused_before_classification(
+    monkeypatch, _owned_build_target,
+):
+    """An explicit or confirmed file scope always applies when it proceeds, and a parent whose pack selection
+    cannot be verified admits no candidate, so the scope is refused first: no classification, provider, surface
+    planner or run, registry run or change request."""
+    from mozaiksai.core.auth import reset_auth_adapter
+
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+    reset_auth_adapter()
+    from mozaiksai.hosts import studio as studio_app
+
+    handler = "app/modules/product/backend/handler.py"
+    monkeypatch.setattr(studio_app, "parent_pack_output_owners", lambda capability_packs: None)
+    harness = studio_app.get_orchestration_control_harness()
+    monkeypatch.setattr(harness, "coding_enabled", lambda: True)
+    monkeypatch.setattr(harness, "contract_surface_enabled", lambda: True)
+    calls = {name: AsyncMock(side_effect=AssertionError(f"{name} reached")) for name in (
+        "route_refinement_request", "prepare_coding_request", "execute_coding_request",
+        "prepare_contract_surface_request", "execute_surface_plan", "finalize_surface_output",
+    )}
+    for name, mock in calls.items():
+        monkeypatch.setattr(harness, name, mock)
+
+    response = TestClient(studio_app.app).post("/api/workflows/trigger", json={
+        "build_registry_id": "appreg_1", "trigger_source": "refinement",
+        "trigger_payload": {
+            "refinement_request": {
+                "artifact_kind": "app_bundle", "artifact_key": "app_bundle", "artifact_version_id": "av_456",
+                "raw_user_request": "Trim message bodies before they are stored", "source_surface": "app_build",
+            },
+            "coding_request": {"files": {handler: ""}},
+        },
+    })
+
+    assert response.status_code == 409, response.text
+    detail = response.json()["detail"]
+    assert detail.startswith("This change cannot be checked: the capability packs the parent build selected"), detail
+    assert "run an AppGenerator revision of this build and accept it" in detail and "regenerate" not in detail
+    for mock in calls.values():
+        mock.assert_not_awaited()
+    _owned_build_target.begin_refinement_run.assert_not_awaited()
+    assert _BaselineStore.change_requests == {}
+
+
+def test_a_surface_plan_on_a_parent_whose_pack_ownership_cannot_be_verified_is_refused_before_the_run(
+    monkeypatch, _owned_build_target,
+):
+    """An inferred feature change whose surface plan would apply to a parent with an unverifiable pack selection
+    is refused after the planner, before the surface run, its finalization and the registry run."""
+    from mozaiksai.control_plane.contracts import ContractSurfacePlan, ContractSurfaceUpdate
+    from mozaiksai.core.auth import reset_auth_adapter
+
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+    reset_auth_adapter()
+    from mozaiksai.hosts import studio as studio_app
+
+    plan = ContractSurfacePlan(
+        summary="Add export action to product module", change_class="feature", artifact_kind="app_bundle",
+        confidence=0.92,
+        surfaces=[ContractSurfaceUpdate(
+            kind="module_action", target_id="product", target_kind="module",
+            affected_paths=["app/ui/pages/product_export.yaml"],
+            dependency_order=0, rationale="Add export action handler", confidence=0.92,
+        )],
+    )
+    monkeypatch.setattr(studio_app, "parent_pack_output_owners", lambda capability_packs: None)
+    harness = studio_app.get_orchestration_control_harness()
+    monkeypatch.setattr(harness._refinement_resolver, "_classifier", SimpleNamespace(classify=_async_classifier(
+        change_class="feature", rationale="Adding an export action extends the existing app bundle.",
+        confidence=0.92, signals=["new_capability", "app_extension"],
+    )))
+    monkeypatch.setattr(harness, "contract_surface_enabled", lambda: True)
+    prepare = AsyncMock(return_value=(plan, None))
+    monkeypatch.setattr(harness, "prepare_contract_surface_request", prepare)
+    execute = AsyncMock(side_effect=RuntimeError("surface run reached"))
+    finalize = AsyncMock()
+    monkeypatch.setattr(harness, "execute_surface_plan", execute)
+    monkeypatch.setattr(harness, "finalize_surface_output", finalize)
+
+    response = TestClient(studio_app.app).post("/api/workflows/trigger", json={
+        "build_registry_id": "appreg_1", "trigger_source": "refinement",
+        "trigger_payload": {"refinement_request": {
+            "artifact_kind": "app_bundle", "artifact_key": "app_bundle", "artifact_version_id": "av_456",
+            "raw_user_request": "Add an export action to the product module", "source_surface": "app_build",
+        }},
+    })
+
+    prepare.assert_awaited_once()
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"].startswith("This change cannot be checked:"), response.text
+    execute.assert_not_awaited()
+    finalize.assert_not_awaited()
+    _owned_build_target.begin_refinement_run.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("cancel_at", ["coding", "surface_execution", "surface_finalization"])
 async def test_cancelled_inline_refinement_releases_bound_build_without_promotion(

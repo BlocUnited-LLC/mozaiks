@@ -194,18 +194,20 @@ This project follows a practical pre-1.0 changelog format:
   not declare it no longer verify until the pack is upgraded or the
   selection is pinned again. A contract or catalog asset that is not a file
   is an integrity diagnostic.
-- Generated bundle validation never renders pack templates. Each resolved
-  pack's provenance must record its version, every template-owned output must
-  be present, and the output of every static (non-`.j2`) template must equal
-  the verified template text, with line endings normalized. A `.j2` output is
-  checked through the pack's declared outputs and pinned identity, not its
-  content. Bundles of packs that render from build context, such as
-  `operator_readiness`, therefore pass the public validation facade and
-  Studio candidate validation without build-time template variables, and
-  CRLF and LF checkouts of a pack validate the same bundle. A bundle built
-  from another version of a shipped pack fails until an AppGenerator revision
-  or a regeneration re-materializes the pack; the diagnostic names that
-  remedy.
+- Generated bundle validation checks pack outputs without rendering pack
+  templates. Each resolved pack's provenance must record its version, every
+  template-owned output must be present, and the output of every static
+  (non-`.j2`) template must equal the verified template text, with line
+  endings normalized. A `.j2` output is checked through the pack's declared
+  outputs and pinned identity, not its content. Bundles of packs that render
+  from build context, such as `operator_readiness`, therefore pass the public
+  validation facade and Studio candidate validation, which render nothing,
+  without build-time template variables, and CRLF and LF checkouts of a pack
+  validate the same bundle. AppGenerator's own acceptance gate still renders
+  the selected packs' templates, with the full build context, for its
+  planned-data check. A bundle built from another version of a shipped pack
+  fails until an AppGenerator revision of the build, once accepted,
+  re-materializes the pack; the diagnostic names that remedy.
 - The bundle scanner takes `provides_capabilities`, `forbidden_outputs` and
   `capability_source` only from a resolved pack's verified contract and
   context, never from a caller's row. The validation facade and the
@@ -227,6 +229,12 @@ This project follows a practical pre-1.0 changelog format:
   template resolver holds back `data/contract.json`, `ui/index.js` and
   `ui/route_manifest.json` and records each contributing pack under
   `composed_outputs`, including a pack whose only templates are shared roots.
+  UI registry composition accepts a route to one of the shell's own core
+  components (`SchemaPage`, `ChatPage`, `ProfilePage` and the others chat-ui
+  registers itself) without a `ui/index.js` registration, and a route without
+  an id, which it matches by path and keeps as written. Schema-native
+  community packs and apps with such routes therefore compose beside a
+  UI-contributing pack; a route to a component nobody registers still fails.
   The bundle scanner rejects pack provenance that lists a shared root in a
   pack's `materialized_owned_files` (written before composition) and asks for
   a reassembly. A Community Component upgrade blocks before writing anything
@@ -249,9 +257,8 @@ This project follows a practical pre-1.0 changelog format:
   leaves the shared UI roots out. The pack-only data contract guard checks
   the bundle's copy, which revision hydration loads from the bound source.
 - Assembly reads task outputs only from the task batch result map. A key that
-  is not a task id of the approved plan, including the obsolete
-  `task_results`, `results` and `tasks` wrappers, fails assembly with a
-  diagnostic that asks for the batch to be rerun.
+  is not a task id of the approved plan fails assembly with a diagnostic that
+  asks for the batch to be rerun.
 - Runtime smoke get checks read the get action's declared output schema, as
   create and list do. A get response whose record the schema does not
   declare fails `get_missing`, `a_get` and `b_get_isolated` explicitly; a 404
@@ -321,6 +328,11 @@ This project follows a practical pre-1.0 changelog format:
 - When the selected packs' data contributions cannot be composed, the app
   schema save still derives `app.json` `authRequired` from the approved data
   contract; only `data/contract.json` is left to assembly.
+- A Community Component upgrade verifies the installed source against the
+  version and digest installed state pinned before comparing the app with
+  it. A source changed in place since installation refuses the upgrade, and
+  nothing changes, instead of recording a false upgrade over files still
+  materialized from the old content.
 - An OSS SaaS build whose plan adds the default id-only MozaiksPay row now
   materializes the shipped MozaiksPay pack and schedules no model work for
   its pages, client and facade module, so assembly and validation agree on
@@ -328,41 +340,28 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Removed
 
-- Acceptance fallbacks in Studio refinement, AppGenerator and the
-  staged-refinement acceptance. Accepted or promoted refinement sessions, the
-  shape of a parentless genesis build and the two-field acceptance marker no
-  longer count as acceptance evidence. AppGenerator no longer saves its first
-  build as current or stamps it with a marker. A confirmation whose change
-  request saved no build state is no longer judged by the change request's
-  creation time, and staged acceptance no longer takes `accepted_by` from the
-  staged review record's reviewer. Records that relied on these fallbacks
-  fail closed with a diagnostic.
-- Unverified pack paths: the silent skip of a selected row that resolves to
-  no source, inline `provides_capabilities` and `forbidden_outputs` claims on
-  selected rows, a caller-claimed `capability_source` for a resolved pack,
-  and the scanner's integrity-only use of a caller's own `pack_source_path`
-  outside the verified selection.
-- The template resolver's flat mode, which wrote `ui/index.js` and
-  `ui/route_manifest.json` as pack files, and the Community Component
-  upgrade's in-place rewrite of an exclusively claimed UI root and migration
-  of an upgraded pack's own exclusive shared-root claim; such provenance now
-  blocks the upgrade until the app is reassembled.
-- `save_app_schema`'s write of its uncomposed render into `generated_files`
-  and of the raw approved data contract when packs cannot be composed, and
-  the process-memory revision baseline as a fallback for repair composition.
-- `task_batch_outputs` tolerance for `task_results`, `results` or `tasks`
-  wrappers, list results and a top-level `failed_tasks` key; the hardcoded
-  `item` reads of runtime smoke get checks; the scanner's page-title check of
-  a workspace-prefixed `app/brand/theme_config.json`, a path layout already
-  rejects; and `scripts/generated_ui_acceptance.normalize_ui_acceptance_findings`,
-  which had no callers.
+- Acceptance without an authorized transition: AppGenerator no longer saves
+  an app's first build as current, and the staged-refinement acceptance no
+  longer credits the acceptance to the staged review record's reviewer.
+- Unverified pack contracts: the bundle scanner no longer honors a selected
+  row's inline `provides_capabilities`, `forbidden_outputs` or
+  `capability_source`, and no longer reads a `contract.yaml` from a row's
+  own `pack_source_path` without verifying it, nor skips a row whose
+  contract it cannot read.
+- Pack templates writing `ui/index.js`, `ui/route_manifest.json` or
+  `data/contract.json` as their own files, and the Community Component
+  upgrade rewriting such a shared root in place; composition owns them, and
+  provenance that claims one blocks the upgrade until the app is
+  reassembled.
+- `save_app_schema`'s write of its uncomposed render into `generated_files`.
+- The hardcoded `item` reads of runtime smoke get checks, and
+  `scripts/generated_ui_acceptance.normalize_ui_acceptance_findings`, which
+  had no callers.
 - `BrandingProvider`, `useBranding` and the unresolvable `providers/index.js`
   barrel from `@mozaiks/chat-ui`. Theme loading uses `initializeTheme` and
   `useTheme`, which fail closed on an invalid page-title style.
-- The Messages profile tab's Friends list and start-conversation path, the
-  Messaging UI's unprefixed theme tokens with fixed colour fallbacks, and the
-  notification router's second read of `related_type` from the event
-  envelope.
+- The Messages profile tab's Friends list and start-conversation path, and
+  the Messaging UI's unprefixed theme tokens with fixed colour fallbacks.
 
 ### Security
 

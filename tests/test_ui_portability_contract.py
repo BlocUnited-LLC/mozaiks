@@ -120,12 +120,8 @@ def test_greetings_pack_has_route_manifest() -> None:
     assert 'registerComponent("GreetingsPage", GreetingsPage)' in index
 
 
-@pytest.mark.xfail(strict=True, raises=ValueError, reason=(
-    "compose_ui_registry accepts only registered and auth route components, not the shell's core "
-    "SchemaPage, so a pack or app route to a declarative page cannot be assembled (owner: UI registry "
-    "composition). Remove this mark when the composer accepts shell core components."
-))
 def test_a_pack_route_to_the_shell_schema_page_composes() -> None:
+    """A schema-native pack route targets the shell's SchemaPage, which the shell registers itself."""
     from mozaiksai.core.workflow.generator_support.ui_registry_composition import (
         compose_ui_registry,
     )
@@ -134,7 +130,60 @@ def test_a_pack_route_to_the_shell_schema_page_composes() -> None:
     composed = compose_ui_registry(
         [{"owner": "pack:greetings", "files": [{"filename": "ui/route_manifest.json", "content": json.dumps(manifest)}]}], {},
     )
-    assert json.loads(composed["ui/route_manifest.json"])["pages"][0]["component"] == "SchemaPage"
+    assert json.loads(composed["ui/route_manifest.json"])["pages"] == manifest["pages"]
+
+
+def test_an_app_with_schema_page_routes_without_ids_composes_with_a_ui_contributing_pack() -> None:
+    """A canonical example's carried manifest (SchemaPage routes, no route ids) composes beside a pack's own
+    registered page; every app route is kept exactly as written, and an unregistered component still fails."""
+    from mozaiksai.core.workflow.generator_support.ui_registry_composition import (
+        compose_ui_registry,
+    )
+
+    canonical = REPO_ROOT / "examples" / "canonical-apps" / "project-hub" / "app" / "ui" / "route_manifest.json"
+    app_manifest = json.loads(canonical.read_text(encoding="utf-8"))
+    assert all("id" not in route for route in app_manifest["pages"])
+    files, contribution = _greetings_resolution()
+    app = {"owner": "app:generated_files", "files": [
+        {"filename": "ui/route_manifest.json", "content": json.dumps(app_manifest)},
+    ]}
+    composed = compose_ui_registry([app, contribution], files)
+    pages = json.loads(composed["ui/route_manifest.json"])["pages"]
+    for route in app_manifest["pages"]:
+        assert route in pages, route
+    assert any(route.get("id") == "greetings" and route["component"] == "GreetingsPage" for route in pages)
+    # The shell registers SchemaPage itself: the composed barrel registers only the pack's component.
+    assert "SchemaPage" not in composed["ui/index.js"] and "GreetingsPage" in composed["ui/index.js"]
+
+    # A route to a component nobody registers and the shell does not provide is still refused.
+    unknown = {"pages": [{"path": "/reports", "component": "ReportsPage"}]}
+    with pytest.raises(ValueError, match="Unregistered route component: ReportsPage"):
+        compose_ui_registry([{"owner": "app:generated_files", "files": [
+            {"filename": "ui/route_manifest.json", "content": json.dumps(unknown)},
+        ]}, contribution], files)
+    # Two id-less routes cannot claim one path, and a declared id must be a non-empty string.
+    for pages_ in ([{"path": "/a", "component": "SchemaPage"}, {"path": "/a", "component": "ChatPage"}],
+                   [{"id": "", "path": "/a", "component": "SchemaPage"}]):
+        with pytest.raises(ValueError):
+            compose_ui_registry([{"owner": "app:generated_files", "files": [
+                {"filename": "ui/route_manifest.json", "content": json.dumps({"pages": pages_})},
+            ]}], {})
+
+
+def test_the_composer_and_scanner_accept_exactly_the_shells_core_components() -> None:
+    """One definition of the shell's core route components, matching chat-ui's CORE_COMPONENTS."""
+    import re
+
+    from factory_app.workflows.AppGenerator.tools import generated_bundle_scanner as scanner
+    from mozaiksai.core.workflow.generator_support.ui_registry_composition import (
+        SHELL_CORE_COMPONENTS,
+    )
+
+    source = (REPO_ROOT / "chat-ui" / "src" / "registry" / "coreComponents.js").read_text(encoding="utf-8")
+    declared = re.search(r"export const CORE_COMPONENTS = \[([^\]]*)\]", source)
+    assert declared is not None
+    assert SHELL_CORE_COMPONENTS == frozenset(re.findall(r"'([A-Za-z]+)'", declared.group(1)))
+    assert scanner._SHELL_CORE_COMPONENTS is SHELL_CORE_COMPONENTS
 
 
 def _greetings_resolution() -> tuple[dict[str, str], dict[str, Any]]:

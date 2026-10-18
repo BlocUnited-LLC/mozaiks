@@ -178,6 +178,12 @@ owned template files. Several selected packs may declare the same shared root
 (`data/contract.json`, `ui/index.js`, `ui/route_manifest.json`); any other
 declared output path belongs to exactly one selected pack.
 
+A composed route may target one of the shell's own core components
+(`SchemaPage`, `ChatPage`, `ProfilePage` and the others chat-ui's
+`CORE_COMPONENTS` lists) without a `ui/index.js` registration, and a route may
+omit its `id`: composition then matches it by path and keeps it as written.
+Any other route component must be registered by a contribution.
+
 The resolver never materializes a shared root as one pack's file, whoever calls
 it. It leaves the root out of its output and lists it under `composed_outputs`
 with every contributing pack's identity; a pack whose templates are only shared
@@ -573,6 +579,12 @@ to overwrite locally modified owned files, files owned by another installed
 pack, or workspace-owned/custom files. It validates the upgraded provenance
 against the app as it will be before it writes anything. It does not execute
 migration scripts.
+
+An upgrade compares the app with the installed source only after that
+source verifies to the version and digest installed state pinned; a source
+changed in place since installation refuses the upgrade, and nothing
+changes. Restore the installed source and plan the upgrade from a separate
+candidate directory.
 
 When the app's provenance claims any shared root as a pack's exclusive file,
 whichever pack claims it and in any entry order, the plan blocks with

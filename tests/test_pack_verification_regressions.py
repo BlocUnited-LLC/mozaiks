@@ -874,6 +874,29 @@ def test_a_caller_cannot_promote_a_verified_pack_to_a_managed_capability():
     assert not any("Selected managed capability 'messaging'" in error for error in errors), errors
 
 
+def test_a_pack_that_declares_no_capability_source_is_never_managed_whatever_the_row_claims(tmp_path):
+    """A pinned pack whose context omits capability_source takes no label from the selecting row: a
+    managed_capability claim does not make it managed (no managed layout slot)."""
+    from mozaiksai.core.runtime.app.layout_validation import layout_extensions_from_selected_packs
+
+    source = tmp_path / "greetings"
+    shutil.copytree(GREETINGS, source, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    manifest = source / "context.yaml"
+    text = manifest.read_text(encoding="utf-8")
+    assert "  capability_source: generated_module\n" in text
+    manifest.write_text(text.replace("  capability_source: generated_module\n", ""), encoding="utf-8")
+    for claim in ("managed_capability", "operator_pack", None):
+        row = {"id": "greetings", "pack_source_path": str(source), **_pinned("greetings", source)}
+        if claim is not None:
+            row["capability_source"] = claim
+        [entry] = resolver.verified_selected_pack_sources([row])
+        assert entry["capability_source"] == "", (claim, entry["capability_source"])
+        resolved: list[dict] = []
+        scanner.scan_generated_bundle({"app.json": "{}"}, capability_packs=[row], resolved_capability_packs=resolved)
+        rows = [{"id": identity["pack_id"], "capability_source": entry["capability_source"]} for identity in resolved]
+        assert layout_extensions_from_selected_packs(rows) == ()
+
+
 def test_one_pack_identity_precedence_across_resolver_scanner_and_layout():
     from mozaiksai.core.runtime.app.layout_validation import layout_extensions_from_selected_packs
 
@@ -1412,14 +1435,12 @@ def test_a_recorded_build_pins_its_workspace_packs_to_the_identity_acceptance_ve
     errors = scanner.scan_generated_bundle({"app.json": "{}"}, capability_packs=[recorded_row])
     assert len(errors) == 1 and "does not match freshly verified source" in errors[0], errors
 
-    # Restored, the recorded row stays verifiable even after its registration is withdrawn: its own pins vouch.
+    # Restored, the recorded row itself stays verifiable when the registry no longer vouches for it (here the
+    # host names no workspace build context any more): its own recorded pins do.
     template.write_bytes(original)
-    manifest = root / "context.yaml"
-    withdrawn = manifest.read_bytes().replace(b"  - AppGenerator", b"  - AgentGenerator")
-    manifest.write_bytes(withdrawn)
-    retargeted = {**recorded_row, "digest": resolver.verify_pack_integrity(root, "greetings")["digest"]}
-    [pinned] = resolver.verified_selected_pack_sources([retargeted])
-    assert pinned["authority"] == "selected_pins"
+    monkeypatch.delenv("MOZAIKS_BUILD_CONTEXT_PATH")
+    [pinned] = resolver.verified_selected_pack_sources([recorded_row], recorded=True)
+    assert (pinned["authority"], pinned["digest"]) == ("selected_pins", fresh["digest"])
 
 
 def test_a_recorded_selection_of_a_workspace_pack_must_carry_its_digest(tmp_path, monkeypatch):

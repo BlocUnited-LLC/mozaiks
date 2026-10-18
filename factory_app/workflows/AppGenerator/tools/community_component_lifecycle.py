@@ -395,6 +395,17 @@ def _plan_upgrade(
     if not old_source_raw:
         raise CommunityComponentLifecycleError(f"Installed pack has no old local source sidecar: {pack_id}")
     old_source = Path(old_source_raw).resolve()
+    # The comparison base is the content the app was materialized from: the old source must still
+    # verify to the version and digest installed state pinned, as installed resolution requires.
+    old_metadata = verify_pack_integrity(old_source, pack_id)
+    if (old_metadata["version"], old_metadata["digest"]) != (current["version"], current["digest"]):
+        raise CommunityComponentLifecycleError(
+            f"Installed pack '{pack_id}' source {old_source} no longer matches its pinned state (installed "
+            f"{current['version']} {current['digest']}, source now {old_metadata['version']} "
+            f"{old_metadata['digest']}), so the app's files cannot be compared with the content they were "
+            "materialized from. Restore that source at the installed version, and plan the upgrade from a "
+            "separate candidate directory. Nothing was changed."
+        )
     old_files, old_ui_roots, old_data = _render_pack(old_source, pack_id)
     new_files, new_ui_roots, new_data = _render_pack(candidate_source, pack_id)
     recomposed = [_DATA_CONTRACT_PATH] if old_data != new_data else []

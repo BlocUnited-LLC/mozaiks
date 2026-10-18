@@ -717,7 +717,7 @@ PACK_OWNERSHIP_UNRESOLVED_GUIDANCE = (
     "the capability packs the parent build selected cannot be resolved to verified sources, so no candidate is "
     "admitted against them (pack ownership decides which files a refinement may change). Restore the pack "
     "source the parent was built from at the version and digest it selected, or run an AppGenerator revision "
-    "(or regenerate the app) so the build selects packs that verify"
+    "of this build and accept it, so the app's build selects packs that verify"
 )
 
 #: What to do instead of changing a template-owned pack output: the supported paths.

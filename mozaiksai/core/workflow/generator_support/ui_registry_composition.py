@@ -288,17 +288,44 @@ def _registrations(
     return registrations, reexports, removed
 
 
+# The shell's core components (chat-ui src/registry/coreComponents.js CORE_COMPONENTS). The shell
+# registers them itself, so a route may target one without any ui/index.js registration.
+SHELL_CORE_COMPONENTS = frozenset({
+    "ChatPage",
+    "SchemaPage",
+    "LauncherScreen",
+    "ConfirmScreen",
+    "ProfilePage",
+    "WorkflowCompletion",
+    "TokenStatusTab",
+    "AdminMyUsagePanel",
+    "AdminAppUsagePanel",
+})
+
+
+def _route_key(route: Mapping[str, Any]) -> str:
+    """A route's identity for composition: its ``id``, or, for a route that declares none, its path.
+
+    The route itself is composed as written; the key only matches it across
+    contributions and the revision baseline.
+    """
+    route_id = route.get("id")
+    return route_id if isinstance(route_id, str) and route_id else f"path:{route['path']}"
+
+
 def _manifest(source: str, owner: str) -> dict[str, Any]:
     manifest = json.loads(source)
     if not isinstance(manifest, dict) or not isinstance(manifest.get("pages"), list):
         raise ValueError(f"{owner}: route manifest must declare pages")
     for route in manifest["pages"]:
-        if not isinstance(route, dict) or not all(isinstance(route.get(key), str) and route[key] for key in ("id", "path", "component")):
-            raise ValueError(f"{owner}: routes require id, path and component")
+        if not isinstance(route, dict) or not all(isinstance(route.get(key), str) and route[key] for key in ("path", "component")):
+            raise ValueError(f"{owner}: routes require path and component")
+        if "id" in route and not (isinstance(route["id"], str) and route["id"]):
+            raise ValueError(f"{owner}: a route id must be a non-empty string")
         # Composition reads navigation order; a malformed shape is a declaration error, never a crash.
         for key in ("navigation", "meta"):
             if route.get(key) is not None and not isinstance(route[key], dict):
-                raise ValueError(f"{owner}: route {route['id']!r} {key} must be an object or null")
+                raise ValueError(f"{owner}: route {_route_key(route)!r} {key} must be an object or null")
     return manifest
 
 
@@ -371,18 +398,18 @@ def _apply_admitted_overlay(
                 restated.add(("metadata", key))
         pages = (manifest or {}).get("pages", [])
         for route in pages:
-            if routes.setdefault(route["id"], route) != route:
-                raise ValueError(f"Conflicting route id: {route['id']}")
-            if route["id"] not in sequence:
-                sequence.append(route["id"])
-            if revision is not None and route in revision.routes.get(route["id"], []):
-                restated.add(("route", route["id"]))
+            if routes.setdefault(_route_key(route), route) != route:
+                raise ValueError(f"Conflicting route id: {_route_key(route)}")
+            if _route_key(route) not in sequence:
+                sequence.append(_route_key(route))
+            if revision is not None and route in revision.routes.get(_route_key(route), []):
+                restated.add(("route", _route_key(route)))
             else:
-                task_positioned.add(route["id"])
+                task_positioned.add(_route_key(route))
         # A task's relative order yields only to an overlay order that differs from the baseline's.
-        known = [route["id"] for route in pages if revision is not None and route["id"] in revision.routes]
+        known = [_route_key(route) for route in pages if revision is not None and _route_key(route) in revision.routes]
         if revision is None or known != [route_id for route_id in revision.sequence if route_id in known]:
-            task_positioned.update(route["id"] for route in pages)
+            task_positioned.update(_route_key(route) for route in pages)
     patched: list[_Declaration] = []
     for owner, baseline, contents, own_entries, own_exports, manifest in declarations:
         if owner not in overlay_owners and not owner.startswith("pack:"):
@@ -403,10 +430,10 @@ def _apply_admitted_overlay(
             }
             if manifest is not None:
                 pages = list(manifest["pages"])
-                own_routes = {route["id"]: route for route in pages}
+                own_routes = {_route_key(route): route for route in pages}
                 moved: Collection[str] = routes.keys() if baseline or "route" in newer else task_positioned
-                slots = [index for index, route in enumerate(pages) if route["id"] in moved]
-                for index, route_id in zip(slots, sorted((pages[index]["id"] for index in slots), key=sequence.index), strict=True):
+                slots = [index for index, route in enumerate(pages) if _route_key(route) in moved]
+                for index, route_id in zip(slots, sorted((_route_key(pages[index]) for index in slots), key=sequence.index), strict=True):
                     pages[index] = own_routes[route_id] if ("route", route_id) in keeps else routes[route_id]
                 manifest = {**{
                     key: metadata[key] if key in metadata and ("metadata", key) not in keeps else value
@@ -449,8 +476,8 @@ def compose_ui_registry(
             saved_manifest = _manifest(revision_baseline["ui/route_manifest.json"], "revision baseline")
             baseline_metadata.update((key, value) for key, value in saved_manifest.items() if key != "pages")
             for route in saved_manifest["pages"]:
-                baseline_routes.setdefault(route["id"], []).append(route)
-                baseline_sequence.append(route["id"])
+                baseline_routes.setdefault(_route_key(route), []).append(route)
+                baseline_sequence.append(_route_key(route))
     for contribution in contributions:
         owner = str(contribution["owner"])
         overlay = contribution.get("admitted_overlay") is True
@@ -500,7 +527,7 @@ def compose_ui_registry(
     dropped_components = {key for removed in set_aside for key in removed} - registered
     if dropped_components:
         dropped_routes = {
-            (route["id"], owner) for owner, _, _, _, _, manifest in declarations
+            (_route_key(route), owner) for owner, _, _, _, _, manifest in declarations
             if manifest is not None and not owner.startswith("pack:")
             for route in manifest["pages"] if route["component"] in dropped_components
         }
@@ -517,18 +544,18 @@ def compose_ui_registry(
     app_declarations = [item for item in declarations if not item[1] and not item[0].startswith("pack:")]
     changed_components = {entry.key for _, _, _, entries, _, _ in app_declarations for entry in entries if entry not in baseline_entries}
     changed_exports = {name for _, _, _, _, exports, _ in app_declarations for name, binding in exports.items() if (name, binding) not in baseline_exports}
-    changed_routes = {route["id"] for _, _, _, _, _, manifest in app_declarations if manifest is not None for route in manifest["pages"] if route not in baseline_routes.get(route["id"], [])}
+    changed_routes = {_route_key(route) for _, _, _, _, _, manifest in app_declarations if manifest is not None for route in manifest["pages"] if route not in baseline_routes.get(_route_key(route), [])}
     reordered_routes = set()
     for _, _, _, _, _, manifest in app_declarations:
         if manifest is None:
             continue
-        sequence = [route["id"] for route in manifest["pages"] if route["id"] in baseline_routes]
+        sequence = [_route_key(route) for route in manifest["pages"] if _route_key(route) in baseline_routes]
         if sequence != [route_id for route_id in baseline_sequence if route_id in sequence]:
             reordered_routes.update(sequence)
         for route in manifest["pages"]:
             order = (route.get("order"), (route.get("navigation") or {}).get("order"))
-            if any(order != (prior.get("order"), (prior.get("navigation") or {}).get("order")) for prior in baseline_routes.get(route["id"], [])):
-                reordered_routes.add(route["id"])
+            if any(order != (prior.get("order"), (prior.get("navigation") or {}).get("order")) for prior in baseline_routes.get(_route_key(route), [])):
+                reordered_routes.add(_route_key(route))
 
     registrations: dict[str, set[tuple[str, bool, ComponentRegistration]]] = {}
     reexports: dict[str, tuple[str, str]] = {}
@@ -570,7 +597,7 @@ def compose_ui_registry(
         sequence = []
         seen_route_ids = set()
         for route in manifest["pages"]:
-            route_id, path = route["id"], route["path"]
+            route_id, path = _route_key(route), route["path"]
             if route_id in seen_route_ids:
                 raise ValueError(f"{owner}: repeated route id: {route_id}")
             seen_route_ids.add(route_id)
@@ -612,8 +639,9 @@ def compose_ui_registry(
         else:
             raise ValueError(f"Conflicting component registration: {key}")
     for route in routes.values():
-        if route["component"] not in selected and route["component"] not in APP_AUTH_COMPONENTS:
-            raise ValueError(f"Unregistered route component: {route['component']}")
+        component = route["component"]
+        if component not in selected and component not in APP_AUTH_COMPONENTS and component not in SHELL_CORE_COMPONENTS:
+            raise ValueError(f"Unregistered route component: {component}")
     result: dict[str, str] = {}
     if has_index:
         imports, calls = [], []

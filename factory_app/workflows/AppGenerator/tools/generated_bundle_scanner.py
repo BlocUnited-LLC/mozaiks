@@ -102,6 +102,7 @@ from mozaiksai.core.workflow.generator_support.persistence_artifacts import (
 from mozaiksai.core.workflow.generator_support.subscription_data_contract import (
     ensure_subscription_assignment_stores,
 )
+from mozaiksai.core.workflow.generator_support.ui_registry_composition import SHELL_CORE_COMPONENTS
 
 # ---------------------------------------------------------------------------
 # Patterns
@@ -219,19 +220,8 @@ _PLATFORM_EVENT_NAMESPACES = ("hosted.", "platform.", "mozaiks.")
 # Shell-built-in component names registered in chat-ui/src/registry/coreComponents.js.
 # These components are always available in the Mozaiks shell without a custom JSX file.
 # Route manifest entries referencing these names do NOT require a ui/pages/custom/*.jsx file.
-_SHELL_CORE_COMPONENTS = frozenset(
-    {
-        "ChatPage",
-        "SchemaPage",
-        "LauncherScreen",
-        "ConfirmScreen",
-        "ProfilePage",
-        "WorkflowCompletion",
-        "TokenStatusTab",
-        "AdminMyUsagePanel",
-        "AdminAppUsagePanel",
-    }
-)
+# The shell's core route components, shared with UI registry composition.
+_SHELL_CORE_COMPONENTS = SHELL_CORE_COMPONENTS
 
 
 def _is_scannable(path: str) -> bool:
@@ -2477,21 +2467,25 @@ def _template_bytes_match(path: str, actual: Any, rendered: str, managed_owners:
     return False
 
 
+# A revision of the build re-materializes its packs and becomes the app's build once accepted; a
+# regenerated app is a new parentless draft, which acceptance refuses while the app has an accepted build.
 _PACK_REMEDIES = {
     AUTHORITY_FACTORY_BUILD_CONTEXT: (
-        "This pack ships with the installed mozaiks package: run an AppGenerator revision (or regenerate the app) "
-        "so assembly re-materializes it at this version."
+        "This pack ships with the installed mozaiks package: run an AppGenerator revision of the build, and accept "
+        "it, so assembly re-materializes the pack at this version."
     ),
     AUTHORITY_INSTALLED: (
-        "Regenerate the bundle, or upgrade the installed component through the pack lifecycle, with this pack version."
+        "Run an AppGenerator revision of the build with this pack version, or upgrade the installed component "
+        "through the pack lifecycle."
     ),
     AUTHORITY_SELECTED_PINS: (
-        "Regenerate the bundle from the pinned source, or select the source and pins the bundle was built from."
+        "Run an AppGenerator revision of the build from the pinned source, or select the source and pins the bundle "
+        "was built from."
     ),
     AUTHORITY_WORKSPACE_BUILD_CONTEXT: (
-        "This pack is registered in the workspace build context: run an AppGenerator revision (or regenerate the "
-        "app) so assembly re-materializes it at this version, or restore the registered pack the bundle was built "
-        "from."
+        "This pack is registered in the workspace build context: run an AppGenerator revision of the build, and "
+        "accept it, so assembly re-materializes the pack at this version, or restore the registered pack the bundle "
+        "was built from."
     ),
 }
 
@@ -2513,8 +2507,8 @@ def _scan_resolved_pack_outputs(
     static template (one that renders without build-time context, any file
     but ``.j2``) must equal the verified template text, line endings
     normalized. A ``.j2`` output renders from the build's template variables,
-    which validation never has, so nothing is rendered here: it is verified
-    through the pack's declared outputs and its pinned identity.
+    which this check does not have, so nothing is rendered here: it is
+    verified through the pack's declared outputs and its pinned identity.
     """
     errors: list[str] = []
     records = _provenance_pack_records(files_map)

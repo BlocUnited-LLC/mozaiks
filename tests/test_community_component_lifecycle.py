@@ -196,6 +196,39 @@ def test_upgrade_plan_reports_deterministic_file_changes(tmp_path: Path) -> None
     assert "modules/greetings/backend/__init__.py" in plan.removed_files
 
 
+def test_upgrade_refuses_an_installed_source_changed_in_place(tmp_path: Path) -> None:
+    """The comparison base must be what the app was materialized from: an installed source edited in place
+    no longer matches its pinned state, so no upgrade is planned or applied from it, and nothing changes."""
+    from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
+        CommunityComponentLifecycleError,
+        apply_component_upgrade,
+        plan_component_upgrade,
+    )
+
+    source = tmp_path / "source" / "greetings"
+    copytree(GREETINGS, source)
+    build_context_root = tmp_path / "build_context"
+    _install(source, build_context_root)
+    state = build_context_root / "installed_components.json"
+    before = state.read_bytes() if state.exists() else None
+    manifest = source / "context.yaml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace('version: "0.1.0"', 'version: "0.2.0"'), encoding="utf-8",
+    )
+    service = next(source.rglob("service.py"))
+    service.write_text(service.read_text(encoding="utf-8") + "\n# changed in place\n", encoding="utf-8")
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+    with pytest.raises(CommunityComponentLifecycleError, match="no longer matches its pinned state"):
+        plan_component_upgrade(build_context_root=build_context_root, candidate_pack_source_path=source)
+    with pytest.raises(CommunityComponentLifecycleError, match="no longer matches its pinned state"):
+        apply_component_upgrade(
+            build_context_root=build_context_root, candidate_pack_source_path=source, workspace_app_root=app_root,
+        )
+    assert list(app_root.iterdir()) == []
+    assert (state.read_bytes() if state.exists() else None) == before
+
+
 def test_upgrade_plan_detects_workspace_owned_file_collision(tmp_path: Path) -> None:
     from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
         plan_component_upgrade,

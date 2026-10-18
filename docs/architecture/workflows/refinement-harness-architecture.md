@@ -232,8 +232,14 @@ Ownership comes from those packs' pinned contracts, never from the candidate:
   neither is a scope that holds template-owned files beside files the patch
   may change; a confirmed apply of an all-template proposal is refused before
   the pending decision is used. Ownership is the saved parent's verified pack
-  ownership; when it cannot be verified nothing is refused there and candidate
-  validation fails the candidate. The diagnostic names the supported paths:
+  ownership. When it cannot be verified (a selection recorded without the
+  identity it was verified against, a pack edited in place since, or an
+  unresolvable claim), Studio refuses every applying patch (an explicit or
+  confirmed scope, an auto-applied inferred scope, a surface plan) with 409
+  before the provider and the registry run, naming the way forward: run an
+  AppGenerator revision of the build and accept it, or restore the pack
+  source it was built from. A decision that applies nothing, or a workflow
+  route, is not refused. The template-only diagnostic names the supported paths:
   customize through the app's own files (an app-owned page, component or
   route, or a pack's app-owned extension file such as a workspace handler), or
   upgrade the pack. The admission check below is the backstop for every
@@ -374,8 +380,8 @@ records `refinement_scope` (selected paths, scope origin
 `explicit|confirmed|auto_proposal|surface_plan`, changed workspace pack paths) in
 its commit metadata and keeps the parent's `capability_packs`. An app-only
 handler edit is a new app revision, not a new pack version. If the selected
-pack sources cannot be resolved, admission defers to candidate validation,
-which verifies the same sources and fails the candidate.
+pack sources cannot be resolved or verified, admission refuses every
+candidate with `PACK_OWNERSHIP_UNRESOLVED` and the same way forward.
 
 Acceptance rechecks a child that changed app-owned pack code before it becomes
 current. Its recorded `refinement_scope` must still be an explicit or confirmed

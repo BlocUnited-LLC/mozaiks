@@ -1146,9 +1146,10 @@ def verified_pack_selection(
     :func:`compute_pack_digest` of the resolved source on this host, over its
     raw bytes, so a pin is meaningful on the host (and checkout) that recorded
     it. The entry records the identity (:data:`PACK_IDENTITY_FIELDS`, with the
-    ``authority`` that vouched for it), ``source_path`` and the declared
-    ``capability_source``; a caller acts on the pack's contents only through
-    it. It does not check the selection's pack dependencies
+    ``authority`` that vouched for it), ``source_path`` and the
+    ``capability_source`` the pack's context declares (empty when it declares
+    none; the selecting row's claim never counts); a caller acts on the pack's
+    contents only through it. It does not check the selection's pack dependencies
     (:func:`verified_selected_pack_sources` does). A row that claims a pack
     and cannot be resolved or verified raises :class:`PackIntegrityError`.
 
@@ -1187,8 +1188,9 @@ def verified_pack_selection(
         "resolution": resolved.resolution,
         "authority": resolved.authority,
         "source_path": str(root),
-        "capability_source": _declared_capability_source(root, pack_id)
-        or str(pack.get("capability_source") or "").strip(),
+        # Only the pack's own declaration; a pack that declares none is never treated as managed,
+        # whatever the selecting row claims.
+        "capability_source": _declared_capability_source(root, pack_id),
     }
 
 

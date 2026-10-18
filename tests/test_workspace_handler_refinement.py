@@ -38,6 +38,9 @@ from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     save_generated_code,
 )
 from factory_app.workflows.AppGenerator.tools.repair_policy import prepare_bundle_repair
+from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+    verified_selected_pack_sources,
+)
 from mozaiksai.control_plane.config import ControlPlaneConfig
 from mozaiksai.control_plane.contracts import (
     ContractSurfacePlan,
@@ -2865,10 +2868,20 @@ def _recorded_workspace_messaging(tmp_path, monkeypatch, *, pinned=True):
     return resolver.pin_workspace_pack_selections(rows, identities) if pinned else rows
 
 
+_SELECTION_AUTHORITIES = {
+    "catalog": "factory_build_context",
+    "pinned_external": "selected_pins",
+    "installed_descriptor_rows": "selected_pins",
+    "workspace_recorded": "workspace_build_context",
+}
+
+
 _PACK_SELECTIONS = {
     "catalog": lambda tmp_path, monkeypatch: _packs(),
     "pinned_external": lambda tmp_path, monkeypatch: _pinned_external_messaging(tmp_path),
-    "installed_descriptor": lambda tmp_path, monkeypatch: _installed_messaging(tmp_path),
+    # Installed state's descriptor rows carry their pins; admission reads saved rows with no
+    # build_context_root, so they verify through those pins (selected_pins), not installed state.
+    "installed_descriptor_rows": lambda tmp_path, monkeypatch: _installed_messaging(tmp_path),
     "workspace_recorded": _recorded_workspace_messaging,
 }
 
@@ -2941,6 +2954,9 @@ async def test_an_authorized_handler_change_is_admitted_for_every_authority(tmp_
 
     packs = _PACK_SELECTIONS[selection](tmp_path, monkeypatch)
     assert parent_workspace_pack_paths(packs) == frozenset({HANDLER})
+    # Each selection reaches admission through the authority it names.
+    [entry] = verified_selected_pack_sources(packs, recorded=True)
+    assert entry["authority"] == _SELECTION_AUTHORITIES[selection], entry["authority"]
     scope = await _admit(tmp_path, packs, {HANDLER: NORMALIZING_HANDLER}, scope_origin="explicit")
     assert scope == {
         "selected_file_paths": [HANDLER], "scope_origin": "explicit", "changed_workspace_pack_paths": [HANDLER],
@@ -3031,6 +3047,7 @@ def test_studio_refuses_a_patch_before_the_provider_when_the_parents_pack_owners
             "This change cannot be checked: the capability packs the parent build selected cannot be resolved",
         ), refused["detail"]
         assert "run an AppGenerator revision" in refused["detail"] and refused["detail"].endswith("No files were changed.")
+        assert "regenerate" not in refused["detail"].lower(), refused["detail"]
         flow.provider.execute.assert_not_awaited()
 
 
