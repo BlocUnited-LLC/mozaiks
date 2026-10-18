@@ -119,7 +119,8 @@ A Refinement Run never edits your live app in place:
   first version for review.
 - "I need an internal app to log equipment inspections with photo uploads and
   weekly summaries." → Mozaiks plans an inspections capability, an AI workflow
-  for the summaries, generates the app, and stages it for promotion.
+  for the summaries, generates the app, and saves it as a draft for you to
+  accept.
 
 **Refinement Runs:**
 

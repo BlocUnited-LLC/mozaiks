@@ -116,8 +116,8 @@ build. Every generated build, the first included, is saved as a draft; validatin
 it does not accept it. Studio offers **Accept this draft** when its checks pass.
 
 **Promote** is the explicit step that moves accepted artifacts into the active
-app bundle so the runtime loads them. Studio shows a **Promote** action once a
-build is accepted.
+app bundle so the runtime loads them. Once a build is accepted, Studio's review
+offers it as **Activate this version**.
 
 These explicit steps let you review what the AI produced before anything goes
 live in your app.

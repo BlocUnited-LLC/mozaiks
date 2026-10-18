@@ -47,6 +47,6 @@ accepted it and when. Only an accepted build can be promoted, and later refineme
 start from it; until you accept the first build, a change to app-owned capability code
 (such as a workspace handler) is refused and asks you to accept it first.
 
-Once a build is accepted, Studio shows a **Promote** action (**Activate this version** in
-the review). Promoting moves the generated artifacts from `generated/` into the active app
-workspace so the runtime loads them.
+Once a build is accepted, Studio's review offers **Activate this version**, which promotes
+it: promoting moves the generated artifacts from `generated/` into the active app workspace
+so the runtime loads them.
