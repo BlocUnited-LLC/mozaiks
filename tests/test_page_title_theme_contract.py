@@ -162,3 +162,79 @@ def test_scanner_reads_only_the_bundle_relative_theme_path():
         "brand/theme_config.json: ui.page.title" in error
         for error in scan_generated_bundle({"app.json": "{}", "brand/theme_config.json": bad})
     )
+
+
+def test_declarative_and_custom_pages_compose_under_the_retained_page_title_role():
+    """Owner composition (c): declarative and custom UI in one bundle under the app's page-title role.
+
+    The bundle holds the Messaging pack's custom page (titled through
+    PageHeader, the page-title role, reading only theme tokens), an app-owned
+    custom board, and a declarative page whose PageHeader omits title_font
+    (the role's font) or names an existing slot, composed through the
+    canonical UI registry, with an app theme that sets ``ui.page.title``. It
+    scans clean, and an invalid title role fails the same bundle naming the
+    field. Nothing in it reaches the removed BrandingProvider: the chat-ui
+    package root exports the theme consumers (``useTheme``, ``themeProvider``)
+    and no branding provider.
+    """
+    from factory_app.workflows._shared.generated_ui_contract import (
+        resolve_registered_component_files,
+    )
+    from factory_app.workflows.AppGenerator.tools.assembly_phase import _merge_code_files
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        resolve_managed_capability_templates,
+    )
+    from mozaiksai.core.runtime.app.page_schema import validate_page_schema
+    from mozaiksai.core.workflow.generator_support.ui_registry_composition import (
+        compose_ui_registry,
+    )
+    from tests.test_app_ui_composition import component, contribution
+
+    messaging = ROOT / "factory_app" / "build_context" / "messaging"
+    rows = [{"id": "messaging", "pack_source_path": str(messaging), "capability_source": "generated_module"}]
+    board = component(path="ui/pages/custom/Board.jsx")
+    contributions = [contribution("app:board", board)]
+    emitted = resolve_managed_capability_templates(rows, ui_contributions=contributions)
+    shared = compose_ui_registry(contributions, {**board, **{item["filename"]: item["content"] for item in emitted}})
+    # Assembly merges the pack, the app's files and the composed roots, and compiles the data contract.
+    pack = {item["filename"]: item["content"] for item in _merge_code_files(
+        [{"code_files": emitted}, {"code_files": [{"filename": path, "content": content} for path, content in sorted(shared.items())]}],
+        app_build_plan={"capability_packs": [{
+            "capability_pack_id": "messages", "capability_source": "generated_module",
+            "primary_entities": ["Thread", "Message", "ThreadRead"],
+        }]},
+        data_contract={"version": "1", "surfaces": [], "shared_collections": []}, context_variables={"capability_packs": rows},
+    )}
+    projects = {
+        "schema_version": "mozaiks.app_page.v1", "name": "Projects", "route": "/projects", "title": "Projects",
+        "page_type": "record_list", "layout": "full-width", "sections": [
+            {"id": "header", "primitive": "PageHeader", "config": {"title": "Projects", "subtitle": "Every project"}},
+            {"id": "pinned", "primitive": "PageHeader", "config": {"title": "Pinned", "title_font": "heading"}},
+        ],
+    }
+    validate_page_schema(projects)
+    for section in projects["sections"]:
+        AppPageHeaderConfig.model_validate(section["config"])
+    title = {"font": "heading", "weight": "semibold", "size": "xl", "lineHeight": "tight",
+             "letterSpacing": "tight", "textTransform": "none"}
+    files = {
+        **board, **pack, "app.json": json.dumps({"appId": "ui-theme", "appName": "Theme"}),
+        "ui/pages/projects.yaml": yaml.safe_dump(projects),
+        "brand/theme_config.json": json.dumps({"identity": {"name": "Theme"}, "ui": {"page": {"title": title}}}),
+    }
+    registered, issues = resolve_registered_component_files(files, source_label="composed")
+    assert not issues and {"Board", "Messages"} <= set(registered)
+    messages = files["ui/pages/custom/Messages.jsx"]
+    assert 'import { PageHeader } from "@mozaiks/chat-ui/ui";' in messages and "<h1" not in messages
+    assert scan_generated_bundle(files, capability_packs=rows) == []
+
+    invalid = {**files, "brand/theme_config.json": json.dumps({"ui": {"page": {"title": {**title, "size": "huge"}}}})}
+    errors = scan_generated_bundle(invalid, capability_packs=rows)
+    assert [error.split(":", 2)[:2] for error in errors] == [["brand/theme_config.json", " ui.page.title.size"]], errors
+
+    assert not any("BrandingProvider" in content or "useBranding" in content for content in files.values())
+    package_root = (ROOT / "chat-ui" / "src" / "index.js").read_text(encoding="utf-8")
+    assert "export { default as useTheme } from './styles/useTheme';" in package_root
+    assert "export * as themeProvider from './styles/themeProvider';" in package_root
+    assert "BrandingProvider" not in package_root and "useBranding" not in package_root
+    assert not (ROOT / "chat-ui" / "src" / "providers" / "BrandingProvider.jsx").exists()

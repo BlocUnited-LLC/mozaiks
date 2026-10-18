@@ -1343,3 +1343,71 @@ def test_a_row_naming_its_pack_only_under_a_non_canonical_key_is_refused_as_malf
 def test_a_canonical_id_beside_a_non_canonical_key_is_an_ordinary_selection():
     [entry] = resolver.verified_selected_pack_sources([{"id": "mozaikspay", "module_id": "billing_portal"}])
     assert (entry["pack_id"], entry["authority"]) == ("mozaikspay", "factory_build_context")
+
+
+
+# ------------------------------------------------------------------ owner composition (a)
+
+
+def test_a_verified_selection_materializes_and_passes_canonical_validation_with_its_identities(tmp_path, monkeypatch):
+    """Selection -> materialization -> canonical validation, across authorities, as one flow.
+
+    The hosted id-only MozaiksPay row resolves to the shipped catalog, and a
+    Messaging copy registered as an operator pack in the workspace build
+    context resolves to the workspace registry. Assembly materializes and
+    composes both; the validation facade passes the bundle and returns both
+    identities with their authorities. A tampered template-owned output fails
+    the same facade, and so does the same selection once its workspace
+    authority cannot be resolved.
+    """
+    import yaml
+
+    from mozaiksai.core.workflow.generator_support.subscription_data_contract import (
+        ensure_subscription_assignment_stores,
+    )
+
+    workspace = tmp_path / "workspace" / "build_context"
+    _workspace_operator_pack(workspace, source=MESSAGING)
+    [messaging] = _registered_rows(workspace)
+    assert (messaging["capability_source"], "digest" in messaging) == ("operator_pack", False)
+    _workspace_root_from(monkeypatch, workspace, "environment")
+    rows = [dict(HOSTED_MOZAIKSPAY_ROW), messaging]
+
+    contributions: list[dict] = []
+    emitted = resolver.resolve_managed_capability_templates(
+        rows, context_variables={"build_timestamp": "2026-10-18T00:00:00Z"}, ui_contributions=contributions,
+    )
+    shared = compose_ui_registry(contributions, {item["filename"]: item["content"] for item in emitted})
+    files = {item["filename"]: item["content"] for item in _merge_code_files(
+        [{"code_files": emitted}, {"code_files": [{"filename": path, "content": content} for path, content in sorted(shared.items())]}],
+        app_build_plan={"capability_packs": [{
+            "capability_pack_id": "messages", "capability_source": "generated_module",
+            "primary_entities": ["Thread", "Message", "ThreadRead"],
+        }]},
+        data_contract=dict(EMPTY_CONTRACT), context_variables={"capability_packs": rows},
+    )}
+    files["app.json"] = json.dumps({"appId": "billing", "appName": "Billing"})
+    files["config/subscriptions.yaml"] = HOSTED_SUBSCRIPTIONS
+    files[DATA_CONTRACT] = json.dumps(ensure_subscription_assignment_stores(
+        json.loads(files[DATA_CONTRACT]),
+        {"contract_required": True, "subscription_config_file": yaml.safe_load(HOSTED_SUBSCRIPTIONS)},
+    ))
+    assert {pack["pack_id"] for pack in json.loads(files[PROVENANCE])["packs"]} == {"mozaikspay", "messaging"}
+
+    result = _hosted_facade(files, rows)
+    assert result.passed, _errors(result)
+    assert [(item["pack_id"], item["resolution"], item["authority"]) for item in result.resolved_capability_packs] == [
+        ("mozaikspay", "factory_build_context", "factory_build_context"),
+        ("messaging", "explicit", "workspace_build_context"),
+    ]
+
+    policy = "modules/messages/backend/policy.py"
+    tampered = _hosted_facade({**files, policy: files[policy] + "\nimport os  # tampered\n"}, rows)
+    assert not tampered.passed
+    assert any(error.startswith(f"{policy}: differs from the verified template of the selected pack 'messaging'")
+               for error in _errors(tampered)), _errors(tampered)
+
+    monkeypatch.delenv("MOZAIKS_BUILD_CONTEXT_PATH")
+    unresolved = _hosted_facade(files, rows)
+    assert not unresolved.passed and unresolved.resolved_capability_packs == []
+    assert any("not in a workspace build context" in error for error in _errors(unresolved)), _errors(unresolved)

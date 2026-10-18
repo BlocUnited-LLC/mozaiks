@@ -1321,6 +1321,55 @@ def test_confirmed_handler_scope_applies_to_the_still_current_build_and_is_accep
     assert flow.store.status("parent") == ArtifactLifecycleStatus.STALE
 
 
+def _mobile_board(source):
+    """The paired run's board request, scripted: on mobile, task details open in a bottom panel."""
+    anchor = "export default function View() { return null; }"
+    assert source.count(anchor) == 1, source
+    return source.replace(anchor, """import { Modal } from '@mozaiks/chat-ui/ui';
+
+export default function View() {
+  const isMobile = window.matchMedia('(max-width: 639px)').matches;
+  return isMobile ? <Modal id="mobile-task-details" title="Task details" open onClose={() => {}} /> : null;
+}""")
+
+
+def test_handler_customization_then_mobile_board_refinement_keeps_every_pack_file(monkeypatch, tmp_path):
+    """Owner composition (d), through Studio's routes: an accepted handler customization, then a mobile board change.
+
+    The explicit handler extension is validated and accepted; the board
+    refinement made from that accepted build changes only the board page.
+    Its child carries the accepted handler and every pack-owned file
+    (template-owned and app-owned) byte for byte, and is accepted in turn.
+    """
+    from mozaiksai.control_plane.implementations.coding_worker import pack_output_owners
+
+    flow = _studio_flow(monkeypatch, tmp_path, outputs=[{HANDLER: NORMALIZING_HANDLER}, {PAGE: _mobile_board(_baseline(app_id="app_1")[PAGE])}])
+    handler = _handler_attempt(flow)
+    assert handler["status"] == "validated", (handler.get("error"), handler["metadata"].get("candidate_admission"))
+    customized = handler["metadata"]["build_record_id"]
+    assert flow.accept(customized).status_code == 200 and flow.store.current() == [customized]
+    accepted_files = _archive_files(flow.store.records[customized])
+    assert accepted_files[HANDLER] == NORMALIZING_HANDLER
+
+    board = _attempt(flow, lambda: flow.trigger({"files": {PAGE: ""}}, build_record_id=customized))
+    assert board["status"] == "validated", (board.get("error"), board["metadata"].get("candidate_admission"))
+    child = flow.store.records[board["metadata"]["build_record_id"]]
+    assert child.parent_build_record_id == customized
+    assert child.commit_metadata.metadata["refinement_scope"] == {
+        "selected_file_paths": [PAGE], "scope_origin": "explicit", "changed_workspace_pack_paths": [],
+    }
+    child_files = _archive_files(child)
+    assert {path for path in accepted_files.keys() | child_files.keys() if accepted_files.get(path) != child_files.get(path)} == {PAGE}
+    assert "matchMedia('(max-width: 639px)')" in child_files[PAGE]
+    owned = pack_output_owners(_packs())
+    assert {"templates", "workspace"} <= set(owned.values())
+    assert all(child_files[path] == accepted_files[path] for path in owned if path in accepted_files)
+    assert child_files[HANDLER] == NORMALIZING_HANDLER
+    assert _template_owned(child_files) == _template_owned(_assembled_files())
+    assert flow.accept(child.id).status_code == 200
+    assert flow.store.current() == [child.id]
+
+
 def _forge_pending_scope(flow, paths, *, build_record_id=None):
     """Plant a pending decision as POST /api/session/decisions/pending does, naming other files or another build."""
     from mozaiksai.core.session.model import PendingDecisionAction, PendingHarnessDecision
