@@ -12,6 +12,8 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+## 0.2.0 - 2026-10-17
+
 ### Added
 
 - Android delivery can produce a provenance-bound unsigned release AAB for a
@@ -28,10 +30,6 @@ This project follows a practical pre-1.0 changelog format:
   generated native barrel keeps the Capacitor auth facade authoritative.
 - Hosted workspace Android builds now stage the exact revision-bound Factory UI
   resources required by the public `@mozaiks/factory-app-ui` extension contract.
-
-## 0.2.0 - 2026-10-16
-
-### Added
 
 - Added owner-reviewed imported Genesis baselines for existing app roots. Studio
   verifies the exact archive and member digests in contained local validation,
