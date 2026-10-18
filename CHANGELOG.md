@@ -38,6 +38,19 @@ This project follows a practical pre-1.0 changelog format:
   return. Notifications rendered by an earlier pack version (the released
   `0.1.12` and before) keep their copied preview until the recipient clears
   them.
+- Messaging `0.1.14` UI reads only app theme tokens (`--color-border`,
+  `--color-primary`, `--color-error`, `--color-surface-alt`,
+  `--color-text-primary`, `--color-text-secondary`) with no fixed fallbacks.
+  The `/messages` page titles itself with `PageHeader`, so it follows the
+  app's `ui.page.title` role. The Messages profile tab renders only its
+  `list_threads` result: its unreachable Friends list and start-conversation
+  path are removed, and the social pack's own profile tab owns the friends
+  roster.
+- Commerce `0.1.12` page templates (cart, orders, products and product
+  detail) and the factory app's notifications page no longer pin
+  `title_font: body`, so their titles follow the app's `ui.page.title` font.
+- A `source_event: reference` notification reads `related_type` only from
+  the event payload. A flat event's top-level fields still form that payload.
 - An app-owned pack handler, such as Messaging's `handler.py`, can now be
   changed through an authorized selected-file Studio refinement of the app's
   accepted current build (the current record of its build family and key, so
@@ -55,20 +68,37 @@ This project follows a practical pre-1.0 changelog format:
   flight or changed: no other build of its family and key was accepted since
   it was, no other change request from it is recorded as a workflow route, every build
   made from it or further down its lineage is closed (rejected, removed,
-  failed validation, or a stale draft that was never accepted, such as a draft
-  refined in review, which can then be neither rejected nor accepted, unless a
+  failed validation, or a stale draft that the state its change request saved
+  shows was never accepted, such as a draft refined in review, which can then
+  be neither rejected nor accepted, unless a
   change request made from it is recorded as a workflow route), Studio's
   registry read found no other run building when the run began, and no input
   family it depends on became current after it was accepted or is stale with
-  no current build. Anything else, including a failed lookup, is refused with
-  `STALE_REFINEMENT_BASELINE` and the reason in `stale_baseline_refusal`.
-  Studio acceptance now records
-  `metadata.acceptance` on the accepted record, so a build that is later
-  marked stale can still be recognized as accepted (an earlier build is
-  recognized by its accepted refinement session, or as the AppGenerator
-  genesis build, including one with no capability packs). A surface run's
-  change request is recorded as
-  `surface_regeneration` rather than as a workflow route.
+  no current build. Anything else, including a failed lookup, is refused.
+  Studio applies this baseline rule before any coding or surface provider
+  call: when an explicit or confirmed file selection includes app-owned pack
+  code, a build that does not pass it is refused with 409 and the reason,
+  before classification, before a pending decision is used and before the
+  registry run. A draft, such as the app's first build before the owner
+  accepts it, is refused with the way forward: "accept the first build before
+  changing its app-owned capability code". Candidate admission applies the
+  same rule as the backstop, refusing with `STALE_REFINEMENT_BASELINE` and
+  the reason in `stale_baseline_refusal`. A surface run's change request is
+  recorded as `surface_regeneration` rather than as a workflow route.
+- Studio's acceptance and the staged-refinement acceptance write acceptance
+  evidence on the record they make current, as `metadata.acceptance`:
+  `app_id`, `build_family`, `build_key`, `build_record_id`, `accepted_by`
+  (the caller's authenticated principal), `accepted_at` and `transition`
+  (`studio_accept` or `staged_refinement_accept`). A build marked stale later
+  is therefore still recognized as accepted. Evidence counts only on the
+  record it names: a marker copied from another record, one naming another
+  app, family, key or record, and the earlier two-field marker show nothing.
+  A stale build without evidence is refused as unverifiable, and the refusal
+  names the cause and the way forward: accept a new build of the app, then
+  change its app-owned code from that build. This covers a build accepted
+  before evidence named its build, and an imported Genesis build: brownfield
+  Genesis acceptance writes no evidence yet, and the refusal names that
+  dependency.
 - A Studio refinement request marks the selected build stale only once the
   operation it started has changed that build or left its outcome unresolved:
   an inline run that stored a child, not since rejected, whose validation
@@ -76,15 +106,149 @@ This project follows a practical pre-1.0 changelog format:
   and the run's build id; a failed lookup or a named child the store does not
   return counts too), or a workflow run that launched. A pending or skipped
   child can never be accepted; the trigger response and the run's refinement
-  session report it as `unresolved_change`, and rejecting that draft is the
-  supported next step (a draft refined instead is marked stale and can no
-  longer be rejected; it stops holding its build once nothing made from it is
-  open). A scope question or confirmation prompt, a dismissed
+  session report it as `unresolved_change`. The build stays stale even after
+  the draft is rejected, and ordinary refinements of it continue. Only an
+  app-owned pack-code change from that build needs the draft closed first, so
+  rejecting the draft is the supported next step for that change. A draft
+  that is refined instead is marked stale and can no longer be rejected. It
+  stops holding its build once nothing made from it is open, unless a
+  refinement of it took a workflow route (even one whose launch failed),
+  which keeps it open; then accept a new build of the app before changing its
+  app-owned code. A scope question or confirmation prompt, a dismissed
   decision, rejected input, a workflow launch that failed, and an inline run
   that stored nothing or only a child whose validation failed leave the build
   current, so the confirmed or retried change is still admitted against it.
   Change requests, session revision state, refinement sessions and registry
   runs still record every attempt. Builds already marked stale stay stale.
+- AppGenerator now saves every app bundle it generates as a draft, including
+  the first (parentless) build, with no acceptance evidence. The owner accepts
+  the draft in Studio (**Accept this draft**,
+  `POST /api/studio/build/artifacts/{id}/accept`), which makes it current and
+  records the evidence; only then can it be activated (**Activate this
+  version**) or its app-owned capability code be changed. A parentless draft
+  goes through the same lineage check as any other version, so it is refused
+  while another build of its scope is current or shown accepted.
+  `scripts/live_journey_driver.py` accepts the reviewed draft and then
+  promotes it; a refused acceptance stops the run as `acceptance_failed`. The
+  README, getting-started, Genesis and refinement, Studio, concepts, local
+  setup and CLI reference docs describe accepting the draft before activating
+  it.
+- Studio refuses with 409 a refinement that would patch only template-owned
+  capability pack files of the saved build, for example a UI-only edit of
+  Messaging's `ui/pages/custom/Messages.jsx`. This covers an explicit or
+  confirmed file selection, an auto-applied inferred scope, and a contract
+  surface plan that writes only such files. The refusal comes before the
+  coding or surface provider runs, before validation and before any registry
+  run. An explicit or confirmed selection is refused before classification;
+  the other cases are refused after the classifier and the scope proposer or
+  surface planner. Clarifications, workflow routes, and scopes that include
+  template files alongside files the patch may change are not refused.
+  Candidate admission still refuses any changed template-owned output
+  (`PACK_TEMPLATE_OUTPUT_CHANGED`), and now names the supported paths in
+  `candidate_admission.supported_path`.
+- `OrchestrationControlHarness.prepare_coding_request` and
+  `FirstPartyHarnessDecisionPolicy.for_scope_resolution` now require
+  `confirmation_required_paths` (pass `()` when the saved build has no
+  app-owned pack code), so no caller can apply an inferred scope without
+  confirmation just by omitting it.
+- Every selected capability pack resolves to one verified identity before any
+  check uses it: its own `pack_source_path`, else the workspace's installed
+  component, else, for a row that claims a pack, the installed package's
+  shipped catalog `build_context/<id>`. A row claims a pack when it carries
+  `version`, `digest` or `source`, when its `capability_source` is a
+  registered pack source (`managed_capability`, `operator_pack`,
+  `framework_pack`, `config_file` or `operator_extension`), or when it is not
+  a `generated_module` row and its id names a shipped pack. A claimed pack
+  that resolves nowhere fails with `PackIntegrityError`; a `generated_module`
+  row never selects a pack by its id; a row that names its pack only under
+  `capability_id` or `module_id` is refused as malformed. Pins on the row
+  must equal the freshly computed version and digest.
+- The resolved identity `{pack_id, version, digest, source, resolution,
+  authority}` names what vouched for the source: the shipped catalog
+  (`factory_build_context`), verified installed state (`installed`), the
+  workspace build-context registry (`workspace_build_context`), or the
+  selection's own matching pins (`selected_pins`). The validation facade
+  returns it as `GeneratedAppValidationResult.resolved_capability_packs`, and
+  the app-bundle acceptance gate records it in its result. The digest hashes
+  the source's raw bytes and is a same-host value; `pack_id` and `version`
+  are the portable identity.
+- A pack that `load_trusted_build_context` registers for AppGenerator
+  directly under the workspace build context (`build_context_root`, else
+  `MOZAIKS_BUILD_CONTEXT_PATH` or `MOZAIKS_APP_WORKSPACE_PATH/build_context`)
+  resolves with authority `workspace_build_context`, so the documented
+  operator-pack flow assembles. The context must apply to AppGenerator and
+  project `capability_packs` from its pack declarations
+  (`projects_registered_packs`), and the selection must carry the registered
+  version, which is compared with the fresh source. A recorded build pins
+  each such row to the version and digest its acceptance verified, so
+  refinement and Studio verify that identity again.
+- Generated bundle validation never renders pack templates. Each resolved
+  pack's provenance must record its version, every template-owned output must
+  be present, and the output of every static (non-`.j2`) template must equal
+  the verified template text, with line endings normalized. A `.j2` output is
+  checked through the pack's declared outputs and pinned identity, not its
+  content. Bundles of packs that render from build context, such as
+  `operator_readiness`, therefore pass the public validation facade and
+  Studio candidate validation without build-time template variables, and
+  CRLF and LF checkouts of a pack validate the same bundle. A bundle built
+  from another version of a shipped pack fails until an AppGenerator revision
+  or a regeneration re-materializes the pack; the diagnostic names that
+  remedy.
+- The bundle scanner takes `provides_capabilities`, `forbidden_outputs` and
+  `capability_source` only from a resolved pack's verified contract and
+  context, never from a caller's row. The validation facade and the
+  app-bundle acceptance gate apply the functional pack checks to the resolved
+  packs only. The scanner and layout validation identify a pack by `id`, then
+  `pack_id`, then `capability_pack_id`.
+- Planning (pack-owned outputs, facade directories, template module
+  contracts and the managed contract inventory), plan coverage, the discard
+  of worker copies of pack-owned files and assembly read a selected pack only
+  through the same resolver, after it verified the pack; a refused row
+  contributes nothing, and a managed selection that cannot be verified
+  refuses the DesignDocs save or plan check with the resolver's diagnostic.
+  An id-only row, such as the default MozaiksPay row of an OSS SaaS plan,
+  therefore owns exactly the outputs assembly materializes. When the build
+  context selects no packs, `app_build_plan` releases those outputs to model
+  tasks. A plan row that takes a source path from the build context also
+  takes that source's pins.
+- Pack templates never own a shared composition root. For every caller, the
+  template resolver holds back `data/contract.json`, `ui/index.js` and
+  `ui/route_manifest.json` and records each contributing pack under
+  `composed_outputs`, including a pack whose only templates are shared roots.
+  The bundle scanner rejects pack provenance that lists a shared root in a
+  pack's `materialized_owned_files` (written before composition) and asks for
+  a reassembly. A Community Component upgrade blocks before writing anything
+  when the app's provenance holds such a claim (`exclusive_shared_root_claim`,
+  whichever pack claims it), when the upgrade changes a shared UI root, or
+  when the app's root was not composed with the pack
+  (`composed_output_requires_reassembly`): reassemble the app, then plan the
+  upgrade again. The upgrade validates its provenance before writing.
+- `save_app_schema` writes its rendered files only to the admitted
+  `code_files` overlay. `generated_files` stays the last assembled bundle, so
+  a projection that cannot compose a repair keeps the composed roots, never
+  an app-only render. When the selected packs cannot be verified or composed
+  with the approved data contract, the save writes no `data/contract.json`,
+  logs `APP_SCHEMA_PACK_DATA_CONTRACT_NOT_WRITTEN`, reports it in its result,
+  and leaves assembly to report the pack failure.
+- Admitted repair copies of pack-composed UI roots compose only against the
+  revision baseline the caller passes (`load_revision_baseline`); process
+  memory is now only a memo inside `load_revision_baseline`. Synchronous
+  module, config and auth-scope readers use `admitted_module_file_map`, which
+  leaves the shared UI roots out. The pack-only data contract guard checks
+  the bundle's copy, which revision hydration loads from the bound source.
+- Assembly reads task outputs only from the task batch result map. A key that
+  is not a task id of the approved plan, including the obsolete
+  `task_results`, `results` and `tasks` wrappers, fails assembly with a
+  diagnostic that asks for the batch to be rerun.
+- Runtime smoke get checks read the get action's declared output schema, as
+  create and list do. A get response whose record the schema does not
+  declare fails `get_missing`, `a_get` and `b_get_isolated` explicitly; a 404
+  for a missing record still passes.
+- AppSchemaAgent guidance and the `theme_config_patch` description name only
+  what the patch accepts (`theme` selectors, `identity`, `fonts`,
+  `ui.page.title`). Generated UI browser docs state that a mocked run is a
+  rendering smoke and that only a real-host run on an owned launch can accept
+  a candidate. The generated-UI Playwright configuration retries no test.
 
 ### Fixed
 
@@ -92,9 +256,6 @@ This project follows a practical pre-1.0 changelog format:
   retain participant-aware actions, and compose their UI registrations with
   app-owned routes. Page refinement receives the saved pack, design and domain
   context without widening its file scope.
-- Generated bundle validation checks selected pack pins and declared outputs
-  without rendering pack templates, so the public validation facade no longer
-  needs build-time template variables such as `readiness_profile`.
 - Filtering an exclusive pack page out of a typed custom route bundle keeps the
   app's own pages and shared registrations instead of leaving an empty or
   dangling route bundle.
@@ -145,6 +306,53 @@ This project follows a practical pre-1.0 changelog format:
 - Page refinement workers see earlier surfaces' outputs in the same plan, and
   real-host acceptance receipts label the caller-supplied revision as an
   unverified annotation.
+- When the selected packs' data contributions cannot be composed, the app
+  schema save still derives `app.json` `authRequired` from the approved data
+  contract; only `data/contract.json` is left to assembly.
+- An OSS SaaS build whose plan adds the default id-only MozaiksPay row now
+  materializes the shipped MozaiksPay pack and schedules no model work for
+  its pages, client and facade module, so assembly and validation agree on
+  those files.
+
+### Removed
+
+- Acceptance fallbacks in Studio refinement, AppGenerator and the
+  staged-refinement acceptance. Accepted or promoted refinement sessions, the
+  shape of a parentless genesis build and the two-field acceptance marker no
+  longer count as acceptance evidence. AppGenerator no longer saves its first
+  build as current or stamps it with a marker. A confirmation whose change
+  request saved no build state is no longer judged by the change request's
+  creation time, and staged acceptance no longer takes `accepted_by` from the
+  staged review record's reviewer. Records that relied on these fallbacks
+  fail closed with a diagnostic.
+- Unverified pack paths: the silent skip of a selected row that resolves to
+  no source, inline `provides_capabilities` and `forbidden_outputs` claims on
+  selected rows, a caller-claimed `capability_source` for a resolved pack,
+  the scanner's integrity-only use of a caller's own `pack_source_path`
+  outside the verified selection, and the `implementation_trusted` entry
+  flag, replaced by the recorded `authority`. `resolved_pack_source_root` is
+  removed; use `verified_pack_selection`.
+- The template resolver's flat mode, which wrote `ui/index.js` and
+  `ui/route_manifest.json` as pack files, and the Community Component
+  upgrade's in-place rewrite of an exclusively claimed UI root and migration
+  of an upgraded pack's own exclusive shared-root claim; such provenance now
+  blocks the upgrade until the app is reassembled.
+- `save_app_schema`'s write of its uncomposed render into `generated_files`
+  and of the raw approved data contract when packs cannot be composed, and
+  the process-memory revision baseline as a fallback for repair composition.
+- `task_batch_outputs` tolerance for `task_results`, `results` or `tasks`
+  wrappers, list results and a top-level `failed_tasks` key; the hardcoded
+  `item` reads of runtime smoke get checks; the scanner's page-title check of
+  a workspace-prefixed `app/brand/theme_config.json`, a path layout already
+  rejects; and `scripts/generated_ui_acceptance.normalize_ui_acceptance_findings`,
+  which had no callers.
+- `BrandingProvider`, `useBranding` and the unresolvable `providers/index.js`
+  barrel from `@mozaiks/chat-ui`. Theme loading uses `initializeTheme` and
+  `useTheme`, which fail closed on an invalid page-title style.
+- The Messages profile tab's Friends list and start-conversation path, the
+  Messaging UI's unprefixed theme tokens with fixed colour fallbacks, and the
+  notification router's second read of `related_type` from the event
+  envelope.
 
 ### Security
 
@@ -168,7 +376,19 @@ This project follows a practical pre-1.0 changelog format:
   A missing or overlong lineage, a failed read, a scan past its bound, or an
   acceptance that cannot be ordered against the ancestor's refuses. Studio
   re-reads the version under its per-process acceptance lock, which
-  coordinates one Studio process only.
+  coordinates one Studio process only. A version with no parent goes through
+  the same check. A stale build that no acceptance evidence names is passed
+  over only when its invalidating change request was made from that build and
+  the state it saved shows a draft that was never accepted; a saved state of
+  `stale` is followed back at most 16 change requests and 64 reads. Anything
+  else refuses as unverifiable and names the cause: accepted at a time
+  nothing records, no saved state, a saved state of another build or a change
+  request made from another build (naming that build), a missing change
+  request, a passed bound, or a failed read. A superseded build without
+  evidence is never treated as never accepted, and a rejected build never
+  counts as accepted work, whatever evidence it carries. A workflow launch now
+  keeps the saved build state on its change request when it rewrites the
+  routing.
 - Confirming a proposed refinement scope requires the pending decision's files
   to equal those the trigger saved on its change request for the same build,
   since the pending decision can also be written through the session decision
@@ -181,11 +401,44 @@ This project follows a practical pre-1.0 changelog format:
   another build key does not), or when that cannot be checked. A decision
   proposed for a build that was already
   stale, and is unchanged, can be confirmed; it then follows its route, so a
-  scope that changes app-owned pack code still needs stale-build admission and
-  a workflow route launches as before. A change request proposed before the
-  state was saved is refused when its build was written after it was created,
-  as every earlier proposal's build was; requesting the change again saves the
-  state, and that proposal can be confirmed.
+  scope that includes app-owned pack code still goes through the baseline
+  rule for that code, and a workflow route launches as before. A change
+  request with no saved state is always refused, because whether its build
+  changed cannot be checked; this covers one recorded before Studio kept that
+  state. Requesting the change again saves the state, and that proposal can
+  be confirmed.
+- Acceptance evidence always names the caller's authenticated principal. The
+  staged-refinement acceptance (`accept_staged_refinement_build_record`,
+  `accept_staged_refinement_artifact_version`) requires `accepted_by` and
+  refuses without it, writing nothing; it no longer credits the acceptance to
+  the staged review record's reviewer. `contracts.build_acceptance_evidence`
+  refuses evidence that names no principal, and Studio passes the request's
+  principal for both acceptances.
+- A selected pack's own `pack_source_path` is trusted without pins only
+  inside the shipped factory catalog, as the verified source of the installed
+  component with that id, or as a pack registered for AppGenerator directly
+  under the workspace build context. Any other source, including a copy of a
+  workspace pack elsewhere and a lifecycle upgrade candidate, must be selected
+  with matching `version` and `digest` pins, or it is refused before its
+  contract is read, so its own contract grants no capability, layout or output
+  ownership. A context retargeted to another workflow or no longer projecting
+  its packs vouches for nothing, and a workspace pack edited in place after a
+  build was recorded fails that build's later refinements, instead of
+  releasing its template-owned files, until an AppGenerator revision
+  re-assembles it.
+- A row that claims a pack but cannot be resolved, or whose pins do not
+  match, fails with a diagnostic; no warning admits an unverified,
+  unresolvable, mismatched or omitted pack. The bundle scanner refuses an
+  explicit row whose `pack_source_path` lies outside the build context's
+  verified selection, and a bundle whose template-owned pack files differ
+  from the verified templates, whatever its provenance records.
+- Studio refinement admission keeps the verified identity (pins and
+  authority) of every pack the parent build selected, so a pinned external
+  pack, an installed Community Component and a workspace pack are held to
+  the same template-drift, module-closure, app-owned-scope, stale-baseline
+  and handler-grammar checks as a shipped pack. If the parent's selection
+  cannot be resolved or verified, every candidate is refused with
+  `PACK_OWNERSHIP_UNRESOLVED` instead of being admitted unchecked.
 ## 0.2.0 - 2026-10-17
 
 ### Added
