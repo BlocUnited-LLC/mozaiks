@@ -38,6 +38,8 @@ def _context(facade_id="billing_portal", *, ownership_rules=(), platform_hints=(
         "context_id": "managed_billing", "applies_to_workflows": ["DesignDocs", "AppGenerator"],
         "assets": [{"kind": "contract", "path": "contract.yaml"}],
         "pack": {"id": "managed_billing", "version": "1.0.0", "status": "active", "capability_source": "managed_capability"},
+        # The projection the trusted loader registers packs through.
+        "projections": {"context_variables": {"capability_packs": {"from": "capability_packs"}}},
     }), encoding="utf-8")
     (root / "contract.yaml").write_text(yaml.safe_dump(contract), encoding="utf-8")
     return ContextVariablesBridge({

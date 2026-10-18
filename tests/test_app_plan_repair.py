@@ -232,6 +232,8 @@ def _registered_provider_pack(workspace: Path) -> dict[str, Any]:
         "assets": [{"path": "contract.yaml", "kind": "contract"}],
         "pack": {"id": "notifications_pack", "version": "1.0.0", "status": "active",
                  "capability_source": "managed_capability"},
+        # The projection the trusted loader registers packs through.
+        "projections": {"context_variables": {"capability_packs": {"from": "capability_packs"}}},
     }
     (root / "context.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
     (root / "contract.yaml").write_text(yaml.safe_dump({

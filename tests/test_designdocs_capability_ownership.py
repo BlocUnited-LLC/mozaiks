@@ -366,6 +366,8 @@ def _search_pack(tmp_path, monkeypatch) -> tuple[dict, list[dict]]:
         "context_id": "managed_search", "applies_to_workflows": ["DesignDocs", "AppGenerator"],
         "assets": [{"path": "contract.yaml", "kind": "contract"}],
         "pack": {"id": "managed_search", "version": "1.0.0", "status": "active", "capability_source": "managed_capability"},
+        # The projection the trusted loader registers packs through.
+        "projections": {"context_variables": {"capability_packs": {"from": "capability_packs"}}},
     }
     contract = {
         "contract_id": "managed_search", "contract_type": "build_pack_instructions",
