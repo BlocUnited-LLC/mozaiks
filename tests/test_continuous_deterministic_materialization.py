@@ -568,8 +568,15 @@ async def test_typed_plan_materializes_validates_loads_and_serves_same_bundle(
             capability_packs=_selected_packs(),
         )
     )
-    assert scan_generated_bundle(files_one, capability_packs=_selected_packs()) == []
-    assert validation.passed is True, validation.diagnostics
+    assert scan_generated_bundle(files_one, capability_packs=_selected_packs(), context_variables=context_one) == []
+    # operator_readiness renders its .j2 templates from the build's context: the facade, which has
+    # none, cannot verify those outputs and fails closed on exactly them.
+    errors = [item.message for item in validation.diagnostics if item.severity == "error"]
+    assert {error.split(":", 1)[0] for error in errors} == {
+        "config/operator_readiness.yaml", "docs/operations/operator-readiness.md",
+        "scripts/check_operator_readiness_local.ps1",
+    }, validation.diagnostics
+    assert all("renders from build context, and this scan has none" in error for error in errors)
 
     acceptance = await run_app_bundle_acceptance_gate(
         files=files_one,

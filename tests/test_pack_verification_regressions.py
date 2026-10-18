@@ -117,7 +117,7 @@ def _assert_upgrade_blocked_before_writing(build_context_root: Path, candidate: 
 
 
 def _write_composed_greetings_app(app_root: Path, pack_root: Path) -> None:
-    """Write the greetings pack as assembly does, with its route manifest a composed root."""
+    """Write the greetings pack as assembly does, with its UI roots built by the canonical composer."""
     contributions: list[dict] = []
     files = {
         item["filename"]: item["content"]
@@ -125,9 +125,9 @@ def _write_composed_greetings_app(app_root: Path, pack_root: Path) -> None:
             [{"id": "greetings", "pack_source_path": str(pack_root)}], ui_contributions=contributions,
         )
     }
-    # Assembly passes ui_contributions, so the pack's route manifest is a composed root.
-    assert list(json.loads(files[PROVENANCE])["composed_outputs"]) == [ROUTE_MANIFEST]
-    files[ROUTE_MANIFEST] = next(item["content"] for item in contributions[0]["files"] if item["filename"] == ROUTE_MANIFEST)
+    # Assembly passes ui_contributions, so the pack's UI roots are composed roots.
+    assert ROUTE_MANIFEST in json.loads(files[PROVENANCE])["composed_outputs"]
+    files.update(compose_ui_registry(contributions, files))
     for path, content in files.items():
         (app_root / path).parent.mkdir(parents=True, exist_ok=True)
         (app_root / path).write_text(content, encoding="utf-8")
@@ -587,28 +587,291 @@ def test_verified_installed_pin_trusts_complete_template_backend(tmp_path, monke
         resolver.verified_selected_pack_sources(context_variables=context)
 
 
-@pytest.mark.parametrize("pins", [{"digest": "sha256:" + "0" * 64}, {"version": "9.9.9"}, {"version": "1.0.0", "digest": "sha256:" + "1" * 64}])
-@pytest.mark.parametrize("pack_id", ["messaging", "does_not_exist"])
-def test_an_unresolvable_selection_with_pins_fails_instead_of_skipping(pins, pack_id):
-    """Pins on a row nothing resolves to a source can never be compared, so they fail closed."""
-    selected = [{"id": pack_id, **pins}]
-    with pytest.raises(resolver.PackIntegrityError, match=f"Pack '{pack_id}' selected .*pin cannot be checked"):
-        resolver.verified_selected_pack_sources(selected)
-    with pytest.raises(resolver.PackIntegrityError, match="pin cannot be checked"):
-        resolver.resolve_declared_pack_output_paths(selected)
-    errors = scanner.scan_generated_bundle({"app.json": "{}"}, capability_packs=selected)
-    assert any("Selected CapabilityPack output contract is invalid" in error and "pin cannot be checked" in error for error in errors)
+MOZAIKSPAY = BUILD_CONTEXT / "mozaikspay"
+# Exactly the row mozaiks-app's generated_bundle_gate infers from services/integrations/mozaikspay_client.py.
+HOSTED_MOZAIKSPAY_ROW = {
+    "id": "mozaikspay", "capability_source": "managed_capability", "provides_capabilities": ["subscription_write_path"],
+}
+HOSTED_SUBSCRIPTIONS = """
+schema_version: mozaiks.subscriptions.v1
+label: Plans
+default_plan_id: free
+assignment_store:
+  data_alias: subscriptions.assignments
+  user_id_field: user_id
+  active_statuses: [active, pending]
+plans:
+  - plan_id: free
+    label: Free
+    capabilities: []
+  - plan_id: pro
+    label: Pro
+    capabilities: []
+"""
 
 
-def test_an_unresolved_id_only_selection_is_reported_as_unverified(caplog):
-    """The hosted gate's id-only rows keep working, but are never silently treated as verified."""
-    hosted = [{"id": "mozaikspay", "capability_source": "managed_capability", "provides_capabilities": ["subscription_write_path"]}]
-    caplog.set_level("WARNING", logger=resolver.__name__)
-    assert resolver.verified_selected_pack_sources(hosted) == []
-    assert [record.getMessage().split(":", 1)[0] for record in caplog.records] == ["UNVERIFIED_PACK_SELECTION"]
-    assert "'mozaikspay'" in caplog.records[0].getMessage()
-    errors = scanner.scan_generated_bundle({"app.json": "{}"}, capability_packs=hosted)
-    assert not any("CapabilityPack output contract" in error for error in errors), errors
+def _hosted_mozaikspay_bundle() -> dict[str, str]:
+    """A MozaiksPay bundle materialized from the shipped catalog, as AppGenerator assembles it."""
+    import yaml
+
+    from mozaiksai.core.workflow.generator_support.subscription_data_contract import (
+        ensure_subscription_assignment_stores,
+    )
+
+    files = {
+        item["filename"]: item["content"]
+        for item in resolver.resolve_managed_capability_templates(
+            [{"id": "mozaikspay", "capability_source": "managed_capability", "pack_source_path": str(MOZAIKSPAY)}],
+            context_variables={"build_timestamp": "2026-10-17T00:00:00Z"},
+        )
+    }
+    files["app.json"] = json.dumps({"appId": "billing", "appName": "Billing"})
+    files["config/subscriptions.yaml"] = HOSTED_SUBSCRIPTIONS
+    files[DATA_CONTRACT] = json.dumps(ensure_subscription_assignment_stores(
+        dict(EMPTY_CONTRACT), {"contract_required": True, "subscription_config_file": yaml.safe_load(HOSTED_SUBSCRIPTIONS)},
+    ))
+    return files
+
+
+def _hosted_facade(files: dict[str, str], rows: list[dict] | None = None):
+    from mozaiksai.core.validation import (
+        GeneratedAppValidationRequest,
+        validate_generated_app_bundle,
+    )
+
+    return validate_generated_app_bundle(GeneratedAppValidationRequest(
+        files=files, capability_packs=[dict(row) for row in rows or [HOSTED_MOZAIKSPAY_ROW]],
+    ))
+
+
+def _errors(result) -> list[str]:
+    return [item.message for item in result.diagnostics if item.severity == "error"]
+
+
+def test_the_hosted_id_only_mozaikspay_row_resolves_to_the_shipped_catalog_identity(caplog):
+    """The installed package's shipped catalog is the authority for the hosted gate's id-only row."""
+    caplog.set_level("DEBUG", logger=resolver.__name__)
+    shipped = resolver.verify_pack_integrity(MOZAIKSPAY, "mozaikspay")
+    identity = {**{key: shipped[key] for key in ("pack_id", "version", "digest", "source")}, "resolution": "factory_build_context"}
+
+    [entry] = resolver.verified_selected_pack_sources([dict(HOSTED_MOZAIKSPAY_ROW)])
+    assert resolver.pack_identity(entry) == identity
+    assert (Path(entry["source_path"]), entry["implementation_trusted"]) == (MOZAIKSPAY.resolve(), True)
+    assert not [record for record in caplog.records if "UNVERIFIED" in record.getMessage()]
+
+    # A clean materialized bundle passes the facade, which returns the identity it verified.
+    result = _hosted_facade(_hosted_mozaikspay_bundle())
+    assert result.passed, _errors(result)
+    assert result.resolved_capability_packs == [identity]
+
+
+def test_a_selection_whose_pins_match_the_shipped_catalog_passes():
+    shipped = resolver.verify_pack_integrity(MOZAIKSPAY, "mozaikspay")
+    pinned = {**HOSTED_MOZAIKSPAY_ROW, "version": shipped["version"], "digest": shipped["digest"]}
+    [entry] = resolver.verified_selected_pack_sources([pinned])
+    assert (entry["resolution"], entry["digest"]) == ("factory_build_context", shipped["digest"])
+    result = _hosted_facade(_hosted_mozaikspay_bundle(), [pinned])
+    assert result.passed, _errors(result)
+
+
+@pytest.mark.parametrize(("row", "reason"), [
+    ({"id": "acme_pay", "capability_source": "managed_capability"}, "ships no pack at build_context/acme_pay"),
+    ({"id": "acme", "version": "1.0.0"}, "ships no pack at build_context/acme"),
+    ({"id": "acme", "digest": "sha256:" + "1" * 64}, "ships no pack at build_context/acme"),
+    ({"id": "../mozaikspay", "capability_source": "managed_capability"}, "'../mozaikspay' is not a safe pack identifier"),
+    # Normalizes onto the shipped mozaikspay directory, but is still no safe catalog id.
+    ({"id": "mozaikspay/.", "capability_source": "managed_capability"}, "'mozaikspay/.' is not a safe pack identifier"),
+    ({"id": "AppGenerator", "capability_source": "operator_pack"}, "ships no pack at build_context/AppGenerator"),
+], ids=[
+    "unknown_managed_id", "unknown_pinned_version", "unknown_pinned_digest", "unsafe_id", "unsafe_alias_of_a_shipped_pack",
+    "catalog_context_not_a_pack",
+])
+def test_a_claimed_pack_that_resolves_to_no_verified_source_fails(row, reason):
+    """No warning admits an unresolvable pack: the resolver, declared outputs and every scan refuse it."""
+    with pytest.raises(resolver.PackIntegrityError, match=re.escape(reason)):
+        resolver.verified_selected_pack_sources([row])
+    with pytest.raises(resolver.PackIntegrityError, match=re.escape(reason)):
+        resolver.resolve_declared_pack_output_paths([row])
+    errors = scanner.scan_generated_bundle({"app.json": "{}"}, capability_packs=[row])
+    assert len(errors) == 1 and errors[0].startswith("Selected CapabilityPack output contract is invalid"), errors
+    result = _hosted_facade(_hosted_mozaikspay_bundle(), [row])
+    assert not result.passed and result.resolved_capability_packs == []
+
+
+def test_the_hosted_row_fails_when_no_factory_catalog_resolves(monkeypatch):
+    monkeypatch.setattr(resolver, "resolve_factory_app_root", lambda: None)
+    message = "the installed factory catalog cannot be located"
+    with pytest.raises(resolver.PackIntegrityError, match=message):
+        resolver.verified_selected_pack_sources([dict(HOSTED_MOZAIKSPAY_ROW)])
+    result = _hosted_facade(_hosted_mozaikspay_bundle())
+    assert not result.passed and any(message in error for error in _errors(result)), _errors(result)
+
+
+@pytest.mark.parametrize("pins", [
+    {"version": "0.0.1"}, {"digest": "sha256:" + "0" * 64}, {"version": "9.9.9", "digest": "sha256:" + "1" * 64},
+], ids=["stale_version", "stale_digest", "both"])
+@pytest.mark.parametrize("pack_id", ["mozaikspay", "messaging"])
+def test_a_stale_or_mismatched_pin_fails_against_the_resolved_source(pack_id, pins):
+    row = {"id": pack_id, **pins}
+    with pytest.raises(resolver.PackIntegrityError, match="selected (version|digest) does not match freshly verified source"):
+        resolver.verified_selected_pack_sources([row])
+    with pytest.raises(resolver.PackIntegrityError, match="does not match freshly verified source"):
+        resolver.resolve_declared_pack_output_paths([row])
+    errors = scanner.scan_generated_bundle({"app.json": "{}"}, capability_packs=[row])
+    assert any("does not match freshly verified source" in error for error in errors), errors
+
+
+@pytest.mark.parametrize("field", ["version", "digest"])
+def test_bundle_provenance_that_differs_from_the_resolved_identity_fails(field):
+    files = _hosted_mozaikspay_bundle()
+    provenance = json.loads(files[PROVENANCE])
+    provenance["packs"][0][field] = "0.0.9" if field == "version" else "sha256:" + "2" * 64
+    files[PROVENANCE] = json.dumps(provenance)
+    result = _hosted_facade(files)
+    assert not result.passed
+    assert any(
+        error.startswith(f"{PROVENANCE}: packs[0] records pack 'mozaikspay' with {field}") and "factory_build_context" in error
+        for error in _errors(result)
+    ), _errors(result)
+
+
+def test_a_modified_copy_of_the_catalog_source_fails_the_fresh_digest(tmp_path, monkeypatch):
+    """Changed catalog bytes are rechecked through the digest: pins, provenance and template bytes all fail."""
+    shipped = resolver.verify_pack_integrity(MOZAIKSPAY, "mozaikspay")
+    genuine = _hosted_mozaikspay_bundle()
+    factory_root = tmp_path / "factory_app"
+    copy = factory_root / "build_context" / "mozaikspay"
+    shutil.copytree(MOZAIKSPAY, copy, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    service = copy / "templates/modules/billing_portal/backend/service.py"
+    service.write_text(service.read_text(encoding="utf-8") + "\n# changed after release\n", encoding="utf-8")
+    monkeypatch.setattr(resolver, "resolve_factory_app_root", lambda: factory_root)
+
+    pinned = {**HOSTED_MOZAIKSPAY_ROW, "version": shipped["version"], "digest": shipped["digest"]}
+    with pytest.raises(resolver.PackIntegrityError, match="selected digest does not match freshly verified source"):
+        resolver.verified_selected_pack_sources([pinned])
+    [entry] = resolver.verified_selected_pack_sources([dict(HOSTED_MOZAIKSPAY_ROW)])
+    assert entry["digest"] != shipped["digest"]
+    errors = _errors(_hosted_facade(genuine))
+    assert any(error.startswith(f"{PROVENANCE}: packs[0] records pack 'mozaikspay' with digest") for error in errors), errors
+    assert any(error.startswith("modules/billing_portal/backend/service.py: differs from the verified template") for error in errors)
+
+
+@pytest.mark.parametrize("forge_provenance", [False, True], ids=["provenance_untouched", "provenance_forged"])
+def test_a_tampered_template_owned_file_fails_even_with_forged_provenance(forge_provenance):
+    files = _hosted_mozaikspay_bundle()
+    path = "modules/billing_portal/backend/base_handler.py"
+    files[path] += "\nimport os  # tampered\n"
+    if forge_provenance:
+        provenance = json.loads(files[PROVENANCE])
+        provenance["packs"][0]["materialized_owned_files"] = [
+            row for row in provenance["packs"][0]["materialized_owned_files"] if row["path"] != path
+        ] + [{"path": path, "owner": "workspace"}]
+        files[PROVENANCE] = json.dumps(provenance)
+    result = _hosted_facade(files)
+    assert not result.passed
+    assert any(error.startswith(f"{path}: differs from the verified template of the selected pack 'mozaikspay'") for error in _errors(result))
+    # A deleted template-owned output fails the same way.
+    del files[path]
+    assert any(error.startswith(f"{path}: template-owned output of the selected pack 'mozaikspay'") for error in _errors(_hosted_facade(files)))
+
+
+def test_the_hosted_row_rejects_a_forbidden_output_from_the_verified_contract():
+    """modules/wallet/ is forbidden by the shipped mozaikspay contract, with the id-only row and no build context."""
+    files = {**_hosted_mozaikspay_bundle(), "modules/wallet/module.yaml": "module:\n  id: wallet\nactions: []\n"}
+    errors = scanner.scan_generated_bundle(files, capability_packs=[dict(HOSTED_MOZAIKSPAY_ROW)])
+    assert any(
+        "Selected managed capability 'mozaikspay' declares forbidden output prefixes" in error
+        and "modules/wallet/module.yaml" in error
+        for error in errors
+    ), errors
+
+
+def test_an_inline_provides_capabilities_claim_grants_nothing_beyond_the_verified_contract():
+    """Only the verified contract can exempt a bundle from the self-hosted entitlement_dispatch module."""
+    files = {"config/subscriptions.yaml": HOSTED_SUBSCRIPTIONS}
+    required = "Self-hosted apps require an entitlement_dispatch module"
+    # mozaiks_cloud is a verified managed pack whose contract provides only the cloud write paths.
+    claimed = {"id": "mozaiks_cloud", "capability_source": "managed_capability", "provides_capabilities": ["subscription_write_path"]}
+    assert any(required in error for error in scanner.scan_generated_bundle(files, capability_packs=[claimed]))
+    # A planned module that is no pack grants nothing either.
+    planned = {"capability_pack_id": "billing_tools", "capability_source": "generated_module", "provides_capabilities": ["subscription_write_path"]}
+    assert any(required in error for error in scanner.scan_generated_bundle(files, capability_packs=[planned]))
+    # The shipped mozaikspay contract does provide it, with or without the inline claim.
+    for row in (HOSTED_MOZAIKSPAY_ROW, {key: value for key, value in HOSTED_MOZAIKSPAY_ROW.items() if key != "provides_capabilities"}):
+        assert not any(required in error for error in scanner.scan_generated_bundle(files, capability_packs=[dict(row)]))
+
+
+def test_a_generated_module_plan_row_that_matches_no_pack_selects_and_grants_nothing(caplog):
+    caplog.set_level("DEBUG", logger=resolver.__name__)
+    planned = [
+        {"capability_pack_id": "tasks", "capability_source": "generated_module"},
+        {"capability_pack_id": "billing_tools", "capability_source": "generated_module", "provides_capabilities": ["subscription_write_path"]},
+    ]
+    assert resolver.verified_selected_pack_sources(planned) == []
+    assert resolver.resolve_declared_pack_output_paths(planned) == frozenset()
+    assert caplog.records == []
+    resolved: list[dict] = []
+    files = {"app.json": "{}", "services/integrations/billing_tools_client.py": "x = 1\n"}
+    errors = scanner.scan_generated_bundle(files, capability_packs=planned, resolved_capability_packs=resolved)
+    assert resolved == [] and not any("CapabilityPack output contract" in error for error in errors), errors
+
+
+def test_a_template_rendered_from_build_context_is_verified_only_with_that_context():
+    """operator_readiness renders .j2 templates from build context: without it they fail closed."""
+    row = {"id": "operator_readiness", "capability_source": "config_file", "pack_source_path": str(BUILD_CONTEXT / "operator_readiness")}
+    context = {"readiness_profile": "host_operator_platform", "capability_packs": [row]}
+    files = {
+        "app.json": "{}",
+        **{item["filename"]: item["content"] for item in resolver.resolve_templates_for_pack(
+            BUILD_CONTEXT / "operator_readiness", "operator_readiness", context_variables=context,
+        )},
+    }
+    assert scanner.scan_generated_bundle(files, capability_packs=[row], context_variables=context) == []
+    without_context = scanner.scan_generated_bundle(files, capability_packs=[row])
+    assert sorted(error.split(":", 1)[0] for error in without_context) == sorted(path for path in files if path != "app.json")
+    assert all("renders from build context, and this scan has none" in error for error in without_context)
+    changed = {**files, "config/operator_readiness.yaml": files["config/operator_readiness.yaml"] + "# edited\n"}
+    assert any(
+        error.startswith("config/operator_readiness.yaml: differs from the verified template")
+        for error in scanner.scan_generated_bundle(changed, capability_packs=[row], context_variables=context)
+    )
+
+
+def test_a_caller_cannot_promote_a_verified_pack_to_a_managed_capability():
+    """The pack's declared capability_source governs the checks, never the caller's claimed one."""
+    claimed = {"id": "messaging", "capability_source": "managed_capability"}
+    [entry] = resolver.verified_selected_pack_sources([claimed])
+    assert (entry["resolution"], entry["capability_source"]) == ("factory_build_context", "generated_module")
+    config = "config/integrations/messaging.yaml"
+    errors = scanner.scan_generated_bundle({"app.json": "{}", config: "service: messaging\n"}, capability_packs=[claimed])
+    # No managed-capability layout extension admits the managed config path, and no managed checks run.
+    assert any(config in error for error in errors), errors
+    assert not any("Selected managed capability 'messaging'" in error for error in errors), errors
+
+
+def test_one_pack_identity_precedence_across_resolver_scanner_and_layout():
+    from mozaiksai.core.runtime.app.layout_validation import layout_extensions_from_selected_packs
+
+    rows = [
+        {"id": "a", "pack_id": "b", "capability_pack_id": "c"},
+        {"pack_id": "b", "capability_pack_id": "c"},
+        {"capability_pack_id": "c"},
+        {"id": "a", "capability_pack_id": "c"},
+    ]
+    for row in rows:
+        expected = resolver.selected_pack_id(row)
+        assert scanner._pack_id_from_descriptor(row) == expected
+        [extension, *_] = layout_extensions_from_selected_packs([{**row, "capability_source": "managed_capability"}])
+        assert extension.pack_id == expected
+    assert [resolver.selected_pack_id(row) for row in rows] == ["a", "b", "c", "a"]
+
+
+def test_a_pack_selected_twice_resolves_once_or_fails_on_different_identities(tmp_path):
+    rows = [dict(HOSTED_MOZAIKSPAY_ROW), _factory_pack("mozaikspay", capability_source="managed_capability")]
+    assert [entry["pack_id"] for entry in resolver.verified_selected_pack_sources(rows)] == ["mozaikspay"]
+    other = _messaging_copy(tmp_path / "messaging", version="0.0.1")
+    with pytest.raises(resolver.PackIntegrityError, match="selected more than once with different identities"):
+        resolver.verified_selected_pack_sources([_factory_pack("messaging"), {"id": "messaging", "pack_source_path": str(other)}])
 
 
 def test_an_explicit_row_outside_the_verified_selection_cannot_supply_its_own_source():

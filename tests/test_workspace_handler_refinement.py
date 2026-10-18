@@ -537,12 +537,14 @@ async def test_admitted_handler_survives_regeneration_and_changes_the_send_actio
     saved = request.getfixturevalue("revision_baseline")
     saved.files = child_files
     _replace_archive(saved, {})
-    # Re-materializing the same pack keeps the admitted handler; a raw worker
-    # copy that no current plan task owns is ignored.
+    # Re-materializing the same pack keeps the admitted handler; a raw copy from a
+    # planned worker whose task does not own the handler is ignored.
     caplog.set_level(logging.WARNING, logger="factory_app.workflows.AppGenerator.tools.assemble_app_tasks")
-    result = await assemble_app_tasks(context_variables=_revision_context(saved, child_files, app_task_batch_results={
-        "old_worker": {"code_files": [{"filename": HANDLER, "content": TEMPLATE_HANDLER}]},
-    }))
+    result = await assemble_app_tasks(context_variables=_revision_context(
+        saved, child_files, app_task_batch_items=[{"task_id": "old_worker"}], app_task_batch_results={
+            "old_worker": {"code_files": [{"filename": HANDLER, "content": TEMPLATE_HANDLER}]},
+        },
+    ))
     assert result["success"], result
     assert any("WORKSPACE_PACK_OUTPUT_IGNORED" in record.getMessage() and "task:old_worker" in record.getMessage()
                for record in caplog.records)

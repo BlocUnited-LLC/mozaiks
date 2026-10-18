@@ -9,7 +9,8 @@ import yaml
 from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
 from factory_app.workflows.AppGenerator.tools.code_file_utils import admitted_app_file_map
 from mozaiksai.core.workflow.context.adapter import create_context_container
-from tests.factory_context import factory_context
+from mozaiksai.core.workflow.generator_support.code_files import data_contract_requires_auth
+from tests.factory_context import factory_context, planned_tasks
 from tests.test_app_ui_composition import component, compose, contribution, retitled
 from tests.test_appgenerator_revision_baseline import _replace_archive
 from tests.test_appgenerator_revision_baseline import baseline as revision_baseline  # noqa: F401
@@ -112,6 +113,7 @@ async def test_genesis_repair_overlay_reaches_the_composed_roots(fault):
     def context(code_files):
         return Context(factory_context({
             **_context(), "app_id": "genesis_repair", "data_contract": EMPTY_CONTRACT, "code_files": code_files,
+            "app_task_batch_items": planned_tasks("pages"),
             "app_task_batch_results": {"pages": {"code_files": contribution("task:pages", task)["files"]}},
         }))
 
@@ -128,9 +130,12 @@ WIDGET = "ui/components/Widget.jsx"
 
 
 def _genesis_context(task, **extra):
+    results = extra.pop("app_task_batch_results", {"pages": {"code_files": contribution("task:pages", task)["files"]}})
+    # The batch ran the plan's tasks: one planned item per result key.
+    extra.setdefault("app_task_batch_items", planned_tasks(*results))
     return Context(factory_context({
         **_context(), "app_id": "genesis_repair", "data_contract": EMPTY_CONTRACT,
-        "app_task_batch_results": {"pages": {"code_files": contribution("task:pages", task)["files"]}}, **extra,
+        "app_task_batch_results": results, **extra,
     }))
 
 
@@ -198,7 +203,7 @@ async def test_repair_overlay_cannot_change_a_pack_route():
     repair = {"ui/route_manifest.json": retitled(compose(task, pack)["ui/route_manifest.json"], "messages", "Hijacked")}
     result = await assemble_app_tasks(context_variables=Context(factory_context({
         **_context(), "app_id": "pack_route_repair", "data_contract": EMPTY_CONTRACT,
-        "code_files": contribution("repair", repair)["files"],
+        "code_files": contribution("repair", repair)["files"], "app_task_batch_items": planned_tasks("pages"),
         "app_task_batch_results": {"pages": {"code_files": contribution("task:pages", task)["files"]}},
     })))
     assert not result["success"]
@@ -212,6 +217,7 @@ async def test_pack_ui_assembly_renders_provenance_from_the_pinned_build_timesta
     for _ in range(2):
         result = await assemble_app_tasks(context_variables=Context(factory_context({
             **_context(), "app_id": "pinned_provenance", "build_timestamp": pinned, "data_contract": EMPTY_CONTRACT,
+            "app_task_batch_items": planned_tasks("shell", "pages"),
             "app_task_batch_results": {
                 "shell": {"manifest": {"app_name": "Board", "default_route": "/board"}, "pages": []},
                 "pages": {"code_files": contribution("task:pages", component(path="ui/pages/custom/board.jsx"))["files"]},
@@ -951,10 +957,14 @@ async def test_genesis_app_schema_save_leaves_pack_data_contract_failures_to_ass
     assert "data/contract.json" not in context.get("generated_files", {})
     assert not (Path(context["generated_app_dir"]) / "data" / "contract.json").exists()
     assert any("APP_SCHEMA_PACK_DATA_CONTRACT_NOT_WRITTEN" in record.getMessage() for record in caplog.records)
+    # Only data/contract.json is skipped: app.json still derives authRequired from the approved contract.
+    assert data_contract_requires_auth(approved)
+    assert json.loads(overlay["app.json"])["authRequired"] is True
+    assert json.loads((Path(context["generated_app_dir"]) / "app.json").read_text(encoding="utf-8"))["authRequired"] is True
     context["app_ui_quality_status"] = "passed"
     result = await assemble_app_tasks(context_variables=context)
     assert not result["success"]
-    assert result["error"] == expected, result["error"]
+    assert result["error"].startswith(expected), result["error"]
 
 
 def _pack_data_contract_failure(failure):
@@ -1015,6 +1025,9 @@ def test_a_page_repair_is_not_rejected_for_a_pack_data_contract_failure(tmp_path
     assert json.loads(overlay["ui/route_manifest.json"])["pages"][0]["meta"]["title"] == "Repaired board"
     assert overlay.get("data/contract.json", bundle_contract) == bundle_contract
     assert context["generated_files"]["data/contract.json"] == bundle_contract
+    # The repair's app.json still derives authRequired from the approved, auth-requiring contract.
+    assert data_contract_requires_auth(approved)
+    assert json.loads(overlay["app.json"])["authRequired"] is True
 
 
 @pytest.mark.asyncio
@@ -1069,7 +1082,8 @@ async def test_an_auth_route_binding_error_raised_by_reassembly_routes_to_the_ro
     context = _genesis_context(board, app_task_batch_results={
         "pages": {"code_files": contribution("task:pages", board)["files"]},
         "shell": {"manifest": {"app_name": "Board", "default_route": "/board", "auth_strategy": "basic-login"}, "pages": []},
-    }, app_task_batch_items=[pages], app_build_plan={**selected["app_build_plan"], "build_tasks": [pages], "pages": [
+    }, app_task_batch_items=[pages, *planned_tasks("shell")], app_build_plan={
+        **selected["app_build_plan"], "build_tasks": [pages, *planned_tasks("shell")], "pages": [
         {"name": "board", "route": "/board", "ui_surface": "custom_react_page"},
     ]})
     result = await assemble_app_tasks(context_variables=context)

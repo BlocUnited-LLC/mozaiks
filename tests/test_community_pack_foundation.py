@@ -64,12 +64,15 @@ def _files_map(*pack_descs: dict[str, Any]) -> dict[str, str]:
 
 
 def _single_pack_bundle(pack_desc: dict[str, Any]) -> dict[str, str]:
-    """One pack's files plus the shared UI roots it alone contributes, written as their composed root."""
+    """One pack's files plus the shared UI roots the canonical composer builds from its contribution."""
     from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
         resolve_managed_capability_templates,
     )
     from mozaiksai.core.workflow.generator_support.module_action_inventory import (
         SHARED_UI_OUTPUT_PATHS,
+    )
+    from mozaiksai.core.workflow.generator_support.ui_registry_composition import (
+        compose_ui_registry,
     )
 
     contributions: list[dict[str, Any]] = []
@@ -77,10 +80,9 @@ def _single_pack_bundle(pack_desc: dict[str, Any]) -> dict[str, str]:
         f["filename"]: f["content"]
         for f in resolve_managed_capability_templates([pack_desc], ui_contributions=contributions)
     }
-    # The resolver holds shared roots back; with one contributor the composed root is its declaration.
+    # The resolver holds shared roots back; assembly composes them from every contribution.
     assert not SHARED_UI_OUTPUT_PATHS & set(files)
-    [contribution] = contributions
-    files.update({f["filename"]: f["content"] for f in contribution["files"] if f["filename"] in SHARED_UI_OUTPUT_PATHS})
+    files.update(compose_ui_registry(contributions, files))
     return files
 
 

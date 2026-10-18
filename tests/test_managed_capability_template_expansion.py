@@ -177,7 +177,7 @@ async def test_assemble_app_tasks_overlays_selected_pack_template(tmp_path: Path
                 "capability_packs": [
                     {"capability_pack_id": "wallet", "capability_source": "managed_capability"}
                 ],
-                "build_tasks": [],
+                "build_tasks": [{"task_id": "wallet_adapter"}],
             },
             "capability_packs": [
                 {

@@ -247,17 +247,11 @@ dependency closure, current source identity, declared output closure, and exact
 template bytes are verified. The factory's shipped packs are trusted sources;
 external sources require matching version and digest pins, either on the
 selected pack or from installed Community Component state verified against the
-source's current bytes. A selected row whose version or digest pins cannot be
-resolved to a source (no `pack_source_path`, and no `build_context_root` that
-resolves an installed component) is refused with a diagnostic. An unresolved
-id-only row, such as a hosted bundle gate's selection, is not verified: the
-resolver logs it as `UNVERIFIED_PACK_SELECTION`, and only checks keyed by its
-id apply. The bundle scanner also refuses an explicit caller row that carries a
-`pack_source_path` or pins outside the verified selection, because its source
-was never compared with the selected one. A workspace-owned
-`backend/handler.py` may extend the verified template base handler. Missing,
-changed, or undeclared implementation files fail admission; the exemption does
-not skip runtime, schema, implementation, or browser validation.
+source's current bytes. A workspace-owned `backend/handler.py` may extend the
+verified template base handler. Missing, changed, or undeclared implementation
+files fail admission; the exemption does not skip runtime, schema,
+implementation, or browser validation. How a selected row resolves to a
+verified source is described in [Pack identity authority](#pack-identity-authority).
 
 Messaging `0.1.14` declares `threads`, `messages`, and `thread_reads` under the
 `messages` module. These app-wide collections retain participant and verified
@@ -616,6 +610,100 @@ still compares against the old version's output and blocks again.
 Mozaiks does not perform remote downloads, registry lookup, marketplace ranking,
 trust scoring, cryptographic signing, or automatic semver range upgrades for
 this local lifecycle layer.
+
+### Pack identity authority
+
+Every selected `capability_packs` row is resolved to one verified source before
+anything uses it (`verified_selected_pack_sources`). The resolver tries, in
+order:
+
+1. `explicit`: the row's own `pack_source_path`;
+2. `installed`: the workspace's installed Community Component with the row's id
+   under `build_context_root`, whose source workspace state verified against its
+   pinned version and digest;
+3. `factory_build_context`: the installed package's shipped catalog,
+   `resolve_factory_app_root()/build_context/<id>`, when `<id>` is a safe
+   identifier and that directory holds a `context.yaml` with a `pack` block.
+
+`verify_pack_integrity` then computes a fresh version and digest from the
+resolved source. Any `version` or `digest` on the row (and, for an installed
+pack, the pins workspace state recorded) must equal them. The resolver records
+`{pack_id, version, digest, source, resolution}`; `resolution` names the step
+that found the source, and `source` stays the pack's declared source. A pack
+selected by several rows resolves once, and only when they agree.
+
+A row claims a pack when it carries a `version`, `digest` or `source`, or its
+`capability_source` is `managed_capability`, `operator_pack` or
+`framework_pack`. A claiming row that none of the three steps resolves fails
+with `PackIntegrityError`, naming the reason: an unsafe id (`../mozaikspay`), an
+id the catalog does not ship, or a host where `resolve_factory_app_root()`
+resolves nothing. No warning admits an unverified, unresolvable, mismatched or
+omitted pack. A `generated_module` plan row that resolves from neither its own
+path nor installed state is a planned module, not a pack selection: it selects
+no pack and grants no layout extension, capability or output ownership.
+
+The bundle scanner resolves the selection the same way (the build context's
+selection when it has one, else the caller's rows) and passes only the resolved
+rows to every pack-aware check: declared outputs and layout extensions,
+managed-capability boundaries and `forbidden_outputs`, the managed setup lane,
+the MozaiksPay and Mozaiks Cloud contracts, and the `entitlement_dispatch`
+exemption. `forbidden_outputs` and `provides_capabilities` come only from the
+verified contract; a caller row's inline values are never read. A caller row
+for a pack the build context selected adds nothing but pins, which must match;
+one for any other pack may not carry its own `pack_source_path`.
+
+The bundle's provenance cannot vouch for itself. For each resolved pack the
+scanner requires that every `.mozaiks/pack_provenance.json` entry for that pack
+records the resolved version and digest, and that every template-owned output
+the pack renders (the composed shared roots aside) is present with exactly the
+bytes `resolve_templates_for_pack` renders. A template-owned migration is
+compared after the migration compilation assembly applies. A `.j2` template
+renders from the build's context, so its output is verified only when the scan
+has that context; without it, the output fails closed. The validation facade
+returns the resolved identities as
+`GeneratedAppValidationResult.resolved_capability_packs`.
+
+### Hosted bundle gate authority (mozaiks-app)
+
+mozaiks-app's `generated_bundle_gate` infers MozaiksPay from the presence of
+`services/integrations/mozaikspay_client.py` and passes
+`{"id": "mozaikspay", "capability_source": "managed_capability",
+"provides_capabilities": ["subscription_write_path"]}` through
+`validate_generated_app_bundle` with no build context. The authority chain for
+that row is:
+
+1. it names no `pack_source_path` and the facade has no `build_context_root`, so
+   steps 1 and 2 do not apply;
+2. `managed_capability` claims a pack, so the row must resolve or fail;
+3. the installed `mozaiks` package's catalog,
+   `resolve_factory_app_root()/build_context/mozaikspay`, resolves it
+   (`resolution: factory_build_context`), and `verify_pack_integrity`
+   recomputes the version and digest from those shipped bytes;
+4. its inline `provides_capabilities` is ignored: the `entitlement_dispatch`
+   exemption and the forbidden outputs (such as `modules/wallet/`) come from the
+   shipped `contract.yaml`;
+5. the bundle's provenance entry and template-owned files are compared with that
+   identity, and the facade returns it.
+
+A genuine MozaiksPay bundle built from the same package version passes
+unchanged. A bundle built from another pack version fails until it is
+regenerated or upgraded, as does a tampered template-owned file or a forbidden
+output. A hosted bundle of a pack whose templates render from build context
+(`operator_readiness`) fails closed through the facade.
+
+Migration items for the mozaiks-app owner (not changed in this repository):
+
+- select packs from the bundle provenance's pack ids instead of inferring
+  MozaiksPay from a client file;
+- drop the inline `provides_capabilities` claim, which grants nothing;
+- remove the dead reads of `capability_packs` from the app record,
+  `app_build_plan`, `build_plan` and `metadata`, which no hosted record fills;
+- store `resolved_capability_packs` with the hosting record;
+- plan for version skew: after an OSS pin bump, a bundle built from the previous
+  pack version fails the gate until it is regenerated or upgraded;
+- bundles built before shared-root composition, whose provenance claims a
+  shared root as an exclusive file, fail every scan (the hosted gate included)
+  until they are reassembled or regenerated.
 
 ## Resolution
 

@@ -31,10 +31,19 @@ class GeneratedAppValidationRequest:
 
 @dataclass(frozen=True)
 class GeneratedAppValidationResult:
-    """Result from the public generated app bundle validation facade."""
+    """Result from the public generated app bundle validation facade.
+
+    ``resolved_capability_packs`` is the verified identity of every selected
+    capability pack, ``{pack_id, version, digest, source, resolution}``, as
+    the bundle scanner resolved it (``resolution`` is ``explicit``,
+    ``installed`` or ``factory_build_context``). It is empty when no pack was
+    selected or the selection could not be resolved and verified; that
+    failure is an error diagnostic.
+    """
 
     passed: bool
     diagnostics: list[GeneratedAppValidationDiagnostic]
+    resolved_capability_packs: list[dict[str, str]] = field(default_factory=list)
 
 
 def _path_from_message(message: str) -> str | None:
@@ -117,10 +126,12 @@ def validate_generated_app_bundle(
         scan_functional_generated_app,
     )
 
+    resolved_capability_packs: list[dict[str, str]] = []
     scanner_errors = scan_generated_bundle(
         request.files,
         capability_packs=list(request.capability_packs),
         require_deployment_artifacts=request.require_deployment_artifacts,
+        resolved_capability_packs=resolved_capability_packs,
     )
     diagnostics.extend(
         _diagnostic("generated_bundle_contract_failed", error)
@@ -159,6 +170,7 @@ def validate_generated_app_bundle(
     return GeneratedAppValidationResult(
         passed=not any(item.severity == "error" for item in diagnostics),
         diagnostics=diagnostics,
+        resolved_capability_packs=resolved_capability_packs,
     )
 
 

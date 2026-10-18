@@ -1137,11 +1137,16 @@ def _persist_to_filesystem(
     custom_route_bundle: dict[str, Any] | None,
     context_variables: Any | None = None,
     profile_layout: str | None = None,
+    auth_data_contract: dict[str, Any] | None = None,
 ) -> list[str]:
     """Write app.json, ui/pages/*.yaml, optional custom route artifacts, and optional config artifacts.
 
     Returns a list of written file paths (relative to output_dir).
     Tools are dumb — no reasoning here, just serialize what AppSchemaAgent produced.
+    ``auth_data_contract`` is the contract app.json's ``authRequired`` is
+    derived from when it is not the ``data_contract`` written (the approved
+    contract, when the pack contributions could not be composed and no
+    data/contract.json is written).
     """
     written: list[str] = []
 
@@ -1155,7 +1160,9 @@ def _persist_to_filesystem(
         "appName": manifest_dict["app_name"],
         "startup": {"landing_spot": default_route},
         "targets": {"web": True, "mobile": False},
-        "authRequired": auth_required or data_contract_requires_auth(data_contract),
+        "authRequired": auth_required or data_contract_requires_auth(
+            data_contract if data_contract is not None else auth_data_contract
+        ),
         "admins": [],
     }
     for manifest_key, app_json_key in (
@@ -1613,6 +1620,8 @@ def save_app_schema(
                 staging, manifest_dict, page_list, resolved_theme_config,
                 shell_config, asset_manifest, bundle_data_contract, custom_route_bundle,
                 context_variables=context_variables, profile_layout=_profile_layout,
+                # Only data/contract.json is skipped when the packs fail; auth still follows the approved contract.
+                auth_data_contract=resolved_data_contract,
             )
         except OSError as exc:
             raise RuntimeError("Could not write schema files to disk") from exc

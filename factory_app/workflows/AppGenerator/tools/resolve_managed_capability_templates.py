@@ -72,26 +72,51 @@ class PackIntegrityError(ManagedCapabilityTemplateError):
     """Raised when a local pack fails deterministic trust/integrity verification."""
 
 
-def selected_pack_id(pack: dict[str, Any]) -> str:
-    """The pack id a selected ``capability_packs`` row names: ``id``, then ``pack_id``, then ``capability_pack_id``."""
+# How a selected row's source was found, in resolution order.
+RESOLUTION_EXPLICIT = "explicit"
+RESOLUTION_INSTALLED = "installed"
+RESOLUTION_FACTORY_BUILD_CONTEXT = "factory_build_context"
+# The identity a verified selection records and returns to callers.
+PACK_IDENTITY_FIELDS: tuple[str, ...] = ("pack_id", "version", "digest", "source", "resolution")
+# capability_source values that select a pack rather than plan a generated module.
+PACK_CLAIM_SOURCES: frozenset[str] = frozenset({"managed_capability", "operator_pack", "framework_pack"})
+
+
+def selected_pack_id(pack: Any) -> str:
+    """The pack a selected ``capability_packs`` row names.
+
+    This is the one pack-identity precedence: ``id``, then ``pack_id``, then
+    ``capability_pack_id`` (an AppBuildPlan row's own id). The bundle scanner
+    and ``layout_validation.layout_extensions_from_selected_packs`` use the
+    same order.
+    """
+    if not isinstance(pack, dict):
+        return ""
     return str(pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id") or "").strip()
 
 
-def _require_unpinned_unresolved_selection(pack: dict[str, Any], pack_id: str) -> None:
-    """Refuse a selected row whose version or digest pins name a source nothing resolves.
+def _has_value(value: Any) -> bool:
+    return value is not None and value != ""
 
-    A row that names no ``pack_source_path`` is resolved only from the
-    workspace's installed components, through ``build_context_root``. Without
-    either, its pins cannot be compared with any source bytes, so they fail
-    here instead of silently passing.
+
+def claims_pack(pack: dict[str, Any]) -> bool:
+    """Whether a row claims to select a pack, so it must resolve to a verified source.
+
+    A row claims a pack when it carries a ``version``, ``digest`` or
+    ``source``, or its ``capability_source`` is one of
+    :data:`PACK_CLAIM_SOURCES`. Any other row, such as an AppBuildPlan
+    ``generated_module`` row, is a planned module: unless its own path or the
+    workspace's installed state resolves it, it selects no pack and grants
+    nothing.
     """
-    pins = [key for key in ("version", "digest") if pack.get(key) is not None]
-    if pins:
-        raise PackIntegrityError(
-            f"Pack '{pack_id}' selected {' and '.join(pins)} pin cannot be checked: the selection names no "
-            "pack_source_path and no build_context_root resolves an installed source. Select the pack with "
-            "its source path, select it from the workspace's installed components, or remove the pins."
-        )
+    if any(_has_value(pack.get(key)) for key in ("version", "digest", "source")):
+        return True
+    return str(pack.get("capability_source") or "").strip() in PACK_CLAIM_SOURCES
+
+
+def pack_identity(entry: dict[str, Any]) -> dict[str, str]:
+    """The recorded identity of a verified selection: ``{pack_id, version, digest, source, resolution}``."""
+    return {key: str(entry[key]) for key in PACK_IDENTITY_FIELDS}
 
 
 def _normalized_source(pack: dict[str, Any], context: dict[str, Any]) -> str:
@@ -252,10 +277,10 @@ def _validate_pack_dependencies(
         # Capabilities from context.yaml (fallback when descriptor lacks them).
         # Only attempt when pack_id is safe — unsafe IDs will be caught later
         # by resolve_templates_for_pack's _is_safe_identifier check.
-        raw_path, _pins = _resolve_pack_source_from_installed_state(pack, context_variables=context_variables)
-        if raw_path and pid and _is_safe_identifier(pid):
+        resolved = _resolve_selected_pack_source(pack, context_variables=context_variables)
+        if resolved is not None and pid and _is_safe_identifier(pid):
             try:
-                context_data = _read_pack_context(Path(raw_path).resolve(), pid)
+                context_data = _read_pack_context(Path(resolved.path).resolve(), pid)
                 pack_value = context_data.get("pack")
                 pack_block = pack_value if isinstance(pack_value, dict) else {}
                 available_pack_versions[pid] = str(pack_block.get("version") or "").strip()
@@ -270,11 +295,11 @@ def _validate_pack_dependencies(
         if not isinstance(pack, dict):
             continue
         pack_id = selected_pack_id(pack)
-        raw_path, _pins = _resolve_pack_source_from_installed_state(pack, context_variables=context_variables)
-        if not raw_path or not pack_id:
+        resolved = _resolve_selected_pack_source(pack, context_variables=context_variables)
+        if resolved is None or not pack_id:
             continue
 
-        contract = _read_pack_contract(Path(raw_path))
+        contract = _read_pack_contract(Path(resolved.path))
         required_packs, required_caps = _extract_requires(contract)
 
         missing_packs = [p["pack_id"] for p in required_packs if p["pack_id"] not in available_pack_ids]
@@ -538,6 +563,11 @@ def _file_owner_map(pack_source_path: Path) -> dict[str, str]:
     return owner_map
 
 
+def declared_output_owners(pack_source_path: Path) -> dict[str, str]:
+    """``{output path: owner}`` a pack's contract declares; provenance records any other rendered output as ``templates``."""
+    return _file_owner_map(pack_source_path)
+
+
 def _build_provenance_manifest(
     pack_file_map: list[tuple[dict[str, Any], list[dict[str, str]]]],
     *,
@@ -667,39 +697,187 @@ def _context_build_context_root(context_variables: Any | None) -> Path | None:
     return None
 
 
-def _resolve_pack_source_from_installed_state(
+class _ResolvedSource:
+    """Where a selected row's source was found, before its bytes are verified.
+
+    A plain class: callers load this module by file path, outside sys.modules.
+    """
+
+    __slots__ = ("path", "pins", "resolution")
+
+    def __init__(self, path: str, resolution: str, pins: dict[str, str] | None = None) -> None:
+        self.path = path
+        self.resolution = resolution
+        # For an installed pack, the version and digest workspace state pinned.
+        self.pins = dict(pins or {})
+
+
+def _factory_catalog_source(pack_id: str) -> Path | None:
+    """``resolve_factory_app_root()/build_context/<pack_id>`` when it is a shipped pack context, else None.
+
+    The catalog also holds workflow contexts (AppGenerator, AgentGenerator);
+    only a context that declares a ``pack`` block is a pack.
+    """
+    if not _is_safe_identifier(pack_id):
+        return None
+    factory_root = resolve_factory_app_root()
+    if factory_root is None:
+        return None
+    catalog = (Path(factory_root) / "build_context").resolve()
+    candidate = (catalog / pack_id).resolve()
+    # The candidate must be a direct child of the shipped catalog, not "." or a link elsewhere.
+    context_path = candidate / "context.yaml"
+    if candidate.parent != catalog or not context_path.is_file():
+        return None
+    try:
+        context = yaml.safe_load(context_path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return None
+    return candidate if isinstance(context, dict) and isinstance(context.get("pack"), dict) else None
+
+
+def _installed_pack_ids(build_context_root: Path) -> set[str]:
+    from .community_component_state import component_by_id, load_installed_components
+
+    return set(component_by_id(load_installed_components(build_context_root)))
+
+
+def _unresolvable_pack_message(pack: dict[str, Any], pack_id: str, build_context_root: Path | None) -> str:
+    claim = [
+        f"capability_source {pack.get('capability_source')!r}"
+        if str(pack.get("capability_source") or "").strip() in PACK_CLAIM_SOURCES else "",
+        *(f"{key} {pack[key]!r}" for key in ("version", "digest", "source") if _has_value(pack.get(key))),
+    ]
+    if not pack_id:
+        reasons = ["the row names no pack id"]
+    elif not _is_safe_identifier(pack_id):
+        reasons = [f"'{pack_id}' is not a safe pack identifier"]
+    else:
+        reasons = [
+            "the row names no pack_source_path",
+            "no installed component in build_context_root has this id" if build_context_root is not None
+            else "no build_context_root selects installed components",
+        ]
+        factory_root = resolve_factory_app_root()
+        reasons.append(
+            "the installed factory catalog cannot be located (resolve_factory_app_root() resolved nothing)"
+            if factory_root is None
+            else f"the installed factory catalog ships no pack at build_context/{pack_id} (a context.yaml with a pack block)"
+        )
+    return (
+        f"Selected pack '{pack_id or '<unnamed>'}' ({', '.join(item for item in claim if item)}) cannot be "
+        f"resolved to a verified source: {'; '.join(reasons)}. Select it with its pack_source_path, install it "
+        "into the workspace build context, or select a pack the installed factory catalog ships. An "
+        "unverified pack is never admitted."
+    )
+
+
+def _resolve_selected_pack_source(
     pack: dict[str, Any],
     *,
     context_variables: Any | None,
-) -> tuple[str | None, dict[str, str]]:
-    """Resolve an explicitly selected installed pack without copying local paths into AppBuildPlan.
+) -> _ResolvedSource | None:
+    """Find a selected row's source, in order, without copying local paths into AppBuildPlan.
 
-    Returns the source path and, for an installed pack, the version and digest
-    pins that workspace state verified against the source's fresh bytes.
+    1. ``explicit``: the row's own ``pack_source_path``.
+    2. ``installed``: the workspace's installed component with the row's id,
+       under ``build_context_root``, whose source workspace state verified
+       against its pinned version and digest.
+    3. ``factory_build_context``: for a row that :func:`claims_pack`, the
+       installed package's shipped catalog,
+       ``resolve_factory_app_root()/build_context/<id>``, when the id is a safe
+       identifier and that context exists.
+
+    A row that claims a pack and resolves from none of these raises
+    :class:`PackIntegrityError`. Any other unresolved row is not a pack
+    selection and returns None. The caller verifies the source's bytes.
     """
 
     raw_path = pack.get("pack_source_path")
     if raw_path:
-        return str(raw_path), {}
+        return _ResolvedSource(str(raw_path), RESOLUTION_EXPLICIT)
     pack_id = selected_pack_id(pack)
     build_context_root = _context_build_context_root(context_variables)
-    if not pack_id or build_context_root is None:
-        return None, {}
-    try:
-        from .community_component_lifecycle import resolve_installed_component_descriptors
+    if pack_id and build_context_root is not None:
+        try:
+            installed_ids = _installed_pack_ids(build_context_root)
+            descriptors = []
+            if pack_id in installed_ids:
+                from .community_component_lifecycle import resolve_installed_component_descriptors
 
-        descriptors = resolve_installed_component_descriptors(
-            build_context_root=build_context_root,
-            selected_pack_ids=[pack_id],
-        )
-    except Exception as exc:
-        raise ManagedCapabilityTemplateError(
-            f"Selected installed pack '{pack_id}' could not be resolved from workspace state: {exc}"
-        ) from exc
-    if not descriptors:
-        return None, {}
-    installed = descriptors[0]
-    return str(installed.get("pack_source_path") or ""), {key: str(installed[key]) for key in ("version", "digest")}
+                descriptors = resolve_installed_component_descriptors(
+                    build_context_root=build_context_root,
+                    selected_pack_ids=[pack_id],
+                )
+        except Exception as exc:
+            raise ManagedCapabilityTemplateError(
+                f"Selected installed pack '{pack_id}' could not be resolved from workspace state: {exc}"
+            ) from exc
+        if descriptors:
+            installed = descriptors[0]
+            path = str(installed.get("pack_source_path") or "")
+            if not path:
+                raise PackIntegrityError(f"Installed pack '{pack_id}' names no local source")
+            return _ResolvedSource(
+                path, RESOLUTION_INSTALLED, {key: str(installed[key]) for key in ("version", "digest")},
+            )
+    if not claims_pack(pack):
+        return None
+    catalog = _factory_catalog_source(pack_id) if pack_id else None
+    if catalog is not None:
+        return _ResolvedSource(str(catalog), RESOLUTION_FACTORY_BUILD_CONTEXT)
+    raise PackIntegrityError(_unresolvable_pack_message(pack, pack_id, build_context_root))
+
+
+def _declared_capability_source(context_root: Path, pack_id: str) -> str:
+    pack_block = _read_pack_context(context_root, pack_id).get("pack")
+    return str((pack_block or {}).get("capability_source") or "").strip() if isinstance(pack_block, dict) else ""
+
+
+def _factory_contexts_root() -> Path | None:
+    factory_root = resolve_factory_app_root()
+    return (Path(factory_root) / "build_context").resolve() if factory_root is not None else None
+
+
+def _verified_selection(
+    pack: dict[str, Any],
+    *,
+    context_variables: Any | None,
+    factory_contexts: Path | None,
+) -> dict[str, Any] | None:
+    """Resolve and verify one selected row; None when it selects no pack.
+
+    The resolved source's fresh version and digest must equal any pins on the
+    row and, for an installed pack, the pins workspace state recorded.
+    """
+    resolved = _resolve_selected_pack_source(pack, context_variables=context_variables)
+    if resolved is None:
+        return None
+    pack_id = selected_pack_id(pack)
+    if not pack_id:
+        raise PackIntegrityError(_unresolvable_pack_message(pack, pack_id, None))
+    root = Path(resolved.path).resolve()
+    metadata = verify_pack_integrity(root, pack_id)
+    for label, pins in (("selected", pack), ("installed", resolved.pins)):
+        for key in ("version", "digest"):
+            if _has_value(pins.get(key)) and str(pins[key]) != metadata[key]:
+                raise PackIntegrityError(
+                    f"Pack '{pack_id}' {label} {key} does not match freshly verified source: the {label} pin is "
+                    f"{pins[key]!r}, the {resolved.resolution} source at {root} is {metadata[key]!r}. Regenerate "
+                    "or upgrade the build with this pack version, or select the source the pin names."
+                )
+    return {
+        **metadata,
+        "resolution": resolved.resolution,
+        "source_path": str(root),
+        "capability_source": _declared_capability_source(root, pack_id)
+        or str(pack.get("capability_source") or "").strip(),
+        # Shipped factory packs are trusted; external sources need both pins.
+        "implementation_trusted": (
+            (factory_contexts is not None and root.parent == factory_contexts)
+            or any(bool(pins.get("version") and pins.get("digest")) for pins in (pack, resolved.pins))
+        ),
+    }
 
 
 def _safe_declared_output_path(raw_path: Any, *, pack_id: str) -> str:
@@ -734,23 +912,16 @@ def resolve_declared_pack_output_paths(
     """
 
     paths: set[str] = set()
+    factory_contexts = _factory_contexts_root()
     for pack in capability_packs or []:
         if not isinstance(pack, dict):
             continue
-        pack_id = selected_pack_id(pack)
-        raw_path, _pins = _resolve_pack_source_from_installed_state(
-            pack,
-            context_variables=context_variables,
-        )
-        if not pack_id:
+        # Only a verified selection declares outputs; a claimed pack that does not resolve raises.
+        entry = _verified_selection(pack, context_variables=context_variables, factory_contexts=factory_contexts)
+        if entry is None:
             continue
-        if not raw_path:
-            # An unresolved id-only row declares no outputs here; its pins are refused.
-            _require_unpinned_unresolved_selection(pack, pack_id)
-            continue
-        pack_source_path = Path(raw_path)
-        verify_pack_integrity(pack_source_path, pack_id)
-        contract = _read_pack_contract(pack_source_path)
+        pack_id = entry["pack_id"]
+        contract = _read_pack_contract(Path(entry["source_path"]))
         for index, output in enumerate(contract.get("required_outputs") or []):
             if not isinstance(output, dict) or not str(output.get("path") or "").strip():
                 raise PackIntegrityError(
@@ -770,6 +941,38 @@ def resolve_templates_for_pack(
 ) -> list[dict[str, str]]:
     """Return all files under a selected pack's ``templates/`` tree."""
 
+    files, _context_outputs = _render_pack_templates(pack_source_path, pack_id, context_variables=context_variables)
+    return files
+
+
+def render_pack_templates_for_verification(
+    pack_source_path: Path,
+    pack_id: str,
+    *,
+    context_variables: Any | None,
+) -> tuple[dict[str, str], frozenset[str]]:
+    """Render a verified pack's templates to compare them with a bundle's bytes.
+
+    Returns ``(rendered, context_outputs)``. A ``.j2`` template renders from
+    the build's template variables, so without ``context_variables`` it is
+    not rendered: its output path is listed in ``context_outputs`` instead,
+    for the caller to fail closed. Every other template renders as
+    :func:`resolve_templates_for_pack` renders it.
+    """
+    files, context_outputs = _render_pack_templates(
+        pack_source_path, pack_id, context_variables=context_variables,
+        render_context_templates=context_variables is not None,
+    )
+    return {file["filename"]: file["content"] for file in files}, context_outputs
+
+
+def _render_pack_templates(
+    pack_source_path: Path,
+    pack_id: str,
+    *,
+    context_variables: Any | None,
+    render_context_templates: bool = True,
+) -> tuple[list[dict[str, str]], frozenset[str]]:
     if not _is_safe_identifier(pack_id):
         raise ManagedCapabilityTemplateError(
             f"Unsafe pack_id '{pack_id}': must be a simple identifier without path separators or traversal sequences"
@@ -781,15 +984,16 @@ def resolve_templates_for_pack(
     pack: dict[str, Any] = _pack_raw if isinstance(_pack_raw, dict) else {}
     if str(pack.get("status") or "active").strip() != "active":
         logger.info("Skipping template materialization for inactive pack '%s'", pack_id)
-        return []
+        return [], frozenset()
 
     template_vars = _template_variables(pack=pack, context={**context, **_context_to_dict(context_variables)})
     template_roots = _template_roots(context_root, context)
     if not template_roots:
-        return []
+        return [], frozenset()
 
     files: list[dict[str, str]] = []
     by_filename: dict[str, str] = {}
+    context_outputs: set[str] = set()
     for templates_root in template_roots:
         for path in sorted(
             item
@@ -797,6 +1001,9 @@ def resolve_templates_for_pack(
             if item.is_file() and _is_materializable_template_file(item, templates_root)
         ):
             output_path = _template_output_path(path, templates_root)
+            if path.suffix == ".j2" and not render_context_templates:
+                context_outputs.add(output_path)
+                continue
             content = path.read_text(encoding="utf-8")
             if path.suffix == ".j2":
                 try:
@@ -818,24 +1025,30 @@ def resolve_templates_for_pack(
             by_filename[output_path] = content
     for filename, content in sorted(by_filename.items()):
         files.append({"filename": filename, "content": content})
-    return files
+    return files, frozenset(context_outputs)
 
 
 def verified_selected_pack_sources(
     capability_packs: list[dict[str, Any]] | None = None, *, context_variables: Any = None,
 ) -> list[dict[str, Any]]:
-    """Verify dependency-closed selected pack sources against their pins.
+    """Resolve and verify dependency-closed selected pack sources against their pins.
 
     This does not render templates, so callers that only need verified source
     paths (layout and declared-output checks) do not require the approved
     build context that template variables come from.
 
-    A row that names no ``pack_source_path`` resolves only from the
-    workspace's installed components (``build_context_root``). When nothing
-    resolves it, a row carrying version or digest pins is refused, and an
-    id-only row is not verified: it is logged as ``UNVERIFIED_PACK_SELECTION``
-    and left out of the result, and its id still selects the id-keyed managed
-    capability checks.
+    Each row resolves as :func:`_resolve_selected_pack_source` describes: its
+    own ``pack_source_path`` (``explicit``), the workspace's installed
+    components (``installed``), or, for a row that claims a pack, the
+    installed package's shipped catalog (``factory_build_context``).
+    :func:`verify_pack_integrity` then computes a fresh version and digest,
+    which any pins on the row must equal. Each entry records the identity
+    (:data:`PACK_IDENTITY_FIELDS`), ``source_path``, the pack's declared
+    ``capability_source`` and ``implementation_trusted``. A claimed pack that
+    resolves from none of these raises :class:`PackIntegrityError`; a row
+    that claims no pack and resolves from neither its own path nor installed
+    state selects nothing and is left out. A pack selected by several rows is
+    returned once, and only when they all resolve to the same identity.
     """
     if capability_packs is None and context_variables is not None:
         capability_packs = detach(context_variables.get("capability_packs")) or []
@@ -845,40 +1058,29 @@ def verified_selected_pack_sources(
     if not capability_packs:
         return []
     _validate_pack_dependencies(capability_packs, context_variables=context_variables)
-    verified = []
-    factory_root = resolve_factory_app_root()
+    verified: list[dict[str, Any]] = []
+    by_id: dict[str, dict[str, Any]] = {}
     # Without a resolvable factory root, only explicitly pinned packs are trusted.
     # Selected-row pins and verified installed-state pins are both explicit pins.
-    factory_contexts = (factory_root / "build_context").resolve() if factory_root is not None else None
+    factory_contexts = _factory_contexts_root()
     for pack in capability_packs:
         if not isinstance(pack, dict):
             continue
-        pack_id = selected_pack_id(pack)
-        source, installed_pins = _resolve_pack_source_from_installed_state(pack, context_variables=context_variables)
-        if not pack_id:
+        entry = _verified_selection(pack, context_variables=context_variables, factory_contexts=factory_contexts)
+        if entry is None:
             continue
-        if not source:
-            _require_unpinned_unresolved_selection(pack, pack_id)
-            logger.warning(
-                "UNVERIFIED_PACK_SELECTION: pack '%s' names no pack_source_path and no build_context_root "
-                "resolves an installed source, so its source, templates and declared outputs are not verified "
-                "here; only checks keyed by its id apply.",
-                pack_id,
+        prior = by_id.get(entry["pack_id"])
+        if prior is None:
+            by_id[entry["pack_id"]] = entry
+            verified.append(entry)
+            continue
+        if (prior["version"], prior["digest"]) != (entry["version"], entry["digest"]):
+            raise PackIntegrityError(
+                f"Pack '{entry['pack_id']}' is selected more than once with different identities: "
+                f"{prior['version']} ({prior['digest']}, {prior['resolution']}) and "
+                f"{entry['version']} ({entry['digest']}, {entry['resolution']}). Select it once."
             )
-            continue
-        root = Path(source).resolve()
-        metadata = verify_pack_integrity(root, pack_id)
-        for label, pins in (("selected", pack), ("installed", installed_pins)):
-            for key in ("version", "digest"):
-                if pins.get(key) is not None and pins[key] != metadata[key]:
-                    raise PackIntegrityError(f"Pack '{pack_id}' {label} {key} does not match freshly verified source")
-        verified.append({
-            **metadata, "source_path": str(root),
-            "implementation_trusted": (
-                (factory_contexts is not None and root.parent == factory_contexts)
-                or any(bool(pins.get("version") and pins.get("digest")) for pins in (pack, installed_pins))
-            ),
-        })
+        prior["implementation_trusted"] = bool(prior["implementation_trusted"] or entry["implementation_trusted"])
     return verified
 
 
@@ -1067,13 +1269,22 @@ def resolve_managed_capability_templates(
 
 
 __all__ = [
+    "PACK_CLAIM_SOURCES",
+    "PACK_IDENTITY_FIELDS",
+    "RESOLUTION_EXPLICIT",
+    "RESOLUTION_FACTORY_BUILD_CONTEXT",
+    "RESOLUTION_INSTALLED",
+    "claims_pack",
     "compute_pack_digest",
     "ManagedCapabilityTemplateError",
     "PackDependencyError",
     "PackIntegrityError",
+    "pack_identity",
+    "render_pack_templates_for_verification",
     "resolve_managed_capability_templates",
     "resolve_declared_pack_output_paths",
     "resolve_templates_for_pack",
+    "declared_output_owners",
     "selected_pack_id",
     "verify_pack_integrity",
     "verified_pack_template_inventory",

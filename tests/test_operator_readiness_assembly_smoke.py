@@ -55,7 +55,7 @@ async def test_operator_readiness_pack_materializes_rendered_outputs_end_to_end(
                         "pack_source_path": str(OPERATOR_READINESS_PACK_ROOT),
                     }
                 ],
-                "build_tasks": [],
+                "build_tasks": [{"task_id": "seed"}],
             },
             "capability_packs": [
                 {

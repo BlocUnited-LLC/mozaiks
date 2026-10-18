@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
+from pathlib import Path
 
 import pytest
 import yaml
@@ -37,9 +38,11 @@ def _contract():
 
 
 def _managed_context():
+    # A managed pack is selected from a verified source: the shipped MozaiksPay pack, whose
+    # contract declares the billing_portal facade.
     return {"capability_packs": [{
-        "id": "managed_payments", "capability_source": "managed_capability",
-        "facades": [{"module_id": "billing_portal", "pages": []}],
+        "id": "mozaikspay", "capability_source": "managed_capability",
+        "pack_source_path": str(Path(__file__).resolve().parents[1] / "factory_app/build_context/mozaikspay"),
     }]}
 
 

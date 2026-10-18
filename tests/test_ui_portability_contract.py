@@ -24,6 +24,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -109,7 +110,27 @@ def test_greetings_pack_has_route_manifest() -> None:
     greetings_page = next((p for p in pages if p.get("id") == "greetings"), None)
     assert greetings_page is not None
     assert greetings_page["path"] == "/greetings"
-    assert greetings_page["component"] == "SchemaPage"
+    # The route names a component the pack itself registers, so the canonical composer can assemble it.
+    assert greetings_page["component"] == "GreetingsPage"
+    index = (GREETINGS_PACK / "templates" / "ui" / "index.js").read_text(encoding="utf-8")
+    assert 'registerComponent("GreetingsPage", GreetingsPage)' in index
+
+
+@pytest.mark.xfail(strict=True, raises=ValueError, reason=(
+    "compose_ui_registry accepts only registered and auth route components, not the shell's core "
+    "SchemaPage, so a pack or app route to a declarative page cannot be assembled (owner: UI registry "
+    "composition). Remove this mark when the composer accepts shell core components."
+))
+def test_a_pack_route_to_the_shell_schema_page_composes() -> None:
+    from mozaiksai.core.workflow.generator_support.ui_registry_composition import (
+        compose_ui_registry,
+    )
+
+    manifest = {"pages": [{"id": "greetings", "path": "/greetings", "component": "SchemaPage", "schema": "greetings"}]}
+    composed = compose_ui_registry(
+        [{"owner": "pack:greetings", "files": [{"filename": "ui/route_manifest.json", "content": json.dumps(manifest)}]}], {},
+    )
+    assert json.loads(composed["ui/route_manifest.json"])["pages"][0]["component"] == "SchemaPage"
 
 
 def _greetings_resolution() -> tuple[dict[str, str], dict[str, Any]]:
@@ -178,11 +199,15 @@ def test_greetings_pack_ui_files_have_templates_owner_in_provenance() -> None:
 
 
 def test_greetings_pack_materialized_bundle_passes_scanner() -> None:
-    """The scanner accepts the greetings bundle with its route manifest composed from its only contributor."""
+    """The scanner accepts the greetings bundle with its UI roots built by the canonical composer."""
+    from mozaiksai.core.workflow.generator_support.ui_registry_composition import (
+        compose_ui_registry,
+    )
+
     scanner = _load_scanner()
     files, contribution = _greetings_resolution()
-    declared = {f["filename"]: f["content"] for f in contribution["files"]}
-    files_map = {**files, "ui/route_manifest.json": declared["ui/route_manifest.json"]}
+    files_map = {**files, **compose_ui_registry([contribution], files)}
+    assert "ui/route_manifest.json" in files_map
 
     errors = scanner.scan_generated_bundle(files_map)
     assert errors == [], f"Scanner found errors in greetings pack bundle: {errors}"

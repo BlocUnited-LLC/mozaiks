@@ -612,7 +612,12 @@ recorded by `bundle_name`; the verifier does not reinterpret older rootless ZIPs
 Pre-fix local drafts need a new canonical build before preview or revision.
 Security readiness may explicitly read SVG text for its secret scan. Assembly
 rechecks the baseline, then applies schema/task outputs, accumulated repairs,
-and explicit deletions in that order. Finalization rechecks the selected record,
+and explicit deletions in that order. Task outputs are read only from the task
+batch's result map: each key other than `_meta` and `_failed` must be a task id
+of the approved plan (`build_tasks`, or the batch's `app_task_batch_items`
+projection of them). Any other key, including the obsolete wrappers that
+nested the map under `task_results`, `results` or `tasks`, fails assembly
+with a diagnostic that asks for the batch to be rerun. Finalization rechecks the selected record,
 owner, and archive digest before carrying forward unchanged binary bytes into
 the ZIP and file manifest. Acceptance records the source BuildRecord ID and
 every retained opaque path, byte count, and SHA-256 digest. It also binds the
@@ -965,6 +970,9 @@ internals:
 
 Managed packs that own subscription assignment writes must declare that through
 `provides_capabilities: [subscription_write_path]` in the pack `contract.yaml`.
+Only the verified contract of a resolved pack counts: an inline
+`provides_capabilities` on a selected `capability_packs` row grants nothing
+(see the pack identity authority in `build-context-packs.md`).
 The scanner uses that provider-neutral capability flag to skip
 `entitlement_dispatch`; otherwise any generated app with
 `config/subscriptions.yaml -> assignment_store` must include the

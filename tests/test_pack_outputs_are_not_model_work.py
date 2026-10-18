@@ -159,7 +159,8 @@ def _assembly_plan() -> dict:
                   {"name": "Pricing", "route": "/pricing"}, {"name": "Usage", "route": "/usage"}],
         "capability_packs": [],
         "build_tasks": [{"task_id": "page_bundle", "task_type": "page_bundle", "initial_agent": "AppSchemaAgent",
-                         "owned_paths": ["app.json", "ui/pages/dashboard.yaml"], "depends_on": []}],
+                         "owned_paths": ["app.json", "ui/pages/dashboard.yaml"], "depends_on": []},
+                        {"task_id": "facade_contract"}],
     }
 
 

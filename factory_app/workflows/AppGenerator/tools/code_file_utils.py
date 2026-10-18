@@ -460,26 +460,55 @@ def workspace_pack_output_paths(context_variables: Any) -> frozenset[str]:
     return recorded | declared
 
 
+_OBSOLETE_TASK_RESULT_WRAPPERS = frozenset({"task_results", "results", "tasks"})
+
+
+def _planned_task_ids(context_variables: Any) -> set[str]:
+    """Task ids of the approved plan: its build_tasks, else the batch's projection of them (app_task_batch_items)."""
+    plan = detach(context_variables.get("app_build_plan"))
+    tasks = plan.get("build_tasks") if isinstance(plan, dict) else None
+    if not isinstance(tasks, list):
+        tasks = detach(context_variables.get("app_task_batch_items"))
+    if not isinstance(tasks, list):
+        return set()
+    return {str(task["task_id"]) for task in tasks if isinstance(task, dict) and task.get("task_id")}
+
+
 def task_batch_outputs(context_variables: Any) -> list[tuple[str, dict[str, Any]]]:
     """Accepted task outputs in assembly order, as (task id, payload).
 
     ``app_task_batch_results`` is the task_batch runtime's result map: each
     completed task's output under its task id, plus ``_meta`` and, when tasks
-    failed, ``_failed``. Every other key is a task id, whatever its name. Any
-    other shape is refused rather than read as a guess.
+    failed, ``_failed``. Every other key must be a task id of the approved
+    plan (its ``build_tasks``, or the batch's ``app_task_batch_items``
+    projection of them). Any other shape is refused with a diagnostic rather
+    than read as a guess, including the obsolete wrappers that nested the map
+    under ``task_results``, ``results`` or ``tasks``.
     """
     merged = detach(context_variables.get("app_task_batch_results"))
     if merged is None:
         return []
+    shape = (
+        "the task batch result map: task outputs keyed by the approved plan's task ids, plus _meta and _failed"
+    )
     if not isinstance(merged, dict):
         raise ValueError(
-            "app_task_batch_results must be the task batch result map: task outputs keyed by task id, plus "
-            f"_meta and _failed; got {type(merged).__name__}. Rerun the task batch to rebuild it."
+            f"app_task_batch_results must be {shape}; got {type(merged).__name__}. Rerun the task batch to rebuild it."
         )
+    task_ids = _planned_task_ids(context_variables)
     outputs: list[tuple[str, dict[str, Any]]] = []
     for key, value in merged.items():
         if key in {"_meta", "_failed"}:
             continue
+        if key not in task_ids:
+            obsolete = (
+                f"{key!r} is the obsolete wrapper shape that nested the result map under one key"
+                if key in _OBSOLETE_TASK_RESULT_WRAPPERS else f"{key!r} is not a task id of the approved plan"
+            )
+            raise ValueError(
+                f"app_task_batch_results must be {shape}; {obsolete} (approved task ids: {sorted(task_ids)}). "
+                "Rerun the task batch to rebuild the result map."
+            )
         if not isinstance(value, dict):
             raise ValueError(
                 f"app_task_batch_results[{key!r}] must be that task's output object; got {type(value).__name__}. "

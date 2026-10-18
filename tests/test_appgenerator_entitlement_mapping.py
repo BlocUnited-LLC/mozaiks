@@ -74,6 +74,8 @@ def _context(source="subscription_contract"):
             "build_id": "build", "phase": "genesis",
         },
         source: contract,
+        # Every writer below stores its output as the planned task_contract task's batch result.
+        "app_task_batch_items": [{"task_id": "task_contract"}],
         "design_surface_map": {"surfaces": [{
             "surface_id": "task_management", "surface_kind": "module", "owner": "app",
             "primary_entities": ["Task"], "owned_mutations": ["create_task", "edit_task", "delete_task"],

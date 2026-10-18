@@ -286,6 +286,31 @@ CARRIED_APP_CONTRACT = {"version": "1", "surfaces": [{
 }], "shared_collections": []}
 
 
+def test_the_save_compiles_the_contract_from_the_bundle_copy_never_the_process_memo():
+    """The process memo of the bound source is not the carried contract; only the bundle's copy is.
+
+    The memo holds a contract with an app-owned surface that the bundle's
+    generated_files copy lacks. The save's compile (``_assembled_data_contract``)
+    must not consult the memo: it composes the packs onto the bundle as it is,
+    so its result never depends on which process remembers the source.
+    """
+    from factory_app.workflows.AppGenerator.tools import code_file_utils
+
+    context = {
+        **_context(), "user_id": "user-1", "revision_source_artifact_version_id": "version-1",
+        "run_build_binding": {"target_app_id": "customer-app", "build_registry_id": "registry-1"},
+        "generated_files": {"app.json": json.dumps({"appId": "customer-app"})},
+    }
+    code_file_utils.remember_revision_baseline(context, {"data/contract.json": json.dumps(CARRIED_APP_CONTRACT)})
+    try:
+        assert json.loads(code_file_utils._cached_revision_baseline(context)["data/contract.json"]) == CARRIED_APP_CONTRACT
+        compiled = code_file_utils._assembled_data_contract(context, None)
+    finally:
+        code_file_utils._REVISION_UI_BASELINES.clear()
+    # The packs' contribution on an empty base, with no guard error raised from the memo's 'projects' surface.
+    assert [surface["surface_id"] for surface in compiled["surfaces"]] == ["messages"]
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("with_pack", [False, True])
 async def test_revision_without_approved_contract_never_replaces_the_carried_app_contract(request, with_pack):
@@ -654,6 +679,7 @@ async def test_actual_assembly_preserves_admitted_workspace_handler_and_restores
         "generated_files": {**({handler: admitted_handler} if has_admitted_handler else {}),
                             policy: "# injected policy must be discarded\n",
                             "data/contract.json": json.dumps(contract)},
+        "app_task_batch_items": [{"task_id": "untrusted_worker"}],
         "app_task_batch_results": {"untrusted_worker": {"code_files": [
             {"filename": handler, "content": "# raw task copy must not replace admitted handler\n"},
             {"filename": policy, "content": "# raw task copy must not replace template policy\n"},
@@ -684,6 +710,7 @@ async def test_actual_revision_assembly_retains_verified_archive_workspace_handl
     context = create_context_container(initial={
         **saved_baseline.context, **_context(),
         "data_contract": json.loads(saved_baseline.files["data/contract.json"]),
+        "app_task_batch_items": [{"task_id": "old_worker"}],
         "app_task_batch_results": {"old_worker": {"code_files": [
             {"filename": handler, "content": "# raw task copy must not replace admitted handler\n"},
             {"filename": policy, "content": "# raw task copy must not replace template policy\n"},

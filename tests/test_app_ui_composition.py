@@ -327,6 +327,7 @@ async def test_actual_genesis_accumulated_copy_cannot_hide_competing_ui_owners(o
     context = Context(factory_context({
         **_context(), "app_id": "genesis_collision", "code_files": output["code_files"],
         "data_contract": {"version": "1", "surfaces": [], "shared_collections": []},
+        "app_task_batch_items": [{"task_id": "pages"}, *([{"task_id": "other"}] if other_owner == "task" else [])],
         "app_task_batch_results": {"pages": output, **({"other": output} if other_owner == "task" else {})},
     }))
     result = await assemble_app_tasks(context_variables=context)

@@ -228,8 +228,9 @@ def _wallet_replay_plan() -> dict[str, Any]:
 
 
 def _wallet_task_outputs() -> dict[str, Any]:
+    # Keyed by the replay plan's task ids, as the task batch writes its result map.
     return {
-        "wallet_adapter": {
+        "wallet.adapter": {
             "code_files": [
                 {
                     "filename": "services/integrations/wallet_client.py",
@@ -237,7 +238,7 @@ def _wallet_task_outputs() -> dict[str, Any]:
                 }
             ]
         },
-        "wallet_facade": {
+        "wallet.facade_contract": {
             "code_files": [
                 {
                     "filename": "modules/wallet_dashboard/module.yaml",
