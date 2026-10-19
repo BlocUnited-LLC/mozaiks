@@ -748,8 +748,14 @@ same-host identity: a CRLF and an LF checkout of the same pack have different di
 A symbolic link inside a pack is digested under its target's path, so
 adding, removing or retargeting a link whose target is already covered is
 not detected; this is a known limit, as it was in 0.2.0. A `contract.yaml`
-that is a link is refused as an integrity diagnostic, so a pack's contract
-is never read through one.
+that is a link is refused as an integrity diagnostic wherever a pack is
+verified or digested, so no pin verifies, selects or adopts a pack whose
+contract is a link. Selection checks the selected packs' declared
+dependencies before it verifies them, so a linked contract whose
+dependencies are unmet is refused first with a dependency diagnostic. To
+use such a pack, replace the link with a regular file; a component
+installed with a linked contract must then be installed from its verified
+source into a build context without that pin.
 Row-level digest pins (and installed-state pins) keep comparing against
 `compute_pack_digest` of the resolved source on the validating host, so a pin
 is meaningful on the host and checkout that recorded it. Across hosts, the
