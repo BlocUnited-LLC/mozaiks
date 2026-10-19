@@ -19,7 +19,8 @@ This project follows a practical pre-1.0 changelog format:
   startup failures without recreating the workspace. Local Setup now describes
   the published package and how to distinguish it from an older editable install
   with the same version, repair older empty secret contracts and missing app IDs,
-  and configure local-only Studio access.
+  restore a missing refinement regeneration profile, and configure local-only
+  Studio access.
 
 ## 0.2.0 - 2026-10-17
 

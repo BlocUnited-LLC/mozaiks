@@ -464,6 +464,15 @@ absent, add a stable lowercase slug for your workspace, such as
 `"appId": "my-app"`, while preserving the other fields. Do not change an existing
 ID: it scopes the app's data and artifacts.
 
+An older `app/config/refinement_policy.yaml` can also enable `contract_surface`
+without its separate `regeneration_llm_profile`. That prevents Studio from
+building the app-list response even when the server's health checks pass.
+If the policy already defines a valid `llm_profiles.codegen` with a model, add
+`regeneration_llm_profile: codegen` inside the existing `contract_surface`
+mapping. Preserve its other fields and model settings; do not replace the whole
+policy. For a custom profile, reference the intended declared regeneration
+profile instead. See [Refinement Engine](architecture/workflows/refinement-engine.md#llm-profile-indirection).
+
 For a trusted, single-user local workspace with `AUTH_ENABLED=false`, Studio
 management pages also need the local user's role. Current scaffolds set
 `AUTH_ANON_ROLES=admin,user`; if adopting that setting in an older workspace,
@@ -484,9 +493,13 @@ For a public package install, check:
 - backend health: `http://localhost:8000/api/health`
 - backend shell config: `http://localhost:8000/api/shell-config`
 - frontend shell: `http://localhost:3000/apps`
+- Studio app-list API: `http://localhost:3000/api/studio/apps`
 
 Adjust the ports if you selected different ones. If startup stops before the
 frontend launches, follow [Backend failed to start](#backend-failed-to-start).
+Health checks and a successful frontend HTML response do not prove that Studio's
+API requests succeed. If the app-list API fails after upgrading an existing
+workspace, check [Older scaffold configuration](#older-scaffold-configuration).
 For a source checkout, also inspect dependencies under `web_shell/` and run
 the repo smoke script: `.\scripts\smoke-studio-local.ps1 -SkipBrowser`.
 The repo smoke script checks `http://localhost:8000/health`, which reports
