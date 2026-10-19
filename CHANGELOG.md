@@ -196,12 +196,19 @@ This project follows a practical pre-1.0 changelog format:
   contract, or the lack of one, that the pin never covered: it is refused
   until the pack is installed from its verified source into a build context
   without that pin (see the upgrade entry below). A contract or catalog
-  asset that is not a file is an integrity diagnostic, and so is a
-  `contract.yaml` that is a symbolic link: a link is digested under its
-  target's path, so it could change the contract without changing the
-  digest. Replace such a link with a regular file; a component installed
-  with a linked contract must then be installed from its verified source
-  into a build context without that pin.
+  asset that is not a file is an integrity diagnostic, and so is a link
+  among a pack's inputs: a symbolic link, or a Windows junction or other
+  reparse point, at `context.yaml`, `contract.yaml`, a declared asset or
+  anywhere under a declared directory. A link is digested under its
+  target's path and read through it, so retargeting one between inputs the
+  pack already covers changed its effective configuration (such as its
+  `capability_source`) or a rendered file, or dropped an input, without
+  changing the digest. The pack's context and contract readers, the
+  verifier and template rendering all refuse it before the input is used.
+  Replace such a link with the file or directory it points to; a component
+  installed with a linked input must then be installed from its verified
+  source into a build context without that pin. The pack directory itself
+  may still be reached through a link.
 - Generated bundle validation checks pack outputs without rendering pack
   templates. Each resolved pack's provenance must record its version, every
   template-owned output must be present, and the output of every static
@@ -353,7 +360,8 @@ This project follows a practical pre-1.0 changelog format:
   is refused by the upgrade plan, a repeated installation and installed
   resolution alike, whether its contract was since edited, added or deleted,
   and nothing changes. A 0.2.0 pin of a pack that declares its contract
-  verifies as before, because both rules digest that pack alike. The refused
+  and holds no link verifies as before, because both rules digest that pack
+  alike. The refused
   pin cannot show whether, or with which contract, the component was
   installed: the refusal compares what it recorded
   (version, declared files and their capabilities, and the dependencies it
@@ -388,7 +396,8 @@ This project follows a practical pre-1.0 changelog format:
   `contract.yaml` is undeclared or absent: that pin covered neither the
   contract nor its absence, so it is refused until the pack is installed
   from its verified source into a build context without that pin.
-- A pack whose `contract.yaml` is a symbolic link; it is now an integrity
+- Links among a pack's inputs (`context.yaml`, `contract.yaml`, a declared
+  asset or anything under a declared directory); each is now an integrity
   diagnostic (the digest entry above names the remedy).
 - The bundle scanner's acceptance of a route to one of the shell's non-page
   core components (the launcher, confirm and completion screens, the token

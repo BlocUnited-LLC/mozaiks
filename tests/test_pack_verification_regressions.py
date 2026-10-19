@@ -1602,43 +1602,117 @@ def test_a_contract_asset_that_is_not_a_file_is_an_integrity_diagnostic(tmp_path
     assert len(errors) == 1 and "Contract asset must be a file" in errors[0], errors
 
 
-def _linked_contract(monkeypatch, root: Path) -> None:
-    """Make ``root/contract.yaml`` report itself as a symbolic link (hosts without link privilege can still test)."""
-    real = Path.is_symlink
-    link = (root / "contract.yaml").absolute()
+def _real_link(link: Path, target: Path) -> str:
+    """Make ``link`` a real link to ``target``: a symbolic link, or on Windows a directory junction.
 
-    def is_symlink(self: Path) -> bool:
-        return True if self.absolute() == link else real(self)
-
-    monkeypatch.setattr(Path, "is_symlink", is_symlink)
-
-
-@pytest.mark.parametrize("link", ["emulated", "real"])
-def test_a_contract_yaml_that_is_a_symbolic_link_is_an_integrity_diagnostic(tmp_path, monkeypatch, link):
-    """A link is digested under its target's path, so a linked contract.yaml could change the contract (added,
-    removed or retargeted to another covered file) without changing the digest; the pack is refused instead."""
+    A file link on a Windows host without the symbolic-link privilege skips, labelled; nothing is emulated.
+    """
     import os
+    import platform
 
-    root = tmp_path / "greetings"
+    try:
+        os.symlink(os.path.relpath(target, link.parent), link, target_is_directory=target.is_dir())
+        return "symlink"
+    except OSError as exc:
+        if os.name == "nt" and target.is_dir():
+            import _winapi
+
+            _winapi.CreateJunction(str(target.resolve()), str(link))
+            return "junction"
+        pytest.skip(f"{platform.system()} host cannot create a symbolic link to a file here ({exc}); runs on Linux")
+
+
+LINKED_INPUT = "must be a regular file or directory, not a link"
+
+
+def _pack_with_linked_input(root: Path, linked: str) -> Path:
+    """A greetings copy whose ``linked`` input is a real link to a regular copy of itself inside the pack."""
+    import yaml
+
     shutil.copytree(GREETINGS, root, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-    contract = root / "contract.yaml"
-    target = root / "templates" / "linked_contract.yaml"
-    target.write_text(contract.read_text(encoding="utf-8"), encoding="utf-8")
-    if link == "real":
-        contract.unlink()
-        try:
-            os.symlink(target, contract)
-        except (OSError, NotImplementedError):
-            pytest.skip("this host cannot create symbolic links")
+    variants = root / "variants"
+    variants.mkdir()
+    if linked == "declared catalog":
+        context = yaml.safe_load((root / "context.yaml").read_text(encoding="utf-8"))
+        context["assets"].append({"path": "catalogs/greetings.yaml", "kind": "catalog"})
+        (root / "context.yaml").write_text(yaml.safe_dump(context, sort_keys=False), encoding="utf-8")
+        (root / "catalogs").mkdir()
+        (variants / "greetings.yaml").write_text("greetings: [hello]\n", encoding="utf-8")
+        _real_link(root / "catalogs" / "greetings.yaml", variants / "greetings.yaml")
+        return root
+    if linked == "undeclared contract.yaml":
+        manifest = root / "context.yaml"
+        manifest.write_text(
+            manifest.read_text(encoding="utf-8").replace("  - path: contract.yaml\n    kind: contract\n", ""),
+            encoding="utf-8",
+        )
+        linked = "contract.yaml"
+    relative = {
+        "context.yaml": "context.yaml",
+        "contract.yaml": "contract.yaml",
+        "template file": "templates/modules/greetings/backend/service.py",
+        "nested template directory": "templates/modules/greetings/backend",
+        "declared templates root": "templates",
+    }[linked]
+    original = root / relative
+    copy = variants / original.name
+    if original.is_dir():
+        shutil.copytree(original, copy)
+        shutil.rmtree(original)
     else:
-        _linked_contract(monkeypatch, root)
-    with pytest.raises(resolver.PackIntegrityError, match="must be a regular file, not a symbolic link"):
+        shutil.copyfile(original, copy)
+        original.unlink()
+    _real_link(original, copy)
+    return root
+
+
+@pytest.mark.parametrize("linked", [
+    "context.yaml", "contract.yaml", "undeclared contract.yaml", "declared catalog", "template file",
+    "nested template directory", "declared templates root",
+])
+def test_a_linked_pack_input_is_an_integrity_diagnostic(tmp_path, linked):
+    """A link is digested under its target's path and read through it, so retargeting it between covered inputs
+    changes what the pack holds, or drops an input, under the same digest. The verifier, the digest, rendering and
+    the scanner refuse any link among a pack's inputs (real links; directory links are junctions on Windows)."""
+    root = _pack_with_linked_input(tmp_path / "greetings", linked)
+    if linked in {"context.yaml", "contract.yaml", "undeclared contract.yaml"}:
+        reader = resolver._read_pack_context if linked == "context.yaml" else resolver._read_pack_contract
+        with pytest.raises(resolver.PackIntegrityError, match=LINKED_INPUT):
+            reader(root, "greetings") if linked == "context.yaml" else reader(root)
+    with pytest.raises(resolver.PackIntegrityError, match=LINKED_INPUT):
         resolver.verify_pack_integrity(root, "greetings")
-    with pytest.raises(resolver.PackIntegrityError, match="must be a regular file, not a symbolic link"):
+    with pytest.raises(resolver.PackIntegrityError, match=LINKED_INPUT):
         resolver.compute_pack_digest(root, "greetings")
+    with pytest.raises(resolver.PackIntegrityError, match=LINKED_INPUT):
+        resolver.resolve_templates_for_pack(root, "greetings")
     row = {"id": "greetings", "pack_source_path": str(root), "version": "0.1.0", "digest": "sha256:" + "0" * 64}
     errors = scanner.scan_generated_bundle({"app.json": "{}"}, capability_packs=[row])
-    assert len(errors) == 1 and "not a symbolic link" in errors[0], errors
+    assert len(errors) == 1 and "not a link" in errors[0], errors
+
+
+def test_a_regular_pack_walks_the_same_files_as_before_links_were_refused(tmp_path):
+    """The verifier's walk of declared directories, which no longer follows links, contributes exactly the files
+    the earlier walk did for a regular pack: dot-named and __pycache__ entries and compiled files stay out."""
+    root = tmp_path / "greetings"
+    shutil.copytree(GREETINGS, root, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    extra = root / "templates" / "modules" / "greetings"
+    (extra / ".hidden").mkdir()
+    (extra / ".hidden" / "x.py").write_text("x = 1\n", encoding="utf-8")
+    (extra / "__pycache__").mkdir()
+    (extra / "__pycache__" / "y.cpython-311.pyc").write_bytes(b"\0")
+    (extra / "backend" / "z.pyc").write_bytes(b"\0")
+    import yaml
+
+    context = yaml.safe_load((root / "context.yaml").read_text(encoding="utf-8"))
+    walked = [path.relative_to(root).as_posix() for path in resolver._safe_asset_files(root, context)]
+    expected = ["context.yaml", "contract.yaml"] + sorted(
+        path.relative_to(root).as_posix()
+        for path in (root / "templates").rglob("*")
+        if path.is_file()
+        and not any(part == "__pycache__" or part.startswith(".") for part in path.relative_to(root / "templates").parts)
+        and path.suffix not in {".pyc", ".pyo"}
+    )
+    assert walked == expected
 
 
 def test_a_workspace_pack_without_an_identity_from_acceptance_cannot_be_recorded(tmp_path, monkeypatch):

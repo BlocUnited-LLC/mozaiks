@@ -602,7 +602,8 @@ undeclared contract nor the absence of one) cannot show whether, or with
 which contract, it was installed. The upgrade plan, a repeated installation
 and installed resolution all refuse it, whether its contract was since
 edited, added or deleted, and nothing changes. A pin of a pack that declares
-its contract verifies as before, because both rules digest that pack alike. The refusal compares what the
+its contract and holds no link verifies as before, because both rules digest
+that pack alike. The refusal compares what the
 pin recorded (the version, the declared files and the capabilities they
 declare, and the dependencies it read from the contract) and says that this
 does not prove the contract's ownership, provided capabilities or
@@ -721,8 +722,9 @@ the source, and the resolved identity records which one did (`authority`):
   workspace pack row that acceptance verified no identity for. The registry
   match is on the resolved path, so a pack reached through a junction or
   symbolic link directly under the root resolves to its target outside the
-  root and needs both pins, although the loader registers it: link the pack's
-  files, not its directory, or select it pinned;
+  root and needs both pins, although the loader registers it: place the
+  pack's directory itself under the root, or select it pinned (links inside a
+  pack are refused, below);
 - `selected_pins`: any other `pack_source_path` (a directory outside the
   catalog and outside the workspace build context, such as a copy of a
   workspace pack elsewhere or a lifecycle upgrade candidate) must be selected
@@ -745,17 +747,24 @@ does not declare it as an asset; a pack without one records that absence, so
 adding or deleting a contract changes the digest) and every declared asset,
 so it is a
 same-host identity: a CRLF and an LF checkout of the same pack have different digests.
-A symbolic link inside a pack is digested under its target's path, so
-adding, removing or retargeting a link whose target is already covered is
-not detected; this is a known limit, as it was in 0.2.0. A `contract.yaml`
-that is a link is refused as an integrity diagnostic wherever a pack is
-verified or digested, so no pin verifies, selects or adopts a pack whose
-contract is a link. Selection checks the selected packs' declared
-dependencies before it verifies them, so a linked contract whose
-dependencies are unmet is refused first with a dependency diagnostic. To
-use such a pack, replace the link with a regular file; a component
-installed with a linked contract must then be installed from its verified
-source into a build context without that pin.
+Every input under a pack's directory must be a regular file or directory.
+A link (a symbolic link, or a Windows junction or other reparse point) at
+`context.yaml`, `contract.yaml`, a declared asset, or anywhere under a
+declared directory is an integrity diagnostic. A link is digested under its
+target's path and read through it, so retargeting one between inputs the
+pack already covers would change its effective configuration (a linked
+`context.yaml` changes its `capability_source`) or a rendered file, or drop
+an input, without changing the digest. The pack's context and contract
+readers refuse a linked `context.yaml` or `contract.yaml` before reading
+it; the verifier refuses any linked input and walks declared directories
+without following links; template rendering applies the verifier's input
+rules first. Installation, installed resolution, selection and the upgrade
+plan therefore refuse the pack before any pin is compared or any input is
+used. To use such a pack, replace each link with the file or directory it
+points to; a component installed with a linked input must then be installed
+from its verified source into a build context without that pin. The pack
+directory itself may be reached through a link (see the authorities
+above).
 Row-level digest pins (and installed-state pins) keep comparing against
 `compute_pack_digest` of the resolved source on the validating host, so a pin
 is meaningful on the host and checkout that recorded it. Across hosts, the

@@ -394,58 +394,125 @@ def test_a_current_pin_covers_whether_the_pack_has_a_contract(tmp_path: Path, ch
     assert state.read_bytes() == before
 
 
-@pytest.mark.parametrize("pin", ["earlier_rule", "current_rule"])
-def test_a_contract_yaml_linked_into_an_installed_source_is_refused_before_any_pin_is_compared(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pin: str,
-) -> None:
-    """A contract.yaml added as a symbolic link to a file the pack already covers leaves the digest unchanged, so an
-    old pin of a contract-less pack would verify and adopt it. Every lifecycle step refuses the link itself, and
-    nothing changes."""
-    import json as _json
+def _real_link(link: Path, target: Path) -> str:
+    """Make ``link`` a real link to ``target``: a symbolic link, or on Windows a directory junction.
 
+    A file link on a Windows host without the symbolic-link privilege skips, labelled; nothing is emulated.
+    """
+    import os
+    import platform
+
+    try:
+        os.symlink(os.path.relpath(target, link.parent), link, target_is_directory=target.is_dir())
+        return "symlink"
+    except OSError as exc:
+        if os.name == "nt" and target.is_dir():
+            import _winapi
+
+            _winapi.CreateJunction(str(target.resolve()), str(link))
+            return "junction"
+        pytest.skip(f"{platform.system()} host cannot create a symbolic link to a file here ({exc}); runs on Linux")
+
+
+def _two_contexts(source: Path) -> None:
+    """Two declared catalogs holding the pack's context, differing only in the capability_source they declare."""
+    import yaml
+
+    context = yaml.safe_load((source / "context.yaml").read_text(encoding="utf-8"))
+    context["assets"] += [{"path": "catalogs/ctx_a.yaml", "kind": "catalog"}, {"path": "catalogs/ctx_b.yaml", "kind": "catalog"}]
+    (source / "catalogs").mkdir()
+    for name, capability_source in (("ctx_a", "generated_module"), ("ctx_b", "managed_capability")):
+        variant = {**context, "pack": {**context["pack"], "capability_source": capability_source}}
+        (source / "catalogs" / f"{name}.yaml").write_text(yaml.safe_dump(variant, sort_keys=False), encoding="utf-8")
+    (source / "context.yaml").write_text(yaml.safe_dump(context, sort_keys=False), encoding="utf-8")
+
+
+def _two_template_trees(source: Path) -> None:
+    """Two covered variants of the templates tree, differing in one rendered file."""
+    for name in ("tpl_a", "tpl_b"):
+        copytree(source / "templates", source / "variants" / name)
+        service = source / "variants" / name / "modules" / "greetings" / "backend" / "service.py"
+        service.write_text(service.read_text(encoding="utf-8") + f"\n# {name}\n", encoding="utf-8")
+
+
+@pytest.mark.parametrize("linked", ["context.yaml", "templates"])
+def test_a_link_in_an_installed_source_is_refused_before_the_pack_is_used(tmp_path: Path, linked: str) -> None:
+    """The reproduced cases: a context.yaml linked to one of two declared catalogs (retargeting flips the
+    capability_source) and a declared templates root linked to one of two covered trees (retargeting changes a
+    rendered file). Installation refuses a linked input; once an installed source gains one, installed resolution,
+    a pinned selection, a repeated installation, the upgrade plan and rendering all refuse it with the link
+    diagnostic, before any digest comparison, so no effective configuration changes under an accepted identity.
+    Real links; the templates root is a junction on Windows. Nothing changes."""
     from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
+        CommunityComponentLifecycleError,
         plan_component_upgrade,
         resolve_installed_component_descriptors,
     )
     from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
         PackIntegrityError,
-        pre_contract_rule_digest,
+        resolve_templates_for_pack,
+        verified_pack_selection,
     )
 
     source = tmp_path / "source" / "greetings"
     copytree(GREETINGS, source)
-    manifest = source / "context.yaml"
-    declared = "  - path: contract.yaml\n    kind: contract\n"
-    manifest.write_text(manifest.read_text(encoding="utf-8").replace(declared, ""), encoding="utf-8")
-    contract = source / "contract.yaml"
-    contract_text = contract.read_text(encoding="utf-8")
-    contract.unlink()
+    if linked == "context.yaml":
+        _two_contexts(source)
+        link, first, second = source / "context.yaml", source / "catalogs" / "ctx_a.yaml", source / "catalogs" / "ctx_b.yaml"
+    else:
+        _two_template_trees(source)
+        link, first, second = source / "templates", source / "variants" / "tpl_a", source / "variants" / "tpl_b"
+    # A source that already holds the link is never installed.
+    linked_copy = tmp_path / "linked" / "greetings"
+    copytree(source, linked_copy)
+    if (linked_copy / link.relative_to(source)).is_dir():
+        import shutil
+
+        shutil.rmtree(linked_copy / link.relative_to(source))
+    else:
+        (linked_copy / link.relative_to(source)).unlink()
+    _real_link(linked_copy / link.relative_to(source), linked_copy / first.relative_to(source))
+    with pytest.raises(PackIntegrityError, match="not a link"):
+        _install(linked_copy, tmp_path / "never_installed")
+    assert not (tmp_path / "never_installed").exists() or not any((tmp_path / "never_installed").rglob("*.json"))
+
     build_context_root = tmp_path / "build_context"
-    state = Path(_install(source, build_context_root).installed_state_path)
-    if pin == "earlier_rule":
-        recorded = _json.loads(state.read_text(encoding="utf-8"))
-        for component in recorded["components"]:
-            component["digest"] = pre_contract_rule_digest(source, "greetings")
-        state.write_text(_json.dumps(recorded), encoding="utf-8")
+    installed = _install(source, build_context_root)
+    state = Path(installed.installed_state_path)
     before = state.read_bytes()
-    contract.write_text(contract_text, encoding="utf-8")
-    real = Path.is_symlink
-    link = contract.absolute()
-    monkeypatch.setattr(Path, "is_symlink", lambda self: True if self.absolute() == link else real(self))
+    pins = {"id": "greetings", "pack_source_path": str(source), "version": "0.1.0", "digest": installed.digest}
+    assert verified_pack_selection(pins)["capability_source"] == "generated_module"
     candidate = tmp_path / "candidate" / "greetings"
-    copytree(GREETINGS, candidate)
+    copytree(source, candidate)
     candidate_manifest = candidate / "context.yaml"
     candidate_manifest.write_text(
-        candidate_manifest.read_text(encoding="utf-8").replace('version: "0.1.0"', 'version: "0.2.0"'), encoding="utf-8",
+        candidate_manifest.read_text(encoding="utf-8").replace("version: 0.1.0", "version: 0.2.0"), encoding="utf-8",
     )
-    linked = "must be a regular file, not a symbolic link"
-    with pytest.raises(PackIntegrityError, match=linked):
-        resolve_installed_component_descriptors(build_context_root=build_context_root, selected_pack_ids=["greetings"])
-    with pytest.raises(PackIntegrityError, match=linked):
-        _install(source, build_context_root)
-    with pytest.raises(PackIntegrityError, match=linked):
-        plan_component_upgrade(build_context_root=build_context_root, candidate_pack_source_path=candidate)
-    assert state.read_bytes() == before
+    for target in (first, second):
+        if link.is_dir() and not link.is_symlink():
+            import os
+
+            try:
+                os.rmdir(link)  # a junction (or empty directory); never its target
+            except OSError:
+                import shutil
+
+                shutil.rmtree(link)
+        elif link.exists() or link.is_symlink():
+            link.unlink()
+        _real_link(link, target)
+        for attempt in (
+            lambda: resolve_installed_component_descriptors(build_context_root=build_context_root, selected_pack_ids=["greetings"]),
+            lambda: verified_pack_selection(pins),
+            lambda: _install(source, build_context_root),
+            lambda: plan_component_upgrade(build_context_root=build_context_root, candidate_pack_source_path=candidate),
+            lambda: resolve_templates_for_pack(source, "greetings"),
+        ):
+            with pytest.raises((PackIntegrityError, CommunityComponentLifecycleError)) as refused:
+                attempt()
+            assert "not a link" in str(refused.value), str(refused.value)
+            assert "no longer matches" not in str(refused.value)
+        assert state.read_bytes() == before
 
 
 def test_a_fresh_installation_pins_the_current_contract(tmp_path: Path) -> None:

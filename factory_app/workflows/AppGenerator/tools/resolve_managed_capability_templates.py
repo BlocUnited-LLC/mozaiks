@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
+import stat
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -162,8 +164,43 @@ def _is_safe_identifier(name: str) -> bool:
     return "/" not in normalized and ".." not in normalized
 
 
+def _is_link(path: Path) -> bool:
+    """A symbolic link, or on Windows a junction or other reparse point (the repository's link test)."""
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return False
+    return stat.S_ISLNK(metadata.st_mode) or bool(
+        getattr(metadata, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    )
+
+
+def _refuse_linked_pack_input(context_root: Path, path: Path) -> None:
+    """Refuse a pack input that is a link, or that sits under a link inside the pack.
+
+    A link is digested under its target's path and read through it, so
+    retargeting one between inputs the pack already covers would change what
+    the pack holds (its context, contract, catalogs or rendered templates), or
+    drop an input, without changing its identity. Every input under the pack
+    root must be a regular file or directory; the pack root itself may be
+    reached through a link, since callers resolve it before use.
+    """
+    relative = Path(os.path.normpath(path.relative_to(context_root)))
+    for depth in range(len(relative.parts), 0, -1):
+        candidate = context_root.joinpath(*relative.parts[:depth])
+        if _is_link(candidate):
+            raise PackIntegrityError(
+                f"Pack input {Path(*relative.parts[:depth]).as_posix()} must be a regular file or directory, not a "
+                f"link: {candidate}. A link is digested under its target's path and read through it, so the pack's "
+                "identity could not show which input it holds. Replace the link with the file or directory it points "
+                "to; a component installed with a linked input must then be installed from its verified source into "
+                "a build context without that pin."
+            )
+
+
 def _read_pack_context(pack_source_path: Path, pack_id: str) -> dict[str, Any]:
     context_path = pack_source_path / "context.yaml"
+    _refuse_linked_pack_input(pack_source_path, context_path)
     if not context_path.exists():
         raise ManagedCapabilityTemplateError(f"Managed capability pack context not found: {context_path}")
     try:
@@ -195,6 +232,7 @@ def _read_pack_context(pack_source_path: Path, pack_id: str) -> dict[str, Any]:
 def _read_pack_contract(pack_source_path: Path) -> dict[str, Any]:
     """Read contract.yaml from a pack directory, returning empty dict if absent."""
     contract_path = pack_source_path / "contract.yaml"
+    _refuse_linked_pack_input(pack_source_path, contract_path)
     if not contract_path.exists():
         return {}
     try:
@@ -360,14 +398,9 @@ def _safe_asset_files(context_root: Path, context: dict[str, Any], *, cover_cont
     # contract.yaml decides output ownership and dependencies (_read_pack_contract reads it whether
     # or not the context declares it as an asset), so the pack's identity always covers it, and
     # _digest_of_files covers its absence.
+    # context.yaml was read through _read_pack_context, which refuses a linked one.
     contract = context_root / "contract.yaml"
-    if contract.is_symlink():
-        # A link is digested under its target's path, so adding, removing or retargeting one could
-        # change the contract without changing the digest.
-        raise PackIntegrityError(
-            f"Pack contract.yaml must be a regular file, not a symbolic link: {contract}. A link is digested "
-            "under its target's path, so the pack's identity could not show which contract it holds."
-        )
+    _refuse_linked_pack_input(context_root, contract)
     if cover_contract and contract.is_file():
         files.append(contract)
         seen.add(contract.resolve())
@@ -376,6 +409,7 @@ def _safe_asset_files(context_root: Path, context: dict[str, Any], *, cover_cont
             asset_path = resolve_context_asset_path(context_root, asset)
         except BuildContextError as exc:
             raise PackIntegrityError(str(exc)) from exc
+        _refuse_linked_pack_input(context_root, context_root / str(asset["path"]))
         if not asset_path.exists():
             raise PackIntegrityError(f"Declared pack asset not found: {asset_path}")
         if asset_path.is_file():
@@ -386,17 +420,36 @@ def _safe_asset_files(context_root: Path, context: dict[str, Any], *, cover_cont
             continue
         if not asset_path.is_dir():
             raise PackIntegrityError(f"Declared pack asset must be a file or directory: {asset_path}")
-        for path in sorted(item for item in asset_path.rglob("*") if item.is_file()):
-            relative = path.relative_to(asset_path)
-            if any(part == "__pycache__" or part.startswith(".") for part in relative.parts):
-                continue
-            if path.suffix in {".pyc", ".pyo"}:
-                continue
+        for path in _declared_tree_files(context_root, asset_path):
             resolved = path.resolve()
             if resolved not in seen:
                 files.append(path)
                 seen.add(resolved)
     return files
+
+
+def _declared_tree_files(context_root: Path, directory: Path) -> list[Path]:
+    """The files a declared directory contributes, refusing any link before it could be followed.
+
+    The same files, in the same order, that the directory's regular-file tree
+    contributed before: ``__pycache__``, dot-named entries and compiled Python
+    files are not inputs.
+    """
+    files: list[Path] = []
+    pending = [directory]
+    while pending:
+        current = pending.pop()
+        with os.scandir(current) as entries:
+            for entry in entries:
+                path = Path(entry.path)
+                if entry.name == "__pycache__" or entry.name.startswith("."):
+                    continue
+                _refuse_linked_pack_input(context_root, path)
+                if entry.is_dir(follow_symlinks=False):
+                    pending.append(path)
+                elif entry.is_file(follow_symlinks=False) and path.suffix not in {".pyc", ".pyo"}:
+                    files.append(path)
+    return sorted(files)
 
 
 def compute_pack_digest(pack_source_path: Path, pack_id: str) -> str:
@@ -1335,6 +1388,8 @@ def _render_pack_templates(
 
     context_root = pack_source_path.resolve()
     context = _read_pack_context(context_root, pack_id)
+    # The verifier's input rules (no links among the pack's inputs) hold for whatever is rendered.
+    _safe_asset_files(context_root, context)
     _pack_raw = context.get("pack")
     pack: dict[str, Any] = _pack_raw if isinstance(_pack_raw, dict) else {}
     if str(pack.get("status") or "active").strip() != "active":
