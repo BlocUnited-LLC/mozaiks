@@ -377,6 +377,10 @@ has not been scaffolded yet, use `quickstart --dir .` instead of
 `studio --dir . --open`. Calling the environment's Python directly avoids needing
 to activate it or change PowerShell's execution policy.
 
+Installing the package does not rewrite an existing scaffold's app configuration.
+If the workspace was created by an older checkout, also check
+[Older scaffold configuration](#older-scaffold-configuration).
+
 ### Backend failed to start
 
 `Setup complete` confirms that the scaffold was written. A later backend error
@@ -431,6 +435,48 @@ installation and dependencies; an address-in-use error needs an available port.
 Review logs for credentials before sharing them. `studio --json` shows app
 configuration, not a server health check or the backend exception.
 
+### Older scaffold configuration
+
+An older editable checkout can leave configuration that the published package
+rejects even after you install it into a clean environment. Keep your workspace
+and back up each file before editing it; do not rerun `init` over an existing app.
+
+If the traceback contains `SecretContractError: Invalid names-only secret
+contract: missing, model_type`, inspect `app/security/secrets.yaml`. The old
+empty starter used `provider: env` and `secrets: []` without a version. For that
+empty, environment-backed starter only, replace it with:
+
+```yaml
+version: 1
+kind: app_secret_contract
+provider:
+  type: env
+secrets: []
+```
+
+This file declares secret policy, not credential values. Keep API keys and
+`MONGO_URI` in environment variables or the workspace's `.env`. If the contract
+already declares secrets or a vault provider, preserve those declarations and
+repair their schema instead of replacing them with the empty example.
+
+The same older scaffold may also lack an `appId` in `app/app.json`. If it is
+absent, add a stable lowercase slug for your workspace, such as
+`"appId": "my-app"`, while preserving the other fields. Do not change an existing
+ID: it scopes the app's data and artifacts.
+
+For a trusted, single-user local workspace with `AUTH_ENABLED=false`, Studio
+management pages also need the local user's role. Current scaffolds set
+`AUTH_ANON_ROLES=admin,user`; if adopting that setting in an older workspace,
+set `AUTH_ANON_ACCESS=local` and use the published CLI's default loopback binding
+(`127.0.0.1`). This grants administrative access to requests from your computer,
+not a sign-in-protected account; do not use it to expose Studio to a network.
+Keep authenticated deployments' access settings unchanged.
+
+Stop the Studio processes you launched, then relaunch using the same isolated
+Python environment so configuration changes take effect. Prefer the published
+`studio --dir <workspace> --open` command over old generated launch scripts,
+which may have different bind and environment-file defaults.
+
 ### Studio does not open
 
 For a public package install, check:
@@ -443,6 +489,8 @@ Adjust the ports if you selected different ones. If startup stops before the
 frontend launches, follow [Backend failed to start](#backend-failed-to-start).
 For a source checkout, also inspect dependencies under `web_shell/` and run
 the repo smoke script: `.\scripts\smoke-studio-local.ps1 -SkipBrowser`.
+The repo smoke script checks `http://localhost:8000/health`, which reports
+platform startup status; `/api/health` checks runtime database connectivity.
 
 ### Mongo connection errors
 
