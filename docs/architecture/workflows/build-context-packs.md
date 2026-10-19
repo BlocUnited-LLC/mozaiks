@@ -746,8 +746,10 @@ adding or deleting a contract changes the digest) and every declared asset,
 so it is a
 same-host identity: a CRLF and an LF checkout of the same pack have different digests.
 A symbolic link inside a pack is digested under its target's path, so
-retargeting a link from one covered file to another is not detected; this
-is a known limit, as it was in 0.2.0.
+adding, removing or retargeting a link whose target is already covered is
+not detected; this is a known limit, as it was in 0.2.0. A `contract.yaml`
+that is a link is refused as an integrity diagnostic, so a pack's contract
+is never read through one.
 Row-level digest pins (and installed-state pins) keep comparing against
 `compute_pack_digest` of the resolved source on the validating host, so a pin
 is meaningful on the host and checkout that recorded it. Across hosts, the

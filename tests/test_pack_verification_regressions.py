@@ -1602,6 +1602,45 @@ def test_a_contract_asset_that_is_not_a_file_is_an_integrity_diagnostic(tmp_path
     assert len(errors) == 1 and "Contract asset must be a file" in errors[0], errors
 
 
+def _linked_contract(monkeypatch, root: Path) -> None:
+    """Make ``root/contract.yaml`` report itself as a symbolic link (hosts without link privilege can still test)."""
+    real = Path.is_symlink
+    link = (root / "contract.yaml").absolute()
+
+    def is_symlink(self: Path) -> bool:
+        return True if self.absolute() == link else real(self)
+
+    monkeypatch.setattr(Path, "is_symlink", is_symlink)
+
+
+@pytest.mark.parametrize("link", ["emulated", "real"])
+def test_a_contract_yaml_that_is_a_symbolic_link_is_an_integrity_diagnostic(tmp_path, monkeypatch, link):
+    """A link is digested under its target's path, so a linked contract.yaml could change the contract (added,
+    removed or retargeted to another covered file) without changing the digest; the pack is refused instead."""
+    import os
+
+    root = tmp_path / "greetings"
+    shutil.copytree(GREETINGS, root, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    contract = root / "contract.yaml"
+    target = root / "templates" / "linked_contract.yaml"
+    target.write_text(contract.read_text(encoding="utf-8"), encoding="utf-8")
+    if link == "real":
+        contract.unlink()
+        try:
+            os.symlink(target, contract)
+        except (OSError, NotImplementedError):
+            pytest.skip("this host cannot create symbolic links")
+    else:
+        _linked_contract(monkeypatch, root)
+    with pytest.raises(resolver.PackIntegrityError, match="must be a regular file, not a symbolic link"):
+        resolver.verify_pack_integrity(root, "greetings")
+    with pytest.raises(resolver.PackIntegrityError, match="must be a regular file, not a symbolic link"):
+        resolver.compute_pack_digest(root, "greetings")
+    row = {"id": "greetings", "pack_source_path": str(root), "version": "0.1.0", "digest": "sha256:" + "0" * 64}
+    errors = scanner.scan_generated_bundle({"app.json": "{}"}, capability_packs=[row])
+    assert len(errors) == 1 and "not a symbolic link" in errors[0], errors
+
+
 def test_a_workspace_pack_without_an_identity_from_acceptance_cannot_be_recorded(tmp_path, monkeypatch):
     workspace = tmp_path / "workspace" / "build_context"
     _workspace_operator_pack(workspace)

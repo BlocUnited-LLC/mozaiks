@@ -196,7 +196,10 @@ This project follows a practical pre-1.0 changelog format:
   contract, or the lack of one, that the pin never covered: it is refused
   until the pack is installed from its verified source into a build context
   without that pin (see the upgrade entry below). A contract or catalog
-  asset that is not a file is an integrity diagnostic.
+  asset that is not a file is an integrity diagnostic, and so is a
+  `contract.yaml` that is a symbolic link: a link is digested under its
+  target's path, so it could change the contract without changing the
+  digest.
 - Generated bundle validation checks pack outputs without rendering pack
   templates. Each resolved pack's provenance must record its version, every
   template-owned output must be present, and the output of every static
@@ -383,6 +386,8 @@ This project follows a practical pre-1.0 changelog format:
   `contract.yaml` is undeclared or absent: that pin covered neither the
   contract nor its absence, so it is refused until the pack is installed
   from its verified source into a build context without that pin.
+- A pack whose `contract.yaml` is a symbolic link; it is now an integrity
+  diagnostic.
 - The bundle scanner's acceptance of a route to one of the shell's non-page
   core components (the launcher, confirm and completion screens, the token
   tab, the usage panels) without a custom page file; only the routable core

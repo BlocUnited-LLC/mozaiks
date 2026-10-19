@@ -361,6 +361,13 @@ def _safe_asset_files(context_root: Path, context: dict[str, Any], *, cover_cont
     # or not the context declares it as an asset), so the pack's identity always covers it, and
     # _digest_of_files covers its absence.
     contract = context_root / "contract.yaml"
+    if contract.is_symlink():
+        # A link is digested under its target's path, so adding, removing or retargeting one could
+        # change the contract without changing the digest.
+        raise PackIntegrityError(
+            f"Pack contract.yaml must be a regular file, not a symbolic link: {contract}. A link is digested "
+            "under its target's path, so the pack's identity could not show which contract it holds."
+        )
     if cover_contract and contract.is_file():
         files.append(contract)
         seen.add(contract.resolve())

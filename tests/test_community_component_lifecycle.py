@@ -394,6 +394,60 @@ def test_a_current_pin_covers_whether_the_pack_has_a_contract(tmp_path: Path, ch
     assert state.read_bytes() == before
 
 
+@pytest.mark.parametrize("pin", ["earlier_rule", "current_rule"])
+def test_a_contract_yaml_linked_into_an_installed_source_is_refused_before_any_pin_is_compared(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pin: str,
+) -> None:
+    """A contract.yaml added as a symbolic link to a file the pack already covers leaves the digest unchanged, so an
+    old pin of a contract-less pack would verify and adopt it. Every lifecycle step refuses the link itself, and
+    nothing changes."""
+    import json as _json
+
+    from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
+        plan_component_upgrade,
+        resolve_installed_component_descriptors,
+    )
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        PackIntegrityError,
+        pre_contract_rule_digest,
+    )
+
+    source = tmp_path / "source" / "greetings"
+    copytree(GREETINGS, source)
+    manifest = source / "context.yaml"
+    declared = "  - path: contract.yaml\n    kind: contract\n"
+    manifest.write_text(manifest.read_text(encoding="utf-8").replace(declared, ""), encoding="utf-8")
+    contract = source / "contract.yaml"
+    contract_text = contract.read_text(encoding="utf-8")
+    contract.unlink()
+    build_context_root = tmp_path / "build_context"
+    state = Path(_install(source, build_context_root).installed_state_path)
+    if pin == "earlier_rule":
+        recorded = _json.loads(state.read_text(encoding="utf-8"))
+        for component in recorded["components"]:
+            component["digest"] = pre_contract_rule_digest(source, "greetings")
+        state.write_text(_json.dumps(recorded), encoding="utf-8")
+    before = state.read_bytes()
+    contract.write_text(contract_text, encoding="utf-8")
+    real = Path.is_symlink
+    link = contract.absolute()
+    monkeypatch.setattr(Path, "is_symlink", lambda self: True if self.absolute() == link else real(self))
+    candidate = tmp_path / "candidate" / "greetings"
+    copytree(GREETINGS, candidate)
+    candidate_manifest = candidate / "context.yaml"
+    candidate_manifest.write_text(
+        candidate_manifest.read_text(encoding="utf-8").replace('version: "0.1.0"', 'version: "0.2.0"'), encoding="utf-8",
+    )
+    linked = "must be a regular file, not a symbolic link"
+    with pytest.raises(PackIntegrityError, match=linked):
+        resolve_installed_component_descriptors(build_context_root=build_context_root, selected_pack_ids=["greetings"])
+    with pytest.raises(PackIntegrityError, match=linked):
+        _install(source, build_context_root)
+    with pytest.raises(PackIntegrityError, match=linked):
+        plan_component_upgrade(build_context_root=build_context_root, candidate_pack_source_path=candidate)
+    assert state.read_bytes() == before
+
+
 def test_a_fresh_installation_pins_the_current_contract(tmp_path: Path) -> None:
     """The boundary the refusal names: installing the verified source into a build context without the old pin
     verifies and pins the whole pack, contract.yaml included."""
