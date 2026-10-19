@@ -217,10 +217,9 @@ _CANONICAL_REACTION_TARGET_KINDS = frozenset(
 # declared in the bundle's events.yaml and must be skipped during closure checks.
 _PLATFORM_EVENT_NAMESPACES = ("hosted.", "platform.", "mozaiks.")
 
-# Shell-built-in component names registered in chat-ui/src/registry/coreComponents.js.
-# These components are always available in the Mozaiks shell without a custom JSX file.
-# Route manifest entries referencing these names do NOT require a ui/pages/custom/*.jsx file.
-# The shell's routable core pages, shared with UI registry composition.
+# The shell's routable core pages (a subset of chat-ui/src/registry/coreComponents.js), shared with
+# UI registry composition. A route manifest entry naming one does NOT require a ui/pages/custom/*.jsx
+# file; one naming any other core component does.
 _SHELL_ROUTE_COMPONENTS = SHELL_ROUTE_COMPONENTS
 
 

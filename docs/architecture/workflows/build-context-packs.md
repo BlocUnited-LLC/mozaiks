@@ -594,11 +594,11 @@ changed in place since installation refuses the upgrade, and nothing
 changes. Restore the installed source and plan the upgrade from a separate
 candidate directory.
 
-A component pinned with a digest that left out its `contract.yaml` (a
-contract the context does not declare, pinned under the earlier digest rule,
-or a contract added after installation) cannot show which contract it was
-installed with. The upgrade plan, a repeated installation and installed
-resolution all refuse it, and nothing changes. The refusal compares what the
+A component pinned under the earlier digest rule, which covered neither a
+`contract.yaml` the context does not declare nor the absence of one, cannot
+show whether, or with which contract, it was installed. The upgrade plan, a
+repeated installation and installed resolution all refuse it, whether its
+contract was since edited, added or deleted, and nothing changes. The refusal compares what the
 pin recorded (the version, the declared files and the capabilities they
 declare, and the dependencies it read from the contract) and says that this
 does not prove the contract's ownership, provided capabilities or
@@ -606,7 +606,9 @@ restrictions unchanged. No lifecycle step adopts a contract its pin never
 covered and installation never re-labels an existing pin, so the remedy is
 to install the pack from its verified source into a build context without
 that pin; installation verifies and pins the whole pack, `contract.yaml`
-included.
+(or its absence) included. A pin recorded under the current rule covers the
+contract and its absence, so a contract added to or deleted from the
+installed source is refused as an in-place change.
 
 When the app's provenance claims any shared root as a pack's exclusive file,
 whichever pack claims it and in any entry order, the plan blocks with
@@ -735,7 +737,9 @@ only when they agree.
 
 The digest hashes the raw bytes of `context.yaml`, `contract.yaml` (always,
 because it decides output ownership and dependencies, even when the context
-does not declare it as an asset) and every declared asset, so it is a
+does not declare it as an asset; a pack without one records that absence, so
+adding or deleting a contract changes the digest) and every declared asset,
+so it is a
 same-host identity: a CRLF and an LF checkout of the same pack have different digests.
 Row-level digest pins (and installed-state pins) keep comparing against
 `compute_pack_digest` of the resolved source on the validating host, so a pin

@@ -358,7 +358,8 @@ def _safe_asset_files(context_root: Path, context: dict[str, Any], *, cover_cont
     files: list[Path] = [context_root / "context.yaml"]
     seen: set[Path] = {files[0].resolve()}
     # contract.yaml decides output ownership and dependencies (_read_pack_contract reads it whether
-    # or not the context declares it as an asset), so the pack's identity always covers it.
+    # or not the context declares it as an asset), so the pack's identity always covers it, and
+    # _digest_of_files covers its absence.
     contract = context_root / "contract.yaml"
     if cover_contract and contract.is_file():
         files.append(contract)
@@ -396,27 +397,27 @@ def compute_pack_digest(pack_source_path: Path, pack_id: str) -> str:
 
     context_root = pack_source_path.resolve()
     context = _read_pack_context(context_root, pack_id)
-    return _digest_of_files(context_root, pack_id, _safe_asset_files(context_root, context))
+    return _digest_of_files(
+        context_root, pack_id, _safe_asset_files(context_root, context),
+        contract_absent=not (context_root / "contract.yaml").is_file(),
+    )
 
 
 def pre_contract_rule_digest(pack_source_path: Path, pack_id: str) -> str | None:
-    """The source's digest under the earlier rule, which left out a ``contract.yaml`` the context does not declare.
+    """The source's digest under the earlier rule, which covered neither a ``contract.yaml`` the context does not declare nor the absence of one.
 
-    None when the two rules agree (the contract is declared, or there is
-    none). Only to explain why an installed pin no longer verifies
+    None when the two rules agree (the contract is declared). Only to explain
+    why an installed pin no longer verifies
     (``community_component_lifecycle._uncovered_contract_refusal``): it covers
     no contract, so it never verifies, selects or re-pins a pack.
     """
     context_root = pack_source_path.resolve()
     context = _read_pack_context(context_root, pack_id)
-    current = _safe_asset_files(context_root, context)
-    earlier = _safe_asset_files(context_root, context, cover_contract=False)
-    if {path.resolve() for path in current} == {path.resolve() for path in earlier}:
-        return None
-    return _digest_of_files(context_root, pack_id, earlier)
+    earlier = _digest_of_files(context_root, pack_id, _safe_asset_files(context_root, context, cover_contract=False))
+    return None if earlier == compute_pack_digest(context_root, pack_id) else earlier
 
 
-def _digest_of_files(context_root: Path, pack_id: str, files: list[Path]) -> str:
+def _digest_of_files(context_root: Path, pack_id: str, files: list[Path], *, contract_absent: bool = False) -> str:
     entries: list[dict[str, str]] = []
     for path in files:
         try:
@@ -427,11 +428,15 @@ def _digest_of_files(context_root: Path, pack_id: str, files: list[Path]) -> str
             "path": relative,
             "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
         })
-    payload = {
+    payload: dict[str, Any] = {
         "schema_version": "mozaiks.pack_digest.v1",
         "pack_id": pack_id,
         "files": sorted(entries, key=lambda item: item["path"]),
     }
+    if contract_absent:
+        # A pack without contract.yaml has no ownership or restrictions; its identity says so, so a
+        # contract added or removed later changes the digest. A pack with one digests as before.
+        payload["contract"] = "absent"
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return f"sha256:{hashlib.sha256(canonical).hexdigest()}"
 

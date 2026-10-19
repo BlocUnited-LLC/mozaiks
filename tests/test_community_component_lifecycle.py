@@ -239,12 +239,13 @@ _UNCOVERED = "does not cover its contract.yaml"
 
 
 def _uncovered_pin(tmp_path: Path, case: str):
-    """A greetings installation whose pin does not cover the contract.yaml its source holds now.
+    """A greetings installation pinned as 0.2.0 pinned it: a digest covering neither an undeclared contract.yaml
+    nor the absence of one.
 
-    The earlier cases reproduce a 0.2.0 install of a pack whose contract.yaml is not a declared asset (the
-    recorded digest leaves it out), then edit the contract in place as reported: forbidden outputs removed,
-    provided capabilities added, or a dependency added (the one contract field the pin records).
-    ``contract_added`` installs a pack with no contract.yaml under the current rule and adds one later.
+    The contract is not a declared asset. Then the source is changed in place as reported: forbidden outputs
+    removed, provided capabilities added, a dependency added (the one contract field the pin records), or the
+    contract deleted. ``contract_less`` and ``contract_added`` pin a pack that had no contract.yaml at
+    installation; ``contract_added`` adds one later.
     """
     import json as _json
 
@@ -262,42 +263,47 @@ def _uncovered_pin(tmp_path: Path, case: str):
     contract = source / "contract.yaml"
     original_contract = contract.read_text(encoding="utf-8")
     build_context_root = tmp_path / "build_context"
-    if case == "contract_added":
+    if case in {"contract_less", "contract_added"}:
         contract.unlink()
-        installed = _install(source, build_context_root)
+    installed = _install(source, build_context_root)
+    # The pin 0.2.0 recorded: the digest without the undeclared contract.yaml, or without the absence of one.
+    earlier = pre_contract_rule_digest(source, "greetings")
+    assert earlier is not None
+    state = Path(installed.installed_state_path)
+    recorded = _json.loads(state.read_text(encoding="utf-8"))
+    for component in recorded["components"]:
+        component["digest"] = earlier
+    state.write_text(_json.dumps(recorded), encoding="utf-8")
+    if case == "contract_added":
         contract.write_text(original_contract, encoding="utf-8")
-    else:
-        installed = _install(source, build_context_root)
-        # The pin 0.2.0 recorded: the digest without the undeclared contract.yaml.
-        state = Path(installed.installed_state_path)
-        recorded = _json.loads(state.read_text(encoding="utf-8"))
-        for component in recorded["components"]:
-            component["digest"] = pre_contract_rule_digest(source, "greetings")
-        state.write_text(_json.dumps(recorded), encoding="utf-8")
-        if case == "forbidden_outputs_removed":
+    elif case == "contract_deleted":
+        contract.unlink()
+    elif case == "forbidden_outputs_removed":
             assert "forbidden_outputs:" in original_contract
             kept = original_contract.split("forbidden_outputs:")[0]
             rest = original_contract.split("forbidden_outputs:")[1].split("\n\n", 1)
             contract.write_text(kept + (rest[1] if len(rest) > 1 else ""), encoding="utf-8")
-        elif case == "capabilities_added":
-            contract.write_text(original_contract + "\nprovides_capabilities:\n  - subscription_write_path\n", encoding="utf-8")
-        elif case == "dependency_added":
-            contract.write_text(
-                original_contract + "\nrequires:\n  capabilities:\n    - capability_id: greetings.say_hello\n"
-                "      reason: greetings check a plan\n",
-                encoding="utf-8",
-            )
-    return source, build_context_root, Path(installed.installed_state_path)
+    elif case == "capabilities_added":
+        contract.write_text(original_contract + "\nprovides_capabilities:\n  - subscription_write_path\n", encoding="utf-8")
+    elif case == "dependency_added":
+        contract.write_text(
+            original_contract + "\nrequires:\n  capabilities:\n    - capability_id: greetings.say_hello\n"
+            "      reason: greetings check a plan\n",
+            encoding="utf-8",
+        )
+    return source, build_context_root, state
 
 
 @pytest.mark.parametrize("case", [
-    "unchanged", "forbidden_outputs_removed", "capabilities_added", "contract_added", "dependency_added",
+    "unchanged", "forbidden_outputs_removed", "capabilities_added", "dependency_added", "contract_deleted",
+    "contract_less", "contract_added",
 ])
 def test_a_pin_that_never_covered_contract_yaml_adopts_no_contract_and_names_the_cause(tmp_path: Path, case: str) -> None:
-    """A pin whose digest left out the contract.yaml cannot show which contract the pack was installed with, so no
-    step adopts the source's current contract over it: the upgrade plan, a repeated installation and installed
-    resolution all refuse with the same cause, compare the recorded metadata that exists, claim nothing about
-    the unrecorded contract, name the installation boundary that pins a whole pack, and change nothing."""
+    """A pin whose digest covered neither the contract.yaml nor its absence cannot show whether, or with which
+    contract, the pack was installed, so no step adopts the source's current contract (or its lack of one) over
+    it: the upgrade plan, a repeated installation and installed resolution all refuse with the same cause,
+    compare the recorded metadata that exists, claim nothing about the unrecorded contract, name the
+    installation boundary that pins a whole pack, and change nothing."""
     from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
         CommunityComponentLifecycleError,
         plan_component_upgrade,
@@ -336,6 +342,55 @@ def test_a_pin_that_never_covered_contract_yaml_adopts_no_contract_and_names_the
             assert "recorded from the contract differ" in message and "greetings.say_hello" in message, message
         else:
             assert "the dependencies it recorded from the contract match" in message, message
+    assert state.read_bytes() == before
+
+
+@pytest.mark.parametrize("change", ["contract_added", "contract_deleted"])
+def test_a_current_pin_covers_whether_the_pack_has_a_contract(tmp_path: Path, change: str) -> None:
+    """Under the current rule a pin covers an undeclared contract.yaml and the absence of one, so a contract
+    added to or deleted from the installed source is an in-place change: refused like any other, never read as
+    an earlier-rule pin and never adopted."""
+    from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
+        CommunityComponentLifecycleError,
+        plan_component_upgrade,
+        resolve_installed_component_descriptors,
+    )
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        PackIntegrityError,
+    )
+
+    source = tmp_path / "source" / "greetings"
+    copytree(GREETINGS, source)
+    manifest = source / "context.yaml"
+    declared = "  - path: contract.yaml\n    kind: contract\n"
+    manifest.write_text(manifest.read_text(encoding="utf-8").replace(declared, ""), encoding="utf-8")
+    contract = source / "contract.yaml"
+    original_contract = contract.read_text(encoding="utf-8")
+    if change == "contract_added":
+        contract.unlink()
+    build_context_root = tmp_path / "build_context"
+    state = Path(_install(source, build_context_root).installed_state_path)
+    assert _install(source, build_context_root).status == "unchanged"
+    resolve_installed_component_descriptors(build_context_root=build_context_root, selected_pack_ids=["greetings"])
+    before = state.read_bytes()
+    if change == "contract_added":
+        contract.write_text(original_contract, encoding="utf-8")
+    else:
+        contract.unlink()
+    candidate = tmp_path / "candidate" / "greetings"
+    copytree(source, candidate)
+    candidate_manifest = candidate / "context.yaml"
+    candidate_manifest.write_text(
+        candidate_manifest.read_text(encoding="utf-8").replace('version: "0.1.0"', 'version: "0.2.0"'), encoding="utf-8",
+    )
+    with pytest.raises(CommunityComponentLifecycleError, match="its bytes changed since installation") as planned:
+        plan_component_upgrade(build_context_root=build_context_root, candidate_pack_source_path=candidate)
+    with pytest.raises(CommunityComponentLifecycleError, match="already installed") as reinstalled:
+        _install(source, build_context_root)
+    with pytest.raises(PackIntegrityError, match="no longer matches pinned state") as resolved:
+        resolve_installed_component_descriptors(build_context_root=build_context_root, selected_pack_ids=["greetings"])
+    for refusal in (planned, reinstalled, resolved):
+        assert _UNCOVERED not in str(refusal.value)
     assert state.read_bytes() == before
 
 

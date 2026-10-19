@@ -127,10 +127,12 @@ def _component_entry_from_verified_pack(pack_source_path: Path, pack_id: str) ->
 def _uncovered_contract_refusal(pack_id: str, source: Path, recorded: dict[str, Any]) -> str | None:
     """Why an installed pin cannot verify a source whose ``contract.yaml`` the pin never covered; None otherwise.
 
-    The pin was recorded with a digest that left out an undeclared
-    ``contract.yaml``: before pack digests covered it, or before the file
-    existed. Its declared files, and the capabilities they declare, still
-    verify to that pin. The one thing the pin recorded from the contract, its
+    The pin was recorded under the earlier digest rule, which covered
+    neither an undeclared ``contract.yaml`` nor the absence of one, so it
+    cannot show whether the pack had a contract when it was installed, or
+    which. Its declared files, and the capabilities they declare, still
+    verify to that pin, whether the contract was since edited, added or
+    deleted. The one thing the pin recorded from the contract, its
     dependencies, is compared and reported, but that cannot show that the
     contract the pack was installed with (ownership, provided capabilities,
     restrictions) is the one in the source now, so nothing adopts it: the
@@ -150,9 +152,9 @@ def _uncovered_contract_refusal(pack_id: str, source: Path, recorded: dict[str, 
             f"{recorded['dependencies']!r}, source now {current['dependencies']!r})"
         )
     return (
-        f"Installed pack '{pack_id}' was pinned with a digest that does not cover its contract.yaml (pinned before "
-        "pack digests covered an undeclared contract.yaml, or before that file existed), so the contract it was "
-        f"installed with cannot be verified against {source}. Of what the pin recorded, the version, the declared "
+        f"Installed pack '{pack_id}' was pinned with a digest that does not cover its contract.yaml or the absence "
+        "of one (pinned before pack digests covered both), so whether it was installed with a contract, and which, "
+        f"cannot be verified against {source}. Of what the pin recorded, the version, the declared "
         f"files and the capabilities they declare match the source, and {dependencies}; that does not show that "
         "the contract's ownership, provided capabilities or restrictions are unchanged, and the lifecycle does not "
         "adopt a contract its pin never covered. To adopt the current contract, install the pack from its "

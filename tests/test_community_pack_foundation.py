@@ -866,6 +866,33 @@ def test_different_pack_contents_produce_different_digest(tmp_path: Path) -> Non
     assert compute_pack_digest(pack_copy, "greetings") != before
 
 
+def test_the_digest_covers_contract_yaml_and_its_absence(tmp_path: Path) -> None:
+    """contract.yaml decides ownership and restrictions whether or not the context declares it, so deleting an
+    undeclared one changes the digest, and a contract-less pack never digests like the earlier rule, which
+    covered neither. A pack that declares its contract digests the same under both rules."""
+    from shutil import copytree
+
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        compute_pack_digest,
+        pre_contract_rule_digest,
+    )
+
+    assert pre_contract_rule_digest(GREETINGS_PACK, "greetings") is None
+    pack_copy = tmp_path / "greetings"
+    copytree(GREETINGS_PACK, pack_copy)
+    manifest = pack_copy / "context.yaml"
+    declared = "  - path: contract.yaml\n    kind: contract\n"
+    manifest.write_text(manifest.read_text(encoding="utf-8").replace(declared, ""), encoding="utf-8")
+    with_contract = compute_pack_digest(pack_copy, "greetings")
+    earlier_with_contract = pre_contract_rule_digest(pack_copy, "greetings")
+    (pack_copy / "contract.yaml").unlink()
+    without_contract = compute_pack_digest(pack_copy, "greetings")
+
+    assert without_contract != with_contract
+    assert pre_contract_rule_digest(pack_copy, "greetings") == earlier_with_contract
+    assert earlier_with_contract not in {with_contract, without_contract}
+
+
 def test_valid_local_pack_verifies_before_materialization() -> None:
     from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
         verify_pack_integrity,

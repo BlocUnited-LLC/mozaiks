@@ -189,11 +189,11 @@ This project follows a practical pre-1.0 changelog format:
   again.
 - A pack's digest now always covers its `contract.yaml`, which decides output
   ownership and dependencies, even when the context does not declare it as a
-  contract asset. Every shipped pack declares it, so no shipped digest
-  changes. A pin recorded for a pack that does not declare it no longer
-  verifies, and nothing adopts the contract it never covered: a recorded
-  build selection verifies again only once an accepted AppGenerator revision
-  of the build pins the selection anew, and an installed pin is refused
+  contract asset, and it covers the absence of one. Every shipped pack
+  declares its contract, so no shipped digest changes. An installed
+  Community Component pin that 0.2.0 recorded for a pack that does not
+  declare a contract, or has none, no longer verifies, and nothing adopts a
+  contract, or the lack of one, that the pin never covered: it is refused
   until the pack is installed from its verified source into a build context
   without that pin (see the upgrade entry below). A contract or catalog
   asset that is not a file is an integrity diagnostic.
@@ -342,17 +342,19 @@ This project follows a practical pre-1.0 changelog format:
   it. A source changed in place since installation refuses the upgrade, and
   nothing changes, instead of recording a false upgrade over files still
   materialized from the old content; the refusal says whether the version or
-  only the bytes changed. A component pinned with a digest that left out its
-  `contract.yaml` (an undeclared contract under the earlier digest rule, or
-  one added after installation) is refused by the upgrade plan, a repeated
-  installation and installed resolution alike, and nothing changes. The pin
-  cannot show which contract the component was installed with: the refusal
-  compares what it recorded (version, declared files and their capabilities,
-  and the dependencies it read from the contract), says that this does not
-  prove the contract's ownership, provided capabilities or restrictions
-  unchanged, and names the remedy, installing the pack from its verified
-  source into a build context without that pin. Installation never
-  re-labels an existing pin.
+  only the bytes changed. A component pinned under the earlier digest rule,
+  which covered neither an undeclared `contract.yaml` nor the absence of
+  one, is refused by the upgrade plan, a repeated installation and installed
+  resolution alike, whether its contract was since edited, added or deleted,
+  and nothing changes. The pin cannot show whether, or with which contract,
+  the component was installed: the refusal compares what it recorded
+  (version, declared files and their capabilities, and the dependencies it
+  read from the contract), says that this does not prove the contract's
+  ownership, provided capabilities or restrictions unchanged, and names the
+  remedy, installing the pack from its verified source into a build context
+  without that pin. Installation never re-labels an existing pin. A pin
+  recorded under the current rule covers the contract and its absence, so a
+  contract added or deleted later is refused as an in-place change.
 - An OSS SaaS build whose plan adds the default id-only MozaiksPay row now
   materializes the shipped MozaiksPay pack and schedules no model work for
   its pages, client and facade module, so assembly and validation agree on
@@ -374,6 +376,10 @@ This project follows a practical pre-1.0 changelog format:
   provenance that claims one blocks the upgrade until the app is
   reassembled.
 - `save_app_schema`'s write of its uncomposed render into `generated_files`.
+- The bundle scanner's acceptance of a route to one of the shell's non-page
+  core components (the launcher, confirm and completion screens, the token
+  tab, the usage panels) without a custom page file; only the routable core
+  pages (`ChatPage`, `SchemaPage`, `ProfilePage`) need none.
 - Assembly's tolerance of task batch results nested under `task_results`,
   `results` or `tasks`, of list results and of a top-level `failed_tasks`
   key; such maps now fail with a diagnostic that asks for the batch to be
