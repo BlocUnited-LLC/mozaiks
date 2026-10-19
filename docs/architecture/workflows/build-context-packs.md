@@ -756,9 +756,14 @@ pack already covers would change its effective configuration (a linked
 `context.yaml` changes its `capability_source`) or a rendered file, or drop
 an input, without changing the digest. The pack's context and contract
 readers refuse a linked `context.yaml` or `contract.yaml` before reading
-it; the verifier refuses any linked input and walks declared directories
-without following links; template rendering applies the verifier's input
-rules first. Installation, installed resolution, selection and the upgrade
+it, and the selection's dependency check reports that refusal; the verifier
+refuses any linked input, or any linked parent of a declared asset inside
+the pack, and walks declared directories without following links; template
+rendering applies the verifier's input rules first. A declared asset path
+may not contain `..`: the operating system follows a link before applying
+`..`, so such a path could reach a linked directory that a check of the path
+itself would miss. A directory under a declared asset that cannot be read
+is an integrity diagnostic too. Installation, installed resolution, selection and the upgrade
 plan therefore refuse the pack before any pin is compared or any input is
 used. To use such a pack, replace each link with the file or directory it
 points to; a component installed with a linked input must then be installed

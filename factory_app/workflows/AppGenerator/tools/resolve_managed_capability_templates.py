@@ -168,7 +168,7 @@ def _is_link(path: Path) -> bool:
     """A symbolic link, or on Windows a junction or other reparse point (the repository's link test)."""
     try:
         metadata = path.lstat()
-    except FileNotFoundError:
+    except (FileNotFoundError, NotADirectoryError):
         return False
     return stat.S_ISLNK(metadata.st_mode) or bool(
         getattr(metadata, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
@@ -185,7 +185,14 @@ def _refuse_linked_pack_input(context_root: Path, path: Path) -> None:
     root must be a regular file or directory; the pack root itself may be
     reached through a link, since callers resolve it before use.
     """
-    relative = Path(os.path.normpath(path.relative_to(context_root)))
+    relative = path.relative_to(context_root)
+    if ".." in relative.parts:
+        # The OS follows a link before applying '..', so a lexical check of the path would test the wrong
+        # file; pack input paths, like declared outputs, never step back up.
+        raise PackIntegrityError(
+            f"Pack input path {relative.as_posix()} must not contain '..': {path}. Name the file or directory "
+            "directly, under the pack directory."
+        )
     for depth in range(len(relative.parts), 0, -1):
         candidate = context_root.joinpath(*relative.parts[:depth])
         if _is_link(candidate):
@@ -354,6 +361,8 @@ def _validate_pack_dependencies(
                 available_pack_versions[pid] = str(pack_block.get("version") or "").strip()
                 for cid in _capabilities_from_context(context_data):
                     available_capability_ids.add(cid)
+            except PackIntegrityError:
+                raise
             except Exception:
                 if not pack.get("capabilities"):
                     pass
@@ -439,16 +448,19 @@ def _declared_tree_files(context_root: Path, directory: Path) -> list[Path]:
     pending = [directory]
     while pending:
         current = pending.pop()
-        with os.scandir(current) as entries:
-            for entry in entries:
-                path = Path(entry.path)
-                if entry.name == "__pycache__" or entry.name.startswith("."):
-                    continue
-                _refuse_linked_pack_input(context_root, path)
-                if entry.is_dir(follow_symlinks=False):
-                    pending.append(path)
-                elif entry.is_file(follow_symlinks=False) and path.suffix not in {".pyc", ".pyo"}:
-                    files.append(path)
+        try:
+            listing = list(os.scandir(current))
+        except OSError as exc:
+            raise PackIntegrityError(f"Pack directory {current} cannot be read: {exc}") from exc
+        for entry in listing:
+            path = Path(entry.path)
+            if entry.name == "__pycache__" or entry.name.startswith("."):
+                continue
+            _refuse_linked_pack_input(context_root, path)
+            if entry.is_dir(follow_symlinks=False):
+                pending.append(path)
+            elif entry.is_file(follow_symlinks=False) and path.suffix not in {".pyc", ".pyo"}:
+                files.append(path)
     return sorted(files)
 
 

@@ -1640,6 +1640,14 @@ def _pack_with_linked_input(root: Path, linked: str) -> Path:
         (variants / "greetings.yaml").write_text("greetings: [hello]\n", encoding="utf-8")
         _real_link(root / "catalogs" / "greetings.yaml", variants / "greetings.yaml")
         return root
+    if linked == "parent directory of a declared catalog":
+        context = yaml.safe_load((root / "context.yaml").read_text(encoding="utf-8"))
+        context["assets"].append({"path": "catalogs/greetings.yaml", "kind": "catalog"})
+        (root / "context.yaml").write_text(yaml.safe_dump(context, sort_keys=False), encoding="utf-8")
+        (variants / "catalogs").mkdir()
+        (variants / "catalogs" / "greetings.yaml").write_text("greetings: [hello]\n", encoding="utf-8")
+        _real_link(root / "catalogs", variants / "catalogs")
+        return root
     if linked == "undeclared contract.yaml":
         manifest = root / "context.yaml"
         manifest.write_text(
@@ -1667,8 +1675,8 @@ def _pack_with_linked_input(root: Path, linked: str) -> Path:
 
 
 @pytest.mark.parametrize("linked", [
-    "context.yaml", "contract.yaml", "undeclared contract.yaml", "declared catalog", "template file",
-    "nested template directory", "declared templates root",
+    "context.yaml", "contract.yaml", "undeclared contract.yaml", "declared catalog",
+    "parent directory of a declared catalog", "template file", "nested template directory", "declared templates root",
 ])
 def test_a_linked_pack_input_is_an_integrity_diagnostic(tmp_path, linked):
     """A link is digested under its target's path and read through it, so retargeting it between covered inputs
@@ -1688,6 +1696,83 @@ def test_a_linked_pack_input_is_an_integrity_diagnostic(tmp_path, linked):
     row = {"id": "greetings", "pack_source_path": str(root), "version": "0.1.0", "digest": "sha256:" + "0" * 64}
     errors = scanner.scan_generated_bundle({"app.json": "{}"}, capability_packs=[row])
     assert len(errors) == 1 and "not a link" in errors[0], errors
+
+
+@pytest.mark.parametrize("through_link", [False, True])
+def test_a_declared_asset_path_with_dotdot_is_refused(tmp_path, through_link):
+    """The OS follows a link before applying '..' (on POSIX), so 'L/../t' reads under L's target while a lexical
+    check would test 't'. Declared asset paths, like declared outputs, may not contain '..'; with a real link L
+    (a junction on Windows) and without one."""
+    import yaml
+
+    root = tmp_path / "greetings"
+    shutil.copytree(GREETINGS, root, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    declared = "templates/../templates"
+    if through_link:
+        (root / "variants" / "a" / "inner").mkdir(parents=True)
+        shutil.copytree(root / "templates", root / "variants" / "a" / "t")
+        _real_link(root / "L", root / "variants" / "a" / "inner")
+        declared = "L/../t"
+    context = yaml.safe_load((root / "context.yaml").read_text(encoding="utf-8"))
+    context["assets"] = [a for a in context["assets"] if a["kind"] != "templates"] + [{"path": declared, "kind": "templates"}]
+    (root / "context.yaml").write_text(yaml.safe_dump(context, sort_keys=False), encoding="utf-8")
+    with pytest.raises(resolver.PackIntegrityError, match="must not contain '..'"):
+        resolver.verify_pack_integrity(root, "greetings")
+    with pytest.raises(resolver.PackIntegrityError, match="must not contain '..'"):
+        resolver.resolve_templates_for_pack(root, "greetings")
+    row = {"id": "greetings", "pack_source_path": str(root), "version": "0.1.0", "digest": "sha256:" + "0" * 64}
+    errors = scanner.scan_generated_bundle({"app.json": "{}"}, capability_packs=[row])
+    assert len(errors) == 1 and "must not contain '..'" in errors[0], errors
+
+
+def test_a_declared_asset_under_a_regular_file_is_a_missing_asset(tmp_path):
+    """A path through a regular file (POSIX raises ENOTDIR for it) is the existing missing-asset diagnostic, not
+    an operating-system error that escapes the verifier and the scanner."""
+    import yaml
+
+    root = tmp_path / "greetings"
+    shutil.copytree(GREETINGS, root, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    context = yaml.safe_load((root / "context.yaml").read_text(encoding="utf-8"))
+    context["assets"].append({"path": "contract.yaml/extra.yaml", "kind": "catalog"})
+    (root / "context.yaml").write_text(yaml.safe_dump(context, sort_keys=False), encoding="utf-8")
+    with pytest.raises(resolver.PackIntegrityError, match="Declared pack asset not found"):
+        resolver.verify_pack_integrity(root, "greetings")
+    row = {"id": "greetings", "pack_source_path": str(root), "version": "0.1.0", "digest": "sha256:" + "0" * 64}
+    errors = scanner.scan_generated_bundle({"app.json": "{}"}, capability_packs=[row])
+    assert len(errors) == 1 and "Declared pack asset not found" in errors[0], errors
+
+
+def test_the_selection_dependency_check_reports_a_linked_context_before_its_dependants(tmp_path):
+    """A selection whose dependency check reads a linked context.yaml reports the link, not a misleading missing
+    dependency of the pack that requires it (a real symbolic link)."""
+    root = _pack_with_linked_input(tmp_path / "greetings", "context.yaml")
+    farewell = tmp_path / "farewell"
+    shutil.copytree(GREETINGS.parent / "farewell", farewell, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    pins = {"version": "0.1.0", "digest": "sha256:" + "0" * 64}
+    rows = [
+        {"id": "greetings", "pack_source_path": str(root), **pins},
+        {"id": "farewell", "pack_source_path": str(farewell), **pins},
+    ]
+    with pytest.raises(resolver.PackIntegrityError, match=LINKED_INPUT):
+        resolver.verified_selected_pack_sources(rows)
+
+
+def test_an_unreadable_pack_directory_is_an_integrity_diagnostic(tmp_path, monkeypatch):
+    """A declared directory the verifier cannot list is refused with an integrity diagnostic naming it; the
+    earlier walk skipped it silently. (The operating-system error is injected; no link is involved.)"""
+    root = tmp_path / "greetings"
+    shutil.copytree(GREETINGS, root, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    blocked = (root / "templates" / "ui").resolve()
+    real_scandir = resolver.os.scandir
+
+    def scandir(path):
+        if Path(path).resolve() == blocked:
+            raise PermissionError(13, "Permission denied", str(path))
+        return real_scandir(path)
+
+    monkeypatch.setattr(resolver.os, "scandir", scandir)
+    with pytest.raises(resolver.PackIntegrityError, match="cannot be read"):
+        resolver.verify_pack_integrity(root, "greetings")
 
 
 def test_a_regular_pack_walks_the_same_files_as_before_links_were_refused(tmp_path):

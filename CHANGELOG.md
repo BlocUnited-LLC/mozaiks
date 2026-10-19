@@ -204,7 +204,11 @@ This project follows a practical pre-1.0 changelog format:
   pack already covers changed its effective configuration (such as its
   `capability_source`) or a rendered file, or dropped an input, without
   changing the digest. The pack's context and contract readers, the
-  verifier and template rendering all refuse it before the input is used.
+  verifier, the selection's dependency check and template rendering all
+  refuse it before the input is used. A declared asset path may not contain
+  `..` either: the operating system follows a link before applying `..`,
+  so such a path could reach a linked directory a check of the path itself
+  would miss.
   Replace such a link with the file or directory it points to; a component
   installed with a linked input must then be installed from its verified
   source into a build context without that pin. The pack directory itself
@@ -397,8 +401,9 @@ This project follows a practical pre-1.0 changelog format:
   contract nor its absence, so it is refused until the pack is installed
   from its verified source into a build context without that pin.
 - Links among a pack's inputs (`context.yaml`, `contract.yaml`, a declared
-  asset or anything under a declared directory); each is now an integrity
-  diagnostic (the digest entry above names the remedy).
+  asset or anything under a declared directory), and declared asset paths
+  that contain `..`; each is now an integrity diagnostic (the digest entry
+  above names the remedy).
 - The bundle scanner's acceptance of a route to one of the shell's non-page
   core components (the launcher, confirm and completion screens, the token
   tab, the usage panels) without a custom page file; only the routable core
