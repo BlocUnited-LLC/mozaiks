@@ -12,6 +12,15 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Added
+
+- Agent replies rejected by structured-output validation now write an
+  `agent.output.rejected` audit record from the runtime turn, network WAL, and
+  task-batch paths. The record carries the agent, workflow, chat, trace id,
+  failure category, offending field paths with error types, and a SHA-256 digest
+  of the reply; it never stores the reply or Pydantic's input-quoting message.
+  Validation still fails closed, and an audit failure cannot change that.
+
 ## 0.2.0 - 2026-10-17
 
 ### Added

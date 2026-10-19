@@ -56,7 +56,11 @@ from mozaiksai.core.workflow.context.authority import (
 )
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.execution.network_graph import compile_transition_rules_to_graph
-from mozaiksai.core.workflow.outputs.runtime_validation import validate_agent_structured_output
+from mozaiksai.core.workflow.outputs.rejection_audit import audit_structured_output_rejection
+from mozaiksai.core.workflow.outputs.runtime_validation import (
+    StructuredOutputValidation,
+    validate_agent_structured_output,
+)
 
 _INITIATOR_NAME = "mozaiks_user"
 # A channel fails only after this long without progress; runs stay bounded by
@@ -631,12 +635,22 @@ class AG2NetworkRunner:
                     context_vars, key=request.failure_message_key, close_reason=close_reason,
                 )
                 agent_name_by_id = _agent_names()
+                rejections: list[StructuredOutputValidation] = []
                 structured_outputs, validation_error = _validate_wal_structured_outputs(
                     wal=wal,
                     agent_name_by_id=agent_name_by_id,
                     structured_registry=request.structured_registry,
+                    rejections=rejections,
                 )
                 if validation_error:
+                    for rejection in rejections:
+                        await audit_structured_output_rejection(
+                            rejection,
+                            source="network_wal",
+                            workflow_name=request.workflow_name,
+                            chat_id=request.chat_id,
+                            app_id=request.app_id,
+                        )
                     return AG2NetworkRunnerResult(
                         status=RunStatus.FAILED,
                         workflow_name=request.workflow_name,
@@ -1535,6 +1549,7 @@ def _validate_wal_structured_outputs(
     wal: Sequence[Any],
     agent_name_by_id: Mapping[str, str],
     structured_registry: Mapping[str, Any],
+    rejections: list[StructuredOutputValidation] | None = None,
 ) -> tuple[list[dict[str, Any]], str | None]:
     # AG2 Network WAL packets expose serialized body data, not the original
     # AgentReply. Without that supported AG2 handle this runner cannot invoke
@@ -1561,6 +1576,8 @@ def _validate_wal_structured_outputs(
         if validation is None:
             continue
         if not validation.validation_passed or validation.structured_data is None:
+            if rejections is not None:
+                rejections.append(validation)
             return [], (
                 f"structured output validation failed for {agent_name}: {validation.error}"
             )

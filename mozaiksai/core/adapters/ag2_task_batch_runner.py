@@ -28,6 +28,7 @@ from mozaiksai.core.workflow.context.authority import (
     ContextAuthorityPolicy,
     ScopedContextWriter,
 )
+from mozaiksai.core.workflow.outputs.rejection_audit import audit_structured_output_rejection
 from mozaiksai.core.workflow.outputs.runtime_validation import (
     reply_body_to_data,
     validate_agent_structured_output,
@@ -165,6 +166,13 @@ class AG2TaskBatchRunner:
                         error = (
                             f"structured output validation failed for {request.agent_name}: "
                             f"{validation.error}"
+                        )
+                        await audit_structured_output_rejection(
+                            validation,
+                            source="task_batch",
+                            workflow_name=request.workflow_name,
+                            chat_id=request.chat_id,
+                            app_id=request.app_id,
                         )
                         await active_task.fail(error)
                         return _result_from_task(

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 
 @dataclass(slots=True)
@@ -21,6 +22,37 @@ class StructuredOutputValidation:
     structured_data: dict[str, Any] | None
     validation_passed: bool
     error: str | None = None
+    # Audit-safe description of a rejection. Unlike ``error`` (Pydantic's text
+    # embeds the offending input values), these never carry output content.
+    failure_category: str | None = None
+    failure_fields: tuple[str, ...] = ()
+    output_digest: str | None = None
+
+
+_MAX_FAILURE_FIELDS = 10
+_MAX_FAILURE_FIELD_CHARS = 120
+
+
+def _output_digest(data: Any) -> str:
+    """SHA-256 of the canonical JSON of ``data``; the content itself is not kept."""
+
+    try:
+        canonical = json.dumps(data, sort_keys=True, default=str, separators=(",", ":"))
+    except (TypeError, ValueError):
+        canonical = repr(data)
+    return hashlib.sha256(canonical.encode("utf-8", "replace")).hexdigest()
+
+
+def _failure_fields(exc: ValidationError) -> tuple[str, ...]:
+    """``<field path>:<error type>`` pairs, bounded; never the input values."""
+
+    fields: list[str] = []
+    for item in exc.errors(include_input=False, include_context=False, include_url=False):
+        path = ".".join(str(part) for part in item.get("loc", ())) or "<root>"
+        fields.append(f"{path[:_MAX_FAILURE_FIELD_CHARS]}:{item.get('type', 'unknown')}")
+        if len(fields) >= _MAX_FAILURE_FIELDS:
+            break
+    return tuple(fields)
 
 
 _JSON_FENCE_RE = re.compile(
@@ -85,6 +117,8 @@ def validate_agent_structured_output(
             structured_data=None,
             validation_passed=False,
             error="structured output was not a JSON object",
+            failure_category="not_json_object",
+            output_digest=_output_digest(raw_data),
         )
 
     try:
@@ -97,6 +131,11 @@ def validate_agent_structured_output(
             structured_data=None,
             validation_passed=False,
             error=str(exc),
+            failure_category="schema_violation"
+            if isinstance(exc, ValidationError)
+            else "validation_error",
+            failure_fields=_failure_fields(exc) if isinstance(exc, ValidationError) else (),
+            output_digest=_output_digest(raw_data),
         )
 
     return StructuredOutputValidation(

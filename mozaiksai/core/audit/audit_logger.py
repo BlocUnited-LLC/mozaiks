@@ -34,6 +34,7 @@ class AuditEventKind(StrEnum):
     AUTH_FAIL = "auth.fail"
     ARTIFACT_PROMOTE = "artifact.promote"
     ARTIFACT_LOAD = "artifact.load"
+    AGENT_OUTPUT_REJECTED = "agent.output.rejected"
 
 
 @dataclass
@@ -198,6 +199,36 @@ class AuditLogger:
             action=action_id,
             inputs_hash=_hash_inputs(params) if params is not None else None,
             outcome=outcome,
+            error=error,
+            extra=dict(extra or {}),
+        ))
+
+    async def log_agent_output_rejected(
+        self,
+        *,
+        actor_id: str,
+        app_id: str | None,
+        chat_id: str | None,
+        workflow_name: str,
+        agent_name: str,
+        output_digest: str | None,
+        error: str,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        """Record that an agent reply failed its structured-output contract.
+
+        ``output_digest`` is a hash of the rejected reply; callers must not put
+        the reply itself, or text that embeds it, in ``error`` or ``extra``.
+        """
+        await self.log(AuditRecord(
+            kind=AuditEventKind.AGENT_OUTPUT_REJECTED,
+            actor_id=actor_id,
+            app_id=app_id,
+            chat_id=chat_id,
+            resource=workflow_name,
+            action=agent_name,
+            inputs_hash=output_digest,
+            outcome="fail",
             error=error,
             extra=dict(extra or {}),
         ))
