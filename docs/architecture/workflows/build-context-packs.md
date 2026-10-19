@@ -751,9 +751,10 @@ same-host identity: a CRLF and an LF checkout of the same pack have different di
 Every included input under a pack's directory must be a regular file or directory.
 A link (a symbolic link, or a Windows junction or other reparse point) at
 `context.yaml`, `contract.yaml`, a declared asset, or anywhere under a
-declared directory that is not excluded as dot-named, `__pycache__` or compiled
-Python content is an integrity diagnostic. Those excluded entries are ignored
-by verification, planning and materialization. A link is digested under its
+declared directory that is not excluded as dot-named or `__pycache__` content is
+an integrity diagnostic. Those excluded entries are ignored by verification,
+planning and materialization; regular compiled Python files are excluded from
+the verified/materialized tree. A link is digested under its
 target's path and read through it, so retargeting one between inputs the
 pack already covers would change its effective configuration (a linked
 `context.yaml` changes its `capability_source`) or a rendered file, or drop

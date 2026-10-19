@@ -199,9 +199,10 @@ This project follows a practical pre-1.0 changelog format:
   asset that is not a file is an integrity diagnostic, and so is a link
   among a pack's inputs: a symbolic link, or a Windows junction or other
   reparse point, at `context.yaml`, `contract.yaml`, a declared asset or any
-  non-excluded entry under a declared directory. Dot-named, `__pycache__` and
-  compiled Python entries are ignored by verification, planning and
-  materialization rather than treated as pack inputs. A link is digested under its
+  non-excluded entry under a declared directory. Dot-named and `__pycache__`
+  entries are ignored by verification, planning and materialization rather
+  than treated as pack inputs; regular compiled Python files are excluded from
+  the verified/materialized tree. A link is digested under its
   target's path and read through it, so retargeting one between inputs the
   pack already covers changed its effective configuration (such as its
   `capability_source`) or a rendered file, or dropped an input, without
