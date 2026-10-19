@@ -12,6 +12,14 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Fixed
+
+- Clarified public quickstart instructions for writable workspace paths,
+  quoted PowerShell API keys, a running MongoDB server, and diagnosing backend
+  startup failures without recreating the workspace. Local Setup now describes
+  the published package and how to distinguish it from an older editable install
+  with the same version.
+
 ## 0.2.0 - 2026-10-17
 
 ### Added

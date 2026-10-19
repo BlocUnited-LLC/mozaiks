@@ -11,22 +11,29 @@ installed version.
 
 ## Quickstart
 
-The single command most users need:
+Start in your user folder, or another writable directory:
 
 === "Windows"
 
     ```powershell
+    Set-Location $env:USERPROFILE
     python -m mozaiks quickstart --dir .\my-workspace
     ```
 
 === "macOS / Linux"
 
     ```bash
+    cd "$HOME"
     python -m mozaiks quickstart --dir ./my-workspace
     ```
 
 Scaffolds the workspace, starts the backend and frontend, and opens Studio at
 `http://127.0.0.1:3000/apps`.
+
+A relative `--dir` is resolved from the current directory. On Windows, avoid
+protected locations such as `C:\Windows\System32`; administrator access is not
+required. Later examples assume you are in the same writable parent directory,
+or that you replace `--dir` with your workspace's absolute path.
 
 Run it with `--dir` from a Mozaiks source checkout. Without `--dir` there,
 `quickstart` and `onboard` create no workspace: they rewrite the config of the
@@ -650,6 +657,10 @@ In check mode, the command exits with `1` when any file is missing, outdated,
 or unmanaged, and suggests the flag that applies changes.
 
 ## Troubleshooting
+
+For `WinError 5`, an unquoted PowerShell API key, or `Backend failed to start`,
+see [Local Setup](local-setup.md#troubleshooting). A successful scaffold followed
+by a startup error does not require deleting or recreating the workspace.
 
 ??? "Port already in use"
 

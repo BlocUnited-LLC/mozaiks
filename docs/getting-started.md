@@ -4,7 +4,7 @@
 
 - Python 3.11+
 - Node.js 20.19+ or 22.12+ (required by the Vite 8 frontend toolchain)
-- Docker Desktop — [download here](https://www.docker.com/products/docker-desktop/) (used to run MongoDB)
+- Docker Desktop — [download here](https://www.docker.com/products/docker-desktop/) if you use the local MongoDB container below; optional with an existing MongoDB server
 
 Mozaiks installs Tree-sitter parser packages with the core framework package so
 Studio can build source-backed App Intelligence for generated and existing
@@ -23,6 +23,10 @@ For framework development, clone the repository and run
 
 Mozaiks requires a database to store your apps, build history, and workspace
 state. The easiest way to start one is via Docker:
+
+Start Docker Desktop before running the command below. Skip this step if you
+already have a reachable MongoDB server. Setting `MONGO_URI` in step 3 only
+selects the database; it does not start one.
 
 === "Windows"
 
@@ -56,6 +60,14 @@ state. The easiest way to start one is via Docker:
     export OPENAI_API_KEY="sk-..."
     ```
 
+Replace `sk-...` with your own key and keep the quotes. PowerShell tries to run
+an unquoted key as a command, producing "not recognized". Do not share your key
+in terminal transcripts or screenshots.
+
+Run the remaining steps in this same terminal: these environment variables last
+only for the current session. In a new terminal, set them again or configure the
+workspace's `.env` privately.
+
 !!! note "LLM provider"
     Builds call OpenAI today: the runtime builds OpenAI clients only. The
     default model is `gpt-5-nano`; set `DEFAULT_LLM_MODEL` to use another
@@ -65,19 +77,26 @@ state. The easiest way to start one is via Docker:
 
 ## 4. Create your workspace and open Studio
 
-Replace `my-workspace` with whatever you want to name your app folder:
+Start in your user folder, or another folder you can write to. Replace
+`my-workspace` with your preferred workspace folder name:
 
 === "Windows"
 
     ```powershell
+    Set-Location $env:USERPROFILE
     python -m mozaiks quickstart --dir .\my-workspace
     ```
 
 === "macOS / Linux"
 
     ```bash
+    cd "$HOME"
     python -m mozaiks quickstart --dir ./my-workspace
     ```
+
+The relative `--dir` path is created inside the terminal's current directory.
+On Windows, do not create workspaces under `C:\Windows\System32` or
+`C:\Program Files`; administrator access is not needed.
 
 This scaffolds the workspace, starts the backend and frontend, and opens
 Studio in your browser at `http://127.0.0.1:3000/apps`. While it runs,
@@ -114,6 +133,7 @@ not replace them.
     === "Windows"
 
         ```powershell
+        Set-Location $env:USERPROFILE
         docker start mozaiks-mongo   # bring MongoDB back up if your PC restarted
         python -m mozaiks studio --dir .\my-workspace --open
         ```
@@ -121,11 +141,27 @@ not replace them.
     === "macOS / Linux"
 
         ```bash
+        cd "$HOME"
         docker start mozaiks-mongo   # bring MongoDB back up if your machine restarted
         python -m mozaiks studio --dir ./my-workspace --open
         ```
 
+    Use the same workspace path you chose in step 4 and restore the environment
+    variables from step 3 if this is a new terminal. The `docker start` line is
+    only for the container created in step 2.
+
 ## Troubleshooting
+
+??? "Access is denied / WinError 5"
+    The workspace path points into a protected directory. Return to your user
+    folder with `Set-Location $env:USERPROFILE`, then rerun step 4. Do not use
+    administrator access to create a workspace inside Windows system folders.
+
+??? "Setup complete, then Backend failed to start"
+    The workspace was created successfully; this message concerns the server
+    process. Keep the workspace. Read the backend error using
+    [Local Setup's diagnostic steps](local-setup.md#backend-failed-to-start),
+    fix that error, then reopen the same workspace with `studio --open`.
 
 ??? "MongoDB connection error"
     Make sure Docker is running and the MongoDB container is up:
