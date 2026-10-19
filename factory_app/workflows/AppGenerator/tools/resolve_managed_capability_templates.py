@@ -403,9 +403,9 @@ def pre_contract_rule_digest(pack_source_path: Path, pack_id: str) -> str | None
     """The source's digest under the earlier rule, which left out a ``contract.yaml`` the context does not declare.
 
     None when the two rules agree (the contract is declared, or there is
-    none). Only for re-pinning installed state recorded under that rule
-    (:func:`community_component_lifecycle.install_verified_local_pack`); it is
-    never an identity.
+    none). Only to explain why an installed pin no longer verifies
+    (``community_component_lifecycle._uncovered_contract_refusal``): it covers
+    no contract, so it never verifies, selects or re-pins a pack.
     """
     context_root = pack_source_path.resolve()
     context = _read_pack_context(context_root, pack_id)

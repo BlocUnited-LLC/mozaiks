@@ -190,10 +190,13 @@ This project follows a practical pre-1.0 changelog format:
 - A pack's digest now always covers its `contract.yaml`, which decides output
   ownership and dependencies, even when the context does not declare it as a
   contract asset. Every shipped pack declares it, so no shipped digest
-  changes; installed-state or selection pins recorded for a pack that does
-  not declare it no longer verify until the pack is upgraded or the
-  selection is pinned again. A contract or catalog asset that is not a file
-  is an integrity diagnostic.
+  changes. A pin recorded for a pack that does not declare it no longer
+  verifies, and nothing adopts the contract it never covered: a recorded
+  build selection verifies again only once an accepted AppGenerator revision
+  of the build pins the selection anew, and an installed pin is refused
+  until the pack is installed from its verified source into a build context
+  without that pin (see the upgrade entry below). A contract or catalog
+  asset that is not a file is an integrity diagnostic.
 - Generated bundle validation checks pack outputs without rendering pack
   templates. Each resolved pack's provenance must record its version, every
   template-owned output must be present, and the output of every static
@@ -237,7 +240,7 @@ This project follows a practical pre-1.0 changelog format:
   UI-contributing pack; a route to a component nobody registers, or to a core
   component that is not a page, still fails. The scanner's route check
   accepts only those routable core pages.
-  The functional route check accepts the same core components, and planning
+  The functional route check accepts the same routable core pages, and planning
   decides whether a selected pack is managed from the verified pack's own
   declaration, as the bundle scanner does.
   The bundle scanner rejects pack provenance that lists a shared root in a
@@ -339,9 +342,17 @@ This project follows a practical pre-1.0 changelog format:
   it. A source changed in place since installation refuses the upgrade, and
   nothing changes, instead of recording a false upgrade over files still
   materialized from the old content; the refusal says whether the version or
-  only the bytes changed. A component pinned under the earlier digest rule,
-  which left out an undeclared `contract.yaml`, is re-pinned by installing
-  the same source again (status `repinned`).
+  only the bytes changed. A component pinned with a digest that left out its
+  `contract.yaml` (an undeclared contract under the earlier digest rule, or
+  one added after installation) is refused by the upgrade plan, a repeated
+  installation and installed resolution alike, and nothing changes. The pin
+  cannot show which contract the component was installed with: the refusal
+  compares what it recorded (version, declared files and their capabilities,
+  and the dependencies it read from the contract), says that this does not
+  prove the contract's ownership, provided capabilities or restrictions
+  unchanged, and names the remedy, installing the pack from its verified
+  source into a build context without that pin. Installation never
+  re-labels an existing pin.
 - An OSS SaaS build whose plan adds the default id-only MozaiksPay row now
   materializes the shipped MozaiksPay pack and schedules no model work for
   its pages, client and facade module, so assembly and validation agree on

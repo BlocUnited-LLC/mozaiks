@@ -223,6 +223,26 @@ def test_the_composer_keeps_a_route_to_each_routable_core_page_and_refuses_the_o
             ]}, contribution], files)
 
 
+def test_the_scanner_route_check_reports_a_route_to_a_core_component_that_is_not_a_page() -> None:
+    """The bundle scanner's own route check: a route to a routable core page needs no custom page file, while a
+    route to a core component that is not a page is reported like any component without a registered page."""
+    from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import (
+        scan_generated_bundle,
+    )
+    from mozaiksai.core.workflow.generator_support.ui_registry_composition import (
+        SHELL_CORE_COMPONENTS,
+        SHELL_ROUTE_COMPONENTS,
+    )
+
+    names = sorted(SHELL_CORE_COMPONENTS)
+    pages = [{"id": f"core-{index}", "path": f"/core/{index}", "component": name, "schema": "home"}
+             for index, name in enumerate(names)]
+    files = {"app.json": json.dumps({"appName": "Core"}), "ui/route_manifest.json": json.dumps({"pages": pages})}
+    errors = scan_generated_bundle(files)
+    reported = {name for name in names if any(f"declares component '{name}'" in error for error in errors)}
+    assert reported == SHELL_CORE_COMPONENTS - SHELL_ROUTE_COMPONENTS, errors
+
+
 def test_the_composer_and_scanner_accept_exactly_the_shells_core_components() -> None:
     """One definition of the shell's core components, matching chat-ui's CORE_COMPONENTS, and of the routable
     subset composition and the scanner accept."""

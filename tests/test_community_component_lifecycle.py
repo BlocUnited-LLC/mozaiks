@@ -235,58 +235,126 @@ def test_upgrade_refuses_an_installed_source_changed_in_place(tmp_path: Path) ->
         plan_component_upgrade(build_context_root=build_context_root, candidate_pack_source_path=source)
 
 
-def test_a_component_pinned_under_the_earlier_digest_rule_is_repinned_by_installing_its_source_again(tmp_path: Path) -> None:
-    """A 0.2.0 install of a pack whose contract.yaml is not a declared asset recorded a digest without it. The
-    unchanged source no longer verifies to that pin: the upgrade names the cause and the re-pin step, installing
-    the same source again re-pins it, and the upgrade then plans. Another source at the same version is not
-    re-pinned."""
+_UNCOVERED = "does not cover its contract.yaml"
+
+
+def _uncovered_pin(tmp_path: Path, case: str):
+    """A greetings installation whose pin does not cover the contract.yaml its source holds now.
+
+    The earlier cases reproduce a 0.2.0 install of a pack whose contract.yaml is not a declared asset (the
+    recorded digest leaves it out), then edit the contract in place as reported: forbidden outputs removed,
+    provided capabilities added, or a dependency added (the one contract field the pin records).
+    ``contract_added`` installs a pack with no contract.yaml under the current rule and adds one later.
+    """
     import json as _json
 
-    from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
-        CommunityComponentLifecycleError,
-        plan_component_upgrade,
-    )
     from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
         pre_contract_rule_digest,
-        verify_pack_integrity,
     )
 
     source = tmp_path / "source" / "greetings"
     copytree(GREETINGS, source)
     manifest = source / "context.yaml"
-    text = manifest.read_text(encoding="utf-8")
     declared = "  - path: contract.yaml\n    kind: contract\n"
+    text = manifest.read_text(encoding="utf-8")
     assert declared in text
     manifest.write_text(text.replace(declared, ""), encoding="utf-8")
+    contract = source / "contract.yaml"
+    original_contract = contract.read_text(encoding="utf-8")
     build_context_root = tmp_path / "build_context"
-    installed = _install(source, build_context_root)
-    earlier = pre_contract_rule_digest(source, "greetings")
-    current = verify_pack_integrity(source, "greetings")["digest"]
-    assert earlier is not None and earlier != current
-    # Installed state as 0.2.0 recorded it: the digest without the undeclared contract.yaml.
-    state = Path(installed.installed_state_path)
-    recorded = _json.loads(state.read_text(encoding="utf-8"))
-    for component in recorded["components"]:
-        component["digest"] = earlier
-    state.write_text(_json.dumps(recorded), encoding="utf-8")
+    if case == "contract_added":
+        contract.unlink()
+        installed = _install(source, build_context_root)
+        contract.write_text(original_contract, encoding="utf-8")
+    else:
+        installed = _install(source, build_context_root)
+        # The pin 0.2.0 recorded: the digest without the undeclared contract.yaml.
+        state = Path(installed.installed_state_path)
+        recorded = _json.loads(state.read_text(encoding="utf-8"))
+        for component in recorded["components"]:
+            component["digest"] = pre_contract_rule_digest(source, "greetings")
+        state.write_text(_json.dumps(recorded), encoding="utf-8")
+        if case == "forbidden_outputs_removed":
+            assert "forbidden_outputs:" in original_contract
+            kept = original_contract.split("forbidden_outputs:")[0]
+            rest = original_contract.split("forbidden_outputs:")[1].split("\n\n", 1)
+            contract.write_text(kept + (rest[1] if len(rest) > 1 else ""), encoding="utf-8")
+        elif case == "capabilities_added":
+            contract.write_text(original_contract + "\nprovides_capabilities:\n  - subscription_write_path\n", encoding="utf-8")
+        elif case == "dependency_added":
+            contract.write_text(
+                original_contract + "\nrequires:\n  capabilities:\n    - capability_id: greetings.say_hello\n"
+                "      reason: greetings check a plan\n",
+                encoding="utf-8",
+            )
+    return source, build_context_root, Path(installed.installed_state_path)
 
+
+@pytest.mark.parametrize("case", [
+    "unchanged", "forbidden_outputs_removed", "capabilities_added", "contract_added", "dependency_added",
+])
+def test_a_pin_that_never_covered_contract_yaml_adopts_no_contract_and_names_the_cause(tmp_path: Path, case: str) -> None:
+    """A pin whose digest left out the contract.yaml cannot show which contract the pack was installed with, so no
+    step adopts the source's current contract over it: the upgrade plan, a repeated installation and installed
+    resolution all refuse with the same cause, compare the recorded metadata that exists, claim nothing about
+    the unrecorded contract, name the installation boundary that pins a whole pack, and change nothing."""
+    from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
+        CommunityComponentLifecycleError,
+        plan_component_upgrade,
+        resolve_installed_component_descriptors,
+    )
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        PackIntegrityError,
+    )
+
+    source, build_context_root, state = _uncovered_pin(tmp_path, case)
+    before = state.read_bytes()
     candidate = tmp_path / "candidate" / "greetings"
     copytree(source, candidate)
     candidate_manifest = candidate / "context.yaml"
     candidate_manifest.write_text(
         candidate_manifest.read_text(encoding="utf-8").replace('version: "0.1.0"', 'version: "0.2.0"'), encoding="utf-8",
     )
-    with pytest.raises(CommunityComponentLifecycleError, match="earlier digest rule.*installing the same source again"):
+    refusals = []
+    with pytest.raises(CommunityComponentLifecycleError, match=_UNCOVERED) as planned:
         plan_component_upgrade(build_context_root=build_context_root, candidate_pack_source_path=candidate)
+    refusals.append(str(planned.value))
+    with pytest.raises(CommunityComponentLifecycleError, match=_UNCOVERED) as reinstalled:
+        _install(source, build_context_root)
+    refusals.append(str(reinstalled.value))
+    with pytest.raises(PackIntegrityError, match=_UNCOVERED) as resolved:
+        resolve_installed_component_descriptors(build_context_root=build_context_root, selected_pack_ids=["greetings"])
+    refusals.append(str(resolved.value))
+    for message in refusals:
+        assert "cannot be verified" in message and "does not show that the contract" in message, message
+        assert "install the pack from its verified source into a build context that does not hold this pin" in message
+        assert "unchanged source" not in message and "its source is unchanged" not in message
+        assert message.endswith("Nothing was changed.")
+    for message in refusals:
+        assert "the version, the declared files and the capabilities they declare match the source" in message
+        if case == "dependency_added":
+            assert "recorded from the contract differ" in message and "greetings.say_hello" in message, message
+        else:
+            assert "the dependencies it recorded from the contract match" in message, message
+    assert state.read_bytes() == before
 
-    other = tmp_path / "other" / "greetings"
-    copytree(source, other)
-    with pytest.raises(CommunityComponentLifecycleError, match="already installed"):
-        _install(other, build_context_root)
-    result = _install(source, build_context_root)
-    assert (result.status, result.digest) == ("repinned", current)
-    plan = plan_component_upgrade(build_context_root=build_context_root, candidate_pack_source_path=candidate)
-    assert (plan.status, plan.from_version, plan.to_version) == ("ready", "0.1.0", "0.2.0")
+
+def test_a_fresh_installation_pins_the_current_contract(tmp_path: Path) -> None:
+    """The boundary the refusal names: installing the verified source into a build context without the old pin
+    verifies and pins the whole pack, contract.yaml included."""
+    from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
+        resolve_installed_component_descriptors,
+    )
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        verify_pack_integrity,
+    )
+
+    source, _, _ = _uncovered_pin(tmp_path, "forbidden_outputs_removed")
+    fresh = tmp_path / "fresh_build_context"
+    result = _install(source, fresh)
+    assert (result.status, result.digest) == ("installed", verify_pack_integrity(source, "greetings")["digest"])
+    [descriptor] = resolve_installed_component_descriptors(build_context_root=fresh, selected_pack_ids=["greetings"])
+    assert descriptor["digest"] == result.digest
 
 
 def test_upgrade_plan_detects_workspace_owned_file_collision(tmp_path: Path) -> None:

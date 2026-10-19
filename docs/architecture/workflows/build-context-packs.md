@@ -592,9 +592,21 @@ An upgrade compares the app with the installed source only after that
 source verifies to the version and digest installed state pinned; a source
 changed in place since installation refuses the upgrade, and nothing
 changes. Restore the installed source and plan the upgrade from a separate
-candidate directory. A component pinned under the earlier digest rule, which
-left out a `contract.yaml` the context does not declare, is re-pinned by
-installing the same source again; the refusal names that step.
+candidate directory.
+
+A component pinned with a digest that left out its `contract.yaml` (a
+contract the context does not declare, pinned under the earlier digest rule,
+or a contract added after installation) cannot show which contract it was
+installed with. The upgrade plan, a repeated installation and installed
+resolution all refuse it, and nothing changes. The refusal compares what the
+pin recorded (the version, the declared files and the capabilities they
+declare, and the dependencies it read from the contract) and says that this
+does not prove the contract's ownership, provided capabilities or
+restrictions unchanged. No lifecycle step adopts a contract its pin never
+covered and installation never re-labels an existing pin, so the remedy is
+to install the pack from its verified source into a build context without
+that pin; installation verifies and pins the whole pack, `contract.yaml`
+included.
 
 When the app's provenance claims any shared root as a pack's exclusive file,
 whichever pack claims it and in any entry order, the plan blocks with

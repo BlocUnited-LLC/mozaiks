@@ -124,6 +124,43 @@ def _component_entry_from_verified_pack(pack_source_path: Path, pack_id: str) ->
     })
 
 
+def _uncovered_contract_refusal(pack_id: str, source: Path, recorded: dict[str, Any]) -> str | None:
+    """Why an installed pin cannot verify a source whose ``contract.yaml`` the pin never covered; None otherwise.
+
+    The pin was recorded with a digest that left out an undeclared
+    ``contract.yaml``: before pack digests covered it, or before the file
+    existed. Its declared files, and the capabilities they declare, still
+    verify to that pin. The one thing the pin recorded from the contract, its
+    dependencies, is compared and reported, but that cannot show that the
+    contract the pack was installed with (ownership, provided capabilities,
+    restrictions) is the one in the source now, so nothing adopts it: the
+    refusal names the installation boundary that verifies and pins a whole pack
+    instead.
+    """
+    if pre_contract_rule_digest(source, pack_id) != recorded["digest"]:
+        return None
+    current = _component_entry_from_verified_pack(source, pack_id)
+    if current["version"] != recorded["version"]:
+        return None
+    if current["dependencies"] == recorded["dependencies"]:
+        dependencies = "the dependencies it recorded from the contract match"
+    else:
+        dependencies = (
+            "the dependencies it recorded from the contract differ (recorded "
+            f"{recorded['dependencies']!r}, source now {current['dependencies']!r})"
+        )
+    return (
+        f"Installed pack '{pack_id}' was pinned with a digest that does not cover its contract.yaml (pinned before "
+        "pack digests covered an undeclared contract.yaml, or before that file existed), so the contract it was "
+        f"installed with cannot be verified against {source}. Of what the pin recorded, the version, the declared "
+        f"files and the capabilities they declare match the source, and {dependencies}; that does not show that "
+        "the contract's ownership, provided capabilities or restrictions are unchanged, and the lifecycle does not "
+        "adopt a contract its pin never covered. To adopt the current contract, install the pack from its "
+        "verified source into a build context that does not hold this pin: installation verifies and pins the "
+        "whole pack, contract.yaml included. Nothing was changed."
+    )
+
+
 def _ensure_dependencies_satisfied(candidate: dict[str, Any], installed: dict[str, dict[str, Any]]) -> None:
     missing_packs: list[str] = []
     missing_capabilities: list[str] = []
@@ -171,12 +208,10 @@ def install_verified_local_pack(
 ) -> InstallResult:
     """Verify a local pack and pin it in workspace build-context state.
 
-    Installing the source a component was installed from again re-pins it
-    (``repinned``) when its installed state was recorded under the earlier
-    digest rule, which left out a ``contract.yaml`` the pack's context does
-    not declare: same version, same source, and the recorded digest equals the
-    source's digest under that rule. Any other change goes through the upgrade
-    plan.
+    A pack already installed with another identity is refused: a change goes
+    through the upgrade plan, and a pin that never covered the pack's
+    ``contract.yaml`` is refused with its cause (:func:`_uncovered_contract_refusal`);
+    installation never re-labels an existing pin.
     """
 
     root = Path(build_context_root).resolve()
@@ -186,14 +221,10 @@ def install_verified_local_pack(
     state = load_installed_components(root)
     installed = component_by_id(state)
     existing = installed.get(pack_id)
-    sources = load_installed_component_sources(root)
-    repin = bool(
-        existing and existing != candidate
-        and existing["version"] == candidate["version"]
-        and sources.get(pack_id) and Path(sources[pack_id]).resolve() == source_path
-        and pre_contract_rule_digest(source_path, pack_id) == existing["digest"]
-    )
-    if existing and existing != candidate and not repin:
+    if existing and existing != candidate:
+        refusal = _uncovered_contract_refusal(pack_id, source_path, existing)
+        if refusal is not None:
+            raise CommunityComponentLifecycleError(refusal)
         raise CommunityComponentLifecycleError(
             f"Pack '{pack_id}' is already installed at {existing['version']} {existing['digest']}; "
             "use the deterministic upgrade plan instead."
@@ -202,10 +233,11 @@ def install_verified_local_pack(
     _ensure_dependencies_satisfied(candidate, {k: v for k, v in installed.items() if k != pack_id})
     installed[pack_id] = candidate
     state_path = write_installed_components(root, {"components": list(installed.values())})
+    sources = load_installed_component_sources(root)
     sources[pack_id] = str(source_path)
     source_state_path = write_installed_component_sources(root, sources)
     return InstallResult(
-        status="installed" if existing is None else "repinned" if repin else "unchanged",
+        status="installed" if existing is None else "unchanged",
         pack_id=pack_id,
         version=candidate["version"],
         digest=candidate["digest"],
@@ -235,7 +267,8 @@ def resolve_installed_component_descriptors(
             raise InstalledComponentStateError(f"Installed pack has no non-portable local source sidecar: {pack_id}")
         metadata = verify_pack_integrity(Path(source), pack_id)
         if metadata["version"] != installed_component["version"] or metadata["digest"] != installed_component["digest"]:
-            raise PackIntegrityError(f"Installed pack source no longer matches pinned state: {pack_id}")
+            refusal = _uncovered_contract_refusal(pack_id, Path(source), installed_component)
+            raise PackIntegrityError(refusal or f"Installed pack source no longer matches pinned state: {pack_id}")
         descriptor = {
             "id": pack_id,
             "pack_id": pack_id,
@@ -414,14 +447,11 @@ def _plan_upgrade(
     # verify to the version and digest installed state pinned, as installed resolution requires.
     old_metadata = verify_pack_integrity(old_source, pack_id)
     if (old_metadata["version"], old_metadata["digest"]) != (current["version"], current["digest"]):
+        refusal = _uncovered_contract_refusal(pack_id, old_source, current)
+        if refusal is not None:
+            raise CommunityComponentLifecycleError(refusal)
         if old_metadata["version"] != current["version"]:
             cause = f"it is now version {old_metadata['version']}"
-        elif pre_contract_rule_digest(old_source, pack_id) == current["digest"]:
-            raise CommunityComponentLifecycleError(
-                f"Installed pack '{pack_id}' was pinned under the earlier digest rule, which left out its "
-                "contract.yaml (not a declared asset); its source is unchanged. Re-pin it by installing the same "
-                f"source again ({old_source}), then plan the upgrade. Nothing was changed."
-            )
         else:
             cause = "its bytes changed since installation (an in-place edit, or a re-checkout with other line endings)"
         raise CommunityComponentLifecycleError(
