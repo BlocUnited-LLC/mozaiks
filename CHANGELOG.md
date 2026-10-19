@@ -229,12 +229,14 @@ This project follows a practical pre-1.0 changelog format:
   template resolver holds back `data/contract.json`, `ui/index.js` and
   `ui/route_manifest.json` and records each contributing pack under
   `composed_outputs`, including a pack whose only templates are shared roots.
-  UI registry composition accepts a route to one of the shell's own core
-  components (`SchemaPage`, `ChatPage`, `ProfilePage` and the others chat-ui
-  registers itself) without a `ui/index.js` registration, and a route without
-  an id, which it matches by path and keeps as written. Schema-native
+  UI registry composition accepts a route to one of the shell's routable
+  core pages (`SchemaPage`, `ChatPage`, `ProfilePage`) without a
+  `ui/index.js` registration, and a route without an id, which it matches by
+  path and keeps as written (an id may not start with `path:`). Schema-native
   community packs and apps with such routes therefore compose beside a
-  UI-contributing pack; a route to a component nobody registers still fails.
+  UI-contributing pack; a route to a component nobody registers, or to a core
+  component that is not a page, still fails. The scanner's route check
+  accepts only those routable core pages.
   The functional route check accepts the same core components, and planning
   decides whether a selected pack is managed from the verified pack's own
   declaration, as the bundle scanner does.
@@ -336,7 +338,10 @@ This project follows a practical pre-1.0 changelog format:
   version and digest installed state pinned before comparing the app with
   it. A source changed in place since installation refuses the upgrade, and
   nothing changes, instead of recording a false upgrade over files still
-  materialized from the old content.
+  materialized from the old content; the refusal says whether the version or
+  only the bytes changed. A component pinned under the earlier digest rule,
+  which left out an undeclared `contract.yaml`, is re-pinned by installing
+  the same source again (status `repinned`).
 - An OSS SaaS build whose plan adds the default id-only MozaiksPay row now
   materializes the shipped MozaiksPay pack and schedules no model work for
   its pages, client and facade module, so assembly and validation agree on
@@ -365,6 +370,12 @@ This project follows a practical pre-1.0 changelog format:
 - The hardcoded `item` reads of runtime smoke get checks, and
   `scripts/generated_ui_acceptance.normalize_ui_acceptance_findings`, which
   had no callers.
+- The `PageHeader` `titleFont` prop and SectionRenderer's `config.titleFont`
+  fallback; `PageHeader` now refuses `titleFont`, and declarative configs
+  already reject the key.
+- Planning's reads of an id-only managed row's contract from the projected
+  `operator_contracts` and of a row's own inline `facades`; a managed row's
+  contract now comes only from the verified pack.
 - `BrandingProvider`, `useBranding` and the unresolvable `providers/index.js`
   barrel from `@mozaiks/chat-ui`. Theme loading uses `initializeTheme` and
   `useTheme`, which fail closed on an invalid page-title style.

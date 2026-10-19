@@ -288,8 +288,8 @@ def _registrations(
     return registrations, reexports, removed
 
 
-# The shell's core components (chat-ui src/registry/coreComponents.js CORE_COMPONENTS). The shell
-# registers them itself, so a route may target one without any ui/index.js registration.
+# The shell's core components (chat-ui src/registry/coreComponents.js CORE_COMPONENTS), which the
+# shell registers itself.
 SHELL_CORE_COMPONENTS = frozenset({
     "ChatPage",
     "SchemaPage",
@@ -301,6 +301,10 @@ SHELL_CORE_COMPONENTS = frozenset({
     "AdminMyUsagePanel",
     "AdminAppUsagePanel",
 })
+# The core components that render as a routed page, so a route may target one without any ui/index.js
+# registration. The others are transition screens, a profile tab and admin panels, which need props a
+# route does not supply.
+SHELL_ROUTE_COMPONENTS = frozenset({"ChatPage", "SchemaPage", "ProfilePage"})
 
 
 def _route_key(route: Mapping[str, Any]) -> str:
@@ -642,7 +646,7 @@ def compose_ui_registry(
             raise ValueError(f"Conflicting component registration: {key}")
     for route in routes.values():
         component = route["component"]
-        if component not in selected and component not in APP_AUTH_COMPONENTS and component not in SHELL_CORE_COMPONENTS:
+        if component not in selected and component not in APP_AUTH_COMPONENTS and component not in SHELL_ROUTE_COMPONENTS:
             raise ValueError(f"Unregistered route component: {component}")
     result: dict[str, str] = {}
     if has_index:

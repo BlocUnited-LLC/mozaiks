@@ -875,26 +875,28 @@ def test_a_caller_cannot_promote_a_verified_pack_to_a_managed_capability():
 
 
 def test_a_pack_that_declares_no_capability_source_is_never_managed_whatever_the_row_claims(tmp_path):
-    """A pinned pack whose context omits capability_source takes no label from the selecting row: a
-    managed_capability claim does not make it managed (no managed layout slot)."""
-    from mozaiksai.core.runtime.app.layout_validation import layout_extensions_from_selected_packs
-
+    """A pinned pack whose context omits capability_source takes no label from the selecting row. Asserted on the
+    scanner's own output: a pack that provides the subscription write path but is not managed never waives the
+    entitlement_dispatch module, whatever the row claims."""
     source = tmp_path / "greetings"
     shutil.copytree(GREETINGS, source, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     manifest = source / "context.yaml"
     text = manifest.read_text(encoding="utf-8")
     assert "  capability_source: generated_module\n" in text
     manifest.write_text(text.replace("  capability_source: generated_module\n", ""), encoding="utf-8")
+    contract = source / "contract.yaml"
+    contract.write_text(
+        contract.read_text(encoding="utf-8") + "\nprovides_capabilities:\n  - subscription_write_path\n", encoding="utf-8",
+    )
+    files = {"config/subscriptions.yaml": HOSTED_SUBSCRIPTIONS}
     for claim in ("managed_capability", "operator_pack", None):
         row = {"id": "greetings", "pack_source_path": str(source), **_pinned("greetings", source)}
         if claim is not None:
             row["capability_source"] = claim
         [entry] = resolver.verified_selected_pack_sources([row])
         assert entry["capability_source"] == "", (claim, entry["capability_source"])
-        resolved: list[dict] = []
-        scanner.scan_generated_bundle({"app.json": "{}"}, capability_packs=[row], resolved_capability_packs=resolved)
-        rows = [{"id": identity["pack_id"], "capability_source": entry["capability_source"]} for identity in resolved]
-        assert layout_extensions_from_selected_packs(rows) == ()
+        errors = scanner.scan_generated_bundle(files, capability_packs=[row])
+        assert any(REQUIRED_DISPATCH in error for error in errors), (claim, errors)
 
 
 def test_planning_decides_managed_from_the_verified_pack_not_the_row_label(tmp_path):

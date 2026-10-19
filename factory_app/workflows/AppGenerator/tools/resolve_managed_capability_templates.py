@@ -354,13 +354,13 @@ def _validate_pack_dependencies(
             )
 
 
-def _safe_asset_files(context_root: Path, context: dict[str, Any]) -> list[Path]:
+def _safe_asset_files(context_root: Path, context: dict[str, Any], *, cover_contract: bool = True) -> list[Path]:
     files: list[Path] = [context_root / "context.yaml"]
     seen: set[Path] = {files[0].resolve()}
     # contract.yaml decides output ownership and dependencies (_read_pack_contract reads it whether
     # or not the context declares it as an asset), so the pack's identity always covers it.
     contract = context_root / "contract.yaml"
-    if contract.is_file():
+    if cover_contract and contract.is_file():
         files.append(contract)
         seen.add(contract.resolve())
     for asset in iter_context_assets(context):
@@ -396,8 +396,29 @@ def compute_pack_digest(pack_source_path: Path, pack_id: str) -> str:
 
     context_root = pack_source_path.resolve()
     context = _read_pack_context(context_root, pack_id)
+    return _digest_of_files(context_root, pack_id, _safe_asset_files(context_root, context))
+
+
+def pre_contract_rule_digest(pack_source_path: Path, pack_id: str) -> str | None:
+    """The source's digest under the earlier rule, which left out a ``contract.yaml`` the context does not declare.
+
+    None when the two rules agree (the contract is declared, or there is
+    none). Only for re-pinning installed state recorded under that rule
+    (:func:`community_component_lifecycle.install_verified_local_pack`); it is
+    never an identity.
+    """
+    context_root = pack_source_path.resolve()
+    context = _read_pack_context(context_root, pack_id)
+    current = _safe_asset_files(context_root, context)
+    earlier = _safe_asset_files(context_root, context, cover_contract=False)
+    if {path.resolve() for path in current} == {path.resolve() for path in earlier}:
+        return None
+    return _digest_of_files(context_root, pack_id, earlier)
+
+
+def _digest_of_files(context_root: Path, pack_id: str, files: list[Path]) -> str:
     entries: list[dict[str, str]] = []
-    for path in _safe_asset_files(context_root, context):
+    for path in files:
         try:
             relative = path.resolve().relative_to(context_root).as_posix()
         except ValueError as exc:
@@ -1615,6 +1636,7 @@ __all__ = [
     "PackIntegrityError",
     "pack_identity",
     "pin_workspace_pack_selections",
+    "pre_contract_rule_digest",
     "resolve_managed_capability_templates",
     "resolve_declared_pack_output_paths",
     "resolve_templates_for_pack",

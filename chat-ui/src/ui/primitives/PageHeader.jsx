@@ -13,8 +13,13 @@ export function PageHeader({
   actions = [],
   onAction,
   title_font = null,
+  titleFont,
   className,
 }) {
+  if (titleFont !== undefined) {
+    // The camelCase alias was removed; failing visibly beats silently following the page-title role.
+    throw new Error('PageHeader no longer accepts titleFont: pass title_font, or omit it to follow the app page-title role.');
+  }
   const visibleActions = normalizeActions(actions);
 
   return (

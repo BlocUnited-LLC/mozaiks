@@ -176,35 +176,70 @@ def test_an_app_with_schema_page_routes_without_ids_composes_with_a_ui_contribut
         ]}], {})
 
 
-def test_the_functional_route_check_accepts_the_shells_core_components() -> None:
-    """A composed route to a shell core component needs no ui/index.js registration in the functional check
-    either, while a route to a component nobody registers is still reported."""
+def test_the_functional_route_check_accepts_only_the_shells_routable_core_pages() -> None:
+    """A route to a routable core page needs no ui/index.js registration in the functional check; a route to a
+    core component that is not a page (a transition screen, the token tab, a usage panel) or to a component
+    nobody registers is still reported."""
     from mozaiksai.core.validation.functional_generated_app import scan_functional_generated_app
     from mozaiksai.core.workflow.generator_support.ui_registry_composition import (
         SHELL_CORE_COMPONENTS,
+        SHELL_ROUTE_COMPONENTS,
     )
 
-    pages = [{"path": f"/core{index}", "component": name} for index, name in enumerate(sorted(SHELL_CORE_COMPONENTS - {"SchemaPage"}))]
-    pages.append({"path": "/reports", "component": "ReportsPage"})
+    routable = sorted(SHELL_ROUTE_COMPONENTS - {"SchemaPage"})
+    refused = sorted(SHELL_CORE_COMPONENTS - SHELL_ROUTE_COMPONENTS) + ["ReportsPage"]
+    pages = [{"path": f"/page{index}", "component": name} for index, name in enumerate(routable + refused)]
     files = {"app.json": json.dumps({"appName": "Core"}), "ui/route_manifest.json": json.dumps({"pages": pages})}
     missing = [d for d in scan_functional_generated_app(files) if d.code == "MISSING_ROUTE_COMPONENT"]
-    assert len(missing) == 1 and "ReportsPage" in missing[0].message, [d.message for d in missing]
+    reported = {name for name in routable + refused if any(repr(name) in d.message for d in missing)}
+    assert reported == set(refused), [d.message for d in missing]
+
+
+def test_the_composer_keeps_a_route_to_each_routable_core_page_and_refuses_the_other_core_components() -> None:
+    """Every routable core page composes beside a UI-contributing pack without a barrel registration; each core
+    component that is not a page is refused like any unregistered component."""
+    from mozaiksai.core.workflow.generator_support.ui_registry_composition import (
+        SHELL_CORE_COMPONENTS,
+        SHELL_ROUTE_COMPONENTS,
+        compose_ui_registry,
+    )
+
+    files, contribution = _greetings_resolution()
+    routes = [{"id": f"core-{name.lower()}", "path": f"/core/{name.lower()}", "component": name, "schema": "greetings"}
+              for name in sorted(SHELL_ROUTE_COMPONENTS)]
+    app = {"owner": "app:generated_files", "files": [
+        {"filename": "ui/route_manifest.json", "content": json.dumps({"pages": routes})},
+    ]}
+    composed = compose_ui_registry([app, contribution], files)
+    pages = json.loads(composed["ui/route_manifest.json"])["pages"]
+    for route in routes:
+        assert route in pages, route
+        assert route["component"] not in composed["ui/index.js"]
+    for name in sorted(SHELL_CORE_COMPONENTS - SHELL_ROUTE_COMPONENTS):
+        manifest = {"pages": [{"id": "screen", "path": "/screen", "component": name}]}
+        with pytest.raises(ValueError, match=f"Unregistered route component: {name}"):
+            compose_ui_registry([{"owner": "app:generated_files", "files": [
+                {"filename": "ui/route_manifest.json", "content": json.dumps(manifest)},
+            ]}, contribution], files)
 
 
 def test_the_composer_and_scanner_accept_exactly_the_shells_core_components() -> None:
-    """One definition of the shell's core route components, matching chat-ui's CORE_COMPONENTS."""
+    """One definition of the shell's core components, matching chat-ui's CORE_COMPONENTS, and of the routable
+    subset composition and the scanner accept."""
     import re
 
     from factory_app.workflows.AppGenerator.tools import generated_bundle_scanner as scanner
     from mozaiksai.core.workflow.generator_support.ui_registry_composition import (
         SHELL_CORE_COMPONENTS,
+        SHELL_ROUTE_COMPONENTS,
     )
 
     source = (REPO_ROOT / "chat-ui" / "src" / "registry" / "coreComponents.js").read_text(encoding="utf-8")
     declared = re.search(r"export const CORE_COMPONENTS = \[([^\]]*)\]", source)
     assert declared is not None
     assert SHELL_CORE_COMPONENTS == frozenset(re.findall(r"'([A-Za-z]+)'", declared.group(1)))
-    assert scanner._SHELL_CORE_COMPONENTS is SHELL_CORE_COMPONENTS
+    assert SHELL_ROUTE_COMPONENTS == {"ChatPage", "SchemaPage", "ProfilePage"} <= SHELL_CORE_COMPONENTS
+    assert scanner._SHELL_ROUTE_COMPONENTS is SHELL_ROUTE_COMPONENTS
 
 
 def _greetings_resolution() -> tuple[dict[str, str], dict[str, Any]]:

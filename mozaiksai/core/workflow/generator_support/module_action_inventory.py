@@ -229,17 +229,16 @@ def managed_pack_contracts(context_variables: Any) -> list[dict[str, Any]]:
     authority recorded). A resolved pack is managed when its own context
     declares ``managed_capability``, whatever the row claims, as the bundle
     scanner decides, and its declarations come from the verified source's
-    declared contract assets. A ``managed_capability`` row that selects no pack
-    is read from the ``operator_contracts`` the trusted build context projected.
+    declared contract assets. A row that claims ``managed_capability`` always
+    claims a pack, so it either verifies or refuses.
     A row's own inline ``facades`` are never read. Its consumers enforce what
     a managed pack owns (surface ownership, managed data owners, facade
-    actions), so a managed row the resolver refuses is never silently
+    actions), so a row claiming ``managed_capability`` that the resolver refuses is never silently
     omitted: this raises ``ValueError`` with the resolver's diagnostic.
     """
     if context_variables is None:
         return []
     packs = [dict(pack) for pack in detach(context_variables.get("capability_packs")) or [] if isinstance(pack, Mapping)]
-    contracts = detach(context_variables.get("operator_contracts")) or []
     surface_map = detach(context_variables.get("design_surface_map")) or {}
     referenced = {
         pack_id for surface in surface_map.get("surfaces") or []
@@ -267,22 +266,10 @@ def managed_pack_contracts(context_variables: Any) -> list[dict[str, Any]]:
                 f"Selected managed pack '{_row_pack_id(pack) or '<unnamed>'}' cannot be verified, so what it "
                 f"owns cannot be read: {refusal}"
             )
-        if entry is not None:
-            if entry.get("capability_source") != "managed_capability":
-                continue  # The pack's own declaration decides, never the row's label.
-            root = Path(entry["source_path"])
-            result.extend(load_contract_descriptors(root, load_build_context(root / "context.yaml")))
-            continue
-        if not claims_managed:
-            continue
-        pack_id = _row_pack_id(pack)
-        result.extend(
-            contract for contract in contracts
-            if pack_id and (
-                contract.get("contract_id") == pack_id
-                or (contract.get("canonical_provider") or {}).get("provider_pack_id") == pack_id
-            )
-        )
+        if entry is None or entry.get("capability_source") != "managed_capability":
+            continue  # Selects no pack, or the pack's own declaration is not managed.
+        root = Path(entry["source_path"])
+        result.extend(load_contract_descriptors(root, load_build_context(root / "context.yaml")))
     return result
 
 
@@ -353,8 +340,7 @@ def _selected_packs(context_variables: Any) -> list[_SelectedPack]:
     source, and its own ``context.yaml`` says whether it is active. A row the
     resolver refuses contributes nothing: no unverified source or contract
     stands in for it. A row that selects no pack is read from the
-    ``operator_contracts`` the build context projected, the same way the
-    managed facade inventory resolves it.
+    ``operator_contracts`` the build context projected.
     """
     from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
         pack_identity,

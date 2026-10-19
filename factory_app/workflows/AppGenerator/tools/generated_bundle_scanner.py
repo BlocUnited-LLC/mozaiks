@@ -102,7 +102,7 @@ from mozaiksai.core.workflow.generator_support.persistence_artifacts import (
 from mozaiksai.core.workflow.generator_support.subscription_data_contract import (
     ensure_subscription_assignment_stores,
 )
-from mozaiksai.core.workflow.generator_support.ui_registry_composition import SHELL_CORE_COMPONENTS
+from mozaiksai.core.workflow.generator_support.ui_registry_composition import SHELL_ROUTE_COMPONENTS
 
 # ---------------------------------------------------------------------------
 # Patterns
@@ -220,8 +220,8 @@ _PLATFORM_EVENT_NAMESPACES = ("hosted.", "platform.", "mozaiks.")
 # Shell-built-in component names registered in chat-ui/src/registry/coreComponents.js.
 # These components are always available in the Mozaiks shell without a custom JSX file.
 # Route manifest entries referencing these names do NOT require a ui/pages/custom/*.jsx file.
-# The shell's core route components, shared with UI registry composition.
-_SHELL_CORE_COMPONENTS = SHELL_CORE_COMPONENTS
+# The shell's routable core pages, shared with UI registry composition.
+_SHELL_ROUTE_COMPONENTS = SHELL_ROUTE_COMPONENTS
 
 
 def _is_scannable(path: str) -> bool:
@@ -1964,7 +1964,7 @@ def _scan_route_manifest_component_files(files_map: dict[str, str]) -> list[str]
         if not component:
             continue
         # Shell-built-in components are always available — no custom JSX file required.
-        if component in _SHELL_CORE_COMPONENTS or component in APP_AUTH_COMPONENTS:
+        if component in _SHELL_ROUTE_COMPONENTS or component in APP_AUTH_COMPONENTS:
             continue
         if not any(
             path.startswith("ui/pages/custom/") and path.endswith(".jsx")
@@ -2566,13 +2566,13 @@ def scan_generated_bundle(
     unresolvable, unverified or mismatched pack selection is the only error
     returned. Every pack-aware check then reads only the resolved rows and
     their verified contracts. When ``resolved_capability_packs`` is a list,
-    the verified identity ``{pack_id, version, digest, source, resolution}``
+    the verified identity ``{pack_id, version, digest, source, resolution, authority}``
     of each selected pack is appended to it.
 
     Checks applied per file type:
     - All scannable files: raw provider secret key literals.
     - .mozaiks/pack_provenance.json: schema validation when present, and each
-      resolved pack's recorded version and digest.
+      resolved pack's recorded version (the digest is a same-host value and is not compared).
     - Template-owned outputs of each resolved pack: present, with the verified bytes.
     - ui/route_manifest.json: required path/component fields; component file existence.
     - ui/pages/*.yaml (schema-native): required fields, canonical page_type, canonical primitives,

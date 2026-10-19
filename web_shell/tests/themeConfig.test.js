@@ -238,3 +238,17 @@ test('compact platform changes preserve captured title choices and explicit titl
   await assert.rejects(getTheme('editorial'), /ui.page.title.size/);
   assert.equal(getCachedTheme('editorial'), null);
 });
+
+test('PageHeader refuses the removed titleFont alias instead of silently following the title role', () => {
+  const bundle = buildSync({
+    entryPoints: [fileURLToPath(new URL('../../chat-ui/src/ui/primitives/PageHeader.jsx', import.meta.url))],
+    bundle: true, platform: 'node', format: 'cjs', jsx: 'automatic', write: false,
+    nodePaths: [fileURLToPath(new URL('../node_modules', import.meta.url))],
+  });
+  const module = { exports: {} };
+  new Function('module', 'exports', 'require', bundle.outputFiles[0].text)(module, module.exports, () => ({}));
+  const { PageHeader } = module.exports;
+  assert.throws(() => PageHeader({ title: 'Billing', titleFont: 'body' }), /no longer accepts titleFont/);
+  assert.ok(PageHeader({ title: 'Billing', title_font: 'body' }));
+  assert.ok(PageHeader({ title: 'Billing' }));
+});

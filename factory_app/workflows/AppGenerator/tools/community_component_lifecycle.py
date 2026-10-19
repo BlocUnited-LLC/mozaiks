@@ -34,6 +34,7 @@ from .resolve_managed_capability_templates import (
     _file_owner_map,
     _read_pack_context,
     _read_pack_contract,
+    pre_contract_rule_digest,
     resolve_managed_capability_templates,
     resolve_templates_for_pack,
     verified_pack_data_contracts,
@@ -168,7 +169,15 @@ def install_verified_local_pack(
     pack_source_path: str | Path,
     build_context_root: str | Path,
 ) -> InstallResult:
-    """Verify a local pack and pin it in workspace build-context state."""
+    """Verify a local pack and pin it in workspace build-context state.
+
+    Installing the source a component was installed from again re-pins it
+    (``repinned``) when its installed state was recorded under the earlier
+    digest rule, which left out a ``contract.yaml`` the pack's context does
+    not declare: same version, same source, and the recorded digest equals the
+    source's digest under that rule. Any other change goes through the upgrade
+    plan.
+    """
 
     root = Path(build_context_root).resolve()
     source_path = Path(pack_source_path).resolve()
@@ -177,7 +186,14 @@ def install_verified_local_pack(
     state = load_installed_components(root)
     installed = component_by_id(state)
     existing = installed.get(pack_id)
-    if existing and existing != candidate:
+    sources = load_installed_component_sources(root)
+    repin = bool(
+        existing and existing != candidate
+        and existing["version"] == candidate["version"]
+        and sources.get(pack_id) and Path(sources[pack_id]).resolve() == source_path
+        and pre_contract_rule_digest(source_path, pack_id) == existing["digest"]
+    )
+    if existing and existing != candidate and not repin:
         raise CommunityComponentLifecycleError(
             f"Pack '{pack_id}' is already installed at {existing['version']} {existing['digest']}; "
             "use the deterministic upgrade plan instead."
@@ -186,11 +202,10 @@ def install_verified_local_pack(
     _ensure_dependencies_satisfied(candidate, {k: v for k, v in installed.items() if k != pack_id})
     installed[pack_id] = candidate
     state_path = write_installed_components(root, {"components": list(installed.values())})
-    sources = load_installed_component_sources(root)
     sources[pack_id] = str(source_path)
     source_state_path = write_installed_component_sources(root, sources)
     return InstallResult(
-        status="installed" if existing is None else "unchanged",
+        status="installed" if existing is None else "repinned" if repin else "unchanged",
         pack_id=pack_id,
         version=candidate["version"],
         digest=candidate["digest"],
@@ -399,11 +414,16 @@ def _plan_upgrade(
     # verify to the version and digest installed state pinned, as installed resolution requires.
     old_metadata = verify_pack_integrity(old_source, pack_id)
     if (old_metadata["version"], old_metadata["digest"]) != (current["version"], current["digest"]):
-        cause = (
-            "its bytes changed since installation (an in-place edit, or a re-checkout with other line endings)"
-            if old_metadata["version"] == current["version"]
-            else f"it is now version {old_metadata['version']}"
-        )
+        if old_metadata["version"] != current["version"]:
+            cause = f"it is now version {old_metadata['version']}"
+        elif pre_contract_rule_digest(old_source, pack_id) == current["digest"]:
+            raise CommunityComponentLifecycleError(
+                f"Installed pack '{pack_id}' was pinned under the earlier digest rule, which left out its "
+                "contract.yaml (not a declared asset); its source is unchanged. Re-pin it by installing the same "
+                f"source again ({old_source}), then plan the upgrade. Nothing was changed."
+            )
+        else:
+            cause = "its bytes changed since installation (an in-place edit, or a re-checkout with other line endings)"
         raise CommunityComponentLifecycleError(
             f"Installed pack '{pack_id}' source {old_source} no longer matches its pinned state (installed "
             f"{current['version']} {current['digest']}, source now {old_metadata['version']} "

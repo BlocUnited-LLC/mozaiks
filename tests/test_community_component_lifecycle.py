@@ -235,6 +235,60 @@ def test_upgrade_refuses_an_installed_source_changed_in_place(tmp_path: Path) ->
         plan_component_upgrade(build_context_root=build_context_root, candidate_pack_source_path=source)
 
 
+def test_a_component_pinned_under_the_earlier_digest_rule_is_repinned_by_installing_its_source_again(tmp_path: Path) -> None:
+    """A 0.2.0 install of a pack whose contract.yaml is not a declared asset recorded a digest without it. The
+    unchanged source no longer verifies to that pin: the upgrade names the cause and the re-pin step, installing
+    the same source again re-pins it, and the upgrade then plans. Another source at the same version is not
+    re-pinned."""
+    import json as _json
+
+    from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
+        CommunityComponentLifecycleError,
+        plan_component_upgrade,
+    )
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        pre_contract_rule_digest,
+        verify_pack_integrity,
+    )
+
+    source = tmp_path / "source" / "greetings"
+    copytree(GREETINGS, source)
+    manifest = source / "context.yaml"
+    text = manifest.read_text(encoding="utf-8")
+    declared = "  - path: contract.yaml\n    kind: contract\n"
+    assert declared in text
+    manifest.write_text(text.replace(declared, ""), encoding="utf-8")
+    build_context_root = tmp_path / "build_context"
+    installed = _install(source, build_context_root)
+    earlier = pre_contract_rule_digest(source, "greetings")
+    current = verify_pack_integrity(source, "greetings")["digest"]
+    assert earlier is not None and earlier != current
+    # Installed state as 0.2.0 recorded it: the digest without the undeclared contract.yaml.
+    state = Path(installed.installed_state_path)
+    recorded = _json.loads(state.read_text(encoding="utf-8"))
+    for component in recorded["components"]:
+        component["digest"] = earlier
+    state.write_text(_json.dumps(recorded), encoding="utf-8")
+
+    candidate = tmp_path / "candidate" / "greetings"
+    copytree(source, candidate)
+    candidate_manifest = candidate / "context.yaml"
+    candidate_manifest.write_text(
+        candidate_manifest.read_text(encoding="utf-8").replace('version: "0.1.0"', 'version: "0.2.0"'), encoding="utf-8",
+    )
+    with pytest.raises(CommunityComponentLifecycleError, match="earlier digest rule.*installing the same source again"):
+        plan_component_upgrade(build_context_root=build_context_root, candidate_pack_source_path=candidate)
+
+    other = tmp_path / "other" / "greetings"
+    copytree(source, other)
+    with pytest.raises(CommunityComponentLifecycleError, match="already installed"):
+        _install(other, build_context_root)
+    result = _install(source, build_context_root)
+    assert (result.status, result.digest) == ("repinned", current)
+    plan = plan_component_upgrade(build_context_root=build_context_root, candidate_pack_source_path=candidate)
+    assert (plan.status, plan.from_version, plan.to_version) == ("ready", "0.1.0", "0.2.0")
+
+
 def test_upgrade_plan_detects_workspace_owned_file_collision(tmp_path: Path) -> None:
     from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
         plan_component_upgrade,

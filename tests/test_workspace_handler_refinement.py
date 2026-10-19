@@ -2917,7 +2917,12 @@ async def _admit(tmp_path, packs, applied, *, store=None, scope_origin=None):
 async def test_pack_ownership_is_enforced_for_every_authority_the_parent_selected(
     tmp_path, monkeypatch, selection, case, code,
 ):
-    """Pinned, installed and catalog selections keep their identities through admission, so every check applies.
+    """Catalog, pinned, installed-descriptor and recorded workspace rows keep their identities through admission.
+
+    Installed-descriptor rows verify through the pins they carry (admission
+    reads saved rows with no build_context_root), so each selection reaches
+    admission through the authority _SELECTION_AUTHORITIES names, and every
+    check applies.
 
     The parent's rows are verified once, as saved (pins and authority kept),
     and their declared outputs decide ownership: a pinned external pack's
@@ -2948,7 +2953,8 @@ async def test_pack_ownership_is_enforced_for_every_authority_the_parent_selecte
 @pytest.mark.asyncio
 @pytest.mark.parametrize("selection", sorted(_PACK_SELECTIONS))
 async def test_an_authorized_handler_change_is_admitted_for_every_authority(tmp_path, monkeypatch, selection):
-    """The catalog Messaging pack, and the same pack pinned, installed or recorded from the workspace registry, admit
+    """The catalog Messaging pack, and the same pack pinned, from installed-descriptor rows or recorded from the
+    workspace registry, admit
     the explicit handler extension."""
     from mozaiksai.control_plane.implementations.coding_worker import parent_workspace_pack_paths
 

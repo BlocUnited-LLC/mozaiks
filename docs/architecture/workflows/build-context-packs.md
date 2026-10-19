@@ -178,14 +178,19 @@ owned template files. Several selected packs may declare the same shared root
 (`data/contract.json`, `ui/index.js`, `ui/route_manifest.json`); any other
 declared output path belongs to exactly one selected pack.
 
-A composed route may target one of the shell's own core components
-(`SchemaPage`, `ChatPage`, `ProfilePage` and the others chat-ui's
-`CORE_COMPONENTS` lists) without a `ui/index.js` registration, and a route may
-omit its `id`: composition then matches it by path and keeps it as written.
+A composed route may target one of the shell's routable core pages
+(`SchemaPage`, `ChatPage`, `ProfilePage`) without a `ui/index.js`
+registration, and a route may omit its `id`: composition then matches it by
+path and keeps it as written.
 An id-less route's path is its identity, so a revision that changes the path
-adds a route rather than moving it (give the route an id to move it), and an
-id may not start with `path:`. Any other route component must be registered
-by a contribution.
+adds a route rather than moving it, and a route with an id at the same path
+conflicts with the carried id-less one: an existing id-less route keeps its
+path once it is composed beside a pack. Declare a route with an id from the
+start to make it movable. An id may not start with `path:`. Only the shell's
+routable core pages (`ChatPage`, `SchemaPage`, `ProfilePage`) need no
+registration; the other core components (transition screens, the token tab,
+the usage panels) are not route pages. Any other route component must be
+registered by a contribution.
 
 The resolver never materializes a shared root as one pack's file, whoever calls
 it. It leaves the root out of its output and lists it under `composed_outputs`
@@ -587,7 +592,9 @@ An upgrade compares the app with the installed source only after that
 source verifies to the version and digest installed state pinned; a source
 changed in place since installation refuses the upgrade, and nothing
 changes. Restore the installed source and plan the upgrade from a separate
-candidate directory.
+candidate directory. A component pinned under the earlier digest rule, which
+left out a `contract.yaml` the context does not declare, is re-pinned by
+installing the same source again; the refusal names that step.
 
 When the app's provenance claims any shared root as a pack's exclusive file,
 whichever pack claims it and in any entry order, the plan blocks with
@@ -870,7 +877,8 @@ Migration items for the mozaiks-app owner (not changed in this repository):
   has no lifecycle upgrade;
 - bundles built before shared-root composition, whose provenance claims a
   shared root as an exclusive file, fail every scan (the hosted gate included)
-  until they are reassembled or regenerated.
+  until they are reassembled (a regeneration only for an app with no accepted
+  build).
 
 ## Resolution
 
