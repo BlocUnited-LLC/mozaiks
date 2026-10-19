@@ -472,8 +472,10 @@ Before materialization, a selected local pack must pass deterministic checks for
 - dependency declarations and exact dependency versions when declared;
 - canonical content digest.
 
-The digest is one `sha256:` value computed from `context.yaml` and every
-declared asset file. It excludes timestamps, absolute paths, worktree location,
+The digest is one `sha256:` value computed from `context.yaml`,
+`contract.yaml` (always, declared or not; a pack without one records its
+absence) and every declared asset file; see the pack identity rules below.
+It excludes timestamps, absolute paths, worktree location,
 and transient generated metadata. The same pack content produces the same
 digest; material pack-content changes produce a different digest. It hashes raw
 file bytes, so a checkout's line endings are part of it: a pin or recorded
@@ -594,11 +596,13 @@ changed in place since installation refuses the upgrade, and nothing
 changes. Restore the installed source and plan the upgrade from a separate
 candidate directory.
 
-A component pinned under the earlier digest rule, which covered neither a
-`contract.yaml` the context does not declare nor the absence of one, cannot
-show whether, or with which contract, it was installed. The upgrade plan, a
-repeated installation and installed resolution all refuse it, whether its
-contract was since edited, added or deleted, and nothing changes. The refusal compares what the
+A component whose pack does not declare its `contract.yaml`, or has none,
+and that was pinned under the earlier digest rule (which covered neither an
+undeclared contract nor the absence of one) cannot show whether, or with
+which contract, it was installed. The upgrade plan, a repeated installation
+and installed resolution all refuse it, whether its contract was since
+edited, added or deleted, and nothing changes. A pin of a pack that declares
+its contract verifies as before, because both rules digest that pack alike. The refusal compares what the
 pin recorded (the version, the declared files and the capabilities they
 declare, and the dependencies it read from the contract) and says that this
 does not prove the contract's ownership, provided capabilities or
@@ -741,6 +745,9 @@ does not declare it as an asset; a pack without one records that absence, so
 adding or deleting a contract changes the digest) and every declared asset,
 so it is a
 same-host identity: a CRLF and an LF checkout of the same pack have different digests.
+A symbolic link inside a pack is digested under its target's path, so
+retargeting a link from one covered file to another is not detected; this
+is a known limit, as it was in 0.2.0.
 Row-level digest pins (and installed-state pins) keep comparing against
 `compute_pack_digest` of the resolved source on the validating host, so a pin
 is meaningful on the host and checkout that recorded it. Across hosts, the

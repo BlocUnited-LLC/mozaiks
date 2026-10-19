@@ -342,12 +342,15 @@ This project follows a practical pre-1.0 changelog format:
   it. A source changed in place since installation refuses the upgrade, and
   nothing changes, instead of recording a false upgrade over files still
   materialized from the old content; the refusal says whether the version or
-  only the bytes changed. A component pinned under the earlier digest rule,
-  which covered neither an undeclared `contract.yaml` nor the absence of
-  one, is refused by the upgrade plan, a repeated installation and installed
+  only the bytes changed. A component whose pack does not declare its
+  `contract.yaml`, or has none, and that was pinned under the earlier digest
+  rule (which covered neither an undeclared contract nor the absence of one)
+  is refused by the upgrade plan, a repeated installation and installed
   resolution alike, whether its contract was since edited, added or deleted,
-  and nothing changes. The pin cannot show whether, or with which contract,
-  the component was installed: the refusal compares what it recorded
+  and nothing changes. A 0.2.0 pin of a pack that declares its contract
+  verifies as before, because both rules digest that pack alike. The refused
+  pin cannot show whether, or with which contract, the component was
+  installed: the refusal compares what it recorded
   (version, declared files and their capabilities, and the dependencies it
   read from the contract), says that this does not prove the contract's
   ownership, provided capabilities or restrictions unchanged, and names the
@@ -376,6 +379,10 @@ This project follows a practical pre-1.0 changelog format:
   provenance that claims one blocks the upgrade until the app is
   reassembled.
 - `save_app_schema`'s write of its uncomposed render into `generated_files`.
+- Verification of a 0.2.0 Community Component pin of a pack whose
+  `contract.yaml` is undeclared or absent: that pin covered neither the
+  contract nor its absence, so it is refused until the pack is installed
+  from its verified source into a build context without that pin.
 - The bundle scanner's acceptance of a route to one of the shell's non-page
   core components (the launcher, confirm and completion screens, the token
   tab, the usage panels) without a custom page file; only the routable core
