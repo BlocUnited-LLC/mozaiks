@@ -34,6 +34,7 @@ from .resolve_managed_capability_templates import (
     _file_owner_map,
     _read_pack_context,
     _read_pack_contract,
+    _refuse_linked_pack_input,
     pre_contract_rule_digest,
     resolve_managed_capability_templates,
     resolve_templates_for_pack,
@@ -88,7 +89,9 @@ class UpgradePlan:
 
 
 def _pack_id_from_context(pack_source_path: Path) -> str:
-    context = yaml.safe_load((pack_source_path / "context.yaml").read_text(encoding="utf-8")) or {}
+    context_path = pack_source_path / "context.yaml"
+    _refuse_linked_pack_input(pack_source_path, context_path)
+    context = yaml.safe_load(context_path.read_text(encoding="utf-8")) or {}
     if not isinstance(context, dict):
         raise CommunityComponentLifecycleError(f"Pack context must be a mapping: {pack_source_path / 'context.yaml'}")
     raw_pack = context.get("pack")

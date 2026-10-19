@@ -4,6 +4,8 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { build } from 'vite';
+import postcss from 'postcss';
+import tailwindcss from '@tailwindcss/postcss';
 import configureShell from '../vite.config.js';
 
 const shellRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -23,6 +25,8 @@ test('the actual shell config compiles JavaScript sources and preserves Vite ass
     return filename;
   };
   write('app/app.json', JSON.stringify({ app_id: 'source-filter-fixture' }));
+  const uniqueClass = ['bg-[#12', '3abc]'].join('');
+  const tailwindFixture = write('app/ui/TailwindFixture.jsx', `export default () => <div className="${uniqueClass}" />;`);
   fs.mkdirSync(workflowRoot);
   const environment = {
     PLATFORM_PATH: workspace,
@@ -41,6 +45,54 @@ test('the actual shell config compiles JavaScript sources and preserves Vite ass
   const config = await configureShell({ command: 'build', mode: 'test' });
   const plugin = config.plugins.find((entry) => entry.name === 'jsx-in-js');
   assert.ok(plugin);
+
+  await t.test('Tailwind receives exact real files instead of an unscanned junction root', async () => {
+    const sourcePlugin = config.plugins.find((entry) => entry.name === 'mozaiks-tailwind-sources');
+    assert.ok(sourcePlugin);
+    const watched = [];
+    const stylesheet = '@import "tailwindcss" source(none);';
+    const transformed = sourcePlugin.transform.call(
+      { addWatchFile(source) { watched.push(source); } },
+      stylesheet,
+      path.join(shellRoot, 'styles.css'),
+    );
+    assert.ok(watched.includes(fs.realpathSync(tailwindFixture)));
+    assert.match(transformed, new RegExp(`@source .*${path.basename(tailwindFixture)}`));
+    const result = await postcss([tailwindcss()]).process(transformed, { from: path.join(shellRoot, 'styles.css') });
+    assert.match(result.css, /\.bg-\\\[\\#123abc\\\]/);
+
+    const added = write('app/ui/AddedAfterStartup.jsx', 'export default () => <div className="max-w-[731px]" />;');
+    const refreshed = sourcePlugin.transform.call(
+      { addWatchFile() {} },
+      stylesheet,
+      path.join(shellRoot, 'styles.css'),
+    );
+    assert.match(refreshed, new RegExp(`@source .*${path.basename(added)}`));
+
+    const callbacks = {};
+    const invalidated = [];
+    const messages = [];
+    const styleModule = {};
+    sourcePlugin.configureServer({
+      watcher: {
+        add(watchedRoots) { assert.ok(watchedRoots.includes(fs.realpathSync(path.join(appRoot, 'ui')))); },
+        on(event, callback) { callbacks[event] = callback; },
+        off() {},
+      },
+      moduleGraph: {
+        getModulesByFile(filename) {
+          assert.equal(filename, path.join(shellRoot, 'styles.css').replaceAll('\\', '/'));
+          return new Set([styleModule]);
+        },
+        invalidateModule(module) { invalidated.push(module); },
+      },
+      ws: { send(message) { messages.push(message); } },
+      httpServer: { once() {} },
+    });
+    callbacks.add(added);
+    assert.deepEqual(invalidated, [styleModule]);
+    assert.deepEqual(messages, [{ type: 'full-reload', path: '*' }]);
+  });
   const jsx = 'export default function View() { return <section>jsx-preserved</section>; }';
   const sources = [
     path.join(appRoot, 'ui', 'View.js'),

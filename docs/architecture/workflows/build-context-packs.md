@@ -602,8 +602,9 @@ undeclared contract nor the absence of one) cannot show whether, or with
 which contract, it was installed. The upgrade plan, a repeated installation
 and installed resolution all refuse it, whether its contract was since
 edited, added or deleted, and nothing changes. A pin of a pack that declares
-its contract and holds no link verifies as before, because both rules digest
-that pack alike. The refusal compares what the
+its contract and has the same readable, regular-file inputs accepted by the
+current rules verifies as before, because both rules digest that pack alike.
+The refusal compares what the
 pin recorded (the version, the declared files and the capabilities they
 declare, and the dependencies it read from the contract) and says that this
 does not prove the contract's ownership, provided capabilities or
@@ -747,10 +748,12 @@ does not declare it as an asset; a pack without one records that absence, so
 adding or deleting a contract changes the digest) and every declared asset,
 so it is a
 same-host identity: a CRLF and an LF checkout of the same pack have different digests.
-Every input under a pack's directory must be a regular file or directory.
+Every included input under a pack's directory must be a regular file or directory.
 A link (a symbolic link, or a Windows junction or other reparse point) at
 `context.yaml`, `contract.yaml`, a declared asset, or anywhere under a
-declared directory is an integrity diagnostic. A link is digested under its
+declared directory that is not excluded as dot-named, `__pycache__` or compiled
+Python content is an integrity diagnostic. Those excluded entries are ignored
+by verification, planning and materialization. A link is digested under its
 target's path and read through it, so retargeting one between inputs the
 pack already covers would change its effective configuration (a linked
 `context.yaml` changes its `capability_source`) or a rendered file, or drop

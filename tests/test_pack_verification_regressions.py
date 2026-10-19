@@ -1800,6 +1800,56 @@ def test_a_regular_pack_walks_the_same_files_as_before_links_were_refused(tmp_pa
     assert walked == expected
 
 
+def test_pack_input_outside_the_root_is_an_integrity_diagnostic(tmp_path):
+    """The link guard never leaks Path.relative_to's raw ValueError to scanners or lifecycle callers."""
+    root = tmp_path / "pack"
+    root.mkdir()
+    with pytest.raises(resolver.PackIntegrityError, match="must stay inside the pack directory"):
+        resolver._refuse_linked_pack_input(root, tmp_path / "alias" / "asset.yaml")
+
+
+def test_link_probe_os_errors_do_not_escape_as_raw_platform_errors(tmp_path, monkeypatch):
+    """Windows rejects some legal manifest strings at lstat time; the resolver still owns the diagnostic."""
+    candidate = tmp_path / "pack" / "bad-name"
+    candidate.parent.mkdir()
+    real_lstat = Path.lstat
+    invalid_name = OSError(123, "The filename, directory name, or volume label syntax is incorrect")
+    invalid_name.winerror = 123
+
+    def lstat(path):
+        if path == candidate:
+            raise invalid_name
+        return real_lstat(path)
+
+    monkeypatch.setattr(Path, "lstat", lstat)
+    assert resolver._is_link(candidate) is False
+
+
+def test_link_probe_permission_errors_fail_closed(tmp_path, monkeypatch):
+    """An unreadable metadata probe is not evidence that a pack input is a regular path."""
+    candidate = tmp_path / "pack" / "unreadable"
+    candidate.parent.mkdir()
+    real_lstat = Path.lstat
+
+    def lstat(path):
+        if path == candidate:
+            raise PermissionError(13, "Permission denied", str(path))
+        return real_lstat(path)
+
+    monkeypatch.setattr(Path, "lstat", lstat)
+    with pytest.raises(resolver.PackIntegrityError, match="metadata cannot be read"):
+        resolver._is_link(candidate)
+
+
+def test_dot_named_template_outputs_are_not_planning_inputs():
+    """Planning reads the same regular-file closure that verification and materialization cover."""
+    from mozaiksai.core.workflow.generator_support import module_action_inventory as inventory
+
+    assert inventory._bundle_relative_path("modules/.hidden/module.yaml") is None
+    assert inventory._bundle_relative_path("modules/cache/__pycache__/module.yaml") is None
+    assert inventory._bundle_relative_path("modules/visible/module.yaml") == "modules/visible/module.yaml"
+
+
 def test_a_workspace_pack_without_an_identity_from_acceptance_cannot_be_recorded(tmp_path, monkeypatch):
     workspace = tmp_path / "workspace" / "build_context"
     _workspace_operator_pack(workspace)

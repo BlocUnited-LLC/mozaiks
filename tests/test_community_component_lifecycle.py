@@ -515,6 +515,24 @@ def test_a_link_in_an_installed_source_is_refused_before_the_pack_is_used(tmp_pa
         assert state.read_bytes() == before
 
 
+def test_lifecycle_pack_id_read_refuses_a_linked_context_first(tmp_path: Path) -> None:
+    """Install and upgrade identification cannot parse context.yaml through a link before verification."""
+    from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
+        _pack_id_from_context,
+    )
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        PackIntegrityError,
+    )
+
+    source = tmp_path / "greetings"
+    copytree(GREETINGS, source)
+    original = source / "context-original.yaml"
+    (source / "context.yaml").replace(original)
+    _real_link(source / "context.yaml", original)
+    with pytest.raises(PackIntegrityError, match="not a link"):
+        _pack_id_from_context(source)
+
+
 def test_a_fresh_installation_pins_the_current_contract(tmp_path: Path) -> None:
     """The boundary the refusal names: installing the verified source into a build context without the old pin
     verifies and pins the whole pack, contract.yaml included."""

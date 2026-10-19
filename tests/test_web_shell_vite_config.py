@@ -161,7 +161,7 @@ class TestTailwindV4PackagedSourceDetection:
             "@config. The JavaScript content contract can hang packaged "
             "production builds under Tailwind v4."
         )
-        assert '@source "./.mozaiks-tailwind-sources";' in styles
+        assert ".mozaiks-tailwind-sources" not in styles
         assert '@source not "./node_modules";' in styles
         assert "@theme" in styles
         assert "--color-primary: hsl(var(--mz-primary));" in styles
@@ -170,27 +170,22 @@ class TestTailwindV4PackagedSourceDetection:
         assert "--font-chat-body:" in styles
         assert "--border-width-3: 3px;" in styles
 
-    def test_vite_config_populates_tailwind_source_links(self) -> None:
+    def test_vite_config_registers_exact_tailwind_source_files(self) -> None:
         source = _vite_config()
-        assert "ensureTailwindSourceLinks" in source
-        assert "tailwindSourceLinkRoot" in source
-        assert "fs.symlinkSync" in source
-        assert "'.mozaiks-tailwind-sources'" in source
-        assert "['chat-ui-src', chatUiSrcRoot]" in source
-        assert "['factory-app-ui', path.resolve(factoryAppRoot, 'app/ui')]" in source
+        assert "tailwindSourceFiles" in source
+        assert "tailwindSourcePlugin" in source
+        assert "fs.symlinkSync" not in source
+        assert ".map((source) => `@source" in source
+        assert "chatUiSrcRoot" in source
+        assert "path.resolve(factoryAppRoot, 'app/ui')" in source
         # Admin pages are imported through app/ui/index.js but live beside it;
-        # without this link a class used only by an admin page (for example a
+        # without this source root a class used only by an admin page (for example a
         # card's hover:bg-card/50) is missing from the built stylesheet.
-        assert "['factory-app-admin', path.resolve(factoryAppRoot, 'app/admin')]" in source
-        assert "['platform-admin', path.resolve(platformAppDir, 'admin')]" in source
-        assert "['factory-workflows', factoryWorkflowsRoot]" in source
-        assert "['platform-ui', path.resolve(platformAppDir, 'ui')]" in source
-        assert "['platform-workflows', platformWorkflowRoot]" in source
-        assert re.search(
-            r"viteFsAllow\s*=\s*Array\.from\(new Set\(\[.*tailwindSourceLinkRoot",
-            source,
-            re.DOTALL,
-        )
+        assert "path.resolve(factoryAppRoot, 'app/admin')" in source
+        assert "path.resolve(platformAppDir, 'admin')" in source
+        assert "factoryWorkflowsRoot" in source
+        assert "path.resolve(platformAppDir, 'ui')" in source
+        assert "platformWorkflowRoot" in source
 
 
 # ── resolve.alias for React ─────────────────────────────────────────────────

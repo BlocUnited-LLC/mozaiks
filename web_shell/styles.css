@@ -4,12 +4,12 @@
    Tailwind v4 scans source files automatically by default. The web shell is
    often copied out of the Python package and built beside large dependency
    trees, so automatic detection can traverse the wrong build context. Keep
-   source detection explicit and let vite.config.js populate
-   .mozaiks-tailwind-sources with links to packaged chat UI, Factory UI and
-   admin pages, active app UI and admin pages, and workflow UI roots.
+   source detection explicit. vite.config.js appends one @source directive for
+   each real source file in the packaged chat UI, Factory UI/admin/workflows,
+   and active app UI/admin/workflows. Exact files work in installed Windows
+   layouts where Tailwind does not traverse directory junctions.
 */
 @source "./";
-@source "./.mozaiks-tailwind-sources";
 @source not "./node_modules";
 @source not "./dist";
 @source not "./test-results";

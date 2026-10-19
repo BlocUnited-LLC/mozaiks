@@ -95,40 +95,82 @@ function normalizeFaviconPath(value) {
   return out || 'favicon.ico';
 }
 
-function tailwindSourceLinkType(target) {
-  const stats = fs.statSync(target);
-  if (!stats.isDirectory()) return 'file';
-  return process.platform === 'win32' ? 'junction' : 'dir';
+const TAILWIND_SOURCE_EXTENSIONS = new Set(['.html', '.js', '.jsx', '.mdx', '.ts', '.tsx']);
+const TAILWIND_IGNORED_DIRECTORIES = new Set([
+  '__pycache__', 'dist', 'node_modules', 'playwright-report', 'test-results',
+]);
+
+export function tailwindSourceFiles(roots) {
+  const files = new Set();
+  const pending = roots
+    .filter((root) => root && fs.existsSync(root))
+    .map((root) => fs.realpathSync(root));
+  while (pending.length) {
+    const current = pending.pop();
+    const stat = fs.lstatSync(current);
+    if (stat.isSymbolicLink()) continue;
+    if (stat.isFile()) {
+      if (TAILWIND_SOURCE_EXTENSIONS.has(path.extname(current).toLowerCase())) {
+        files.add(fs.realpathSync(current));
+      }
+      continue;
+    }
+    if (!stat.isDirectory()) continue;
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      if (entry.name.startsWith('.') || TAILWIND_IGNORED_DIRECTORIES.has(entry.name)) continue;
+      pending.push(path.join(current, entry.name));
+    }
+  }
+  return [...files].sort();
 }
 
-function ensureTailwindSourceLinks(entries) {
-  const linkRoot = path.resolve(__dirname, '.mozaiks-tailwind-sources');
-  const required = process.env.MOZAIKS_REQUIRE_TAILWIND_SOURCE_LINKS === '1';
+function isTailwindSourceWithinRoots(filename, roots) {
+  if (!TAILWIND_SOURCE_EXTENSIONS.has(path.extname(filename).toLowerCase())) return false;
+  return roots.some((root) => {
+    const relative = path.relative(root, filename);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) return false;
+    return relative.split(path.sep).every(
+      (part) => part && !part.startsWith('.') && !TAILWIND_IGNORED_DIRECTORIES.has(part),
+    );
+  });
+}
 
-  try {
-    fs.mkdirSync(linkRoot, { recursive: true });
-    for (const name of fs.readdirSync(linkRoot)) {
-      fs.rmSync(path.join(linkRoot, name), { recursive: true, force: true });
-    }
-  } catch (error) {
-    if (required) throw error;
-    console.warn(`[mozaiks-web-shell] Failed to prepare Tailwind source links: ${error.message}`);
-    return linkRoot;
-  }
-
-  for (const [name, target] of entries) {
-    if (!target || !fs.existsSync(target)) continue;
-
-    try {
-      const linkPath = path.join(linkRoot, name);
-      fs.symlinkSync(fs.realpathSync(target), linkPath, tailwindSourceLinkType(target));
-    } catch (error) {
-      if (required) throw error;
-      console.warn(`[mozaiks-web-shell] Failed to link Tailwind source '${name}': ${error.message}`);
-    }
-  }
-
-  return linkRoot;
+export function tailwindSourcePlugin(roots) {
+  const stylesheet = path.resolve(__dirname, 'styles.css').replaceAll('\\', '/');
+  const watchedRoots = [...new Set(roots.filter(Boolean).flatMap((root) => {
+    const resolved = path.resolve(root);
+    return fs.existsSync(resolved) ? [resolved, fs.realpathSync(resolved)] : [resolved];
+  }))];
+  return {
+    name: 'mozaiks-tailwind-sources',
+    enforce: 'pre',
+    configureServer(server) {
+      server.watcher.add(watchedRoots);
+      const refreshStyles = (filename) => {
+        const resolved = path.resolve(filename);
+        if (!isTailwindSourceWithinRoots(resolved, watchedRoots)) return;
+        for (const module of server.moduleGraph.getModulesByFile(stylesheet) || []) {
+          server.moduleGraph.invalidateModule(module);
+        }
+        server.ws.send({ type: 'full-reload', path: '*' });
+      };
+      server.watcher.on('add', refreshStyles);
+      server.watcher.on('unlink', refreshStyles);
+      server.httpServer?.once('close', () => {
+        server.watcher.off('add', refreshStyles);
+        server.watcher.off('unlink', refreshStyles);
+      });
+    },
+    transform(code, id) {
+      if (id.split('?', 1)[0].replaceAll('\\', '/') !== stylesheet) return undefined;
+      const sources = tailwindSourceFiles(roots);
+      for (const source of sources) this.addWatchFile(source);
+      const directives = sources
+        .map((source) => `@source ${JSON.stringify(source.replaceAll('\\', '/'))};`)
+        .join('\n');
+      return `${code}\n${directives}\n`;
+    },
+  };
 }
 
 function isLoopbackAddress(address) {
@@ -221,15 +263,15 @@ export default defineConfig(({ mode }) => {
 
   // Public (static) assets come from the active app bundle: <app>/brand
   const platformBrandDir = resolveBrandDir(platformAppDir, factoryBrandDir);
-  const tailwindSourceLinkRoot = ensureTailwindSourceLinks([
-    ['chat-ui-src', chatUiSrcRoot],
-    ['factory-app-ui', path.resolve(factoryAppRoot, 'app/ui')],
-    ['factory-app-admin', path.resolve(factoryAppRoot, 'app/admin')],
-    ['factory-workflows', factoryWorkflowsRoot],
-    ['platform-ui', path.resolve(platformAppDir, 'ui')],
-    ['platform-admin', path.resolve(platformAppDir, 'admin')],
-    ['platform-workflows', platformWorkflowRoot],
-  ]);
+  const tailwindSourceRoots = [
+    chatUiSrcRoot,
+    path.resolve(factoryAppRoot, 'app/ui'),
+    path.resolve(factoryAppRoot, 'app/admin'),
+    factoryWorkflowsRoot,
+    path.resolve(platformAppDir, 'ui'),
+    path.resolve(platformAppDir, 'admin'),
+    platformWorkflowRoot,
+  ];
   const viteFsAllow = Array.from(new Set([
     __dirname,
     projectRoot,
@@ -243,7 +285,6 @@ export default defineConfig(({ mode }) => {
     chatUiRoot,
     chatUiSrcRoot,
     chatUiNodeModules,
-    tailwindSourceLinkRoot,
     path.resolve(__dirname, 'node_modules'),
   ]));
 
@@ -277,6 +318,7 @@ export default defineConfig(({ mode }) => {
   return {
   cacheDir: path.join(__dirname, 'node_modules', '.vite-apps', createHash('sha256').update(platformAppDir).digest('hex').slice(0, 16)),
   plugins: [
+    tailwindSourcePlugin(tailwindSourceRoots),
     {
       name: 'monaco-patched-sanitizer',
       enforce: 'pre',

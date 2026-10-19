@@ -170,6 +170,13 @@ def _is_link(path: Path) -> bool:
         metadata = path.lstat()
     except (FileNotFoundError, NotADirectoryError):
         return False
+    except OSError as exc:
+        # Windows rejects some manifest strings before metadata can be read.
+        # They are handled later as missing/invalid assets. Every other probe
+        # failure is indeterminate and must not be treated as proof of no link.
+        if getattr(exc, "winerror", None) == 123:
+            return False
+        raise PackIntegrityError(f"Pack input metadata cannot be read for {path}: {exc}") from exc
     return stat.S_ISLNK(metadata.st_mode) or bool(
         getattr(metadata, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
     )
@@ -185,7 +192,13 @@ def _refuse_linked_pack_input(context_root: Path, path: Path) -> None:
     root must be a regular file or directory; the pack root itself may be
     reached through a link, since callers resolve it before use.
     """
-    relative = path.relative_to(context_root)
+    try:
+        relative = path.relative_to(context_root)
+    except ValueError as exc:
+        raise PackIntegrityError(
+            f"Pack input path must stay inside the pack directory: {path}. "
+            "Declare the file or directory by its relative path under the pack directory."
+        ) from exc
     if ".." in relative.parts:
         # The OS follows a link before applying '..', so a lexical check of the path would test the wrong
         # file; pack input paths, like declared outputs, never step back up.
@@ -193,7 +206,7 @@ def _refuse_linked_pack_input(context_root: Path, path: Path) -> None:
             f"Pack input path {relative.as_posix()} must not contain '..': {path}. Name the file or directory "
             "directly, under the pack directory."
         )
-    for depth in range(len(relative.parts), 0, -1):
+    for depth in range(1, len(relative.parts) + 1):
         candidate = context_root.joinpath(*relative.parts[:depth])
         if _is_link(candidate):
             raise PackIntegrityError(
@@ -414,11 +427,12 @@ def _safe_asset_files(context_root: Path, context: dict[str, Any], *, cover_cont
         files.append(contract)
         seen.add(contract.resolve())
     for asset in iter_context_assets(context):
+        declared_path = context_root / str(asset["path"])
+        _refuse_linked_pack_input(context_root, declared_path)
         try:
             asset_path = resolve_context_asset_path(context_root, asset)
         except BuildContextError as exc:
             raise PackIntegrityError(str(exc)) from exc
-        _refuse_linked_pack_input(context_root, context_root / str(asset["path"]))
         if not asset_path.exists():
             raise PackIntegrityError(f"Declared pack asset not found: {asset_path}")
         if asset_path.is_file():

@@ -37,7 +37,13 @@ def _bundle_relative_path(raw: Any) -> str | None:
     while path.startswith("./"):
         path = path[2:]
     parts = [part for part in path.split("/") if part]
-    if not parts or path.startswith("/") or ".." in parts or ":" in parts[0]:
+    if (
+        not parts
+        or path.startswith("/")
+        or ".." in parts
+        or ":" in parts[0]
+        or any(part.startswith(".") or part == "__pycache__" for part in parts)
+    ):
         return None
     return "/".join(parts)
 

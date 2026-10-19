@@ -879,7 +879,6 @@ def _canonical_build_environment(root: str) -> dict[str, str]:
         "VITE_MOZAIKS_HOST": "platform",
         "PYTHON_DOTENV_DISABLED": "1",
         "CI": "1",
-        "MOZAIKS_REQUIRE_TAILWIND_SOURCE_LINKS": "1",
     }
 
 

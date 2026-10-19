@@ -198,8 +198,10 @@ This project follows a practical pre-1.0 changelog format:
   without that pin (see the upgrade entry below). A contract or catalog
   asset that is not a file is an integrity diagnostic, and so is a link
   among a pack's inputs: a symbolic link, or a Windows junction or other
-  reparse point, at `context.yaml`, `contract.yaml`, a declared asset or
-  anywhere under a declared directory. A link is digested under its
+  reparse point, at `context.yaml`, `contract.yaml`, a declared asset or any
+  non-excluded entry under a declared directory. Dot-named, `__pycache__` and
+  compiled Python entries are ignored by verification, planning and
+  materialization rather than treated as pack inputs. A link is digested under its
   target's path and read through it, so retargeting one between inputs the
   pack already covers changed its effective configuration (such as its
   `capability_source`) or a rendered file, or dropped an input, without
@@ -300,6 +302,15 @@ This project follows a practical pre-1.0 changelog format:
   retain participant-aware actions, and compose their UI registrations with
   app-owned routes. Page refinement receives the saved pack, design and domain
   context without widening its file scope.
+- Pip-installed Windows web shells register every real chat, Factory and app
+  UI source file with Tailwind instead of relying on directory junctions that
+  Tailwind does not traverse. Core layout utilities are therefore present in
+  the built stylesheet and branded assets remain contained by the shell.
+- Capability-pack lifecycle reads refuse a linked `context.yaml` before
+  identifying an install or upgrade candidate. Link probes that encounter a
+  platform filename error and asset paths outside the pack now remain
+  structured integrity diagnostics, and planning cannot consume dot-named or
+  cache template paths that verification and materialization exclude.
 - Filtering an exclusive pack page out of a typed custom route bundle keeps the
   app's own pages and shared registrations instead of leaving an empty or
   dangling route bundle.
@@ -364,8 +375,8 @@ This project follows a practical pre-1.0 changelog format:
   is refused by the upgrade plan, a repeated installation and installed
   resolution alike, whether its contract was since edited, added or deleted,
   and nothing changes. A 0.2.0 pin of a pack that declares its contract
-  and holds no link verifies as before, because both rules digest that pack
-  alike. The refused
+  and has the same readable, regular-file inputs accepted by the current rules
+  verifies as before, because both rules digest that pack alike. The refused
   pin cannot show whether, or with which contract, the component was
   installed: the refusal compares what it recorded
   (version, declared files and their capabilities, and the dependencies it
@@ -401,9 +412,11 @@ This project follows a practical pre-1.0 changelog format:
   contract nor its absence, so it is refused until the pack is installed
   from its verified source into a build context without that pin.
 - Links among a pack's inputs (`context.yaml`, `contract.yaml`, a declared
-  asset or anything under a declared directory), and declared asset paths
+  asset or any non-excluded entry under a declared directory), and declared asset paths
   that contain `..`; each is now an integrity diagnostic (the digest entry
   above names the remedy).
+- Silent omission of a declared pack directory that cannot be read; it is now
+  an integrity diagnostic naming that directory.
 - The bundle scanner's acceptance of a route to one of the shell's non-page
   core components (the launcher, confirm and completion screens, the token
   tab, the usage panels) without a custom page file; only the routable core
