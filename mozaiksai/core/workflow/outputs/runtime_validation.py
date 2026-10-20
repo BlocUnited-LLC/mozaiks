@@ -7,7 +7,8 @@ import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from functools import lru_cache
+from typing import Any, get_args
 
 from pydantic import BaseModel, ValidationError
 
@@ -30,7 +31,8 @@ class StructuredOutputValidation:
 
 
 _MAX_FAILURE_FIELDS = 10
-_MAX_FAILURE_FIELD_CHARS = 120
+_REDACTED_FIELD = "<redacted-field>"
+_SAFE_ERROR_TYPE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 
 
 def _output_digest(data: Any) -> str:
@@ -43,13 +45,64 @@ def _output_digest(data: Any) -> str:
     return hashlib.sha256(canonical.encode("utf-8", "replace")).hexdigest()
 
 
-def _failure_fields(exc: ValidationError) -> tuple[str, ...]:
-    """``<field path>:<error type>`` pairs, bounded; never the input values."""
+def _nested_models(annotation: Any) -> list[type[BaseModel]]:
+    """Every BaseModel class mentioned anywhere inside a type annotation."""
+
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return [annotation]
+    models: list[type[BaseModel]] = []
+    for arg in get_args(annotation):
+        models.extend(_nested_models(arg))
+    return models
+
+
+@lru_cache(maxsize=256)
+def declared_field_names(model_cls: type[BaseModel]) -> frozenset[str]:
+    """Field names and aliases declared by ``model_cls`` and the models nested in it.
+
+    This is the only vocabulary an audit record may quote from a validation
+    path: it comes from the schema, never from the model's output.
+    """
+
+    names: set[str] = set()
+    seen: set[type[BaseModel]] = set()
+    pending = [model_cls]
+    while pending:
+        current = pending.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        for name, info in current.model_fields.items():
+            names.add(name)
+            for alias in (info.alias, info.validation_alias):
+                if isinstance(alias, str):
+                    names.add(alias)
+            pending.extend(_nested_models(info.annotation))
+    return frozenset(names)
+
+
+def _failure_fields(exc: ValidationError, declared: frozenset[str]) -> tuple[str, ...]:
+    """``<field path>:<error type>`` pairs, bounded and free of model-controlled text.
+
+    A path segment survives only if it is a list index or a declared field
+    name. Anything else (an undeclared key the model added, a key inside an open
+    dict, a union tag) is replaced by a fixed sentinel rather than truncated.
+    """
 
     fields: list[str] = []
     for item in exc.errors(include_input=False, include_context=False, include_url=False):
-        path = ".".join(str(part) for part in item.get("loc", ())) or "<root>"
-        fields.append(f"{path[:_MAX_FAILURE_FIELD_CHARS]}:{item.get('type', 'unknown')}")
+        parts = [
+            str(part)
+            if isinstance(part, int) and not isinstance(part, bool)
+            else part
+            if isinstance(part, str) and part in declared
+            else _REDACTED_FIELD
+            for part in item.get("loc", ())
+        ]
+        error_type = str(item.get("type", ""))
+        if _SAFE_ERROR_TYPE.fullmatch(error_type) is None:
+            error_type = "unknown"
+        fields.append(f"{'.'.join(parts) or '<root>'}:{error_type}")
         if len(fields) >= _MAX_FAILURE_FIELDS:
             break
     return tuple(fields)
@@ -134,7 +187,11 @@ def validate_agent_structured_output(
             failure_category="schema_violation"
             if isinstance(exc, ValidationError)
             else "validation_error",
-            failure_fields=_failure_fields(exc) if isinstance(exc, ValidationError) else (),
+            failure_fields=(
+                _failure_fields(exc, declared_field_names(model_cls))
+                if isinstance(exc, ValidationError)
+                else ()
+            ),
             output_digest=_output_digest(raw_data),
         )
 

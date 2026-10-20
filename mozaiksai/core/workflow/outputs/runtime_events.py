@@ -50,6 +50,7 @@ async def emit_validated_agent_output(
             chat_id=chat_id,
             app_id=app_id,
             user_id=user_id,
+            turn_key=turn_idempotency_key,
         )
         return None
 

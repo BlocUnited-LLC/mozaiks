@@ -51,6 +51,8 @@ class AG2TaskBatchRunnerRequest:
     structured_registry: dict[str, Any] = field(default_factory=dict)
     context_authority_policy: ContextAuthorityPolicy | None = None
     timeout_seconds: int | None = None
+    # Verified initiating identity; used only to attribute audit records.
+    user_id: str | None = None
 
 
 @dataclass(slots=True)
@@ -173,6 +175,7 @@ class AG2TaskBatchRunner:
                             workflow_name=request.workflow_name,
                             chat_id=request.chat_id,
                             app_id=request.app_id,
+                            user_id=request.user_id,
                         )
                         await active_task.fail(error)
                         return _result_from_task(
