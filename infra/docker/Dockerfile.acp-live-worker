@@ -1,0 +1,16 @@
+# syntax=docker/dockerfile:1
+# One-shot repository coding worker. Build its pinned offline proof and adapter
+# images locally first; the trusted launcher pins this final image by ID.
+ARG PROOF_IMAGE=mozaiks-acp-proof:local
+ARG ADAPTER_IMAGE=mozaiks-acp-adapters:local
+
+FROM ${ADAPTER_IMAGE} AS adapters
+FROM ${PROOF_IMAGE}
+
+COPY --from=adapters /usr/local/bin/node /usr/local/bin/node
+COPY --from=adapters /opt/acp/node_modules /opt/acp/node_modules
+COPY infra/docker/acp_live/worker.py /opt/mozaiks/acp_live/worker.py
+ENV PATH=/opt/acp/node_modules/.bin:$PATH \
+    HOME=/home/sandbox
+
+ENTRYPOINT ["python", "/opt/mozaiks/acp_live/worker.py"]
