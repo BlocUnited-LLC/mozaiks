@@ -53,7 +53,7 @@ Build and Refinement Run are the product-facing lifecycle terms.
 
 ## Quickstart
 
-Five steps from a checkout to your first app in Studio.
+Five steps from installation to your first app in Studio.
 
 ### Prerequisites
 
@@ -94,15 +94,13 @@ environment first, as shown in
 ### 2. Point Mozaiks at MongoDB
 
 Studio stores workspace state in MongoDB, so configure it before opening Studio:
+MongoDB must already be running; setting its URI does not start the database.
 
 **Windows (PowerShell)**
 
 ```powershell
 # Local MongoDB
 $env:MONGO_URI="mongodb://localhost:27017/mozaiks"
-
-# Or MongoDB Atlas
-$env:MONGO_URI="<your MongoDB connection string>"
 ```
 
 **macOS / Linux (bash or zsh)**
@@ -110,10 +108,11 @@ $env:MONGO_URI="<your MongoDB connection string>"
 ```bash
 # Local MongoDB
 export MONGO_URI="mongodb://localhost:27017/mozaiks"
-
-# Or MongoDB Atlas
-export MONGO_URI="<your MongoDB connection string>"
 ```
+
+For another MongoDB server, replace the local URI with its connection string.
+If you need to start a local database, follow
+[Getting Started](https://docs.mozaiks.ai/getting-started/#2-start-mongodb).
 
 ### 3. Set an OpenAI key
 
@@ -132,6 +131,10 @@ $env:OPENAI_API_KEY="sk-..."
 export OPENAI_API_KEY="sk-..."
 ```
 
+Replace `sk-...` with your own key and keep the quotes. In PowerShell, an
+unquoted key is treated as a command and produces "not recognized". Keep the
+key private when sharing terminal output.
+
 The default model is `gpt-5-nano`; set `DEFAULT_LLM_MODEL` to use another
 OpenAI model. Gemini and Anthropic keys are not used for builds yet, and the
 provider you pick in Studio or with `--provider` is recorded for display only.
@@ -144,17 +147,21 @@ step 4 in the same terminal, or set them again in a new one.
 **Windows (PowerShell)**
 
 ```powershell
+Set-Location $env:USERPROFILE
 python -m mozaiks quickstart --dir .\mozaiks-workspace
 ```
 
 **macOS / Linux (bash or zsh)**
 
 ```bash
+cd "$HOME"
 python -m mozaiks quickstart --dir ./mozaiks-workspace
 ```
 
-This creates the `mozaiks-workspace` folder, starts the local Studio, and opens
-it in your browser.
+These commands create `mozaiks-workspace` inside your user folder, start the
+local Studio, and open it in your browser. You can choose another writable
+folder instead. A relative `--dir` path starts from the terminal's current
+directory; on Windows, avoid `C:\Windows\System32` and `C:\Program Files`.
 
 `mozaiks-workspace` is the local workspace folder Mozaiks uses for generated
 output, config, and launch scripts. It is not the app itself. The app is
@@ -177,6 +184,12 @@ If setup fails, check three things first: use `python -m mozaiks` if the
 `mozaiks` command is unavailable, make sure `MONGO_URI` points to a reachable
 MongoDB instance, and set an LLM API key before running builds. Builds use
 `OPENAI_API_KEY` only today.
+
+For `[WinError 5] Access is denied`, return to your user folder as shown in
+step 4. Administrator access is not needed. If you see `Setup complete` followed
+by `Backend failed to start`, the workspace was created but the server failed;
+keep the workspace and follow
+[backend startup troubleshooting](https://docs.mozaiks.ai/local-setup/#backend-failed-to-start).
 
 ### Where To Go Next
 

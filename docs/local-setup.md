@@ -12,15 +12,16 @@ Use one setup path at a time:
 
 | Path | Use When | Environment |
 | --- | --- | --- |
-| Public package install (after the first PyPI release) | You want to create and use local Mozaiks workspaces | Mozaiks is installed into your Python environment; until the release, use an editable install from a checkout. Run `python -m mozaiks quickstart` and `python -m mozaiks studio` |
+| Public package install | You want to create and use local Mozaiks workspaces | Install with `python -m pip install mozaiks`, then run `python -m mozaiks quickstart` and `python -m mozaiks studio` |
 | Repo contributor setup | You are changing Mozaiks itself | `.venv` lives inside the `mozaiks/` repo; run repo scripts like `scripts\run-studio.ps1` |
 | Standalone workspace setup | A generated app workspace is being developed as its own repo | `.venv` lives inside that app workspace; run that workspace's `scripts/run-studio` |
 
 Do not create a shared `.venv` in the parent folder that contains multiple
 repos. Put the environment in the repo or workspace that owns it. For the
 public package path, install Mozaiks into the Python environment you normally
-use for command-line tools. Mozaiks is not on PyPI yet, so that means
-`python -m pip install -e <path-to-mozaiks>` from a clone.
+use for command-line tools. If that environment already has a contributor
+checkout installed, use a separate workspace environment as described under
+[Already satisfied with an editable install](#already-satisfied-with-an-editable-install).
 
 Studio requires MongoDB at startup. Docker Desktop is not required when you use
 MongoDB Atlas or a native local MongoDB server, but the repo convenience scripts
@@ -194,9 +195,13 @@ Mozaiks after that. See the [CLI Reference](cli-reference.md) for all commands.
 
 ## Useful Commands
 
+These examples assume a workspace in your user folder. If you chose another
+location, use that workspace's absolute path for `--dir` instead.
+
 === "Windows"
 
     ```powershell
+    Set-Location $env:USERPROFILE
     python -m mozaiks quickstart --dir .\mozaiks-workspace
     python -m mozaiks studio --dir .\mozaiks-workspace --open
     python -m mozaiks studio --dir .\mozaiks-workspace --json
@@ -206,6 +211,7 @@ Mozaiks after that. See the [CLI Reference](cli-reference.md) for all commands.
 === "macOS / Linux"
 
     ```bash
+    cd "$HOME"
     python -m mozaiks quickstart --dir ./mozaiks-workspace
     python -m mozaiks studio --dir ./mozaiks-workspace --open
     python -m mozaiks studio --dir ./mozaiks-workspace --json
@@ -302,24 +308,212 @@ app.
 
 ## Troubleshooting
 
+### Access is denied / WinError 5
+
+Relative paths such as `.\mozaiks-workspace` start from the terminal's current
+directory. If the prompt is `PS C:\Windows\System32>`, that command tries to
+create a workspace inside Windows. Use your user folder instead:
+
+```powershell
+Set-Location $env:USERPROFILE
+python -m mozaiks quickstart --dir .\mozaiks-workspace
+```
+
+Administrator access is not needed. Keep workspaces in a writable folder outside
+`C:\Windows` and `C:\Program Files`.
+
+### PowerShell treats the API key as a command
+
+Keep the quotes around the value when setting an environment variable:
+
+```powershell
+$env:OPENAI_API_KEY="replace-with-your-openai-api-key"
+```
+
+Replace only the placeholder text. An unquoted value can produce
+`CommandNotFoundException` and leave the variable unset. A successful assignment
+prints nothing. Set the variable in the same terminal used to launch Studio,
+and remove credentials before sharing terminal output.
+
+### Already satisfied with an editable install
+
+`Requirement already satisfied: mozaiks ... (0.2.0)` confirms a matching package
+version is installed; it does not prove Python is using the published PyPI
+files. An editable checkout can have the same version. From your workspace
+folder, outside the Mozaiks source checkout, check:
+
+```bash
+python -m pip show mozaiks
+python -c "import mozaiks_cli; print(mozaiks_cli.__file__)"
+```
+
+`Editable project location` or an import path inside a repository/worktree means
+you are using that source checkout. To try the public package while keeping the
+contributor environment intact, create a separate environment inside your
+workspace. The examples below use `.venv-pypi`; choose a new name if it already
+contains an editable install.
+
+=== "Windows"
+
+    ```powershell
+    Set-Location "$env:USERPROFILE\mozaiks-workspace"
+    python -m venv .venv-pypi
+    .\.venv-pypi\Scripts\python.exe -m pip install mozaiks
+    .\.venv-pypi\Scripts\python.exe -m mozaiks studio --dir . --open
+    ```
+
+=== "macOS / Linux"
+
+    ```bash
+    cd "$HOME/mozaiks-workspace"
+    python -m venv .venv-pypi
+    ./.venv-pypi/bin/python -m pip install mozaiks
+    ./.venv-pypi/bin/python -m mozaiks studio --dir . --open
+    ```
+
+Use your existing workspace's path and set `MONGO_URI` and `OPENAI_API_KEY` in
+this terminal, or in the workspace's `.env`, before launching. If the workspace
+has not been scaffolded yet, use `quickstart --dir .` instead of
+`studio --dir . --open`. Calling the environment's Python directly avoids needing
+to activate it or change PowerShell's execution policy.
+
+Installing the package does not rewrite an existing scaffold's app configuration.
+If the workspace was created by an older checkout, also check
+[Older scaffold configuration](#older-scaffold-configuration).
+
+### Backend failed to start
+
+`Setup complete` confirms that the scaffold was written. A later backend error
+means Studio has not started successfully; keep the workspace and inspect the
+server error before retrying.
+
+The public launcher records backend output under the workspace's
+`logs/studio-backend.log` and includes its last lines in a startup failure:
+
+=== "Windows"
+
+    ```powershell
+    Get-Content "$env:USERPROFILE\mozaiks-workspace\logs\studio-backend.log" -Tail 80
+    ```
+
+=== "macOS / Linux"
+
+    ```bash
+    tail -n 80 "$HOME/mozaiks-workspace/logs/studio-backend.log"
+    ```
+
+Use the path printed by the launcher if your workspace is elsewhere. Frontend
+startup output is in `logs/studio-frontend.log` after the backend is healthy.
+If the error only says "Check the backend terminal for details" and there is no
+`studio-backend.log`, check for an older
+[editable install](#already-satisfied-with-an-editable-install). That launcher
+may have opened a separate terminal instead of saving its output.
+
+To keep a backend error visible in the current terminal, run the Studio backend
+in the foreground with the same Python environment and workspace:
+
+=== "Windows"
+
+    ```powershell
+    python -m mozaiks serve "$env:USERPROFILE\mozaiks-workspace" --host studio --listen 127.0.0.1
+    ```
+
+=== "macOS / Linux"
+
+    ```bash
+    python -m mozaiks serve "$HOME/mozaiks-workspace" --host studio --listen 127.0.0.1
+    ```
+
+This command starts only the backend. If you use `.venv-pypi`, replace `python`
+with its Python path from the previous section. Use `Ctrl+C` to stop this
+diagnostic process before reopening Studio with `studio --dir <workspace> --open`.
+If port 8000 is already occupied, add `--port 8001` for the diagnostic run.
+
+Use the actual exception to decide the fix: a MongoDB connection error needs a
+running database and correct URI; an import error needs the correct Python
+installation and dependencies; an address-in-use error needs an available port.
+Review logs for credentials before sharing them. `studio --json` shows app
+configuration, not a server health check or the backend exception.
+
+### Older scaffold configuration
+
+An older editable checkout can leave configuration that the published package
+rejects even after you install it into a clean environment. Keep your workspace
+and back up each file before editing it; do not rerun `init` over an existing app.
+
+If the traceback contains `SecretContractError: Invalid names-only secret
+contract: missing, model_type`, inspect `app/security/secrets.yaml`. The old
+empty starter used `provider: env` and `secrets: []` without a version. For that
+empty, environment-backed starter only, replace it with:
+
+```yaml
+version: 1
+kind: app_secret_contract
+provider:
+  type: env
+secrets: []
+```
+
+This file declares secret policy, not credential values. Keep API keys and
+`MONGO_URI` in environment variables or the workspace's `.env`. If the contract
+already declares secrets or a vault provider, preserve those declarations and
+repair their schema instead of replacing them with the empty example.
+
+The same older scaffold may also lack an `appId` in `app/app.json`. If it is
+absent, add a stable lowercase slug for your workspace, such as
+`"appId": "my-app"`, while preserving the other fields. Do not change an existing
+ID: it scopes the app's data and artifacts.
+
+An older `app/config/refinement_policy.yaml` can also enable `contract_surface`
+without its separate `regeneration_llm_profile`. That prevents Studio from
+building the app-list response even when the server's health checks pass.
+If the policy already defines a valid `llm_profiles.codegen` with a model, add
+`regeneration_llm_profile: codegen` inside the existing `contract_surface`
+mapping. Preserve its other fields and model settings; do not replace the whole
+policy. For a custom profile, reference the intended declared regeneration
+profile instead. See [Refinement Engine](architecture/workflows/refinement-engine.md#llm-profile-indirection).
+
+For a trusted, single-user local workspace with `AUTH_ENABLED=false`, Studio
+management pages also need the local user's role. Current scaffolds set
+`AUTH_ANON_ROLES=admin,user`; if adopting that setting in an older workspace,
+set `AUTH_ANON_ACCESS=local` and use the published CLI's default loopback binding
+(`127.0.0.1`). This grants administrative access to requests from your computer,
+not a sign-in-protected account; do not use it to expose Studio to a network.
+Keep authenticated deployments' access settings unchanged.
+
+Stop the Studio processes you launched, then relaunch using the same isolated
+Python environment so configuration changes take effect. Prefer the published
+`studio --dir <workspace> --open` command over old generated launch scripts,
+which may have different bind and environment-file defaults.
+
 ### Studio does not open
 
-Check:
+For a public package install, check:
 
-- backend health: `http://localhost:8000/health`
+- backend health: `http://localhost:8000/api/health`
 - backend shell config: `http://localhost:8000/api/shell-config`
 - frontend shell: `http://localhost:3000/apps`
-- Node dependencies under `web_shell/`
-- local smoke: `.\scripts\smoke-studio-local.ps1 -SkipBrowser`
+- Studio app-list API: `http://localhost:3000/api/studio/apps`
 
-If startup stops before the frontend launches, check the backend terminal first.
-Common causes are Docker Desktop not running, MongoDB not reachable, missing
-Python dependencies, or missing frontend dependencies under `web_shell/`.
+Adjust the ports if you selected different ones. If startup stops before the
+frontend launches, follow [Backend failed to start](#backend-failed-to-start).
+Health checks and a successful frontend HTML response do not prove that Studio's
+API requests succeed. If the app-list API fails after upgrading an existing
+workspace, check [Older scaffold configuration](#older-scaffold-configuration).
+For a source checkout, also inspect dependencies under `web_shell/` and run
+the repo smoke script: `.\scripts\smoke-studio-local.ps1 -SkipBrowser`.
+The repo smoke script checks `http://localhost:8000/health`, which reports
+platform startup status; `/api/health` checks runtime database connectivity.
 
 ### Mongo connection errors
 
 Confirm local MongoDB is running or `MONGO_URI` points to a valid Atlas
 connection string.
+
+Setting `MONGO_URI` does not start MongoDB. If you used the container from
+[Getting Started](getting-started.md#2-start-mongodb), start Docker Desktop,
+then run `docker start mozaiks-mongo`. Skip Docker commands if you use a native
+MongoDB server or an existing remote database.
 
 ### LLM key errors
 
