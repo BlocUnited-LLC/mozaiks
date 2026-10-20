@@ -124,7 +124,7 @@ def test_support_escalation_uses_profile_support_tab() -> None:
     assert "page_url:" not in widget_source
     assert "subjectParams.set('username', username)" in profile_source
     assert "const subjectSuffix = subjectParams.toString() ? `?${subjectParams}` : '';" in profile_source
-    assert "fetchWithAuth(`${backendUrl}/api/me/profile-pages${subjectSuffix}`, {}, auth)" in profile_source
+    assert "fetchWithAuth(`${backendUrl}/api/me/profile-pages${subjectSuffix}`, { signal }, auth)" in profile_source
     assert "fetchWithAuth(`${backendUrl}/api/me/profile-panels" not in profile_source
     assert "fetchWithAuth(`${backendUrl}/api/me/profile-tabs" not in profile_source
     assert "supportTrace('support_request:create:start'" in widget_source
