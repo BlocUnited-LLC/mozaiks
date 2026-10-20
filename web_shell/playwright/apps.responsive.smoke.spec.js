@@ -1754,6 +1754,17 @@ test('workspace support route stays responsive across desktop and mobile widths'
 
 test('profile support page loads tickets on a same-origin Studio host', async ({ page }) => {
   let profilePageRequests = 0;
+  await page.route('**/api/me', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        user_id: 'user_1',
+        username: 'profile-owner',
+        display_name: 'Profile Owner',
+      }),
+    });
+  });
   await page.route('**/api/me/profile-pages**', async (route) => {
     profilePageRequests += 1;
     await route.fulfill({
