@@ -213,7 +213,7 @@ declared in `profile.yaml` — they are platform guarantees.
 
 | Section | Order | Editable |
 |---------|-------|---------|
-| Identity (avatar, display_name, email, roles) | 0 | display_name, avatar_url |
+| Identity (avatar, display_name, bio, email, roles) | 0 | display_name, bio |
 | *Account-scoped module panels and tabs inject here (order 1-998)* | — | — |
 | App Preferences | 999 | settings dict |
 
