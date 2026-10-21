@@ -43,20 +43,6 @@ const composedShellConfig = {
   // Like the host: with sign-in disabled the public profile route is not registered.
   pages: [...(routeManifest.pages || []).filter((route) => route.path !== '/u/:username'), ...transitionRoutes],
 };
-// Layout-only tests keep the local development identity but omit the explicit
-// runtime.enabled=false signal. That preserves configured personal chrome
-// without starting a real authentication flow.
-const personalChromeShellConfig = {
-  ...composedShellConfig,
-  auth: {
-    ...localDevelopmentAuth,
-    runtime: {
-      provider: localDevelopmentAuth.runtime.provider,
-      local_development: localDevelopmentAuth.runtime.local_development,
-      user: localDevelopmentAuth.runtime.user,
-    },
-  },
-};
 const dashboardPayload = {
   schema_version: 'mozaiks.dashboard.v1',
   workspace: {
@@ -1479,14 +1465,12 @@ test('assistant panel follows the bottom bar in keyboard tab order', async ({ pa
   await expect(assistant).toBeFocused();
 });
 
-test('header menus stay above the open assistant panel on short desktop viewports', async ({ page, isMobile }) => {
-  test.skip(isMobile, 'Desktop header menus and floating assistant only');
-  await page.route('**/api/shell-config', async (route) => {
-    await route.fulfill({ json: personalChromeShellConfig });
-  });
+test('header notification menu stays above the open assistant panel on short desktop viewports', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'Desktop header menu and floating assistant only');
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.goto('/apps');
-  // This static personal-chrome fixture does not start the local onboarding tour.
+  await page.getByRole('dialog', { name: /Onboarding step 1 of 3/i })
+    .getByRole('button', { name: 'Skip tour' }).click();
   await page.locator('.widget-floating-launcher').getByRole('button', { name: 'Open assistant' }).click();
   await expect(page.locator('#mozaiks-assistant-panel')).toBeVisible();
   const header = page.locator('header');
@@ -1502,11 +1486,7 @@ test('header menus stay above the open assistant panel on short desktop viewport
     await bell.click();
     await expect(header.getByRole('button', { name: 'View all notifications' })).toHaveCount(0);
 
-    const profile = header.getByTitle('Developer', { exact: true });
-    await profile.click();
-    await header.getByRole('button', { name: /^sign out$/i }).click({ trial: true, timeout: 5000 });
-    await profile.click();
-    await expect(header.getByRole('button', { name: /^sign out$/i })).toHaveCount(0);
+    await expect(header.getByTitle('Developer', { exact: true })).toHaveCount(0);
     await expect(page.locator('#mozaiks-assistant-panel')).toBeVisible();
   }
 });
@@ -1557,17 +1537,18 @@ test('five configured mobile tabs retain their labels beside Assistant', async (
     { id: 'home', label: 'Home', path: '/apps' },
     { id: 'projects', label: 'Projects', path: '/usage', iconLabel: 'P' },
     { id: 'alerts', label: 'Alerts', path: '/notifications' },
-    { id: 'profile', label: 'Account', path: '/me' },
+    { id: 'settings', label: 'Settings', path: '/admin/settings' },
     { id: 'create', label: 'Create', path: '/create' },
   ];
   await page.route('**/api/shell-config', async (route) => {
     await route.fulfill({ json: {
-      ...personalChromeShellConfig,
+      ...composedShellConfig,
       mobile: { bottomBar: { items: configured } },
     } });
   });
   await page.goto('/apps');
-  // This static personal-chrome fixture does not start the local onboarding tour.
+  await page.getByRole('dialog', { name: /Onboarding step 1 of 3/i })
+    .getByRole('button', { name: 'Skip tour' }).click();
   const navigation = page.getByRole('navigation', { name: 'Mobile app navigation' });
   await expect(navigation.getByRole('button')).toHaveCount(6);
   for (const { label } of configured) {
