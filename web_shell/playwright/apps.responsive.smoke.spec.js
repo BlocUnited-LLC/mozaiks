@@ -1486,8 +1486,7 @@ test('header menus stay above the open assistant panel on short desktop viewport
   });
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.goto('/apps');
-  await page.getByRole('dialog', { name: /Onboarding step 1 of 3/i })
-    .getByRole('button', { name: 'Skip tour' }).click();
+  // This static personal-chrome fixture does not start the local onboarding tour.
   await page.locator('.widget-floating-launcher').getByRole('button', { name: 'Open assistant' }).click();
   await expect(page.locator('#mozaiks-assistant-panel')).toBeVisible();
   const header = page.locator('header');
@@ -1568,8 +1567,7 @@ test('five configured mobile tabs retain their labels beside Assistant', async (
     } });
   });
   await page.goto('/apps');
-  await page.getByRole('dialog', { name: /Onboarding step 1 of 3/i })
-    .getByRole('button', { name: 'Skip tour' }).click();
+  // This static personal-chrome fixture does not start the local onboarding tour.
   const navigation = page.getByRole('navigation', { name: 'Mobile app navigation' });
   await expect(navigation.getByRole('button')).toHaveCount(6);
   for (const { label } of configured) {
