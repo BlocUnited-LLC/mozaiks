@@ -32,7 +32,7 @@ def auth_document():
 @pytest.fixture(autouse=True)
 def isolated_auth(monkeypatch):
     for name in tuple(os.environ):
-        if name.startswith(("AUTH_", "MOZAIKS_OIDC_", "MOZAIKS_ANDROID_OIDC_", "VITE_OIDC_", "SUPABASE_", "KEYCLOAK_")):
+        if name.startswith(("AUTH_", "MOZAIKS_OIDC_", "VITE_OIDC_", "SUPABASE_", "KEYCLOAK_")):
             monkeypatch.delenv(name)
     monkeypatch.setenv("ENV", "test")
     monkeypatch.delenv("ENVIRONMENT", raising=False)
@@ -210,42 +210,6 @@ async def test_public_projection_exposes_only_declared_browser_config(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_android_profile_preserves_browser_and_runtime_authority(monkeypatch, auth_document):
-    monkeypatch.setenv("AUTH_ENABLED", "true")
-    monkeypatch.setenv("AUTH_PROVIDER", "jwt")
-    monkeypatch.setenv("AUTH_AUDIENCE", "shared-api")
-    monkeypatch.setenv("AUTH_ISSUER", "https://issuer.example")
-    monkeypatch.setenv("AUTH_JWKS_URL", "https://issuer.example/jwks")
-    monkeypatch.setenv("VITE_OIDC_CLIENT_ID", "browser")
-    monkeypatch.setenv("VITE_OIDC_REDIRECT_URI", "https://app.example/auth/callback")
-    contract = validate_app_auth_contract(auth_document)
-    browser = await build_app_auth_projection(contract)
-    monkeypatch.setenv("MOZAIKS_ANDROID_OIDC_CLIENT_ID", "android")
-    partial = await build_app_auth_projection(contract)
-    assert partial == browser
-    monkeypatch.setenv("MOZAIKS_ANDROID_OIDC_REDIRECT_URI", "org.example.app:/auth/callback")
-    both = await build_app_auth_projection(contract)
-    assert both["frontend"].pop("android") == {
-        "client_id": "android", "redirect_uri": "org.example.app:/auth/callback",
-    }
-    assert both == browser
-    monkeypatch.delenv("MOZAIKS_ANDROID_OIDC_CLIENT_ID")
-    assert await build_app_auth_projection(contract) == browser
-
-
-def test_android_profile_handles_are_closed_and_names_only(auth_document):
-    contract = validate_app_auth_contract(auth_document)
-    assert contract.frontend.android.model_dump() == {
-        "client_id_env": "MOZAIKS_ANDROID_OIDC_CLIENT_ID",
-        "redirect_uri_env": "MOZAIKS_ANDROID_OIDC_REDIRECT_URI",
-    }
-    for android in ({"client_id": "raw-value"}, {"client_id_env": "CLIENT_SECRET"}, {"provider": "custom"}):
-        auth_document["frontend"]["android"] = android
-        with pytest.raises(AppAuthContractError):
-            validate_app_auth_contract(auth_document)
-
-
-@pytest.mark.asyncio
 async def test_missing_browser_env_never_disables_backend_auth(monkeypatch, auth_document):
     monkeypatch.setenv("ENV", "production")
     monkeypatch.setenv("AUTH_ENABLED", "true")
@@ -275,3 +239,90 @@ async def test_shell_projects_auth_contract_and_effective_local_mode(monkeypatch
     assert result["auth"]["contract"]["routes"]["post_login_default"] == "/apps"
     assert result["auth"]["runtime"]["local_development"] is True
     assert result["auth"]["runtime"]["user"]["id"] == "anonymous"
+
+
+PUBLIC_PROFILE_ROUTE = "/u/:username"
+
+
+def enable_runtime_auth(monkeypatch):
+    monkeypatch.setenv("ENV", "production")
+    monkeypatch.setenv("AUTH_ENABLED", "true")
+    monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+    monkeypatch.setenv("AUTH_AUDIENCE", "test-api")
+    monkeypatch.setenv("AUTH_ISSUER", "https://backend-issuer.invalid")
+    monkeypatch.setenv("AUTH_JWKS_URL", "https://backend-issuer.invalid/jwks")
+
+
+def shell_root(kind, tmp_path):
+    """A freshly scaffolded public workspace, or Studio, whose manifest declares the public profile."""
+    if kind == "studio":
+        return FACTORY_APP, "studio"
+    write_app(tmp_path / "app", required=False)
+    return tmp_path / "app", "platform"
+
+
+def navigation_targets(shell):
+    """Everything the shell can render as an entry: all composed config except the route table."""
+    return json.dumps({key: value for key, value in shell.items() if key != "pages"})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["workspace", "studio"])
+async def test_public_profile_route_is_not_registered_without_sign_in(monkeypatch, tmp_path, kind):
+    root, surface = shell_root(kind, tmp_path)
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setattr(shell_config, "resolve_app_root", lambda: root)
+    shell = await shell_config.build_shell_config(surface=surface)
+    paths = [page["path"] for page in shell["pages"]]
+    assert shell["auth"]["runtime"]["enabled"] is False
+    assert PUBLIC_PROFILE_ROUTE not in paths
+    # /me stays routable so a typed or bookmarked visit says sign-in is not enabled.
+    assert "/me" in paths
+    assert "/u/" not in navigation_targets(shell)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["workspace", "studio"])
+async def test_public_profile_route_is_a_deep_link_only_with_sign_in(monkeypatch, tmp_path, kind):
+    root, surface = shell_root(kind, tmp_path)
+    enable_runtime_auth(monkeypatch)
+    monkeypatch.setattr(shell_config, "resolve_app_root", lambda: root)
+    shell = await shell_config.build_shell_config(surface=surface)
+    pages = {page["path"]: page for page in shell["pages"]}
+    assert shell["auth"]["runtime"]["enabled"] is True
+    assert pages[PUBLIC_PROFILE_ROUTE]["component"] == "ProfilePage"
+    assert pages[PUBLIC_PROFILE_ROUTE]["meta"]["requiresAuth"] is True
+    assert pages[PUBLIC_PROFILE_ROUTE]["meta"]["navigation"]["include"] is False
+    assert "/u/" not in navigation_targets(shell)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("declared", [
+    {},
+    {"navigation": {"label": "People"}},
+    {"navigation": {"include": True, "scope": "profile"}},
+    {"shell_item": {"id": "people", "label": "People", "path": PUBLIC_PROFILE_ROUTE}},
+], ids=["automatic", "page-navigation", "profile-scope", "navigation-item"])
+async def test_app_declared_public_profile_is_never_a_navigation_entry(monkeypatch, tmp_path, declared):
+    root = tmp_path / "app"
+    write_app(root, required=False)
+    (root / "config").mkdir()
+    navigation = {"policy": {"autoFromPages": True}, "items": [declared["shell_item"]] if "shell_item" in declared else []}
+    (root / "config/shell.json").write_text(json.dumps({"navigation": navigation}), encoding="utf-8")
+    profile_page = {"id": "public-profile", "label": "Profile", "path": PUBLIC_PROFILE_ROUTE, "component": "ProfilePage"}
+    if "navigation" in declared:
+        profile_page["navigation"] = declared["navigation"]
+    (root / "ui").mkdir()
+    (root / "ui/route_manifest.json").write_text(json.dumps({"pages": [
+        {"id": "members", "label": "Members", "path": "/members", "component": "SchemaPage", "schema": "members"},
+        profile_page,
+    ]}), encoding="utf-8")
+    enable_runtime_auth(monkeypatch)
+    monkeypatch.setattr(shell_config, "resolve_app_root", lambda: root)
+    shell = await shell_config.build_shell_config(surface="platform")
+    assert PUBLIC_PROFILE_ROUTE in [page["path"] for page in shell["pages"]]
+    item_paths = [item.get("path") for item in shell["navigation"]["items"]]
+    # Automatic navigation is on: an ordinary page becomes an entry, the profile template never does.
+    assert "/members" in item_paths
+    assert PUBLIC_PROFILE_ROUTE not in item_paths
+    assert "/u/" not in navigation_targets(shell)
