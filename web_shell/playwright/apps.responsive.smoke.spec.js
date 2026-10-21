@@ -43,6 +43,18 @@ const composedShellConfig = {
   // Like the host: with sign-in disabled the public profile route is not registered.
   pages: [...(routeManifest.pages || []).filter((route) => route.path !== '/u/:username'), ...transitionRoutes],
 };
+const authEnabledShellConfig = {
+  ...composedShellConfig,
+  auth: {
+    ...localDevelopmentAuth,
+    runtime: {
+      ...localDevelopmentAuth.runtime,
+      enabled: true,
+      provider: 'jwt',
+      local_development: false,
+    },
+  },
+};
 const dashboardPayload = {
   schema_version: 'mozaiks.dashboard.v1',
   workspace: {
@@ -1258,12 +1270,13 @@ test('mobile shell navigation uses icons and keeps readable action labels', asyn
     await expect(navigation).toBeHidden();
   } else {
     await expect(navigation).toBeVisible();
-    for (const label of ['Create App', 'Alerts', 'Account']) {
+    for (const label of ['Create App', 'Alerts']) {
       const button = navigation.getByRole('button', { name: label });
       await expect(button).toBeVisible();
       await expect(button.locator('svg.shell-mobile-bottom-icon')).toHaveCount(1);
       await expect(button.locator('.shell-mobile-bottom-glyph')).toHaveAttribute('aria-hidden', 'true');
     }
+    await expect(navigation.getByRole('button', { name: 'Account' })).toHaveCount(0);
     await expect(navigation.getByRole('button', { name: 'Open assistant' })).toBeVisible();
     await expectNoHorizontalOverflow(page);
   }
@@ -1407,7 +1420,8 @@ test('assistant bottom action leaves mobile controls tappable and opens the chat
       });
     }
 
-    for (const label of ['Create App', 'Alerts', 'Account']) {
+    await expect(navigation.getByRole('button', { name: 'Account' })).toHaveCount(0);
+    for (const label of ['Create App', 'Alerts']) {
       await navigation.getByRole('button', { name: label }).click();
       await expect(page).not.toHaveURL(/\/apps$/);
       await expect(page.locator('#mozaiks-assistant-panel')).toHaveCount(0);
@@ -1465,6 +1479,9 @@ test('assistant panel follows the bottom bar in keyboard tab order', async ({ pa
 
 test('header menus stay above the open assistant panel on short desktop viewports', async ({ page, isMobile }) => {
   test.skip(isMobile, 'Desktop header menus and floating assistant only');
+  await page.route('**/api/shell-config', async (route) => {
+    await route.fulfill({ json: authEnabledShellConfig });
+  });
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.goto('/apps');
   await page.getByRole('dialog', { name: /Onboarding step 1 of 3/i })
@@ -1544,7 +1561,7 @@ test('five configured mobile tabs retain their labels beside Assistant', async (
   ];
   await page.route('**/api/shell-config', async (route) => {
     await route.fulfill({ json: {
-      ...composedShellConfig,
+      ...authEnabledShellConfig,
       mobile: { bottomBar: { items: configured } },
     } });
   });
