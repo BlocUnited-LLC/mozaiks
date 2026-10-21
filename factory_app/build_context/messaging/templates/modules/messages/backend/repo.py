@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import Any
 
 Document = dict[str, Any]
@@ -52,16 +52,23 @@ class ThreadRepo:
         query: Mapping[str, Any] | None = None,
         updated_at: str,
         preview: Mapping[str, Any],
-        participant_ids: Sequence[str] | None = None,
+        admitted_participant_id: str | None = None,
     ) -> int:
-        updates: dict[str, Any] = {
+        """Record a sent message without rewriting the thread's participant list.
+
+        Account deletion can release a participant after the sender read the
+        thread, so the list read then is never written back. A sender admitted
+        as a non-participant is added on its own with $addToSet.
+        """
+        update: dict[str, Any] = {"$set": {
             "updated_at": updated_at,
             "last_message_at": updated_at,
             "last_message": dict(preview),
-        }
-        if participant_ids is not None:
-            updates["participant_ids"] = list(participant_ids)
-        return await self.update(ctx, query=query or {"thread_id": thread_id}, updates=updates)
+        }}
+        if admitted_participant_id:
+            update["$addToSet"] = {"participant_ids": admitted_participant_id}
+        result = await _collection(ctx, "threads").update_one(dict(query or {"thread_id": thread_id}), update)
+        return int(getattr(result, "matched_count", 0) or 0)
 
 
 class MessageRepo:

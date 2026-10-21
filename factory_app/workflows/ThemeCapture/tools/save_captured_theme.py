@@ -9,6 +9,7 @@ from typing import Annotated, Any
 from factory_app.workflows._shared.platform.build_target import require_build_binding
 from mozaiksai.core.artifacts import persist_summary_artifact
 from mozaiksai.core.data.persistence.artifact_store import BuilderArtifactStore
+from mozaiksai.core.runtime.app.theme_contract import validate_page_title_theme
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.ui_tools import emit_ui_surface
 
@@ -52,6 +53,10 @@ async def save_captured_theme(
 
     agent_message = data.get("agent_message", "Theme captured successfully.")
     theme_config = {key: value for key, value in data.items() if key != "agent_message"}
+    try:
+        validate_page_title_theme(theme_config)
+    except ValueError as exc:
+        return {"success": False, "error": str(exc)}
     identity = theme_config.get("identity") or {}
     colors = theme_config.get("colors") or {}
     fonts = theme_config.get("fonts") or {}

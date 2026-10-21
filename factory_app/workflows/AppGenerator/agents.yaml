@@ -942,8 +942,12 @@ agents:
       - `app/brand/theme_config.json` is the canonical visual identity source for generated apps.
       - `provenance.yaml` is the app-root lineage and contract-reference file. It is emitted by the generator/scaffold path, not by app.json, shell_config, asset_manifest, or custom route output.
       - `app/config/shell.json` is the canonical shell behavior, navigation, and chrome source for generated apps; it is not a visual token file.
-      - `theme_config_patch` owns visual tokens only: compact `theme` selectors (`primary`, `radius`, `font`, `font_heading`, `appearance`, `density`), `primitives`, and semantic `ui.chat` / `ui.shell` / `ui.page` spacing, sizing, density, and visual styling.
+      - `theme_config_patch` owns visual tokens only, and accepts only these keys: compact `theme` selectors (`primary`, `variant`, `radius`, `font`, `font_heading`, `appearance`, `density`, `branding`), `identity`, `fonts`, and `ui.page.title`. It cannot patch `primitives`, `colors`, `shadows`, or semantic `ui.chat` / `ui.shell` / `ui.page` spacing, sizing, or density: those come from `captured_theme_config` or the platform defaults.
       - The expanded `fonts`, `colors`, `shadows`, `ui`, and `primitives` layer is the runtime bridge for shell/chat tokens until those tokens fully migrate to `--mz-*`.
+      - Preserve `captured_theme_config.ui.page.title` unless approved design changes it.
+        Use `theme_config_patch.ui.page.title` for finite typography deltas, with null
+        on untouched fields. Fonts reference existing body/heading slots. Defaults are
+        heading/semibold/lg/tight/normal/none; casing follows the approved app design.
       - `shell_config` owns only app-wide shell behavior: `header.logo`, sparse `header.actions`, canonical `shortcuts`, `navigation.policy`, `navigation.items` for non-page-owned entries, and compact `chrome` mode overrides.
       - `asset_manifest` owns reusable media inventory metadata (`asset_id`, source, path/url, alt/provenance, usage). Use it for logos/icons/hero imagery/video references.
       - Do NOT put raw spacing, padding, width, or density tokens in `shell_config`.
@@ -1071,7 +1075,7 @@ agents:
           e. `default_route` — the most logical landing page route and it must match a generated declarative page route or custom route path.
       5. Set `theme_config_patch` to null when upstream context does not establish a clear non-default direction, or when the approved direction already matches the platform default.
       6. Set `shell_config` to null when the default platform shell or selected `shell_preset_hint` is appropriate without runtime overrides. Only emit it when the app needs a custom logo/header action, canonical shortcut chrome, a non-default `navigation.policy`, non-page-owned `navigation.items`, or a non-default `chrome` mode policy.
-      7. If `captured_theme_config` is present, preserve its token structure where possible and only narrow it to the app-specific deltas you actually need.
+      7. If `captured_theme_config` is present, it already supplies the full token structure, including `primitives` and semantic `ui` spacing; emit only the app-specific deltas `theme_config_patch` accepts (`theme` selectors, `identity`, `fonts`, `ui.page.title`).
       8. Set `asset_manifest` to null when shipped/default assets are sufficient. Emit it only when the app requires non-default image/icon/media inventory that should be cataloged.
       9. Set `custom_route_bundle` to null unless a persistent route truly requires custom full-page React.
       10. The approved DesignDocs `data_contract` is supplied in context. Do not emit, replace, or reinterpret it from page needs.

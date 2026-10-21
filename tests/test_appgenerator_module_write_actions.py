@@ -1,6 +1,7 @@
 """Canonical writes, typed schemas and their implementations derive from approved ownership."""
 from __future__ import annotations
 
+import datetime as dt
 import importlib
 import json
 import logging
@@ -705,6 +706,16 @@ def _context(raw, user, tenancy="per_user"):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("tenancy", ["per_user", "per_workspace"])
 async def test_generated_writes_scope_stamp_and_hook_through_the_real_adapter(tmp_path, monkeypatch, tenancy):
+    # Consecutive writes can share one wall-clock tick. Control the clock so
+    # this test checks stamping and preservation without depending on its speed.
+    now = dt.datetime(2026, 1, 1, tzinfo=dt.UTC)
+
+    class Clock(dt.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now.astimezone(tz) if tz is not None else now.replace(tzinfo=None)
+
+    monkeypatch.setattr(dt, "datetime", Clock)
     hooks = {
         f"{BACKEND}/service.py": (
             "async def before_create_task(ctx, values):\n"
@@ -729,6 +740,7 @@ async def test_generated_writes_scope_stamp_and_hook_through_the_real_adapter(tm
     assert item["title"] == "First" and item["is_completed"] is False and item["priority"] == "normal"
     assert item[owner] == ("a" if tenancy == "per_user" else "space-a")
     assert item["created_at"] == item["updated_at"] and len(item["task_id"]) == 32
+    assert item["created_at"] == now
     assert set(item) == {"task_id", owner, "title", "description", "is_completed", "priority", "created_at", "updated_at"}
     assert user_a.events == [("domain.task.created", item)]
     stored = raw.rows[0]
@@ -742,9 +754,11 @@ async def test_generated_writes_scope_stamp_and_hook_through_the_real_adapter(tm
     assert (await handler.get_tasks(user_a, id=item["task_id"]))["item"]["title"] == "First"
     with pytest.raises(ModuleRecordNotFoundError):
         await handler.get_tasks(user_b, id=item["task_id"])
+    now += dt.timedelta(seconds=1)
     updated = await handler.update_task(user_a, task_id=item["task_id"], title="edited", is_completed=True)
     assert updated["item"]["title"] == "EDITED" and updated["item"]["is_completed"] is True
     assert updated["item"]["updated_at"] > updated["item"]["created_at"]
+    assert updated["item"]["updated_at"] == now and updated["item"]["created_at"] == item["created_at"]
     assert updated["item"]["description"] == "one"
     for attempt in (
         handler.update_task(user_b, task_id=item["task_id"], title="stolen"),

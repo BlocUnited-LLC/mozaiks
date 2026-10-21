@@ -279,6 +279,15 @@ def test_runtime_composed_prompt_preserves_approved_experience(
     assert "all approved experience requirements survive" in prompt
     assert "Prefer declarative_page when shipped primitives express the behavior" not in prompt
     assert "first try to narrow it into the existing primitives" not in prompt
+    if agent_name in {"AppPlanAgent", "AppSchemaAgent"}:
+        # These rules come from the registered shell catalog after the complete
+        # middleware chain, not from invoking its hook on a synthetic agent.
+        assert prompt.count("[SHELL PRESET CONTEXT]\n") == 1
+        assert "otherwise use null and the existing explicit navigation and shell_mode contracts" in prompt
+        assert "Preserve approved per-page shell_mode_hint and navigation decisions" in prompt
+        assert "Page category alone does not select the mode" in prompt
+        assert "never hide platform chrome with generated CSS" in prompt
+        assert "Select at most one shell_preset_hint unless" not in prompt
     if agent_name == "AppPlanAgent":
         assert "checkout_success`" in prompt
         assert "This structural type does not select the rendering surface" in prompt

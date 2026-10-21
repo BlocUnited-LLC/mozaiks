@@ -109,7 +109,19 @@ Current implementation:
 - `ModuleEventRouter` reads each loaded module's `contracts/reactions.yaml` and
   `notifications.yaml`.
 - Notification targets create platform notification intents and emit
-  `notification.created`.
+  `notification.created`. By default the stored record and that event keep the
+  originating event as `source_event`. A rule whose event carries content the
+  notification must not retain (Messaging's `message_sent`) declares
+  `source_event: reference`, which keeps only `id`, `type`, and `related_type`
+  when the event carries one. The rule's template renders the title and body,
+  and its `context_fields` choose the context (stored only when the event
+  carries one of them). Every record also keeps its own `notification_id`,
+  the `rule_id` and `module_id` of the rule that created it, the event's id
+  (`source_event_id`) and type, its actor, the rule's `audience` with the
+  resolved recipients, the `channels`, its `status` (`unread`) and
+  `created_at`, and the owning `app_id` (and `tenant_id` and `workspace_id`,
+  when the event names them); `notification.created` carries the same record,
+  and the default store's saved copy also gets MongoDB's `_id`.
 - Capability targets resolve against workflow `orchestrator.yaml` trigger
   declarations by matching `capability_id`.
 - `mozaiksai/hosts/platform.py` indexes capability-triggered workflows from

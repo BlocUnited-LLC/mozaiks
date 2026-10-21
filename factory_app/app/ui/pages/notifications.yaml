@@ -12,7 +12,6 @@ sections:
     config:
       title: Notifications
       subtitle: Review alerts from app builds, deployments, and workflow runs.
-      title_font: body
   - id: notifications-list
     primitive: ResourceTable
     title: null

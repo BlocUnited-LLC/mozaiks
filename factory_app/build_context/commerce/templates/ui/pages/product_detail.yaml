@@ -19,7 +19,6 @@ sections:
     config:
       title: Product
       subtitle: Review details, then add the product to your cart.
-      title_font: body
       actions:
         - id: back-to-products
           label: Products

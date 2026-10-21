@@ -469,7 +469,7 @@ export function SectionRenderer({
         title: config.title,
         subtitle: config.subtitle,
         actions: headerActions,
-        title_font: config.title_font ?? config.titleFont ?? 'body',
+        title_font: config.title_font ?? null,
         onAction: (actionId) => {
           const action = actionLookup.get(actionId);
           if (action) void executeAction(action, {});

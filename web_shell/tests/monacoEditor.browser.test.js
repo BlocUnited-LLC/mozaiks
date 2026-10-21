@@ -13,6 +13,7 @@ const normalize = (value) => value.replaceAll('\\', '/');
 const workbench = normalize(path.join(repo, 'factory_app/workflows/AppGenerator/ui/AppWorkbench.js'));
 const sanitizer = normalize(path.join(repo, 'chat-ui/src/utils/monacoDomPurify.js'));
 const setup = normalize(path.join(repo, 'factory_app/workflows/AppGenerator/ui/monacoEditor.js'));
+const monacoSanitizer = normalize(fs.realpathSync(path.join(shell, 'node_modules/monaco-editor/esm/vs/base/browser/domSanitize.js')));
 const copiedSanitizer = '/monaco-editor/esm/vs/base/browser/dompurify/dompurify.js';
 
 test('AppWorkbench Code and Split use local Monaco with the locked sanitizer in dev and production', { timeout: 240_000 }, async (t) => {
@@ -64,6 +65,12 @@ test('AppWorkbench Code and Split use local Monaco with the locked sanitizer in 
   for (const mode of ['dev', 'production']) {
     await t.test(mode, { timeout: 110_000 }, async (t) => {
       const config = await configureShell({ command: mode === 'dev' ? 'serve' : 'build', mode: 'test' });
+      const sanitizerResolver = config.plugins.find((plugin) => plugin.name === 'monaco-patched-sanitizer');
+      assert.equal(normalize(sanitizerResolver.resolveId('./dompurify/dompurify.js', monacoSanitizer)), sanitizer, 'canonical dependency path resolves the patched sanitizer through junctions');
+      assert.equal(normalize(sanitizerResolver.resolveId('./dompurify/dompurify.js', monacoSanitizer + '?v=fixture')), sanitizer);
+      assert.equal(sanitizerResolver.resolveId('./dompurify/dompurify.js', path.join(fixture, 'unrelated/domSanitize.js')), undefined, 'same relative import from an unrelated module is untouched');
+      assert.equal(sanitizerResolver.resolveId('./unrelated.js', monacoSanitizer), undefined, 'other Monaco imports are untouched');
+      assert.equal(sanitizerResolver.resolveId('./dompurify/dompurify.js'), undefined, 'entry imports are untouched');
       config.resolve.alias = {
         '@mozaiks/chat-ui/hooks/useWorkflowStart.js': path.join(fixture, 'stubs/workflowStart.js'),
         '@mozaiks/chat-ui/platform/workflowSurfaceStyles.js': path.join(fixture, 'stubs/workflowSurfaceStyles.js'),
@@ -237,6 +244,7 @@ test('AppWorkbench Code and Split use local Monaco with the locked sanitizer in 
       await expect.poll(() => page.evaluate(() => window.workerLabels)).toEqual(expect.arrayContaining(['editorWorkerService', 'typescript', 'json', 'css', 'html']));
       assert.ok(workerUrls.length >= 5);
       assert.ok(workerUrls.every((url) => new URL(url).origin === origin), 'workers are local assets');
+      assert.ok(moduleIds.has(monacoSanitizer), 'module graph uses the canonical installed Monaco path');
       assert.ok(moduleIds.has(sanitizer), 'actual shell resolver loads the patched adapter');
       assert.equal([...moduleIds].some((id) => id.endsWith(copiedSanitizer)), false, 'copied sanitizer is absent from the module graph');
       assert.deepEqual(external, [], 'no external or CDN fallback request');

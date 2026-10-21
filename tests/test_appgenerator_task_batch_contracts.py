@@ -527,6 +527,7 @@ async def test_assemble_app_tasks_applies_accumulated_repair_overlay_and_deletio
         "modules/billing/backend/service.py": "OLD BASELINE",
         "modules/billing/backend/token_wallet_ledger.py": "OBSOLETE",
     })
+    context.set("app_task_batch_items", [{"task_id": "task_service"}])
     context.set(
         "app_task_batch_results",
         {
@@ -603,3 +604,34 @@ class TicketsModule:
     assert parsed["actions"][0]["handler_method"] == "update_status"
 
 
+
+
+def test_task_batch_outputs_read_only_the_canonical_result_map() -> None:
+    """Every key but _meta and _failed must be a planned task id; no wrapper, list or other key is guessed."""
+    from factory_app.workflows.AppGenerator.tools.code_file_utils import task_batch_outputs
+
+    output = {"code_files": [{"filename": "modules/a/module.yaml", "content": "id: a\n"}]}
+    meta = {"_meta": {"status": "completed", "failed_tasks": []}, "_failed": {"broken": {"error": "x"}}}
+    plan = {"app_build_plan": {"build_tasks": [{"task_id": "pages"}, {"task_id": "module_a"}, {"task_id": "broken"}]}}
+    canonical = {"pages": output, "module_a": output, **meta}
+    assert task_batch_outputs({**plan, "app_task_batch_results": canonical}) == [("pages", output), ("module_a", output)]
+    # Before the plan is in context, the batch's planned items name the same tasks.
+    items = {"app_task_batch_items": plan["app_build_plan"]["build_tasks"]}
+    assert task_batch_outputs({**items, "app_task_batch_results": canonical}) == [("pages", output), ("module_a", output)]
+    assert task_batch_outputs({}) == []
+    shape = "app_task_batch_results must be the task batch result map: task outputs keyed by the approved plan's task ids"
+    with pytest.raises(ValueError, match=shape):
+        task_batch_outputs({**plan, "app_task_batch_results": [output]})
+    # The obsolete wrappers nested the map under one key; each is refused with the shape diagnostic.
+    for wrapper in ("task_results", "results", "tasks"):
+        with pytest.raises(ValueError, match=f"{shape}.*'{wrapper}' is the obsolete wrapper shape"):
+            task_batch_outputs({**plan, "app_task_batch_results": {wrapper: {"pages": output}, **meta}})
+    # Any other key that is not a planned task id is refused, never read as a task.
+    for unknown in ("failed_tasks", "extra_task"):
+        with pytest.raises(ValueError, match=f"{shape}.*'{unknown}' is not a task id of the approved plan"):
+            task_batch_outputs({**plan, "app_task_batch_results": {**canonical, unknown: output}})
+    # Without an approved task inventory no key is a planned task.
+    with pytest.raises(ValueError, match="'pages' is not a task id of the approved plan"):
+        task_batch_outputs({"app_task_batch_results": {"pages": output}})
+    with pytest.raises(ValueError, match=r"app_task_batch_results\['pages'\] must be that task's output object"):
+        task_batch_outputs({**plan, "app_task_batch_results": {"pages": [output]}})

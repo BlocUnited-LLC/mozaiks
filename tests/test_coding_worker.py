@@ -565,16 +565,21 @@ async def test_request_and_generated_provenance_cannot_grant_missing_pack_contra
 
 @pytest.mark.asyncio
 async def test_saved_pack_still_requires_its_resolvable_output_contract(tmp_path):
+    """A saved selection whose source no longer resolves refuses the candidate at admission, before validation."""
     selected = _selected_pack_contracts()
     selected[0]["pack_source_path"] = str(tmp_path / "missing_installed_pack")
     store = _LineageArtifactStore({"capability_packs": selected})
+    validate = AsyncMock(side_effect=_validate_pack_support_outputs)
     worker = ScopedRefinementCodingWorker(
-        candidate_validation_runner=_validate_pack_support_outputs, artifact_store=store, output_root=tmp_path,
+        candidate_validation_runner=validate, artifact_store=store, output_root=tmp_path,
     )
     result = await worker.finalize_proposal(_pack_candidate_request(), _candidate_proposal())
     assert result.status == "failed"
-    assert "Selected CapabilityPack output contract is invalid" in result.error
-    assert store.calls[0]["validation_status"].value == "failed"
+    assert result.error.startswith("PACK_OWNERSHIP_UNRESOLVED: "), result.error
+    admission = result.metadata["candidate_admission"]
+    assert admission["code"] == "PACK_OWNERSHIP_UNRESOLVED" and "missing_installed_pack" in admission["resolution_error"]
+    validate.assert_not_awaited()
+    assert store.calls == []
 
 
 @pytest.mark.asyncio

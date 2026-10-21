@@ -20,7 +20,7 @@ from mozaiksai.core.workflow.execution.network_graph import (
     compile_transition_rules_to_graph,
     resolve_next_agent,
 )
-from tests.factory_context import factory_context
+from tests.factory_context import factory_context, planned_tasks
 from tests.test_generated_app_functional_acceptance import _basic_crud_files
 
 WORKFLOW = Path(__file__).resolve().parents[1] / "factory_app/workflows/AppGenerator"
@@ -40,6 +40,8 @@ def _context(**overrides):
         "integration_tests_passed": True,
         "app_validation_status": "passed",
         "app_bundle_acceptance_status": "passed",
+        # The default result is the planned module_contract task's; an override plan brings its own tasks.
+        **({} if "app_build_plan" in overrides else {"app_task_batch_items": planned_tasks("module_contract")}),
         "app_task_batch_results": {"module_contract": {"code_files": [
             {"filename": "README.md", "content": "New bundle"},
         ]}},

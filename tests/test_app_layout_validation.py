@@ -376,29 +376,33 @@ def test_scanner_extension_selection_is_explicit_not_filename_inferred() -> None
 
 
 def test_scanner_requires_repo_support_pack_outputs_to_be_declared_when_packs_selected() -> None:
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        resolve_templates_for_pack,
+    )
+
     pack = {
         "id": "operator_readiness",
         "capability_source": "config_file",
         "pack_source_path": "factory_app/build_context/operator_readiness",
     }
+    # Its templates render from build context; the scan verifies them against the same context.
+    context = {"readiness_profile": "host_operator_platform", "capability_packs": [pack]}
+    rendered = {
+        item["filename"]: item["content"]
+        for item in resolve_templates_for_pack(Path(pack["pack_source_path"]), "operator_readiness", context_variables=context)
+    }
+    assert "docs/operations/operator-readiness.md" in rendered
 
-    assert (
-        scan_generated_bundle(
-            {
-                "app.json": "{}",
-                "docs/operations/operator-readiness.md": "",
-            },
-            capability_packs=[pack],
-        )
-        == []
-    )
+    assert scan_generated_bundle({"app.json": "{}", **rendered}, capability_packs=[pack], context_variables=context) == []
 
     errors = scan_generated_bundle(
         {
             "app.json": "{}",
+            **rendered,
             "docs/operations/undeclared.md": "",
         },
         capability_packs=[pack],
+        context_variables=context,
     )
     assert any("undeclared repository-support pack outputs" in error for error in errors)
 
@@ -513,7 +517,12 @@ def test_duplicate_pack_output_claims_fail_closed(monkeypatch: pytest.MonkeyPatc
     with pytest.raises(ManagedCapabilityTemplateError, match="duplicate pack output"):
         scanner._layout_extensions_for_selected_packs(packs)
 
-    errors = scanner.scan_generated_bundle({"app.json": "{}"}, capability_packs=packs)
+    # A scan claims outputs only for verified selections, so it selects two real packs.
+    verified = [
+        {"id": pack_id, "pack_source_path": f"factory_app/build_context/{pack_id}"}
+        for pack_id in ("operator_readiness", "mozaikspay")
+    ]
+    errors = scanner.scan_generated_bundle({"app.json": "{}"}, capability_packs=verified)
     assert any("duplicate pack output claims" in error for error in errors)
 
 

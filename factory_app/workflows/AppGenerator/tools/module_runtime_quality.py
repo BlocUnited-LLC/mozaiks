@@ -9,8 +9,10 @@ placeholder trends, demo/sample records, or TODO-backed business logic.
 from __future__ import annotations
 
 import ast
+import io
 import logging
 import re
+import tokenize
 from collections.abc import Iterable
 from pathlib import PurePosixPath
 from typing import Annotated, Any
@@ -29,6 +31,7 @@ _RUNTIME_BACKEND_FILE = re.compile(r"(^|/)modules/[^/]+/backend/[^/]+\.py$")
 _SUMMARY_FUNCTION = re.compile(r"(summary|stats|metrics|metric|count|dashboard|overview)", re.I)
 _TREND_KEY = re.compile(r"(trend|change|growth|delta|rate)", re.I)
 _PERCENT_TEXT = re.compile(r"[+-]?\d+(?:\.\d+)?\s*%")
+_TODO_MARKER = re.compile(r"\bTODO\b", re.I)
 
 _BANNED_TEXT_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bmock(?:ed|ing)?\b", re.I), "mock runtime data"),
@@ -38,7 +41,6 @@ _BANNED_TEXT_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bdummy\b", re.I), "dummy runtime data"),
     (re.compile(r"\bdemo\b", re.I), "demo runtime data"),
     (re.compile(r"\blorem\b", re.I), "lorem placeholder text"),
-    (re.compile(r"\bTODO\b", re.I), "TODO runtime logic"),
     (re.compile(r"\bNotImplemented(?:Error)?\b", re.I), "unimplemented runtime logic"),
     (re.compile(r"\bexample\b", re.I), "example runtime logic"),
     (re.compile(r"\bimplement(?:\s+(?:additional|the|own))?\s+(?:logic|checks|authorization|persistence)", re.I), "unfinished runtime logic"),
@@ -209,7 +211,43 @@ def _audit_ast(filename: str, content: str) -> list[str]:
     try:
         tree = ast.parse(content)
     except SyntaxError:
-        # Syntax is handled by build validation. Avoid duplicating that concern here.
+        tree = None
+
+    todo_text = content
+    if tree is not None:
+        # An exact string value such as a task status or Literal enum member is
+        # data. Comments, docstrings and explanatory messages remain markers.
+        marker_strings = {
+            id(node.value) for node in ast.walk(tree)
+            if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+        }
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call):
+                marker_strings.update(
+                    id(value) for value in [*node.exc.args, *(item.value for item in node.exc.keywords)]
+                    if isinstance(value, ast.Constant) and isinstance(value.value, str)
+                )
+            if isinstance(node, ast.JoinedStr) and any(
+                isinstance(value, ast.FormattedValue) for value in node.values
+            ):
+                marker_strings.update(id(value) for value in node.values if isinstance(value, ast.Constant))
+        todo_sources = [
+            token.string for token in tokenize.generate_tokens(io.StringIO(content).readline)
+            if token.type == tokenize.COMMENT
+        ]
+        todo_sources.extend(
+            node.value for node in ast.walk(tree)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)
+            and (node.value.strip().casefold() != "todo" or id(node) in marker_strings)
+        )
+        todo_text = "\n".join(todo_sources)
+    if match := _TODO_MARKER.search(todo_text):
+        warnings.append(
+            f"{filename}: contains TODO runtime logic ({match.group(0)!r}); generated module runtime code must use repo-backed data or honest empty states."
+        )
+    if tree is None:
+        # Build validation owns syntax; malformed source still cannot hide TODOs.
         return warnings
 
     function_passes = {

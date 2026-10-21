@@ -201,7 +201,28 @@ a task left with nothing to build, so it never synthesizes a facade task trio
 for a template module; `page_bundle` owns only the pages no pack ships, and its
 message names the pack-provided pages. A worker's, repairer's or earlier
 assembly's copy of a pack-owned path is discarded with a
-`PACK_OWNED_OUTPUT_DISCARDED` log line instead of validated. Pages bind facade
+`PACK_OWNED_OUTPUT_DISCARDED` log line instead of validated. Outside genesis an
+`owner: workspace` path is the app's own code, and its copy comes only from
+verified source: the bound verified revision source (through the existing
+refinement binding, including an explicit `full_rebuild` or
+`conceptual_replan` that skips hydration), else the admitted genesis copy in
+`generated_files`, else the starter template, used only when no app copy exists
+(genesis, a newly selected pack, or a rebuild with no bound source). A repair
+overlay copy or a `deleted_files` tombstone never changes it: assembly and
+`admitted_app_file_map` exclude one with a `WORKSPACE_PACK_OUTPUT_EXCLUDED`
+warning, and `save_generated_code` rejects a candidate that changes or deletes
+one (identical bytes are not a change) through `validate_repair_candidate`,
+with a `WORKSPACE_PACK_OUTPUT_CHANGE_UNSUPPORTED` diagnostic, whether or not a
+repair is active.
+Output for the path from a task that is not a current plan task owning it is
+raw history: it is ignored with a `WORKSPACE_PACK_OUTPUT_IGNORED` warning. When a
+current plan task owns the path and its output differs from the retained copy,
+assembly fails with `WORKSPACE_PACK_OUTPUT_CHANGE_UNSUPPORTED`. AppGenerator
+cannot admit that change, and reporting success while dropping it would hide
+that it never shipped. The diagnostic names the missing capability
+(`authorized_backend_refinement`: a Studio selected-file patch refinement of
+that path) and carries a `block_reason`, so bounded repair does not try to
+admit the change either. Pages bind facade
 actions against the template module contract, the one assembly applies.
 Assembly takes pack-owned files only from the templates and never re-derives a
 template page; it runs `pack_template_page_errors` on each template page (page
@@ -224,6 +245,103 @@ changing persistence or the data contract. Managed pack templates replace their
 page and module artifacts together before final page compilation, so acceptance
 checks the actual emitted contracts. Worker inventories still come from their
 accepted prerequisite outputs.
+
+### Shared UI composition
+
+When selected packs contribute UI, `assemble_app_tasks` composes their verified
+declarations with admitted app output through `ui_registry_composition`.
+`ui/index.js` and `ui/route_manifest.json` are shared composition outputs;
+exclusive pack filtering must retain authored declarations for these two paths.
+The existing `CustomRouteBundle` materializer and `FrontendStubOutput` remain
+the producers. There is no second runtime registry, and component source files
+are not rewritten by composition.
+
+If a typed custom bundle also contains an exclusive pack-owned page, the
+existing materializer derives its shared registry and routes before the filter
+removes that page implementation. Other app page bytes and
+`registration_barrel` declarations remain unchanged; verified templates supply
+the exclusive file. Retaining declarations does not authorize a competing app
+claim over a pack route or registration: the composition checks below still
+reject conflicts.
+
+The existing JavaScript parser admits local default/named imports (including
+aliases), named re-exports, and literal `registerComponent` calls in the exported
+`register` function. Registration `description`, `core`, and `override` options
+retain their literal values. Imports must resolve and expose the requested
+export. Dynamic calls/options, side effects, missing exports, and unsupported
+barrel statements fail instead of being evaluated or concatenated.
+Component forwarding must name its default or named export explicitly;
+namespace objects and export-star forwarding are not component bindings.
+
+Separate active owners cannot declare the same component key, route id, route
+path, or barrel export, even with identical declarations. A unique explicit
+component `override: true` may replace a conflicting registration; it does not
+override a route collision. Repeated declarations from the same owner and exact
+copies in prior admitted assembly snapshots are idempotent. Saved snapshots
+are fallback declarations: an admitted app revision supersedes its
+saved route metadata and ordering. Exact unchanged entries carried from that
+verified prior archive do not claim a second active owner, including retained
+pack entries. Current accumulated output cannot grant this carryover. A title
+or other metadata update retains prior relative positions; explicit order or
+authored sequence changes replace the affected ordering constraints.
+Current task/task and task/pack collisions still fail; a pack alone cannot
+replace a conflicting saved app route. Repeated local import bindings also fail.
+Contribution discovery order does not affect output. Each manifest's authored array sequence
+is preserved, explicit root and navigation `order` values remain intact, and
+incompatible sequences fail. Route metadata, auth and Ask references survive
+unchanged and still pass their existing acceptance gates.
+Final planned-page validation admits additional pack routes only when their
+complete entries match the verified resolver output; worker admission cannot
+grant that authority or invent an extra route.
+
+The accumulated `code_files` repair overlay is the newest admitted app layer,
+as it is in the merge without a pack and in `admitted_app_file_map`. For each
+component key, barrel export, route id and manifest metadata key it declares,
+it replaces the saved-snapshot and task declarations, and its relative route
+order replaces theirs for those route ids. A patched task declaration keeps its
+owner, so task/task and task/pack collisions still fail. The overlay never
+patches a pack declaration: a differing overlay route fails as a conflict, and a
+differing registration wins only through the unique explicit `override: true`
+contract above. In a revision a current task takes only the overlay values
+that differ from the verified revision baseline: component keys, barrel
+exports, route ids, manifest metadata, and the relative order when the
+overlay's order differs from the baseline's. An overlay value equal to the
+baseline, such as a full-root copy an earlier repair or the auth scaffold saved,
+still replaces older saved-snapshot values. It cannot revert a task's approved
+revision change or make competing task or pack declarations look carried. The
+exception is a root an admitted repair of that task saved: a responded repair
+records its `saved_paths` in `bundle_repair_result`, and such an overlay copy
+is newer than the task's output, so it supersedes that task even where it
+restates the baseline (`overlay_supersedes` on the task's contribution).
+Genesis has no baseline, so there every overlay value supersedes.
+
+Composition is additive. A carried declaration that a current task omits stays,
+so a partial root never removes a page. Removal is explicit: composition resolves
+imports against the final file set without admitted `deleted_files` tombstones.
+Admitted deletions are newer than task output. Any app registration (saved
+snapshot, repair overlay or current task) whose import names only a deleted
+file is dropped, and so are the app routes to a component left unregistered.
+The drop is logged with the components, routes and owners. The remaining routes
+keep their relative positions. A task that writes the deleted file itself and
+still registers it is current page work: an admitted `ui/index.js` that no
+longer registers that file supersedes it, and otherwise assembly fails with a
+`ui/index.js:` diagnostic naming the task. A planned page that loses its route
+this way still fails the planned-page route check. Pack declarations never
+drop. A pack registration of a deleted file, or an app registration of a file
+that is absent without an admitted deletion, fails with the existing explicit
+error. Pack-owned template paths are never tombstoned.
+
+Pack provenance identifies contributors to the composed roots
+(`data/contract.json`, `ui/index.js`, `ui/route_manifest.json`) under
+`composed_outputs`; they are never listed as exact template-owned final files.
+The resolver holds them back for every caller, and a pack that contributes only
+composed roots still has a provenance entry. The bundle scanner rejects
+provenance that lists a shared root in a pack's `materialized_owned_files`
+(written before composition) and asks for a reassembly, which rewrites the
+provenance. Other pack implementation files retain their existing template
+ownership.
+
+### Workflow and action reachability
 
 Page workflow actions must resolve to workflows in the supplied workflow bundle
 or its artifact-backed integration metadata. A proposed workflow name alone
@@ -494,7 +612,12 @@ recorded by `bundle_name`; the verifier does not reinterpret older rootless ZIPs
 Pre-fix local drafts need a new canonical build before preview or revision.
 Security readiness may explicitly read SVG text for its secret scan. Assembly
 rechecks the baseline, then applies schema/task outputs, accumulated repairs,
-and explicit deletions in that order. Finalization rechecks the selected record,
+and explicit deletions in that order. Task outputs are read only from the task
+batch's result map: each key other than `_meta` and `_failed` must be a task id
+of the approved plan (`build_tasks`, or the batch's `app_task_batch_items`
+projection of them). Any other key, including the obsolete wrappers that
+nested the map under `task_results`, `results` or `tasks`, fails assembly
+with a diagnostic that asks for the batch to be rerun. Finalization rechecks the selected record,
 owner, and archive digest before carrying forward unchanged binary bytes into
 the ZIP and file manifest. Acceptance records the source BuildRecord ID and
 every retained opaque path, byte count, and SHA-256 digest. It also binds the
@@ -628,6 +751,14 @@ rendered YAML/JSON stop materialization with the pack and template path in the
 error. Optional values must declare their defaults in the template. String
 substitutions in YAML must be serialized, for example with Jinja's `tojson`
 filter, so punctuation does not change the YAML structure or scalar type.
+The bundle scanner's output and provenance checks never render a template:
+they compare the output of each static (non-`.j2`) pack template with the
+verified template text, line endings normalized, and check a `.j2` output
+through the pack's declared outputs and pinned identity (see Pack identity
+authority in `build-context-packs.md`). The validation facade and Studio
+candidate validation therefore render nothing; AppGenerator's own acceptance
+gate still renders the selected packs' templates, with the full build
+context, for its planned-data check.
 
 `generate_and_download` runs `run_app_bundle_acceptance_gate` on the assembled
 files before packaging. That gate is the deterministic check of generated
@@ -771,7 +902,7 @@ models retain the existing optional-field default semantics.
 
 Two artifacts handle visual and behavioral customization:
 
-- `theme_config_patch` → visual tokens only: colors, typography, spacing scale, shadows, density, `ui.chat` / `ui.shell` / `ui.page` semantic styling
+- `theme_config_patch` → visual token deltas only, limited to what `AppThemeConfigPatch` accepts: compact `theme` selectors (`primary`, `variant`, `radius`, `font`, `font_heading`, `appearance`, `density`, `branding`), `identity`, `fonts`, and `ui.page.title`. Primitives, colors, shadows, and semantic `ui.chat` / `ui.shell` / `ui.page` spacing and sizing come from `captured_theme_config` or the platform defaults and cannot be patched.
 - `shell_config` → shell behavior only: header logo/actions, canonical `shortcuts`, `navigation.policy`, non-page-owned `navigation.items`, and `chrome` mode overrides
 
 `shell_preset_hint` is not an artifact. It is prompt-time AppGenerator guidance
@@ -780,7 +911,7 @@ uses it to choose page `navigation`, page `shell_mode`, and whether a compact
 `shell_config` override is necessary. The preset id is never written into the
 generated app bundle.
 
-Do not mix them. Raw spacing/width/density tokens belong in `theme_config_patch`.
+Do not mix them. Raw spacing, width, and sizing tokens belong to the captured theme, never to `shell_config`.
 Header action labels and app-wide shell placement rules belong in `shell_config`.
 
 Rules:
@@ -790,7 +921,7 @@ Rules:
 - `theme_config_patch` is a partial patch for `brand/theme_config.json`
 - `shell_config` is a partial patch for `config/shell.json`
 - `asset_manifest` is a partial patch for `config/asset_manifest.json`
-- raw spacing, width, density, and sizing tokens belong in `theme_config_patch`, not `shell_config`
+- raw spacing, width, and sizing tokens come from `captured_theme_config`; neither `theme_config_patch` nor `shell_config` carries them
 - generated `shell_config.shortcuts` may only contain `header`, `profile`, `mobile`, `footer`, and `footerHideOnMobile`
 - do not emit custom shortcut catalogs or shell fields outside `AppShellConfigPatch`
 - shell actions may use semantic `variants[].when` for context-aware label/target changes; do not emit path-prefix, wildcard, or query-param override rules
@@ -847,6 +978,9 @@ internals:
 
 Managed packs that own subscription assignment writes must declare that through
 `provides_capabilities: [subscription_write_path]` in the pack `contract.yaml`.
+Only the verified contract of a resolved pack counts: an inline
+`provides_capabilities` on a selected `capability_packs` row grants nothing
+(see the pack identity authority in `build-context-packs.md`).
 The scanner uses that provider-neutral capability flag to skip
 `entitlement_dispatch`; otherwise any generated app with
 `config/subscriptions.yaml -> assignment_store` must include the
@@ -979,7 +1113,23 @@ It must:
   `theme_config_patch` deltas into `brand/theme_config.json`
 - deep-merge `shell_config` into `config/shell.json`
 - deep-merge `asset_manifest` into `config/asset_manifest.json`
+- write `data/contract.json`, when DesignDocs approved a data contract, as
+  assembly compiles it: with the verified pack data contributions and the
+  subscription assignment stores, because the admitted projection overlays this
+  copy on the assembled bundle (a bounded repair keeps the bundle's copy). When
+  the selected packs cannot be verified, or their contributions do not compose
+  with the approved contract, the save writes no `data/contract.json` and does
+  not fail: the app schema author cannot repair either. It logs
+  `APP_SCHEMA_PACK_DATA_CONTRACT_NOT_WRITTEN` and reports the pack failure in
+  its result, the bundle keeps its assembled contract, and assembly then fails
+  with its own `PackIntegrityError` or conflicting pack contribution error. A
+  contract compiled without the pack contributions is never written
 - store `app_manifest`, `app_pages`, `app_custom_route_bundle`, `app_theme_config_patch`, `app_shell_config`, `app_asset_manifest`, and `app_schema_ready` in workflow context
+- add the rendered files to the admitted `code_files` overlay, and leave
+  `generated_files` as the last assembled bundle: the rendered `ui/index.js`
+  and `ui/route_manifest.json` hold only the app's own routes, so they reach
+  the bundle only through assembly or the admitted projection, which compose
+  them with the selected packs' declarations
 
 It must not write directly into an active runtime-loaded app root such as a
 workspace's `app/` bundle or `factory_app/app`. Activation requires an
@@ -1073,6 +1223,59 @@ gate passes.
 
 Validation and download use `admitted_app_file_map`: the current `generated_files`
 map, admitted `code_files` repairs, and admitted `deleted_files` tombstones.
+When `.mozaiks/pack_provenance.json` records `ui/index.js` or
+`ui/route_manifest.json` under `composed_outputs`, a repair copy of that root
+in the admitted overlay is composed onto it with assembly's own contributions
+and rules: the bundle's roots as the carried snapshot, every current task
+output, the admitted overlay, the verified pack templates, the admitted
+deletions and, in a revision, the same bound revision baseline. `generated_files`
+holds only assembled roots: `save_app_schema` and `save_generated_code` write
+repair copies to the overlay only. As in assembly, the sign-in and callback
+routes of `config/auth.yaml`, which carry no route id, are set aside while the
+roots compose and added to the composed manifest afterwards when
+`app.json.authRequired` is true. A partial repair copy therefore cannot drop
+the verified pack declarations it omits, a stale baseline copy cannot revert a
+task's change, and a pack declaration is never patched. No reassembly is needed
+for the repair to reach validation.
+
+The revision baseline does not depend on the process that assembled the
+bundle. Validation and export pass `revision_baseline` from
+`load_revision_baseline`, which reads the bound revision source again from its
+verified, immutable build record (text entries only, as assembly reads them).
+A memo inside `load_revision_baseline`, keyed by the immutable source identity
+and primed by assembly's own read, only saves that read; nothing else reads it.
+When the source cannot be read, `load_revision_baseline` logs
+`REVISION_BASELINE_UNAVAILABLE` and the projection, given no baseline, keeps the
+bundle's roots; acceptance then fails on the same unreadable source. When
+composing the overlay onto those roots alone would change them, an
+`ADMITTED_UI_ROOT_NOT_COMPOSED` warning reports the dropped repair; when
+validation has already written its composition back, `ADMITTED_UI_ROOT_KEPT`
+is logged at info level. Synchronous callers that read only module, config and
+data files (`save_generated_code`'s module action closure and implementations,
+assembly's auth-scope read) use `admitted_module_file_map`, the same projection
+without the shared UI roots, so their result never depends on process memory.
+`save_generated_code`'s pack-only data contract guard checks the bundle's
+`data/contract.json`, which in a revision is the bound source's copy that
+revision hydration loads before any agent reasons, or an assembled composition
+already checked against it; assembly checks the source's copy again. `save_auth_scaffold` never
+overwrites an overlay copy of a pack-composed root, so a projection that could
+not compose it cannot replace the repair with the pre-repair root.
+
+When the rules reject the copy, or the selected packs cannot be resolved, the
+bundle's roots are kept and an `ADMITTED_UI_ROOT_NOT_COMPOSED` warning names
+them; only without resolvable packs does the copy replace the root for the
+acceptance gates to judge. A malformed route declaration, such as a
+`navigation` or `meta` that is not an object, is such a rejection, never a
+crash of a synchronous caller. A copy that composes but breaks an auth route
+binding (for example a sign-in route that requires sign-in) is not held back:
+the auth routes are added without checking their bindings and
+`ADMITTED_AUTH_ROUTE_BINDING_INVALID` is logged, so the acceptance gate fails on
+that binding error and export's own auth route composition rejects it. The gate,
+and assembly's own auth route composition (so a reassembly after a repair as
+well), attribute a login or callback route's binding error to
+`ui/route_manifest.json` (for example `ui/route_manifest.json: Auth
+routes.login must declare meta.requiresAuth=false`), so the repair loop routes
+it to the task that owns that file. Without that provenance the last writer wins.
 Historical raw worker responses and prior generated directories cannot overwrite,
 refill, or delete that snapshot. An older foreign readback filtered by a save tool
 cannot reappear during packaging. Empty current artifacts remain empty.

@@ -22,6 +22,8 @@ def test_notifications_page_is_canonical_yaml_ui_proof() -> None:
         "PageHeader",
         "ResourceTable",
     ]
+    # The title follows the app-owned ui.page.title role; no font is pinned.
+    assert "title_font" not in page["sections"][0]["config"]
 
     table = page["sections"][1]["config"]
     assert table["api_endpoint"] == "/api/notifications"

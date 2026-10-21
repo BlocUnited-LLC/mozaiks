@@ -190,6 +190,59 @@ MAX_READ_ONLY_INSPECTION_FILES = 20
 MAX_READ_ONLY_INSPECTION_BYTES = 2_097_152
 
 
+#: Studio's read of the app registry before it began a run (``CodingWorkerRequest.registry_run_state``).
+RegistryRunState = Literal["idle", "run_in_flight", "unverified"]
+
+#: The authorized transitions that make a build record current and write its
+#: acceptance evidence: Studio's acceptance of a draft
+#: (``POST /api/studio/build/artifacts/{id}/accept``) and the staged-refinement
+#: acceptance (``accept_staged_refinement_build_record``). Generation, validation,
+#: bundle shape and session completion never write it.
+BUILD_ACCEPTANCE_TRANSITIONS = frozenset({"studio_accept", "staged_refinement_accept"})
+#: The scope and revision keys acceptance evidence names, in the order they are written.
+BUILD_ACCEPTANCE_SCOPE_KEYS = ("app_id", "build_family", "build_key", "build_record_id")
+
+
+def build_acceptance_evidence(
+    record: Any, *, accepted_by: str, accepted_at: str, transition: str,
+) -> dict[str, Any]:
+    """The ``commit_metadata.metadata.acceptance`` evidence an authorized acceptance writes on ``record``.
+
+    It names the accepted build's scope and revision (``app_id``,
+    ``build_family``, ``build_key``, ``build_record_id``), the authenticated
+    principal that accepted it (``accepted_by``, required: the caller passes
+    its own principal, never a name read from a stored record), when
+    (``accepted_at``) and the transition (``transition``). Readers honour it
+    only on the record it names (:func:`acceptance_evidence_names`), so
+    evidence copied into another record shows nothing about that record.
+    """
+    if transition not in BUILD_ACCEPTANCE_TRANSITIONS:
+        raise ValueError(f"Unknown build acceptance transition: {transition!r}")
+    if not isinstance(accepted_by, str) or not accepted_by.strip():
+        raise ValueError("Build acceptance evidence requires the authenticated principal that accepted the build")
+    return {
+        "app_id": record.app_id,
+        "build_family": record.build_family,
+        "build_key": record.build_key,
+        "build_record_id": record.id,
+        "accepted_by": accepted_by,
+        "accepted_at": accepted_at,
+        "transition": transition,
+    }
+
+
+def acceptance_evidence_names(record: Any, evidence: Any) -> bool:
+    """Whether ``evidence`` names ``record`` itself: its app, build family, build key and record id."""
+    return isinstance(evidence, dict) and all(
+        isinstance(evidence.get(key), str) and evidence.get(key) == value
+        for key, value in zip(
+            BUILD_ACCEPTANCE_SCOPE_KEYS,
+            (record.app_id, record.build_family, record.build_key, record.id),
+            strict=True,
+        )
+    )
+
+
 class CodingWorkerRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -198,6 +251,12 @@ class CodingWorkerRequest(BaseModel):
     target_app_id: BuildIdentity | None = None
     run_build_binding: RunBuildBinding | None = None
     baseline_files: dict[str, str] | None = None
+    #: Studio's read of the app registry just before it began this request's
+    #: run, set by Studio after it builds the request (never from the client
+    #: payload): ``idle`` when no other run was building, ``run_in_flight``
+    #: when one was, ``unverified`` when the read failed. Admission from a
+    #: STALE parent requires ``idle``; None (no such read) refuses it.
+    registry_run_state: RegistryRunState | None = None
     user_id: str | None = None
     build_family: str
     build_key: str | None = None

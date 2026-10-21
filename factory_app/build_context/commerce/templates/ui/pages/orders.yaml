@@ -19,7 +19,6 @@ sections:
     config:
       title: Orders
       subtitle: Review purchases and fulfillment state.
-      title_font: body
       actions:
         - id: back-products
           label: Products

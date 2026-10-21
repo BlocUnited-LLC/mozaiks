@@ -165,6 +165,128 @@ app bundle paths.
 UI primitives stay first-class in `chat-ui`. Build-context packs compose page
 schemas from those primitives; they do not define their own primitive layer.
 
+### Persistent template contributions
+
+A selected pack may declare `templates/data/contract.json` as an
+`owner: templates` required output. The verified resolver contributes its
+module-owned collection surfaces to the approved app data contract. The data
+compiler preserves unrelated app surfaces and rejects conflicting ownership or
+collection definitions. It emits one `data/contract.json`; a pack template never
+replaces that shared app artifact directly. Shared outputs record contributor
+pack identities in `.mozaiks/pack_provenance.json`, separately from exclusively
+owned template files. Several selected packs may declare the same shared root
+(`data/contract.json`, `ui/index.js`, `ui/route_manifest.json`); any other
+declared output path belongs to exactly one selected pack.
+
+A composed route may target one of the shell's routable core pages
+(`SchemaPage`, `ChatPage`, `ProfilePage`) without a `ui/index.js`
+registration, and a route may omit its `id`: composition then matches it by
+path and keeps it as written.
+An id-less route's path is its identity, so a revision that changes the path
+adds a route rather than moving it, and a route with an id at the same path
+conflicts with the carried id-less one: an existing id-less route keeps its
+path once it is composed beside a pack. Declare a route with an id from the
+start to make it movable. An id may not start with `path:`. Only the shell's
+routable core pages (`ChatPage`, `SchemaPage`, `ProfilePage`) need no
+registration; the other core components (transition screens, the token tab,
+the usage panels) are not route pages. Any other route component must be
+registered by a contribution.
+
+The resolver never materializes a shared root as one pack's file, whoever calls
+it. It leaves the root out of its output and lists it under `composed_outputs`
+with every contributing pack's identity; a pack whose templates are only shared
+roots still gets a provenance entry, so each contributor names a selected pack.
+Assembly composes the roots from those contributions. Provenance that lists a
+shared root in a pack's `materialized_owned_files` predates composition: the
+bundle scanner rejects it and asks for a reassembly, which rewrites the
+provenance.
+
+Without an approved DesignDocs data contract, assembly composes the selected
+packs' contributions (and any subscription assignment stores) onto an empty
+contract. A `data/contract.json` the bundle already carries is not an approval,
+so that composition replaces it only when the carried contract holds nothing
+but what the composition derives. The guard compares exactly these:
+
+- each carried surface's `surface_id` and `surface_kind` must be those of a
+  composition surface (a selected pack's contributed surface or the
+  subscription assignment store surface);
+- each collection under a carried surface must be one the composition declares
+  under that same surface, matched by collection `name` and physical collection
+  (`mongo_collection`, else `collection`, else `name`);
+- each row of the top-level `aliases` list, as an (alias, collection) pair, must
+  be a pair the composition declares;
+- `shared_collections` must be empty;
+- every other top-level key except `version` must equal the composition's.
+
+Nothing else is compared. Within a collection the composition declares, its
+`fields`, `indexes`, `tenancy`, `owner_field`, entity, lifecycle and
+collection-level aliases (`data_alias`, `primary_alias`, `shared_with`,
+`read_by`) may differ; so may surface-level keys other than `surface_id`,
+`surface_kind` and `collections`, `version`, and surface order. The carried
+contract may also lack surfaces, collections or aliases the composition adds.
+The composition's declaration replaces all of these, so an earlier assembly,
+the pack lifecycle's recomposition, a changed pack contribution or a newly added
+assignment store all recompose. It follows that a collection-level alias, or a
+changed tenancy, owner field or index, written on a declared collection is
+replaced without an error. An app-authored collection-level alias can come only
+from an imported or hand-edited contract, since the DesignDocs collection schema
+has no `data_alias`.
+
+Assembly checks every copy of `data/contract.json` it is given (the bundle's
+snapshot, task outputs and the repair overlay) and, in a revision, the bound
+revision source's copy, not only the copy that wins the merge. A pack-only copy
+written over the carried contract therefore cannot launder the app's data out
+of it, and a bounded repair of the `data/contract.json` owner, whose save would
+write that copy, is refused with the guard's reason.
+
+When the guard fails, assembly fails closed instead of replacing the carried
+contract, and the error names the reason. A carried contract that holds
+app-owned data (any other surface, a composition surface under another
+`surface_kind`, a collection or top-level alias the composition does not
+declare, a shared collection or differing metadata, including an app surface
+that shares a pack's surface id or an app collection inside a pack or
+assignment store surface) is reported as holding app-owned data, naming each
+item. A carried contract whose only differences are derived data whose identity
+changed (a declared collection stored in another physical collection, a surface
+without its `surface_kind`, or a subscription assignment store or alias the
+current subscription contract no longer compiles) is reported as derived data
+that no longer matches the current pack/assignment composition, naming each
+change: its stored rows need an approved DesignDocs data contract or a
+migration, never a silent re-point.
+
+Canonical policy, schema, and CRUD synthesis still owns ordinary generated and
+partially templated modules, including OutcomeFeedback. A complete template
+implementation keeps its own actions and participant-aware policy only when
+dependency closure, current source identity, declared output closure, and exact
+template bytes are verified. The factory's shipped packs and the packs
+registered for AppGenerator directly under the workspace build context are
+trusted sources;
+any other source requires matching version and digest pins, either on the
+selected pack or from installed Community Component state verified against the
+source's current bytes, and an external source without them is not resolved at
+all. A workspace-owned `backend/handler.py` may extend the
+verified template base handler. Missing, changed, or undeclared implementation
+files fail admission; the exemption does not skip runtime, schema,
+implementation, or browser validation. How a selected row resolves to a
+verified source is described in [Pack identity authority](#pack-identity-authority).
+
+Messaging `0.1.14` declares `threads`, `messages`, and `thread_reads` under the
+`messages` module. These app-wide collections retain participant and verified
+workspace authorization in the shipped service and policy; generic collection
+CRUD must not expose private conversations. Its additive migration uses only
+`ensure_collection` and `ensure_index`, retaining the existing index names and
+keys. Reapplying the same migration hash skips it without rewriting records.
+Account export and deletion use the same app-bound persistence collections and
+preserve messages and conversations belonging to other participants. Its
+`message_sent` notification carries no message text (a fixed title and body, a
+context of the thread, message and related-record ids, and a `source_event`
+reference), and its lifecycle events
+declare the subject app and related record as nullable, so plain direct
+conversations still dispatch them. Neither the migration nor account deletion
+touches platform notifications, so a notification rendered by a pack version
+before `0.1.14` (the released `0.1.12` and earlier) keeps its copied preview
+until the recipient clears it.
+
 ## Targeting
 
 Targeting has two layers.
@@ -350,10 +472,15 @@ Before materialization, a selected local pack must pass deterministic checks for
 - dependency declarations and exact dependency versions when declared;
 - canonical content digest.
 
-The digest is one `sha256:` value computed from `context.yaml` and every
-declared asset file. It excludes timestamps, absolute paths, worktree location,
+The digest is one `sha256:` value computed from `context.yaml`,
+`contract.yaml` (always, declared or not; a pack without one records its
+absence) and every declared asset file; see the pack identity rules below.
+It excludes timestamps, absolute paths, worktree location,
 and transient generated metadata. The same pack content produces the same
-digest; material pack-content changes produce a different digest.
+digest; material pack-content changes produce a different digest. It hashes raw
+file bytes, so a checkout's line endings are part of it: a pin or recorded
+digest is compared on the host that computed it, never across checkouts (see
+[Pack identity authority](#pack-identity-authority)).
 
 Cross-repository generator inputs use the same content-addressed principle
 through `mozaiks.contract_identity.v1`. The identity records the immutable
@@ -390,9 +517,21 @@ Generated bundles retain pack metadata in the existing
         { "path": "modules/greetings/module.yaml", "owner": "templates" }
       ]
     }
-  ]
+  ],
+  "composed_outputs": {
+    "ui/route_manifest.json": [
+      {
+        "pack_id": "greetings",
+        "version": "0.1.0",
+        "source": "https://example.com/community-packs/greetings",
+        "digest": "sha256:..."
+      }
+    ]
+  }
 }
 ```
+
+`materialized_owned_files` never lists a shared root.
 
 Local installation pins a verified Community Component in workspace
 build-context metadata:
@@ -443,15 +582,352 @@ installed A@v1 + verified local candidate A@v2 -> UpgradePlan
 ```
 
 The plan reports exact version/digest movement, dependency changes, added,
-removed, and changed owned files, and potential conflicts. Applying an upgrade
-is allowed only when the operation can compare the workspace files against the
-old pack's rendered content. It refuses to overwrite locally modified owned
-files, files owned by another installed pack, or workspace-owned/custom files.
-It does not execute migration scripts.
+removed, and changed owned files, and potential conflicts. Shared roots are
+never owned files. Applying an upgrade is allowed only when the operation can
+compare the workspace files against the old pack's rendered content. It refuses
+to overwrite locally modified owned files, files owned by another installed
+pack, or workspace-owned/custom files. It validates the upgraded provenance
+against the app as it will be before it writes anything. It does not execute
+migration scripts.
+
+An upgrade compares the app with the installed source only after that
+source verifies to the version and digest installed state pinned; a source
+changed in place since installation refuses the upgrade, and nothing
+changes. Restore the installed source and plan the upgrade from a separate
+candidate directory.
+
+A component whose pack does not declare its `contract.yaml`, or has none,
+and that was pinned under the earlier digest rule (which covered neither an
+undeclared contract nor the absence of one) cannot show whether, or with
+which contract, it was installed. The upgrade plan, a repeated installation
+and installed resolution all refuse it, whether its contract was since
+edited, added or deleted, and nothing changes. A pin of a pack that declares
+its contract and has the same readable, regular-file inputs accepted by the
+current rules verifies as before, because both rules digest that pack alike.
+The refusal compares what the
+pin recorded (the version, the declared files and the capabilities they
+declare, and the dependencies it read from the contract) and says that this
+does not prove the contract's ownership, provided capabilities or
+restrictions unchanged. No lifecycle step adopts a contract its pin never
+covered and installation never re-labels an existing pin, so the remedy is
+to install the pack from its verified source into a build context without
+that pin; installation verifies and pins the whole pack, `contract.yaml`
+(or its absence) included. A pin recorded under the current rule covers the
+contract and its absence, so a contract added to or deleted from the
+installed source is refused as an in-place change.
+
+When the app's provenance claims any shared root as a pack's exclusive file,
+whichever pack claims it and in any entry order, the plan blocks with
+`exclusive_shared_root_claim` before anything is written. That provenance
+predates composition; reassemble the app to recompose its shared roots, then
+plan the upgrade again.
+
+`data/contract.json` is never an owned file. When a pack's data contribution
+changes, the plan lists it in `recomposed_files`, and applying replaces only
+that pack's surfaces in the app contract, preserving app-owned surfaces and
+other contributions. When the contribution changes and the app has no
+contract, the lifecycle creates one whenever the new version ships a data
+contract template, even one that declares no surfaces. In that case it writes
+the same empty contract (`"surfaces": []`) that assembly composes for the pack
+when no approved DesignDocs contract exists. If the new version ships no data
+contract template, no contract is created. The plan blocks before anything is
+written when a pack surface was modified locally
+(`locally_modified_composed_output`), or when the app contract fails the
+runtime data contract loader or conflicts with the contribution
+(`composed_output_conflict`).
+
+Provenance keeps other packs' composed contributors. A shared UI root
+(`ui/index.js`, `ui/route_manifest.json`) merges the app's and every
+contributing pack's declarations into one file, so the lifecycle does not
+recompose it. An unchanged template only updates the contributor identity, and
+only when the app has that root and its provenance records the pack as one of
+its contributors. When an upgrade adds, changes, or removes the pack's template
+for a shared UI root, or the app's root was not composed with the pack, the
+plan blocks with `composed_output_requires_reassembly` and nothing is written.
+
+For an installed Community Component, that block currently has no supported
+way through: the lifecycle cannot adopt that pack version. Applying the
+upgrade is the only operation that moves the installed pin, and it is the
+blocked step. Installing the new version is refused while another version of
+the pack is installed. Reassembly that selects the pack by id resolves the
+pinned old source. A reassembly whose pack descriptor names the new version's
+`pack_source_path` directly renders the new templates but does not touch
+`installed_components.json` or its source sidecar, so the next upgrade plan
+still compares against the old version's output and blocks again.
 
 Mozaiks does not perform remote downloads, registry lookup, marketplace ranking,
 trust scoring, cryptographic signing, or automatic semver range upgrades for
 this local lifecycle layer.
+
+### Pack identity authority
+
+Every selected `capability_packs` row is resolved to one verified source before
+anything uses it (`verified_selected_pack_sources`). The resolver tries, in
+order:
+
+1. `explicit`: the row's own `pack_source_path`;
+2. `installed`: the workspace's installed Community Component with the row's id
+   under `build_context_root`, whose source workspace state verified against its
+   pinned version and digest;
+3. `factory_build_context`: the installed package's shipped catalog,
+   `resolve_factory_app_root()/build_context/<id>`, when `<id>` is a safe
+   identifier and that directory holds a `context.yaml` with a `pack` block.
+
+A caller may omit `version` and `digest` only where an authority vouches for
+the source, and the resolved identity records which one did (`authority`):
+
+- `factory_build_context`: the source is a pack the shipped catalog holds, a
+  direct child of `resolve_factory_app_root()/build_context`, whether the row
+  names it by id or by that path;
+- `installed`: the source is the installed Community Component with the row's
+  id, verified against the version and digest workspace state pinned, whether
+  the row names it by id or by its source path;
+- `workspace_build_context`: the row's `pack_source_path` is a direct child of
+  the trusted workspace build-context root (the context's `build_context_root`,
+  else the root `load_trusted_build_context` registers packs from:
+  `MOZAIKS_BUILD_CONTEXT_PATH`, then `MOZAIKS_APP_WORKSPACE_PATH/build_context`)
+  that `load_trusted_build_context` registers for AppGenerator. The resolver
+  runs the loader itself over that root, with the AppGenerator declarations
+  the installed factory ships (`workflows/AppGenerator/context_variables.yaml`),
+  and trusts the row only when the loader registers a pack with the row's id
+  whose source is this directory. The loader's own rules decide: a root it
+  refuses (an invalid, undeclared or conflicting projection in any context
+  for AppGenerator, an invalid `operator_capabilities` value, a pack id
+  registered twice) vouches for nothing, and neither does a context
+  retargeted to another workflow, one that no longer projects its packs, or
+  an inactive pack. A workspace pack must therefore apply to AppGenerator,
+  which assembles it: a pack registered only for another workflow, such as
+  DesignDocs, is selected with both pins. This is the documented operator-pack flow: the build-context
+  projection (`normalize_pack_descriptor`) carries the pack's
+  `pack_source_path` and `version` but no digest, because the pack block
+  cannot hold one. The row must carry that `version`, which is compared with
+  the fresh source, and the fresh digest is recorded. Because the registry
+  vouches at a version only, and a pack's bytes can change in place without
+  a version change, a recorded build pins every row that names a pack
+  directly under the workspace root (unless that root is the shipped catalog
+  itself, whose packs follow the installed catalog like any other workspace's
+  and are recorded as selected) to the `version` and `digest` its
+  acceptance verified, whatever authority acceptance resolved it through
+  (`pin_workspace_pack_selections`, from the acceptance gate's
+  `resolved_capability_packs`). Refinement admission and Studio's ownership
+  checks read recorded rows back as a recorded selection
+  (`verified_pack_selection(..., recorded=True)`): a workspace pack row must
+  carry its digest, and the fresh source must match it. A pack edited in place
+  after the build was recorded therefore fails with `PackIntegrityError`
+  (`PACK_OWNERSHIP_UNRESOLVED` at admission) instead of being trusted on the
+  registry alone, and so does a build recorded before builds pinned workspace
+  packs, or a refinement that copied its rows; an AppGenerator revision
+  records a pinned build from the current pack.
+  A recorded row whose registration was later withdrawn still verifies
+  through its own pins (`selected_pins`). A build cannot be recorded with a
+  workspace pack row that acceptance verified no identity for. The registry
+  match is on the resolved path, so a pack reached through a junction or
+  symbolic link directly under the root resolves to its target outside the
+  root and needs both pins, although the loader registers it: place the
+  pack's directory itself under the root, or select it pinned (links inside a
+  pack are refused, below);
+- `selected_pins`: any other `pack_source_path` (a directory outside the
+  catalog and outside the workspace build context, such as a copy of a
+  workspace pack elsewhere or a lifecycle upgrade candidate) must be selected
+  with both `version` and `digest`, and its bytes must verify to them.
+
+An explicit source with neither authority nor both pins fails with
+`PackIntegrityError` before its contract is read: a directory's own contract
+never vouches for itself, so it grants no capability, layout or output
+ownership. `verify_pack_integrity` then computes a fresh version and digest
+from the resolved source. Any `version` or `digest` on the row (and, for an
+installed pack, the pins workspace state recorded) must equal them. The
+resolver records `{pack_id, version, digest, source, resolution, authority}`;
+`resolution` names the step that found the source, and `source` stays the
+pack's declared source. A pack selected by several rows resolves once, and
+only when they agree.
+
+The digest hashes the raw bytes of `context.yaml`, `contract.yaml` (always,
+because it decides output ownership and dependencies, even when the context
+does not declare it as an asset; a pack without one records that absence, so
+adding or deleting a contract changes the digest) and every declared asset,
+so it is a
+same-host identity: a CRLF and an LF checkout of the same pack have different digests.
+Every included input under a pack's directory must be a regular file or directory.
+A link (a symbolic link, or a Windows junction or other reparse point) at
+`context.yaml`, `contract.yaml`, a declared asset, or anywhere under a
+declared directory that is not excluded as dot-named or `__pycache__` content is
+an integrity diagnostic. Those excluded entries are ignored by verification,
+planning and materialization; regular compiled Python files are excluded from
+the verified/materialized tree. A link is digested under its
+target's path and read through it, so retargeting one between inputs the
+pack already covers would change its effective configuration (a linked
+`context.yaml` changes its `capability_source`) or a rendered file, or drop
+an input, without changing the digest. The pack's context and contract
+readers refuse a linked `context.yaml` or `contract.yaml` before reading
+it, and the selection's dependency check reports that refusal; the verifier
+refuses any linked input, or any linked parent of a declared asset inside
+the pack, and walks declared directories without following links; template
+rendering applies the verifier's input rules first. A declared asset path
+may not contain `..`: the operating system follows a link before applying
+`..`, so such a path could reach a linked directory that a check of the path
+itself would miss. A directory under a declared asset that cannot be read
+is an integrity diagnostic too. Installation, installed resolution, selection and the upgrade
+plan therefore refuse the pack before any pin is compared or any input is
+used. To use such a pack, replace each link with the file or directory it
+points to; a component installed with a linked input must then be installed
+from its verified source into a build context without that pin. The pack
+directory itself may be reached through a link (see the authorities
+above).
+Row-level digest pins (and installed-state pins) keep comparing against
+`compute_pack_digest` of the resolved source on the validating host, so a pin
+is meaningful on the host and checkout that recorded it. Across hosts, the
+portable identity is the pack id and version, and content is compared as
+described below.
+
+A row claims a pack, and must resolve or fail, when it carries a `version`,
+`digest` or `source`; when its `capability_source` is a registered pack source
+of the AppBuildPlan schema (`managed_capability`, `operator_pack`,
+`framework_pack`, `config_file` or `operator_extension`); or when it is not a
+`generated_module` row and its id names a pack the shipped catalog holds. A row
+whose id names an installed component resolves from installed state whatever
+its source. A claiming row that none of the three steps resolves fails with
+`PackIntegrityError`, naming the reason: an unsafe id (`../mozaikspay`), an id
+the catalog does not ship, or a host where `resolve_factory_app_root()`
+resolves nothing. No warning admits an unverified, unresolvable, mismatched or
+omitted pack. A `generated_module` row is a planned app-owned module, whatever
+its id: unless its own path or installed state resolves it, it selects no pack
+and grants no layout extension, capability or output ownership. A row with no
+registered source whose id names no shipped or installed pack names no pack to
+omit, and selects nothing. A row that names its pack only under `capability_id`
+or `module_id` is malformed: no producer of `capability_packs` rows (the
+build-context projection, installed-component descriptors, AppBuildPlan and
+ExistingAppDiscovery plan rows, the scanner's resolved rows) emits that shape,
+so the resolver refuses it with a diagnostic naming the key, rather than
+treating it as a non-selection.
+
+Every consumer acts on a pack only through a verified entry. Planning
+(`module_action_inventory`: pack-owned outputs, facade directories, template
+module contracts and the managed contract inventory) reads a row's contents
+only after `verified_pack_selection` compared its pins and recorded its
+authority. A row the resolver refuses contributes no pack-owned output,
+facade directory or template contract (assembly refuses it with the same
+diagnostic). The managed contract inventory (`managed_pack_contracts`) feeds
+what a managed pack owns (surface ownership, managed data owners and facade
+actions), so a refused managed row raises there with the resolver's
+diagnostic, and DesignDocs refuses the design rather than saving it without
+the pack's ownership; a row's own inline `facades` are never read. Studio
+refinement admission verifies the saved parent's rows once, as saved, and
+reads declared outputs from those verified entries
+(`verified_pack_output_paths`), so a pack selected with pins keeps them. When
+the saved selection cannot be resolved or verified, ownership is unknown and
+the candidate is refused with `PACK_OWNERSHIP_UNRESOLVED`; it is never
+admitted unchecked.
+
+The bundle scanner resolves the selection the same way (the build context's
+selection when it has one, else the caller's rows) and passes only the resolved
+rows to every pack-aware check: declared outputs and layout extensions,
+managed-capability boundaries and `forbidden_outputs`, the managed setup lane,
+the MozaiksPay and Mozaiks Cloud contracts, and the `entitlement_dispatch`
+exemption. `forbidden_outputs` and `provides_capabilities` come only from the
+verified contract; a caller row's inline values are never read. A caller row
+for a pack the build context selected adds nothing but pins, which must match;
+one for any other pack may not carry its own `pack_source_path`. The
+validation facade and the app-bundle acceptance gate pass the same resolved
+packs to the functional checks (`scan_functional_generated_app`), so a row
+that selects no pack requires no pack facade either.
+
+Plan coverage, the discard of worker copies of pack-owned files and assembly
+read the same selection through the same resolver and the same verification
+(`module_action_inventory._selected_packs` calls `verified_pack_selection`), so
+an id-only row, such
+as the default MozaiksPay row an OSS SaaS plan adds when no build context
+selects MozaiksPay, owns exactly the outputs assembly materializes. While
+`app_build_plan` builds a plan whose packs the build context does not select,
+it releases the pack-owned paths of the plan's own rows.
+
+The bundle's provenance cannot vouch for itself. For each resolved pack the
+scanner requires that every `.mozaiks/pack_provenance.json` entry for that pack
+records the resolved version (its recorded digest is not compared, because it
+is a same-host identity), and that every template-owned output the pack ships
+(the composed shared roots aside) is present. The output of each static
+template, any template that needs no build-time context (every file but
+`.j2`), must equal the verified template text with line endings normalized; a
+template-owned migration is compared after the migration compilation assembly
+applies. These output checks never render a template: a `.j2` template renders
+from the build's template variables, which no validation caller has, so its
+output is verified through the pack's declared outputs (present, inside the
+declared output lanes, not forbidden) and its pinned identity. Its content is
+not compared with anything; `operator_readiness` (a config YAML, a docs page
+and a PowerShell script) is the only shipped pack with `.j2` templates. The
+validation facade returns the resolved identities as
+`GeneratedAppValidationResult.resolved_capability_packs`.
+
+One check still renders templates, for data rather than output bytes: when
+the caller passes the build's planned data contract (only AppGenerator's own
+acceptance gate does, from its full build context), the planned-data check
+recomposes it with the packs' data contributions through
+`verified_pack_template_inventory`, which renders every selected pack's
+templates with that context. The validation facade and Studio refinement
+candidates pass no planned data contract, so they render nothing.
+
+A pack version bump changes what the current pack ships. After an upgrade of
+the installed `mozaiks` package (or any shipped pack version bump), an
+unchanged bundle built from the previous version no longer matches the current
+pack: its provenance records the old version, and its pack-owned files may
+differ from the current templates. Validation then refuses it, and so do the
+hosted gate and Studio refinement candidates of that bundle, whose build-record
+rows resolve to the current pack. This is intended. For a shipped pack the
+remedy is an AppGenerator revision of the build, accepted, which
+re-materializes the pack at the current version (a regeneration only for an
+app with no accepted build); the Community Component
+lifecycle upgrade applies only to installed components.
+
+### Hosted bundle gate authority (mozaiks-app)
+
+mozaiks-app's `generated_bundle_gate` infers MozaiksPay from the presence of
+`services/integrations/mozaikspay_client.py` and passes
+`{"id": "mozaikspay", "capability_source": "managed_capability",
+"provides_capabilities": ["subscription_write_path"]}` through
+`validate_generated_app_bundle` with no build context. The authority chain for
+that row is:
+
+1. it names no `pack_source_path` and the facade has no `build_context_root`, so
+   steps 1 and 2 do not apply;
+2. `managed_capability` claims a pack, so the row must resolve or fail;
+3. the installed `mozaiks` package's catalog,
+   `resolve_factory_app_root()/build_context/mozaikspay`, resolves it
+   (`resolution` and `authority`: `factory_build_context`), and
+   `verify_pack_integrity` recomputes the version and digest from those
+   shipped bytes;
+4. its inline `provides_capabilities` is ignored: the `entitlement_dispatch`
+   exemption and the forbidden outputs (such as `modules/wallet/`) come from the
+   shipped `contract.yaml`;
+5. the bundle's provenance version and template-owned files are compared with
+   that pack, and the facade returns its identity.
+
+A genuine MozaiksPay bundle built from the same package version passes
+unchanged, whichever line endings the building or validating checkout uses. A
+bundle built from another pack version fails until an AppGenerator revision
+re-materializes the pack, as does a
+tampered template-owned file or a forbidden output. A bundle of a pack whose
+templates render from build context (`operator_readiness`) passes the facade:
+those outputs are checked through the pack's declared outputs, never rendered.
+
+Migration items for the mozaiks-app owner (not changed in this repository):
+
+- select packs from the bundle provenance's pack ids instead of inferring
+  MozaiksPay from a client file;
+- drop the inline `provides_capabilities` claim, which grants nothing;
+- remove the dead reads of `capability_packs` from the app record,
+  `app_build_plan`, `build_plan` and `metadata`, which no hosted record fills;
+- store the returned `resolved_capability_packs` with the hosting record, and
+  compare a stored identity across hosts by `pack_id` and `version` only: the
+  `digest` hashes the validating host's raw source bytes (see above);
+- plan for version skew: after an OSS pin bump, a bundle built from the
+  previous pack version fails the gate until an AppGenerator revision of the
+  build (a regeneration only for an app with no accepted build)
+  re-materializes the pack at the new version; a shipped pack
+  has no lifecycle upgrade;
+- bundles built before shared-root composition, whose provenance claims a
+  shared root as an exclusive file, fail every scan (the hosted gate included)
+  until they are reassembled (a regeneration only for an app with no accepted
+  build).
 
 ## Resolution
 

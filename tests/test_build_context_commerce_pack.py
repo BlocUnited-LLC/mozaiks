@@ -231,6 +231,19 @@ def test_commerce_page_templates_use_canonical_primitives_and_app_owned_endpoint
                 assert "/api/modules/mozaikspay/" not in value
 
 
+def test_commerce_page_titles_follow_the_app_page_title_role() -> None:
+    headers = [
+        (path.name, section["config"])
+        for path in sorted((TEMPLATES / "ui" / "pages").glob("*.yaml"))
+        for section in _read_yaml(path)["sections"]
+        if section["primitive"] == "PageHeader"
+    ]
+    assert {name for name, _ in headers} == {"cart.yaml", "orders.yaml", "product_detail.yaml", "products.yaml"}
+    for name, config in headers:
+        # Omitting title_font selects the app-owned ui.page.title font.
+        assert "title_font" not in config, name
+
+
 def test_appgenerator_selection_wiring_includes_commerce_pack() -> None:
     directory = _read_yaml(BUILD_CONTEXT / "AppGenerator" / "capability_directory.yaml")
     by_id = {entry["id"]: entry for entry in directory["capabilities"]}

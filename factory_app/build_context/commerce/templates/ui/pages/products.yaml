@@ -19,7 +19,6 @@ sections:
     config:
       title: Products
       subtitle: Browse the catalog and add products to your cart.
-      title_font: body
       actions:
         - id: view-cart
           label: View Cart

@@ -892,12 +892,15 @@ def validate_planned_custom_routes(
     pages: list[dict[str, Any]],
     owned_paths: set[str],
     baseline_files: dict[str, str] | None = None,
+    verified_pack_routes: list[dict[str, Any]] | None = None,
 ) -> None:
     """Bind this task's materialized custom routes to its approved page identities.
 
     The typed bundle materializer owns the registry syntax. This checks its
     route-to-import binding, without interpreting or rewriting authored React.
-    A scoped revision may retain other routes only as unchanged baseline entries.
+    A scoped revision may retain unchanged baseline entries. Final assembly may
+    also retain exact route entries supplied by its verified pack resolver;
+    worker admission never supplies this additional authority.
     """
     custom_paths = {path for path in owned_paths if path.startswith("ui/pages/custom/")}
     if not custom_paths:
@@ -927,6 +930,7 @@ def validate_planned_custom_routes(
 
     routes = routes_from(combined)
     preserved = routes_from(baseline) if manifest_path in baseline else []
+    pack_routes = _normalize_custom_route_bundle({"route_manifest": verified_pack_routes or []})["route_manifest"]
     approved_routes = {planned[path]["route"] for path in custom_paths}
     # Assembly adds shared sign-in/callback routes from the app auth contract.
     # Only that exact projection belongs to auth; matching a URL or a component
@@ -942,7 +946,7 @@ def validate_planned_custom_routes(
             canonical_auth = route in auth_routes and sum(
                 entry.get("path") == route.get("path") for entry in routes
             ) == 1
-            if route.get("path") not in approved_routes and route not in preserved and not canonical_auth:
+            if route.get("path") not in approved_routes and route not in preserved and route not in pack_routes and not canonical_auth:
                 raise ValueError(
                     f"{manifest_path}: unapproved custom route {route.get('path')!r}. "
                     f"Preserve the approved custom routes {sorted(approved_routes)} and their registered page files. "

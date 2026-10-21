@@ -670,6 +670,35 @@ def _context_get(context_variables: Any | None, key: str, default: Any = None) -
         return default
 
 
+class _PlanPackSelection:
+    """Read-only planning context whose pack selection is this plan's when the build context selects none.
+
+    Assembly applies the build context's ``capability_packs``, else the stored
+    plan's (an OSS SaaS plan's default id-only MozaiksPay row among them).
+    While a plan is being built it is not stored yet, so the pack ownership
+    planning releases and validates is read from the plan's own rows here,
+    through the same resolver assembly uses.
+    """
+
+    def __init__(self, base: Any, capability_packs: list[dict[str, Any]]) -> None:
+        self._base = base
+        self._plan = {"capability_packs": [dict(pack) for pack in capability_packs if isinstance(pack, dict)]}
+
+    def get(self, key: str, default: Any = None) -> Any:
+        if key == "app_build_plan":
+            return self._plan
+        return self._base.get(key, default)
+
+
+def _pack_selection_context(context_variables: Any | None, capability_packs: list[dict[str, Any]]) -> Any | None:
+    """The context pack ownership is read from while planning (see :class:`_PlanPackSelection`)."""
+    if context_variables is None or not hasattr(context_variables, "get") or _context_get(
+        context_variables, "capability_packs",
+    ):
+        return context_variables
+    return _PlanPackSelection(context_variables, capability_packs)
+
+
 def _context_available_pack_map(context_variables: Any | None) -> dict[str, dict[str, Any]]:
     raw_groups = [
         _context_get(context_variables, "capability_packs", []),
@@ -735,9 +764,14 @@ def _merge_available_pack_defaults(
         if required_integrations:
             merged["required_integrations"] = required_integrations
 
-    for key in ("pack_source_path", "context_id"):
-        if not merged.get(key) and available.get(key):
-            merged[key] = available[key]
+    if not merged.get("pack_source_path") and available.get("pack_source_path"):
+        merged["pack_source_path"] = available["pack_source_path"]
+        # The source's pins travel with its path: an external source resolves only with them.
+        for key in ("version", "digest"):
+            if not merged.get(key) and available.get(key):
+                merged[key] = available[key]
+    if not merged.get("context_id") and available.get("context_id"):
+        merged["context_id"] = available["context_id"]
     return merged
 
 
@@ -2263,11 +2297,13 @@ def app_build_plan(
         build_tasks=build_tasks,
         context_variables=context_variables,
     )
-    # The cached plan never schedules model work for an output or facade module a selected pack owns.
+    # The cached plan never schedules model work for an output or facade module a selected pack owns,
+    # including a pack only this plan selects (the build context selecting none).
+    pack_selection = _pack_selection_context(context_variables, capability_packs)
     released: dict[str, Any] = {"build_tasks": build_tasks, "generation_order": generation_order}
     for repair in (
-        *release_pack_owned_paths(released, context_variables),
-        *release_pack_facade_paths(released, context_variables),
+        *release_pack_owned_paths(released, pack_selection),
+        *release_pack_facade_paths(released, pack_selection),
         *release_subscriptions_config(released),
     ):
         _logger.info("[AppGenerator] plan normalized: %s", repair)
@@ -2307,7 +2343,7 @@ def app_build_plan(
         pages,
         build_tasks,
         managed_capability_ids=managed_capability_ids,
-        pack_paths=pack_owned_output_paths(context_variables),
+        pack_paths=pack_owned_output_paths(pack_selection),
     )
     _validate_monetization_provider_selection(
         capability_packs,

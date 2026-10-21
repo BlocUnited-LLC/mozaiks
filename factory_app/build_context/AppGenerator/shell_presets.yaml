@@ -139,7 +139,10 @@ presets:
         settings: profile
 rules:
 - Presets are prompt-time guidance only, not runtime artifacts.
-- Select at most one shell_preset_hint unless the app clearly combines public and authenticated zones.
+- Select one shell_preset_hint only when its navigation and chrome fit the approved experience; otherwise use null and the existing explicit navigation and shell_mode contracts.
+- Preset shell_policy, chrome_default, and page modes are starting points. Preserve approved per-page shell_mode_hint and navigation decisions, including mixed public and authenticated zones, instead of forcing every route into the preset's default.
+- Choose workspace for navigation-heavy operational work, focused for a bounded step flow, and immersive only when the approved experience needs the supported full-viewport presentation. Page category alone does not select the mode.
+- A preset is not permission to add a sidebar, bottom bar, dashboard, or extra page that the approved experience does not require. Use supported shell configuration; never hide platform chrome with generated CSS.
 - Do not emit preset ids into generated runtime files.
 - Compile the selected preset into normal AppPageSchema.navigation, AppPageSchema.shell_mode, and optional shell_config.
 - Keep shell_config null when the selected preset matches platform defaults.

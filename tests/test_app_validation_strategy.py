@@ -897,8 +897,30 @@ async def test_deleting_a_required_planned_file_cannot_close_acceptance_or_expor
     assert export_gate["reasons"]
 
 
+def _hosted_billing_pack(root: Path) -> dict[str, str]:
+    """A verified managed capability pack with no templates, selected by its source path."""
+    source = root / "hosted_billing"
+    source.mkdir(parents=True)
+    (source / "context.yaml").write_text(
+        "context_id: hosted_billing\n"
+        "assets:\n  - path: contract.yaml\n    kind: contract\n"
+        "pack:\n  id: hosted_billing\n  version: \"0.1.0\"\n  status: active\n  capability_source: managed_capability\n",
+        encoding="utf-8",
+    )
+    (source / "contract.yaml").write_text("contract_type: build_pack_instructions\n", encoding="utf-8")
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        verify_pack_integrity,
+    )
+
+    metadata = verify_pack_integrity(source, "hosted_billing")
+    return {
+        "id": "hosted_billing", "capability_source": "managed_capability", "pack_source_path": str(source),
+        "version": metadata["version"], "digest": metadata["digest"],
+    }
+
+
 @pytest.mark.asyncio
-async def test_app_bundle_acceptance_schedules_app_schema_repair_for_direct_managed_endpoint() -> None:
+async def test_app_bundle_acceptance_schedules_app_schema_repair_for_direct_managed_endpoint(tmp_path: Path) -> None:
     module = importlib.import_module("factory_app.workflows.AppGenerator.tools.app_validation")
     from scripts.smoke_appgenerator_live_acceptance import (
         build_appgenerator_acceptance_files,
@@ -926,9 +948,7 @@ async def test_app_bundle_acceptance_schedules_app_schema_repair_for_direct_mana
     result = await module.run_app_bundle_acceptance_gate(
         files=files,
         context_variables=context,
-        capability_packs=[
-            {"id": "hosted_billing", "capability_source": "managed_capability"},
-        ],
+        capability_packs=[_hosted_billing_pack(tmp_path)],
     )
 
     assert result["passed"] is False
@@ -942,7 +962,7 @@ async def test_app_bundle_acceptance_schedules_app_schema_repair_for_direct_mana
 
 
 @pytest.mark.asyncio
-async def test_app_bundle_acceptance_schedules_config_repair_for_missing_managed_client() -> None:
+async def test_app_bundle_acceptance_schedules_config_repair_for_missing_managed_client(tmp_path: Path) -> None:
     module = importlib.import_module("factory_app.workflows.AppGenerator.tools.app_validation")
     from scripts.smoke_appgenerator_live_acceptance import (
         build_appgenerator_acceptance_files,
@@ -965,9 +985,7 @@ async def test_app_bundle_acceptance_schedules_config_repair_for_missing_managed
     result = await module.run_app_bundle_acceptance_gate(
         files=files,
         context_variables=context,
-        capability_packs=[
-            {"id": "hosted_billing", "capability_source": "managed_capability"},
-        ],
+        capability_packs=[_hosted_billing_pack(tmp_path)],
     )
 
     assert result["passed"] is False

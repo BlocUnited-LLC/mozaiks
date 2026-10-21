@@ -490,7 +490,7 @@ async def _run_lineage_smoke_with_store(
             file_path = app_dir / path
             file_path.parent.mkdir(parents=True, exist_ok=True)
             file_path.write_text(content, encoding="utf-8", newline="")
-    await _register_app_bundle_artifact_version(
+    registered = await _register_app_bundle_artifact_version(
         app_id=app_id,
         chat_id="chat_appgenerator",
         user_id="user_1",
@@ -500,9 +500,9 @@ async def _run_lineage_smoke_with_store(
         artifact_store=store,
     )
     current_refs = await store.get_current_build_record_refs(app_id=app_id)
-    app_bundle = await store.get_build_record(app_id=app_id, build_record_id=current_refs["app_bundle"])
+    app_bundle = await store.get_build_record(app_id=app_id, build_record_id=registered.id)
     if app_bundle is None:
-        return {"success": False, "validation_errors": ["Expected current app_bundle artifact."]}
+        return {"success": False, "validation_errors": ["Expected the registered app_bundle artifact."]}
     app_call = next(
         (call for call in reversed(list(getattr(store, "create_calls", []))) if call["build_family"] == "app_bundle"),
         {"source_workflow": app_bundle.source_workflow,
@@ -516,6 +516,14 @@ async def _run_lineage_smoke_with_store(
     loader_result = await _load_app_bundle(files, capability_id)
 
     errors: list[str] = list(integration_errors)
+    # Generation is not acceptance: the first build is a draft for review, with no acceptance evidence,
+    # and it is not the app's current build until an authorized acceptance makes it so.
+    if app_bundle.lifecycle_status != ArtifactLifecycleStatus.DRAFT:
+        errors.append(f"The generated app_bundle was saved {app_bundle.lifecycle_status}, not as a draft for review.")
+    if "acceptance" in app_bundle.commit_metadata.metadata:
+        errors.append("The generated app_bundle carries acceptance evidence that no acceptance wrote.")
+    if "app_bundle" in current_refs:
+        errors.append("A generated, never-accepted app_bundle is reported as the app's current build.")
     expected_workflow_steps = [
         ["ValueEngine"],
         ["ThemeCapture"],
@@ -589,6 +597,7 @@ async def _run_lineage_smoke_with_store(
                 "theme_capture_id": theme_capture.id,
                 "workflow_bundle_id": workflow_bundle.id,
                 "app_bundle_id": app_bundle.id,
+                "app_bundle_lifecycle_status": ArtifactLifecycleStatus(app_bundle.lifecycle_status).value,
                 "workflow_bundle_inputs": workflow_call["canonical_inputs_version"],
                 "app_bundle_inputs": app_call["canonical_inputs_version"],
                 "current_refs": current_refs,

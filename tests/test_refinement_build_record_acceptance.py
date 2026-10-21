@@ -277,8 +277,47 @@ async def test_accepts_draft_app_bundle_when_review_is_promotion_ready(tmp_path:
     assert result.metadata["acceptance"]["request_id"] == context["plan"].request_id
     assert result.build_record.lifecycle_status == BuildRecordStatus.CURRENT
     assert result.build_record.commit_metadata.metadata["acceptance"]["accepted_by"] == "operator-1"
+    # The same evidence Studio's acceptance writes: the accepted record's scope and revision, the
+    # principal, the time and the transition, so readers honour it only on this record.
+    record = result.build_record
+    assert {key: result.metadata["acceptance"][key] for key in (
+        "app_id", "build_family", "build_key", "build_record_id", "accepted_by", "accepted_at", "transition",
+    )} == {
+        "app_id": record.app_id, "build_family": "app_bundle", "build_key": record.build_key,
+        "build_record_id": record.id, "accepted_by": "operator-1", "accepted_at": result.accepted_at,
+        "transition": "staged_refinement_accept",
+    }
     assert context["build_record_store"].source_record.lifecycle_status == BuildRecordStatus.SUPERSEDED
     assert load_refinement_review_record(context["staging_result"].staging_area).status == "promotion_ready"
+
+
+@pytest.mark.parametrize("accepted_by", [None, "", "   "])
+@pytest.mark.asyncio
+async def test_acceptance_without_the_callers_principal_is_refused_not_credited_to_the_reviewer(
+    tmp_path: Path, accepted_by,
+) -> None:
+    """The evidence names the authority for the transition: the caller's principal, never the review's reviewer.
+
+    The promotion-ready review record names ``reviewer_1``, but that stored
+    name is not who is accepting now, so an acceptance without a principal is
+    refused and nothing is written: the draft stays a draft, unaccepted.
+    """
+    context = await _build_acceptance_context(tmp_path)
+    assert context["review_record"].reviewer == "reviewer_1"
+    with pytest.raises(AcceptedStagedAppBundleBuildRecordError, match="authenticated principal"):
+        await accept_staged_refinement_build_record(
+            app_id=context["app_id"],
+            draft_build_record_id=context["draft_result"].build_record_id,
+            review_record=context["review_record"],
+            request_id=context["plan"].request_id,
+            record_store=context["build_record_store"],
+            accepted_by=accepted_by,
+        )
+    store = context["build_record_store"]
+    assert store.accept_calls == []
+    assert store.created_record.lifecycle_status == BuildRecordStatus.DRAFT
+    assert "acceptance" not in store.created_record.commit_metadata.metadata
+    assert store.source_record.lifecycle_status == BuildRecordStatus.CURRENT
 
 
 @pytest.mark.asyncio

@@ -9,6 +9,7 @@ def test_generated_ui_acceptance_has_no_private_retry_state() -> None:
 
     forbidden = (
         "review_ui_acceptance_findings",
+        "normalize_ui_acceptance_findings",
         "prior_revision_count",
         "revision_count",
         "revision_request",

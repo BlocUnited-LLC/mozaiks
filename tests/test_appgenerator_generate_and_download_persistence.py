@@ -205,9 +205,85 @@ def test_register_app_bundle_artifact_version_sets_context_and_parent(monkeypatc
     assert metadata["app_bundle_acceptance"]["status"] == "passed"
     assert metadata["validation_evidence"]["failed"] == []
     assert metadata["capability_packs"] == context.data["app_build_plan"]["capability_packs"]
+    # A revision is saved as a draft for review: only its acceptance records one.
+    assert "acceptance" not in metadata
     context.data["app_build_plan"]["capability_packs"][0]["config"]["profile"] = "changed"
     assert metadata["capability_packs"][0]["config"]["profile"] == "local"
     assert context.data["artifact_version_id"] == "av_bundle_1"
+
+
+def test_a_recorded_build_pins_its_workspace_pack_rows_to_the_identity_acceptance_verified(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    """The workspace registry vouches at a version only; the saved rows carry the digest acceptance verified.
+
+    A refinement verifies the saved rows again, so a pack edited in place after
+    this build was recorded no longer verifies, while a shipped catalog row is
+    recorded as selected. Without an identity from acceptance the build is not
+    recorded at all.
+    """
+    import shutil
+
+    from factory_app.workflows.AppGenerator.tools import (
+        resolve_managed_capability_templates as resolver,
+    )
+
+    fake_artifact_store = _FakeArtifactStore()
+    artifacts_mod = importlib.import_module("mozaiksai.core.artifacts")
+    monkeypatch.setattr(artifacts_mod, "get_artifact_store", lambda: fake_artifact_store)
+    monkeypatch.setattr(
+        artifacts_mod, "resolve_latest_artifact_version_refs", lambda **kwargs: asyncio.sleep(0, result={}),
+    )
+    workspace = tmp_path / "workspace" / "build_context"
+    source = Path(__file__).resolve().parent / "fixtures/community_packs/greetings"
+    shutil.copytree(source, workspace / "greetings", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    row = {
+        "id": "greetings", "capability_source": "generated_module",
+        "pack_source_path": str((workspace / "greetings").resolve()), "version": "0.1.0",
+    }
+    catalog_row = {"id": "mozaikspay", "capability_source": "managed_capability"}
+    identities = [
+        resolver.pack_identity(entry)
+        for entry in resolver.verified_selected_pack_sources(
+            [row, catalog_row], context_variables={"build_context_root": str(workspace)},
+        )
+    ]
+    zip_path = tmp_path / "GeneratedApp.zip"
+    zip_path.write_bytes(b"fake bundle bytes")
+
+    def register(acceptance_result):
+        context = _Context({
+            "build_id": "build_1",
+            "build_registry_id": "appreg_1",
+            "build_context_root": str(workspace),
+            "app_build_plan": {"capability_packs": [dict(row), dict(catalog_row)]},
+            "app_bundle_acceptance_status": "passed",
+            "app_bundle_acceptance_result": acceptance_result,
+        })
+        return asyncio.run(
+            generate_and_download_module._register_app_bundle_artifact_version(
+                app_id="app_123", user_id="user_123", workflow_name="AppGenerator", chat_id="chat_123",
+                bundle_name="GeneratedApp", zip_path=zip_path, context_variables=context,
+            )
+        )
+
+    register({"status": "passed", "resolved_capability_packs": identities})
+    saved_row, saved_catalog = fake_artifact_store.calls[0]["commit_metadata"]["metadata"]["capability_packs"]
+    fresh = resolver.verify_pack_integrity(workspace / "greetings", "greetings")
+    assert saved_row == {**row, "digest": fresh["digest"]}
+    assert saved_catalog == catalog_row
+    assert resolver.verified_selected_pack_sources([saved_row], context_variables={"build_context_root": str(workspace)})
+
+    # Edited in place at the same version, the pack no longer verifies against what the build recorded.
+    contract = workspace / "greetings" / "contract.yaml"
+    contract.write_bytes(contract.read_bytes() + b"\n# edited in place\n")
+    with pytest.raises(resolver.PackIntegrityError, match="selected digest does not match freshly verified source"):
+        resolver.verified_selected_pack_sources([saved_row], context_variables={"build_context_root": str(workspace)})
+
+    recorded = len(fake_artifact_store.calls)
+    with pytest.raises(resolver.PackIntegrityError, match="acceptance recorded no verified identity"):
+        register({"status": "passed"})
+    assert len(fake_artifact_store.calls) == recorded
 
 
 def test_register_app_bundle_artifact_version_marks_failed_acceptance(monkeypatch, tmp_path: Path) -> None:
@@ -248,6 +324,43 @@ def test_register_app_bundle_artifact_version_marks_failed_acceptance(monkeypatc
     assert fake_artifact_store.calls[0]["validation_status"].value == "failed"
     metadata = fake_artifact_store.calls[0]["commit_metadata"]["metadata"]
     assert metadata["validation_evidence"]["failed"] == ["module_wiring"]
+
+
+@pytest.mark.parametrize("parent_lookup", ["no_parent", "lookup_failed"])
+def test_a_first_build_is_saved_as_a_draft_without_acceptance_evidence(monkeypatch, tmp_path: Path, parent_lookup) -> None:
+    """Generation is not acceptance: a parentless build is saved DRAFT for review, carrying no acceptance evidence.
+
+    That holds whatever its validation said, and for a revision run whose
+    parent could not be read. Only an authorized acceptance (Studio's accept)
+    makes it current and writes the evidence.
+    """
+
+    class _UnreadableContext(_Context):
+        def get(self, key, default=None):
+            if key in {"artifact_version_id", "build_mode"}:
+                raise RuntimeError("context unavailable")
+            return super().get(key, default)
+
+    fake_artifact_store = _FakeArtifactStore()
+    artifacts_mod = importlib.import_module("mozaiksai.core.artifacts")
+    monkeypatch.setattr(artifacts_mod, "get_artifact_store", lambda: fake_artifact_store)
+    monkeypatch.setattr(
+        artifacts_mod, "resolve_latest_artifact_version_refs", lambda **kwargs: asyncio.sleep(0, result={}),
+    )
+    zip_path = tmp_path / "GeneratedApp.zip"
+    zip_path.write_bytes(b"fake bundle bytes")
+    context_type = _Context if parent_lookup == "no_parent" else _UnreadableContext
+    asyncio.run(
+        generate_and_download_module._register_app_bundle_artifact_version(
+            app_id="app_123", user_id="user_123", workflow_name="AppGenerator", chat_id="chat_123",
+            bundle_name="GeneratedApp", zip_path=zip_path,
+            context_variables=context_type({"app_bundle_acceptance_status": "passed"}),
+        )
+    )
+
+    (call,) = [call for call in fake_artifact_store.calls if call["build_family"] == "app_bundle"]
+    assert call["parent_build_record_id"] is None and call["lifecycle_status"].value == "draft"
+    assert "acceptance" not in call["commit_metadata"]["metadata"]
 
 
 def test_generate_and_download_blocks_failed_acceptance_before_writing(monkeypatch) -> None:

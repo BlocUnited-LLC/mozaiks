@@ -255,7 +255,7 @@ async def test_coding_request_preserves_derived_id_through_preparation_and_compl
     assert request is not None
     assert request.context_seed["request_id"] == refinement.request_id
     assert RefinementRequest.model_validate(request.context_seed["refinement_request"]).request_id == refinement.request_id
-    prepared, _ = await harness.prepare_coding_request(request)
+    prepared, _ = await harness.prepare_coding_request(request, confirmation_required_paths=())
     assert prepared is not None
 
     await harness.execute_coding_request(prepared)

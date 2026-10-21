@@ -454,7 +454,7 @@ the change.
 ### `gen`
 
 Generate from a single prompt in the terminal. `gen` is a developer convenience;
-reviewing, comparing, and promoting generated output happens in Studio.
+reviewing, comparing, accepting and promoting generated output happens in Studio.
 
 ```text
 mozaiks gen [-h] [--prompt PROMPT] [--output OUTPUT]
