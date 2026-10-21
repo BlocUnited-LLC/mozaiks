@@ -182,10 +182,12 @@ class MessageService:
 
         sender_id = actor_id(ctx)
         participant_ids = list(thread.get("participant_ids") or [])
+        admitted_sender: str | None = None
         if not is_participant(thread, sender_id):
             if not allow_nonparticipant_sender:
                 return {"success": False, "error": "access denied"}
             participant_ids = normalize_participant_ids([*participant_ids, sender_id])
+            admitted_sender = sender_id
 
         message = build_message_record(
             thread_id=thread_id,
@@ -214,7 +216,8 @@ class MessageService:
             },
             updated_at=message["created_at"],
             preview=preview,
-            participant_ids=participant_ids,
+            # Only an admitted sender joins; the list read above may already be stale.
+            admitted_participant_id=admitted_sender,
         )
 
         recipients = normalize_participant_ids(recipient_ids) if recipient_ids is not None else [

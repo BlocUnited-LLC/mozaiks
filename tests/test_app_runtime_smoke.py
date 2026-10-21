@@ -152,6 +152,195 @@ async def mongo():
 # --------------------------------------------------------------------------- no database (D1, D2)
 
 
+def test_declared_response_envelopes_use_the_shipped_messaging_contract():
+    source = Path(__file__).parents[1] / "factory_app/build_context/messaging/templates/modules/messages/module.yaml"
+    manifest = yaml.safe_load(source.read_text(encoding="utf-8"))
+    module = SimpleNamespace(action_schemas_map={
+        action["id"]: {"output": action["output_schema"]} for action in manifest["actions"]
+    })
+    entity = SimpleNamespace(id_field="thread_id")
+    thread = {"thread_id": "declared-thread"}
+    assert app_runtime_smoke._record_id(
+        entity, {"success": True, "thread": thread}, app_runtime_smoke._output_schema(module, "create_thread"),
+    ) == "declared-thread"
+    assert app_runtime_smoke._items(
+        {"threads": [thread], "total": 1}, app_runtime_smoke._output_schema(module, "list_threads"),
+    ) == [thread]
+
+
+@pytest.mark.parametrize("recorded_bundle", [_good, _dead])
+def test_declared_response_envelopes_preserve_canonical_items_and_direct_record_ids(recorded_bundle):
+    manifest = yaml.safe_load(recorded_bundle()[MODULE_YAML])
+    schemas = {action["id"]: action["output_schema"] for action in manifest["actions"]}
+    entity = SimpleNamespace(id_field="task_id")
+    item = {"task_id": "task-one"}
+    body = {"item": item} if "item" in schemas["create_task"]["properties"] else item
+    assert app_runtime_smoke._record_id(entity, body, schemas["create_task"]) == "task-one"
+    assert app_runtime_smoke._items({"items": [item], "total": 1}, schemas["list_tasks"]) == [item]
+
+
+@pytest.mark.parametrize("change", ["missing", "wrong_type", "undeclared", "ambiguous", "wrong_schema_type", "wrong_root_type"])
+@pytest.mark.parametrize("kind,member", [("object", "thread"), ("array", "threads")])
+def test_declared_response_envelopes_reject_unresolved_or_malformed_members(change, kind, member):
+    record = {"thread_id": "thread-one"}
+    body = {member: record if kind == "object" else [record]}
+    schema = {"type": "object", "properties": {member: {"type": kind}}}
+    if change == "missing":
+        body = {}
+    elif change == "wrong_type":
+        body[member] = [] if kind == "object" else {}
+    elif change == "undeclared":
+        schema["properties"] = {}
+    elif change == "ambiguous":
+        schema["properties"]["another"] = {"type": kind}
+    elif change == "wrong_schema_type":
+        schema["properties"][member]["type"] = "string"
+    else:
+        schema["type"] = "array"
+    if kind == "object":
+        assert app_runtime_smoke._record_id(SimpleNamespace(id_field="thread_id"), body, schema) is None
+    else:
+        assert app_runtime_smoke._items(body, schema) is None
+
+
+def test_declared_response_envelopes_never_fall_back_to_undeclared_record_values():
+    entity = SimpleNamespace(id_field="thread_id")
+    schema = {"type": "object", "properties": {"thread": {"type": "object"}}}
+    assert app_runtime_smoke._record_id(entity, {"thread": {}, "thread_id": "outside"}, schema) is None
+    assert app_runtime_smoke._record_id(entity, {"item": {"thread_id": "wrong-envelope"}}, schema) is None
+    assert app_runtime_smoke._record_id(entity, {"thread_id": "undeclared"}, {}) is None
+    assert app_runtime_smoke._items({"items": []}, {"properties": {"threads": {"type": "array"}}}) is None
+
+
+def test_declared_response_envelopes_keep_canonical_members_with_declared_metadata():
+    entity = SimpleNamespace(id_field="task_id")
+    record = {"task_id": "canonical"}
+    record_schema = {"type": "object", "properties": {"item": {"type": "object"}, "metadata": {"type": "object"}}}
+    array_schema = {"type": "object", "properties": {"items": {"type": "array"}, "warnings": {"type": "array"}}}
+    assert app_runtime_smoke._record_id(entity, {"item": record, "metadata": {}}, record_schema) == "canonical"
+    assert app_runtime_smoke._items({"items": [record], "warnings": []}, array_schema) == [record]
+
+
+class _CrudRun:
+    """Just enough of a smoke run for one owned entity's two-user CRUD checks, with scripted responses."""
+
+    def __init__(self, module, respond):
+        self.load = SimpleNamespace(modules=[module], subscriptions_config=None)
+        self.last_exception_path = None
+        self.outcomes: dict[str, tuple] = {}
+        self._respond = respond
+
+    def principal(self, label):
+        return SimpleNamespace(label=label, user_id=f"user-{label}", workspace_id=None, token=label)
+
+    async def call(self, method, module, action, principal, params):
+        status, body = self._respond(action, principal.label, params)
+        return status, body, f"{status} {body}"
+
+    def record(self, check, passed, message, *, path=None, **details):
+        self.outcomes[check] = (passed, message, path)
+        return passed
+
+    def not_run(self, check, reason):
+        self.outcomes[check] = (None, reason, None)
+
+
+def _get_checks(monkeypatch, get_schema, respond):
+    """Run the CRUD checks of an owned notes entity whose get action declares ``get_schema``."""
+    stored = {"note_id": "n1", "owner_id": "user-A"}
+
+    async def stored_record(run, entity, record_id):
+        return dict(stored) if record_id == "n1" else None
+
+    monkeypatch.setattr(app_runtime_smoke, "_stored", stored_record)
+    module = SimpleNamespace(
+        name="notes", action_api_surface_map={}, action_entitlement_map={},
+        action_schemas_map={
+            "create_notes": {"input": {}, "output": {"type": "object", "properties": {"item": {"type": "object"}}}},
+            "get_notes": {"input": {}, "output": get_schema},
+        },
+    )
+    entity = app_runtime_smoke._Entity(
+        module="notes", entity="Note", id_field="note_id", owner_field="owner_id", tenancy="per_user",
+        actions={"create": "create_notes", "get": "get_notes"},
+        collection={"name": "notes", "search_by": "note_id", "fields": [{"name": "note_id"}, {"name": "owner_id"}]},
+    )
+
+    def responses(action, who, params):
+        if action == "create_notes":
+            return 201, {"item": {"note_id": "n1"}}
+        return respond(who, params.get("id"))
+
+    run = _CrudRun(module, responses)
+    asyncio.run(app_runtime_smoke._crud(run, entity))
+    return {check.rsplit(".", 1)[1]: outcome for check, outcome in run.outcomes.items() if "get" in check}
+
+
+RECORD_GET = {"type": "object", "properties": {"record": {"type": "object"}}}
+
+
+def test_get_checks_read_the_declared_record_member(monkeypatch):
+    def respond(who, record_id):
+        if record_id != "n1":
+            return 200, {"record": None}
+        return 200, {"record": {"note_id": "n1"} if who == "A" else None}
+
+    outcomes = _get_checks(monkeypatch, RECORD_GET, respond)
+    assert {name: outcome[0] for name, outcome in outcomes.items()} == {
+        "get_missing": True, "a_get": True, "b_get_isolated": True,
+    }
+
+
+def test_get_isolation_fails_when_b_reads_a_record_under_a_declared_custom_member(monkeypatch):
+    def respond(who, record_id):
+        return (404, {}) if record_id != "n1" else (200, {"record": {"note_id": "n1"}})
+
+    outcomes = _get_checks(monkeypatch, RECORD_GET, respond)
+    assert outcomes["a_get"][0] is True and outcomes["get_missing"][0] is True
+    passed, message, path = outcomes["b_get_isolated"]
+    assert passed is False and "returned user A's record" in message
+    assert path == "modules/notes/backend/repo.py"
+
+
+@pytest.mark.parametrize("schema", [
+    {}, {"type": "object", "properties": {"one": {"type": "object"}, "two": {"type": "object"}}},
+], ids=["undeclared", "ambiguous"])
+def test_get_checks_fail_explicitly_when_the_get_response_record_is_undeclared(monkeypatch, schema):
+    def respond(who, record_id):
+        return 200, {"record": {"note_id": "n1"}} if record_id == "n1" else {}
+
+    outcomes = _get_checks(monkeypatch, schema, respond)
+    for name in ("get_missing", "a_get", "b_get_isolated"):
+        passed, message, path = outcomes[name]
+        assert passed is False, (name, message)
+        assert "notes.get_notes declares no response record" in message
+        assert path == "modules/notes/module.yaml"
+
+
+def test_a_missing_record_404_passes_without_a_declared_get_record(monkeypatch):
+    def respond(who, record_id):
+        return (200, {"note_id": "n1"}) if record_id == "n1" and who == "A" else (404, {})
+
+    outcomes = _get_checks(monkeypatch, {}, respond)
+    assert outcomes["get_missing"][0] is True
+    assert outcomes["b_get_isolated"][0] is True
+    assert outcomes["a_get"][0] is False
+
+
+def test_a_get_declaring_the_id_field_returns_the_record_itself(monkeypatch):
+    direct = {"type": "object", "properties": {"note_id": {"type": "string"}, "metadata": {"type": "object"}}}
+
+    def respond(who, record_id):
+        if record_id != "n1":
+            return 200, {}
+        return (200, {"note_id": "n1", "metadata": {}}) if who == "A" else (403, {})
+
+    outcomes = _get_checks(monkeypatch, direct, respond)
+    assert {name: outcome[0] for name, outcome in outcomes.items()} == {
+        "get_missing": True, "a_get": True, "b_get_isolated": True,
+    }
+
+
 async def test_no_database_is_reported_as_skipped_never_as_a_pass():
     result = await _smoke(_good(), None)
 

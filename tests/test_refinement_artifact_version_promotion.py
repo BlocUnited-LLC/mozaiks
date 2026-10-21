@@ -818,6 +818,7 @@ async def test_accept_staged_refinement_rejects_non_draft_version(tmp_path: Path
         review_record=review_record,
         request_id=plan.request_id,
         artifact_store=artifact_store,
+        accepted_by="operator-1",
     )
     # Second accept must be rejected — version is now CURRENT, not DRAFT
     with pytest.raises(AcceptedStagedAppBundleArtifactVersionError, match="DRAFT"):
@@ -827,6 +828,7 @@ async def test_accept_staged_refinement_rejects_non_draft_version(tmp_path: Path
             review_record=review_record,
             request_id=plan.request_id,
             artifact_store=artifact_store,
+            accepted_by="operator-1",
         )
 
 

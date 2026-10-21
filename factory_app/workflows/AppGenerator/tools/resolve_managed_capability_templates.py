@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
+import stat
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -17,9 +19,16 @@ from mozaiksai.core.runtime.app.provenance import resolve_build_timestamp
 from mozaiksai.core.session.build_context import (
     BuildContextError,
     iter_context_assets,
+    load_trusted_build_context,
+    resolve_build_context_root,
     resolve_context_asset_path,
 )
 from mozaiksai.core.session.build_context_schema import validate_pack_context
+from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    SHARED_PACK_OUTPUT_PATHS,
+)
+from mozaiksai.resources import resolve_factory_app_root
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +76,81 @@ class PackIntegrityError(ManagedCapabilityTemplateError):
     """Raised when a local pack fails deterministic trust/integrity verification."""
 
 
+# How a selected row's source was found, in resolution order.
+RESOLUTION_EXPLICIT = "explicit"
+RESOLUTION_INSTALLED = "installed"
+RESOLUTION_FACTORY_BUILD_CONTEXT = "factory_build_context"
+# What vouches for a resolved source's identity, so a caller may omit pins.
+# The installed package's shipped catalog, resolve_factory_app_root()/build_context/<id>.
+AUTHORITY_FACTORY_BUILD_CONTEXT = "factory_build_context"
+# Installed Community Component state, whose pinned version and digest the source matched.
+AUTHORITY_INSTALLED = "installed"
+# Version and digest pins on the selected row, which the source matched.
+AUTHORITY_SELECTED_PINS = "selected_pins"
+# The workspace build-context registry: a pack directly under the trusted build_context_root that
+# load_trusted_build_context registers for AppGenerator, at the row's version. A build records the
+# digest acceptance verified on the row (pin_workspace_pack_selections), and a recorded selection
+# must carry it (verified_pack_selection(recorded=True)), so later uses recheck the bytes.
+AUTHORITY_WORKSPACE_BUILD_CONTEXT = "workspace_build_context"
+PACK_AUTHORITIES: frozenset[str] = frozenset({
+    AUTHORITY_FACTORY_BUILD_CONTEXT, AUTHORITY_INSTALLED, AUTHORITY_SELECTED_PINS, AUTHORITY_WORKSPACE_BUILD_CONTEXT,
+})
+# Keys some readers once took as a pack id. No producer of capability_packs rows emits them, so a
+# row that names its pack only under one of them is malformed (never silently a non-selection).
+NON_CANONICAL_PACK_ID_KEYS: tuple[str, ...] = ("capability_id", "module_id")
+# The identity a verified selection records and returns to callers.
+PACK_IDENTITY_FIELDS: tuple[str, ...] = ("pack_id", "version", "digest", "source", "resolution", "authority")
+# Registered pack sources of the AppBuildPlan schema: a row with one of them selects a pack.
+PACK_CLAIM_SOURCES: frozenset[str] = frozenset({
+    "managed_capability", "operator_pack", "framework_pack", "config_file", "operator_extension",
+})
+# The capability_source of an app-owned planned module, which never selects a pack by its id.
+PLANNED_MODULE_SOURCE = "generated_module"
+
+
+def selected_pack_id(pack: Any) -> str:
+    """The pack a selected ``capability_packs`` row names.
+
+    This is the one pack-identity precedence: ``id``, then ``pack_id``, then
+    ``capability_pack_id`` (an AppBuildPlan row's own id). The bundle scanner
+    and ``layout_validation.layout_extensions_from_selected_packs`` use the
+    same order.
+    """
+    if not isinstance(pack, dict):
+        return ""
+    return str(pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id") or "").strip()
+
+
+def _has_value(value: Any) -> bool:
+    return value is not None and value != ""
+
+
+def claims_pack(pack: dict[str, Any]) -> bool:
+    """Whether a row claims to select a pack, so it must resolve to a verified source or fail.
+
+    A row claims a pack when it carries a ``version``, ``digest`` or
+    ``source``; when its ``capability_source`` is a registered pack source
+    (:data:`PACK_CLAIM_SOURCES`, which includes ``config_file`` and
+    ``operator_extension``); or when it is not a ``generated_module`` row and
+    its id names a pack the installed factory catalog ships. (A row whose id
+    names an installed Community Component resolves from installed state
+    before this question arises.) A ``generated_module`` row is a planned
+    app-owned module: unless its own path or installed state resolves it, it
+    selects no pack and grants nothing, whatever its id.
+    """
+    if any(_has_value(pack.get(key)) for key in ("version", "digest", "source")):
+        return True
+    capability_source = str(pack.get("capability_source") or "").strip()
+    if capability_source in PACK_CLAIM_SOURCES:
+        return True
+    return capability_source != PLANNED_MODULE_SOURCE and _factory_catalog_source(selected_pack_id(pack)) is not None
+
+
+def pack_identity(entry: dict[str, Any]) -> dict[str, str]:
+    """The recorded identity of a verified selection (:data:`PACK_IDENTITY_FIELDS`)."""
+    return {key: str(entry[key]) for key in PACK_IDENTITY_FIELDS}
+
+
 def _normalized_source(pack: dict[str, Any], context: dict[str, Any]) -> str:
     pack_value = context.get("pack")
     pack_block = pack_value if isinstance(pack_value, dict) else {}
@@ -80,8 +164,63 @@ def _is_safe_identifier(name: str) -> bool:
     return "/" not in normalized and ".." not in normalized
 
 
+def _is_link(path: Path) -> bool:
+    """A symbolic link, or on Windows a junction or other reparse point (the repository's link test)."""
+    try:
+        metadata = path.lstat()
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+    except OSError as exc:
+        # Windows rejects some manifest strings before metadata can be read.
+        # They are handled later as missing/invalid assets. Every other probe
+        # failure is indeterminate and must not be treated as proof of no link.
+        if getattr(exc, "winerror", None) == 123:
+            return False
+        raise PackIntegrityError(f"Pack input metadata cannot be read for {path}: {exc}") from exc
+    return stat.S_ISLNK(metadata.st_mode) or bool(
+        getattr(metadata, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    )
+
+
+def _refuse_linked_pack_input(context_root: Path, path: Path) -> None:
+    """Refuse a pack input that is a link, or that sits under a link inside the pack.
+
+    A link is digested under its target's path and read through it, so
+    retargeting one between inputs the pack already covers would change what
+    the pack holds (its context, contract, catalogs or rendered templates), or
+    drop an input, without changing its identity. Every input under the pack
+    root must be a regular file or directory; the pack root itself may be
+    reached through a link, since callers resolve it before use.
+    """
+    try:
+        relative = path.relative_to(context_root)
+    except ValueError as exc:
+        raise PackIntegrityError(
+            f"Pack input path must stay inside the pack directory: {path}. "
+            "Declare the file or directory by its relative path under the pack directory."
+        ) from exc
+    if ".." in relative.parts:
+        # The OS follows a link before applying '..', so a lexical check of the path would test the wrong
+        # file; pack input paths, like declared outputs, never step back up.
+        raise PackIntegrityError(
+            f"Pack input path {relative.as_posix()} must not contain '..': {path}. Name the file or directory "
+            "directly, under the pack directory."
+        )
+    for depth in range(1, len(relative.parts) + 1):
+        candidate = context_root.joinpath(*relative.parts[:depth])
+        if _is_link(candidate):
+            raise PackIntegrityError(
+                f"Pack input {Path(*relative.parts[:depth]).as_posix()} must be a regular file or directory, not a "
+                f"link: {candidate}. A link is digested under its target's path and read through it, so the pack's "
+                "identity could not show which input it holds. Replace the link with the file or directory it points "
+                "to; a component installed with a linked input must then be installed from its verified source into "
+                "a build context without that pin."
+            )
+
+
 def _read_pack_context(pack_source_path: Path, pack_id: str) -> dict[str, Any]:
     context_path = pack_source_path / "context.yaml"
+    _refuse_linked_pack_input(pack_source_path, context_path)
     if not context_path.exists():
         raise ManagedCapabilityTemplateError(f"Managed capability pack context not found: {context_path}")
     try:
@@ -113,6 +252,7 @@ def _read_pack_context(pack_source_path: Path, pack_id: str) -> dict[str, Any]:
 def _read_pack_contract(pack_source_path: Path) -> dict[str, Any]:
     """Read contract.yaml from a pack directory, returning empty dict if absent."""
     contract_path = pack_source_path / "contract.yaml"
+    _refuse_linked_pack_input(pack_source_path, contract_path)
     if not contract_path.exists():
         return {}
     try:
@@ -209,7 +349,7 @@ def _validate_pack_dependencies(
     for pack in capability_packs:
         if not isinstance(pack, dict):
             continue
-        pid = str(pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id") or "").strip()
+        pid = selected_pack_id(pack)
         if pid:
             available_pack_ids.add(pid)
 
@@ -225,15 +365,17 @@ def _validate_pack_dependencies(
         # Capabilities from context.yaml (fallback when descriptor lacks them).
         # Only attempt when pack_id is safe — unsafe IDs will be caught later
         # by resolve_templates_for_pack's _is_safe_identifier check.
-        raw_path = _resolve_pack_source_from_installed_state(pack, context_variables=context_variables)
-        if raw_path and pid and _is_safe_identifier(pid):
+        resolved = _resolve_selected_pack_source(pack, context_variables=context_variables)
+        if resolved is not None and pid and _is_safe_identifier(pid):
             try:
-                context_data = _read_pack_context(Path(raw_path).resolve(), pid)
+                context_data = _read_pack_context(Path(resolved.path).resolve(), pid)
                 pack_value = context_data.get("pack")
                 pack_block = pack_value if isinstance(pack_value, dict) else {}
                 available_pack_versions[pid] = str(pack_block.get("version") or "").strip()
                 for cid in _capabilities_from_context(context_data):
                     available_capability_ids.add(cid)
+            except PackIntegrityError:
+                raise
             except Exception:
                 if not pack.get("capabilities"):
                     pass
@@ -242,12 +384,12 @@ def _validate_pack_dependencies(
     for pack in capability_packs:
         if not isinstance(pack, dict):
             continue
-        pack_id = str(pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id") or "").strip()
-        raw_path = _resolve_pack_source_from_installed_state(pack, context_variables=context_variables)
-        if not raw_path or not pack_id:
+        pack_id = selected_pack_id(pack)
+        resolved = _resolve_selected_pack_source(pack, context_variables=context_variables)
+        if resolved is None or not pack_id:
             continue
 
-        contract = _read_pack_contract(Path(raw_path))
+        contract = _read_pack_contract(Path(resolved.path))
         required_packs, required_caps = _extract_requires(contract)
 
         missing_packs = [p["pack_id"] for p in required_packs if p["pack_id"] not in available_pack_ids]
@@ -272,10 +414,21 @@ def _validate_pack_dependencies(
             )
 
 
-def _safe_asset_files(context_root: Path, context: dict[str, Any]) -> list[Path]:
+def _safe_asset_files(context_root: Path, context: dict[str, Any], *, cover_contract: bool = True) -> list[Path]:
     files: list[Path] = [context_root / "context.yaml"]
     seen: set[Path] = {files[0].resolve()}
+    # contract.yaml decides output ownership and dependencies (_read_pack_contract reads it whether
+    # or not the context declares it as an asset), so the pack's identity always covers it, and
+    # _digest_of_files covers its absence.
+    # context.yaml was read through _read_pack_context, which refuses a linked one.
+    contract = context_root / "contract.yaml"
+    _refuse_linked_pack_input(context_root, contract)
+    if cover_contract and contract.is_file():
+        files.append(contract)
+        seen.add(contract.resolve())
     for asset in iter_context_assets(context):
+        declared_path = context_root / str(asset["path"])
+        _refuse_linked_pack_input(context_root, declared_path)
         try:
             asset_path = resolve_context_asset_path(context_root, asset)
         except BuildContextError as exc:
@@ -290,12 +443,7 @@ def _safe_asset_files(context_root: Path, context: dict[str, Any]) -> list[Path]
             continue
         if not asset_path.is_dir():
             raise PackIntegrityError(f"Declared pack asset must be a file or directory: {asset_path}")
-        for path in sorted(item for item in asset_path.rglob("*") if item.is_file()):
-            relative = path.relative_to(asset_path)
-            if any(part == "__pycache__" or part.startswith(".") for part in relative.parts):
-                continue
-            if path.suffix in {".pyc", ".pyo"}:
-                continue
+        for path in _declared_tree_files(context_root, asset_path):
             resolved = path.resolve()
             if resolved not in seen:
                 files.append(path)
@@ -303,13 +451,61 @@ def _safe_asset_files(context_root: Path, context: dict[str, Any]) -> list[Path]
     return files
 
 
+def _declared_tree_files(context_root: Path, directory: Path) -> list[Path]:
+    """The files a declared directory contributes, refusing any link before it could be followed.
+
+    The same files, in the same order, that the directory's regular-file tree
+    contributed before: ``__pycache__``, dot-named entries and compiled Python
+    files are not inputs.
+    """
+    files: list[Path] = []
+    pending = [directory]
+    while pending:
+        current = pending.pop()
+        try:
+            listing = list(os.scandir(current))
+        except OSError as exc:
+            raise PackIntegrityError(f"Pack directory {current} cannot be read: {exc}") from exc
+        for entry in listing:
+            path = Path(entry.path)
+            if entry.name == "__pycache__" or entry.name.startswith("."):
+                continue
+            _refuse_linked_pack_input(context_root, path)
+            if entry.is_dir(follow_symlinks=False):
+                pending.append(path)
+            elif entry.is_file(follow_symlinks=False) and path.suffix not in {".pyc", ".pyo"}:
+                files.append(path)
+    return sorted(files)
+
+
 def compute_pack_digest(pack_source_path: Path, pack_id: str) -> str:
     """Return the canonical SHA-256 digest for declared pack-owned content."""
 
     context_root = pack_source_path.resolve()
     context = _read_pack_context(context_root, pack_id)
+    return _digest_of_files(
+        context_root, pack_id, _safe_asset_files(context_root, context),
+        contract_absent=not (context_root / "contract.yaml").is_file(),
+    )
+
+
+def pre_contract_rule_digest(pack_source_path: Path, pack_id: str) -> str | None:
+    """The source's digest under the earlier rule, which covered neither a ``contract.yaml`` the context does not declare nor the absence of one.
+
+    None when the two rules agree (the contract is declared). Only to explain
+    why an installed pin no longer verifies
+    (``community_component_lifecycle._uncovered_contract_refusal``): it covers
+    no contract, so it never verifies, selects or re-pins a pack.
+    """
+    context_root = pack_source_path.resolve()
+    context = _read_pack_context(context_root, pack_id)
+    earlier = _digest_of_files(context_root, pack_id, _safe_asset_files(context_root, context, cover_contract=False))
+    return None if earlier == compute_pack_digest(context_root, pack_id) else earlier
+
+
+def _digest_of_files(context_root: Path, pack_id: str, files: list[Path], *, contract_absent: bool = False) -> str:
     entries: list[dict[str, str]] = []
-    for path in _safe_asset_files(context_root, context):
+    for path in files:
         try:
             relative = path.resolve().relative_to(context_root).as_posix()
         except ValueError as exc:
@@ -318,11 +514,15 @@ def compute_pack_digest(pack_source_path: Path, pack_id: str) -> str:
             "path": relative,
             "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
         })
-    payload = {
+    payload: dict[str, Any] = {
         "schema_version": "mozaiks.pack_digest.v1",
         "pack_id": pack_id,
         "files": sorted(entries, key=lambda item: item["path"]),
     }
+    if contract_absent:
+        # A pack without contract.yaml has no ownership or restrictions; its identity says so, so a
+        # contract added or removed later changes the digest. A pack with one digests as before.
+        payload["contract"] = "absent"
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return f"sha256:{hashlib.sha256(canonical).hexdigest()}"
 
@@ -481,11 +681,15 @@ def verify_pack_integrity(pack_source_path: Path, pack_id: str) -> dict[str, Any
     _safe_asset_files(context_root, context)
     for asset in iter_context_assets(context, kind="catalog"):
         path = resolve_context_asset_path(context_root, asset)
+        if not path.is_file():
+            raise PackIntegrityError(f"Catalog asset must be a file: {path}")
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         if not isinstance(data, dict):
             raise PackIntegrityError(f"Catalog asset must be a YAML mapping: {path}")
     for asset in iter_context_assets(context, kind="contract"):
         path = resolve_context_asset_path(context_root, asset)
+        if not path.is_file():
+            raise PackIntegrityError(f"Contract asset must be a file: {path}")
         contract_data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         if not isinstance(contract_data, dict):
             raise PackIntegrityError(f"Contract asset must be a YAML mapping: {path}")
@@ -509,6 +713,11 @@ def _file_owner_map(pack_source_path: Path) -> dict[str, str]:
             if path:
                 owner_map[path] = owner
     return owner_map
+
+
+def declared_output_owners(pack_source_path: Path) -> dict[str, str]:
+    """``{output path: owner}`` a pack's contract declares; provenance records any other rendered output as ``templates``."""
+    return _file_owner_map(pack_source_path)
 
 
 def _build_provenance_manifest(
@@ -640,21 +849,138 @@ def _context_build_context_root(context_variables: Any | None) -> Path | None:
     return None
 
 
-def _resolve_pack_source_from_installed_state(
-    pack: dict[str, Any],
-    *,
-    context_variables: Any | None,
-) -> str | None:
-    """Resolve an explicitly selected installed pack without copying local paths into AppBuildPlan."""
+def _workspace_build_context_root(context_variables: Any | None) -> Path | None:
+    """The trusted workspace build-context root, or None when none names an existing directory.
 
-    raw_path = pack.get("pack_source_path")
-    if raw_path:
-        return str(raw_path)
-    pack_id = str(pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id") or "").strip()
-    build_context_root = _context_build_context_root(context_variables)
+    The context's ``build_context_root`` when it carries one; otherwise the
+    root :func:`load_trusted_build_context` itself registers packs from at
+    launch (``resolve_build_context_root``: ``MOZAIKS_BUILD_CONTEXT_PATH``,
+    else ``MOZAIKS_APP_WORKSPACE_PATH``/build_context).
+    """
+    root = _context_build_context_root(context_variables)
+    if root is None:
+        try:
+            root = resolve_build_context_root()
+        except BuildContextError:
+            return None
+    return root.resolve() if root is not None and root.is_dir() else None
+
+
+# The workflow that assembles selected packs; workspace registration is decided for it.
+_ASSEMBLING_WORKFLOW = "AppGenerator"
+
+
+def _assembling_workflow_policy() -> Any | None:
+    """AppGenerator's context authority policy, from the declarations the installed factory ships; None when unreadable.
+
+    The same declarations the runtime loads for the workflow
+    (``workflows/AppGenerator/context_variables.yaml``), read from disk so the
+    answer does not depend on which workflows this process has loaded.
+    """
+    factory_root = resolve_factory_app_root()
+    if factory_root is None:
+        return None
+    path = Path(factory_root) / "workflows" / _ASSEMBLING_WORKFLOW / "context_variables.yaml"
+    try:
+        declarations = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return None
+    definitions = declarations.get("definitions") if isinstance(declarations, dict) else None
+    if not isinstance(definitions, dict):
+        return None
+    from mozaiksai.core.workflow.context.authority import build_context_authority_policy
+
+    try:
+        return build_context_authority_policy(workflow_name=_ASSEMBLING_WORKFLOW, definitions=definitions)
+    except ValueError:
+        # ContextAuthorityError, a declaration validation error or another invalid declaration: the runtime
+        # could not load these either, so no registration can be checked.
+        return None
+
+
+def _workspace_registration_refusal(root: Path, pack_id: str, workspace_root: Path) -> str | None:
+    """Why ``root``, directly under ``workspace_root``, is not a pack ``pack_id`` registered for AppGenerator.
+
+    None only when :func:`load_trusted_build_context` itself, run for
+    AppGenerator over ``workspace_root``, registers a pack with that id whose
+    source is ``root``. The loader's own rules decide, so a root it refuses
+    (an invalid or conflicting context anywhere in it, an undeclared or
+    malformed projection, a pack id registered twice) vouches for nothing,
+    and neither does a context retargeted to another workflow, one that no
+    longer projects its packs, or an inactive pack.
+    """
+    policy = _assembling_workflow_policy()
+    if policy is None or "capability_packs" not in policy.build_context_keys:
+        return (
+            f"{_ASSEMBLING_WORKFLOW}'s build-context declarations could not be read from the installed factory, so "
+            "no workspace registration can be checked"
+        )
+    try:
+        registered = load_trusted_build_context(policy, build_context_root=workspace_root).get("capability_packs")
+    except BuildContextError as exc:
+        return f"load_trusted_build_context refuses the workspace build context: {exc}"
+    for row in registered or []:
+        if not isinstance(row, dict) or str(row.get("id") or "") != pack_id:
+            continue
+        if Path(str(row.get("pack_source_path") or "")).expanduser().resolve() == root:
+            return None
+    return f"load_trusted_build_context registers no pack '{pack_id}' at this path for {_ASSEMBLING_WORKFLOW}"
+
+
+class _ResolvedSource:
+    """Where a selected row's source was found, before its bytes are verified.
+
+    A plain class: callers load this module by file path, outside sys.modules.
+    """
+
+    __slots__ = ("authority", "path", "pins", "resolution")
+
+    def __init__(self, path: str, resolution: str, authority: str, pins: dict[str, str] | None = None) -> None:
+        self.path = path
+        self.resolution = resolution
+        # What vouches for the identity (one of PACK_AUTHORITIES).
+        self.authority = authority
+        # For an installed pack, the version and digest workspace state pinned.
+        self.pins = dict(pins or {})
+
+
+def _factory_catalog_source(pack_id: str) -> Path | None:
+    """``resolve_factory_app_root()/build_context/<pack_id>`` when it is a shipped pack context, else None.
+
+    The catalog also holds workflow contexts (AppGenerator, AgentGenerator);
+    only a context that declares a ``pack`` block is a pack.
+    """
+    if not _is_safe_identifier(pack_id):
+        return None
+    factory_root = resolve_factory_app_root()
+    if factory_root is None:
+        return None
+    catalog = (Path(factory_root) / "build_context").resolve()
+    candidate = (catalog / pack_id).resolve()
+    # The candidate must be a direct child of the shipped catalog, not "." or a link elsewhere.
+    context_path = candidate / "context.yaml"
+    if candidate.parent != catalog or not context_path.is_file():
+        return None
+    try:
+        context = yaml.safe_load(context_path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return None
+    return candidate if isinstance(context, dict) and isinstance(context.get("pack"), dict) else None
+
+
+def _installed_pack_ids(build_context_root: Path) -> set[str]:
+    from .community_component_state import component_by_id, load_installed_components
+
+    return set(component_by_id(load_installed_components(build_context_root)))
+
+
+def _installed_descriptor(pack_id: str, build_context_root: Path | None) -> dict[str, Any] | None:
+    """The workspace's installed component ``pack_id``, its source verified against its pins; None when not installed."""
     if not pack_id or build_context_root is None:
         return None
     try:
+        if pack_id not in _installed_pack_ids(build_context_root):
+            return None
         from .community_component_lifecycle import resolve_installed_component_descriptors
 
         descriptors = resolve_installed_component_descriptors(
@@ -667,7 +993,318 @@ def _resolve_pack_source_from_installed_state(
         ) from exc
     if not descriptors:
         return None
-    return str(descriptors[0].get("pack_source_path") or "")
+    installed = descriptors[0]
+    if not str(installed.get("pack_source_path") or ""):
+        raise PackIntegrityError(f"Installed pack '{pack_id}' names no local source")
+    return installed
+
+
+def _installed_pins(installed: dict[str, Any]) -> dict[str, str]:
+    return {key: str(installed[key]) for key in ("version", "digest")}
+
+
+def _explicit_source(
+    pack: dict[str, Any],
+    raw_path: Any,
+    *,
+    pack_id: str,
+    build_context_root: Path | None,
+    workspace_root: Path | None,
+) -> _ResolvedSource:
+    """Resolve a row's own ``pack_source_path``, naming what vouches for it.
+
+    Without both pins, only three sources are trusted: a pack the installed
+    package's shipped catalog holds (a direct child of
+    ``resolve_factory_app_root()/build_context``); the source of the installed
+    Community Component with the row's id, which workspace state verified
+    against its pinned version and digest; and a pack directly under the
+    trusted workspace build-context root (:func:`_workspace_build_context_root`)
+    that :func:`load_trusted_build_context` registers for AppGenerator
+    (:func:`_workspace_registration_refusal`), selected with the ``version``
+    its registration declares (the build-context projection carries it; the
+    fresh digest is recorded, and a recorded build pins it on the row; see
+    :func:`verified_pack_selection` for recorded selections). Any other directory
+    must be selected with matching ``version`` and ``digest`` pins; its own
+    contract never vouches for itself.
+    """
+    if not pack_id:
+        raise PackIntegrityError(_unresolvable_pack_message(pack, pack_id, build_context_root))
+    if not _is_safe_identifier(pack_id):
+        raise PackIntegrityError(
+            f"Unsafe pack_id '{pack_id}': must be a simple identifier without path separators or traversal sequences"
+        )
+    root = Path(str(raw_path)).expanduser().resolve()
+    catalog = _factory_contexts_root()
+    if catalog is not None and root.parent == catalog:
+        return _ResolvedSource(str(root), RESOLUTION_EXPLICIT, AUTHORITY_FACTORY_BUILD_CONTEXT)
+    installed = _installed_descriptor(pack_id, build_context_root)
+    if installed is not None and Path(str(installed["pack_source_path"])).resolve() == root:
+        return _ResolvedSource(str(root), RESOLUTION_EXPLICIT, AUTHORITY_INSTALLED, _installed_pins(installed))
+    workspace_refusal = None
+    if workspace_root is not None and root.parent == workspace_root:
+        workspace_refusal = _workspace_registration_refusal(root, pack_id, workspace_root)
+        if workspace_refusal is None:
+            if not _has_value(pack.get("version")):
+                raise PackIntegrityError(
+                    f"Selected pack '{pack_id}' names the workspace build-context pack {root} without the version "
+                    "its registration declares. Select it with the version its context.yaml declares, as the "
+                    "build-context projection does, so the fresh source is compared with it. An unverified pack "
+                    "is never admitted."
+                )
+            return _ResolvedSource(str(root), RESOLUTION_EXPLICIT, AUTHORITY_WORKSPACE_BUILD_CONTEXT)
+    if all(_has_value(pack.get(key)) for key in ("version", "digest")):
+        return _ResolvedSource(str(root), RESOLUTION_EXPLICIT, AUTHORITY_SELECTED_PINS)
+    missing = [key for key in ("version", "digest") if not _has_value(pack.get(key))]
+    workspace = (
+        f"not a pack registered directly under the workspace build context ({workspace_root}"
+        + (f"; it is directly under it, but {workspace_refusal}" if workspace_refusal else "")
+        + ")"
+        if workspace_root is not None
+        else "not in a workspace build context (no build_context_root, MOZAIKS_BUILD_CONTEXT_PATH or "
+        "MOZAIKS_APP_WORKSPACE_PATH names an existing build_context directory)"
+    )
+    raise PackIntegrityError(
+        f"Selected pack '{pack_id}' names the external source {root} without "
+        f"{' and '.join(missing)} pin{'s' if len(missing) > 1 else ''}. A pack_source_path outside the installed "
+        "factory catalog"
+        + (f" ({catalog})" if catalog is not None else " (resolve_factory_app_root() resolved nothing)")
+        + f", outside the workspace's verified installed components and {workspace} must be selected with the "
+        "version and digest its bytes verify to. Pin the selection, register or install the pack in the "
+        "workspace build context, or select a pack the installed factory catalog ships. An unverified pack is "
+        "never admitted."
+    )
+
+
+def pin_workspace_pack_selections(
+    capability_packs: list[dict[str, Any]],
+    resolved_identities: list[dict[str, Any]] | None,
+    *,
+    context_variables: Any | None = None,
+) -> list[dict[str, Any]]:
+    """The selection rows a build records, each workspace build-context pack pinned to the identity acceptance verified.
+
+    The workspace registry (:data:`AUTHORITY_WORKSPACE_BUILD_CONTEXT`) vouches
+    for a pack at its declared version, but the pack's bytes can change in
+    place without a version change. A recorded build therefore carries, on
+    each row that names a pack directly under the workspace build-context
+    root, the ``version`` and ``digest`` acceptance verified the bundle
+    against (``resolved_identities``, the scanner's resolved rows), whatever
+    authority acceptance resolved it through: a later reader may resolve the
+    same directory through the registry (an installed copy read without the
+    caller's ``build_context_root``, for example). Every later use of the
+    recorded rows (refinement admission, Studio's ownership checks) verifies
+    them as recorded (:func:`verified_pack_selection` with ``recorded=True``):
+    the fresh source must match the pins, so a changed pack fails instead of
+    being trusted on the registry alone. Other rows are recorded as selected:
+    the shipped catalog is the installed package (also when the workspace
+    root is the shipped catalog itself), and installed state and selection
+    pins already pin the digest. A row that names a pack directly
+    under the workspace build-context root without an identity acceptance
+    verified cannot be recorded.
+    """
+    rows = [dict(row) for row in capability_packs if isinstance(row, dict)]
+    by_id = {
+        str(identity.get("pack_id") or ""): identity
+        for identity in resolved_identities or [] if isinstance(identity, dict)
+    }
+    workspace_root = _workspace_build_context_root(context_variables)
+    # A workspace root that is the shipped catalog itself holds the installed package's packs, which the
+    # catalog authority follows across upgrades like any other workspace's; they are recorded as selected.
+    if workspace_root is not None and workspace_root == _factory_contexts_root():
+        workspace_root = None
+    for row in rows:
+        raw_path = row.get("pack_source_path")
+        if workspace_root is None or not raw_path or Path(str(raw_path)).expanduser().resolve().parent != workspace_root:
+            continue
+        pack_id = selected_pack_id(row)
+        identity = by_id.get(pack_id)
+        if identity is None:
+            raise PackIntegrityError(
+                f"Selected pack '{pack_id or '<unnamed>'}' names the workspace build-context pack {raw_path}, but "
+                "acceptance recorded no verified identity for it, so the build cannot record which bytes it was "
+                "verified against. Run the app bundle acceptance gate on this selection before recording the build."
+            )
+        for key in ("version", "digest"):
+            if _has_value(row.get(key)) and str(row[key]) != str(identity[key]):
+                raise PackIntegrityError(
+                    f"Pack '{pack_id}' selected {key} {row[key]!r} differs from the {identity[key]!r} acceptance "
+                    "verified; the build cannot record a selection its acceptance did not verify."
+                )
+            row[key] = str(identity[key])
+    return rows
+
+
+def _non_canonical_pack_id_refusal(pack: dict[str, Any]) -> str | None:
+    """The diagnostic for a row that names its pack only under a non-canonical key; None otherwise."""
+    if selected_pack_id(pack):
+        return None
+    named = [(key, str(pack[key]).strip()) for key in NON_CANONICAL_PACK_ID_KEYS if str(pack.get(key) or "").strip()]
+    if not named:
+        return None
+    keys = ", ".join(f"{key} {value!r}" for key, value in named)
+    return (
+        f"Malformed capability_packs row: it names a pack only under {keys}, which no pack selection uses. A row "
+        "names its pack under 'id' (or 'pack_id', or an AppBuildPlan row's 'capability_pack_id'), and no "
+        "producer of capability_packs rows emits this shape: correct the caller that built it. The row selects "
+        "nothing until it is corrected, and it is never silently ignored."
+    )
+
+
+def _unresolvable_pack_message(pack: dict[str, Any], pack_id: str, build_context_root: Path | None) -> str:
+    claim = [
+        f"capability_source {pack.get('capability_source')!r}"
+        if str(pack.get("capability_source") or "").strip() else "",
+        *(f"{key} {pack[key]!r}" for key in ("version", "digest", "source") if _has_value(pack.get(key))),
+    ]
+    if not pack_id:
+        reasons = ["the row names no pack id"]
+    elif not _is_safe_identifier(pack_id):
+        reasons = [f"'{pack_id}' is not a safe pack identifier"]
+    else:
+        reasons = [
+            "the row names no pack_source_path",
+            "no installed component in build_context_root has this id" if build_context_root is not None
+            else "no build_context_root selects installed components",
+        ]
+        factory_root = resolve_factory_app_root()
+        reasons.append(
+            "the installed factory catalog cannot be located (resolve_factory_app_root() resolved nothing)"
+            if factory_root is None
+            else f"the installed factory catalog ships no pack at build_context/{pack_id} (a context.yaml with a pack block)"
+        )
+    return (
+        f"Selected pack '{pack_id or '<unnamed>'}' ({', '.join(item for item in claim if item)}) cannot be "
+        f"resolved to a verified source: {'; '.join(reasons)}. Select it with its pack_source_path, install it "
+        "into the workspace build context, or select a pack the installed factory catalog ships. An "
+        "unverified pack is never admitted."
+    )
+
+
+def _resolve_selected_pack_source(
+    pack: dict[str, Any],
+    *,
+    context_variables: Any | None,
+) -> _ResolvedSource | None:
+    """Find a selected row's source, in order, without copying local paths into AppBuildPlan.
+
+    1. ``explicit``: the row's own ``pack_source_path``, trusted without both
+       pins only inside the installed factory catalog, as the verified source
+       of the installed component with the row's id, or as a pack registered
+       directly under the trusted workspace build-context root (selected with
+       its registered version); any other directory needs matching
+       ``version`` and ``digest`` pins (:func:`_explicit_source`).
+    2. ``installed``: the workspace's installed component with the row's id,
+       under ``build_context_root``, whose source workspace state verified
+       against its pinned version and digest.
+    3. ``factory_build_context``: for a row that :func:`claims_pack`, the
+       installed package's shipped catalog,
+       ``resolve_factory_app_root()/build_context/<id>``, when the id is a safe
+       identifier and that context exists.
+
+    Each result names its authority (:data:`PACK_AUTHORITIES`). A row that
+    claims a pack and resolves from none of these raises
+    :class:`PackIntegrityError`, as does an unpinned external source and a
+    malformed row that names its pack only under a non-canonical key
+    (:data:`NON_CANONICAL_PACK_ID_KEYS`). Any other unresolved row is not a
+    pack selection and returns None. The caller verifies the source's bytes.
+    """
+
+    malformed = _non_canonical_pack_id_refusal(pack)
+    if malformed is not None:
+        raise PackIntegrityError(malformed)
+    pack_id = selected_pack_id(pack)
+    build_context_root = _context_build_context_root(context_variables)
+    raw_path = pack.get("pack_source_path")
+    if raw_path:
+        return _explicit_source(
+            pack, raw_path, pack_id=pack_id, build_context_root=build_context_root,
+            workspace_root=_workspace_build_context_root(context_variables),
+        )
+    installed = _installed_descriptor(pack_id, build_context_root)
+    if installed is not None:
+        return _ResolvedSource(
+            str(installed["pack_source_path"]), RESOLUTION_INSTALLED, AUTHORITY_INSTALLED, _installed_pins(installed),
+        )
+    if not claims_pack(pack):
+        return None
+    catalog = _factory_catalog_source(pack_id) if pack_id else None
+    if catalog is not None:
+        return _ResolvedSource(str(catalog), RESOLUTION_FACTORY_BUILD_CONTEXT, AUTHORITY_FACTORY_BUILD_CONTEXT)
+    raise PackIntegrityError(_unresolvable_pack_message(pack, pack_id, build_context_root))
+
+
+def _declared_capability_source(context_root: Path, pack_id: str) -> str:
+    pack_block = _read_pack_context(context_root, pack_id).get("pack")
+    return str((pack_block or {}).get("capability_source") or "").strip() if isinstance(pack_block, dict) else ""
+
+
+def _factory_contexts_root() -> Path | None:
+    factory_root = resolve_factory_app_root()
+    return (Path(factory_root) / "build_context").resolve() if factory_root is not None else None
+
+
+def verified_pack_selection(
+    pack: dict[str, Any],
+    *,
+    context_variables: Any | None = None,
+    recorded: bool = False,
+) -> dict[str, Any] | None:
+    """Resolve and verify one selected row; None when it selects no pack.
+
+    The canonical per-row resolution (:func:`_resolve_selected_pack_source`)
+    followed by :func:`verify_pack_integrity`. The resolved source's fresh
+    version and digest must equal any pins on the row and, for an installed
+    pack, the pins workspace state recorded. Digest pins compare with
+    :func:`compute_pack_digest` of the resolved source on this host, over its
+    raw bytes, so a pin is meaningful on the host (and checkout) that recorded
+    it. The entry records the identity (:data:`PACK_IDENTITY_FIELDS`, with the
+    ``authority`` that vouched for it), ``source_path`` and the
+    ``capability_source`` the pack's context declares (empty when it declares
+    none; the selecting row's claim never counts); a caller acts on the pack's
+    contents only through it. It does not check the selection's pack dependencies
+    (:func:`verified_selected_pack_sources` does). A row that claims a pack
+    and cannot be resolved or verified raises :class:`PackIntegrityError`.
+
+    ``recorded`` marks a selection read back from a saved build (refinement
+    admission and Studio's ownership checks). The workspace registry vouches
+    at a version only, so a recorded selection of a workspace pack must carry
+    the digest its build recorded (:func:`pin_workspace_pack_selections`); one
+    without it, saved before builds pinned workspace packs or copied from such
+    a build, raises instead of being trusted at its version.
+    """
+    resolved = _resolve_selected_pack_source(pack, context_variables=context_variables)
+    if resolved is None:
+        return None
+    pack_id = selected_pack_id(pack)
+    if not pack_id:
+        raise PackIntegrityError(_unresolvable_pack_message(pack, pack_id, None))
+    if recorded and resolved.authority == AUTHORITY_WORKSPACE_BUILD_CONTEXT and not _has_value(pack.get("digest")):
+        raise PackIntegrityError(
+            f"The recorded selection of workspace build-context pack '{pack_id}' ({resolved.path}) carries no "
+            "digest, so nothing shows which bytes its build was verified against: it was recorded before builds "
+            "pinned workspace packs, or copied from such a build. Run an AppGenerator revision, which records a "
+            "pinned build. An unverified pack is never admitted."
+        )
+    root = Path(resolved.path).resolve()
+    metadata = verify_pack_integrity(root, pack_id)
+    for label, pins in (("selected", pack), ("installed", resolved.pins)):
+        for key in ("version", "digest"):
+            if _has_value(pins.get(key)) and str(pins[key]) != metadata[key]:
+                raise PackIntegrityError(
+                    f"Pack '{pack_id}' {label} {key} does not match freshly verified source: the {label} pin is "
+                    f"{pins[key]!r}, the {resolved.resolution} source at {root} is {metadata[key]!r}. Run an "
+                    "AppGenerator revision of the build with this pack version and accept it, or select the source "
+                    "the pin names."
+                )
+    return {
+        **metadata,
+        "resolution": resolved.resolution,
+        "authority": resolved.authority,
+        "source_path": str(root),
+        # Only the pack's own declaration; a pack that declares none is never treated as managed,
+        # whatever the selecting row claims.
+        "capability_source": _declared_capability_source(root, pack_id),
+    }
 
 
 def _safe_declared_output_path(raw_path: Any, *, pack_id: str) -> str:
@@ -701,20 +1338,28 @@ def resolve_declared_pack_output_paths(
     outputs are preserved across regeneration).
     """
 
+    # Only a verified selection declares outputs; a claimed pack that does not resolve raises.
+    entries = [
+        entry for pack in capability_packs or [] if isinstance(pack, dict)
+        if (entry := verified_pack_selection(pack, context_variables=context_variables)) is not None
+    ]
+    return verified_pack_output_paths(entries, owner=owner)
+
+
+def verified_pack_output_paths(entries: list[dict[str, Any]], *, owner: str | None = None) -> frozenset[str]:
+    """Exact safe required_outputs paths of already verified selections, as :func:`resolve_declared_pack_output_paths`.
+
+    ``entries`` are verified selections (:func:`verified_pack_selection` or
+    :func:`verified_selected_pack_sources`), each keeping the identity and
+    authority that vouched for it, so a caller that verified a saved
+    selection reads its declared outputs without re-selecting rows from it.
+    """
     paths: set[str] = set()
-    for pack in capability_packs or []:
-        if not isinstance(pack, dict):
-            continue
-        pack_id = str(pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id") or "").strip()
-        raw_path = _resolve_pack_source_from_installed_state(
-            pack,
-            context_variables=context_variables,
-        )
-        if not pack_id or not raw_path:
-            continue
-        pack_source_path = Path(raw_path)
-        verify_pack_integrity(pack_source_path, pack_id)
-        contract = _read_pack_contract(pack_source_path)
+    for entry in entries:
+        pack_id = entry["pack_id"]
+        if entry.get("authority") not in PACK_AUTHORITIES:
+            raise PackIntegrityError(f"Pack '{pack_id}' declared outputs require a verified selection with an authority")
+        contract = _read_pack_contract(Path(entry["source_path"]))
         for index, output in enumerate(contract.get("required_outputs") or []):
             if not isinstance(output, dict) or not str(output.get("path") or "").strip():
                 raise PackIntegrityError(
@@ -734,6 +1379,34 @@ def resolve_templates_for_pack(
 ) -> list[dict[str, str]]:
     """Return all files under a selected pack's ``templates/`` tree."""
 
+    files, _context_outputs = _render_pack_templates(pack_source_path, pack_id, context_variables=context_variables)
+    return files
+
+
+def static_pack_templates(pack_source_path: Path, pack_id: str) -> tuple[dict[str, str], frozenset[str]]:
+    """A verified pack's template outputs for validating a bundle, without rendering anything.
+
+    Returns ``(static, context_outputs)``. ``static`` maps each output of a
+    template that needs no build-time context (any file but ``.j2``) to the
+    text assembly writes for it, read as :func:`resolve_templates_for_pack`
+    reads it. A ``.j2`` template renders from the build's template variables,
+    which validation does not have, so it is never rendered here: its output
+    path is listed in ``context_outputs``, verified through the pack's
+    declared outputs and its pinned identity.
+    """
+    files, context_outputs = _render_pack_templates(
+        pack_source_path, pack_id, context_variables=None, render_context_templates=False,
+    )
+    return {file["filename"]: file["content"] for file in files}, context_outputs
+
+
+def _render_pack_templates(
+    pack_source_path: Path,
+    pack_id: str,
+    *,
+    context_variables: Any | None,
+    render_context_templates: bool = True,
+) -> tuple[list[dict[str, str]], frozenset[str]]:
     if not _is_safe_identifier(pack_id):
         raise ManagedCapabilityTemplateError(
             f"Unsafe pack_id '{pack_id}': must be a simple identifier without path separators or traversal sequences"
@@ -741,19 +1414,22 @@ def resolve_templates_for_pack(
 
     context_root = pack_source_path.resolve()
     context = _read_pack_context(context_root, pack_id)
+    # The verifier's input rules (no links among the pack's inputs) hold for whatever is rendered.
+    _safe_asset_files(context_root, context)
     _pack_raw = context.get("pack")
     pack: dict[str, Any] = _pack_raw if isinstance(_pack_raw, dict) else {}
     if str(pack.get("status") or "active").strip() != "active":
         logger.info("Skipping template materialization for inactive pack '%s'", pack_id)
-        return []
+        return [], frozenset()
 
     template_vars = _template_variables(pack=pack, context={**context, **_context_to_dict(context_variables)})
     template_roots = _template_roots(context_root, context)
     if not template_roots:
-        return []
+        return [], frozenset()
 
     files: list[dict[str, str]] = []
     by_filename: dict[str, str] = {}
+    context_outputs: set[str] = set()
     for templates_root in template_roots:
         for path in sorted(
             item
@@ -761,6 +1437,9 @@ def resolve_templates_for_pack(
             if item.is_file() and _is_materializable_template_file(item, templates_root)
         ):
             output_path = _template_output_path(path, templates_root)
+            if path.suffix == ".j2" and not render_context_templates:
+                context_outputs.add(output_path)
+                continue
             content = path.read_text(encoding="utf-8")
             if path.suffix == ".j2":
                 try:
@@ -782,13 +1461,151 @@ def resolve_templates_for_pack(
             by_filename[output_path] = content
     for filename, content in sorted(by_filename.items()):
         files.append({"filename": filename, "content": content})
-    return files
+    return files, frozenset(context_outputs)
+
+
+def verified_selected_pack_sources(
+    capability_packs: list[dict[str, Any]] | None = None, *, context_variables: Any = None, recorded: bool = False,
+) -> list[dict[str, Any]]:
+    """Resolve and verify dependency-closed selected pack sources against their pins.
+
+    This does not render templates, so callers that only need verified source
+    paths (layout and declared-output checks) do not require the approved
+    build context that template variables come from.
+
+    Each row resolves as :func:`_resolve_selected_pack_source` describes: its
+    own ``pack_source_path`` (``explicit``), the workspace's installed
+    components (``installed``), or, for a row that claims a pack, the
+    installed package's shipped catalog (``factory_build_context``).
+    :func:`verify_pack_integrity` then computes a fresh version and digest,
+    which any pins on the row must equal. Each entry records the identity
+    (:data:`PACK_IDENTITY_FIELDS`, whose ``authority`` names what vouches for
+    it: the shipped catalog, verified installed state, the workspace
+    build-context registry, or the selection's own matching pins),
+    ``source_path`` and the pack's declared ``capability_source``. A claimed
+    pack that resolves from none of these, or an external source without an
+    authority or both pins, raises
+    :class:`PackIntegrityError`; a row that claims no pack and resolves from
+    neither its own path nor installed state selects nothing and is left out.
+    A pack selected by several rows is returned once, and only when they all
+    resolve to the same identity. ``recorded`` verifies rows read back from a
+    saved build, as :func:`verified_pack_selection` describes.
+    """
+    if capability_packs is None and context_variables is not None:
+        capability_packs = detach(context_variables.get("capability_packs")) or []
+        if not capability_packs:
+            plan = detach(context_variables.get("app_build_plan")) or {}
+            capability_packs = plan.get("capability_packs") or []
+    if not capability_packs:
+        return []
+    _validate_pack_dependencies(capability_packs, context_variables=context_variables)
+    verified: list[dict[str, Any]] = []
+    by_id: dict[str, dict[str, Any]] = {}
+    for pack in capability_packs:
+        if not isinstance(pack, dict):
+            continue
+        entry = verified_pack_selection(pack, context_variables=context_variables, recorded=recorded)
+        if entry is None:
+            continue
+        prior = by_id.get(entry["pack_id"])
+        if prior is None:
+            by_id[entry["pack_id"]] = entry
+            verified.append(entry)
+            continue
+        if (prior["version"], prior["digest"]) != (entry["version"], entry["digest"]):
+            raise PackIntegrityError(
+                f"Pack '{entry['pack_id']}' is selected more than once with different identities: "
+                f"{prior['version']} ({prior['digest']}, {prior['resolution']}) and "
+                f"{entry['version']} ({entry['digest']}, {entry['resolution']}). Select it once."
+            )
+    return verified
+
+
+def verified_pack_template_inventory(
+    capability_packs: list[dict[str, Any]] | None = None, *, context_variables: Any = None,
+) -> list[dict[str, Any]]:
+    """Resolve dependency-closed templates and check fresh bytes against selected pins.
+
+    Every entry carries the authority that vouched for its source (the shipped
+    catalog, verified installed state, the workspace build-context registry or
+    matching selection pins); no other source resolves, so only those packs
+    can own a complete backend implementation.
+    """
+    inventory = []
+    for entry in verified_selected_pack_sources(capability_packs, context_variables=context_variables):
+        root = Path(entry["source_path"])
+        files = resolve_templates_for_pack(root, entry["pack_id"], context_variables=context_variables)
+        inventory.append({**entry, "owner_map": _file_owner_map(root), "files": files})
+    return inventory
+
+
+def verified_template_module_ids(files: dict[str, str], inventory: list[dict[str, Any]]) -> frozenset[str]:
+    """Keep only complete, declared, exact template implementations out of synthesis.
+
+    Workspace-owned handler extensions remain workspace code. They never grant
+    ownership to a policy, schema, service, repo, or undeclared backend helper.
+    """
+    result = set()
+    required = {"module.yaml", "backend/service.py", "backend/repo.py", "backend/policy.py", "backend/schemas.py"}
+    for pack in inventory:
+        owners = pack["owner_map"]
+        rendered = {entry["filename"]: entry["content"] for entry in pack["files"]}
+        modules = {path.split("/")[1] for path in rendered if path.startswith("modules/")}
+        for module_id in modules:
+            prefix = f"modules/{module_id}/"
+            if not all(owners.get(prefix + path) == "templates" and prefix + path in rendered for path in required):
+                continue
+            if pack.get("authority") not in PACK_AUTHORITIES:
+                raise PackIntegrityError(
+                    f"Pack '{pack['pack_id']}' complete backend requires a source the shipped catalog, verified "
+                    "installed state, the workspace build-context registry or matching selection pins vouch for"
+                )
+            declared = {path: owner for path, owner in owners.items() if path.startswith(prefix)}
+            template_paths = {path for path in rendered if path.startswith(prefix)}
+            candidate_paths = {path for path in files if path.startswith(prefix)}
+            handler = prefix + "backend/handler.py"
+            if owners.get(handler) not in {"templates", "workspace"} or handler not in template_paths:
+                raise PackIntegrityError(f"Pack '{pack['pack_id']}' module '{module_id}' requires a declared handler template")
+            if template_paths != set(declared) or candidate_paths != set(declared):
+                raise PackIntegrityError(f"Pack '{pack['pack_id']}' module '{module_id}' requires its complete declared template closure")
+            for path, owner in declared.items():
+                if owner == "templates" and files[path] != rendered[path]:
+                    raise PackIntegrityError(f"Pack '{pack['pack_id']}' template bytes differ at '{path}'")
+                if owner not in {"templates", "workspace"}:
+                    raise PackIntegrityError(f"Pack '{pack['pack_id']}' module '{module_id}' has non-template implementation ownership")
+                if owner == "workspace" and path != prefix + "backend/handler.py":
+                    raise PackIntegrityError(f"Pack '{pack['pack_id']}' workspace ownership is limited to its handler extension")
+            if owners.get(handler) == "workspace" and owners.get(prefix + "backend/base_handler.py") != "templates":
+                raise PackIntegrityError(f"Pack '{pack['pack_id']}' workspace handler needs a template-owned base handler")
+            result.add(module_id)
+    return frozenset(result)
+
+
+def verified_pack_data_contracts(inventory: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Expose only data contributions whose module owners the same pack ships."""
+    contributions = []
+    for pack in inventory:
+        for file in pack["files"]:
+            if file["filename"] != "data/contract.json":
+                continue
+            if pack["owner_map"].get(file["filename"]) != "templates":
+                raise PackIntegrityError(f"Pack '{pack['pack_id']}' data contribution must be template-owned")
+            contract = json.loads(file["content"])
+            for surface in contract.get("surfaces") or []:
+                manifest = f"modules/{surface.get('surface_id')}/module.yaml"
+                if pack["owner_map"].get(manifest) != "templates" or not any(
+                    item["filename"] == manifest for item in pack["files"]
+                ):
+                    raise PackIntegrityError(f"Pack '{pack['pack_id']}' data contribution has an undeclared module owner")
+            contributions.append(contract)
+    return contributions
 
 
 def resolve_managed_capability_templates(
     capability_packs: list[dict[str, Any]] | None,
     *,
     context_variables: Any | None = None,
+    ui_contributions: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, str]]:
     """Materialize all template files from selected managed capabilities.
 
@@ -803,47 +1620,54 @@ def resolve_managed_capability_templates(
        rendered.  Missing deps raise :class:`PackDependencyError` with structured
        diagnostics.
 
-    3. **Provenance manifest** — after all templates are rendered a
+    3. **Composed shared roots** — a pack never materializes a shared
+       composition root (``SHARED_PACK_OUTPUT_PATHS``: ``data/contract.json``,
+       ``ui/index.js`` and ``ui/route_manifest.json``) as its own file. Assembly
+       composes each one from the app's declarations and every selected pack's
+       contribution, so the root is left out of the result and recorded under
+       the provenance ``composed_outputs`` with the identity of every pack that
+       contributes to it. A caller that composes the UI roots passes
+       ``ui_contributions``, which receives each pack's rendered templates as a
+       ``pack:<id>`` contribution for ``compose_ui_registry``.
+
+    4. **Provenance manifest** — after all templates are rendered a
        ``.mozaiks/pack_provenance.json`` entry is appended to the result so the
-       generated app bundle can answer "which pack produced this file?"
+       generated app bundle can answer "which pack produced this file?". Every
+       pack that ships a file or contributes to a composed root has an entry,
+       so each composed-root contributor names a selected pack identity.
     """
     if not capability_packs:
         return []
 
     # --- Step 1: dependency validation (fast fail before rendering) ---
-    _validate_pack_dependencies(capability_packs, context_variables=context_variables)
+    inventory = verified_pack_template_inventory(capability_packs, context_variables=context_variables)
 
     # --- Step 2: render templates, tracking per-pack output for provenance ---
     results_by_filename: dict[str, str] = {}
     # (metadata, owner_map, [produced filenames])
     provenance_entries: list[tuple[dict[str, Any], dict[str, str], list[str]]] = []
+    composed_outputs: dict[str, list[dict[str, str]]] = {}
 
-    for pack in capability_packs:
-        if not isinstance(pack, dict):
-            continue
-        pack_id = str(pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id") or "").strip()
-        raw_path = _resolve_pack_source_from_installed_state(pack, context_variables=context_variables)
-        if not raw_path or not pack_id:
-            continue
-
-        if not _is_safe_identifier(pack_id):
-            raise ManagedCapabilityTemplateError(
-                f"Unsafe pack_id '{pack_id}': must be a simple identifier without path separators or traversal sequences"
-            )
-        pack_source_path = Path(raw_path)
-        metadata = verify_pack_integrity(pack_source_path, pack_id)
-
-        # Ownership map: output_path → owner (from contract.yaml required_outputs)
-        owner_map = _file_owner_map(pack_source_path)
-
+    for metadata in inventory:
+        pack_id = metadata["pack_id"]
+        owner_map = metadata["owner_map"]
+        if ui_contributions is not None:
+            ui_contributions.append({
+                "owner": f"pack:{pack_id}", "pack_id": pack_id, "digest": metadata["digest"],
+                "files": metadata["files"],
+            })
         pack_files: list[str] = []
-        for file in resolve_templates_for_pack(
-            pack_source_path,
-            pack_id,
-            context_variables=context_variables or {},
-        ):
+        contributes = False
+        for file in metadata["files"]:
             filename = file["filename"]
             content = file["content"]
+            if filename in SHARED_PACK_OUTPUT_PATHS:
+                composed_outputs.setdefault(filename, []).append({
+                    "pack_id": pack_id, "version": metadata["version"],
+                    "digest": metadata["digest"], "source": metadata["source"],
+                })
+                contributes = True
+                continue
             existing = results_by_filename.get(filename)
             if existing is not None and existing != content:
                 raise ManagedCapabilityTemplateError(
@@ -852,7 +1676,7 @@ def resolve_managed_capability_templates(
             results_by_filename[filename] = content
             pack_files.append(filename)
 
-        if pack_files:
+        if pack_files or contributes:
             provenance_entries.append((metadata, owner_map, pack_files))
 
     # --- Step 3: emit provenance manifest ---
@@ -871,6 +1695,10 @@ def resolve_managed_capability_templates(
             pack_file_map,
             build_timestamp=_context_to_dict(context_variables).get("build_timestamp"),
         )
+        if composed_outputs:
+            provenance = json.loads(provenance_json)
+            provenance["composed_outputs"] = composed_outputs
+            provenance_json = json.dumps(provenance, indent=2)
         existing_prov = results_by_filename.get(_PROVENANCE_PATH)
         if existing_prov is None:
             results_by_filename[_PROVENANCE_PATH] = provenance_json
@@ -882,12 +1710,37 @@ def resolve_managed_capability_templates(
 
 
 __all__ = [
+    "AUTHORITY_FACTORY_BUILD_CONTEXT",
+    "AUTHORITY_INSTALLED",
+    "AUTHORITY_SELECTED_PINS",
+    "AUTHORITY_WORKSPACE_BUILD_CONTEXT",
+    "NON_CANONICAL_PACK_ID_KEYS",
+    "PACK_AUTHORITIES",
+    "PACK_CLAIM_SOURCES",
+    "PACK_IDENTITY_FIELDS",
+    "PLANNED_MODULE_SOURCE",
+    "RESOLUTION_EXPLICIT",
+    "RESOLUTION_FACTORY_BUILD_CONTEXT",
+    "RESOLUTION_INSTALLED",
+    "claims_pack",
     "compute_pack_digest",
     "ManagedCapabilityTemplateError",
     "PackDependencyError",
     "PackIntegrityError",
+    "pack_identity",
+    "pin_workspace_pack_selections",
+    "pre_contract_rule_digest",
     "resolve_managed_capability_templates",
     "resolve_declared_pack_output_paths",
     "resolve_templates_for_pack",
+    "verified_pack_output_paths",
+    "verified_pack_selection",
+    "declared_output_owners",
+    "selected_pack_id",
+    "static_pack_templates",
     "verify_pack_integrity",
+    "verified_pack_template_inventory",
+    "verified_selected_pack_sources",
+    "verified_pack_data_contracts",
+    "verified_template_module_ids",
 ]

@@ -280,30 +280,40 @@ Responsibilities:
 
 - surface build output summary, validation strategy used, and integration check results
 - show sandbox preview URL when E2B or local npm validation ran
-- present Promote and Revise paths to the user
+- present Accept, Promote and Revise paths to the user
 - persist the active `current_build_run` on the app registry record, including
   the workflow sequence, active chat/workflow, staged bundle path, and app-bundle
   `artifact_version_id` when one was registered
 - preserve a compact `build_context_profile` on the app registry record so
   Continue Build and refinement re-entry can reason about the selected build
   contexts/packs without copying raw prompt catalogs or provider secrets
-- on Promote: call Studio artifact promotion for `artifact_version_id`, restore
-  the reviewed bundle into the active app root, and transition
-  `lifecycle_state` from `review` to `active`
+- on Accept: call Studio artifact acceptance
+  (`POST /api/studio/build/artifacts/{artifact_version_id}/accept`).
+  AppGenerator saves every app-bundle artifact version it registers, the
+  first (parentless) one included, as a `DRAFT`; acceptance is the authorized
+  transition that makes it `CURRENT` and records its acceptance evidence
+  (`commit_metadata.metadata.acceptance`: app, build family and key, record
+  id, accepting principal, time and transition)
+- on Promote: call Studio artifact promotion for `artifact_version_id` (only an
+  accepted `CURRENT` version can be promoted), restore the reviewed bundle into
+  the active app root, and transition `lifecycle_state` from `review` to
+  `active`
 - on Revise: accept user revision request via chat, route through the refinement
   Refinement Engine, operate on the staged `generated/` bundle path (not the active workspace)
 
 How the pause works:
 
 - `AppGenerator` terminates its AG2 session after writing the bundle, registering
-  the app-bundle artifact version, and calling `update_build_status(status="review")`
-  with the staged bundle path and artifact version
+  the app-bundle artifact version as a draft, and calling
+  `update_build_status(status="review")` with the staged bundle path and
+  artifact version
 - `AppGenerator` sets `lifecycle_state=review`, `bundle_path`, and
   `artifact_version_id` in AG2 context_variables before terminating
 - the build sequence advances to the `app_review` chat-session transition,
   which starts the `AppReview` workflow
 - `ReviewAgent` presents the `AppReviewSummary` artifact as the HITL boundary;
-  the user decides to promote or request revisions from that chat session
+  the user accepts the draft and promotes it, or requests revisions, from that
+  chat session
 - revision requests re-enter the refinement router with `artifact_key`,
   `artifact_version_id`, `source_surface=app_review`, and staged-bundle
   metadata so `artifact_root` can be set to the generated bundle path
@@ -314,7 +324,8 @@ How the pause works:
 App lifecycle state:
 
 - `building` — generation in progress
-- `review` — bundle staged, awaiting user decision (promote or revise)
+- `review` — bundle staged as a draft, awaiting user decision (accept and
+  promote, or revise)
 - `active` — bundle promoted; this is the runnable state
 
 Canonical frontend/workflow UI smoke targets:
@@ -406,6 +417,9 @@ Current implementation:
 
 Important rule:
 
+- acceptance is explicit — generation saves a draft, and only an authorized
+  acceptance makes it current and records the evidence; it is never inferred
+  from the bundle's shape, its validation or the session completing
 - promotion is explicit — it is not an incidental side effect of generation
 - promotion only runs when `lifecycle_state == "review"`
 - promotion is the step that transitions `lifecycle_state` to `active`; generation alone

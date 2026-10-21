@@ -81,7 +81,13 @@ Every `BuildRecord` (formerly `ArtifactVersionDoc` — same class, retained alia
 | `archived` | Rejected or explicitly retired |
 | `deleted` | Hard-removed |
 
-After a change request is accepted and routed, the `ArtifactInvalidationService`
+A change request records every routed attempt. The `ArtifactInvalidationService`
+runs for it only once the operation it started has changed the selected build
+or left its outcome unresolved: in Studio, an inline run that stored a child,
+not since rejected, whose validation passed, is pending or was skipped (or whose
+child lookup failed), or a workflow run that launched. A request that returns a
+decision, a launch that failed, or an inline run that stored nothing or only a
+child whose validation failed marks nothing stale. When it runs, the service
 does two things:
 
 1. **Direct invalidation** — marks the specific artifact version IDs in the

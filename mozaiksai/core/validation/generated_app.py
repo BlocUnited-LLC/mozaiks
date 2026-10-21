@@ -31,10 +31,27 @@ class GeneratedAppValidationRequest:
 
 @dataclass(frozen=True)
 class GeneratedAppValidationResult:
-    """Result from the public generated app bundle validation facade."""
+    """Result from the public generated app bundle validation facade.
+
+    ``resolved_capability_packs`` is the verified identity of every selected
+    capability pack, ``{pack_id, version, digest, source, resolution,
+    authority}``, as the bundle scanner resolved it. ``resolution`` says where
+    the source was found (``explicit``, ``installed`` or
+    ``factory_build_context``); ``authority`` says what vouched for it (the
+    shipped catalog ``factory_build_context``, verified ``installed`` state,
+    the ``workspace_build_context`` registry, or matching ``selected_pins``).
+    The workspace registry vouches at a version only, so a caller that
+    records a selection keeps this ``digest`` with it and verifies it again
+    on the same host before reuse. ``digest`` hashes the resolved source's
+    raw bytes on the validating host, so compare it only with digests that
+    host computed; ``pack_id`` and ``version`` are the portable identity. The
+    list is empty when no pack was selected or the selection could not be
+    resolved and verified; that failure is an error diagnostic.
+    """
 
     passed: bool
     diagnostics: list[GeneratedAppValidationDiagnostic]
+    resolved_capability_packs: list[dict[str, str]] = field(default_factory=list)
 
 
 def _path_from_message(message: str) -> str | None:
@@ -117,10 +134,12 @@ def validate_generated_app_bundle(
         scan_functional_generated_app,
     )
 
+    resolved_capability_packs: list[dict[str, str]] = []
     scanner_errors = scan_generated_bundle(
         request.files,
         capability_packs=list(request.capability_packs),
         require_deployment_artifacts=request.require_deployment_artifacts,
+        resolved_capability_packs=resolved_capability_packs,
     )
     diagnostics.extend(
         _diagnostic("generated_bundle_contract_failed", error)
@@ -143,6 +162,8 @@ def validate_generated_app_bundle(
 
     diagnostics.extend(_validate_build_task_dependencies(list(request.build_tasks)))
 
+    # The functional checks see the packs the scanner resolved and verified, never the raw request rows.
+    resolved_rows = [{"id": identity["pack_id"], **identity} for identity in resolved_capability_packs]
     diagnostics.extend(
         GeneratedAppValidationDiagnostic(
             code=diagnostic.code,
@@ -152,13 +173,14 @@ def validate_generated_app_bundle(
         )
         for diagnostic in scan_functional_generated_app(
             request.files,
-            capability_packs=list(request.capability_packs),
+            capability_packs=resolved_rows,
         )
     )
 
     return GeneratedAppValidationResult(
         passed=not any(item.severity == "error" for item in diagnostics),
         diagnostics=diagnostics,
+        resolved_capability_packs=resolved_capability_packs,
     )
 
 

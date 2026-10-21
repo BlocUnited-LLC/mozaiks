@@ -555,6 +555,9 @@ class ModuleNotification(ModuleContractModel):
     title: str | None = None
     body: str | None = None
     context_fields: list[str] = Field(default_factory=list)
+    # "reference" stores only the originating event's id, type and related_type,
+    # for rules whose events carry content the notification must not retain.
+    source_event: Literal["envelope", "reference"] = "envelope"
     preference_key: str | None = None
     default_enabled: bool = True
     renderer: str | None = None

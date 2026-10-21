@@ -44,7 +44,7 @@ async def test_canonical_build_stages_workspace_and_always_terminates(monkeypatc
     envs = adapter.create_session.await_args.kwargs["envs"]
     assert envs["PLATFORM_PATH"] == root + "/app"
     assert envs["MOZAIKS_WEB_SHELL_PATH"] == "/opt/mozaiks/web_shell"
-    assert envs["MOZAIKS_REQUIRE_TAILWIND_SOURCE_LINKS"] == "1"
+    assert "MOZAIKS_REQUIRE_TAILWIND_SOURCE_LINKS" not in envs
     assert "OPENAI_API_KEY" not in envs
     calls = adapter.run_command.await_args_list
     assert calls[0].kwargs["command"] == "python -m compileall -q ."
@@ -301,7 +301,7 @@ async def test_docker_build_session_uses_bounded_read_only_offline_container(mon
     assert "--log-driver=none" in command
     assert any("/workspace:rw,nosuid,nodev,size=512m" in arg for arg in command)
     assert any("/opt/mozaiks/web_shell/node_modules/.vite-temp:rw,nosuid,nodev,size=16m" in arg for arg in command)
-    assert any("/opt/mozaiks/web_shell/.mozaiks-tailwind-sources:rw,nosuid,nodev,size=16m" in arg for arg in command)
+    assert not any(".mozaiks-tailwind-sources" in arg for arg in command)
     assert "-p" not in command
 
 
@@ -328,10 +328,6 @@ async def test_real_docker_build_includes_generated_tailwind_class(monkeypatch):
 
     class InspectingAdapter(real_adapter):
         async def terminate_session(self, *, session_id):
-            captured["source_link"] = await self.run_command(
-                session_id=session_id,
-                command="test -L /opt/mozaiks/web_shell/.mozaiks-tailwind-sources/platform-ui",
-            )
             captured["css"] = await self.run_command(
                 session_id=session_id,
                 command="grep -R -l '#123abc' /workspace/build --include='*.css'",
@@ -348,6 +344,4 @@ async def test_real_docker_build_includes_generated_tailwind_class(monkeypatch):
     assert result["validation_status"] == "passed", result["errors"]
     assert result["sandbox_image_id"] == image_id
     assert result["sandbox_terminated"] is True
-    assert captured["source_link"].success is True
     assert captured["css"].success is True, captured["css"].stderr
-    assert "Failed to prepare Tailwind source links" not in result["build_output"]

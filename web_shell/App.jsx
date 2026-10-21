@@ -77,7 +77,7 @@ export default function App() {
       <div className="max-w-md text-center">
         {failed ? <>
           <h1 className="mb-3 text-xl font-semibold">Unable to open this app</h1>
-          <p role="alert" className="mb-6 text-muted-foreground">The app could not load its sign-in settings. Please try again.</p>
+          <p role="alert" className="mb-6 text-muted-foreground">The app could not finish loading. Please try again.</p>
           <button type="button" className="rounded-md bg-primary px-5 py-2 text-primary-foreground" onClick={() => setAttempt(value => value + 1)}>Try again</button>
         </> : <p role="status">Loading app…</p>}
       </div>

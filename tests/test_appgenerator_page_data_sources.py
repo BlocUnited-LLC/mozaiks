@@ -77,13 +77,19 @@ def _bridge(initial=None):
 
 def test_live_sections_compile_with_real_context_and_pass_unchanged_wiring_gate(tmp_path, monkeypatch):
     monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path))
+    from factory_app.workflows.AppGenerator.tools.code_file_utils import admitted_app_file_map
+
     context = _bridge({"generated_files": _module_files()})
     with _workflow_tool_invocation(context):
         save_app_schema(
             manifest={"app_name": "Task tracker", "pages": ["dashboard", "tasks"], "default_route": "/dashboard"},
             pages=_pages(), context_variables=context,
         )
-    report = asyncio.run(validate_wiring(context))
+    # The save reaches the admitted overlay; generated_files stays the assembled bundle.
+    assert context.get("generated_files") == _module_files()
+    # The acceptance gate runs the wiring check on the admitted snapshot.
+    admitted = admitted_app_file_map(context)
+    report = asyncio.run(validate_wiring({"generated_files": admitted}))
     assert report["passed"] is True, report["failed_tests"]
     assert {(item["page"], item["section"], item["endpoint"]) for item in report["wired"]} == {
         ("dashboard", "kpi-metrics", "/api/modules/task_management/get_dashboard_insights"),
@@ -91,7 +97,7 @@ def test_live_sections_compile_with_real_context_and_pass_unchanged_wiring_gate(
         ("tasks", "task-data-table", "/api/modules/task_management/list_tasks"),
     }
     assert not report["orphaned_pages"]
-    assert "data_source" not in context.get("generated_files")["ui/pages/tasks.yaml"]
+    assert "data_source" not in admitted["ui/pages/tasks.yaml"]
 
 
 def test_original_live_url_evidence_still_fails_wiring_gate():

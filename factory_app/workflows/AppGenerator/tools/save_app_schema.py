@@ -21,6 +21,7 @@ from factory_app.workflows._shared.generated_ui_contract import (
 )
 from factory_app.workflows._shared.platform.build_target import require_build_binding
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
+    _assembled_data_contract,
     extract_code_file_map_from_payload,
 )
 from factory_app.workflows.AppGenerator.tools.default_runtime_configs import (
@@ -40,6 +41,7 @@ from mozaiksai.core.runtime.app.provenance import (
     build_default_app_provenance,
     dump_app_provenance_yaml,
 )
+from mozaiksai.core.runtime.app.theme_contract import validate_page_title_theme
 from mozaiksai.core.runtime.persistence.intent_loader import (
     validate_complete_data_contract_ownership,
 )
@@ -48,12 +50,16 @@ from mozaiksai.core.workflow.generator_support.code_files import (
     _custom_route_bundle_code_files,
     _page_file_stem,
     auth_required_from_strategy,
+    compile_data_contract,
     data_contract_requires_auth,
     safe_relpath,
     validate_custom_page_files,
 )
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     pack_owned_output_paths,
+)
+from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
+    resolve_subscription_contract,
 )
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
     _key_value_entries_to_dict as _key_value_entries_to_dict,
@@ -203,7 +209,10 @@ def resolve_app_theme_config(captured_theme_config: Any, theme_config_patch: Any
         raise ValueError("captured_theme_config must be an object or null")
     if patch is not None and not isinstance(patch, dict):
         raise ValueError("theme_config_patch must be an object or null")
-    return _deep_merge_dicts(captured or {}, patch or {}) or None
+    resolved = _deep_merge_dicts(captured or {}, patch or {}) or None
+    if resolved is not None:
+        validate_page_title_theme(resolved)
+    return resolved
 
 
 def _resolve_output_dir(
@@ -403,6 +412,36 @@ def _validate_data_contract(data_contract: Any) -> None:
             raise ValueError(f"{path}.collection is required")
         if not _is_non_empty_string(alias.get("owner_module")):
             raise ValueError(f"{path}.owner_module is required")
+
+
+def _bundle_data_contract(context_variables: Any, approved: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
+    """data/contract.json as assembly compiles it, or None and the reason it cannot be compiled here.
+
+    The admitted projection overlays this copy on the assembled bundle, so the
+    approved contract alone would drop the verified pack contributions and the
+    subscription assignment stores there. When the selected packs cannot be
+    verified, or their contributions do not compose with the approved contract,
+    the app schema author cannot repair either, and no contract compiled
+    without them is written: this save leaves data/contract.json to assembly,
+    which fails with the same pack error, and returns the reason.
+    """
+    subscription_contract = resolve_subscription_contract(context_variables)
+    try:
+        assembled: dict[str, Any] = _assembled_data_contract(context_variables, subscription_contract)
+        return assembled, None
+    except ValueError as exc:
+        # Without the pack contributions the approved contract still compiles,
+        # so the packs are the reason. Its own compile error raises here.
+        compile_data_contract(
+            approved, subscription_contract=subscription_contract, context_variables=context_variables,
+        )
+        _logger.warning(
+            "APP_SCHEMA_PACK_DATA_CONTRACT_NOT_WRITTEN: the selected packs' data contributions do not compose "
+            "with the approved data contract, so this save writes no data/contract.json; assembly reports "
+            "the pack failure: %s", exc,
+        )
+        return None, str(exc)
+
 
 def _validate_route_auth(route_auth: Any, *, field: str) -> None:
     if route_auth is None:
@@ -1098,11 +1137,16 @@ def _persist_to_filesystem(
     custom_route_bundle: dict[str, Any] | None,
     context_variables: Any | None = None,
     profile_layout: str | None = None,
+    auth_data_contract: dict[str, Any] | None = None,
 ) -> list[str]:
     """Write app.json, ui/pages/*.yaml, optional custom route artifacts, and optional config artifacts.
 
     Returns a list of written file paths (relative to output_dir).
     Tools are dumb — no reasoning here, just serialize what AppSchemaAgent produced.
+    ``auth_data_contract`` is the contract app.json's ``authRequired`` is
+    derived from when it is not the ``data_contract`` written (the approved
+    contract, when the pack contributions could not be composed and no
+    data/contract.json is written).
     """
     written: list[str] = []
 
@@ -1116,7 +1160,9 @@ def _persist_to_filesystem(
         "appName": manifest_dict["app_name"],
         "startup": {"landing_spot": default_route},
         "targets": {"web": True, "mobile": False},
-        "authRequired": auth_required or data_contract_requires_auth(data_contract),
+        "authRequired": auth_required or data_contract_requires_auth(
+            data_contract if data_contract is not None else auth_data_contract
+        ),
         "admins": [],
     }
     for manifest_key, app_json_key in (
@@ -1343,12 +1389,21 @@ def save_app_schema(
       - brand/theme_config.json (merge)  → theme_config_patch when set
       - config/shell.json (merge)        → shell_config when set
       - config/asset_manifest.json       → asset_manifest when set
-      - data/contract.json                 → approved DesignDocs data_contract from context
+      - data/contract.json                 → approved DesignDocs data_contract from context, compiled
+                                           as assembly compiles it (verified pack contributions,
+                                           subscription assignment stores); not written when the
+                                           packs cannot be verified or composed, for assembly to
+                                           report
 
     Stores in context_variables:
       - app_manifest, app_pages, app_theme_config_patch, app_shell_config,
         app_asset_manifest, app_custom_route_bundle,
         app_schema_ready
+      - code_files: the rendered files, in the admitted repair overlay.
+        generated_files stays the last assembled bundle: the rendered
+        ui/index.js and ui/route_manifest.json hold only the app's routes, and
+        assembly (or the admitted projection) composes them with the selected
+        packs' declarations.
 
     Compile explicit module/action references against the closed inventory,
     validate runtime schemas, and persist only the accepted canonical artifacts.
@@ -1513,6 +1568,12 @@ def save_app_schema(
         _validate_asset_manifest(asset_manifest)
         resolved_data_contract = detach(_context_get(context_variables, "data_contract"))
         _validate_data_contract(resolved_data_contract)
+        # data/contract.json is written as assembly compiles it: the approved
+        # contract with the verified pack contributions and subscription stores.
+        bundle_data_contract, data_contract_deferred = (
+            _bundle_data_contract(context_variables, resolved_data_contract) if resolved_data_contract
+            else (None, None)
+        )
         app_ui_quality_warnings = dedupe(
             audit_page_schemas(page_list)
             + audit_custom_route_bundle_integrity(
@@ -1557,8 +1618,10 @@ def save_app_schema(
         try:
             rendered_paths = _persist_to_filesystem(
                 staging, manifest_dict, page_list, resolved_theme_config,
-                shell_config, asset_manifest, resolved_data_contract, custom_route_bundle,
+                shell_config, asset_manifest, bundle_data_contract, custom_route_bundle,
                 context_variables=context_variables, profile_layout=_profile_layout,
+                # Only data/contract.json is skipped when the packs fail; auth still follows the approved contract.
+                auth_data_contract=resolved_data_contract,
             )
         except OSError as exc:
             raise RuntimeError("Could not write schema files to disk") from exc
@@ -1574,7 +1637,10 @@ def save_app_schema(
     if isinstance(active_repair, dict):
         # These values come from deterministic scaffolding, not the repair worker.
         # A page repair cannot replace a previously accepted scaffold version.
-        for path in ("config/ai.json", "provenance.yaml", "config/profile.yaml"):
+        # A page repair has no authority over data/contract.json either: the
+        # approved DesignDocs contract owns it and assembly recompiles it, so
+        # the bundle's copy is kept.
+        for path in ("config/ai.json", "provenance.yaml", "config/profile.yaml", "data/contract.json"):
             if path in baseline_files:
                 rendered_files[path] = baseline_files[path]
             elif path not in (active_repair.get("allowed_paths") or []):
@@ -1621,20 +1687,27 @@ def save_app_schema(
                     {"filename": path, "content": content}
                     for path, content in sorted(code_files.items())
                 ],
-                "generated_files": {**baseline_files, **rendered_files},
             }
             for key, value in values.items():
                 if isinstance(context_variables, dict):
                     context_variables[key] = value
                 else:
                     context_variables.set(key, value)
-            mark_repair_responded(context_variables)
+            # As in save_generated_code: the shared UI roots an admitted repair
+            # saved are newer than its task's output, so assembly lets them
+            # supersede that task even where they restate the revision baseline.
+            mark_repair_responded(context_variables, saved_paths=written)
     except Exception as exc:
         _logger.exception("Could not write schema files to disk")
         raise RuntimeError("Could not write schema files to disk") from exc
 
     msg = (agent_message or "App schema persisted.").strip()
     files_written = f"\nFiles written: {', '.join(written)}" if written else ""
+    if data_contract_deferred:
+        files_written += (
+            "\ndata/contract.json not written: the selected capability packs' data contributions cannot be "
+            f"composed with the approved data contract ({data_contract_deferred}); assembly reports this pack failure."
+        )
     return (
         f"{msg}\n\n"
         f"App: {manifest_dict.get('app_name')}\n"

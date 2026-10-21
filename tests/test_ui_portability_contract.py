@@ -24,6 +24,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -57,10 +58,14 @@ def _load_ui_contract():
 
 
 def _pack_descriptor(pack_id: str, pack_root: Path, capability_source: str = "generated_module") -> dict[str, Any]:
+    """Select an external fixture pack with the version and digest its bytes verify to."""
+    metadata = _load_resolver().verify_pack_integrity(pack_root, pack_id)
     return {
         "id": pack_id,
         "capability_source": capability_source,
         "pack_source_path": str(pack_root),
+        "version": metadata["version"],
+        "digest": metadata["digest"],
     }
 
 
@@ -109,36 +114,190 @@ def test_greetings_pack_has_route_manifest() -> None:
     greetings_page = next((p for p in pages if p.get("id") == "greetings"), None)
     assert greetings_page is not None
     assert greetings_page["path"] == "/greetings"
-    assert greetings_page["component"] == "SchemaPage"
+    # The route names a component the pack itself registers, so the canonical composer can assemble it.
+    assert greetings_page["component"] == "GreetingsPage"
+    index = (GREETINGS_PACK / "templates" / "ui" / "index.js").read_text(encoding="utf-8")
+    assert 'registerComponent("GreetingsPage", GreetingsPage)' in index
+
+
+def test_a_pack_route_to_the_shell_schema_page_composes() -> None:
+    """A schema-native pack route targets the shell's SchemaPage, which the shell registers itself."""
+    from mozaiksai.core.workflow.generator_support.ui_registry_composition import (
+        compose_ui_registry,
+    )
+
+    manifest = {"pages": [{"id": "greetings", "path": "/greetings", "component": "SchemaPage", "schema": "greetings"}]}
+    composed = compose_ui_registry(
+        [{"owner": "pack:greetings", "files": [{"filename": "ui/route_manifest.json", "content": json.dumps(manifest)}]}], {},
+    )
+    assert json.loads(composed["ui/route_manifest.json"])["pages"] == manifest["pages"]
+
+
+def test_an_app_with_schema_page_routes_without_ids_composes_with_a_ui_contributing_pack() -> None:
+    """A canonical example's carried manifest (SchemaPage routes, no route ids) composes beside a pack's own
+    registered page; every app route is kept exactly as written, and an unregistered component still fails."""
+    from mozaiksai.core.workflow.generator_support.ui_registry_composition import (
+        compose_ui_registry,
+    )
+
+    canonical = REPO_ROOT / "examples" / "canonical-apps" / "project-hub" / "app" / "ui" / "route_manifest.json"
+    app_manifest = json.loads(canonical.read_text(encoding="utf-8"))
+    assert all("id" not in route for route in app_manifest["pages"])
+    files, contribution = _greetings_resolution()
+    app = {"owner": "app:generated_files", "files": [
+        {"filename": "ui/route_manifest.json", "content": json.dumps(app_manifest)},
+    ]}
+    composed = compose_ui_registry([app, contribution], files)
+    pages = json.loads(composed["ui/route_manifest.json"])["pages"]
+    for route in app_manifest["pages"]:
+        assert route in pages, route
+    assert any(route.get("id") == "greetings" and route["component"] == "GreetingsPage" for route in pages)
+    # The shell registers SchemaPage itself: the composed barrel registers only the pack's component.
+    assert "SchemaPage" not in composed["ui/index.js"] and "GreetingsPage" in composed["ui/index.js"]
+
+    # A route to a component nobody registers and the shell does not provide is still refused.
+    unknown = {"pages": [{"path": "/reports", "component": "ReportsPage"}]}
+    with pytest.raises(ValueError, match="Unregistered route component: ReportsPage"):
+        compose_ui_registry([{"owner": "app:generated_files", "files": [
+            {"filename": "ui/route_manifest.json", "content": json.dumps(unknown)},
+        ]}, contribution], files)
+    # Two id-less routes cannot claim one path, and a declared id must be a non-empty string.
+    for pages_ in ([{"path": "/a", "component": "SchemaPage"}, {"path": "/a", "component": "ChatPage"}],
+                   [{"id": "", "path": "/a", "component": "SchemaPage"}]):
+        with pytest.raises(ValueError):
+            compose_ui_registry([{"owner": "app:generated_files", "files": [
+                {"filename": "ui/route_manifest.json", "content": json.dumps({"pages": pages_})},
+            ]}], {})
+    # The path: prefix keys routes without an id, so no declared id may use it, even with no collision present.
+    with pytest.raises(ValueError, match="cannot start with 'path:'"):
+        compose_ui_registry([{"owner": "app:generated_files", "files": [
+            {"filename": "ui/route_manifest.json",
+             "content": json.dumps({"pages": [{"id": "path:/x", "path": "/y", "component": "SchemaPage"}]})},
+        ]}], {})
+
+
+def test_the_functional_route_check_accepts_only_the_shells_routable_core_pages() -> None:
+    """A route to a routable core page needs no ui/index.js registration in the functional check; a route to a
+    core component that is not a page (a transition screen, the token tab, a usage panel) or to a component
+    nobody registers is still reported."""
+    from mozaiksai.core.validation.functional_generated_app import scan_functional_generated_app
+    from mozaiksai.core.workflow.generator_support.ui_registry_composition import (
+        SHELL_CORE_COMPONENTS,
+        SHELL_ROUTE_COMPONENTS,
+    )
+
+    routable = sorted(SHELL_ROUTE_COMPONENTS - {"SchemaPage"})
+    refused = sorted(SHELL_CORE_COMPONENTS - SHELL_ROUTE_COMPONENTS) + ["ReportsPage"]
+    pages = [{"path": f"/page{index}", "component": name} for index, name in enumerate(routable + refused)]
+    files = {"app.json": json.dumps({"appName": "Core"}), "ui/route_manifest.json": json.dumps({"pages": pages})}
+    missing = [d for d in scan_functional_generated_app(files) if d.code == "MISSING_ROUTE_COMPONENT"]
+    reported = {name for name in routable + refused if any(repr(name) in d.message for d in missing)}
+    assert reported == set(refused), [d.message for d in missing]
+
+
+def test_the_composer_keeps_a_route_to_each_routable_core_page_and_refuses_the_other_core_components() -> None:
+    """Every routable core page composes beside a UI-contributing pack without a barrel registration; each core
+    component that is not a page is refused like any unregistered component."""
+    from mozaiksai.core.workflow.generator_support.ui_registry_composition import (
+        SHELL_CORE_COMPONENTS,
+        SHELL_ROUTE_COMPONENTS,
+        compose_ui_registry,
+    )
+
+    files, contribution = _greetings_resolution()
+    routes = [{"id": f"core-{name.lower()}", "path": f"/core/{name.lower()}", "component": name, "schema": "greetings"}
+              for name in sorted(SHELL_ROUTE_COMPONENTS)]
+    app = {"owner": "app:generated_files", "files": [
+        {"filename": "ui/route_manifest.json", "content": json.dumps({"pages": routes})},
+    ]}
+    composed = compose_ui_registry([app, contribution], files)
+    pages = json.loads(composed["ui/route_manifest.json"])["pages"]
+    for route in routes:
+        assert route in pages, route
+        assert route["component"] not in composed["ui/index.js"]
+    for name in sorted(SHELL_CORE_COMPONENTS - SHELL_ROUTE_COMPONENTS):
+        manifest = {"pages": [{"id": "screen", "path": "/screen", "component": name}]}
+        with pytest.raises(ValueError, match=f"Unregistered route component: {name}"):
+            compose_ui_registry([{"owner": "app:generated_files", "files": [
+                {"filename": "ui/route_manifest.json", "content": json.dumps(manifest)},
+            ]}, contribution], files)
+
+
+def test_the_scanner_route_check_reports_a_route_to_a_core_component_that_is_not_a_page() -> None:
+    """The bundle scanner's own route check: a route to a routable core page needs no custom page file, while a
+    route to a core component that is not a page is reported like any component without a registered page."""
+    from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import (
+        scan_generated_bundle,
+    )
+    from mozaiksai.core.workflow.generator_support.ui_registry_composition import (
+        SHELL_CORE_COMPONENTS,
+        SHELL_ROUTE_COMPONENTS,
+    )
+
+    names = sorted(SHELL_CORE_COMPONENTS)
+    pages = [{"id": f"core-{index}", "path": f"/core/{index}", "component": name, "schema": "home"}
+             for index, name in enumerate(names)]
+    files = {"app.json": json.dumps({"appName": "Core"}), "ui/route_manifest.json": json.dumps({"pages": pages})}
+    errors = scan_generated_bundle(files)
+    reported = {name for name in names if any(f"declares component '{name}'" in error for error in errors)}
+    assert reported == SHELL_CORE_COMPONENTS - SHELL_ROUTE_COMPONENTS, errors
+
+
+def test_the_composer_and_scanner_accept_exactly_the_shells_core_components() -> None:
+    """One definition of the shell's core components, matching chat-ui's CORE_COMPONENTS, and of the routable
+    subset composition and the scanner accept."""
+    import re
+
+    from factory_app.workflows.AppGenerator.tools import generated_bundle_scanner as scanner
+    from mozaiksai.core.workflow.generator_support.ui_registry_composition import (
+        SHELL_CORE_COMPONENTS,
+        SHELL_ROUTE_COMPONENTS,
+    )
+
+    source = (REPO_ROOT / "chat-ui" / "src" / "registry" / "coreComponents.js").read_text(encoding="utf-8")
+    declared = re.search(r"export const CORE_COMPONENTS = \[([^\]]*)\]", source)
+    assert declared is not None
+    assert SHELL_CORE_COMPONENTS == frozenset(re.findall(r"'([A-Za-z]+)'", declared.group(1)))
+    assert SHELL_ROUTE_COMPONENTS == {"ChatPage", "SchemaPage", "ProfilePage"} <= SHELL_CORE_COMPONENTS
+    assert scanner._SHELL_ROUTE_COMPONENTS is SHELL_ROUTE_COMPONENTS
+
+
+def _greetings_resolution() -> tuple[dict[str, str], dict[str, Any]]:
+    """Resolve the greetings pack as assembly does: its files and its pack:greetings UI contribution."""
+    resolver = _load_resolver()
+    contributions: list[dict[str, Any]] = []
+    all_files = resolver.resolve_managed_capability_templates(
+        [_pack_descriptor("greetings", GREETINGS_PACK)], ui_contributions=contributions,
+    )
+    [contribution] = contributions
+    return {f["filename"]: f["content"] for f in all_files}, contribution
 
 
 def test_greetings_pack_schema_native_page_materializes_from_pack() -> None:
-    """Materializing the greetings pack must produce the schema-native page and route manifest."""
-    resolver = _load_resolver()
-    descriptor = _pack_descriptor("greetings", GREETINGS_PACK)
-    all_files = resolver.resolve_managed_capability_templates([descriptor])
-    filenames = {f["filename"] for f in all_files}
+    """The pack ships its schema-native page; its route manifest is a contribution, never a pack file."""
+    files, contribution = _greetings_resolution()
 
-    assert "ui/pages/greetings.yaml" in filenames, (
+    assert "ui/pages/greetings.yaml" in files, (
         "greetings pack materialization must include ui/pages/greetings.yaml"
     )
-    assert "ui/route_manifest.json" in filenames, (
-        "greetings pack materialization must include ui/route_manifest.json"
-    )
+    # Shared UI roots are composed from every contributor, so the resolver never
+    # materializes one, whichever caller asks.
+    assert "ui/route_manifest.json" not in files
+    assert "ui/route_manifest.json" not in {
+        f["filename"] for f in _load_resolver().resolve_managed_capability_templates(
+            [_pack_descriptor("greetings", GREETINGS_PACK)],
+        )
+    }
+    assert contribution["owner"] == "pack:greetings"
+    declared = {f["filename"]: f["content"] for f in contribution["files"]}
+    assert {page["path"] for page in json.loads(declared["ui/route_manifest.json"])["pages"]} == {"/greetings"}
 
 
 def test_greetings_pack_ui_files_appear_in_provenance() -> None:
-    """Provenance manifest must record UI files produced by the greetings pack."""
-    resolver = _load_resolver()
-    descriptor = _pack_descriptor("greetings", GREETINGS_PACK)
-    all_files = resolver.resolve_managed_capability_templates([descriptor])
+    """Provenance records the pack's page as its file and the route manifest as a composed root it contributes to."""
+    files, _contribution = _greetings_resolution()
 
-    provenance_file = next(
-        (f for f in all_files if f["filename"] == ".mozaiks/pack_provenance.json"), None
-    )
-    assert provenance_file is not None, "Provenance manifest missing after materialization"
-
-    provenance = json.loads(provenance_file["content"])
+    provenance = json.loads(files[".mozaiks/pack_provenance.json"])
     pack_entry = next(
         (p for p in provenance.get("packs", []) if p.get("pack_id") == "greetings"), None
     )
@@ -148,22 +307,16 @@ def test_greetings_pack_ui_files_appear_in_provenance() -> None:
     assert "ui/pages/greetings.yaml" in pack_file_paths, (
         "provenance does not record ui/pages/greetings.yaml"
     )
-    assert "ui/route_manifest.json" in pack_file_paths, (
-        "provenance does not record ui/route_manifest.json"
-    )
+    assert "ui/route_manifest.json" not in pack_file_paths
+    identity = {key: pack_entry[key] for key in ("pack_id", "version", "source", "digest")}
+    assert provenance["composed_outputs"]["ui/route_manifest.json"] == [identity]
 
 
 def test_greetings_pack_ui_files_have_templates_owner_in_provenance() -> None:
-    """UI files from the greetings pack must be recorded with owner=templates."""
-    resolver = _load_resolver()
-    descriptor = _pack_descriptor("greetings", GREETINGS_PACK)
-    all_files = resolver.resolve_managed_capability_templates([descriptor])
+    """The pack's UI files are recorded with owner=templates."""
+    files, _contribution = _greetings_resolution()
 
-    provenance_file = next(
-        (f for f in all_files if f["filename"] == ".mozaiks/pack_provenance.json"), None
-    )
-    assert provenance_file is not None
-    provenance = json.loads(provenance_file["content"])
+    provenance = json.loads(files[".mozaiks/pack_provenance.json"])
     pack_entry = next(
         (p for p in provenance.get("packs", []) if p.get("pack_id") == "greetings"), None
     )
@@ -171,20 +324,24 @@ def test_greetings_pack_ui_files_have_templates_owner_in_provenance() -> None:
 
     owner_by_path = {f["path"]: f.get("owner") for f in pack_entry.get("materialized_owned_files", [])}
     assert owner_by_path.get("ui/pages/greetings.yaml") == "templates"
-    assert owner_by_path.get("ui/route_manifest.json") == "templates"
+    assert "ui/route_manifest.json" not in owner_by_path
 
 
 def test_greetings_pack_materialized_bundle_passes_scanner() -> None:
-    """The scanner must accept the greetings pack materialized bundle (no errors)."""
-    resolver = _load_resolver()
-    scanner = _load_scanner()
+    """The scanner accepts the greetings bundle with its UI roots built by the canonical composer."""
+    from mozaiksai.core.workflow.generator_support.ui_registry_composition import (
+        compose_ui_registry,
+    )
 
-    descriptor = _pack_descriptor("greetings", GREETINGS_PACK)
-    all_files = resolver.resolve_managed_capability_templates([descriptor])
-    files_map = {f["filename"]: f["content"] for f in all_files}
+    scanner = _load_scanner()
+    files, contribution = _greetings_resolution()
+    files_map = {**files, **compose_ui_registry([contribution], files)}
+    assert "ui/route_manifest.json" in files_map
 
     errors = scanner.scan_generated_bundle(files_map)
     assert errors == [], f"Scanner found errors in greetings pack bundle: {errors}"
+    # Without the composed root the provenance names a root the bundle does not have.
+    assert any("must identify a present shared composition root" in error for error in scanner.scan_generated_bundle(files))
 
 
 def test_schema_native_page_inherits_theme_via_primitive_renderer() -> None:

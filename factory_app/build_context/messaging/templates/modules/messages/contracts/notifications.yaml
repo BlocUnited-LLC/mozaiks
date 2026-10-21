@@ -2,15 +2,19 @@ schema_version: mozaiks.notifications.v1
 
 notifications:
   - id: message_sent
-    description: Notify message recipients when a new internal message is sent.
+    description: >
+      Notify message recipients when a new internal message is sent. The
+      notification carries no message text; opening the conversation reads it
+      under the current participant check.
     event_type: domain.messages.message_sent
+    source_event: reference
     channels:
       - in_app
     audience:
       user_id_field: recipient_ids
     template:
       title: "New message"
-      body: "{{body_preview}}"
+      body: "Open the conversation to read it."
     context_fields:
       - thread_id
       - message_id

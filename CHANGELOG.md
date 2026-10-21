@@ -12,6 +12,291 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Changed
+
+- Generated UI acceptance can verify a candidate against the existing local
+  driver's owned backend and built frontend, with authenticated browser evidence
+  preserved per run. External-host probes still cannot accept a candidate.
+- Shared page titles now follow the validated app-owned `ui.page.title` role;
+  page sections use app spacing, and sidebar pages stack on narrow screens.
+  Invalid explicit title roles and layouts report errors instead of silently
+  substituting another presentation.
+- Messaging `0.1.14` `message_sent` notifications carry no message text. A
+  stored record's title is "New message" and its body "Open the conversation
+  to read it."; its context holds the event's `thread_id`, `message_id`,
+  `related_type` and `related_id` when the event carries them; and, because
+  the rule declares `source_event: reference`, its `source_event` holds only
+  the originating event's id, type and related type. Like every notification
+  record it also keeps its own `notification_id`, the `rule_id` and
+  `module_id` of the rule that created it, the event's id and type, its actor,
+  the rule's audience with the resolved recipients, the channels, its status
+  and creation time, and the owning app (and tenant and workspace, when the
+  event names them); `notification.created` carries the same record, and the
+  default store's saved copy also gets MongoDB's `_id`. A rule that
+  does not declare `source_event: reference` keeps storing the full
+  originating event as `source_event`, which notification list responses never
+  return. Notifications rendered by an earlier pack version (the released
+  `0.1.12` and before) keep their copied preview until the recipient clears
+  them.
+- Messaging `0.1.14` UI reads only app theme tokens (`--color-border`,
+  `--color-primary`, `--color-error`, `--color-surface-alt`,
+  `--color-text-primary`, `--color-text-secondary`) with no fixed fallbacks.
+  The `/messages` page titles itself with `PageHeader`, so it follows the
+  app's `ui.page.title` role. The Messages profile tab renders only its
+  `list_threads` result: its unreachable Friends list and start-conversation
+  path are removed, and the social pack's own profile tab owns the friends
+  roster.
+- Commerce `0.1.12` page templates (cart, orders, products and product
+  detail) and the factory app's notifications page no longer pin
+  `title_font: body`, so their titles follow the app's `ui.page.title` font.
+- A `source_event: reference` notification reads `related_type` only from
+  the event payload. A flat event's top-level fields still form that payload.
+- An app-owned pack handler, such as Messaging's `handler.py`, can now be
+  changed through an authorized selected-file Studio refinement of the app's
+  accepted current build (the current record of its build family and key, so
+  the App Intelligence index a promotion saves as current under its own key
+  is not taken for it), as a thin extension that keeps every template-owned
+  pack file byte-identical. Regeneration, UI-only refinement, repairs and
+  AppGenerator plan tasks cannot change it, and an unsupported request fails
+  with an explicit diagnostic that names the supported path. When a rejected
+  draft has left the app with no current build, such a change is admitted from
+  the stale build it was made from, without making any record current again,
+  only if that build's stale marker is this app's own rejected or failed
+  inline refinement (its change request saved the build's state as current
+  when it began, ran inline, was made by the same user, and its draft is now
+  closed, followed back through earlier retries) and nothing else is open, in
+  flight or changed: no other build of its family and key was accepted since
+  it was, no other change request from it is recorded as a workflow route, every build
+  made from it or further down its lineage is closed (rejected, removed,
+  failed validation, or a stale draft that the state its change request saved
+  shows was never accepted, such as a draft refined in review, which can then
+  be neither rejected nor accepted, unless a
+  change request made from it is recorded as a workflow route), Studio's
+  registry read found no other run building when the run began, and no input
+  family it depends on became current after it was accepted or is stale with
+  no current build. Anything else, including a failed lookup, is refused.
+  Studio applies this baseline rule before any coding or surface provider
+  call: when an explicit or confirmed file selection includes app-owned pack
+  code, a build that does not pass it is refused with 409 and the reason,
+  before classification, before a pending decision is used and before the
+  registry run. A draft, such as the app's first build before the owner
+  accepts it, is refused with the way forward: "accept the first build before
+  changing its app-owned capability code". Candidate admission applies the
+  same rule as the backstop, refusing with `STALE_REFINEMENT_BASELINE` and
+  the reason in `stale_baseline_refusal`. A surface run's change request is
+  recorded as `surface_regeneration` rather than as a workflow route.
+- Studio's acceptance and the staged-refinement acceptance write acceptance
+  evidence on the record they make current, as `metadata.acceptance`:
+  `app_id`, `build_family`, `build_key`, `build_record_id`, `accepted_by`
+  (the caller's authenticated principal), `accepted_at` and `transition`
+  (`studio_accept` or `staged_refinement_accept`). A build marked stale later
+  is therefore still recognized as accepted. Evidence counts only on the
+  record it names: a marker copied from another record, one naming another
+  app, family, key or record, and the earlier two-field marker show nothing.
+  A stale build without evidence is refused as unverifiable, and the refusal
+  names the cause and the way forward: accept a new build of the app, then
+  change its app-owned code from that build. This covers a build accepted
+  before evidence named its build, and an imported Genesis build: brownfield
+  Genesis acceptance writes no evidence yet, and the refusal names that
+  dependency.
+- A Studio refinement request marks the selected build stale only once the
+  operation it started has changed that build or left its outcome unresolved:
+  an inline run that stored a child, not since rejected, whose validation
+  passed, is pending or was skipped (found in the artifact store by its parent
+  and the run's build id; a failed lookup or a named child the store does not
+  return counts too), or a workflow run that launched. A pending or skipped
+  child can never be accepted; the trigger response and the run's refinement
+  session report it as `unresolved_change`. The build stays stale even after
+  the draft is rejected, and ordinary refinements of it continue. Only an
+  app-owned pack-code change from that build needs the draft closed first, so
+  rejecting the draft is the supported next step for that change. A draft
+  that is refined instead is marked stale and can no longer be rejected. It
+  stops holding its build once nothing made from it is open, unless a
+  refinement of it took a workflow route (even one whose launch failed),
+  which keeps it open; then accept a new build of the app before changing its
+  app-owned code. A scope question or confirmation prompt, a dismissed
+  decision, rejected input, a workflow launch that failed, and an inline run
+  that stored nothing or only a child whose validation failed leave the build
+  current, so the confirmed or retried change is still admitted against it.
+  Change requests, session revision state, refinement sessions and registry
+  runs still record every attempt. Builds already marked stale stay stale.
+- AppGenerator now saves every app bundle it generates as a draft, including
+  the first (parentless) build, with no acceptance evidence. The owner accepts
+  the draft in Studio (**Accept this draft**,
+  `POST /api/studio/build/artifacts/{id}/accept`), which makes it current and
+  records the evidence; only then can it be activated (**Activate this
+  version**) or its app-owned capability code be changed. A parentless draft
+  goes through the same lineage check as any other version, so it is refused
+  while another build of its scope is current or shown accepted.
+  `scripts/live_journey_driver.py` accepts the reviewed draft and then
+  promotes it; a refused acceptance stops the run as `acceptance_failed`. The
+  README, getting-started, Genesis and refinement, Studio, concepts, local
+  setup and CLI reference docs describe accepting the draft before activating
+  it.
+- Studio refuses with 409 a refinement that would patch only template-owned
+  capability pack files of the saved build, for example a UI-only edit of
+  Messaging's `ui/pages/custom/Messages.jsx`. This covers an explicit or
+  confirmed file selection, an auto-applied inferred scope, and a contract
+  surface plan that writes only such files. The refusal comes before the
+  coding or surface provider runs, before validation and before any registry
+  run. An explicit or confirmed selection is refused before classification;
+  the other cases are refused after the classifier and the scope proposer or
+  surface planner. Clarifications, workflow routes, and scopes that include
+  template files alongside files the patch may change are not refused.
+  Candidate admission still refuses any changed template-owned output
+  (`PACK_TEMPLATE_OUTPUT_CHANGED`), and now names the supported paths in
+  `candidate_admission.supported_path`.
+- `OrchestrationControlHarness.prepare_coding_request` and
+  `FirstPartyHarnessDecisionPolicy.for_scope_resolution` now require
+  `confirmation_required_paths` (pass `()` when the saved build has no
+  app-owned pack code), so no caller can apply an inferred scope without
+  confirmation just by omitting it.
+- Every selected capability pack resolves to one verified identity before any
+  check uses it: its own `pack_source_path`, else the workspace's installed
+  component, else, for a row that claims a pack, the installed package's
+  shipped catalog `build_context/<id>`. A row claims a pack when it carries
+  `version`, `digest` or `source`, when its `capability_source` is a
+  registered pack source (`managed_capability`, `operator_pack`,
+  `framework_pack`, `config_file` or `operator_extension`), or when it is not
+  a `generated_module` row and its id names a shipped pack. A claimed pack
+  that resolves nowhere fails with `PackIntegrityError`; a `generated_module`
+  row never selects a pack by its id; a row that names its pack only under
+  `capability_id` or `module_id` is refused as malformed. Pins on the row
+  must equal the freshly computed version and digest.
+- The resolved identity `{pack_id, version, digest, source, resolution,
+  authority}` names what vouched for the source: the shipped catalog
+  (`factory_build_context`), verified installed state (`installed`), the
+  workspace build-context registry (`workspace_build_context`), or the
+  selection's own matching pins (`selected_pins`). The validation facade
+  returns it as `GeneratedAppValidationResult.resolved_capability_packs`, and
+  the app-bundle acceptance gate records it in its result. The digest hashes
+  the source's raw bytes and is a same-host value; `pack_id` and `version`
+  are the portable identity.
+- A pack that `load_trusted_build_context` registers for AppGenerator
+  directly under the workspace build context (`build_context_root`, else
+  `MOZAIKS_BUILD_CONTEXT_PATH` or `MOZAIKS_APP_WORKSPACE_PATH/build_context`)
+  resolves with authority `workspace_build_context`, so the documented
+  operator-pack flow assembles. The resolver runs the loader itself, with
+  AppGenerator's shipped build-context declarations, and trusts a row only
+  when the loader registers a pack with its id at that path; a root the
+  loader refuses vouches for nothing. The selection must carry the
+  registered version, which is compared with the fresh source. A recorded
+  build pins every row that names a pack directly under the workspace root
+  (unless that root is the shipped catalog itself, whose packs stay
+  catalog-selected) to the version and digest its acceptance verified, and
+  refinement and Studio read
+  recorded rows back only with those pins, so they verify that identity
+  again.
+- A pack's digest now always covers its `contract.yaml`, which decides output
+  ownership and dependencies, even when the context does not declare it as a
+  contract asset, and it covers the absence of one. Every shipped pack
+  declares its contract, so no shipped digest changes. An installed
+  Community Component pin that 0.2.0 recorded for a pack that does not
+  declare a contract, or has none, no longer verifies, and nothing adopts a
+  contract, or the lack of one, that the pin never covered: it is refused
+  until the pack is installed from its verified source into a build context
+  without that pin (see the upgrade entry below). A contract or catalog
+  asset that is not a file is an integrity diagnostic, and so is a link
+  among a pack's inputs: a symbolic link, or a Windows junction or other
+  reparse point, at `context.yaml`, `contract.yaml`, a declared asset or any
+  non-excluded entry under a declared directory. Dot-named and `__pycache__`
+  entries are ignored by verification, planning and materialization rather
+  than treated as pack inputs; regular compiled Python files are excluded from
+  the verified/materialized tree. A link is digested under its
+  target's path and read through it, so retargeting one between inputs the
+  pack already covers changed its effective configuration (such as its
+  `capability_source`) or a rendered file, or dropped an input, without
+  changing the digest. The pack's context and contract readers, the
+  verifier, the selection's dependency check and template rendering all
+  refuse it before the input is used. A declared asset path may not contain
+  `..` either: the operating system follows a link before applying `..`,
+  so such a path could reach a linked directory a check of the path itself
+  would miss.
+  Replace such a link with the file or directory it points to; a component
+  installed with a linked input must then be installed from its verified
+  source into a build context without that pin. The pack directory itself
+  may still be reached through a link.
+- Generated bundle validation checks pack outputs without rendering pack
+  templates. Each resolved pack's provenance must record its version, every
+  template-owned output must be present, and the output of every static
+  (non-`.j2`) template must equal the verified template text, with line
+  endings normalized. A `.j2` output is checked through the pack's declared
+  outputs and pinned identity, not its content. Bundles of packs that render
+  from build context, such as `operator_readiness`, therefore pass the public
+  validation facade and Studio candidate validation, which render nothing,
+  without build-time template variables, and CRLF and LF checkouts of a pack
+  validate the same bundle. AppGenerator's own acceptance gate still renders
+  the selected packs' templates, with the full build context, for its
+  planned-data check. A bundle built from another version of a shipped pack
+  fails until an AppGenerator revision of the build, once accepted,
+  re-materializes the pack; the diagnostic names that remedy.
+- The bundle scanner takes `provides_capabilities`, `forbidden_outputs` and
+  `capability_source` only from a resolved pack's verified contract and
+  context, never from a caller's row. The validation facade and the
+  app-bundle acceptance gate apply the functional pack checks to the resolved
+  packs only. The scanner and layout validation identify a pack by `id`, then
+  `pack_id`, then `capability_pack_id`.
+- Planning (pack-owned outputs, facade directories, template module
+  contracts and the managed contract inventory), plan coverage, the discard
+  of worker copies of pack-owned files and assembly read a selected pack only
+  through the same resolver, after it verified the pack; a refused row
+  contributes nothing, and a managed selection that cannot be verified
+  refuses the DesignDocs save or plan check with the resolver's diagnostic.
+  An id-only row, such as the default MozaiksPay row of an OSS SaaS plan,
+  therefore owns exactly the outputs assembly materializes. When the build
+  context selects no packs, `app_build_plan` releases those outputs to model
+  tasks. A plan row that takes a source path from the build context also
+  takes that source's pins.
+- Pack templates never own a shared composition root. For every caller, the
+  template resolver holds back `data/contract.json`, `ui/index.js` and
+  `ui/route_manifest.json` and records each contributing pack under
+  `composed_outputs`, including a pack whose only templates are shared roots.
+  UI registry composition accepts a route to one of the shell's routable
+  core pages (`SchemaPage`, `ChatPage`, `ProfilePage`) without a
+  `ui/index.js` registration, and a route without an id, which it matches by
+  path and keeps as written (an id may not start with `path:`). Schema-native
+  community packs and apps with such routes therefore compose beside a
+  UI-contributing pack; a route to a component nobody registers, or to a core
+  component that is not a page, still fails. The scanner's route check
+  accepts only those routable core pages.
+  The functional route check accepts the same routable core pages, and planning
+  decides whether a selected pack is managed from the verified pack's own
+  declaration, as the bundle scanner does.
+  The bundle scanner rejects pack provenance that lists a shared root in a
+  pack's `materialized_owned_files` (written before composition) and asks for
+  a reassembly. A Community Component upgrade blocks before writing anything
+  when the app's provenance holds such a claim (`exclusive_shared_root_claim`,
+  whichever pack claims it), when the upgrade changes a shared UI root, or
+  when the app's root was not composed with the pack
+  (`composed_output_requires_reassembly`): reassemble the app, then plan the
+  upgrade again. The upgrade validates its provenance before writing.
+- `save_app_schema` writes its rendered files only to the admitted
+  `code_files` overlay. `generated_files` stays the last assembled bundle, so
+  a projection that cannot compose a repair keeps the composed roots, never
+  an app-only render. When the selected packs cannot be verified or composed
+  with the approved data contract, the save writes no `data/contract.json`,
+  logs `APP_SCHEMA_PACK_DATA_CONTRACT_NOT_WRITTEN`, reports it in its result,
+  and leaves assembly to report the pack failure.
+- Admitted repair copies of pack-composed UI roots compose only against the
+  revision baseline the caller passes (`load_revision_baseline`); process
+  memory is now only a memo inside `load_revision_baseline`. Synchronous
+  module, config and auth-scope readers use `admitted_module_file_map`, which
+  leaves the shared UI roots out. The pack-only data contract guard checks
+  the bundle's copy, which revision hydration loads from the bound source.
+- Assembly reads task outputs only from the task batch result map. A key that
+  is not a task id of the approved plan, including the `task_results`,
+  `results` and `tasks` wrappers assembly used to unwrap, fails assembly with
+  a diagnostic that asks for the batch to be rerun.
+- Runtime smoke get checks read the get action's declared output schema, as
+  create and list do. A get response whose record the schema does not
+  declare fails `get_missing`, `a_get` and `b_get_isolated` explicitly; a 404
+  for a missing record still passes.
+- AppSchemaAgent guidance and the `theme_config_patch` description name only
+  what the patch accepts (`theme` selectors, `identity`, `fonts`,
+  `ui.page.title`). Generated UI browser docs state that a mocked run is a
+  rendering smoke and that only a real-host run on an owned launch can accept
+  a candidate. The generated-UI Playwright configuration retries no test.
+
 ### Fixed
 
 - The shell no longer offers Profile, Sign in, or Sign out when nobody can sign
@@ -28,6 +313,239 @@ This project follows a practical pre-1.0 changelog format:
   authentication enabled every entry renders as before, and `/u/:username` is
   never a navigation entry.
 
+- Messaging pack builds use canonical data contracts and additive migrations,
+  retain participant-aware actions, and compose their UI registrations with
+  app-owned routes. Page refinement receives the saved pack, design and domain
+  context without widening its file scope.
+- Pip-installed Windows web shells register every real chat, Factory and app
+  UI source file with Tailwind instead of relying on directory junctions that
+  Tailwind does not traverse. Core layout utilities are therefore present in
+  the built stylesheet and branded assets remain contained by the shell.
+- Capability-pack lifecycle reads refuse a linked `context.yaml` before
+  identifying an install or upgrade candidate. Link probes that encounter a
+  platform filename error and asset paths outside the pack now remain
+  structured integrity diagnostics, and planning cannot consume dot-named or
+  cache template paths that verification and materialization exclude.
+- Filtering an exclusive pack page out of a typed custom route bundle keeps the
+  app's own pages and shared registrations instead of leaving an empty or
+  dangling route bundle.
+- Runtime smoke checks read declared action response wrappers when checking
+  persisted create/list results, retaining authorization and record identity
+  checks for APIs such as Messaging's `thread` and `threads` responses.
+- Generated module quality checks distinguish a `todo` domain value from TODO
+  comments, docstrings and unfinished implementation messages.
+- Generated UI browser acceptance rejects empty, malformed, skipped or incomplete
+  reports. Reviewed real-host route probes check declarative/custom coverage and
+  local candidate identity; candidate acceptance remains blocked until running
+  host/build provenance is verified. Missing evidence and harness failures block
+  without asking a page worker to regenerate the application.
+- The shell's Monaco sanitizer replacement resolves the installed dependency
+  through directory junctions, preserving the locked sanitizer in isolated
+  Windows worktrees as well as ordinary installations.
+- Pack-composed UI roots honor admitted repairs and page deletions in both
+  assembly and the admitted bundle. A repair overrides only what it changes
+  relative to the verified revision baseline, which validation and export reread
+  from the verified source when the process does not hold it. This also holds in
+  apps that require sign-in and for AppSchemaAgent repairs. Pack declarations
+  stay strict, malformed route `navigation` or `meta` values are declaration
+  errors, auth route binding errors are routed to the owner of
+  `ui/route_manifest.json` whether the acceptance gate or an assembly raises
+  them, and provenance uses the pinned build timestamp.
+- A data-contributing pack no longer replaces a carried app `data/contract.json`
+  when no approved DesignDocs contract exists; a carried contract that holds only
+  pack- and assignment-derived data is recomposed, and any other carried
+  contract fails with the reason. Assembly checks every carried copy, including
+  the bound revision source's, not only the copy that wins the merge, so a
+  repair overlay or task output that writes the pack-only contract cannot drop
+  the app's surfaces; a data contract owner's repair save that would write it is
+  refused with the same reason. Data contract owner repairs and AppSchemaAgent
+  saves otherwise write the contract as assembly compiles it, with the verified
+  pack contributions; pack verification failures are reported by assembly.
+- Bundle validation keeps explicitly selected packs when its context selects
+  none, accepts shared roots claimed by several packs, and trusts verified
+  installed pins. Community pack upgrades fail before writing when another pack
+  owns the data contract, the app contract is malformed, or a composed UI root
+  would change.
+- Messaging account deletion repoints previews away from the deleted user's
+  messages, releases their thread membership, and neutralizes the titles and
+  metadata of threads they created. Export includes membership, read state and
+  the creator's thread annotations; membership rows omit titles written by other
+  users. A send no longer rewrites thread membership, and plain direct
+  threads emit their lifecycle events again (nullable subject and related
+  fields).
+- Page refinement workers see earlier surfaces' outputs in the same plan, and
+  real-host acceptance receipts label the caller-supplied revision as an
+  unverified annotation.
+- When the selected packs' data contributions cannot be composed, the app
+  schema save still derives `app.json` `authRequired` from the approved data
+  contract; only `data/contract.json` is left to assembly.
+- A Community Component upgrade verifies the installed source against the
+  version and digest installed state pinned before comparing the app with
+  it. A source changed in place since installation refuses the upgrade, and
+  nothing changes, instead of recording a false upgrade over files still
+  materialized from the old content; the refusal says whether the version or
+  only the bytes changed. A component whose pack does not declare its
+  `contract.yaml`, or has none, and that was pinned under the earlier digest
+  rule (which covered neither an undeclared contract nor the absence of one)
+  is refused by the upgrade plan, a repeated installation and installed
+  resolution alike, whether its contract was since edited, added or deleted,
+  and nothing changes. A 0.2.0 pin of a pack that declares its contract
+  and has the same readable, regular-file inputs accepted by the current rules
+  verifies as before, because both rules digest that pack alike. The refused
+  pin cannot show whether, or with which contract, the component was
+  installed: the refusal compares what it recorded
+  (version, declared files and their capabilities, and the dependencies it
+  read from the contract), says that this does not prove the contract's
+  ownership, provided capabilities or restrictions unchanged, and names the
+  remedy, installing the pack from its verified source into a build context
+  without that pin. Installation never re-labels an existing pin. A pin
+  recorded under the current rule covers the contract and its absence, so a
+  contract added or deleted later is refused as an in-place change.
+- An OSS SaaS build whose plan adds the default id-only MozaiksPay row now
+  materializes the shipped MozaiksPay pack and schedules no model work for
+  its pages, client and facade module, so assembly and validation agree on
+  those files.
+
+### Removed
+
+- Acceptance without an authorized transition: AppGenerator no longer saves
+  an app's first build as current, and the staged-refinement acceptance no
+  longer credits the acceptance to the staged review record's reviewer.
+- Unverified pack contracts: the bundle scanner no longer honors a selected
+  row's inline `provides_capabilities`, `forbidden_outputs` or
+  `capability_source`, and no longer reads a `contract.yaml` from a row's
+  own `pack_source_path` without verifying it, nor skips a row whose
+  contract it cannot read.
+- Pack templates writing `ui/index.js`, `ui/route_manifest.json` or
+  `data/contract.json` as their own files, and the Community Component
+  upgrade rewriting such a shared root in place; composition owns them, and
+  provenance that claims one blocks the upgrade until the app is
+  reassembled.
+- `save_app_schema`'s write of its uncomposed render into `generated_files`.
+- Verification of a 0.2.0 Community Component pin of a pack whose
+  `contract.yaml` is undeclared or absent: that pin covered neither the
+  contract nor its absence, so it is refused until the pack is installed
+  from its verified source into a build context without that pin.
+- Links among a pack's inputs (`context.yaml`, `contract.yaml`, a declared
+  asset or any non-excluded entry under a declared directory), and declared asset paths
+  that contain `..`; each is now an integrity diagnostic (the digest entry
+  above names the remedy).
+- Silent omission of a declared pack directory that cannot be read; it is now
+  an integrity diagnostic naming that directory.
+- The bundle scanner's acceptance of a route to one of the shell's non-page
+  core components (the launcher, confirm and completion screens, the token
+  tab, the usage panels) without a custom page file; only the routable core
+  pages (`ChatPage`, `SchemaPage`, `ProfilePage`) need none.
+- Assembly's tolerance of task batch results nested under `task_results`,
+  `results` or `tasks`, of list results and of a top-level `failed_tasks`
+  key; such maps now fail with a diagnostic that asks for the batch to be
+  rerun.
+- The hardcoded `item` reads of runtime smoke get checks, and
+  `scripts/generated_ui_acceptance.normalize_ui_acceptance_findings`, which
+  had no callers.
+- The `PageHeader` `titleFont` prop and SectionRenderer's `config.titleFont`
+  fallback; `PageHeader` now refuses `titleFont`, and declarative configs
+  already reject the key.
+- Planning's reads of an id-only managed row's contract from the projected
+  `operator_contracts` and of a row's own inline `facades`; a managed row's
+  contract now comes only from the verified pack.
+- `BrandingProvider`, `useBranding` and the unresolvable `providers/index.js`
+  barrel from `@mozaiks/chat-ui`. Theme loading uses `initializeTheme` and
+  `useTheme`, which fail closed on an invalid page-title style.
+- The Messages profile tab's Friends list and start-conversation path, and
+  the Messaging UI's unprefixed theme tokens with fixed colour fallbacks.
+
+### Security
+
+- Workspace handler extensions are checked so that annotations and defaults
+  cannot run code at import, and service arguments must come from the
+  override's own parameters. These checks are targeted guards, not
+  certification of arbitrary code.
+- Accepting a version whose parent is not the current build of its build
+  family and key is refused when it would replace that current build's
+  app-owned pack code. The comparison reads those files in full from the
+  verified archives and refuses oversized, duplicate or linked entries instead
+  of skipping them.
+- Accepting an app bundle is refused when newer accepted work lies outside its
+  lineage: within its build family and key (the scope acceptance supersedes
+  in, so a current record under another key, such as the App Intelligence
+  index a promotion saves, is not the app's build), a build that is current,
+  or that was accepted at or after the version's nearest accepted ancestor,
+  including one a draft of its own has since marked stale. An older candidate
+  or the sibling of an accepted child therefore cannot replace newer accepted
+  work, and a draft of a draft of the latest accepted build is still accepted.
+  A missing or overlong lineage, a failed read, a scan past its bound, or an
+  acceptance that cannot be ordered against the ancestor's refuses. Studio
+  re-reads the version under its per-process acceptance lock, which
+  coordinates one Studio process only. A version with no parent goes through
+  the same check. A stale build that no acceptance evidence names is passed
+  over only when its invalidating change request was made from that build and
+  the state it saved shows a draft that was never accepted; a saved state of
+  `stale` is followed back at most 16 change requests and 64 reads. Anything
+  else refuses as unverifiable and names the cause: accepted at a time
+  nothing records, no saved state, a saved state of another build or a change
+  request made from another build (naming that build), a missing change
+  request, a passed bound, or a failed read. A superseded build without
+  evidence is never treated as never accepted, and a rejected build never
+  counts as accepted work, whatever evidence it carries. A workflow launch now
+  keeps the saved build state on its change request when it rewrites the
+  routing.
+- Confirming a proposed refinement scope requires the pending decision's files
+  to equal those the trigger saved on its change request for the same build,
+  since the pending decision can also be written through the session decision
+  API. The proposal saves the selected build's lifecycle state on its change
+  request. Before the decision is used, a confirmation is refused when that
+  build has been written since (made stale again, superseded, accepted or
+  rejected), when it is rejected or removed, when newer accepted work lies
+  outside its lineage (read as acceptance reads it, so a newer accepted build
+  that has since been marked stale still refuses, and a current record under
+  another build key does not), or when that cannot be checked. A decision
+  proposed for a build that was already
+  stale, and is unchanged, can be confirmed; it then follows its route, so a
+  scope that includes app-owned pack code still goes through the baseline
+  rule for that code, and a workflow route launches as before. A change
+  request with no saved state is always refused, because whether its build
+  changed cannot be checked; this covers one recorded before Studio kept that
+  state. Requesting the change again saves the state, and that proposal can
+  be confirmed.
+- Acceptance evidence always names the caller's authenticated principal. The
+  staged-refinement acceptance (`accept_staged_refinement_build_record`,
+  `accept_staged_refinement_artifact_version`) requires `accepted_by` and
+  refuses without it, writing nothing; it no longer credits the acceptance to
+  the staged review record's reviewer. `contracts.build_acceptance_evidence`
+  refuses evidence that names no principal, and Studio passes the request's
+  principal for both acceptances.
+- A selected pack's own `pack_source_path` is trusted without pins only
+  inside the shipped factory catalog, as the verified source of the installed
+  component with that id, or as a pack that `load_trusted_build_context`
+  registers for AppGenerator directly under the workspace build context. Any
+  other source, including a copy of a workspace pack elsewhere and a lifecycle
+  upgrade candidate, must be selected with matching `version` and `digest`
+  pins, or it is refused before its contract is read, so its own contract
+  grants no capability, layout or output ownership. A workspace pack edited
+  in place after a build was recorded, including an edit of an undeclared
+  `contract.yaml`, fails that build's later refinements with
+  `PACK_OWNERSHIP_UNRESOLVED` instead of releasing its template-owned files,
+  until an AppGenerator revision re-assembles it. A build recorded before
+  builds pinned workspace packs, and every refinement that copied its rows,
+  carries no digest for them and is refused the same way: run an
+  AppGenerator revision to record a pinned build. Studio refuses such a
+  patch with 409 before any provider call, and refuses to accept a version
+  when the app-owned code of it or of the current build it would replace
+  cannot be compared because a pack selection cannot be verified.
+- A row that claims a pack but cannot be resolved, or whose pins do not
+  match, fails with a diagnostic; no warning admits an unverified,
+  unresolvable, mismatched or omitted pack. The bundle scanner refuses an
+  explicit row whose `pack_source_path` lies outside the build context's
+  verified selection, and a bundle whose template-owned pack files differ
+  from the verified templates, whatever its provenance records.
+- Studio refinement admission keeps the verified identity (pins and
+  authority) of every pack the parent build selected, so a pinned external
+  pack, an installed Community Component and a workspace pack are held to
+  the same template-drift, module-closure, app-owned-scope, stale-baseline
+  and handler-grammar checks as a shipped pack. If the parent's selection
+  cannot be resolved or verified, every candidate is refused with
+  `PACK_OWNERSHIP_UNRESOLVED` instead of being admitted unchecked.
 ## 0.2.0 - 2026-10-17
 
 ### Added

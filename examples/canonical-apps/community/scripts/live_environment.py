@@ -11,15 +11,20 @@ import argparse
 import asyncio
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
 import time
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from copy import deepcopy
 from datetime import UTC, datetime
 from importlib.metadata import version
 from pathlib import Path
+from typing import Any
 from urllib.error import URLError
+from urllib.parse import urlsplit
 from urllib.request import urlopen
 from uuid import uuid4
 
@@ -30,6 +35,7 @@ LABEL = "io.mozaiks.community-acceptance"
 IMAGES = {"mongo": "mongo:7", "identity": "quay.io/keycloak/keycloak:26.0"}
 NATIVE_CALLBACK = "org.mozaiks.examples.commonground:/auth/callback"
 NATIVE_ORIGIN = "https://localhost"
+OS_ENV_KEYS = {"PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "USERPROFILE", "HOME", "LOCALAPPDATA", "APPDATA", "LANG"}
 
 
 def write_json(path: Path, value: object) -> None:
@@ -52,26 +58,40 @@ def free_port(port: int) -> None:
         sock.bind(("127.0.0.1", port))
 
 
-def wait_http(url: str, *, process: subprocess.Popen | None = None, timeout: int = 120) -> dict:
+def wait_http(url: str, *, process: subprocess.Popen | None = None, timeout: int = 120,
+              parse_json: bool = True) -> dict:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if process is not None and process.poll() is not None:
-            raise RuntimeError("Platform process exited; inspect its private log.")
+            raise RuntimeError("Owned process exited; inspect its private log.")
         try:
             with urlopen(url, timeout=2) as response:
-                return json.load(response)
+                return json.load(response) if parse_json else {"status": response.status}
         except (URLError, TimeoutError, ConnectionError):
             time.sleep(0.5)
     raise RuntimeError(f"Local service did not become ready within {timeout}s: {url}")
 
 
+def workspace_path(args: argparse.Namespace) -> Path:
+    workspace = Path(getattr(args, "workspace", None) or WORKSPACE).resolve(strict=True)
+    if not (workspace / "app/app.json").is_file():
+        raise RuntimeError("Acceptance requires a workspace containing app/app.json.")
+    return workspace
+
+
+def clean_environment(inherited: dict[str, str], values: dict[str, str]) -> dict[str, str]:
+    """Keep OS launch essentials, then apply the driver's explicit configuration."""
+    return {**{key: value for key, value in inherited.items() if key.upper() in OS_ENV_KEYS}, **values}
+
+
 def environment(args: argparse.Namespace, evidence: Path) -> tuple[dict, dict]:
+    workspace = workspace_path(args)
     web = f"http://127.0.0.1:{args.web_port}"
     api = f"http://127.0.0.1:{args.api_port}"
     issuer = f"http://127.0.0.1:{args.oidc_port}/realms/common-ground"
     frontend = {
-        "PLATFORM_PATH": str(WORKSPACE / "app"),
-        "MOZAIKS_APP_WORKSPACE_PATH": str(WORKSPACE),
+        "PLATFORM_PATH": str(workspace / "app"),
+        "MOZAIKS_APP_WORKSPACE_PATH": str(workspace),
         "MOZAIKS_HOST": "platform",
         "MOZAIKS_BACKEND_URL": api,
         "VITE_API_URL": api,
@@ -117,6 +137,66 @@ def environment(args: argparse.Namespace, evidence: Path) -> tuple[dict, dict]:
     return frontend, runtime
 
 
+@contextmanager
+def frontend_preview(state: dict, evidence: Path, child_env: dict[str, str]) -> Iterator[dict[str, Any]]:
+    """Build the active workspace and own its preview for an in-process exercise."""
+    from scripts.generated_ui_acceptance import bundle_digest
+
+    if state.get("status") != "ready":
+        raise RuntimeError("Frontend acceptance requires the ready owned backend.")
+    app_root = Path(state["app_root"]).resolve(strict=True)
+    frontend = state["frontend_env"]
+    if (Path(frontend["PLATFORM_PATH"]).resolve(strict=True) != app_root
+            or Path(frontend["MOZAIKS_APP_WORKSPACE_PATH"]).resolve(strict=True) / "app" != app_root):
+        raise RuntimeError("Frontend workspace differs from the running app.")
+    url = urlsplit(state["base_url"])
+    if (url.scheme != "http" or url.hostname != "127.0.0.1" or not url.port
+            or url.username or url.password or url.path or url.query or url.fragment):
+        raise RuntimeError("Frontend preview requires the owned loopback origin.")
+    shell = REPO / "web_shell"
+    # Vite explicitly loads these files independently of the child environment.
+    for root in (REPO, shell):
+        if any((root / name).exists() for name in (".env", ".env.local", ".env.production", ".env.production.local")):
+            raise RuntimeError("Frontend acceptance requires a checkout without Vite dotenv files.")
+    dist = evidence.resolve(strict=True) / "frontend-dist"
+    if dist.exists():
+        raise RuntimeError("Frontend acceptance requires a new build output directory.")
+    free_port(url.port)
+    env = clean_environment(child_env, frontend)
+    before = bundle_digest(app_root)
+    if before != state.get("bundle_sha256"):
+        raise RuntimeError("App bundle differs from the owned backend launch inputs.")
+    npm = shutil.which("npm") or shutil.which("npm.cmd")
+    node = shutil.which("node")
+    if not npm or not node:
+        raise RuntimeError("Frontend acceptance requires npm and Node.js.")
+    with (evidence / "frontend-build.log").open("wb") as log:
+        subprocess.run([npm, "run", "build", "--", "--outDir", str(dist)], cwd=shell,
+                       env=env, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=300)
+    if not (dist / "index.html").is_file():
+        raise RuntimeError("Frontend build did not emit index.html in its owned output.")
+    if bundle_digest(app_root) != before:
+        raise RuntimeError("App bundle changed during the frontend build.")
+    with (evidence / "preview.log").open("wb") as log:
+        process = subprocess.Popen(
+            [node, "node_modules/vite/bin/vite.js", "preview", "--host", "127.0.0.1",
+             "--port", str(url.port), "--strictPort", "--outDir", str(dist)],
+            cwd=shell, env=env, stdout=log, stderr=subprocess.STDOUT,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        try:
+            wait_http(state["base_url"], process=process, timeout=30, parse_json=False)
+            yield {"process": process, "dist_path": dist, "env": env, "bundle_sha256": before}
+        finally:
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=15)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=10)
+
+
 async def host(args: argparse.Namespace) -> None:
     # The parent sets the complete process environment before this import.
     import uvicorn
@@ -140,9 +220,19 @@ async def host(args: argparse.Namespace) -> None:
         raise RuntimeError("Platform startup did not complete.")
 
 
-def run(args: argparse.Namespace, evidence: Path) -> None:
-    if not (WORKSPACE / "app/app.json").is_file():
-        raise RuntimeError("Build the Common Ground reference app before starting acceptance.")
+def run(args: argparse.Namespace, evidence: Path,
+        exercise: Callable[[dict, subprocess.Popen, dict[str, str]], Any] | None = None) -> Any:
+    workspace = workspace_path(args)
+    manifest = json.loads((workspace / "app/app.json").read_text(encoding="utf-8"))
+    app_id = manifest.get("appId") or manifest.get("app_id")
+    if not isinstance(app_id, str) or not app_id.strip():
+        raise RuntimeError("Acceptance workspace has no app identity.")
+    identity_realm = getattr(args, "identity_realm", None)
+    realm_path = Path(identity_realm) if identity_realm is not None else WORKSPACE / "tests/identity-realm.json"
+    realm = json.loads(realm_path.resolve(strict=True).read_text(encoding="utf-8"))
+    if (realm.get("realm") != "common-ground" or len(realm.get("clients", [])) != 1
+            or realm["clients"][0].get("clientId") != "common-ground"):
+        raise RuntimeError("Acceptance requires an explicit common-ground synthetic identity fixture.")
     for port in (args.mongo_port, args.oidc_port, args.api_port, args.web_port):
         free_port(port)
     images = {key: json.loads(docker("image", "inspect", name))[0]["Id"] for key, name in IMAGES.items()}
@@ -152,11 +242,16 @@ def run(args: argparse.Namespace, evidence: Path) -> None:
             raise RuntimeError("Owned container name already exists.")
     evidence.mkdir(parents=True, exist_ok=False)
     frontend, runtime = environment(args, evidence)
-    realm = json.loads((WORKSPACE / "tests/identity-realm.json").read_text(encoding="utf-8"))
+    if identity_realm is not None:
+        scopes = " ".join(dict.fromkeys(["openid", *realm["clients"][0]["defaultClientScopes"]]))
+        frontend["VITE_OIDC_SCOPE"] = runtime["VITE_OIDC_SCOPE"] = scopes
     web = f"http://127.0.0.1:{args.web_port}"
     realm["clients"][0]["redirectUris"] = [frontend["VITE_OIDC_REDIRECT_URI"]]
     realm["clients"][0]["webOrigins"] = [web]
     realm["clients"][0]["attributes"]["post.logout.redirect.uris"] = f"{web}/*"
+    identity_mapper = next(mapper for mapper in realm["clients"][0]["protocolMappers"]
+                           if mapper["config"].get("claim.name") == "app_id")
+    identity_mapper["config"]["claim.value"] = app_id
     if args.native_callback:
         native = deepcopy(realm["clients"][0])
         native.update(
@@ -172,6 +267,7 @@ def run(args: argparse.Namespace, evidence: Path) -> None:
     dirty = subprocess.check_output(["git", "status", "--porcelain"], cwd=REPO, text=True).splitlines()
     state = {
         "status": "starting", "run_id": run_id, "source_sha": source, "source_changes": dirty,
+        "workspace": str(workspace), "app_root": str(workspace / "app"), "app_id": app_id,
         "base_url": web, "api_url": frontend["VITE_API_URL"],
         "auth_issuer": frontend["VITE_OIDC_AUTHORITY"],
         "client_id": "common-ground", "audience": "common-ground-api",
@@ -182,15 +278,19 @@ def run(args: argparse.Namespace, evidence: Path) -> None:
         "started_at": datetime.now(UTC).isoformat(),
         "rate_limit_note": "600 RPM per loopback client for acceptance; limiting remains enabled; not load qualification.",
     }
+    if exercise is not None:
+        from scripts.generated_ui_acceptance import bundle_digest
+
+        # Capture before process startup; a later frontend build must not bind
+        # new bytes to Python modules already imported by this backend.
+        state["bundle_sha256"] = bundle_digest(workspace / "app")
     path = evidence / "environment.json"
     write_json(path, state)
     containers: dict[str, str] = {}
     process: subprocess.Popen | None = None
     outcome = "stopped"
     # Deliberately omit inherited application, provider, proxy and secret env.
-    os_keys = {"PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "USERPROFILE", "HOME", "LOCALAPPDATA", "APPDATA", "LANG"}
-    child_env = {key: value for key, value in os.environ.items() if key.upper() in os_keys}
-    child_env.update(runtime)
+    child_env = clean_environment(dict(os.environ), runtime)
 
     def stop_host() -> None:
         if process is not None and process.poll() is None:
@@ -239,6 +339,8 @@ def run(args: argparse.Namespace, evidence: Path) -> None:
         state["status"] = "ready"
         write_json(path, state)
         print(json.dumps({"status": "ready", "environment_file": str(path), "base_url": web, "api_url": state["api_url"]}), flush=True)
+        if exercise is not None:
+            return exercise(state, process, child_env)
         while True:
             if process.poll() is not None:
                 raise RuntimeError("Owned platform process stopped unexpectedly.")
@@ -324,6 +426,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("start", "stop", "restart-api", "_host"))
     parser.add_argument("--evidence-dir", type=Path, required=True)
+    parser.add_argument("--workspace", type=Path, default=WORKSPACE,
+                        help="App workspace containing app/app.json; defaults to Community.")
+    parser.add_argument("--identity-realm", type=Path,
+                        help="Explicit synthetic common-ground realm fixture; defaults to Community's test realm.")
     parser.add_argument("--mongo-port", type=int, default=27443)
     parser.add_argument("--oidc-port", type=int, default=28443)
     parser.add_argument("--api-port", type=int, default=18443)

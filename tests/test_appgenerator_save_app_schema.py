@@ -190,6 +190,10 @@ def _page_repair_context(tmp_path, monkeypatch):
     save_app_schema_module.save_app_schema(
         manifest=_base_manifest(), pages=[_base_page()], context_variables=context,
     )
+    from factory_app.workflows.AppGenerator.tools.code_file_utils import admitted_app_file_map
+
+    # Assembly publishes the saved schema as the bundle a later repair starts from.
+    context.set("generated_files", admitted_app_file_map(context))
     tasks = [
         {"task_id": "page", "task_type": "page_bundle", "initial_agent": "AppSchemaAgent",
          "owned_paths": ["ui/pages/Dashboard.yaml"], "depends_on": []},
@@ -242,10 +246,15 @@ def test_schema_repair_preserves_deterministic_scaffolds_and_unrelated_bytes(tmp
 
     assert "repair rejected" not in result
     assert context.get("bundle_repair_result")["active"]["status"] == "responded"
-    assert yaml.safe_load(context.get("generated_files")["ui/pages/Dashboard.yaml"])["title"] == "Repaired dashboard"
+    from factory_app.workflows.AppGenerator.tools.code_file_utils import admitted_app_file_map
+
+    # The repair reaches the admitted overlay; generated_files stays the last assembled bundle.
+    assert context.get("generated_files") == before
+    admitted = admitted_app_file_map(context)
+    assert yaml.safe_load(admitted["ui/pages/Dashboard.yaml"])["title"] == "Repaired dashboard"
     for path, content in before.items():
         if path != "ui/pages/Dashboard.yaml":
-            assert context.get("generated_files")[path] == content
+            assert admitted[path] == content
 
 
 def test_invalid_page_repair_is_rejected_before_context_or_disk_changes(tmp_path, monkeypatch):
@@ -1374,8 +1383,11 @@ def test_save_app_schema_writes_data_contract_from_context(monkeypatch, tmp_path
             context_variables=context,
         )
 
+    from mozaiksai.core.workflow.generator_support.code_files import compile_data_contract
+
     data_contract = json.loads((tmp_path / "data" / "contract.json").read_text(encoding="utf-8"))
-    assert data_contract == approved
+    # Written as assembly compiles the approved contract, so the overlay copy equals the assembled one.
+    assert data_contract == compile_data_contract(approved)
     assert context.get("data_contract")["policies"]["default_scope_field"] == "app_id"
     assert context.get("app_data_contract") is None
     assert context.get("app_schema_ready") is True

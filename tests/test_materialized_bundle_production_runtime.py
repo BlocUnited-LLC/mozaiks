@@ -182,6 +182,7 @@ async def test_exact_materialized_file_map_validates_boots_and_executes_http(
     assert page["sections"][0]["primitive"] == "DataTable"
     assert page["sections"][0]["config"]["api_endpoint"] == "/api/modules/reports/list_reports"
 
+    assert scan_generated_bundle(files_one, capability_packs=_selected_packs(), context_variables=context) == []
     assert scan_generated_bundle(files_one, capability_packs=_selected_packs()) == []
     assert scan_functional_generated_app(files_one, capability_packs=_selected_packs()) == []
     validation = validate_generated_app_bundle(
@@ -191,6 +192,7 @@ async def test_exact_materialized_file_map_validates_boots_and_executes_http(
             capability_packs=_selected_packs(),
         )
     )
+    # Validation never renders operator_readiness's .j2 templates, so the facade needs no build context.
     assert validation.passed is True, validation.diagnostics
     acceptance = await run_app_bundle_acceptance_gate(
         files=files_one,

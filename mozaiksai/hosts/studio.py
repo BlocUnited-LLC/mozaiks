@@ -8,15 +8,17 @@ workflow triggering on top of the headless platform host.
 """
 
 import io
+import json
 import os
 import stat
 import zipfile
-from asyncio import CancelledError, to_thread
-from contextlib import asynccontextmanager
+from asyncio import CancelledError, Lock, to_thread
+from collections.abc import Iterable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
 from datetime import UTC, datetime
 from difflib import unified_diff
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import Any, Literal
+from typing import Any, Literal, NamedTuple, TypeVar
 from uuid import uuid4
 
 from anyio import CancelScope
@@ -81,8 +83,19 @@ from mozaiksai.control_plane.app_intelligence_jobs import (
     public_app_intelligence_index_job,
     save_app_intelligence_index_job,
 )
+from mozaiksai.control_plane.contracts import RegistryRunState, build_acceptance_evidence
 from mozaiksai.control_plane.dry_run import RefinementDryRunPlan, RefinementExecutionPlan
-from mozaiksai.control_plane.implementations.coding_worker import resolve_coding_validation_strategy
+from mozaiksai.control_plane.implementations.coding_worker import (
+    PACK_OWNERSHIP_UNRESOLVED_GUIDANCE,
+    TEMPLATE_PACK_OUTPUT_GUIDANCE,
+    PackCodeBaseline,
+    newer_accepted_work,
+    pack_code_baseline_refusal,
+    pack_paths_owned_by,
+    parent_pack_output_owners,
+    parent_workspace_pack_paths,
+    resolve_coding_validation_strategy,
+)
 from mozaiksai.control_plane.review import load_refinement_review_record
 from mozaiksai.core.app_context.models import SourceRef
 from mozaiksai.core.app_context.refresh import ContextRefreshPlan, ContextRefreshScope
@@ -282,7 +295,10 @@ def _zipinfo_is_symlink(info: zipfile.ZipInfo) -> bool:
 
 
 
-def _strip_shared_root_prefix(entries: list[tuple[str, bytes]]) -> list[tuple[str, bytes]]:
+_EntryT = TypeVar("_EntryT")
+
+
+def _strip_shared_root_prefix(entries: list[tuple[str, _EntryT]]) -> list[tuple[str, _EntryT]]:
     if not entries:
         return entries
     split_paths = [path.split("/") for path, _ in entries]
@@ -2131,6 +2147,312 @@ class BuildArtifactAcceptanceRequest(BaseModel):
     notes: str | None = Field(default=None, max_length=2000)
 
 
+#: Per-app serialization of app bundle acceptances, so the app-owned pack code
+#: rechecks and the acceptance they guard cannot interleave in this process.
+_WORKSPACE_ACCEPTANCE_LOCKS: dict[str, Lock] = {}
+
+
+def _changed_workspace_pack_paths(version) -> list[str]:  # noqa: ANN001
+    scope = _version_metadata(version).get("refinement_scope")
+    paths = scope.get("changed_workspace_pack_paths") if isinstance(scope, dict) else None
+    return sorted(str(path) for path in paths) if isinstance(paths, list) else []
+
+
+def _workspace_acceptance_guard(app_id: str, version) -> AbstractAsyncContextManager[Any]:  # noqa: ANN001
+    if version.build_family != "app_bundle" and not _changed_workspace_pack_paths(version):
+        return nullcontext()
+    return _WORKSPACE_ACCEPTANCE_LOCKS.setdefault(app_id, Lock())
+
+
+#: Largest app-owned pack file that acceptance compares; a larger one refuses
+#: acceptance instead of being left out of the comparison.
+_APP_OWNED_CODE_COMPARE_MAX_BYTES = 8_000_000
+#: Largest total of the named entries read from one archive; past it, acceptance refuses too.
+_APP_OWNED_CODE_COMPARE_MAX_TOTAL_BYTES = 16_000_000
+_PACK_PROVENANCE_PATH = ".mozaiks/pack_provenance.json"
+
+
+def _app_bundle_entries(zip_source: bytes, paths: set[str]) -> dict[str, bytes]:
+    """Read the named app-relative entries of a verified app bundle in full.
+
+    ``_decode_text_bundle_entries`` drops entries past its file count and size
+    limits, so a comparison through it can miss an app-owned file. Here every
+    named entry present is read; one that cannot be compared exactly (a
+    duplicate, a symbolic link, or an entry over the compare bound) refuses,
+    as do named entries whose sizes together pass the total compare bound.
+    """
+    with zipfile.ZipFile(io.BytesIO(zip_source), "r") as archive:
+        named = [
+            (name, info) for info in archive.infolist()
+            if not info.is_dir() and (name := _normalize_bundle_entry_name(info.filename)) is not None
+        ]
+        found: dict[str, list[zipfile.ZipInfo]] = {}
+        for path, info in _strip_shared_root_prefix(named):
+            if path in paths:
+                found.setdefault(path, []).append(info)
+        for path, infos in found.items():
+            if (
+                len(infos) != 1 or _zipinfo_is_symlink(infos[0])
+                or infos[0].file_size > _APP_OWNED_CODE_COMPARE_MAX_BYTES
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"App-owned capability code ({path}) in this version or the current build could not be "
+                        "compared. No version was accepted."
+                    ),
+                )
+        # Checked before reading: a read never yields more than the entry's declared size.
+        if sum(infos[0].file_size for infos in found.values()) > _APP_OWNED_CODE_COMPARE_MAX_TOTAL_BYTES:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"App-owned capability code ({', '.join(sorted(found))}) in this version or the current build "
+                    "is too large to compare in full. No version was accepted."
+                ),
+            )
+        entries = {path: archive.read(infos[0]) for path, infos in found.items()}
+    return entries
+
+
+def _recorded_workspace_pack_paths(provenance_entry: bytes | None) -> set[str]:
+    try:
+        provenance = json.loads(provenance_entry or b"{}")
+    except ValueError:
+        return set()
+    packs = provenance.get("packs") if isinstance(provenance, dict) else None
+    return {
+        str(entry.get("path")) for pack in packs or [] if isinstance(pack, dict)
+        for entry in pack.get("materialized_owned_files") or []
+        if isinstance(entry, dict) and entry.get("owner") == "workspace" and entry.get("path")
+    }
+
+
+#: The most CURRENT records of one build family and key acceptance reads.
+_CURRENT_BUILDS_SCAN_LIMIT = 32
+
+
+async def _current_builds_in_scope(version, *, app_id: str, artifact_store: Any) -> list[Any]:  # noqa: ANN001
+    """The CURRENT records of ``version``'s build family and key, sorted by id; a failed read refuses.
+
+    That is the scope in which accepting ``version`` supersedes the current
+    build (``ArtifactStore.accept_build_record``), so a CURRENT record under
+    another key of the same family, such as the App Intelligence index a
+    promotion saves under ``app_intelligence_workspace``, is not the app's
+    build here.
+    """
+    try:
+        current = await artifact_store.list_build_records(
+            app_id=app_id, build_family=version.build_family, build_key=version.build_key,
+            lifecycle_status=ArtifactLifecycleStatus.CURRENT, limit=_CURRENT_BUILDS_SCAN_LIMIT + 1,
+        )
+    except Exception as exc:
+        logger.warning("current_builds_unverified app=%s version=%s", app_id, version.id, exc_info=True)
+        raise HTTPException(
+            status_code=409,
+            detail="The app's current build could not be read. No version was accepted.",
+        ) from exc
+    if len(current) > _CURRENT_BUILDS_SCAN_LIMIT:
+        raise HTTPException(
+            status_code=409,
+            detail=f"The app has more than {_CURRENT_BUILDS_SCAN_LIMIT} current builds to check. No version was accepted.",
+        )
+    return sorted(current, key=lambda record: record.id)
+
+
+async def _require_current_app_owned_pack_code(version, *, app_id: str, artifact_store: Any) -> None:  # noqa: ANN001
+    """Reject a stale version that would replace app-owned pack code accepted since its parent.
+
+    Acceptance replaces the whole bundle. A version made from a build that is
+    no longer the app's accepted current build (the CURRENT record of its
+    build family and key) carries that older build's app-owned pack code, such
+    as a customized Messaging handler, so accepting it would silently revert an
+    authorized change accepted since.
+    """
+    if version.build_family != "app_bundle":
+        return
+    for current in await _current_builds_in_scope(version, app_id=app_id, artifact_store=artifact_store):
+        if current.id not in {version.id, version.parent_build_record_id}:
+            await _require_same_app_owned_pack_code(version, current)
+
+
+async def _require_same_app_owned_pack_code(version, current) -> None:  # noqa: ANN001
+    """Refuse ``version`` when its app-owned pack code differs from the current build's."""
+    current_zip = await _verified_app_bundle(current)
+    version_zip = await _verified_app_bundle(version)
+    paths: set[str] = set()
+    for archive, record in ((current_zip, current), (version_zip, version)):
+        provenance = _app_bundle_entries(archive, {_PACK_PROVENANCE_PATH}).get(_PACK_PROVENANCE_PATH)
+        paths |= _recorded_workspace_pack_paths(provenance)
+        declared = parent_workspace_pack_paths(_version_metadata(record).get("capability_packs") or [])
+        if declared is None:
+            # Its pack selection cannot be verified, so the app-owned paths it declares are unknown.
+            if record is current:
+                way_forward = (
+                    f"Accept an AppGenerator revision made from build {record.id} first (it records a build whose "
+                    "packs verify), then make further changes from that build."
+                )
+            else:
+                way_forward = (
+                    f"Make the change from the current build {current.id} instead, or accept an AppGenerator "
+                    "revision of it first."
+                )
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Build {record.id}'s capability packs cannot be resolved to verified sources, so its app-owned "
+                    f"capability code cannot be compared with the other build's. {way_forward} No version was "
+                    "accepted."
+                ),
+            )
+        paths |= set(declared)
+    current_files = _app_bundle_entries(current_zip, paths)
+    version_files = _app_bundle_entries(version_zip, paths)
+    changed = sorted(path for path in paths if current_files.get(path) != version_files.get(path))
+    if changed:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This version was made from an earlier build and would replace app-owned capability code "
+                f"accepted since ({', '.join(changed)}). Refine the current build instead. No version was accepted."
+            ),
+        )
+
+
+async def _require_accepted_workspace_parent(
+    version, *, app_id: str, owner_user_id: str, build_registry_id: str | None, artifact_store: Any,  # noqa: ANN001
+) -> None:
+    """Recheck at acceptance the authority an app-owned pack code change was admitted under.
+
+    The server-recorded scope must still be an explicit or user-confirmed
+    selection of the changed paths in this registered build. The app must have
+    no accepted current build (a CURRENT record of the child's build family
+    and key), or that build must still be the child's parent, and the
+    registry's current build run must still name this child and its build.
+    Otherwise nothing is accepted.
+    """
+    changed = _changed_workspace_pack_paths(version)
+    metadata = _version_metadata(version)
+    scope = metadata.get("refinement_scope") or {}
+    if (
+        scope.get("scope_origin") not in {"explicit", "confirmed"}
+        or not set(changed) <= set(scope.get("selected_file_paths") or [])
+        or not build_registry_id
+        or metadata.get("build_registry_id") != build_registry_id
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This change to app-owned capability code was not made in an authorized selected-file "
+                "refinement of this build. No version was accepted."
+            ),
+        )
+    current = await _current_builds_in_scope(version, app_id=app_id, artifact_store=artifact_store)
+    if not version.parent_build_record_id or any(
+        record.id != version.parent_build_record_id for record in current
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This change to app-owned capability code was made from a build that is no longer the "
+                "app's accepted current build. Refine the current build again. No version was accepted."
+            ),
+        )
+    # The run that stored this child marked its own parent stale, so no build
+    # is CURRENT while the child awaits review. The registry's compare-and-set
+    # run chain then decides: the child must still be the latest registered
+    # run, admitted against the parent that was current when its run began.
+    registry_record = (await _get_app_registry_service().get_app_record(
+        owner_user_id=owner_user_id, build_registry_id=build_registry_id,
+    )).get("app") or {}
+    run = registry_record.get("current_build_run") or {}
+    if run.get("artifact_version_id") != version.id or run.get("build_id") != metadata.get("build_id"):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "A newer build run started for this app after this change to app-owned capability code was "
+                "made. Refine the current build again. No version was accepted."
+            ),
+        )
+
+
+#: The most saved builds acceptance follows from a child back to the app's current build.
+_ACCEPTANCE_LINEAGE_MAX_DEPTH = 32
+
+
+def _commit_metadata_with_acceptance(version, *, accepted_by: str) -> dict[str, Any]:  # noqa: ANN001
+    """The version's commit metadata with the acceptance evidence this acceptance writes.
+
+    Acceptance is the authorized transition that makes a build current, so it
+    writes the evidence (``contracts.build_acceptance_evidence``, transition
+    ``studio_accept``): the version's app, build family, build key and record
+    id, the authenticated principal and the time. The staged-refinement
+    acceptance writes the same shape. Staling later overwrites the CURRENT
+    status, but the evidence stays, so admission can tell a build that was
+    accepted from a draft that never was.
+    """
+    commit_metadata = version.commit_metadata
+    payload = (
+        commit_metadata.model_dump(mode="python") if hasattr(commit_metadata, "model_dump")
+        else dict(commit_metadata or {})
+    )
+    metadata = dict(payload.get("metadata") or {})
+    metadata["acceptance"] = build_acceptance_evidence(
+        version, accepted_by=accepted_by,
+        accepted_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"), transition="studio_accept",
+    )
+    payload["metadata"] = metadata
+    return payload
+
+
+async def _require_current_build_in_lineage(version, *, app_id: str, artifact_store: Any) -> None:  # noqa: ANN001
+    """Refuse an app bundle made from a build older than the app's latest accepted work.
+
+    Acceptance replaces the whole bundle. Within the version's build family
+    and key (the scope acceptance supersedes in), no build outside the
+    version's lineage may be CURRENT, or have been accepted after the
+    lineage's nearest accepted build (``coding_worker.newer_accepted_work``).
+    An accepted build is marked stale once a refinement of it is stored, so
+    acceptance evidence, not only the CURRENT status, shows it. Otherwise the
+    version was made before a newer build was accepted, such as a sibling
+    candidate, and accepting it would revert that build. A chained draft of
+    the latest accepted build is still accepted. A missing ancestor, a lineage
+    past the bound, a failed read, or an acceptance whose order cannot be
+    established refuses too.
+
+    A version with no parent (AppGenerator's first build, saved as a draft)
+    is checked the same way: its lineage holds no accepted build, so it is
+    accepted only while no build of its scope is CURRENT and none was
+    accepted (or cannot be shown never accepted) before it.
+    """
+    if version.build_family != "app_bundle":
+        return
+    unverified = "This version's lineage could not be verified against the app's accepted builds"
+    try:
+        newer = await newer_accepted_work(
+            artifact_store, app_id=app_id, record=version, max_depth=_ACCEPTANCE_LINEAGE_MAX_DEPTH,
+        )
+    except Exception as exc:
+        logger.warning("acceptance_lineage_unverified app=%s version=%s", app_id, version.id, exc_info=True)
+        raise HTTPException(status_code=409, detail=f"{unverified}. No version was accepted.") from exc
+    if newer is None:
+        return
+    if newer.kind == "unverified":
+        raise HTTPException(status_code=409, detail=f"{unverified} ({newer.reason}). No version was accepted.")
+    latest = "current build" if newer.kind == "current" else "latest accepted build"
+    made = (
+        f"This version was made from an earlier build than the app's {latest}" if version.parent_build_record_id
+        else f"This version is a new build with no parent, made outside the line of the app's {latest}"
+    )
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            f"{made} ({newer.reason}), and accepting it would replace changes accepted since. Refine that build "
+            "instead. No version was accepted."
+        ),
+    )
+
+
 class GenesisAcceptanceRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     confirm_exact_source_review: Literal[True]
@@ -2188,7 +2510,7 @@ async def accept_build_artifact_version(
     principal: UserPrincipal = Depends(require_studio_user),
 ):
     validate_path_id(artifact_version_id, "artifact_version_id")
-    app_id, _ = await _resolve_studio_artifact_scope(principal, app_id=app_id, build_registry_id=build_registry_id)
+    app_id, owner_user_id = await _resolve_studio_artifact_scope(principal, app_id=app_id, build_registry_id=build_registry_id)
     artifact_store = get_artifact_store()
     version = await artifact_store.get_build_record(app_id=app_id, build_record_id=artifact_version_id)
     if not version:
@@ -2214,23 +2536,40 @@ async def accept_build_artifact_version(
             status_code=409,
             detail="Staged refinement drafts require a promotion_ready review record before acceptance.",
         )
-    if refinement_review_record is not None:
-        try:
-            accepted_result = await accept_staged_refinement_build_record(
-                app_id=app_id,
-                draft_build_record_id=artifact_version_id,
-                review_record=refinement_review_record,
-                request_id=refinement_review_record.request_id,
-                record_store=artifact_store,
-                accepted_by=principal.user_id,
-                notes=body.notes if body is not None else None,
+    async with _workspace_acceptance_guard(app_id, version):
+        current_version = version
+        if _changed_workspace_pack_paths(version) or version.build_family == "app_bundle":
+            # Re-read under the guard: another acceptance may have just completed.
+            current_version = await artifact_store.get_build_record(app_id=app_id, build_record_id=artifact_version_id)
+            if current_version is None or current_version.lifecycle_status != ArtifactLifecycleStatus.DRAFT:
+                raise HTTPException(status_code=409, detail="Only draft artifact versions can be accepted.")
+        if _changed_workspace_pack_paths(version):
+            await _require_accepted_workspace_parent(
+                current_version, app_id=app_id, owner_user_id=owner_user_id,
+                build_registry_id=build_registry_id, artifact_store=artifact_store,
             )
-        except (AcceptedStagedAppBundleBuildRecordError, ValueError) as exc:
-            logger.warning("accept_staged_refinement conflict app=%s version=%s: %s", app_id, artifact_version_id, exc)
-            raise HTTPException(status_code=409, detail="Conflict accepting artifact version.") from exc
-        accepted = accepted_result.build_record
-    else:
-        accepted = await artifact_store.accept_build_record(app_id=app_id, build_record_id=artifact_version_id)
+        await _require_current_app_owned_pack_code(version, app_id=app_id, artifact_store=artifact_store)
+        await _require_current_build_in_lineage(version, app_id=app_id, artifact_store=artifact_store)
+        if refinement_review_record is not None:
+            try:
+                accepted_result = await accept_staged_refinement_build_record(
+                    app_id=app_id,
+                    draft_build_record_id=artifact_version_id,
+                    review_record=refinement_review_record,
+                    request_id=refinement_review_record.request_id,
+                    record_store=artifact_store,
+                    accepted_by=principal.user_id,
+                    notes=body.notes if body is not None else None,
+                )
+            except (AcceptedStagedAppBundleBuildRecordError, ValueError) as exc:
+                logger.warning("accept_staged_refinement conflict app=%s version=%s: %s", app_id, artifact_version_id, exc)
+                raise HTTPException(status_code=409, detail="Conflict accepting artifact version.") from exc
+            accepted = accepted_result.build_record
+        else:
+            accepted = await artifact_store.accept_build_record(
+                app_id=app_id, build_record_id=artifact_version_id,
+                commit_metadata=_commit_metadata_with_acceptance(current_version, accepted_by=principal.user_id),
+            )
     if accepted is None:
         raise HTTPException(status_code=404, detail=f"Artifact version not found: {artifact_version_id}")
 
@@ -2783,6 +3122,397 @@ async def _fail_inline_refinement(*, binding: RunBuildBinding, user_id: str) -> 
         logger.exception("Could not record inline refinement failure for build=%s", binding.build_id)
 
 
+class _InlineRunEffect(NamedTuple):
+    """What an inline run left of the build it was made from, as the artifact store shows it."""
+
+    #: The run changed the build or left its outcome unresolved, so the build is invalidated.
+    changed: bool
+    #: Why the outcome is unresolved (a key of ``_UNRESOLVED_CHANGE_DETAILS``), or None.
+    unresolved: str | None = None
+    #: The draft the run stored or named, when there is one.
+    draft_build_record_id: str | None = None
+
+
+#: What an open draft that cannot be accepted still blocks, and the next step.
+#: The run marked its build stale, and nothing makes a stale build current
+#: again, rejection included. Ordinary refinements of that build go on, and a
+#: validated one can be accepted; only an app-owned pack-code change from it
+#: needs every draft made from it closed (coding admission's stale-parent
+#: rule), so rejecting this draft is the next step for that change. A
+#: refinement of the draft marks it stale, after which it can be neither
+#: rejected nor accepted; admission then counts it as closed once nothing made
+#: from it is open, unless a change request made from it took a workflow
+#: route, whose outcome is never on record: then only a newly accepted build
+#: lets that code change again.
+_OPEN_DRAFT_NEXT_STEP = (
+    "The build it was made from is now stale and stays stale, even after this draft is rejected; it can "
+    "still be refined, and a validated refinement of it accepted. Only changing that build's app-owned "
+    "capability code (such as a pack's workspace handler) needs this draft closed first: reject the draft. "
+    "If the draft is refined instead, it can no longer be rejected; it stops blocking that change once "
+    "nothing made from it is open, unless a refinement of it took a workflow route (even one whose launch "
+    "failed), which keeps it open: then accept a new build of the app before changing its app-owned "
+    "capability code."
+)
+#: What the trigger tells the user when an inline run's outcome is unresolved.
+_UNRESOLVED_CHANGE_DETAILS = {
+    "validation_pending": (
+        f"Validation of this draft did not complete, so it cannot be accepted. {_OPEN_DRAFT_NEXT_STEP}"
+    ),
+    "validation_skipped": (
+        f"Validation of this draft was skipped, so it cannot be accepted. {_OPEN_DRAFT_NEXT_STEP}"
+    ),
+    "child_lookup_failed": (
+        "Whether this run stored a draft could not be read, so the build it was made from is invalidated "
+        "and the run's outcome is unresolved. Review the app's saved builds."
+    ),
+    "reported_child_missing": (
+        "This run named a draft the artifact store did not return, so the build it was made from is "
+        "invalidated and the run's outcome is unresolved. Review the app's saved builds."
+    ),
+}
+
+
+async def _inline_run_baseline_effect(
+    artifact_store: Any, *, app_id: str, parent_build_record_id: str | None, binding: RunBuildBinding, result: Any,
+) -> _InlineRunEffect:
+    """What an inline run left of the build it was made from, read from the store.
+
+    An inline coding or surface run's only durable output is a DRAFT child of
+    the baseline whose commit metadata carries the run's build_id, and the run
+    can store one even when its result reports a failure. The store, not the
+    result's status, is the evidence. Records of another run or another parent
+    are not this run's output.
+
+    * A child whose validation PASSED and that is not rejected awaits review:
+      a change.
+    * A child whose validation is PENDING or SKIPPED is unresolved, not
+      "nothing changed". Acceptance admits only PASSED
+      (``_enforce_artifact_validation_gate``) and nothing validates a stored
+      child again, so it can never be accepted, but until it is rejected it is
+      the run's open output. It counts as a change, and the trigger reports it
+      as unresolved (``_OPEN_DRAFT_NEXT_STEP``): the build stays stale, its
+      ordinary refinements go on, and before an app-owned pack-code change
+      from it the draft must be rejected, after which coding admission can
+      admit that change as a retry bound to the same build.
+    * A FAILED child is terminal and durable (refused at acceptance, never
+      validated again), and a rejected one is closed: no change.
+    * A lookup that fails, or a child the result names that the store does
+      not return, is unresolved: a change.
+    """
+    reported = str(((getattr(result, "metadata", None) or {}).get("build_record_id")) or "").strip()
+    parent_id = parent_build_record_id or ""
+    try:
+        listed = await artifact_store.list_run_child_build_records(
+            app_id=app_id, parent_build_record_id=parent_id, build_id=binding.build_id,
+        )
+    except Exception:
+        logger.warning("inline_run_child_lookup_failed build=%s", binding.build_id, exc_info=True)
+        return _InlineRunEffect(True, "child_lookup_failed", reported or None)
+    children = [
+        child for child in listed
+        if child.parent_build_record_id == parent_id
+        and _version_metadata(child).get("build_id") == binding.build_id
+    ]
+    if reported and reported not in {child.id for child in children}:
+        return _InlineRunEffect(True, "reported_child_missing", reported)
+    open_children = [
+        child for child in children
+        if child.lifecycle_status not in {ArtifactLifecycleStatus.ARCHIVED, ArtifactLifecycleStatus.DELETED}
+    ]
+    for child in open_children:
+        if child.validation_status == ArtifactValidationStatus.PASSED:
+            return _InlineRunEffect(True, None, child.id)
+    for child in open_children:
+        if child.validation_status in {ArtifactValidationStatus.PENDING, ArtifactValidationStatus.SKIPPED}:
+            return _InlineRunEffect(
+                True, f"validation_{ArtifactValidationStatus(child.validation_status).value}", child.id,
+            )
+    return _InlineRunEffect(False)
+
+
+def _unresolved_change(
+    effect: _InlineRunEffect | None, *, baseline_build_record_id: str | None, invalidation_recorded: bool,
+) -> dict[str, Any] | None:
+    """The trigger's explicit report of an inline run whose outcome is unresolved, or None."""
+    if effect is None or effect.unresolved is None:
+        return None
+    return {
+        "reason": effect.unresolved,
+        "draft_build_record_id": effect.draft_build_record_id,
+        "baseline_build_record_id": baseline_build_record_id,
+        "baseline_invalidation_recorded": invalidation_recorded,
+        "detail": _UNRESOLVED_CHANGE_DETAILS[effect.unresolved],
+    }
+
+
+async def _registry_run_state(
+    *, user_id: str, build_registry_id: str | None, source_version: Any,
+) -> RegistryRunState | None:
+    """Studio's read of the app registry before it begins a run from a STALE build.
+
+    Coding admission admits a STALE parent only when no other run of the app
+    was building when this one began (``coding_worker._stale_parent_refusal``),
+    so it gets this server-derived read, never a value from the client. It is a
+    read before ``begin_refinement_run`` (and, for an app-owned pack scope,
+    before classification, for the same check), not a compare-and-set;
+    acceptance's registry run check is what binds a child to the latest run.
+    For a parent that is not STALE no read is made (None), and STALE admission
+    refuses.
+    """
+    if source_version is None or source_version.lifecycle_status != ArtifactLifecycleStatus.STALE:
+        return None
+    try:
+        record = (await _get_app_registry_service().get_app_record(
+            owner_user_id=user_id, build_registry_id=build_registry_id,
+        )).get("app")
+    except Exception:
+        logger.warning("registry_run_state_unverified registry=%s", build_registry_id, exc_info=True)
+        return "unverified"
+    if not isinstance(record, dict):
+        return "unverified"
+    return "run_in_flight" if record.get("lifecycle_state") == "building" else "idle"
+
+
+async def _persist_trigger_invalidation(
+    orchestration_control: Any, *, refinement_request: Any, routing_decision: Any,
+    change_request_id: str | None, artifact_store: Any,
+) -> bool:
+    """Ask the invalidation owner to mark the selected build stale; False when that write failed."""
+    try:
+        await orchestration_control.persist_revision_invalidation(
+            refinement_request=refinement_request,
+            routing_decision=routing_decision,
+            change_request_id=change_request_id,
+            artifact_store=artifact_store,
+        )
+    except Exception as invalidation_err:
+        logger.warning("Failed to persist artifact invalidation: %s", invalidation_err)
+        return False
+    return True
+
+
+#: A rejected or removed build is never a baseline, whatever it was at the proposal.
+_REMOVED_BASELINE_STATUSES = frozenset({ArtifactLifecycleStatus.ARCHIVED, ArtifactLifecycleStatus.DELETED})
+
+
+def _utc_instant(value: Any) -> datetime | None:
+    """A stored timestamp as an aware UTC instant (the store may return naive UTC)."""
+    if not isinstance(value, datetime):
+        return None
+    return (value if value.tzinfo is not None else value.replace(tzinfo=UTC)).astimezone(UTC)
+
+
+def _baseline_state(version) -> dict[str, Any]:  # noqa: ANN001
+    """The selected build's lifecycle state, saved on the proposal's ChangeRequest.
+
+    Every write to a build record (staling, superseding, accepting, rejecting)
+    changes its status, its invalidation reason or its ``updated_at``, so a
+    confirmation compares this snapshot to tell whether the build changed after
+    the proposal.
+    """
+    def instant(value: Any) -> str | None:
+        moment = _utc_instant(value)
+        return moment.isoformat(timespec="milliseconds") if moment is not None else None
+
+    return {
+        "build_record_id": version.id,
+        "lifecycle_status": ArtifactLifecycleStatus(version.lifecycle_status).value,
+        "invalidation_reason": version.invalidation_reason,
+        "stale_at": instant(version.stale_at),
+        "updated_at": instant(version.updated_at),
+    }
+
+
+async def _require_unchanged_confirmation_baseline(
+    source_version, change: Any, *, app_id: str, artifact_store: Any,  # noqa: ANN001
+) -> None:
+    """Refuse a confirmation whose build changed after the proposal, or was overtaken by newer accepted work.
+
+    The proposal saved the build's state on its ChangeRequest
+    (``router_decision.baseline_state``, server-written, unlike the pending
+    decision). A build that was already STALE when the decision was proposed,
+    and has not been written since, is still what the user agreed to change.
+    A ChangeRequest with no saved state (recorded before Studio kept that
+    state: every proposal saves it, and a workflow launch keeps it when it
+    rewrites the routing) cannot show whether its build changed, so its
+    decision is refused; requesting the change again saves the state, and that
+    proposal can be confirmed.
+
+    Newer accepted work is read as acceptance does
+    (``coding_worker.newer_accepted_work``): within the build's family and key,
+    a build outside its lineage that is CURRENT, or that was accepted after
+    the lineage's nearest accepted build (the build itself when it was
+    accepted), even if that build has since been marked stale by a refinement
+    of its own. A failed read, or an order that cannot be established,
+    refuses too.
+
+    An unchanged baseline grants nothing by itself: the confirmed request then
+    follows the existing route for its situation. A scope that includes
+    app-owned pack code goes through the baseline rule
+    (``coding_worker.pack_code_baseline_refusal``) before any provider call and
+    again at coding admission, which admit a STALE parent only under
+    ``coding_worker._stale_parent_refusal``; a workflow route launches as an
+    unconfirmed one would.
+    """
+    router_decision = getattr(change, "router_decision", None)
+    recorded = router_decision.get("baseline_state") if isinstance(router_decision, dict) else None
+    if source_version.lifecycle_status in _REMOVED_BASELINE_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail="The build this decision was proposed for was rejected or removed. Request the change again from a saved build.",
+        )
+    if not isinstance(recorded, dict):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "The change request this decision was proposed with saved no state of its build (it was recorded "
+                "before Studio kept that state), so whether the build changed since the proposal cannot be "
+                "checked. Request the change again."
+            ),
+        )
+    if recorded != _baseline_state(source_version):
+        raise HTTPException(
+            status_code=409,
+            detail="The build this decision was proposed for has changed since the proposal. Request the change again.",
+        )
+    unchecked = "The build this decision was proposed for could not be checked against the app's current build"
+    try:
+        newer = await newer_accepted_work(
+            artifact_store, app_id=app_id, record=source_version, max_depth=_ACCEPTANCE_LINEAGE_MAX_DEPTH,
+        )
+    except Exception as exc:
+        logger.warning("confirmation_lineage_check_failed build=%s", source_version.id, exc_info=True)
+        raise HTTPException(status_code=409, detail=f"{unchecked}. Request the change again.") from exc
+    if newer is None:
+        return
+    if newer.kind == "unverified":
+        raise HTTPException(status_code=409, detail=f"{unchecked} ({newer.reason}). Request the change again.")
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            "A newer build of this app was accepted outside the line of builds this decision was proposed for "
+            f"({newer.reason}). Request the change again from the app's latest accepted build."
+        ),
+    )
+
+
+def _refuse_template_pack_patch(template_pack_paths: frozenset[str], paths: Iterable[str]) -> None:
+    """Refuse a patch that would apply to template-owned pack files of the saved parent only.
+
+    Called only where the decision will apply a patch: an explicit or
+    confirmed file scope, an auto-applied inferred scope, or a contract surface
+    plan about to run. ``paths`` are every file the patch may edit. When each
+    one is template-owned (for example a UI-only refinement of a pack template
+    page), candidate admission, which keeps every template-owned output
+    byte-identical to the verified parent, could only refuse the candidate, so
+    the coding or surface provider call, validation and the registry run are
+    skipped. An explicit or confirmed scope is refused before classification
+    (and before a pending decision is used); on the inferred and surface paths
+    the classifier and the scope proposer or surface planner have already run.
+
+    A decision that applies nothing (a clarification, a workflow route) is
+    never refused here, nor a scope that holds template-owned files beside
+    files the patch may change: admission stays the backstop for any changed
+    template-owned output. Ownership is the parent's verified pack ownership;
+    when it cannot be verified, :func:`_refuse_unverifiable_pack_patch`
+    refuses the patch instead.
+    """
+    editable = set(paths)
+    if editable and editable <= template_pack_paths:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"This change would edit only template-owned capability pack files ({', '.join(sorted(editable))}). "
+                f"{TEMPLATE_PACK_OUTPUT_GUIDANCE}. No files were changed."
+            ),
+        )
+
+
+def _refuse_unverifiable_pack_patch(pack_owners: dict[str, str] | None, paths: Iterable[str]) -> None:
+    """Refuse a patch, before the provider runs, when the saved parent's pack ownership cannot be verified.
+
+    Called where :func:`_refuse_template_pack_patch` is, only where the
+    decision will apply a patch. ``pack_owners`` is None when the parent
+    selected capability packs whose sources cannot be resolved and verified,
+    for example a build recorded before builds pinned workspace packs, or a
+    workspace pack edited in place since. Candidate admission refuses every
+    candidate of such a parent (``PACK_OWNERSHIP_UNRESOLVED``), so the coding
+    or surface provider call, validation and the registry run are skipped. A
+    decision that applies nothing, such as a clarification or a workflow route
+    (the AppGenerator revision that records a verifiable build), is never
+    refused here.
+    """
+    if pack_owners is None and set(paths):
+        raise HTTPException(
+            status_code=409,
+            detail=f"This change cannot be checked: {PACK_OWNERSHIP_UNRESOLVED_GUIDANCE}. No files were changed.",
+        )
+
+
+async def _refuse_pack_code_from_an_unadmitted_baseline(
+    workspace_pack_paths: frozenset[str], paths: Iterable[str], *, source_version: Any, artifact_app_id: str,
+    user_id: str, build_registry_id: str | None,
+) -> None:
+    """Refuse an app-owned pack change that candidate admission would refuse for its baseline, before any provider call.
+
+    Called with an explicit or confirmed file scope: the only scope that can
+    carry an app-owned pack change, and one that always applies when it
+    proceeds (to the coding worker, or to the contract surface run for a
+    design or feature change). When it includes app-owned pack paths of the
+    saved build, that build must pass admission's baseline rule
+    (``coding_worker.pack_code_baseline_refusal``, ``STALE_REFINEMENT_BASELINE``):
+    it is the app's accepted current build or, while none is current, a stale
+    build admission admits. A draft, such as the app's first build before the
+    owner accepts it, is refused with the way forward: accept it first.
+
+    The refusal comes before classification, before a pending decision is
+    used, and before the registry run and any coding or surface provider
+    call. Candidate admission runs the same rule on the candidate as the
+    backstop, for anything that changed while the provider ran. Reads only; a
+    failed read refuses.
+    """
+    changed = sorted(set(paths) & workspace_pack_paths)
+    if not changed:
+        return
+    registry_run_state = await _registry_run_state(
+        user_id=user_id, build_registry_id=build_registry_id, source_version=source_version,
+    )
+    refusal = await pack_code_baseline_refusal(get_artifact_store(), PackCodeBaseline(
+        artifact_app_id=artifact_app_id, build_family=source_version.build_family,
+        build_record_id=source_version.id, user_id=user_id, registry_run_state=registry_run_state,
+    ))
+    if refusal is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"App-owned capability pack code ({', '.join(changed)}) cannot be changed from build "
+                f"{source_version.id}: {refusal.reason}. No files were changed."
+            ),
+        )
+
+
+def _require_server_proposed_scope(pending: dict[str, Any], change: Any, request: RefinementRequest) -> None:
+    """Bind a confirmation to the scope this endpoint proposed for the change request.
+
+    The pending decision can also be written through the session decision
+    API, so it does not prove what the server proposed. The ChangeRequest
+    the proposal wrote does: its harness decision must name exactly the
+    pending decision's files, for the same saved build.
+    """
+    router_decision = getattr(change, "router_decision", None)
+    proposed = router_decision.get("harness_decision") if isinstance(router_decision, dict) else None
+    if (
+        change is None
+        or getattr(change, "build_record_id", None) != request.build_record_id
+        or not isinstance(proposed, dict)
+        or list(pending.get("selected_paths") or []) != list(proposed.get("selected_paths") or [])
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="The proposed scope does not match the change request it was proposed for. Submit the change again.",
+        )
+
+
 def _confirmed_refinement_decision(
     snapshot: dict[str, Any] | None,
     request: RefinementRequest,
@@ -2854,6 +3584,7 @@ async def trigger_workflow(
     surface_result = None
     inline_binding = None
     baseline_files = None
+    proposal_baseline_state = None
     persisted_change_request_id = str(trigger_payload.get("change_request_id") or "").strip() or None
     persisted_revision_id = str(trigger_payload.get("revision_id") or "").strip() or None
     action_payload = trigger_payload.get("harness_action")
@@ -2943,6 +3674,7 @@ async def trigger_workflow(
         ) if refinement_request.build_record_id else None
         if source_version is None or source_version.build_family != refinement_request.build_family:
             raise HTTPException(status_code=404, detail="Selected refinement artifact not found")
+        proposal_baseline_state = _baseline_state(source_version)
         metadata = _version_metadata(source_version)
         try:
             await require_accepted_genesis_baseline(
@@ -2952,6 +3684,15 @@ async def trigger_workflow(
             )
         except (GenesisImportError, ValueError, OSError, ContentNotFoundError) as exc:
             raise HTTPException(status_code=409, detail="Selected imported Genesis source has no accepted owner review") from exc
+        # The saved parent's verified pack ownership. App-owned pack code: an
+        # inferred scope that would change it waits for confirmation, and
+        # changing it needs the current build. Template-owned pack files: no
+        # refinement changes them, so a patch that would apply to them only is
+        # refused before the provider runs (candidate admission stays the
+        # backstop for every candidate).
+        pack_owners = parent_pack_output_owners(metadata.get("capability_packs") or [])
+        workspace_pack_paths = pack_paths_owned_by(pack_owners, "workspace")
+        template_pack_paths = pack_paths_owned_by(pack_owners, "templates")
         # Filesystem roots and baseline contracts come from the saved version,
         # not from caller context or copied workbench metadata.
         safe_extra = {
@@ -2969,6 +3710,7 @@ async def trigger_workflow(
             str(refinement_request.extra.get("change_request_id") or "").strip()
             or persisted_change_request_id
         )
+        change = None
         if persisted_change_request_id:
             change = await get_artifact_store().get_change_request(
                 app_id=artifact_app_id, change_request_id=persisted_change_request_id,
@@ -2989,6 +3731,10 @@ async def trigger_workflow(
             )
             if body.context_variables != (pending_decision.get("context_variables") or {}):
                 raise HTTPException(status_code=409, detail="The decision belongs to a different request context. Submit the change again.")
+            _require_server_proposed_scope(pending_decision, change, refinement_request)
+            await _require_unchanged_confirmation_baseline(
+                source_version, change, app_id=artifact_app_id, artifact_store=get_artifact_store(),
+            )
         coding_payload = trigger_payload.get("coding_request")
         if workflow_continuation:
             # Explicit workflow continuation must not try inline generation first.
@@ -3022,6 +3768,13 @@ async def trigger_workflow(
                 raise HTTPException(status_code=400, detail="Refinement file scope is not in the selected artifact")
             coding_payload = {**coding_payload, "files": {path: baseline_files[path] for path in explicit_paths}}
             trigger_payload["coding_request"] = coding_payload
+        # An explicit or confirmed file scope always applies when it proceeds.
+        _refuse_unverifiable_pack_patch(pack_owners, explicit_paths)
+        _refuse_template_pack_patch(template_pack_paths, explicit_paths)
+        await _refuse_pack_code_from_an_unadmitted_baseline(
+            workspace_pack_paths, explicit_paths, source_version=source_version, artifact_app_id=artifact_app_id,
+            user_id=user_id, build_registry_id=build_registry_id,
+        )
         if orchestration_control.coding_enabled() and isinstance(coding_payload, dict):
             try:
                 resolve_coding_validation_strategy(coding_payload.get("validation_strategy"))
@@ -3091,6 +3844,15 @@ async def trigger_workflow(
                         detail="This change could not be resolved within the selected files. Narrow the request, or clear the file limit to review a broader plan. No files were changed.",
                     )
                 if contract_surface_plan is not None:
+                    if pack_owners is None or template_pack_paths:
+                        surface_paths = [
+                            path for surface in contract_surface_plan.surfaces for path in surface.affected_paths
+                        ]
+                        _refuse_unverifiable_pack_patch(pack_owners, surface_paths)
+                        _refuse_template_pack_patch(template_pack_paths, surface_paths)
+                    registry_run_state = await _registry_run_state(
+                        user_id=user_id, build_registry_id=build_registry_id, source_version=source_version,
+                    )
                     inline_binding = await _get_app_registry_service().begin_refinement_run(
                         owner_user_id=user_id, app_id=app_id, build_registry_id=build_registry_id,
                         workflow_name=refinement_decision.workflow_id,
@@ -3108,7 +3870,8 @@ async def trigger_workflow(
                     finalized = await orchestration_control.finalize_surface_output(
                         plan=contract_surface_plan, result=surface_result, refinement_request=refinement_request,
                         routing_decision=refinement_decision, workspace_files=baseline_files,
-                        run_build_binding=inline_binding,
+                        run_build_binding=inline_binding, allowed_paths=explicit_paths or None,
+                        registry_run_state=registry_run_state,
                     )
                     await _complete_inline_refinement(binding=inline_binding, user_id=user_id, result=finalized)
                     surface_result = surface_result.model_copy(update={
@@ -3146,19 +3909,30 @@ async def trigger_workflow(
             if coding_request is not None:
                 inline_binding = None
                 try:
-                    coding_request, coding_decision = await orchestration_control.prepare_coding_request(coding_request)
+                    coding_request, coding_decision = await orchestration_control.prepare_coding_request(
+                        coding_request, confirmation_required_paths=workspace_pack_paths,
+                    )
                     harness_decision = coding_decision
                     if coding_request is not None:
+                        # Only an applying decision (auto_patch) returns a request.
+                        _refuse_unverifiable_pack_patch(pack_owners, coding_request.files)
+                        _refuse_template_pack_patch(template_pack_paths, coding_request.files)
                         baseline_files, skipped = _decode_text_bundle_entries(await _verified_app_bundle(source_version))
                         if skipped:
                             raise HTTPException(status_code=409, detail="Inline refinement cannot preserve every file in this bundle")
+                        registry_run_state = await _registry_run_state(
+                            user_id=user_id, build_registry_id=build_registry_id, source_version=source_version,
+                        )
                         inline_binding = await _get_app_registry_service().begin_refinement_run(
                             owner_user_id=user_id, app_id=app_id,
                             build_registry_id=build_registry_id,
                             workflow_name=refinement_decision.workflow_id,
                         )
+                        # Server-derived, set after the request is built: the client
+                        # payload cannot carry it.
                         coding_request = coding_request.model_copy(update={
                             "run_build_binding": inline_binding, "baseline_files": baseline_files,
+                            "registry_run_state": registry_run_state,
                         })
                         coding_result = await orchestration_control.execute_coding_request(coding_request)
                         await _complete_inline_refinement(
@@ -3211,6 +3985,8 @@ async def trigger_workflow(
                     "execution_mode": (
                         "coding_worker"
                         if coding_result is not None and coding_result.eligible
+                        else "surface_regeneration"
+                        if surface_result is not None
                         else "harness_decision"
                         if harness_decision is not None
                         and (
@@ -3222,28 +3998,54 @@ async def trigger_workflow(
                     "harness_decision": (
                         harness_decision.model_dump(mode="python") if harness_decision is not None else None
                     ),
+                    # The selected build as this request found it, before any run:
+                    # a confirmation of a decision proposed here compares it.
+                    "baseline_state": proposal_baseline_state,
                 },
                 created_by_user_id=user_id,
             )
             persisted_change_request_id = persisted_change_request.id
         except Exception as persist_err:
             logger.warning("Failed to persist ChangeRequest: %s", persist_err)
-    if (
+    if persisted_change_request_id is not None:
+        trigger_payload["change_request_id"] = persisted_change_request_id
+
+    # The ChangeRequest above, the session's revision state and the run
+    # records below keep the history of every attempt. The selected build is
+    # invalidated only by an operation that changed it or left its outcome
+    # unresolved: an inline run whose stored, unrejected child passed
+    # validation, is pending or was skipped, or whose child lookup failed
+    # (checked here, in the store), or a workflow run that launched (after its
+    # launch, below). A returned decision, a failed launch, or an inline run
+    # that stored nothing or only a child that failed validation leaves it as
+    # it was. An unresolved outcome is reported explicitly in the response.
+    invalidation_pending = (
         persisted_change_request_id is not None
         and refinement_request is not None
         and refinement_decision is not None
+    )
+    inline_effect = None
+    invalidation_recorded = False
+    if (
+        invalidation_pending
+        and inline_binding is not None
+        and (coding_result is not None or surface_result is not None)
     ):
-        try:
-            await orchestration_control.persist_revision_invalidation(
-                refinement_request=refinement_request,
-                routing_decision=refinement_decision,
-                change_request_id=persisted_change_request_id,
-                artifact_store=artifact_store,
+        inline_effect = await _inline_run_baseline_effect(
+            artifact_store, app_id=artifact_app_id,
+            parent_build_record_id=refinement_request.build_record_id, binding=inline_binding,
+            result=coding_result if coding_result is not None else surface_result,
+        )
+        if inline_effect.changed:
+            invalidation_recorded = await _persist_trigger_invalidation(
+                orchestration_control, refinement_request=refinement_request, routing_decision=refinement_decision,
+                change_request_id=persisted_change_request_id, artifact_store=artifact_store,
             )
-        except Exception as invalidation_err:
-            logger.warning("Failed to persist artifact invalidation: %s", invalidation_err)
-    if persisted_change_request_id is not None:
-        trigger_payload["change_request_id"] = persisted_change_request_id
+            invalidation_pending = False
+    unresolved_change = _unresolved_change(
+        inline_effect, baseline_build_record_id=refinement_request.build_record_id if refinement_request else None,
+        invalidation_recorded=invalidation_recorded,
+    )
 
     confirmed_action = action_id if refinement_request is not None else None
 
@@ -3402,6 +4204,7 @@ async def trigger_workflow(
                     metadata={
                         "coding_worker": coding_result.model_dump(mode="python"),
                         "workflow_id": refinement_decision.workflow_id,
+                        **({"unresolved_change": unresolved_change} if unresolved_change else {}),
                     },
                 )
             except Exception as persist_err:
@@ -3419,6 +4222,7 @@ async def trigger_workflow(
             "refinement_session_id": coding_session.id if coding_session is not None else None,
             "harness_decision": harness_decision.model_dump(mode="python") if harness_decision is not None else None,
             "coding_worker": coding_result.model_dump(mode="python"),
+            "unresolved_change": unresolved_change,
             "review_continuation": review_continuation,
             "review_continuation_error": review_continuation_error,
         }
@@ -3446,6 +4250,7 @@ async def trigger_workflow(
                     metadata={
                         "surface_result": surface_result.model_dump(mode="python"),
                         "workflow_id": refinement_decision.workflow_id,
+                        **({"unresolved_change": unresolved_change} if unresolved_change else {}),
                     },
                 )
             except Exception as persist_err:
@@ -3462,6 +4267,7 @@ async def trigger_workflow(
             "refinement_session_id": surface_session.id if surface_session is not None else None,
             "harness_decision": harness_decision.model_dump(mode="python") if harness_decision is not None else None,
             "surface_result": surface_result.model_dump(mode="python"),
+            "unresolved_change": unresolved_change,
             "review_continuation": review_continuation,
             "review_continuation_error": review_continuation_error,
         }
@@ -3521,12 +4327,22 @@ async def trigger_workflow(
                     "harness_decision": (
                         harness_decision.model_dump(mode="python") if harness_decision is not None else None
                     ),
+                    # The build's state when the change began stays on record: it is what shows
+                    # whether the build this route stales was a draft never accepted.
+                    **({"baseline_state": proposal_baseline_state} if proposal_baseline_state is not None else {}),
                 },
             )
         except Exception as persist_err:
             logger.warning("Failed to update ChangeRequest routing decision: %s", persist_err)
 
     workflow_launch = await launch_prepared_workflow(launch)
+    if invalidation_pending:
+        # The launched run revises the selected build; a launch that failed
+        # above raised before this and left the build as it was.
+        await _persist_trigger_invalidation(
+            orchestration_control, refinement_request=refinement_request, routing_decision=refinement_decision,
+            change_request_id=persisted_change_request_id, artifact_store=artifact_store,
+        )
 
     return {
         "execution_mode": "workflow",

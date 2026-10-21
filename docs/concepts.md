@@ -111,11 +111,15 @@ for how the two fit together.
 **Generate** is the AI process of producing app files. Generated output lands
 in `generated/apps/{app_id}/{build_id}/app/` — it is staged, not live.
 
-**Promote** is the explicit step that moves validated artifacts into the active
-app bundle so the runtime loads them. Studio shows a **Promote** action when a
-build is ready.
+**Accept** is the explicit step that makes a generated draft the app's current
+build. Every generated build, the first included, is saved as a draft; validating
+it does not accept it. Studio offers **Accept this draft** when its checks pass.
 
-This two-step approach lets you review what the AI produced before anything goes
+**Promote** is the explicit step that moves accepted artifacts into the active
+app bundle so the runtime loads them. Once a build is accepted, Studio's review
+offers it as **Activate this version**.
+
+These explicit steps let you review what the AI produced before anything goes
 live in your app.
 
 ## CLI vs Studio

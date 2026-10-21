@@ -201,7 +201,6 @@ class DockerSandboxAdapter:
         # writable space. The image filesystem stays read-only.
         build_cache_args = ([
             "--tmpfs", "/opt/mozaiks/web_shell/node_modules/.vite-temp:rw,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=0750",
-            "--tmpfs", "/opt/mozaiks/web_shell/.mozaiks-tailwind-sources:rw,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=0750",
         ] if purpose == "app_validation" else [])
         contained_args = ([
             "--read-only", "--user", "10001:10001", "--memory-swap=2g",

@@ -415,7 +415,9 @@ def _seed_role_notifications(notification_http):
     notification_http.collection.insert_many(records)
 
     async def store(record):
-        record["notification_id"] = record["source_event"]["payload"]["probe_id"]
+        # Every notification records its event's id (source_event_id), whether its rule keeps the
+        # whole event or, with `source_event: reference`, only a reference, so the probe id comes from it.
+        record["notification_id"] = record["source_event_id"].removeprefix("event-")
         notification_http.collection.insert_one(record)
 
     # This matches the hosted hosting_deployed.user rule's role audience and

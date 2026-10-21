@@ -13,13 +13,20 @@ from pydantic import ValidationError
 from factory_app.workflows.AppGenerator.tools.app_build_plan import app_build_plan
 from factory_app.workflows.AppGenerator.tools.app_validation import run_app_bundle_acceptance_gate
 from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
+from factory_app.workflows.AppGenerator.tools.generate_and_download import (
+    _selected_capability_packs as _build_record_packs,
+)
 from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import scan_generated_bundle
 from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
     resolve_declared_pack_output_paths,
 )
 from mozaiksai.core.auth.adapters.registry import reset_auth_adapter
 from mozaiksai.core.runtime.app.loader import AppLoader
-from mozaiksai.core.validation import GeneratedAppValidationRequest, validate_generated_app_bundle
+from mozaiksai.core.validation import (
+    GeneratedAppValidationRequest,
+    validate_generated_app_bundle,
+    validate_generated_app_candidate,
+)
 from tests.factory_context import factory_context
 from tests.import_utils import import_module_directly
 
@@ -568,8 +575,20 @@ async def test_typed_plan_materializes_validates_loads_and_serves_same_bundle(
             capability_packs=_selected_packs(),
         )
     )
-    assert scan_generated_bundle(files_one, capability_packs=_selected_packs()) == []
+    assert scan_generated_bundle(files_one, capability_packs=_selected_packs(), context_variables=context_one) == []
+    # operator_readiness renders only .j2 templates. Validation never renders them, so the public
+    # facade, which has no build context, verifies their declared outputs and the pinned identity.
     assert validation.passed is True, validation.diagnostics
+    assert [item["pack_id"] for item in validation.resolved_capability_packs] == ["operator_readiness"]
+
+    # A Studio refinement candidate is validated with {"app_id": ...} and its build record's pack rows.
+    candidate = await validate_generated_app_candidate(
+        files=dict(files_one), app_id="deterministic-reports", validation_strategy="docker",
+        capability_packs=_build_record_packs(context_one),
+    )
+    acceptance_result = candidate["app_bundle_acceptance_result"]
+    assert acceptance_result["validation_evidence"]["failed"] == [], acceptance_result["failed_tests"]
+    assert acceptance_result["validation_evidence"]["skipped"] == ["app_runtime_load_worker", "app_runtime_smoke"]
 
     acceptance = await run_app_bundle_acceptance_gate(
         files=files_one,

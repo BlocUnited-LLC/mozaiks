@@ -6,6 +6,11 @@ from typing import Any
 from mozaiksai.core.session.build_binding import RunBuildBinding
 
 
+def planned_tasks(*task_ids: str) -> list[dict[str, Any]]:
+    """The task batch's planned items (app_task_batch_items): task_batch_outputs reads only planned task ids."""
+    return [{"task_id": task_id} for task_id in task_ids]
+
+
 def factory_context(initial: Mapping[str, Any] | None = None) -> dict[str, Any]:
     data = dict(initial or {})
     # Existing fixture app IDs describe the output under test, not the host.

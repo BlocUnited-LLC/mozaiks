@@ -297,8 +297,9 @@ Mozaiks writes generated output here before it is copied into an app:
 generated/apps/{app_id}/{build_id}/app
 ```
 
-Promotion is the explicit step that copies approved generated files into the
-app.
+Generated output is saved as a draft. Accepting the draft in Studio makes it the
+app's current build; promotion is the explicit step that then copies the accepted
+files into the app.
 
 ## Troubleshooting
 

@@ -1,6 +1,7 @@
 import { palettes } from '../ui/theme/palettes.js';
 import { fontImports } from '../ui/theme/fonts.js';
 import { generateThemeTokens, applyThemeTokens, getFontImports } from '../ui/theme/index.js';
+import { PAGE_TITLE_DEFAULTS, PAGE_TITLE_TOKENS, PageTitleStyleError, resolvePageTitleStyle } from '../ui/theme/pageTitle.js';
 
 const THEME_TOKEN_DEFAULTS = {
   primitives: {
@@ -67,6 +68,7 @@ const THEME_TOKEN_DEFAULTS = {
       },
       sectionGap: '2rem',
       titlePaddingBottom: '1rem',
+      title: PAGE_TITLE_DEFAULTS,
     },
     chat: {
       modes: {
@@ -402,6 +404,7 @@ function normalizePageMaxWidthKeys(maxWidth) {
 }
 
 function resolveThemeSurfaceTokens({ themeConfig = {}, primitives = {}, ui = {} } = {}) {
+  const title = resolvePageTitleStyle(ui?.page?.title);
   const density = themeConfig?.density || 'comfortable';
   const densityPreset = DENSITY_UI_PRESETS[density] || DENSITY_UI_PRESETS.comfortable;
   const resolvedPrimitives = deepMerge(
@@ -416,6 +419,7 @@ function resolveThemeSurfaceTokens({ themeConfig = {}, primitives = {}, ui = {} 
   resolvedUi.page = {
     ...THEME_TOKEN_DEFAULTS.ui.page,
     ...resolvedUi.page,
+    title,
     maxWidth: {
       ...THEME_TOKEN_DEFAULTS.ui.page.maxWidth,
       ...normalizePageMaxWidthKeys(resolvedUi.page?.maxWidth),
@@ -803,6 +807,11 @@ async function loadThemeFromConfig() {
   try {
     const url = baseUrl ? `${baseUrl}/api/theme-config` : '/api/theme-config';
     const res = await fetch(url, { signal: controller.signal });
+    if (res.status === 422) {
+      const diagnostic = await res.json().catch(() => null);
+      throw new PageTitleStyleError(typeof diagnostic?.detail === 'string'
+        ? diagnostic.detail : 'theme_config.json contains invalid theme values.');
+    }
     if (!res.ok) throw new Error(`/api/theme-config returned ${res.status}`);
 
     const config = await res.json();
@@ -823,6 +832,7 @@ async function loadThemeFromConfig() {
 
     throw new Error('theme_config.json has no recognisable format (expected theme: or identity/colors keys)');
   } catch (err) {
+    if (err instanceof PageTitleStyleError) throw err;
     console.warn('⚠️ [THEME] Could not load theme config from API:', err.message);
     return { theme: BARE_FALLBACK_THEME, meta: { source: 'fallback', appId: 'default' } };
   } finally {
@@ -908,6 +918,7 @@ function buildSchemaOverrideTheme(themeOverride, currentTheme) {
         chatbackgroundImage: currentTheme?.branding?.chatbackgroundImage || null,
         loadingIcon: currentTheme?.branding?.loadingIcon || null,
       },
+      ui: { page: { title: currentTheme?.ui?.page?.title } },
     },
     currentTheme?._basePath || '/assets',
   );
@@ -1001,6 +1012,7 @@ export async function getTheme(appId = 'default') {
       meta = { ...meta, ...overrides.meta, source: 'brand+api' };
     }
 
+    resolvePageTitleStyle(theme?.ui?.page?.title);
     entry.theme = theme;
     entry.meta = meta;
     return theme;
@@ -1048,6 +1060,8 @@ export async function initializeTheme(appId = 'default') {
 // ---------------------------------------------------------------------------
 
 export function applyTheme(theme) {
+  // Invalid explicit title tokens must fail before any active-app variables change.
+  resolvePageTitleStyle(theme?.ui?.page?.title);
   try {
     const t = theme || BARE_FALLBACK_THEME;
     if (t._appThemeConfig) applyAppThemeTokens(t._appThemeConfig);
@@ -1497,6 +1511,13 @@ function updateCSSVariables(themeColors, themeShadows, themeChat, themePrimitive
   setDimensionVar(root, 'shell-page-padding-y-md', page.paddingY?.md, fb.ui.page.paddingY.md);
   setDimensionVar(root, 'shell-page-section-gap', page.sectionGap, fb.ui.page.sectionGap);
   setDimensionVar(root, 'shell-page-title-padding-bottom', page.titlePaddingBottom, fb.ui.page.titlePaddingBottom);
+  const title = resolvePageTitleStyle(page.title);
+  root.style.setProperty('--shell-page-title-font-family', PAGE_TITLE_TOKENS.font[title.font]);
+  root.style.setProperty('--shell-page-title-font-weight', PAGE_TITLE_TOKENS.weight[title.weight]);
+  root.style.setProperty('--shell-page-title-font-size', PAGE_TITLE_TOKENS.size[title.size]);
+  root.style.setProperty('--shell-page-title-line-height', PAGE_TITLE_TOKENS.lineHeight[title.lineHeight]);
+  root.style.setProperty('--shell-page-title-letter-spacing', PAGE_TITLE_TOKENS.letterSpacing[title.letterSpacing]);
+  root.style.setProperty('--shell-page-title-text-transform', PAGE_TITLE_TOKENS.textTransform[title.textTransform]);
 
   setDimensionVar(root, 'chat-feed-max-width', chat.feedMaxWidth || primitives?.measure?.chat_feed, fb.primitives.measure.chat_feed);
   setDimensionVar(root, 'chat-feed-padding-top-base', chat.feedPaddingTop?.base, fb.ui.chat.feedPaddingTop.base);

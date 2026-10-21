@@ -58,7 +58,7 @@ Covers pure helpers NOT tested by test_generated_bundle_scanner.py
     - capability_pack_id field → returned
     - id field fallback → returned
     - pack_id field fallback → returned
-    - all three present → capability_pack_id wins
+    - all three present → id wins (the resolver's one pack-identity precedence)
     - all empty → ""
 
   _selected_managed_capability_ids:
@@ -73,7 +73,7 @@ Covers pure helpers NOT tested by test_generated_bundle_scanner.py
     - strings and dict path_prefix values normalized
     - generated app-root app/ prefix stripped
     - exact and nested paths matched without partial-prefix false positives
-    - inline pack and contract.yaml forbidden_outputs collected
+    - only contract.yaml forbidden_outputs collected; an inline row value is ignored
 
   _iter_api_endpoint_literals:
     - no match → []
@@ -377,9 +377,10 @@ class TestPackIdFromDescriptor:
     def test_pack_id_field_fallback(self):
         assert _pack_id_from_descriptor({"pack_id": "mozaikspay"}) == "mozaikspay"
 
-    def test_capability_pack_id_wins_over_id(self):
-        result = _pack_id_from_descriptor({"capability_pack_id": "winner", "id": "loser"})
-        assert result == "winner"
+    def test_id_wins_over_capability_pack_id(self):
+        """One precedence with the resolver's selected_pack_id: id, then pack_id, then capability_pack_id."""
+        assert _pack_id_from_descriptor({"capability_pack_id": "planned_module", "id": "pack"}) == "pack"
+        assert _pack_id_from_descriptor({"capability_pack_id": "planned_module", "pack_id": "pack"}) == "pack"
 
     def test_all_empty_returns_empty(self):
         assert _pack_id_from_descriptor({"capability_pack_id": "", "id": "", "pack_id": ""}) == ""
@@ -448,7 +449,7 @@ class TestForbiddenOutputPrefixHelpers:
         assert _path_matches_prefix("modules/wallet", "modules/wallet/")
         assert not _path_matches_prefix("modules/wallet_dashboard/module.yaml", "modules/wallet/")
 
-    def test_inline_forbidden_outputs_from_pack(self):
+    def test_inline_forbidden_outputs_are_not_a_pack_contract(self):
         prefixes = _forbidden_output_prefixes_from_pack(
             {
                 "id": "wallet",
@@ -460,7 +461,7 @@ class TestForbiddenOutputPrefixHelpers:
             }
         )
 
-        assert prefixes == ["modules/wallet", "services/wallet"]
+        assert prefixes == []
 
     def test_contract_forbidden_outputs_from_pack_source_path(self, tmp_path: Path):
         (tmp_path / "contract.yaml").write_text(
@@ -521,10 +522,9 @@ class TestPacksProviding:
     def test_empty_list_returns_empty(self):
         assert _packs_providing([], "subscription_write_path") == []
 
-    def test_inline_provides_capabilities_match(self):
+    def test_inline_provides_capabilities_claim_grants_nothing(self):
         pack = {"id": "custompay", "provides_capabilities": ["subscription_write_path"]}
-        result = _packs_providing([pack], "subscription_write_path")
-        assert result == [pack]
+        assert _packs_providing([pack], "subscription_write_path") == []
 
     def test_inline_provides_capabilities_no_match(self):
         pack = {"id": "custompay", "provides_capabilities": ["other_capability"]}
@@ -558,15 +558,14 @@ class TestPacksProviding:
         pack = {"id": "testpay", "pack_source_path": str(tmp_path)}
         assert _packs_providing([pack], "subscription_write_path") == []
 
-    def test_inline_takes_precedence_over_pack_source_path(self, tmp_path: Path):
-        """If inline provides_capabilities matches, pack_source_path is not consulted."""
+    def test_only_the_contract_at_pack_source_path_is_consulted(self, tmp_path: Path):
+        """An inline provides_capabilities claim never stands in for the pack's contract."""
         pack = {
             "id": "testpay",
             "provides_capabilities": ["subscription_write_path"],
             "pack_source_path": str(tmp_path),  # no contract.yaml here
         }
-        result = _packs_providing([pack], "subscription_write_path")
-        assert result == [pack]
+        assert _packs_providing([pack], "subscription_write_path") == []
 
     def test_multiple_packs_only_matching_returned(self, tmp_path: Path):
         (tmp_path / "contract.yaml").write_text(
@@ -574,11 +573,9 @@ class TestPacksProviding:
             encoding="utf-8",
         )
         packs = [
-            {"id": "matching", "provides_capabilities": ["subscription_write_path"]},
+            {"id": "inline_claim", "provides_capabilities": ["subscription_write_path"]},
             {"id": "from_file", "pack_source_path": str(tmp_path)},
             {"id": "no_match"},
         ]
         result = _packs_providing(packs, "subscription_write_path")
-        assert len(result) == 2
-        ids = {p["id"] for p in result}
-        assert ids == {"matching", "from_file"}
+        assert [p["id"] for p in result] == ["from_file"]

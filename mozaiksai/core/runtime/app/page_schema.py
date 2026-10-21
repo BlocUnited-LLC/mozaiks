@@ -350,7 +350,7 @@ class AppPageHeaderConfig(PageContractModel):
     title: str
     subtitle: str | None = None
     actions: list[AppPageAction] | None = None
-    title_font: str | None = None
+    title_font: Literal["body", "heading"] | None = None
 
 
 class AppSummaryItem(PageContractModel):

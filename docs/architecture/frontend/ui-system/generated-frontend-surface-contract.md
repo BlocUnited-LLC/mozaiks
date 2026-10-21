@@ -369,24 +369,44 @@ npm --prefix web_shell run test:generated-ui
 
 That Playwright suite serves a generated app fixture as the active app root,
 loads canonical `ui/pages/*.yaml` through `SchemaPage`, and verifies primitive
-rendering across desktop and mobile. It complements the AG2 quality gate: the
-gate decides whether agents may assemble artifacts, while Playwright proves that
-the approved artifacts render cleanly in the shell.
+rendering across desktop and mobile against mocked shell and API responses. It
+complements the AG2 quality gate: the gate decides whether agents may assemble
+artifacts, while this rendering smoke shows that the approved declarative
+artifacts render cleanly in the shell.
 
-Playwright is intentionally a second-stage render acceptance check, not the
-same thing as the AG2 quality gate. The AG2 gate is cheap, deterministic, and
-agent-readable before assembly. Playwright runs against rendered browser output
-after artifacts exist and catches issues the schema audit cannot see: missing
-routes, browser errors, invisible headings, horizontal overflow, broken
-declarative form submission, and responsive layout regressions.
+Playwright is a second-stage browser check, not the same thing as the AG2
+quality gate. The AG2 gate is cheap, deterministic, and agent-readable before
+assembly. Playwright runs against rendered browser output after artifacts exist
+and catches issues the schema audit cannot see: missing routes, browser errors,
+invisible headings, horizontal overflow, broken declarative form submission,
+and responsive layout regressions.
+
+Two evidence tiers use it, and only one of them can accept a candidate:
+
+- **Mocked rendering smoke** (the default `mocked_rendering_smoke` mode of
+  `scripts/generated_ui_acceptance.py`, and the npm scripts in this section).
+  The bundle is served against mocked shell and API responses. A passing run
+  reports `evidence_mode: mocked_rendering_smoke` and no `runtime_identity`; it
+  shows that the declarative routes render, never that the app works. Its
+  controller decision applies to that rendering workload only and does not
+  accept the candidate. It does not prove module effects, authorization,
+  persistence, custom JSX behavior or real-host behavior.
+- **Real-host acceptance on an owned launch.** Only a run whose browser
+  workload targets a host the runner launched and verified
+  (`OwnedBrowserLaunch`, reported as `runtime_identity: verified_owned_launch`)
+  is acceptance evidence for a candidate. An external real-host CLI run cannot
+  attest the running host, always records an identity finding and never
+  accepts. See `ui-system-quality-gates.md`.
 
 Browser findings flow through `scripts/generated_ui_acceptance.py` when they
-need to become structured production-readiness feedback:
+need to become structured feedback:
 
-- canonical `ValidationRun` with the `generated_ui_browser` gate result
+- canonical `ValidationRun` with the `generated_ui_browser` gate result and the
+  `evidence_mode` of the run
 - structured `ValidationIssue` entries with code, severity, route, message,
   suggested fix, and repair owner
-- one `RepairDecision`: `accept`, `repair`, or `block`
+- one `RepairDecision`: `accept`, `repair`, or `block`, scoped to that run's
+  evidence tier
 
 This keeps strictness bounded. Playwright failures should be converted into
 specific canonical issues; they should not become an open-ended agent loop. The
@@ -402,7 +422,8 @@ $env:MOZAIKS_GENERATED_UI_APP_ROOT="generated/apps/{app_id}/{build_id}/app"
 npm --prefix web_shell run test:generated-ui:app
 ```
 
-For structured production-readiness output:
+For the structured rendering-smoke result (direct Playwright exit zero is not
+a controller result):
 
 ```powershell
 python scripts/generated_ui_acceptance.py `

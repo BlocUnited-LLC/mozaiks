@@ -10,8 +10,8 @@ For the product-level page contracts, see the [Studio docs](../../studio/index.m
 
 1. Click **Create App** in the top navigation or in the empty workspace.
 2. Everything happens in the chat — describe your app and the AI walks you through the steps.
-3. Review the generated output when the build completes.
-4. Promote the app when you're satisfied.
+3. Review the generated output when the build completes. It is saved as a draft.
+4. Accept the draft when you're satisfied, then promote it.
 
 In-progress builds stay in **Apps** so you can return any time.
 
@@ -38,7 +38,15 @@ component, starting with the canonical `/apps/:appId/building` Building lane.
 Studio saves your position automatically. When you reopen Studio, your last active build is
 restored. Click the build in **Apps** to continue.
 
-## Promoting a Build
+## Accepting and Promoting a Build
 
-When a build is ready, Studio shows a **Promote** action. Promoting moves the generated
-artifacts from `generated/` into the active app workspace so the runtime loads them.
+Every generated build, your app's first build included, is saved as a draft. Generating
+and validating it does not accept it. When its checks pass, Studio's review offers
+**Accept this draft**: accepting makes it the app's current build and records who
+accepted it and when. Only an accepted build can be promoted, and later refinements
+start from it; until you accept the first build, a change to app-owned capability code
+(such as a workspace handler) is refused and asks you to accept it first.
+
+Once a build is accepted, Studio's review offers **Activate this version**, which promotes
+it: promoting moves the generated artifacts from `generated/` into the active app workspace
+so the runtime loads them.

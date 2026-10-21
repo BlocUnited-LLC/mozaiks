@@ -118,6 +118,15 @@ The preset id itself must not appear in generated app files. Presets keep shell
 authoring consistent; they do not create extra header actions or replace the
 page primitive system.
 
+Select one preset only when its navigation and chrome fit the approved
+experience. Otherwise leave the hint null and use the supported explicit
+navigation and shell-mode contracts. A preset's defaults do not override an
+approved route's `shell_mode_hint` or navigation, including apps that combine
+public and authenticated zones. Operational work can use `workspace`, bounded
+step flows can use `focused`, and an approved full-viewport experience can use
+`immersive`; the page category alone does not decide. Do not fabricate a shell
+presentation by hiding platform controls with generated CSS.
+
 ## Chrome Modes
 
 Routes declare their chrome intent. The shell renders header, footer, bottom

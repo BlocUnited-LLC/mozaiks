@@ -27,6 +27,7 @@ from factory_app.workflows.AppGenerator.tools.app_validation import run_app_bund
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     admitted_app_file_map,
     compose_bundle_auth_routes,
+    load_revision_baseline,
 )
 from factory_app.workflows.AppGenerator.tools.deployment_contract import (
     PRODUCTION_DEPLOYMENT_PROFILES,
@@ -42,6 +43,9 @@ from factory_app.workflows.AppGenerator.tools.hydrate_app_revision_context impor
     revision_source_artifact_id,
 )
 from factory_app.workflows.AppGenerator.tools.requirements_scanner import scan_requirements
+from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+    pin_workspace_pack_selections,
+)
 from factory_app.workflows.AppGenerator.tools.schema_migration import inject_migration_into_bundle
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.app_context.store import register_greenfield_app_context_version
@@ -570,7 +574,6 @@ async def _register_app_bundle_artifact_version(
 
     parent_version_id = None
     validation_status_raw = None
-    lifecycle_status = None
     app_validation_status = None
     app_validation_strategy = None
     sandbox_session_id = None
@@ -596,11 +599,11 @@ async def _register_app_bundle_artifact_version(
             parent_version_id = None
             validation_status_raw = None
 
-    lifecycle_status = (
-        ArtifactLifecycleStatus.DRAFT
-        if parent_version_id
-        else ArtifactLifecycleStatus.CURRENT
-    )
+    # Every build this saves, the first (parentless) one included, is a draft
+    # for review. Generation is not acceptance: the build becomes current only
+    # through an authorized acceptance (Studio's accept, or the staged
+    # refinement acceptance), which writes the acceptance evidence.
+    lifecycle_status = ArtifactLifecycleStatus.DRAFT
 
     normalized_status = str(validation_status_raw or "").strip().lower()
     validation_status = ArtifactValidationStatus.PENDING
@@ -645,10 +648,16 @@ async def _register_app_bundle_artifact_version(
 
     # Persist to content store if a non-local backend is configured.  The local
     # backend is skipped because artifact_path already covers that path.
+    acceptance_result = _context_get(context_variables, "app_bundle_acceptance_result")
     bundle_content_metadata: dict[str, Any] = {
         "artifact_path": str(zip_path.resolve()),
         "bundle_name": bundle_name,
-        "capability_packs": _selected_capability_packs(context_variables),
+        # Workspace packs are recorded with the identity acceptance verified, so later uses recheck it.
+        "capability_packs": pin_workspace_pack_selections(
+            _selected_capability_packs(context_variables),
+            acceptance_result.get("resolved_capability_packs") if isinstance(acceptance_result, dict) else None,
+            context_variables=context_variables,
+        ),
     }
     if app_dir is not None:
         bundle_content_metadata["workspace_dir"] = str(app_dir.resolve())
@@ -663,7 +672,6 @@ async def _register_app_bundle_artifact_version(
             pass
     if isinstance(cf_report, dict):
         bundle_content_metadata["carry_forward_report"] = cf_report
-    acceptance_result = _context_get(context_variables, "app_bundle_acceptance_result")
     validation_evidence = _context_get(context_variables, "app_bundle_validation_evidence")
     if isinstance(acceptance_result, dict):
         bundle_content_metadata["app_bundle_acceptance"] = acceptance_result
@@ -804,7 +812,8 @@ async def generate_and_download(
     if not chat_id or not app_id:
         return {"status": "error", "message": "chat_id and app_id are required"}
 
-    files_map = admitted_app_file_map(context_variables)
+    # Compose admitted repair copies as validation does, from the verified revision source.
+    files_map = admitted_app_file_map(context_variables, revision_baseline=await load_revision_baseline(context_variables))
     if not files_map:
         return {"status": "error", "message": "No admitted app files are available to bundle."}
 

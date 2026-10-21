@@ -15,9 +15,6 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
-    resolve_templates_for_pack,
-)
 from mozaiksai.core.auth.adapters import registry as auth_registry
 from mozaiksai.core.auth.adapters.jwt_adapter import GenericJWTAdapter, JWTAdapterConfig
 from mozaiksai.core.auth.config import clear_auth_config_cache
@@ -25,6 +22,7 @@ from mozaiksai.core.runtime.app.module_loader import ModuleLoader
 from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor
 from mozaiksai.core.runtime.composition.platform_hooks import PlatformHookRegistry
 from mozaiksai.hosts.routers import modules as module_router
+from tests.test_messaging_pack_persistence_composition import _assembled_files
 
 APP_ID = "generated-messaging-app"
 OWN = "workspace-own"
@@ -116,15 +114,16 @@ def runtime(tmp_path, monkeypatch):
     monkeypatch.setattr(ModuleExecutor, "_emit_dispatch_audit", AsyncMock())
 
     app_root = tmp_path / "app"
-    emitted = resolve_templates_for_pack(PACK, "messaging")
-    for file in emitted:
-        if file["filename"].startswith("modules/messages/"):
-            path = app_root / file["filename"]
+    emitted = _assembled_files()
+    for filename, content in emitted.items():
+        if filename.startswith("modules/messages/"):
+            path = app_root / filename
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(file["content"], encoding="utf-8")
+            path.write_text(content, encoding="utf-8")
     loaded = ModuleLoader(str(app_root)).load("messages")
     database = defaultdict(lambda: defaultdict(_Collection))
-    executor = ModuleExecutor(persistence_client=database, persistence_database="generated_messaging_test")
+    executor = ModuleExecutor(persistence_client=database, persistence_database="generated_messaging_test",
+                              data_contract=json.loads(emitted["data/contract.json"]))
     executor.register_loaded_module(loaded)
     app = FastAPI()
     app.state.loaded_app_id = APP_ID
@@ -132,8 +131,8 @@ def runtime(tmp_path, monkeypatch):
     app.state.executor_registry = SimpleNamespace(module_executor=executor)
     app.include_router(module_router.router)
 
-    def token(*, workspace=None, tenant=None):
-        claims = {"sub": "alice", "iss": "https://auth.test", "aud": "generated-messaging-test",
+    def token(*, workspace=None, tenant=None, user="alice"):
+        claims = {"sub": user, "iss": "https://auth.test", "aud": "generated-messaging-test",
                   "app_id": APP_ID, "scp": "messages.read messages.write", "exp": int(time.time()) + 300}
         if workspace:
             claims["workspace_id"] = workspace
@@ -253,3 +252,26 @@ def test_app_scope_uses_loaded_app_and_rejects_foreign_scope(runtime):
     foreign = _create(runtime, token, params={"scope_type": "app", "scope_id": "foreign-app"})
     assert foreign.status_code == 403, foreign.text
     assert len(runtime.threads()) == 1
+
+
+def test_assembled_pack_rejects_wrong_participant_and_has_no_generic_record_routes(runtime):
+    alice = runtime.token()
+    bob = runtime.token(user="bob")
+    thread = _create(runtime, alice).json()["thread"]
+    thread_id = thread["thread_id"]
+    sent = _action(runtime, alice, "send_message", params={"thread_id": thread_id, "body": "private"})
+    assert sent.status_code == 200 and sent.json()["success"] is True
+    listed = _action(runtime, bob, "list_threads")
+    assert listed.status_code == 200 and listed.json()["threads"] == []
+    read = _action(runtime, bob, "get_thread", params={"thread_id": thread_id})
+    assert read.status_code == 200 and read.json()["thread"] is None
+    for action, params in (("send_message", {"thread_id": thread_id, "body": "injected"}),
+                           ("mark_thread_read", {"thread_id": thread_id})):
+        response = _action(runtime, bob, action, params=params)
+        assert response.status_code == 200 and response.json()["success"] is False
+    for action in ("list_messages", "get_messages", "list_thread_reads", "get_thread_reads", "get_threads",
+                   "create_threads", "update_threads", "delete_threads", "create_messages", "delete_messages"):
+        response = _action(runtime, bob, action)
+        assert response.status_code == 404, (action, response.text)
+    assert [row["body"] for row in runtime.rows("messages")] == ["private"]
+    assert runtime.rows("thread_reads") == []

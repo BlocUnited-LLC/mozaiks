@@ -27,6 +27,10 @@ required_outputs:
     owner: templates
   - path: ui/route_manifest.json
     owner: templates
+  - path: ui/index.js
+    owner: templates
+  - path: ui/pages/custom/GreetingsPage.jsx
+    owner: templates
 
 forbidden_outputs:
   - path_prefix: modules/hello/

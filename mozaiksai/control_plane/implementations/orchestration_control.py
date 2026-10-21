@@ -12,6 +12,7 @@ same harness without changing the SessionRouter contract.
 from __future__ import annotations
 
 from asyncio import CancelledError
+from collections.abc import Collection
 from typing import Any
 
 from anyio import CancelScope
@@ -23,6 +24,7 @@ from mozaiksai.control_plane.contracts import (
     ContractSurfacePlan,
     HarnessDecision,
     ProposedFileChange,
+    RegistryRunState,
     StagedPatchProposal,
     SurfacePlanExecutionResult,
 )
@@ -301,12 +303,19 @@ class OrchestrationControlHarness:
         self, *, plan: ContractSurfacePlan, result: SurfacePlanExecutionResult,
         refinement_request: RefinementRequest, routing_decision: RefinementRoutingDecision,
         workspace_files: dict[str, str], run_build_binding: RunBuildBinding,
+        allowed_paths: list[str] | None = None, registry_run_state: RegistryRunState | None = None,
     ) -> CodingWorkerResult:
+        """Admit, validate and store a surface run's output through the coding worker's finalizer.
+
+        ``registry_run_state`` is Studio's server-derived registry read before
+        the run began (see ``CodingWorkerRequest.registry_run_state``).
+        """
         try:
             finalized = await self._finalize_surface_output(
                 plan=plan, result=result, refinement_request=refinement_request,
                 routing_decision=routing_decision, workspace_files=workspace_files,
-                run_build_binding=run_build_binding,
+                run_build_binding=run_build_binding, allowed_paths=allowed_paths,
+                registry_run_state=registry_run_state,
             )
         except (Exception, CancelledError) as exc:
             with CancelScope(shield=True):
@@ -330,6 +339,7 @@ class OrchestrationControlHarness:
         self, *, plan: ContractSurfacePlan, result: SurfacePlanExecutionResult,
         refinement_request: RefinementRequest, routing_decision: RefinementRoutingDecision,
         workspace_files: dict[str, str], run_build_binding: RunBuildBinding,
+        allowed_paths: list[str] | None = None, registry_run_state: RegistryRunState | None = None,
     ) -> CodingWorkerResult:
         if result.status != "success" or plan.requires_schema_migration or plan.build_family != "app_bundle":
             return CodingWorkerResult(eligible=True, status="failed", error="Surface output requires workflow completion")
@@ -339,6 +349,14 @@ class OrchestrationControlHarness:
         app_id = refinement_request.app_id
         if not app_id:
             raise ValueError("Surface output requires an execution host app_id")
+        # A surface plan without the user's file limit never authorizes app-owned
+        # pack code; with one, the limit is the scope the finalizer checks.
+        metadata: dict[str, Any] = {
+            "selected_file_paths": sorted(allowed_paths or []),
+            "scope_origin": (
+                self._selected_scope_origin(refinement_request) if allowed_paths else "surface_plan"
+            ),
+        }
         request = CodingWorkerRequest(
             app_id=app_id, target_app_id=refinement_request.target_app_id,
             user_id=refinement_request.user_id, run_build_binding=run_build_binding,
@@ -347,7 +365,7 @@ class OrchestrationControlHarness:
             raw_user_request=refinement_request.raw_user_request, change_class=plan.change_class,
             source_surface=refinement_request.source_surface,
             files={path: workspace_files.get(path, "") for path in owned_paths},
-            baseline_files=workspace_files,
+            baseline_files=workspace_files, metadata=metadata, registry_run_state=registry_run_state,
         )
         proposal = StagedPatchProposal(
             proposal_id=run_build_binding.build_id, provider_id="contract_surface_regeneration",
@@ -402,10 +420,26 @@ class OrchestrationControlHarness:
             },
         )
 
+    @staticmethod
+    def _selected_scope_origin(refinement_request: RefinementRequest) -> str:
+        """Studio sets harness_action only after resolving the bound pending decision."""
+        action = refinement_request.extra.get("harness_action")
+        confirmed = isinstance(action, dict) and action.get("action_id") == "apply_proposed_scope"
+        return "confirmed" if confirmed else "explicit"
+
     async def prepare_coding_request(
         self,
         request: CodingWorkerRequest,
+        *,
+        confirmation_required_paths: Collection[str],
     ) -> tuple[CodingWorkerRequest | None, HarnessDecision]:
+        """Resolve the write scope and record who chose it.
+
+        ``confirmation_required_paths`` (app-owned pack code of the saved
+        parent) keeps an inferred scope from applying without the user. It is
+        required: a caller states the parent's protected paths, or ``()`` when
+        it has none, so no caller gets the unprompted path by omission.
+        """
         if not self.coding_enabled():
             raise RuntimeError("Refinement coding worker is disabled in app/config/refinement_policy.yaml")
         refinement_payload = request.context_seed.get("refinement_request")
@@ -425,10 +459,12 @@ class OrchestrationControlHarness:
                 proposal=None,
                 selected_paths=explicit_paths,
                 explicit_scope=True,
+                confirmation_required_paths=confirmation_required_paths,
             )
             metadata = dict(request.metadata or {})
             metadata["selected_file_paths"] = explicit_paths
             metadata["explicit_file_count"] = len(request.files)
+            metadata["scope_origin"] = self._selected_scope_origin(refinement_request)
             return request.model_copy(update={"metadata": metadata}), decision
 
         refinement_request = refinement_request.model_copy(update={
@@ -456,11 +492,13 @@ class OrchestrationControlHarness:
             proposal=proposal,
             selected_paths=sorted(resolved_files.keys()),
             explicit_scope=False,
+            confirmation_required_paths=confirmation_required_paths,
         )
         metadata = dict(request.metadata or {})
         metadata["scope_proposal"] = proposal.model_dump(mode="python")
         metadata["selected_file_paths"] = sorted(resolved_files.keys())
         metadata["explicit_file_count"] = len(resolved_files)
+        metadata["scope_origin"] = "auto_proposal"
         if decision.decision_type != "auto_patch":
             return None, decision
         return request.model_copy(update={"files": resolved_files, "metadata": metadata}), decision
