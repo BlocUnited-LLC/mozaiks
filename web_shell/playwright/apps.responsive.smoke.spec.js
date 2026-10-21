@@ -43,11 +43,19 @@ const composedShellConfig = {
   // Like the host: with sign-in disabled the public profile route is not registered.
   pages: [...(routeManifest.pages || []).filter((route) => route.path !== '/u/:username'), ...transitionRoutes],
 };
-// Static shell configs without a host auth projection preserve configured
-// personal chrome; use this in layout-only tests without starting a login flow.
+// Layout-only tests keep the local development identity but omit the explicit
+// runtime.enabled=false signal. That preserves configured personal chrome
+// without starting a real authentication flow.
 const personalChromeShellConfig = {
   ...composedShellConfig,
-  auth: null,
+  auth: {
+    ...localDevelopmentAuth,
+    runtime: {
+      provider: localDevelopmentAuth.runtime.provider,
+      local_development: localDevelopmentAuth.runtime.local_development,
+      user: localDevelopmentAuth.runtime.user,
+    },
+  },
 };
 const dashboardPayload = {
   schema_version: 'mozaiks.dashboard.v1',
