@@ -93,6 +93,11 @@ function renderShellComponent(file, navigation, props = {}) {
     '../../navigation/useNavigationActions': { useNavigationActions: () => () => {} },
     '../../navigation/shellActions': shellActions,
     '../../context/ChatUIContext': { useChatUI: () => ({ user: localUser, login: () => {}, logout: () => {} }) },
+    'react-icons/fi': { FiMessageCircle: () => React.createElement('span') },
+    './ShellNavigationIcon.jsx': {
+      default: ({ fallback = '' }) => React.createElement('span', null, fallback),
+      hasNamedIcon: () => false,
+    },
     '../../ui/hooks/useAppEventBus.js': { useAppEventBus: () => {} },
     './notificationApi.js': { fetchNotificationCount: async () => null, clearNotifications: async () => null },
     './header-styles.css': {},
