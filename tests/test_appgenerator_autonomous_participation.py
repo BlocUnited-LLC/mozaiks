@@ -55,7 +55,9 @@ def test_interview_agent_does_not_re_interview_after_the_user_delegated() -> Non
     assert "`ContextVariables.coding_participation` equals `autonomous`" in agents_text
     assert "Do NOT present a list of open scope questions." in agents_text
     assert "answer yourself from" in agents_text
-    assert "Emit ONLY the token: `NEXT`" in agents_text
+    interview = yaml.safe_load(agents_text)["agents"][0]
+    assert interview["structured_outputs_required"] is True
+    assert "Return `outcome: ready`" in agents_text
 
 
 def test_interview_agent_does_not_offer_scope_the_concept_never_asked_for() -> None:
@@ -134,7 +136,7 @@ def test_entry_agent_resolves_from_participation_before_the_first_turn() -> None
     by_id = {v: k for k, v in agent_ids.items()}
 
     def entry_for(participation: str | None) -> str:
-        context = {"interview_complete": False}
+        context = {"interview_outcome": "blocked"}
         if participation is not None:
             context["coding_participation"] = participation
         graph = compile_transition_rules_to_graph(

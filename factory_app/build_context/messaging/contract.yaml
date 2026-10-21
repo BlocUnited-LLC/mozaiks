@@ -79,6 +79,13 @@ forbidden_outputs:
 runtime_boundaries:
   - id: persistence_layer
     rule: Generated repo.py must use ctx.persistence.collection("messages", collection_name). No direct Motor clients and no app_data_from_context aliases.
+  - id: conversation_scope_authority
+    rule: >
+      Generated workspace conversations require ctx.persistence.principal.workspace_id
+      from an authenticated credential or host-verified membership. Do not use
+      request-selected ctx.workspace_id or an unbound scope_id as authority.
+      Explicit local development selection remains available only under the
+      local_development dispatch authority. App conversations use the loaded app id.
   - id: event_emission
     rule: Events must be emitted via ctx.emit(), not direct dispatcher calls from service/handler.
   - id: support_ticket_authority

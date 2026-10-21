@@ -37,6 +37,7 @@ from mozaiksai.control_plane import (
     StructuredOutputCodingProvider,
     safe_artifact_relpath,
 )
+from mozaiksai.core.artifacts.models import BuildRecord
 
 _SCOPED_PATH = "app/ui/pages/Dashboard.jsx"
 
@@ -46,7 +47,7 @@ _GOOD_PLAN = CodingWorkerPlan(
     updated_files=[
         FileUpdate(path=_SCOPED_PATH, content='export default function Dashboard() { return "patched"; }')
     ],
-    validation_strategy="local",
+    validation_strategy="docker",
     validation_commands=["npm run build"],
     start_preview=False,
     needs_human_review=False,
@@ -95,7 +96,8 @@ class _FakeToolExecutor:
 def _enabled_control_plane() -> ControlPlaneConfig:
     return ControlPlaneConfig(
         enabled=True,
-        coding=ControlPlaneCodingCapabilityConfig(enabled=True, llm_config={"model": "gpt-5.2-codex"}),
+        llm_profiles={"codegen": {"llm_config": {"model": "gpt-5.2-codex"}}},
+        coding=ControlPlaneCodingCapabilityConfig(enabled=True, llm_profile="codegen"),
     )
 
 
@@ -167,7 +169,7 @@ async def test_structured_provider_returns_completed_scoped_proposal() -> None:
     assert proposal.changed_files[0].op == "update"
     assert proposal.changed_files[0].content.endswith('"patched"; }')
     assert proposal.owned_paths == [_SCOPED_PATH]
-    assert proposal.validation_strategy_hint == "local"
+    assert proposal.validation_strategy_hint == "docker"
     assert proposal.validation_commands == ["npm run build"]
     assert proposal.summary == _GOOD_PLAN.summary
     assert proposal.rationale == _GOOD_PLAN.rationale
@@ -255,19 +257,24 @@ class _FakeArtifactStore:
     def __init__(self) -> None:
         self.calls: list[dict] = []
 
+    async def get_build_record(self, *, app_id, build_record_id):
+        return BuildRecord(
+            id=build_record_id, app_id=app_id, build_family="app_bundle", build_key="app_bundle",
+            version_number=1, lineage_root_id=build_record_id,
+        )
+
     async def create_build_record(self, **kwargs):  # noqa: ANN003
         self.calls.append(dict(kwargs))
-        return type("ArtifactVersion", (), {"id": "av_child_1"})()
+        return BuildRecord(id="av_child_1", version_number=1, lineage_root_id="av_parent", **kwargs)
 
 
-async def _fake_source_validation_runner(**kwargs):  # noqa: ANN003
+async def _fake_candidate_validation_runner(**kwargs):  # noqa: ANN003
     return {
         "success": True,
         "validation_status": "passed",
-        "execution_mode": "isolated_workspace_copy",
-        "command_results": [],
-        "fallback_checks": [],
-        "warnings": [],
+        "app_bundle_acceptance_result": {"passed": True},
+        "app_validation_result": {"validation_status": "passed", "validation_strategy": kwargs["validation_strategy"]},
+        "validation_strategy": kwargs["validation_strategy"],
     }
 
 
@@ -282,7 +289,7 @@ def _completed_proposal(**overrides: Any) -> StagedPatchProposal:
             ProposedFileChange(path=_SCOPED_PATH, op="update", content="stub content")
         ],
         "owned_paths": [_SCOPED_PATH],
-        "validation_strategy_hint": "local",
+        "validation_strategy_hint": "docker",
     }
     payload.update(overrides)
     return StagedPatchProposal(**payload)
@@ -297,12 +304,12 @@ async def test_worker_runs_injected_provider_through_full_lifecycle(tmp_path: Pa
     worker = ScopedRefinementCodingWorker(
         config_loader=_enabled_control_plane,
         pack_loader=_pack,
-        source_validation_runner=_fake_source_validation_runner,
+        candidate_validation_runner=_fake_candidate_validation_runner,
         artifact_store=artifact_store,
         output_root=tmp_path,
         provider=provider,
     )
-    result = await worker.execute(_request(validation_strategy="local"))
+    result = await worker.execute(_request(validation_strategy="docker"))
 
     assert provider.requests and provider.requests[0].app_id == "app_1"
     assert result.eligible is True
@@ -311,7 +318,7 @@ async def test_worker_runs_injected_provider_through_full_lifecycle(tmp_path: Pa
     assert result.applied_files == {_SCOPED_PATH: "stub content"}
     assert result.plan is not None
     assert result.plan.summary == "Stub patch"
-    assert result.plan.validation_strategy == "local"
+    assert result.plan.validation_strategy == "docker"
     assert result.metadata["applied_paths"] == [_SCOPED_PATH]
     assert artifact_store.calls[0]["parent_build_record_id"] == "av_123"
     assert artifact_store.calls[0]["lifecycle_status"].value == "draft"
@@ -328,7 +335,7 @@ async def test_worker_fails_closed_when_provider_fails(tmp_path: Path) -> None:
     worker = ScopedRefinementCodingWorker(
         config_loader=_enabled_control_plane,
         pack_loader=_pack,
-        source_validation_runner=_fake_source_validation_runner,
+        candidate_validation_runner=_fake_candidate_validation_runner,
         artifact_store=_FakeArtifactStore(),
         output_root=tmp_path,
         provider=_StubProvider(proposal),
@@ -351,7 +358,7 @@ async def test_worker_fails_closed_on_malformed_completed_proposal(tmp_path: Pat
     worker = ScopedRefinementCodingWorker(
         config_loader=_enabled_control_plane,
         pack_loader=_pack,
-        source_validation_runner=_fake_source_validation_runner,
+        candidate_validation_runner=_fake_candidate_validation_runner,
         artifact_store=_FakeArtifactStore(),
         output_root=tmp_path,
         provider=_StubProvider(proposal),
@@ -368,7 +375,7 @@ async def test_worker_checks_eligibility_before_calling_provider(tmp_path: Path)
     worker = ScopedRefinementCodingWorker(
         config_loader=_enabled_control_plane,
         pack_loader=_pack,
-        source_validation_runner=_fake_source_validation_runner,
+        candidate_validation_runner=_fake_candidate_validation_runner,
         artifact_store=_FakeArtifactStore(),
         output_root=tmp_path,
         provider=provider,
@@ -376,6 +383,24 @@ async def test_worker_checks_eligibility_before_calling_provider(tmp_path: Path)
     result = await worker.execute(_request(change_class="feature"))
 
     assert result.status == "ineligible"
+    assert provider.requests == []
+
+
+@pytest.mark.asyncio
+async def test_generated_app_worker_rejects_repository_inspection_before_provider(tmp_path: Path) -> None:
+    provider = _StubProvider(_completed_proposal())
+    worker = ScopedRefinementCodingWorker(
+        config_loader=_enabled_control_plane,
+        pack_loader=_pack,
+        candidate_validation_runner=_fake_candidate_validation_runner,
+        artifact_store=_FakeArtifactStore(),
+        output_root=tmp_path,
+        provider=provider,
+    )
+    result = await worker.execute(_request(read_only_files={"tests/test_dashboard.py": "private context\n"}))
+
+    assert result.status == "ineligible"
+    assert "inspection files" in (result.blocked_reason or "")
     assert provider.requests == []
 
 
@@ -410,6 +435,18 @@ def test_safe_artifact_relpath_normalization() -> None:
     assert safe_artifact_relpath(None) is None
 
 
+@pytest.mark.parametrize("path", [
+    "app/brand/x:payload.png",
+    "app/brand/CON.png",
+    "app/brand/COM¹.png",
+    "app/brand/LPT².png",
+    "app/brand/trailing. ",
+    "app/brand/name?.png",
+])
+def test_safe_artifact_relpath_rejects_windows_unsafe_components(path: str) -> None:
+    assert safe_artifact_relpath(path) is None
+
+
 # ---------------------------------------------------------------------------
 # Workspace-backed persistence (PR-2)
 # ---------------------------------------------------------------------------
@@ -421,12 +458,12 @@ async def test_persistence_records_staged_file_hashes(tmp_path: Path) -> None:
     worker = ScopedRefinementCodingWorker(
         config_loader=_enabled_control_plane,
         pack_loader=_pack,
-        source_validation_runner=_fake_source_validation_runner,
+        candidate_validation_runner=_fake_candidate_validation_runner,
         artifact_store=artifact_store,
         output_root=tmp_path,
         provider=_StubProvider(_completed_proposal()),
     )
-    result = await worker.execute(_request(validation_strategy="local"))
+    result = await worker.execute(_request(validation_strategy="docker"))
 
     assert result.status == "validated"
     staged_hashes = artifact_store.calls[0]["commit_metadata"]["metadata"]["staged_file_sha256"]
@@ -444,17 +481,17 @@ async def test_secret_scoped_file_fails_before_source_validation(tmp_path: Path)
     worker = ScopedRefinementCodingWorker(
         config_loader=_enabled_control_plane,
         pack_loader=_pack,
-        source_validation_runner=_fake_source_validation_runner,
+        candidate_validation_runner=_fake_candidate_validation_runner,
         artifact_store=_FakeArtifactStore(),
         output_root=tmp_path,
         provider=_StubProvider(proposal),
     )
     result = await worker.execute(
-        _request(files={secret_path: "key: old"}, validation_strategy="local")
+        _request(files={secret_path: "key: old"}, validation_strategy="docker")
     )
 
     assert result.status == "failed"
-    assert "SOURCE_VALIDATION_FAILED" in str(result.error)
+    assert "CANDIDATE_VALIDATION_FAILED" in str(result.error)
     assert "WORKSPACE_SECRET_PATH" in str(result.error)
     assert "build_record_id" not in result.metadata
 
@@ -465,12 +502,12 @@ async def test_provider_execution_metadata_is_persisted(tmp_path: Path) -> None:
     worker = ScopedRefinementCodingWorker(
         config_loader=_enabled_control_plane,
         pack_loader=_pack,
-        source_validation_runner=_fake_source_validation_runner,
+        candidate_validation_runner=_fake_candidate_validation_runner,
         artifact_store=artifact_store,
         output_root=tmp_path,
         provider=_StubProvider(_completed_proposal()),
     )
-    result = await worker.execute(_request(validation_strategy="local"))
+    result = await worker.execute(_request(validation_strategy="docker"))
 
     assert result.status == "validated"
     execution = result.metadata["coding_provider"]

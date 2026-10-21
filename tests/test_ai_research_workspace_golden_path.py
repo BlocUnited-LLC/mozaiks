@@ -654,6 +654,16 @@ async def test_ai_research_workspace_offline_golden_path(
     candidates.update({file["filename"]: file["content"] for file in materialize_app_config_contracts(
         app_id="research", app_build_plan=normalized_plan, context_variables=context,
     )})
+    # The custom action scopes are an operator-approved input to this golden
+    # path, not a grant inferred from the model's module.yaml declaration.
+    auth_template = (
+        REPO_ROOT / "factory_app/build_context/webapp_builder/templates/config/auth.yaml"
+    ).read_text(encoding="utf-8")
+    approved_auth = yaml.safe_load(auth_template.replace("{{AUTH_DEFAULT_ROUTE}}", "/research"))
+    approved_auth["frontend"]["default_scopes"].extend(["research.read", "research.execute"])
+    context.set("generated_files", {
+        "config/auth.yaml": yaml.safe_dump(approved_auth, sort_keys=False),
+    })
     task_outputs = {
         task["task_id"]: {"code_files": [
             {"filename": path, "content": candidates[path]}
@@ -682,6 +692,9 @@ async def test_ai_research_workspace_offline_golden_path(
     research_module = yaml.safe_load(files["modules/research/module.yaml"])
     execute_action = next(action for action in research_module["actions"] if action["id"] == "execute_research")
     assert execute_action["entitlement_gate"] == RESEARCH_ACTION_GATE
+    assert {"research.read", "research.execute"} <= set(
+        yaml.safe_load(files["config/auth.yaml"])["frontend"]["default_scopes"]
+    )
     assert detach(context["subscription_contract"])["workflow_contract_updates"] == []
     assert "services/integrations/mozaikspay_client.py" in files
     assert {"ui/pages/billing.yaml", "ui/pages/pricing.yaml", "ui/pages/usage.yaml"} <= set(files)
@@ -693,10 +706,11 @@ async def test_ai_research_workspace_offline_golden_path(
         context_variables=context,
     )
     acceptance = validation["app_bundle_acceptance_result"]
-    assert acceptance["passed"] is True, acceptance["failed_tests"]
+    assert acceptance["status"] == "pending", acceptance["failed_tests"]
+    assert acceptance["validation_evidence"]["failed"] == []
+    assert acceptance["validation_evidence"]["skipped"] == ["app_runtime_load_worker", "app_runtime_smoke"]
     assert set(acceptance["validation_evidence"]["completed"]) == {
         "agent_backend",
-        "app_runtime_load",
         "bundle_scan",
         "functional_completeness",
         "module_implementation",
@@ -708,10 +722,10 @@ async def test_ai_research_workspace_offline_golden_path(
     }
     assert acceptance["agent_backend"]["checks"][0]["id"] == "agent_backend_integration_not_required"
     assert acceptance["workflow_integration"]["checks"][0]["id"] == "workflow_integration_contract"
-    assert context["app_validation_status"] == "skipped"
-    assert context["integration_tests_passed"] is True
+    assert context["app_validation_status"] == "pending"
+    assert context["integration_tests_passed"] is False
     export_gate = resolve_export_gate(context)
-    assert export_gate["allow_export"] is True, export_gate["reasons"]
+    assert export_gate["allow_export"] is False
 
     async def no_op(*_args: Any, **_kwargs: Any) -> None:
         return None
@@ -742,18 +756,23 @@ async def test_ai_research_workspace_offline_golden_path(
         "AI Research Workspace bundle ready.",
         context_variables=context,
     )
-    assert exported["status"] == "success", exported
-    exported_paths = set(exported["files_written"])
+    assert exported["status"] == "error", exported
+    assert exported["app_bundle_acceptance_status"] == "pending"
+    assert "bundle_zip" not in exported
+    candidate_files = detach(context["generated_files"])
     assert {
         "Dockerfile",
         "docker-compose.yml",
         ".env.example",
         "deployment.manifest.json",
         ".github/workflows/deploy.yml",
-    } <= exported_paths
-    assert Path(exported["bundle_zip"]).is_file()
+    } <= set(candidate_files)
 
-    loaded = await AppLoader.load(exported["bundle_dir"])
+    # Offline contract preservation is useful evidence, but it cannot authorize
+    # export while persistence and build execution remain unverified.
+    candidate_root = tmp_path / "candidate"
+    _write_files(candidate_root, candidate_files)
+    loaded = await AppLoader.load(str(candidate_root))
     assert loaded.failed_module_names == []
     assert {module.name for module in loaded.modules} >= {"research", "billing_portal"}
     # App and workflow bundles have distinct canonical roots. Their connection

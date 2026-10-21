@@ -152,7 +152,7 @@ def _repair_responded(context):
     ("status", "acceptance_status", "integration_passed", "allow_export"),
     [
         ("passed", "passed", True, True),
-        ("skipped", "passed", True, True),
+        ("skipped", "passed", True, False),
         ("passed", "failed", True, False),
         ("passed", None, True, False),
         ("failed", "passed", True, False),
@@ -172,7 +172,7 @@ def test_resolve_export_gate_uses_acceptance_validation_and_integration(
         {
             "app_validation_status": status,
             "app_bundle_acceptance_status": acceptance_status,
-            "app_validation_strategy_used": "local",
+            "app_validation_strategy_used": "docker",
             "integration_tests_passed": integration_passed,
         }
     )
@@ -191,29 +191,28 @@ def test_resolve_export_gate_uses_acceptance_validation_and_integration(
     assert gate["app_bundle_acceptance_status"] == (
         acceptance_status.lower() if isinstance(acceptance_status, str) else acceptance_status
     )
-    assert gate["app_validation_strategy_used"] == "local"
+    assert gate["app_validation_strategy_used"] == "docker"
     assert gate["integration_tests_passed"] is integration_passed
 
 
-def test_validation_strategy_defaults_to_skip_when_e2b_local_and_docker_are_unavailable(monkeypatch) -> None:
+def test_validation_strategy_defaults_to_skip_when_docker_is_unavailable(monkeypatch) -> None:
     from mozaiksai.core.workflow.generator_support import (
         app_validation_strategy as app_validation_strategy_module,
     )
 
     monkeypatch.delenv("E2B_API_KEY", raising=False)
     monkeypatch.delenv("MOZAIKS_APP_VALIDATION_STRATEGY", raising=False)
-    monkeypatch.setattr(app_validation_strategy_module, "local_app_validation_available", lambda: False)
     monkeypatch.setattr(app_validation_strategy_module, "docker_app_validation_available", lambda: False)
 
     strategy, reason = app_validation_strategy_module.resolve_app_validation_strategy(
-        requested=None, context_value=None, local_available=False, docker_available=False
+        requested=None, context_value=None, docker_available=False
     )
 
     assert strategy == "skip"
     assert "resolved" in reason
 
 
-def test_e2b_credentials_do_not_change_the_automatic_local_default() -> None:
+def test_e2b_credentials_do_not_change_the_automatic_docker_default() -> None:
     from mozaiksai.core.workflow.generator_support import (
         app_validation_strategy as app_validation_strategy_module,
     )
@@ -222,7 +221,6 @@ def test_e2b_credentials_do_not_change_the_automatic_local_default() -> None:
         env={"E2B_API_KEY": "configured"},
         requested=None,
         context_value=None,
-        local_available=False,
         docker_available=True,
     )
 
@@ -239,7 +237,6 @@ def test_e2b_remains_available_when_explicitly_selected() -> None:
         env={"E2B_API_KEY": "configured"},
         requested="e2b",
         context_value=None,
-        local_available=False,
         docker_available=True,
     )
 
@@ -252,14 +249,13 @@ def test_validation_strategy_summary_exposes_allowed_values() -> None:
         build_app_validation_strategy_summary,
     )
 
-    summary = build_app_validation_strategy_summary(env={}, local_available=False, docker_available=False)
+    summary = build_app_validation_strategy_summary(env={}, docker_available=False)
 
-    assert summary["allowed_values"] == ["e2b", "docker", "local", "skip"]
+    assert summary["allowed_values"] == ["e2b", "docker", "skip"]
     assert summary["default_value"] == "skip"
     assert summary["options"][0]["value"] == "e2b"
     assert summary["options"][1]["value"] == "docker"
-    assert summary["options"][2]["value"] == "local"
-    assert summary["options"][3]["value"] == "skip"
+    assert summary["options"][2]["value"] == "skip"
 
 
 def test_validation_strategy_rejects_invalid_explicit_values() -> None:
@@ -271,7 +267,7 @@ def test_validation_strategy_rejects_invalid_explicit_values() -> None:
         resolve_app_validation_strategy(requested="invalid", context_value=None)
 
 
-@pytest.mark.parametrize("requested,context", [("skip", "local"), ("docker", "skip"), (None, "skip")])
+@pytest.mark.parametrize("requested,context", [("skip", "docker"), ("docker", "skip"), (None, "skip")])
 def test_operator_strategy_cannot_be_overridden_by_build_inputs(requested, context):
     from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
         resolve_app_validation_strategy,
@@ -302,7 +298,7 @@ def test_validate_app_build_skip_strategy_persists_context() -> None:
         )
     )
 
-    assert result["success"] is True
+    assert result["success"] is False
     assert result["validation_strategy"] == "skip"
     assert result["validation_status"] == "skipped"
     assert context.get("app_validation_status") == "skipped"
@@ -754,8 +750,10 @@ async def test_module_implementation_failure_uses_bounded_bundle_repair(repair: 
         )
     _repair_responded(context)
     second = await module.run_app_bundle_acceptance_gate(files=files, context_variables=context)
-    assert second["passed"] is repair
-    assert second["bundle_repair"]["status"] == ("passed" if repair else "blocked")
+    assert second["module_implementation"]["passed"] is repair
+    assert second["passed"] is False
+    assert second["status"] == ("pending" if repair else "failed")
+    assert second["bundle_repair"]["status"] == "blocked"
     assert second["bundle_repair"]["no_progress"] is (not repair)
     assert second["bundle_repair"]["target_agent"] is None
     assert context.get("bundle_repair_attempt_count") == 1
@@ -793,8 +791,12 @@ async def test_runtime_import_failure_uses_stable_bounded_bundle_repair(repair) 
         files[handler] = original
     _repair_responded(context)
     second = await module.run_app_bundle_acceptance_gate(files=files, context_variables=context)
-    assert second["passed"] is repair
-    assert second["bundle_repair"]["status"] == ("passed" if repair else "blocked")
+    assert second["app_runtime_load"]["passed"] is repair
+    assert second["passed"] is False
+    assert second["status"] == "pending"
+    assert "app_runtime_load" not in second["validation_evidence"]["failed"]
+    assert "app_runtime_smoke" in second["validation_evidence"]["skipped"]
+    assert second["bundle_repair"]["status"] == "blocked"
     assert second["bundle_repair"]["no_progress"] is (not repair)
     assert context.get("bundle_repair_attempt_count") == 1
 

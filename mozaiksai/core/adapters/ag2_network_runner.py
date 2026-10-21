@@ -25,6 +25,7 @@ from ag2.network import (
     EV_PACKET,
     EV_TEXT,
     AgentTarget,
+    ChannelAdapter,
     ChannelState,
     Envelope,
     Hub,
@@ -40,11 +41,13 @@ from ag2.network import (
 from ag2.network.client.handlers import default_handler
 
 from mozaiksai.core.adapters.ag2_transition_conditions import BootstrapInitialDispatch
+from mozaiksai.core.adapters.ag2_workflow_view import WorkflowHistoryAdapter
 from mozaiksai.core.ports.orchestration import RunStatus
 from mozaiksai.core.workflow.context.authority import (
     AGENT_TEXT_WRITER,
     CONTEXT_BRIDGE_WRITER,
     LIVE_USER_CONTEXT_WRITER,
+    PERSISTED_REPLAY_WRITER,
     SENTINEL_TEXT_TRIGGER_WRITER,
     ContextAuthorityError,
     ContextAuthorityPolicy,
@@ -381,6 +384,7 @@ class AG2NetworkRunnerRequest:
     knowledge_store: KnowledgeStore | None = None
     resume_existing_only: bool = False
     resume_context_updates: Mapping[str, Any] = field(default_factory=dict)
+    persisted_replay_context: Mapping[str, Any] = field(default_factory=dict)
     # Declared by orchestrator.yaml: the context key whose text explains why
     # the transition graph ended the run as workflow_failed.
     failure_message_key: str | None = None
@@ -405,6 +409,9 @@ class AG2NetworkRunnerResult:
     wal: list[dict[str, Any]] = field(default_factory=list)
     error: str | None = None
     live_run: Any | None = None
+    # Set only after the live channel accepts this specific user message.
+    # Run settlement can fail after admission, so status alone is not enough.
+    input_accepted: bool | None = None
 
 
 class AG2NetworkRunner:
@@ -437,6 +444,8 @@ class AG2NetworkRunner:
             ttl_sweep_interval=0,
             expectation_sweep_interval=0,
         )
+        # Native WorkflowAdapter narrows the generic protocol's state types.
+        hub.register_adapter(cast(ChannelAdapter, WorkflowHistoryAdapter()))
         turn_failure_listener = _TurnFailureListener()
         hub.register_listener(turn_failure_listener)  # type: ignore[arg-type]
         progress_listener = _ChannelProgressListener()
@@ -699,6 +708,8 @@ class AG2NetworkRunner:
                     recovered = await live_run._wait_for_settlement(seen_envelope_ids=set())
                     if recovered.status is not RunStatus.PAUSED:
                         return recovered
+                if request.persisted_replay_context:
+                    await live_run.apply_persisted_replay_context(request.persisted_replay_context)
                 if request.initial_message:
                     result = await live_run.continue_with_user_message(
                         request.initial_message,
@@ -883,6 +894,10 @@ class AG2NetworkRunner:
 
     @staticmethod
     def _validate_request(request: AG2NetworkRunnerRequest, initial_agent_name: str) -> str | None:
+        if request.persisted_replay_context and not request.resume_existing_only:
+            return "persisted replay requires an existing-channel resume"
+        if request.persisted_replay_context and request.context_authority_policy is None:
+            return "context_authority.replay_policy_unavailable"
         if not request.agents:
             return "AG2NetworkRunner requires at least one agent"
         if not initial_agent_name:
@@ -982,6 +997,7 @@ class _AG2LiveWorkflowRun:
                     app_id=self.app_id,
                     channel_id=self.channel_id,
                     error="live_ag2_channel_closed",
+                    input_accepted=False,
                 )
 
             ended = await self._ended_result()
@@ -1003,6 +1019,7 @@ class _AG2LiveWorkflowRun:
                     app_id=self.app_id,
                     channel_id=self.channel_id,
                     error="ag2_network_stale_build_context",
+                    input_accepted=False,
                 )
 
             prior_wal = await self._hub.read_wal(self.channel_id)
@@ -1027,6 +1044,7 @@ class _AG2LiveWorkflowRun:
                 return ended
 
             result = await self._wait_for_settlement(seen_envelope_ids=seen_envelope_ids)
+            result.input_accepted = True
             result.wal = list(result.wal[self._wal_cursor :])
             self._wal_cursor += len(result.wal)
             if result.status is RunStatus.PAUSED:
@@ -1067,6 +1085,7 @@ class _AG2LiveWorkflowRun:
             close_reason=str(metadata.close_reason or "") or None,
             error=CHANNEL_TERMINAL_ERROR,
         )
+        result.input_accepted = False
         result.wal = list(result.wal[self._wal_cursor :])
         self._wal_cursor += len(result.wal)
         await self.close()
@@ -1078,19 +1097,40 @@ class _AG2LiveWorkflowRun:
                 raise RuntimeError("live_ag2_channel_closed")
             await self._apply_context_updates(updates)
 
+    async def apply_persisted_replay_context(self, updates: Mapping[str, Any]) -> None:
+        """Restore scoped durable state without treating it as user input."""
+        async with self._lock:
+            if self._closed:
+                raise RuntimeError("live_ag2_channel_closed")
+            policy = self._context_authority_policy
+            if not isinstance(policy, ContextAuthorityPolicy):
+                raise ContextAuthorityError("context_authority.replay_policy_unavailable")
+            safe_updates = policy.filter_for_replay(
+                updates,
+                writer_id=PERSISTED_REPLAY_WRITER,
+            )
+            from mozaiksai.core.session.build_context import revalidate_build_context
+
+            safe_updates = revalidate_build_context(policy, safe_updates)
+            if safe_updates:
+                await self._post_context_set(safe_updates)
+
     async def _apply_context_updates(self, updates: Mapping[str, Any]) -> None:
         safe_updates = _authorized_context_updates(
             updates,
             writer_id=LIVE_USER_CONTEXT_WRITER,
             context_authority_policy=self._context_authority_policy,
         )
+        await self._post_context_set(safe_updates)
+
+    async def _post_context_set(self, updates: Mapping[str, Any]) -> None:
         await self._initiator.post_envelope(
             Envelope(
                 channel_id=self.channel_id,
                 sender_id=self._initiator.agent_id,
                 audience=[],
                 event_type=EV_CONTEXT_SET,
-                event_data={"set": _json_safe_dict(safe_updates), "delete": []},
+                event_data={"set": _json_safe_dict(updates), "delete": []},
             )
         )
 

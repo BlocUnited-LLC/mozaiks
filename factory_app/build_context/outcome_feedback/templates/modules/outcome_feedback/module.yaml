@@ -1,0 +1,53 @@
+schema_version: mozaiks.module.v1
+module:
+  id: outcome_feedback
+  display_name: Outcome feedback
+  version: 1.0.0
+  description: Private, authenticated user reports about workflow results.
+  owner: app
+  visibility: private
+  handler: backend.handler:OutcomeFeedbackHandler
+  user_data_scope: true
+permissions: []
+actions:
+  - id: record_workflow_feedback
+    description: Copy a session-owned feedback receipt from an authenticated workflow tool.
+    handler_method: record_workflow_feedback
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [ui_event_id, outcome_id]
+      properties:
+        ui_event_id: {type: string, minLength: 1, maxLength: 256}
+        outcome_id: {type: string, minLength: 1, maxLength: 256}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [success, feedback_id, duplicate]
+      properties:
+        success: {type: boolean}
+        feedback_id: {type: string}
+        duplicate: {type: boolean}
+    permissions: []
+    emits: []
+  - id: list_my_feedback
+    description: Read the caller's own recorded feedback.
+    handler_method: list_my_feedback
+    input_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        limit: {type: integer, minimum: 1, maximum: 100}
+    output_schema:
+      type: object
+      required: [records]
+      properties:
+        records: {type: array, items: {type: object}}
+    permissions: []
+    emits: []
+capabilities:
+  - capability_id: outcome_feedback.record
+    kind: action
+    target: record_workflow_feedback
+    title: Record outcome feedback
+    permissions: []

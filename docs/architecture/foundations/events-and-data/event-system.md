@@ -51,6 +51,14 @@ Native AG2 user handoffs can also pause without emitting a dedicated
 to mark that the next composer message should resume the workflow. This is a
 composer-turn pause signal, not a second workflow UI renderer lane.
 
+Workflow agents project the start of each actual AG2 model call through
+`chat.select_speaker`, using the generic label `Assistant`. The workflow activity
+middleware runs after token preflight and prompt projection; it emits no prompt,
+private agent identity, estimated percentage, or lifecycle transition. Existing
+reply, interactive UI, pause, and terminal events clear the transient indicator.
+Reading persisted history does not emit model activity, and unavailable UI
+delivery does not prevent execution or suppress cancellation.
+
 ## Layer Responsibilities
 
 ### Runtime App
@@ -117,6 +125,57 @@ Current implementation:
   `app.services.adapters.*` class for provider or hosted-product integration
   mechanics while keeping durable facts and public actions module-owned.
 
+`ctx.emit(...)` returns an `EventDispatchOutcome` when the runtime bus is wired.
+Its listener entries identify synchronous callback success, a returned
+`success: false`, or a raised exception. The platform router's listener result
+is a `ModuleEventDeliveryOutcome` with payload-free results for each declared
+reaction; arbitrary callback return values are not exposed to the producer.
+A handler, service adapter, or capability returning `False` or a mapping with
+`success: false` is a failed reaction;
+an exception from a capability callback also becomes a failed reaction;
+the same failure is recorded in the reaction audit and does not leave an
+in-memory idempotency key blocking a later retry. The durable reaction ledger
+still enforces its lease, delay, and attempt budget. Existing emitters that
+ignore the return keep best-effort behavior, and a module action whose write
+already committed is not changed to a failed action by downstream delivery.
+
+Code that must acknowledge one specific downstream effect checks
+`required_module_reaction(receipt, module_id=..., reaction_id=...)` from
+`mozaiksai.core.runtime.composition.module_event_router`. The handler must
+return `ModuleReactionEffectAck(effect_id=...)` only after confirming its
+module-owned durable record, and the reaction must complete in the durable
+idempotency store. A plain `None`, `True`, or `success: true` return means the
+handler was invoked, not that an effect was confirmed. Notification, service
+adapter, and capability targets do not supply this module-owned effect ACK.
+The helper returns `missing`
+when no listener or matching reaction reported a result, and `skipped` or
+`failed` for an attempted reaction that did not report delivery. `completed`
+means the exact scoped event/reaction idempotency identity was previously
+completed; the stored effect reference is returned on replay. Its audit
+still says `skipped` and records the completed reason. An active lease, retry
+delay, dead letter, permission denial, or nonmatching condition is never
+accepted as `completed`. Without a durable ledger `required.success` remains
+false even if the handler returned an effect ACK. An event
+rejected before dispatch still returns `ModuleEventRejection` through
+`ctx.emit`; the helper treats that as failed. `required.success` requires an
+`ok` or `completed` status, a durable completion, and the explicit effect
+reference. That reference is a module claim, not independent proof of its
+business state. Producers must verify the canonical consumer record for
+high-consequence actions and keep their own outbox and recovery boundary.
+They must persist and reuse the original `event_id` on replay by calling
+`ctx.emit(event_type, payload, event_id=outbox_event_id)`. A new event ID
+cannot inherit another event's completion evidence. The outbox must also keep
+the payload immutable for that ID; the reaction ledger keys by event identity
+and does not compare replay payloads.
+
+For a declared notification reaction, `ok` requires the notification store to
+accept the record. A store exception or explicit failure produces a failed,
+retryable reaction receipt and no `notification.created` signal. An implicit
+notification rule has no reaction receipt and cannot bypass a skipped declared
+notification reaction. `platform.reaction.*_dispatched` and notification UI
+signals are secondary publications: a publisher exception is logged but does
+not change the adapter or stored notification's delivery outcome.
+
 ### Module Event/Reaction Contract
 
 - `contracts/events.yaml` declares the event types a module may emit.
@@ -128,6 +187,45 @@ Current implementation:
   events; it is not a reaction-routing file.
 - `contracts/subscriptions.yaml` is not supported. Runtime rejects it so
   modules have one reaction-routing source of truth.
+
+Platform notification records retain the workspace ID from their module event
+provenance. Every notification HTTP query uses the app ID loaded by the host;
+token and optional request app IDs must match it. The routes require a
+matching host-verified membership before showing or changing first-party
+workspace support alerts, including messages linked to support requests.
+Hosts without a notification resolver also require a token-bound workspace.
+Older support alerts without a workspace owner stay hidden.
+Every alert with a tenant or workspace owner, including direct-user and
+empty-audience alerts, requires a matching host-verified owner scope; revoking
+that membership hides it. Personal direct and app-wide alerts with neither
+owner retain their existing audience visibility. A token without a workspace
+binding sees only ownerless notifications unless the host registers
+`notification_scope_resolver`. That read-only hook receives the authenticated
+principal and host-loaded app ID and must return exactly one current
+membership with matching app and user IDs, tenant and workspace IDs, and
+membership roles and permissions. The inbox uses its result on count, list,
+read, mark-all-read, and clear-all routes. An absent, ambiguous, revoked, or
+malformed membership supplies no owned scope or broad-audience grants. A
+token-wide role or permission is never an inbox grant. Without the hook, a
+host-verified token-bound membership can still expose direct owned alerts,
+but cannot grant role or permission alerts.
+The token's OIDC `tid` may identify the identity-provider directory rather
+than the app's tenant, so the host must derive the app tenant from its current
+membership record.
+Alerts that also name the caller directly remain visible only when each
+present owner matches the host-verified scope. Broad-audience alerts with no
+owner or malformed ownership stay hidden, even when they also name the caller
+directly. Hosted customer alerts and app-wide announcements need trusted
+recipient IDs or a separately reviewed generic audience contract.
+New notifications omit absent tenant/workspace owners and skip creation when
+an explicitly supplied owner has an invalid type or conflicts across nested
+and top-level event fields. Older records with present
+null or malformed owners remain hidden.
+Notification rules declaring `audience.user_id_field` create no record when
+the field name is invalid or the event lacks a nonempty string recipient or
+a list of nonempty string recipients; an unresolved direct target cannot
+become app-wide. A list-valued recipient field must be in a structured event
+`payload`; flat event projections carry scalar fields only.
 
 ### Reaction target reference
 
@@ -181,6 +279,13 @@ reactions:
 - Use `target.kind: handler` with `target.handler_method`.
 - `target.handler_method` names a method on this module's `backend/handler.py` class.
 - The event payload is unpacked as keyword arguments into the handler method.
+- Canonical envelopes pass their nested `payload` object. Flat events
+  pass their top-level fields. A declared event payload schema is checked
+  before dispatch. New event producers should emit canonical envelopes.
+- `is_router_reaction_context(...)` can check that a handler received the
+  selected router reaction. It does not authenticate the event producer;
+  consumers changing financial or other sensitive state must verify their
+  canonical server-owned records.
 - The receiving method must be declared as an action in its `module.yaml` or be
   a documented reaction handler on the handler class.
 - Handler targets are for deterministic module-to-module reactions. For

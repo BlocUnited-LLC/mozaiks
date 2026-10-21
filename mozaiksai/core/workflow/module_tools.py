@@ -71,6 +71,17 @@ def _live_session(transport: Any, *, app_id: str, chat_id: str, user_id: str) ->
     return connection, websocket, principal
 
 
+async def session_permissions(principal: WebSocketUser) -> list[str]:
+    """Module permissions a live session's socket principal dispatches with."""
+    if principal.has_local_development_access:
+        # The development path-user binding supplies identity only. Resolve
+        # local permissions from the configured adapter, as HTTP local mode does.
+        return list((await get_auth_adapter().validate_token("")).scopes)
+    # Token users carry their token's scopes; anonymous visitors carry only the
+    # visitor scopes they were minted with.
+    return list(principal.scopes)
+
+
 def _principal_scope(principal: WebSocketUser) -> tuple[Any, ...]:
     return (
         principal.user_id, principal.app_id, principal.chat_id,
@@ -125,12 +136,7 @@ async def _prepare_live_dispatch(
     # missing entry has no loaded contract and must never imply public access.
     if action not in module_surfaces or module_surfaces[action] not in {None, "public", "public_readonly"}:
         raise PermissionError("workflow_module_action_unavailable")
-    if is_auth_enabled():
-        permissions = list(principal.scopes)
-    else:
-        # The no-auth path-user binding supplies identity only. Resolve local
-        # permissions from the configured adapter, as HTTP local mode does.
-        permissions = list((await get_auth_adapter().validate_token("")).scopes)
+    permissions = await session_permissions(principal)
 
     scope = await get_platform_hooks().call_module_scope(
         principal=principal, module_name=module, action_name=action,

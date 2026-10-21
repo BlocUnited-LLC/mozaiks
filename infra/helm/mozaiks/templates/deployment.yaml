@@ -40,7 +40,7 @@ spec:
             {{- toYaml .Values.securityContext | nindent 12 }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: ["mozaiks", "serve", ".", "--host", "{{ .Values.host.name }}", "--port", "{{ .Values.service.targetPort }}"]
+          command: ["mozaiks", "serve", ".", "--host", "{{ .Values.host.name }}", "--listen", "0.0.0.0", "--port", "{{ .Values.service.targetPort }}"]
           ports:
             - name: http
               containerPort: {{ .Values.service.targetPort }}

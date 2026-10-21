@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -190,23 +191,31 @@ def build_app_overview_summary(
         },
     }
     if app_record:
-        lifecycle_state = str(app_record.get("lifecycle_state") or "draft")
-        record_app_id = str(app_record.get("app_id") or app_id)
+        record = build_app_list_entry(app_record)
+        lifecycle_state = record["status"]
+        record_app_id = record["app_id"] or app_id
+        same_workspace = record_app_id == app_id
+        workspace_identity = summary["app"] if same_workspace else {}
         summary["studio"] = {
             **summary["studio"],
             "route": f"/apps/{record_app_id}/overview",
         }
         summary["app"] = {
-            **summary["app"],
+            **record,
             "id": record_app_id,
-            "name": app_record.get("name") or summary["app"]["name"],
-            "description": _optional_text(app_record.get("description"), summary["app"].get("description")),
-            "build_registry_id": app_record.get("build_registry_id"),
+            "name": app_record.get("name") or workspace_identity.get("name"),
+            "description": _optional_text(app_record.get("description"), workspace_identity.get("description")),
+            "tagline": _optional_text(app_record.get("tagline"), workspace_identity.get("tagline")),
+            "value_proposition": _optional_text(
+                app_record.get("value_proposition"), workspace_identity.get("value_proposition"),
+            ),
+            "preset": app_record.get("preset") or workspace_identity.get("preset") or "unknown",
             "lifecycle_state": lifecycle_state,
-            "lifecycle_label": APP_LIFECYCLE_LABELS.get(lifecycle_state, lifecycle_state.title()),
-            "created_at": app_record.get("created_at"),
-            "updated_at": app_record.get("updated_at"),
         }
+        if not same_workspace:
+            # The loaded workspace supplies Studio's build capabilities, not
+            # the identity of a different registered target app.
+            summary["theme"] = {**summary["theme"], "tagline": None, "logo_alt": None}
         summary["home"] = {
             **summary["home"],
             "next_step": _recommend_lifecycle_next_step(lifecycle_state),
@@ -309,8 +318,11 @@ def build_app_list_entry(app_record: dict[str, Any]) -> dict[str, Any]:
     lifecycle_state = str(app_record.get("lifecycle_state") or "draft")
     app_id = str(app_record.get("app_id") or "")
     chat_app_id = str(app_record.get("chat_app_id") or "").strip()
-    active_chat_id = str(app_record.get("active_chat_id") or "").strip()
-    active_workflow_id = str(app_record.get("active_workflow_id") or "ValueEngine").strip() or "ValueEngine"
+    current_build_run = app_record.get("current_build_run") or {}
+    active_chat_id = str(current_build_run.get("active_chat_id") or app_record.get("active_chat_id") or "").strip()
+    active_workflow_id = str(
+        current_build_run.get("active_workflow_id") or app_record.get("active_workflow_id") or ""
+    ).strip()
     chat_scope = chat_app_id or app_id
     resume_query = {
         "workflow": active_workflow_id,
@@ -320,17 +332,21 @@ def build_app_list_entry(app_record: dict[str, Any]) -> dict[str, Any]:
     }
     destination = (
         f"/chat?{urlencode(resume_query)}"
-        if lifecycle_state in APP_BUILD_CONTINUE_STATES and active_chat_id
+        if lifecycle_state in APP_BUILD_CONTINUE_STATES and active_chat_id and active_workflow_id
         else (
-            f"/apps/{app_id}/build"
+            f"/apps/{app_id}/building"
             if lifecycle_state in APP_BUILD_CONTINUE_STATES
             else f"/apps/{app_id}/overview"
         )
     )
+    if lifecycle_state == "review" and app_id and current_build_run.get("artifact_version_id"):
+        destination = f"/apps/{app_id}/activity"
     return {
         "build_registry_id": str(app_record.get("build_registry_id") or ""),
         "app_id": app_id,
-        "name": app_record.get("name") or app_id,
+        "name": app_record.get("name"),
+        "name_status": app_record.get("name_status"),
+        "name_source": app_record.get("name_source"),
         "description": app_record.get("description") or _recommend_lifecycle_next_step(lifecycle_state),
         "status": lifecycle_state,
         "lifecycle_label": APP_LIFECYCLE_LABELS.get(lifecycle_state, lifecycle_state.title()),
@@ -338,7 +354,8 @@ def build_app_list_entry(app_record: dict[str, Any]) -> dict[str, Any]:
         "created_at": app_record.get("created_at"),
         "updated_at": app_record.get("updated_at"),
         "active_chat_id": active_chat_id or None,
-        "active_workflow_id": active_workflow_id if active_chat_id else None,
+        "active_workflow_id": active_workflow_id or None,
+        "current_build_run": deepcopy(current_build_run),
         "created_label": _format_studio_timestamp_label(app_record.get("updated_at"), fallback="Just created"),
         "destination": destination,
     }
@@ -381,6 +398,25 @@ def _build_connector_summary(connectors: list[dict[str, Any]]) -> dict[str, int]
     return summary
 
 
+def _resolved_auth_mode() -> tuple[bool, str | None]:
+    """Whether authentication is on, and its provider, as the runtime resolves them.
+
+    Display only. It reads the runtime's single auth resolution rather than
+    parsing AUTH_ENABLED again, so an auto-detected provider shows as on and
+    implicit demo mode shows as off. An invalid configuration shows as off:
+    the host refuses to start with it and reports why.
+    """
+    from mozaiksai.core.auth.adapters.base import AuthError
+    from mozaiksai.core.auth.adapters.registry import resolve_auth_config
+    from mozaiksai.core.environment import EnvironmentConfigError
+
+    try:
+        config = resolve_auth_config()
+    except (AuthError, EnvironmentConfigError):
+        return False, None
+    return config.enabled, config.provider if config.enabled else None
+
+
 async def build_integrations_summary(*, app_id: str | None = None) -> dict:
     def _mask(value: str, show: int = 6) -> str:
         if len(value) <= show:
@@ -405,8 +441,7 @@ async def build_integrations_summary(*, app_id: str | None = None) -> dict:
     internal_key = os.getenv("INTERNAL_API_KEY", "")
     backend_url = os.getenv("MOZAIKS_BACKEND_URL", "")
 
-    auth_enabled = os.getenv("AUTH_ENABLED", "false").lower() in ("1", "true", "yes", "on")
-    auth_provider = os.getenv("AUTH_PROVIDER", "")
+    auth_enabled, auth_provider = _resolved_auth_mode()
     keycloak_url = os.getenv("KEYCLOAK_URL", "")
     keycloak_realm = os.getenv("KEYCLOAK_REALM", "")
     keycloak_client_id = os.getenv("KEYCLOAK_CLIENT_ID", "")

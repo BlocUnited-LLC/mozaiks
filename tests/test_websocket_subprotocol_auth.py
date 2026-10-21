@@ -533,7 +533,7 @@ assert.equal(currentCloses, 1);
             "chat-ui/src/adapters/api.js",
             "chat-ui/src/runtimeBridge.js",
             "chat-ui/src/adapters/websocketAuth.js",
-            "factory_app/workflows/AppGenerator/ui/useSandbox.js",
+            "factory_app/workflows/_shared/ui/app_preview/useSandbox.js",
         ]
         for relative in surfaces:
             source = (ROOT / relative).read_text(encoding="utf-8")
@@ -542,7 +542,7 @@ assert.equal(currentCloses, 1);
 
     def test_studio_sandbox_import_resolves_through_the_chat_ui_alias(self):
         """`@mozaiks/chat-ui` aliases to chat-ui/src (web_shell/vite.config.js)."""
-        source = (ROOT / "factory_app/workflows/AppGenerator/ui/useSandbox.js").read_text(encoding="utf-8")
+        source = (ROOT / "factory_app/workflows/_shared/ui/app_preview/useSandbox.js").read_text(encoding="utf-8")
         assert "from '@mozaiks/chat-ui/adapters/websocketAuth.js'" in source
         assert (ROOT / "chat-ui/src/adapters/websocketAuth.js").is_file()
         assert "'@mozaiks/chat-ui': chatUiSrcRoot" in (

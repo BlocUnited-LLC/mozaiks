@@ -1,5 +1,5 @@
 {
-  "appName": "MozaiksFactory",
+  "appName": "Mozaiks Studio",
   "appId": "mozaiks-factory",
   "startup": {
     "landing_spot": "/apps"

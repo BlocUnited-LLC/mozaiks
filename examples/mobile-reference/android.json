@@ -1,0 +1,9 @@
+{
+  "schema_version": "mozaiks.android_delivery.v1",
+  "package_id": "org.mozaiks.examples.commonground",
+  "display_name": "Common Ground",
+  "version_name": "0.1.0",
+  "version_code": 1,
+  "backend_origin": "https://runtime.example.invalid",
+  "build_type": "debug"
+}

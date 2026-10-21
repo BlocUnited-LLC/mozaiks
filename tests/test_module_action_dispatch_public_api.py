@@ -1,6 +1,11 @@
 from __future__ import annotations
 
 import importlib
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -17,6 +22,8 @@ from mozaiksai.core.runtime.composition import (
     PlatformHookRegistry,
     dispatch_module_action,
 )
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture(autouse=True)
@@ -326,3 +333,117 @@ async def test_dispatch_module_action_preserves_supplied_authority_exactly(monke
     # The facade passes the caller's authority through unchanged — same object,
     # no rebuilt kind/reason/actor/permissions.
     assert policy_inputs[0].authority is supplied
+
+
+def _orders_request() -> ModuleActionDispatchRequest:
+    return ModuleActionDispatchRequest(
+        module="orders",
+        action="restricted",
+        scope=ModuleDispatchScope(app_id="app-1", user_id="user-1"),
+        authority=ModuleDispatchAuthority(
+            kind="app_internal",
+            permission_mode="enforce",
+            reason="app-local dispatch",
+            actor_id="user-1",
+            permissions=("orders.read",),
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_app_less_dispatch_uses_the_platform_host_the_process_composed(monkeypatch) -> None:
+    composed_platform_host = SimpleNamespace(app=_app_with_executor())
+    monkeypatch.setitem(sys.modules, "mozaiksai.hosts.platform", composed_platform_host)
+
+    result = await dispatch_module_action(_orders_request())
+
+    assert result.success is True
+    assert result.data["app_id"] == "app-1"
+
+
+_RUNTIME_ONLY_HOST_PROBE = """
+import asyncio, json, sys
+
+from fastapi.testclient import TestClient
+
+import mozaiksai.hosts.runtime as runtime
+from mozaiksai.core.runtime.composition import (
+    ModuleActionDispatchRequest,
+    ModuleDispatchAuthority,
+    ModuleDispatchScope,
+    dispatch_module_action,
+)
+
+
+async def _no_dependencies():
+    return None
+
+
+runtime._runtime_startup = _no_dependencies
+runtime._runtime_shutdown = _no_dependencies
+request = ModuleActionDispatchRequest(
+    module="orders",
+    action="restricted",
+    scope=ModuleDispatchScope(app_id="app-1", user_id="user-1"),
+    authority=ModuleDispatchAuthority(
+        kind="app_internal",
+        permission_mode="enforce",
+        reason="app-local dispatch",
+        actor_id="user-1",
+        permissions=("orders.read",),
+    ),
+)
+errors = []
+with TestClient(runtime.app) as client:
+    live = client.get("/api/health/live").status_code
+    for _ in range(2):
+        try:
+            asyncio.run(dispatch_module_action(request))
+        except Exception as exc:
+            errors.append(f"{type(exc).__name__}: {exc}")
+    still_live = client.get("/api/health/live").status_code
+print(json.dumps({
+    "live": [live, still_live],
+    "errors": errors,
+    "platform_host_imported": "mozaiksai.hosts.platform" in sys.modules,
+    "platform_state_on_runtime_app": hasattr(runtime.app.state, "executor_registry"),
+}))
+"""
+
+
+def test_app_less_dispatch_on_a_serving_runtime_only_host_reports_no_module_runtime() -> None:
+    """A dispatch must never compose the platform host onto a serving app.
+
+    The platform host registers middleware on the runtime app at import, which
+    a started app refuses. Importing it from the dispatch facade made every
+    app-less dispatch on a serving runtime-only host fail with "Cannot add
+    middleware after an application has started", after each attempt had
+    already written platform state onto the live app. Runs in a fresh
+    interpreter because the hosts share one process-wide app object.
+    """
+    env = {
+        name: value
+        for name, value in os.environ.items()
+        if name not in {"PLATFORM_PATH", "MOZAIKS_WORKFLOWS_PATH", "MOZAIKS_APP_WORKSPACE_PATH"}
+        and not name.startswith("COV_CORE_")
+    }
+    env.setdefault("ENV", "test")
+    env.setdefault("AUTH_ENABLED", "false")
+    completed = subprocess.run(
+        [sys.executable, "-c", _RUNTIME_ONLY_HOST_PROBE],
+        cwd=str(_REPO_ROOT),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=False,
+    )
+    assert completed.returncode == 0, f"{completed.stdout}\n{completed.stderr}"
+
+    report = json.loads(completed.stdout.strip().splitlines()[-1])
+    assert report == {
+        "live": [200, 200],
+        "errors": ["RuntimeError: Module runtime is not available."] * 2,
+        "platform_host_imported": False,
+        "platform_state_on_runtime_app": False,
+    }

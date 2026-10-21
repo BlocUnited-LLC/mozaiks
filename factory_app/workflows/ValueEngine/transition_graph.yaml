@@ -4,9 +4,35 @@ transition_rules:
 # The runtime compiler prioritizes conditional rules before unconditional
 # after_turn fallbacks while preserving YAML order within each group.
 - source_agent: ValueInterviewAgent
+  target_agent: ResearchAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: interview_outcome
+  condition_value: ready
+  transition_target: AgentTarget
+
+- source_agent: ValueInterviewAgent
   target_agent: user
-  transition_type: after_turn
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: interview_outcome
+  condition_value: needs_input
   transition_target: RevertToUserTarget
+
+- source_agent: ValueInterviewAgent
+  target_agent: terminate
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: interview_outcome
+  condition_value: blocked
+  transition_target: TerminateTarget
+  termination_reason: workflow_failed
+
+- source_agent: ValueInterviewAgent
+  target_agent: terminate
+  transition_type: after_turn
+  transition_target: TerminateTarget
+  termination_reason: workflow_failed
 
 - source_agent: ResearchAgent
   target_agent: GapAnalysisAgent
@@ -29,12 +55,12 @@ transition_rules:
   termination_reason: workflow_complete
 
 - source_agent: GapAnalysisAgent
-  target_agent: user
+  target_agent: GapAnalysisAgent
   transition_type: condition
   condition_type: context_equals
   condition_key: concept_review_outcome
   condition_value: changes_requested
-  transition_target: RevertToUserTarget
+  transition_target: AgentTarget
 
 - source_agent: GapAnalysisAgent
   target_agent: terminate
@@ -54,21 +80,12 @@ transition_rules:
   transition_target: TerminateTarget
   termination_reason: workflow_failed
 
-# Conditional rules win over same-source after_turn fallbacks when their context matches.
-- source_agent: ValueInterviewAgent
-  target_agent: ResearchAgent
-  transition_type: condition
-  condition_type: context_equals
-  condition_key: interview_complete
-  condition_value: true
-  transition_target: AgentTarget
-
 - source_agent: user
   target_agent: ValueInterviewAgent
   transition_type: condition
   condition_type: context_equals
-  condition_key: interview_complete
-  condition_value: false
+  condition_key: interview_outcome
+  condition_value: needs_input
   transition_target: AgentTarget
 
 - source_agent: user
@@ -78,3 +95,9 @@ transition_rules:
   condition_key: concept_presented
   condition_value: true
   transition_target: AgentTarget
+
+- source_agent: user
+  target_agent: terminate
+  transition_type: after_turn
+  transition_target: TerminateTarget
+  termination_reason: workflow_failed

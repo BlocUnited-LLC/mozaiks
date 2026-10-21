@@ -38,8 +38,8 @@ actions:
         scope_type:
           type: string
           enum: [app, workspace]
-        # scope_id — optional explicit scope id. Defaults to ctx.app_id for app
-        # scope or ctx.workspace_id for workspace scope.
+        # scope_id — optional explicit scope id. Must match the loaded app or
+        # the caller's verified workspace (local development may select one).
         scope_id:
           type: string
         # subject_app_id — the app this conversation is about. Support threads

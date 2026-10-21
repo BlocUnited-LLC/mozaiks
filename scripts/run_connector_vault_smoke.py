@@ -103,7 +103,7 @@ async def _run_secret_mode(
         store=store,
     )
     status = await get_connector(scope=ConnectorStore.SCOPE_APP, scope_id=scope_id, service=service, store=store)
-    secret_result = await get_secret(scope_id=scope_id, service=service)
+    secret_result = await get_secret(scope=ConnectorStore.SCOPE_APP, scope_id=scope_id, service=service)
     deleted = await delete_connector(scope=ConnectorStore.SCOPE_APP, scope_id=scope_id, service=service, store=store)
     return {
         "mode": "secret",

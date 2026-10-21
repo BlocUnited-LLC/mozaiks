@@ -17,6 +17,9 @@ frontend:
   discovery_url_env: VITE_OIDC_DISCOVERY_URL
   redirect_uri_env: VITE_OIDC_REDIRECT_URI
   scope_env: VITE_OIDC_SCOPE
+  android:
+    client_id_env: MOZAIKS_ANDROID_OIDC_CLIENT_ID
+    redirect_uri_env: MOZAIKS_ANDROID_OIDC_REDIRECT_URI
   default_scopes:
     - openid
     - profile

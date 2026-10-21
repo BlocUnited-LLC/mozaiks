@@ -272,3 +272,81 @@ def test_approved_nonempty_partition_dispatches_instead_of_recording_empty_bundl
     result = asyncio.run(review.mermaid_sequence_diagram(context_variables=ctx))
     assert result["outcome"] == "approved"
     persist.assert_not_awaited()
+
+
+def review_outcome_spec():
+    tools = yaml.safe_load((Path(__file__).resolve().parents[1] / "factory_app/workflows/AgentGenerator/tools.yaml").read_text(encoding="utf-8"))["tools"]
+    return ToolOutcomeSpec.model_validate(next(tool["outcome"] for tool in tools if tool["function"] == "mermaid_sequence_diagram"))
+
+
+def test_autonomous_empty_partition_persists_truthful_not_required_decision(monkeypatch):
+    ctx = ContextVariablesBridge({**context().data, "coding_participation": "autonomous", "workflow_review_attempts": 0})
+    persist = AsyncMock()
+    ui = AsyncMock(side_effect=AssertionError("No empty-plan approval is needed"))
+    monkeypatch.setattr(export, "_record_context_and_artifacts", persist)
+    monkeypatch.setattr(review, "use_ui_tool", ui)
+    spec = review_outcome_spec()
+    result = asyncio.run(wrap_tool_outcome(review.mermaid_sequence_diagram, spec)(context_variables=ctx))
+    assert result["outcome"] == ctx.get(spec.context_key) == "no_workflows"
+    assert ctx.get(spec.attempts_key) == 1
+    assert ctx.get("workflow_plan_review")["status"] == "not_required"
+    assert ctx.get("workflow_plan_review")["selection_hash"] == review._fingerprint(selection())
+    ui.assert_not_awaited()
+    persist.assert_awaited_once()
+    assert persist.call_args.kwargs["bundle_entries"] == []
+    assert persist.call_args.kwargs["zip_path"] is None
+
+
+@pytest.mark.parametrize("mode", [None, "collaborative", "unknown", "Autonomous", "autonomous "])
+def test_empty_partition_keeps_review_without_exact_autonomous_mode(monkeypatch, mode):
+    ctx = ContextVariablesBridge({**context().data, "coding_participation": mode})
+    persist = AsyncMock()
+    monkeypatch.setattr(export, "_record_context_and_artifacts", persist)
+
+    async def reject(**kwargs):
+        return {"action": "cancel", "approved": False, "review_id": kwargs["payload"]["review_id"]}
+
+    ui = AsyncMock(side_effect=reject)
+    monkeypatch.setattr(review, "use_ui_tool", ui)
+    assert asyncio.run(review.mermaid_sequence_diagram(context_variables=ctx))["outcome"] == "cancelled"
+    ui.assert_awaited_once()
+    persist.assert_not_awaited()
+
+
+def test_autonomous_nonempty_partition_still_requires_review(monkeypatch):
+    ctx = ContextVariablesBridge({**context([workflow()]).data, "coding_participation": "autonomous"})
+    persist = AsyncMock()
+    monkeypatch.setattr(export, "_record_context_and_artifacts", persist)
+
+    async def request_changes(**kwargs):
+        return {"action": "request_changes", "approved": False, "review_id": kwargs["payload"]["review_id"]}
+
+    ui = AsyncMock(side_effect=request_changes)
+    monkeypatch.setattr(review, "use_ui_tool", ui)
+    assert asyncio.run(review.mermaid_sequence_diagram(context_variables=ctx))["outcome"] == "changes_requested"
+    ui.assert_awaited_once()
+    persist.assert_not_awaited()
+
+
+def test_autonomous_empty_partition_remains_blocked_when_design_requires_workflow(monkeypatch):
+    ctx = ContextVariablesBridge({**context().data, "coding_participation": "autonomous",
+                                  "design_surface_map": surface_map("workflow"), "workflow_review_attempts": 0})
+    persist, ui = AsyncMock(), AsyncMock()
+    monkeypatch.setattr(export, "_record_context_and_artifacts", persist)
+    monkeypatch.setattr(review, "use_ui_tool", ui)
+    result = asyncio.run(wrap_tool_outcome(review.mermaid_sequence_diagram, review_outcome_spec())(context_variables=ctx))
+    assert result["outcome"] == "blocked"
+    persist.assert_not_awaited()
+    ui.assert_not_awaited()
+
+
+def test_autonomous_empty_partition_cannot_complete_when_save_fails(monkeypatch):
+    ctx = ContextVariablesBridge({**context().data, "coding_participation": "autonomous", "workflow_review_attempts": 0})
+    persist = AsyncMock(side_effect=RuntimeError("storage unavailable"))
+    ui = AsyncMock(side_effect=AssertionError("No empty-plan approval is needed"))
+    monkeypatch.setattr(export, "_record_context_and_artifacts", persist)
+    monkeypatch.setattr(review, "use_ui_tool", ui)
+    result = asyncio.run(wrap_tool_outcome(review.mermaid_sequence_diagram, review_outcome_spec())(context_variables=ctx))
+    assert result["outcome"] == ctx.get("workflow_review_outcome") == "blocked"
+    persist.assert_awaited_once()
+    ui.assert_not_awaited()

@@ -184,6 +184,8 @@ async def test_local_dispatch_uses_configured_no_auth_permissions(live_runtime, 
     monkeypatch.setattr(module_tools, "get_auth_adapter", NoAuthAdapter)
     live_runtime.principal.scopes = ["access_as_user"]
     live_runtime.principal.provider = "none"
+    # The socket was granted development access (this machine, auth off).
+    live_runtime.principal.auth_provenance = "local_development"
     bridge = _bridge()
     await _wrap_tool_with_context(inspect_generated_app_security, bridge)()
     result = await _wrap_tool_with_context(record_security_findings, bridge)()

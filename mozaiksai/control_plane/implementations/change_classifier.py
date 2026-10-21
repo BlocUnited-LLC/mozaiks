@@ -68,7 +68,7 @@ class LLMChangeClassifier:
         if not control_plane.classifier_enabled():
             raise RuntimeError("Refinement classifier is disabled in app/config/refinement_policy.yaml")
 
-        llm_config = control_plane.resolve_capability_llm_config("classifier") or {}
+        llm_config = control_plane.resolve_capability_llm_config("classifier")
 
         user_prompt = self._build_user_prompt(
             build_family=build_family,

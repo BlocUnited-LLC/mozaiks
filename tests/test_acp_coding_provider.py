@@ -32,14 +32,16 @@ from mozaiksai.control_plane.implementations.acp_coding_provider import (  # noq
 _SCOPED_PATH = "app/ui/pages/Dashboard.jsx"
 _ORIGINAL = "export default function Dashboard() {}\n"
 _PATCHED = "export default function Dashboard() { return 1; }\n"
+_NEW_PATH = "app/ui/pages/New.jsx"
 
 
 def _policy(**acp_overrides: Any):
     def _load() -> ControlPlaneConfig:
         return ControlPlaneConfig(
             enabled=True,
+            llm_profiles={"codegen": {"llm_config": {"model": "test-model"}}},
             coding=ControlPlaneCodingCapabilityConfig.model_validate(
-                {"enabled": True, "providers": {"acp": {"enabled": True, **acp_overrides}}}
+                {"enabled": True, "llm_profile": "codegen", "providers": {"acp": {"enabled": True, **acp_overrides}}}
             ),
         )
 
@@ -80,6 +82,7 @@ class _FakeConfigFactory:
                 "adapter": adapter,
                 "workspace_root": workspace_root,
                 "turn_timeout_seconds": turn_timeout_seconds,
+                "env_source": dict(env_source),
             }
         )
         config = fake_acp_config(
@@ -135,7 +138,7 @@ async def test_happy_path_harvests_modified_file(tmp_path: Path) -> None:
     # CRLF; harvest reports the exact on-disk bytes, which is the contract.
     assert proposal.changed_files[0].content.replace("\r\n", "\n") == _PATCHED
     assert proposal.owned_paths == [_SCOPED_PATH]
-    assert proposal.validation_strategy_hint == "local"
+    assert proposal.validation_strategy_hint == "docker"
     assert proposal.needs_human_review is True
     assert proposal.summary == "Patched the file."
     assert proposal.usage == {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120}
@@ -143,6 +146,139 @@ async def test_happy_path_harvests_modified_file(tmp_path: Path) -> None:
     staging = tmp_path / "acp_staging"
     leftovers = [p for p in staging.rglob("*") if p.is_file()] if staging.exists() else []
     assert leftovers == []
+
+
+@pytest.mark.asyncio
+async def test_host_credentials_are_not_an_implicit_acp_env_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "host-only-test-token")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "host-only-test-token")
+    factory = _FakeConfigFactory(ACPTurn())
+    provider = ACPCodingProvider(
+        config_loader=_policy(), staging_root=tmp_path / "acp_staging",
+        acp_config_factory=factory,
+    )
+
+    assert (await provider.execute(_request())).status == "empty"
+    assert factory.calls[0]["env_source"] == {}
+
+
+@pytest.mark.asyncio
+async def test_exact_create_grant_accepts_only_the_named_new_file(tmp_path: Path) -> None:
+    factory_ref: list = []
+    factory = _FakeConfigFactory(_writing_turn(factory_ref, _NEW_PATH, "export const New = 1;\n"))
+    factory_ref.append(factory)
+    provider = ACPCodingProvider(
+        config_loader=_policy(), staging_root=tmp_path / "create",
+        acp_config_factory=factory, env_source={}, create_paths=[_NEW_PATH],
+    )
+
+    proposal = await provider.execute(_request(files={}))
+
+    assert proposal.status == "completed"
+    assert [(change.path, change.op) for change in proposal.changed_files] == [(_NEW_PATH, "create")]
+    assert proposal.changed_files[0].content is not None
+    assert proposal.changed_files[0].content.replace("\r\n", "\n") == "export const New = 1;\n"
+    assert proposal.owned_paths == [_NEW_PATH]
+
+    rogue_ref: list = []
+    rogue = _FakeConfigFactory(_writing_turn(rogue_ref, "app/ui/pages/Rogue.jsx", "rogue\n"))
+    rogue_ref.append(rogue)
+    rejected = ACPCodingProvider(
+        config_loader=_policy(), staging_root=tmp_path / "rogue",
+        acp_config_factory=rogue, env_source={}, create_paths=[_NEW_PATH],
+    )
+    result = await rejected.execute(_request(files={}))
+    assert result.status == "rejected_scope"
+    assert result.changed_files == []
+
+
+@pytest.mark.asyncio
+async def test_exact_delete_grant_preserves_generated_app_update_only_default(tmp_path: Path) -> None:
+    factory_ref: list = []
+
+    async def _delete() -> None:
+        workspace_root = factory_ref[0].calls[-1]["workspace_root"]
+        (workspace_root / _SCOPED_PATH).unlink()
+
+    factory = _FakeConfigFactory(ACPTurn(on_prompt=_delete))
+    factory_ref.append(factory)
+    granted = ACPCodingProvider(
+        config_loader=_policy(), staging_root=tmp_path / "granted",
+        acp_config_factory=factory, env_source={}, delete_paths=[_SCOPED_PATH],
+    )
+    proposal = await granted.execute(_request())
+    assert proposal.status == "completed"
+    assert [(change.path, change.op, change.content) for change in proposal.changed_files] == [
+        (_SCOPED_PATH, "delete", None),
+    ]
+
+    default = _provider(factory, tmp_path / "default")
+    rejected = await default.execute(_request())
+    assert rejected.status == "rejected_scope"
+    assert rejected.changed_files == []
+
+    other_path = "app/ui/pages/Other.jsx"
+    rogue_ref: list = []
+
+    async def _delete_other() -> None:
+        workspace_root = rogue_ref[0].calls[-1]["workspace_root"]
+        (workspace_root / other_path).unlink()
+
+    rogue = _FakeConfigFactory(ACPTurn(on_prompt=_delete_other))
+    rogue_ref.append(rogue)
+    ungranted = ACPCodingProvider(
+        config_loader=_policy(), staging_root=tmp_path / "ungranted",
+        acp_config_factory=rogue, env_source={}, delete_paths=[_SCOPED_PATH],
+    )
+    result = await ungranted.execute(_request(files={_SCOPED_PATH: _ORIGINAL, other_path: "other\n"}))
+    assert result.status == "rejected_scope"
+    assert result.changed_files == []
+
+
+@pytest.mark.asyncio
+async def test_invalid_operation_grant_fails_before_agent_starts(tmp_path: Path) -> None:
+    factory = _FakeConfigFactory()
+    provider = ACPCodingProvider(
+        config_loader=_policy(), staging_root=tmp_path,
+        acp_config_factory=factory, env_source={}, create_paths=[_SCOPED_PATH],
+    )
+    proposal = await provider.execute(_request())
+    assert proposal.status == "failed"
+    assert factory.calls == []
+
+
+@pytest.mark.asyncio
+async def test_completed_workspace_observer_runs_before_cleanup_only_for_accepted_turn(tmp_path: Path) -> None:
+    factory_ref: list = []
+    factory = _FakeConfigFactory(_writing_turn(factory_ref, _SCOPED_PATH, _PATCHED))
+    factory_ref.append(factory)
+    observed: list[bytes] = []
+    provider = ACPCodingProvider(
+        config_loader=_policy(), staging_root=tmp_path / "accepted",
+        acp_config_factory=factory, env_source={},
+        on_completed_workspace=lambda workspace: observed.append(
+            (workspace.workspace_root / _SCOPED_PATH).read_bytes()
+        ),
+    )
+
+    proposal = await provider.execute(_request())
+
+    assert proposal.status == "completed"
+    assert observed == [proposal.changed_files[0].content.encode("utf-8")]
+    assert not factory.calls[0]["workspace_root"].exists()
+
+    rejected_ref: list = []
+    rejected_factory = _FakeConfigFactory(_writing_turn(rejected_ref, "app/rogue.py", "bad\n"))
+    rejected_ref.append(rejected_factory)
+    rejected = ACPCodingProvider(
+        config_loader=_policy(), staging_root=tmp_path / "rejected",
+        acp_config_factory=rejected_factory, env_source={},
+        on_completed_workspace=lambda workspace: observed.append(b"should not run"),
+    )
+    assert (await rejected.execute(_request())).status == "rejected_scope"
+    assert len(observed) == 1
 
 
 @pytest.mark.asyncio
@@ -211,6 +347,22 @@ async def test_disabled_provider_is_unavailable(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_default_local_acp_is_unavailable_until_isolated(tmp_path: Path) -> None:
+    staging_root = tmp_path / "acp_staging"
+    provider = ACPCodingProvider(
+        config_loader=_policy(),
+        staging_root=staging_root,
+        env_source={"ANTHROPIC_API_KEY": "test-only"},
+    )
+
+    proposal = await provider.execute(_request())
+
+    assert proposal.status == "unavailable"
+    assert "verified OS isolation" in str(proposal.error)
+    assert not staging_root.exists()
+
+
+@pytest.mark.asyncio
 async def test_file_count_over_budget_fails_before_any_execution(tmp_path: Path) -> None:
     factory = _FakeConfigFactory()
     provider = _provider(factory, tmp_path, budget={"max_files": 1})
@@ -264,16 +416,27 @@ async def test_workspace_is_cleaned_up_even_on_rejection(tmp_path: Path) -> None
 # ---------------------------------------------------------------------------
 
 
-def test_build_acp_agent_config_is_hardened(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("adapter", "expected_env", "expected_command"),
+    [
+        ("claude_code", {"ANTHROPIC_API_KEY": "sk-ant-x"}, ["claude-agent-acp"]),
+        ("codex", {"CODEX_API_KEY": "sk-codex-x"}, ["codex-acp"]),
+        ("opencode", None, ["opencode", "acp"]),
+    ],
+)
+def test_build_acp_agent_config_is_hardened(
+    tmp_path: Path, adapter: str, expected_env: dict[str, str] | None, expected_command: list[str]
+) -> None:
     env_source = {
         "ANTHROPIC_API_KEY": "sk-ant-x",
+        "CODEX_API_KEY": "sk-codex-x",
         "OPENAI_API_KEY": "sk-oai-x",
         "MONGO_URI": "mongodb://secret",
         "MOZAIKSPAY_CLIENT_SECRET": "mps_secret",
         "PATH": "/usr/bin",
     }
     config = build_acp_agent_config(
-        adapter="claude_code",
+        adapter=adapter,
         workspace_root=tmp_path,
         turn_timeout_seconds=300,
         env_source=env_source,
@@ -286,9 +449,20 @@ def test_build_acp_agent_config_is_hardened(tmp_path: Path) -> None:
     assert config.expose_tools is False
     assert config.allow_terminal is False
     assert config.turn_timeout == 300.0
-    # env allowlist: provider keys only — never platform secrets or PATH
-    assert config.env == {"ANTHROPIC_API_KEY": "sk-ant-x", "OPENAI_API_KEY": "sk-oai-x"}
-    assert config.command == ["claude-agent-acp"]
+    # Never forward another adapter's credential or platform secrets.
+    assert config.env == expected_env
+    assert config.command == expected_command
+
+
+def test_codex_uses_openai_key_only_when_codex_key_is_absent(tmp_path: Path) -> None:
+    config = build_acp_agent_config(
+        adapter="codex",
+        workspace_root=tmp_path,
+        turn_timeout_seconds=300,
+        env_source={"ANTHROPIC_API_KEY": "sk-ant-x", "OPENAI_API_KEY": "sk-oai-x"},
+    )
+
+    assert config.env == {"OPENAI_API_KEY": "sk-oai-x"}
 
 
 def test_build_acp_agent_config_rejects_unknown_adapter(tmp_path: Path) -> None:
@@ -301,15 +475,78 @@ def test_build_acp_agent_config_rejects_unknown_adapter(tmp_path: Path) -> None:
         )
 
 
-def test_provider_prompt_lists_only_editable_files(tmp_path: Path) -> None:
+def test_provider_prompt_separates_editable_and_read_only_files(tmp_path: Path) -> None:
     from mozaiksai.control_plane.workspace import materialize_coding_workspace
 
-    workspace = materialize_coding_workspace(_request_files(), workspace_root=tmp_path / "ws")
+    workspace = materialize_coding_workspace(
+        _request_files(), workspace_root=tmp_path / "ws",
+        read_only_files={"tests/test_dashboard.py": "def test_dashboard(): pass\n"},
+    )
     prompt = build_provider_prompt(_request(), workspace)
 
     assert _SCOPED_PATH in prompt
+    assert "Read-only inspection files (do not modify or delete):\n- tests/test_dashboard.py" in prompt
     assert "Make the dashboard return 1" in prompt
-    assert "changes anywhere else are discarded" in prompt
+    assert "changes anywhere else are rejected" in prompt
+
+
+@pytest.mark.asyncio
+async def test_provider_can_inspect_read_only_file_without_exporting_it(tmp_path: Path) -> None:
+    inspected: list[str] = []
+    factory_ref: list[_FakeConfigFactory] = []
+
+    async def _inspect_and_write() -> None:
+        config = factory_ref[0].configs[-1]
+        inspected.append((Path(config.cwd) / "tests/test_dashboard.py").read_text(encoding="utf-8"))
+        session = next(iter(config.sessions.values()))
+        await session.bridge.write_text_file(
+            content=_PATCHED, path=_SCOPED_PATH, session_id="fake-session-1",
+        )
+
+    factory = _FakeConfigFactory(ACPTurn(on_prompt=_inspect_and_write))
+    factory_ref.append(factory)
+    proposal = await _provider(factory, tmp_path).execute(_request(
+        read_only_files={"tests/test_dashboard.py": "def test_dashboard(): pass\n"},
+    ))
+
+    assert inspected == ["def test_dashboard(): pass\n"]
+    assert proposal.status == "completed"
+    assert [change.path for change in proposal.changed_files] == [_SCOPED_PATH]
+
+
+@pytest.mark.asyncio
+async def test_provider_rejects_read_only_edit_from_acp_bridge(tmp_path: Path) -> None:
+    factory_ref: list = []
+    factory = _FakeConfigFactory(_writing_turn(
+        factory_ref, "tests/test_dashboard.py", "changed\n",
+    ))
+    factory_ref.append(factory)
+
+    proposal = await _provider(factory, tmp_path).execute(_request(
+        read_only_files={"tests/test_dashboard.py": "original\n"},
+    ))
+
+    assert proposal.status == "rejected_scope"
+    assert "read_only_modified" in (proposal.error or "")
+    assert proposal.changed_files == []
+
+
+@pytest.mark.asyncio
+async def test_provider_budget_counts_inspection_files(tmp_path: Path) -> None:
+    factory = _FakeConfigFactory()
+    proposal = await _provider(factory, tmp_path).execute(_request(read_only_files={
+        f"tests/test_{index}.py": "pass\n" for index in range(3)
+    }))
+
+    assert proposal.status == "budget_exceeded"
+    assert factory.calls == []
+
+
+def test_request_caps_inspection_content_before_provider() -> None:
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="CODING_READ_ONLY_BUDGET"):
+        _request(read_only_files={"tests/test_large.py": "x" * 2_097_153})
 
 
 # ---------------------------------------------------------------------------

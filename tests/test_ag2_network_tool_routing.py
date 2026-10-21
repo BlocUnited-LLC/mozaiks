@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter, defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -13,6 +14,7 @@ from ag2 import Agent
 from ag2.events import BaseEvent, ToolCallEvent, ToolErrorEvent, ToolResultEvent
 from ag2.network import EV_PACKET, TransitionGraph
 from ag2.observers import observer
+from pydantic import BaseModel
 
 from mozaiksai.core.adapters.ag2_network_runner import (
     AG2NetworkRunner,
@@ -156,6 +158,7 @@ async def _agents(
     scenario: _SDKScenario,
     client: httpx.AsyncClient,
     policy: ContextAuthorityPolicy,
+    structured_outputs: Mapping[str, type[BaseModel]] | None = None,
 ) -> dict[str, Agent]:
     from mozaiksai.core import observability
     from mozaiksai.core.workflow import llm_config
@@ -203,7 +206,9 @@ async def _agents(
         return [observer(ToolCallEvent | ToolResultEvent, record)]
 
     monkeypatch.setattr(factory, "workflow_manager", _WorkflowManager())
-    monkeypatch.setattr(factory, "get_structured_outputs_for_workflow", lambda _workflow: {})
+    monkeypatch.setattr(
+        factory, "get_structured_outputs_for_workflow", lambda _workflow: dict(structured_outputs or {}),
+    )
     monkeypatch.setattr(factory, "llm_config_to_ag2_config", convert)
     monkeypatch.setattr(llm_config, "get_llm_config", config)
     monkeypatch.setattr(structured, "get_llm_for_workflow", config)
@@ -231,6 +236,7 @@ async def _run(
     rules: list[dict[str, Any]],
     *,
     allowed: bool = True,
+    structured_outputs: Mapping[str, type[BaseModel]] | None = None,
 ) -> AG2NetworkRunnerResult:
     policy = _policy(rules, allowed=allowed)
     graph = compile_transition_rules_to_graph(
@@ -241,7 +247,7 @@ async def _run(
     )
     assert TransitionGraph.loads(json.dumps(graph.to_dict())).to_dict() == graph.to_dict()
     async with httpx.AsyncClient(transport=httpx.MockTransport(scenario.respond)) as client:
-        agents = await _agents(monkeypatch, scenario, client, policy)
+        agents = await _agents(monkeypatch, scenario, client, policy, structured_outputs)
         result = await AG2NetworkRunner().run(
             AG2NetworkRunnerRequest(
                 workflow_name=_WORKFLOW,
@@ -254,6 +260,7 @@ async def _run(
                 context_variables={_KEY: False},
                 context_authority_policy=policy,
                 idle_timeout_seconds=3.0,
+                structured_registry=dict(structured_outputs or {}),
             )
         )
     return result
@@ -430,3 +437,49 @@ async def test_tool_handoff_pauses_and_resumes_without_duplicate_execution(
         assert not _packets(continued, "AgentB")
     finally:
         await paused.live_run.close()
+
+
+class _IntakeSummary(BaseModel):
+    intake_complete: bool
+
+
+@pytest.mark.asyncio
+async def test_channel_turn_sends_the_agents_construction_time_response_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AG2-WP-007: the schema the factory gives the agent reaches the model on channel turns.
+
+    AG2's default notify handler asks without a ``response_schema``, so the turn
+    uses the one the agent was constructed with.
+    """
+    scenario = _SDKScenario(tool_names=(), final_text='{"intake_complete": true}')
+    result = await _run(monkeypatch, scenario, _rules(), structured_outputs={"AgentA": _IntakeSummary})
+
+    assert result.status is RunStatus.COMPLETED, result.error
+    [request] = scenario.request_bodies
+    assert request["response_format"]["type"] == "json_schema"
+    assert request["response_format"]["json_schema"]["name"] == "_IntakeSummary"
+    assert request["response_format"]["json_schema"]["strict"] is True
+    assert request["response_format"]["json_schema"]["schema"]["required"] == ["intake_complete"]
+    assert result.structured_outputs == [
+        {"agent": "AgentA", "model_name": "_IntakeSummary", "structured_data": {"intake_complete": True}},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_channel_turn_reply_off_schema_gets_no_ag2_correction_and_fails_the_run_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AG2-WP-007 trigger: AG2 packs the raw reply body, so no schema-correction turn runs.
+
+    When AG2 starts correcting channel turns, AgentA is asked a second time and
+    this test fails; that is the signal to revisit the watchpoint.
+    """
+    scenario = _SDKScenario(tool_names=(), final_text="Intake finished.")
+    result = await _run(monkeypatch, scenario, _rules(), structured_outputs={"AgentA": _IntakeSummary})
+
+    assert scenario.requests == {"AgentA": 1}
+    assert [packet["body"] for packet in _packets(result, "AgentA")] == ["Intake finished."]
+    assert result.status is RunStatus.FAILED
+    assert result.error == "structured output validation failed for AgentA: structured output was not a JSON object"
+    assert result.structured_outputs == []

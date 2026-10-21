@@ -13,8 +13,11 @@
 #   "request_received"  — refinement request accepted before classification
 #   "classified"        — classifier produced a change_class and route
 #   "routed"            — harness decision resolved to a workflow_sequence
-#   "completed"         — refinement flow finished successfully
-#   "failed"            — refinement flow raised an unrecoverable error
+#   "completed"         — coding output passed its configured validation
+#   "planned"           — output remains unverified, including skipped checks
+#   "ineligible"        — request cannot execute through the coding worker
+#   "failed"            — execution, validation, or persistence failed
+#   "cancelled"         — coding execution was cancelled
 # ==============================================================================
 from __future__ import annotations
 
@@ -62,13 +65,13 @@ async def record_refinement_event(
 
     Args:
         event_kind:        One of "request_received", "classified", "routed",
-                           "completed", "failed".
+                           "completed", "planned", "ineligible", "failed", "cancelled".
         request_id:        Refinement request correlation ID.
         app_id:            App being refined.
         intent:            Original user intent text (request_received).
         change_class:      Classifier output e.g. "patch", "feature" (classified).
         workflow_sequence: Selected workflow sequence ID (routed/completed).
-        outcome:           Final outcome: "ok", "error", "skipped" (completed/failed).
+        outcome:           Stage outcome: "ok", "error", "skipped", or "cancelled".
         error:             Error description when outcome is "error" (failed).
         duration_ms:       Wall-clock time for this event stage.
         metadata:          Additional structured context (agent name, token counts…).

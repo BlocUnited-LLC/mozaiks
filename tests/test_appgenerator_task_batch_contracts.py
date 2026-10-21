@@ -367,11 +367,7 @@ def test_appgenerator_interview_has_an_explicit_human_reply_route() -> None:
         if rule["target_agent"] not in {"AppValidationAgent", "AssemblyAgent"}
     ]
 
-    # A user who asked to be brought a finished app is routed past the
-    # interview entirely. This has to be a routing rule: interview_complete
-    # only flips on the literal token NEXT from InterviewAgent, so a prompt
-    # instruction to skip is a request the model can decline - and in live
-    # runs it did, returning scope questions instead.
+    # The explicit autonomous choice bypasses the interview in the graph.
     assert initial_routes[0]["target_agent"] == "AppPlanAgent"
     assert initial_routes[0]["condition_key"] == "coding_participation"
     assert initial_routes[0]["condition_value"] == "autonomous"
@@ -379,8 +375,7 @@ def test_appgenerator_interview_has_an_explicit_human_reply_route() -> None:
     # A guided user still reaches the interview, and it still has a human
     # reply route, which is what this test exists to protect.
     assert initial_routes[1]["target_agent"] == "InterviewAgent"
-    assert initial_routes[1]["condition_key"] == "interview_complete"
-    assert initial_routes[1]["condition_value"] is False
+    assert initial_routes[1]["context_expression"] == "${interview_outcome} != 'ready'"
     assert initial_routes[2]["termination_reason"] == "workflow_failed"
     interview_rules = [rule for rule in rules if rule["source_agent"] == "InterviewAgent"]
     assert [rule["target_agent"] for rule in interview_rules[:2]] == [
@@ -388,8 +383,11 @@ def test_appgenerator_interview_has_an_explicit_human_reply_route() -> None:
         "user",
     ]
     assert interview_rules[0]["condition_type"] == "context_equals"
-    assert interview_rules[0]["condition_key"] == "interview_complete"
-    assert interview_rules[0]["condition_value"] is True
+    assert interview_rules[0]["condition_key"] == "interview_outcome"
+    assert interview_rules[0]["condition_value"] == "ready"
+    assert interview_rules[1]["condition_value"] == "needs_input"
+    assert interview_rules[2]["condition_value"] == "blocked"
+    assert all(rule["termination_reason"] == "workflow_failed" for rule in interview_rules[2:])
 
 
 @pytest.mark.asyncio

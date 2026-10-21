@@ -56,6 +56,30 @@ follow-up work; this patch makes no completeness claim.
 Compatibility provenance and upgrade checks:
 [AG2-WP-014](../workflows/ag2-update-watchpoints.md#auxiliary-usage-provenance).
 
+### Isolated Repository ACP Receipts
+
+The repository ACP Docker transport can return a bounded token measurement
+without returning model text or provider events. A trusted host worker may use
+`parse_isolated_acp_usage` and `record_isolated_acp_usage` after the turn, with
+the original `CodingWorkerRequest` carrying a host-owned
+`AuxiliaryUsageContext`, a stable durable attempt ID, and an optional model
+identifier from trusted configuration. The helper checks the usage context
+against the request owner and build target. The container supplies token
+counts only; it never supplies app, user, tenant, workspace, build, model, or
+event identity. Replaying the same attempt writes the same `event_id` through the
+existing `RuntimeUsageLedger` and does not add a duplicate row.
+
+These are **advisory container-reported measurements**. They bypass
+`chat.usage_delta` and configured token-wallet ingest, so the container cannot
+debit a wallet or become billing authority. Missing, zero, malformed, and
+over-limit measurements produce no receipt. A provider error without a
+returned ACP response remains unmeasured. Ledger write failures return false
+so the trusted worker can retry the same attempt without blocking the patch.
+The helper does not run a pre-call
+token guard or reserve funds; the trusted live worker must own admission and
+settlement before enabling paid model calls. The offline executor has no live
+provider or hosted caller yet.
+
 The OSS runtime maintains two independent stores:
 
 | Store | What it records | Key |

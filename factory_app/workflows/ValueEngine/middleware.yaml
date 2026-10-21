@@ -4,7 +4,7 @@ prompt_middleware:
   function: inject_brownfield_adoption_context
 # The interview cannot recommend what it does not know exists. This puts the
 # real buildable catalog (packs, archetypes, domain priors, revenue models) in
-# scope on every turn so proposals name things the generator actually builds.
+# scope on every turn so proposals describe behavior the generator can build.
 - agent: ValueInterviewAgent
   filename: tools/hook_buildable_menu_context.py
   function: inject_buildable_menu_context

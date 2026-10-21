@@ -1,0 +1,16 @@
+# Offline ACP isolation proof. Build the preview base image first; this image
+# adds only the pinned ACP client and a synthetic subprocess agent.
+ARG BASE_IMAGE=mozaiks-sandbox:local
+FROM ${BASE_IMAGE}
+
+USER root
+RUN python -m pip install --no-cache-dir --break-system-packages \
+    "ag2[acp]==1.1.2" "agent-client-protocol==0.12.1"
+COPY mozaiksai/ /opt/mozaiks/mozaiksai/
+COPY factory_app/ /opt/mozaiks/factory_app/
+COPY infra/docker/acp_proof/ /opt/mozaiks/acp_proof/
+
+ENV PYTHONPATH=/opt/mozaiks
+USER 10001:10001
+WORKDIR /workspace
+ENTRYPOINT ["python", "/opt/mozaiks/acp_proof/worker.py"]

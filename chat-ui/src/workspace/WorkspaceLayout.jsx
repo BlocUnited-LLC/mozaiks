@@ -192,7 +192,7 @@ function WorkspaceSidebar({
                 const active = isItemActive(item, location)
                 return (
                   <Link
-                    key={item.id}
+                    key={item.path}
                     to={itemHref(item)}
                     aria-current={active ? 'page' : undefined}
                     onClick={onNavigate || undefined}

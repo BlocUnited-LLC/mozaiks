@@ -231,6 +231,8 @@ def _validate_bundle_implementations(files: dict[str, str], tools: dict[str, Any
         if function is None:
             errors.append(f"{filename} does not define declared tool function {function_name!r}")
             continue
+        if (binding.get("ui") or {}).get("workflow_primitive") == "outcome_feedback":
+            errors.extend(_validate_feedback_implementation(filename, module, function, binding))
         body = [node for node in function.body if not (
             isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)
             and isinstance(node.value.value, str)
@@ -242,6 +244,33 @@ def _validate_bundle_implementations(files: dict[str, str], tools: dict[str, Any
             ) for node in body
         ):
             errors.append(f"{filename} declares unfinished tool function {function_name!r}")
+    return errors
+
+
+def _validate_feedback_implementation(filename, module, function, binding) -> list[str]:
+    """Reject generated ratings fabricated by a model or an unscoped receiver."""
+    errors: list[str] = []
+    arguments = [*function.args.posonlyargs, *function.args.args, *function.args.kwonlyargs]
+    if [arg.arg for arg in arguments] != ["context_variables"] or function.args.vararg or function.args.kwarg:
+        errors.append(f"{filename}: outcome feedback tools accept only injected context_variables, never rating or identity arguments")
+    imports = {
+        alias.asname or alias.name: f"{node.module}.{alias.name}"
+        for node in module.body if isinstance(node, ast.ImportFrom)
+        for alias in node.names
+    }
+    calls = [node for node in ast.walk(function) if isinstance(node, ast.Call)]
+    called = {
+        imports.get(node.func.id) for node in calls if isinstance(node.func, ast.Name)
+    }
+    for required in (
+        "mozaiksai.core.workflow.outcome_feedback.collect_workflow_feedback",
+        "mozaiksai.core.workflow.module_tools.dispatch_workflow_module_action",
+    ):
+        if required not in called:
+            errors.append(f"{filename}: outcome feedback must call {required}")
+    ui = binding.get("ui") or {}
+    if ui.get("component") != "OutcomeFeedback" or ui.get("realization") != "shipped_component":
+        errors.append(f"{filename}: outcome feedback must reuse the shipped OutcomeFeedback component")
     return errors
 
 

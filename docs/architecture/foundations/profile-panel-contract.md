@@ -12,6 +12,14 @@ governance, build runs, and revenue participation belong in Admin Portal or
 Studio / Workspace Shell. Do not use profile panels or tabs to continue app
 builds or manage app/workspace operations.
 
+The shared profile UI renders the host's authenticated profile and declared
+sections. A failed profile or section request displays a retryable error; it
+must never substitute a demo identity or role. Changing the signed-in account
+or viewed username clears the previous identity, sections, and edit draft.
+Display name and bio edits persist through `PUT /api/me`. Images are displayed
+from server-provided profile URLs; the shared page does not offer local-only
+uploads that appear to be saved to the account.
+
 ## Design Goals
 
 | Goal | How it is met |
@@ -205,7 +213,7 @@ declared in `profile.yaml` — they are platform guarantees.
 
 | Section | Order | Editable |
 |---------|-------|---------|
-| Identity (avatar, display_name, email, roles) | 0 | display_name, avatar_url |
+| Identity (avatar, display_name, bio, email, roles) | 0 | display_name, bio |
 | *Account-scoped module panels and tabs inject here (order 1-998)* | — | — |
 | App Preferences | 999 | settings dict |
 

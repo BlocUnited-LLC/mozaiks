@@ -28,6 +28,25 @@ The App Dashboard answers app-specific questions: what is being built, what is
 branded, what is launched, who can use it, and what workflows or support threads
 need attention.
 
+### Directory Composition
+
+`AppsDirectory`, exported through `@mozaiks/factory-app-ui`, accepts an already
+authorized app list and optional `navigationForApp` callbacks. Hosts with a
+paged data source can supply:
+
+- `pagination`: `{ page, hasNext, hasPrevious, onNext, onPrevious, onRetry }`;
+- controlled `searchValue` / `onSearchChange` and `activeFilter` /
+  `onFilterChange` pairs;
+- `loading` and `error` for the current request.
+
+With pagination, the host owns querying, cursor state, search and filtering.
+The directory renders the supplied page without filtering its rows again,
+labels counts as belonging to that page, and provides Previous/Next and retry
+controls. Loading preserves the search controls and disables page navigation.
+Without pagination, the existing local portfolio search, filters and summary
+remain available. The shared component does not define hosted app ownership,
+provider calls, or the host's paging API.
+
 ## Canonical File
 
 Apps declare dashboard structure in:

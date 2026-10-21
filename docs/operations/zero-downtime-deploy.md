@@ -42,9 +42,14 @@ docker pull mozaiks:<new-version>
 # Stop the instance gracefully (SIGTERM → drain → SIGKILL after 30s)
 docker stop --time 30 mozaiks_instance_1
 
-# Start with new version
-docker run -d --name mozaiks_instance_1 mozaiks:<new-version>
+# Start with new version, with the instance's own settings
+# (MONGO_URI, model keys and its authentication configuration)
+docker run -d --name mozaiks_instance_1 --env-file instance.env mozaiks:<new-version>
 ```
+
+The new instance needs the same authentication settings as the one it
+replaces: with no authentication configuration at all, the host refuses to
+start and the readiness check below never passes.
 
 ### Step 3: Health check the new instance
 

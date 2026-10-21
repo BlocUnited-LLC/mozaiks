@@ -278,6 +278,26 @@ class TestModuleRuntimeExtensionContract:
     def test_startup_service_without_prefix_valid(self):
         ext = ModuleRuntimeExtension(kind="startup_service", entrypoint="backend.worker:Worker")
         assert ext.prefix is None
+        assert ext.profile is None
+
+    def test_startup_service_worker_profile_valid(self):
+        ext = ModuleRuntimeExtension(
+            kind="startup_service", entrypoint="backend.worker:Worker", profile="worker"
+        )
+        assert ext.profile == "worker"
+
+    @pytest.mark.parametrize("profile", ["host", "operator", "", 1, ["worker"]])
+    def test_unknown_or_malformed_profile_raises(self, profile):
+        with pytest.raises(ValidationError, match="profile"):
+            ModuleRuntimeExtension(
+                kind="startup_service", entrypoint="backend.worker:Worker", profile=profile
+            )
+
+    def test_api_router_cannot_declare_worker_profile(self):
+        with pytest.raises(ValidationError, match="api_router.*profile"):
+            ModuleRuntimeExtension(
+                kind="api_router", entrypoint="backend.router:get_router", profile="worker"
+            )
 
     def test_startup_service_with_prefix_raises(self):
         with pytest.raises(ValidationError, match="prefix"):

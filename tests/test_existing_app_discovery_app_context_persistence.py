@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from factory_app.workflows.ExistingAppDiscovery.tools import app_context_mapping
 from mozaiksai.core.app_context.models import (
     AdoptionPath,
@@ -72,23 +74,49 @@ class _FakeArtifactStore:
         return artifact
 
 
-def _decomposition_evidence() -> dict:
+def _decomposition_evidence(adoption_level="gradual_modernization") -> dict:
     return {
+        "adoption_level": adoption_level,
+        "migration_complexity": "moderate",
+        "source_app_summary": "Internal work-order operations app.",
+        "proposed_workflows": [],
+        "persistence_migration": "Review work-order storage before changes.",
+        "security_migration": "Preserve OIDC and tenant boundaries.",
+        "risks": [],
+        "unresolved_questions": [],
         "proposed_modules": [
             {
                 "module_id": "work_order_manager",
+                "purpose": "Own reviewed work-order operations.",
+                "notes": None,
+                "source_capabilities": ["work_order_triage"],
                 "source_files": ["src/work_orders/service.py"],
+                "proposed_actions": [],
+                "emitted_events": [],
+                "reactions": [],
+                "persistence_entities": ["work_orders"],
+                "external_connectors": [],
+                "priority": "p1_critical",
             }
         ],
         "proposed_pages": [
             {
                 "page_id": "work_order_queue",
+                "label": "Work orders",
+                "page_type": "admin_panel",
+                "purpose": "Review the work-order queue.",
+                "module_bindings": ["work_order_manager"],
+                "priority": "p1_critical",
                 "route": "/work-orders",
             }
         ],
         "proposed_adapters": [
             {
                 "provider_id": "email_gateway",
+                "provider_type": "email",
+                "ownership": "app_specific_adapter",
+                "source_files": [],
+                "priority": "p3_useful",
                 "secret_requirements": ["EMAIL_API_KEY"],
             }
         ],
@@ -157,6 +185,7 @@ def _discovery_output() -> dict:
         ],
         "agent_augmentation_plan": {
             "adoption_level": "gradual_modernization",
+            "repo_access_willingness": "now",
             "migration_complexity": "moderate",
             "adoption_rationale": "Move selected operations into reviewed owned modules over time.",
             "storage_migration_required": True,
@@ -229,6 +258,12 @@ def _context() -> dict:
             "warnings": [],
             "metadata": {},
         },
+        "identity_complete": True,
+        "capabilities_complete": True,
+        "plan_complete": True,
+        "adoption_level": "gradual_modernization",
+        "agent_augmentation_plan": _discovery_output()["agent_augmentation_plan"],
+        "decomposition_complete": True,
         "module_decomposition_plan": json.dumps(_decomposition_evidence()),
         "structured_output": _discovery_output(),
     }
@@ -317,6 +352,7 @@ def test_save_step_persists_draft_artifact_versions_and_preserves_existing_conte
     result = asyncio.run(save_module.save_existing_app_artifacts(context_variables=context))
 
     assert result["success"] is True
+    assert result["outcome"] == "saved"
     assert context["existing_product_spec"]["app_name"] == "Operations Studio"
     assert context["capability_specs"][0]["capability_id"] == "work_order_triage"
     assert context["agent_augmentation_plan"]["adoption_level"] == "gradual_modernization"
@@ -361,6 +397,109 @@ def test_save_step_persists_draft_artifact_versions_and_preserves_existing_conte
         assert "EMAIL_API_KEY" not in json.dumps(call["commit_metadata"], default=str)
         assert "native_migration" not in json.dumps(call["commit_metadata"], default=str)
         assert "module_decomposition_plan" not in json.dumps(call["commit_metadata"], default=str)
+
+
+@pytest.mark.parametrize("failure", ["missing_output", "mapping", "persistence", "partial_persistence", "missing_id", "registration", "not_current"])
+def test_failed_save_does_not_publish_new_current_context(monkeypatch, failure) -> None:
+    context = _context()
+    context.update({
+        "brownfield_app_context_artifact_version_refs": {"application_inventory": "prior-draft"},
+        "current_app_context_version_id": "prior-context",
+        "app_context_version_artifact_version_id": "prior-version",
+        "app_context_version": {"context_version_id": "prior-context"},
+    })
+    store = _FakeArtifactStore()
+    monkeypatch.setattr(save_module, "get_artifact_store", lambda: store)
+
+    async def unexpected_emit(**kwargs):
+        pytest.fail("Failed persistence must not emit a saved overview")
+
+    monkeypatch.setattr(save_module, "emit_app_intelligence_enriched_overview_card", unexpected_emit)
+    if failure == "missing_output":
+        context.pop("structured_output")
+    elif failure == "mapping":
+        def invalid_mapping(*args, **kwargs):
+            raise ValueError("Synthetic invalid mapping")
+        monkeypatch.setattr(save_module, "build_existing_app_context_artifacts", invalid_mapping)
+    elif failure in {"persistence", "partial_persistence", "missing_id"}:
+        create = store.create_build_record
+
+        async def broken_create(**kwargs):
+            if failure == "partial_persistence" and len(store.calls) < 2:
+                return await create(**kwargs)
+            if failure == "missing_id":
+                return {}
+            raise OSError("Synthetic storage failure")
+        monkeypatch.setattr(store, "create_build_record", broken_create)
+    elif failure == "not_current":
+        async def reject_current(**kwargs):
+            return None
+        monkeypatch.setattr(store, "accept_build_record", reject_current)
+    else:
+        async def failed_registration(*args, **kwargs):
+            raise OSError("Synthetic registration failure")
+        monkeypatch.setattr(save_module, "register_app_context_version", failed_registration)
+
+    result = asyncio.run(save_module.save_existing_app_artifacts(context_variables=context))
+
+    assert result["success"] is False
+    assert result["outcome"] == "failed"
+    assert context["brownfield_app_context_artifact_version_refs"] == {}
+    assert context["current_app_context_version_id"] == "prior-context"
+    assert context["app_context_version_artifact_version_id"] == "prior-version"
+    assert context["app_context_version"] == {"context_version_id": "prior-context"}
+    assert all(record.lifecycle_status is ArtifactLifecycleStatus.DRAFT for record in store.versions.values())
+
+
+def test_assembly_preserves_recorded_scope_without_comparing_descriptive_text(monkeypatch) -> None:
+    context = _context()
+    approved = context["agent_augmentation_plan"]
+    context["structured_output"]["agent_augmentation_plan"].update(
+        adoption_rationale="A new phrasing from assembly.",
+        ai_accessible_capabilities=["unapproved_admin_write"],
+        initial_workflows=["UnapprovedExpansion"],
+        ecosystem_bindings=["unapproved_payments"],
+    )
+    store = _FakeArtifactStore()
+    monkeypatch.setattr(save_module, "get_artifact_store", lambda: store)
+
+    async def emit(**kwargs):
+        pass
+
+    monkeypatch.setattr(save_module, "emit_app_intelligence_enriched_overview_card", emit)
+    result = asyncio.run(save_module.save_existing_app_artifacts(context_variables=context))
+    assert result["success"] is True
+    assert context["agent_augmentation_plan"] == approved
+    assert context["existing_app_discovery_artifact"]["agent_augmentation_plan"] == approved
+    assert "UnapprovedExpansion" not in json.dumps([call["commit_metadata"] for call in store.calls])
+
+
+@pytest.mark.parametrize("preserve_approved", [False, True])
+def test_final_inventory_must_resolve_approved_capabilities_before_save(monkeypatch, preserve_approved):
+    context = _context()
+    context["agent_augmentation_plan"]["ai_accessible_capabilities"] = ["work_order_triage"]
+    context["current_app_context_version_id"] = "previous-context"
+    original_capability = context["structured_output"]["capability_specs"][0]
+    extra = {**original_capability, "capability_id": "billing_admin", "label": "Billing administration"}
+    context["structured_output"]["capability_specs"] = [original_capability, extra] if preserve_approved else [extra]
+    store = _FakeArtifactStore()
+    monkeypatch.setattr(save_module, "get_artifact_store", lambda: store)
+
+    async def emit(**kwargs):
+        assert preserve_approved, "Rejected inventory must not emit a saved overview"
+
+    monkeypatch.setattr(save_module, "emit_app_intelligence_enriched_overview_card", emit)
+    result = asyncio.run(save_module.save_existing_app_artifacts(context_variables=context))
+    assert result["success"] is preserve_approved
+    if preserve_approved:
+        assert context["agent_augmentation_plan"]["ai_accessible_capabilities"] == ["work_order_triage"]
+        assert {item["capability_id"] for item in context["capability_specs"]} == {"work_order_triage", "billing_admin"}
+    else:
+        assert "missing confirmed AI-accessible capabilities: work_order_triage" in result["error"]
+        assert result["outcome"] == "failed"
+        assert store.calls == []
+        assert context["current_app_context_version_id"] == "previous-context"
+        assert context["brownfield_app_context_artifact_version_refs"] == {}
 
 
 def test_existing_app_context_persistence_has_no_graph_database_or_sequence_dependency() -> None:

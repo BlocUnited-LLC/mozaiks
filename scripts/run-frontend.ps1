@@ -5,7 +5,10 @@
 
 param(
   [int]$Port = 3000,
-  [string]$BindHost = "0.0.0.0",
+  # Loopback by default. -BindHost 0.0.0.0 listens on all interfaces; the dev
+  # server then marks other machines' requests (X-Forwarded-For), and with
+  # authentication off the backend refuses them unless AUTH_ANON_ACCESS=open.
+  [string]$BindHost = "127.0.0.1",
   [string]$PlatformPath = "",
   [string]$AppWorkspacePath = "",
   [switch]$ForceStop

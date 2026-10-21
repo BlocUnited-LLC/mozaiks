@@ -18,7 +18,17 @@ module-owned commercial/service boundary.
 2. Module actions declare an `entitlement_gate`.
 3. At startup, Mozaiks loads `app/config/subscriptions.yaml`.
 4. The runtime checks the current assignment store before dispatching gated
-   module actions.
+   module actions. A call whose capability no active plan grants returns
+   HTTP 402 with `detail.error_code: ENTITLEMENT_REQUIRED`.
+
+Among HTTP calls, gates are skipped only for requests with development access. With
+`AUTH_ENABLED=false`, the value `.env.example` and `mozaiks init` ship, HTTP
+calls to `/api/modules/...` from this machine run as trusted local development
+and skip permission and entitlement checks, so a gated action succeeds for
+you. Callers without development access, such as anonymous visitors of a
+public app (`AUTH_ANON_ACCESS=public`), are checked. Visitors share one
+identity, so a plan assigned to it applies to every visitor. Turn
+authentication on to test gating per user.
 
 Payment providers, invoices, taxes, payouts, and settlement stay behind app or
 managed-capability integrations. The subscriptions file defines the app's
@@ -82,6 +92,7 @@ products:
     default_plan_id: starter
     assignment_store:
       data_alias: billing.platform_subscriptions
+      user_id_field: user_id
     plans:
       - plan_id: starter
         label: Starter
@@ -100,6 +111,7 @@ products:
     default_plan_id: included
     assignment_store:
       data_alias: billing.ai_subscriptions
+      user_id_field: user_id
     token_wallets:
       - wallet_id: ai_tokens
         label: AI token balance
@@ -156,6 +168,18 @@ pricing_catalog:
       add_on_ids: [hero_weekly]
 ```
 
+`assignment_store` decides who holds a plan:
+
+- `data_alias` is a data-contract alias, not a collection name. Declare it in
+  `app/data/contract.json`, for example
+  `"aliases": [{"alias": "billing.platform_subscriptions", "collection": "billing_platform_subscriptions"}]`,
+  and write assignment records to that collection. If the alias is not
+  declared, the adapter fails closed and denies every gated action, including
+  capabilities the default plan grants.
+- `user_id_field` is unset by default, which makes an assignment app- or
+  tenant-wide: one record entitles every user in that scope. Set
+  `user_id_field: user_id` for per-user plans; generated apps always do.
+
 ## What Goes Here
 
 | Concern | Field |
@@ -164,24 +188,57 @@ pricing_catalog:
 | Plans | `products[].plans[]` |
 | Capability gates | `products[].plans[].capabilities[]` |
 | Current assignment store | `products[].assignment_store` |
-| Usage caps | `products[].plans[].usage_limits[]` |
+| Usage limits (display only; not enforced yet) | `products[].plans[].usage_limits[]` |
 | Included token grants | `products[].plans[].token_allowances[]` |
 | Token wallet metadata | `products[].token_wallets[]` |
 | Top-up products | `products[].top_up_products[]` |
 | Non-token add-ons | `add_on_products[]` |
 | Pricing-page grouping | `pricing_catalog.groups[]` or `products[].pricing_catalog_group` |
 
+Token wallets may be declared at the root for a shared balance or inside one
+product. Repeated declarations of the same wallet ID must agree on the wallet
+definition. The token summary reports each wallet's governing `product_id`,
+`plan_id`, `plan_resolution`, `allowance_source`, and `grant_authority`; its
+top-level `plan_id` remains the primary product plan for older clients. A wallet
+referenced by more than one product has no single governing plan, so its plan
+allowances are marked ambiguous and automatic grants are skipped.
+An active assignment without a stored allowance snapshot is marked
+`missing_snapshot`; the summary does not substitute a catalog amount.
+Explicit grants into a shared wallet must identify their product. The ledger
+keeps the existing idempotency key for single-owner wallets and includes the
+product in the key for shared wallets. In v2, each usage meter may have only one
+auto-debit wallet. `chat.usage_delta` and its token preflight use the `ai_tokens`
+meter; wallets for other meters are not charged by chat usage.
+
+The runtime may materialize default-plan token allowances. For an active v2
+subscription assignment, billing fulfillment owns token credits from the stored
+allowance snapshot, including renewals. `POST /api/me/tokens/sync` and LLM
+usage preflight show the paid plan but do not mint another paid credit. The
+wallet balance and ledger entries show what has actually been granted. V1
+single-product allowance behavior is unchanged.
+
+Token wallet `depleted_balance` routes must be app-local paths beginning with a
+single `/`. Protocol-relative paths such as `//provider.example/billing` are
+invalid because browsers treat them as external destinations.
+
 ## Module Gate Example
 
 ```yaml
 actions:
-  - action_id: summarize_tasks
+  - id: summarize_tasks
+    description: Summarize the caller's tasks.
     handler_method: summarize_tasks
     entitlement_gate: feature.module.tasks.summarize_tasks
 ```
 
 The factory derives this gate from the selected `module.tasks.summarize_tasks`
 feature. Any active plan that grants it allows the action to run.
+
+Every action entry in `module.yaml` requires `id`, `description`, and
+`handler_method`; `entitlement_gate` is optional. The module loader rejects
+unknown action fields, so an entry keyed `action_id` fails validation. See
+[Minimum `module.yaml`](../adding-modules/01-overview.md#minimum-moduleyaml)
+for the full action shape.
 
 ## Custom Money Rules
 

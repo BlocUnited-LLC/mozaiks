@@ -1772,10 +1772,8 @@ class RefinementTriggerRouteResolver:
         parent_theme_config = request.extra.get("parent_theme_config")
         if isinstance(parent_theme_config, dict) and parent_theme_config:
             context_seed["parent_theme_config"] = parent_theme_config
-        # Signal a stronger reasoning model for architecture-level sequences.
-        # This is advisory context plumbing — the runner reads llm_profile and
-        # selects the declared model when a consumer is wired up. The classifier
-        # and coding worker configs are not affected.
+        # Carry an advisory architecture profile name for conceptual routes.
+        # Workflow runners do not currently resolve it to a model.
         if impact_set.workflow_sequence in ("conceptual_replan", "full_rebuild"):
             context_seed["llm_profile"] = "architecture"
         # Inject conceptual-replan context when the sequence is a concept-level

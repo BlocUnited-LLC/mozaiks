@@ -33,7 +33,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def _bundle(*, pricing: bool, subscription: bool = False) -> dict:
     pages = [{
-        "name": "Reports", "route": "/reports", "layout": "full-width",
+        "name": "Reports", "ui_surface": "declarative_page", "route": "/reports", "layout": "full-width",
         "intent": "Review reports", "sections": [{
             "id": "reports", "primitive": "DataTable", "intent": "Read reports",
         }],
@@ -45,7 +45,7 @@ def _bundle(*, pricing: bool, subscription: bool = False) -> dict:
     }]
     if pricing:
         pages.append({
-            "name": "Subscriptions", "route": "/pricing", "layout": "full-width",
+            "name": "Subscriptions", "ui_surface": "declarative_page", "route": "/pricing", "layout": "full-width",
             "intent": "Compare plans and manage subscription", "sections": [{
                 "id": "plans", "primitive": "SurfaceCard",
                 "intent": "Compare available plans and select a subscription",
@@ -58,7 +58,7 @@ def _bundle(*, pricing: bool, subscription: bool = False) -> dict:
     if subscription:
         for name in ("Billing", "Usage"):
             pages.append({
-                "name": name, "route": f"/{name.lower()}", "layout": "full-width",
+                "name": name, "ui_surface": "declarative_page", "route": f"/{name.lower()}", "layout": "full-width",
                 "intent": f"Manage {name.lower()}", "sections": [{
                     "id": name.lower(), "primitive": "SurfaceCard", "intent": f"Show {name.lower()} status",
                 }],
@@ -413,9 +413,9 @@ def _monetized_plan(context: ContextVariablesBridge, *, subscription: bool = Fal
     plan["revenue_model"] = "subscription"
     plan["monetization_provider"] = "mozaiks_pay"
     plan["pages"].append({
-        "name": "Subscriptions", "route": "/pricing", "purpose": "Compare subscription plans",
+        "name": "Subscriptions", "ui_surface": "declarative_page", "route": "/pricing", "purpose": "Compare subscription plans",
         "primary_entities": [], "primary_actions": [], "ui_layout": "full-width",
-        "ui_surface": "declarative_page", "page_type_hint": "landing", "sections_hint": [],
+        "page_type_hint": "landing", "sections_hint": [],
     })
     if not subscription:
         next(task for task in plan["build_tasks"] if task["task_type"] == "page_bundle")["owned_paths"].append(
@@ -442,9 +442,9 @@ def _monetized_plan(context: ContextVariablesBridge, *, subscription: bool = Fal
         # from its templates; pack-owned outputs are never model work, so no task builds them.
         for name in ("Billing", "Usage"):
             plan["pages"].append({
-                "name": name, "route": f"/{name.lower()}", "purpose": f"Manage {name.lower()}",
+                "name": name, "ui_surface": "declarative_page", "route": f"/{name.lower()}", "purpose": f"Manage {name.lower()}",
                 "primary_entities": [], "primary_actions": [], "ui_layout": "full-width",
-                "ui_surface": "declarative_page", "page_type_hint": "analytics_dashboard", "sections_hint": [],
+                "page_type_hint": "analytics_dashboard", "sections_hint": [],
             })
     context.set("subscription_contract", {
         "contract_required": True,

@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # Mozaiks OSS Repo Host Image
 # ============================
 # Builds the installable `mozaiks` package and serves the first-party
@@ -10,7 +9,10 @@
 # docs/architecture/deployment/oss-infra-and-generated-app-deployment.md.
 #
 # Build: docker build -t mozaiks-repo-host:latest -f infra/docker/Dockerfile .
-# Run:   docker run -p 8000:8000 --env-file .env mozaiks-repo-host:latest
+# Run locally: docker run -p 127.0.0.1:8000:8000 --env-file .env -e AUTH_ANON_ACCESS=open mozaiks-repo-host:latest
+# (With AUTH_ENABLED=false the host serves development access only to its own
+# machine; the browser reaches a container through Docker's gateway, so a
+# container needs AUTH_ANON_ACCESS=open, published on 127.0.0.1 only.)
 
 # ------------------------------------------------------------------------------
 # Stage 1: Builder — install the mozaiks package into a venv
@@ -86,6 +88,8 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 EXPOSE 8000
 
 # Serves the repo-local factory_app/ workspace through the Studio host by
-# default. Override at `docker run` time, e.g.:
-#   docker run ... mozaiks-repo-host:latest mozaiks serve . --host platform
-CMD ["mozaiks", "serve", ".", "--host", "studio"]
+# default. `mozaiks serve` binds 127.0.0.1 unless told otherwise; a container
+# must listen on all interfaces for its published port to reach it. Override at
+# `docker run` time, e.g.:
+#   docker run ... mozaiks-repo-host:latest mozaiks serve . --host platform --listen 0.0.0.0
+CMD ["mozaiks", "serve", ".", "--host", "studio", "--listen", "0.0.0.0"]

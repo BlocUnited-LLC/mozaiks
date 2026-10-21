@@ -321,6 +321,11 @@ design work implemented by ServiceAgent. Canonical create assigns the generated
 record id, which is the declared `<entity>_id` field, else `id`, else Mongo
 `_id`; clients never supply it. `search_by` is the canonical get lookup and may
 be a user-entered natural key, which is never overwritten with a generated id.
+Canonical get resolves `search_by`, then a declared `id`, then Mongo `_id`.
+List/get responses retain Mongo `_id` as a string when it supplies either the
+generated record identity or the get lookup, alongside the declared fields.
+Runtime smoke uses the stored lookup value for both the owner's successful get
+and another user's denied get, while updates/deletes use the generated record id.
 Create stamps declared `created_at`/`updated_at` fields; update and delete
 address records by the generated id and answer 404 outside the caller's scope. The
 closed create/update request schemas carry only writable scalar fields: ids,
@@ -339,6 +344,24 @@ with permissions, subscription gates or internal surfaces receives no open
 canonical writes or reads: ConfigMiddlewareAgent declares each of them
 explicitly with its access policy and ServiceAgent implements them. Ordinary
 canonical implementations remain code-owned.
+
+After this bounded CRUD normalization, every remaining action permission on a
+`generated_module` or model-owned module contract must resolve against the admitted `config/auth.yaml`
+`frontend.default_scopes`. Before that file is materialized, an authenticated
+plan or owner-scoped data contract uses the scopes in the canonical
+`webapp_builder` auth template. Module permission catalogues and plan roles are
+not grant mappings, and a candidate cannot approve its own restriction by
+emitting an auth edit alongside it. An unresolved restriction rejects task
+admission, repair persistence, and final materialization with the module path,
+action, unknown permissions, and declared choices. The closure never strips
+custom restrictions: repair must preserve the approved access intent, exposure, and
+subscription gate, or revise the authorization contract before retrying.
+Build tasks cannot own `config/auth.yaml`; auth-only task output is rejected at
+admission, and assembly resolves scopes from the pre-merge admitted bundle.
+Requested scopes do not prove that an identity provider issues them; runtime
+dispatch still denies a caller lacking any required permission. This Factory
+policy covers generated modules; selected pack templates and host-owned
+permission resolvers retain their separate owners.
 
 `backend/schemas.py` is rendered from the contract for every module owning
 collections: record and input `TypedDict`s, field constants, a

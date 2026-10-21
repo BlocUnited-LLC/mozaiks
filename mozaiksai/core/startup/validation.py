@@ -26,6 +26,11 @@ Checks performed:
                          declarations, and any no-auth operation outside a
                          recognized local/development/test environment abort
                          startup regardless of ``MOZAIKS_STARTUP_CHECKS``.
+  Anonymous access     — mode-INDEPENDENT hard gate: no auth configuration at
+                         all (implicit demo mode) aborts startup; an explicit
+                         disable logs its AUTH_ANON_ACCESS posture and warns
+                         for ``open``. :func:`require_management_auth_posture`
+                         additionally refuses ``public`` on management hosts.
   INTERNAL_API_KEY     — warns when the key is absent or shorter than 32 chars
                          (defense-in-depth; not a hard gate).
   RATE_LIMIT_ENABLED   — warns when ``ENV=production`` and ``RATE_LIMIT_ENABLED=false``.
@@ -229,11 +234,17 @@ async def run_startup_checks(*, _mongo_client: Any = None) -> list[str]:
     # demo mode) outside a recognized local/development/test environment.
     # MOZAIKS_STARTUP_CHECKS mode does not weaken this.
     from mozaiksai.core.auth.adapters.base import AuthError
-    from mozaiksai.core.auth.adapters.registry import validate_auth_provider_configuration
+    from mozaiksai.core.auth.adapters.registry import (
+        resolve_auth_config,
+        unused_provider_settings,
+        validate_auth_provider_configuration,
+    )
+    from mozaiksai.core.auth.anonymous_access import NOT_CONFIGURED_MESSAGE, OPEN_ACCESS_WARNING
 
     try:
         env_name = deployment_environment()
         resolved_provider = validate_auth_provider_configuration()
+        auth_config = resolve_auth_config()
         logger.info(
             "STARTUP_CHECK_OK: auth provider resolved (%s, env=%s)",
             resolved_provider,
@@ -248,6 +259,40 @@ async def run_startup_checks(*, _mongo_client: Any = None) -> list[str]:
             extra={"check": "auth_provider_resolution", "mode": mode},
         )
         raise StartupConfigError(msg) from auth_exc
+
+    # ── Anonymous access (fail closed, mode-independent) ─────────────────────
+    # With no auth configuration at all the host would not know whom to
+    # serve, so it does not start. An explicit disable states it through
+    # AUTH_ANON_ACCESS (local by default).
+    if not auth_config.enabled and not auth_config.explicitly_disabled:
+        logger.error(
+            "STARTUP_CHECK_FAILED: %s",
+            NOT_CONFIGURED_MESSAGE,
+            extra={"check": "anonymous_access", "mode": mode},
+        )
+        raise StartupConfigError(NOT_CONFIGURED_MESSAGE)
+    if auth_config.anonymous_access is not None:
+        logger.info(
+            "STARTUP_CHECK_OK: authentication is off; anonymous access is %s",
+            auth_config.anonymous_access,
+            extra={"check": "anonymous_access", "mode": mode},
+        )
+    if auth_config.anonymous_access == "open":
+        logger.warning(
+            "STARTUP_CHECK_WARNING: %s",
+            OPEN_ACCESS_WARNING,
+            extra={"check": "anonymous_access", "mode": mode},
+        )
+    ignored_provider_settings = unused_provider_settings(auth_config)
+    if auth_config.explicitly_disabled and ignored_provider_settings:
+        logger.warning(
+            "STARTUP_CHECK_WARNING: authentication is off, so these identity provider "
+            "settings in the environment are ignored: %s. To turn authentication on, "
+            "complete the provider configuration and remove AUTH_ENABLED=false and "
+            "AUTH_PROVIDER=none where set.",
+            ", ".join(ignored_provider_settings),
+            extra={"check": "anonymous_access", "mode": mode},
+        )
 
     # ── INTERNAL_API_KEY ─────────────────────────────────────────────────────
     # When not set, service-to-service requests bypass the key check (dev mode).
@@ -360,4 +405,40 @@ async def run_startup_checks(*, _mongo_client: Any = None) -> list[str]:
     return warnings
 
 
-__all__ = ["StartupConfigError", "run_startup_checks"]
+def require_management_auth_posture() -> None:
+    """Refuse to start a management host (Studio) that would serve visitors.
+
+    Studio routes manage workspaces, builds and connectors for whoever calls
+    them, so serving every client as an anonymous visitor
+    (``AUTH_ANON_ACCESS=public``) would hand that management to anyone. With
+    no auth configuration at all it names the choices a management host has
+    (``public`` is not one of them). Raises :class:`StartupConfigError`. Runs
+    before :func:`run_startup_checks`, which reports an invalid configuration
+    and the generic not-configured message.
+    """
+    from mozaiksai.core.auth.adapters.base import AuthError
+    from mozaiksai.core.auth.adapters.registry import resolve_auth_config
+    from mozaiksai.core.auth.anonymous_access import (
+        MANAGEMENT_NOT_CONFIGURED_MESSAGE,
+        STUDIO_PUBLIC_MESSAGE,
+    )
+
+    try:
+        config = resolve_auth_config()
+    except (AuthError, EnvironmentConfigError):
+        return
+    if not config.enabled and not config.explicitly_disabled:
+        refusal = MANAGEMENT_NOT_CONFIGURED_MESSAGE
+    elif config.anonymous_access == "public":
+        refusal = STUDIO_PUBLIC_MESSAGE
+    else:
+        return
+    logger.error(
+        "STARTUP_CHECK_FAILED: %s",
+        refusal,
+        extra={"check": "anonymous_access", "mode": _startup_mode()},
+    )
+    raise StartupConfigError(refusal)
+
+
+__all__ = ["StartupConfigError", "require_management_auth_posture", "run_startup_checks"]

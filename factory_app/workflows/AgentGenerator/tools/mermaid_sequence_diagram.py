@@ -47,30 +47,36 @@ async def mermaid_sequence_diagram(
     context_variables.set("workflow_plan_review", review)
     context_variables.set("workflow_review_feedback", "")
     workflows = selection["workflows"]
-    response = WorkflowPlanReviewResponse.model_validate(await use_ui_tool(
-        tool_id="WorkflowPlanReview",
-        payload={
-            **diagram,
-            "review_id": review_id,
-            "title": selection["pack_name"],
-            "summary": selection["pack_partition_reason"] or "Review the workflows to generate.",
-            "workflow_count": len(workflows),
-            "checkpoints": [f"{item['name']}: {item['description']}" for item in workflows]
-            or ["No AI workflows. App modules and pages provide the requested functionality."],
-        },
-        chat_id=context_variables.get("chat_id"),
-        workflow_name=context_variables.get("workflow_name") or "AgentGenerator",
-    ))
-    current = validate_selection(context_variables.get("PatternSelection"), context_variables)
-    current_review = detach(context_variables.get("workflow_plan_review"))
-    if current_review != review or response.review_id != review_id or _fingerprint(current) != fingerprint:
-        raise ValueError("Workflow approval does not match the current draft")
-    if response.approved is not (response.action == "approve"):
-        raise ValueError("Workflow review action and approval disagree")
-    outcome = {"approve": "approved", "request_changes": "changes_requested", "cancel": "cancelled"}[response.action]
-    context_variables.set("workflow_review_feedback", response.rationale)
-    context_variables.set("workflow_plan_review", {**review, "status": outcome, "rationale": response.rationale})
-    if outcome == "approved" and not workflows:
+    if not workflows and context_variables.get("coding_participation") == "autonomous":
+        outcome = "no_workflows"
+        context_variables.set("workflow_plan_review", {
+            **review, "status": "not_required", "rationale": selection["pack_partition_reason"],
+        })
+    else:
+        response = WorkflowPlanReviewResponse.model_validate(await use_ui_tool(
+            tool_id="WorkflowPlanReview",
+            payload={
+                **diagram,
+                "review_id": review_id,
+                "title": selection["pack_name"],
+                "summary": selection["pack_partition_reason"] or "Review the workflows to generate.",
+                "workflow_count": len(workflows),
+                "checkpoints": [f"{item['name']}: {item['description']}" for item in workflows]
+                or ["No AI workflows. App modules and pages provide the requested functionality."],
+            },
+            chat_id=context_variables.get("chat_id"),
+            workflow_name=context_variables.get("workflow_name") or "AgentGenerator",
+        ))
+        current = validate_selection(context_variables.get("PatternSelection"), context_variables)
+        current_review = detach(context_variables.get("workflow_plan_review"))
+        if current_review != review or response.review_id != review_id or _fingerprint(current) != fingerprint:
+            raise ValueError("Workflow approval does not match the current draft")
+        if response.approved is not (response.action == "approve"):
+            raise ValueError("Workflow review action and approval disagree")
+        outcome = {"approve": "approved", "request_changes": "changes_requested", "cancel": "cancelled"}[response.action]
+        context_variables.set("workflow_review_feedback", response.rationale)
+        context_variables.set("workflow_plan_review", {**review, "status": outcome, "rationale": response.rationale})
+    if not workflows and outcome in {"approved", "no_workflows"}:
         from factory_app.workflows._shared.platform.build_target import require_build_binding
 
         from .generate_and_download import _record_context_and_artifacts

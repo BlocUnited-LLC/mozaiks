@@ -72,8 +72,15 @@ def preview_environment(app_root: Path, *, preview_url: str) -> dict[str, str]:
         "LOGS_BASE_DIR": str(_STATE_ROOT / "logs"),
     })
     if auth_contract is None:
+        # A public app is previewed as its visitors see it: anonymous, without
+        # development access. A preview URL (E2B) reaches anyone who holds it.
+        # Assigned whatever the sandbox environment forwards, and anonymous
+        # roles (a development privilege public refuses) are dropped, so a
+        # forwarded value can neither reopen the preview nor stop it starting.
         env["AUTH_ENABLED"] = "false"
         env["AUTH_PROVIDER"] = "none"
+        env["AUTH_ANON_ACCESS"] = "public"
+        env.pop("AUTH_ANON_ROLES", None)
     else:
         if env.get("AUTH_ENABLED", "true").lower() not in {"true", "1", "yes", "on"}:
             raise ValueError("Authenticated app previews cannot disable authentication")

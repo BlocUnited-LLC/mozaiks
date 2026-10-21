@@ -18,13 +18,13 @@ def _require(value: Any, field: str) -> str:
 
 
 class CloudDomainService:
-    def _client(self, *, app_id: str | None = None) -> MozaiksCloudDomainClient:
+    def _client(self, ctx: Any) -> MozaiksCloudDomainClient:
+        app_id = _require(getattr(ctx, "app_id", None), "ctx.app_id")
         return MozaiksCloudDomainClient(MozaiksCloudTransport(app_id=app_id))
 
     async def connect_domain(self, ctx: Any, **params: Any) -> dict[str, Any]:
-        del ctx
         app_id = _require(params.get("app_id"), "app_id")
-        return await self._client(app_id=app_id).connect_domain(
+        return await self._client(ctx).connect_domain(
             app_id=app_id,
             domain=_require(params.get("domain"), "domain"),
             target_environment=_clean(params.get("target_environment")) or "production",
@@ -32,24 +32,21 @@ class CloudDomainService:
         )
 
     async def get_domain_verification(self, ctx: Any, **params: Any) -> dict[str, Any]:
-        del ctx
-        return await self._client(app_id=_clean(params.get("app_id")) or None).get_domain_verification(
+        return await self._client(ctx).get_domain_verification(
             binding_id=_require(params.get("binding_id"), "binding_id"),
             tenant_id=_clean(params.get("tenant_id")) or None,
             app_id=_clean(params.get("app_id")) or None,
         )
 
     async def get_dns_instructions(self, ctx: Any, **params: Any) -> dict[str, Any]:
-        del ctx
-        return await self._client(app_id=_clean(params.get("app_id")) or None).get_dns_instructions(
+        return await self._client(ctx).get_dns_instructions(
             binding_id=_require(params.get("binding_id"), "binding_id"),
             tenant_id=_clean(params.get("tenant_id")) or None,
             app_id=_clean(params.get("app_id")) or None,
         )
 
     async def request_domain_activation(self, ctx: Any, **params: Any) -> dict[str, Any]:
-        del ctx
-        return await self._client(app_id=_clean(params.get("app_id")) or None).request_domain_activation(
+        return await self._client(ctx).request_domain_activation(
             binding_id=_require(params.get("binding_id"), "binding_id"),
             tenant_id=_require(params.get("tenant_id"), "tenant_id"),
             app_id=_require(params.get("app_id"), "app_id"),
@@ -57,16 +54,14 @@ class CloudDomainService:
         )
 
     async def get_domain_status(self, ctx: Any, **params: Any) -> dict[str, Any]:
-        del ctx
-        return await self._client(app_id=_clean(params.get("app_id")) or None).get_domain_status(
+        return await self._client(ctx).get_domain_status(
             binding_id=_require(params.get("binding_id"), "binding_id"),
             tenant_id=_clean(params.get("tenant_id")) or None,
             app_id=_clean(params.get("app_id")) or None,
         )
 
     async def disconnect_domain(self, ctx: Any, **params: Any) -> dict[str, Any]:
-        del ctx
-        return await self._client(app_id=_clean(params.get("app_id")) or None).disconnect_domain(
+        return await self._client(ctx).disconnect_domain(
             binding_id=_require(params.get("binding_id"), "binding_id"),
             tenant_id=_require(params.get("tenant_id"), "tenant_id"),
             app_id=_require(params.get("app_id"), "app_id"),

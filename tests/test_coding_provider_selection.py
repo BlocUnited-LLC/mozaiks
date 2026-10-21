@@ -22,18 +22,20 @@ from mozaiksai.control_plane import (
     StagedPatchProposal,
     select_coding_provider,
 )
+from mozaiksai.core.artifacts.models import BuildRecord
 
-_FILE_A = "app/ui/pages/Dashboard.jsx"
-_FILE_B = "app/ui/pages/Sidebar.jsx"
+_FILE_A = "ui/pages/custom/Dashboard.jsx"
+_FILE_B = "ui/pages/custom/Sidebar.jsx"
 
 
 def _config(acp_enabled: bool = True, max_files: int = 3) -> ControlPlaneConfig:
     return ControlPlaneConfig(
         enabled=True,
+        llm_profiles={"codegen": {"llm_config": {"model": "gpt-5.2-codex"}}},
         coding=ControlPlaneCodingCapabilityConfig.model_validate(
             {
                 "enabled": True,
-                "llm_config": {"model": "gpt-5.2-codex"},
+                "llm_profile": "codegen",
                 "providers": {"acp": {"enabled": acp_enabled, "budget": {"max_files": max_files}}},
             }
         ),
@@ -126,19 +128,29 @@ def _proposal(provider_id: str, status: str = "completed", **fields: Any) -> Sta
                 ProposedFileChange(path=_FILE_B, content="patched-b"),
             ],
             owned_paths=[_FILE_A, _FILE_B],
-            validation_strategy_hint="local",
+            validation_strategy_hint="docker",
         )
     defaults.update(fields)
     return StagedPatchProposal(**defaults)
 
 
 class _FakeArtifactStore:
+    async def get_build_record(self, *, app_id, build_record_id):
+        return BuildRecord(
+            id=build_record_id, app_id=app_id, build_family="app_bundle", build_key="app_bundle",
+            version_number=1, lineage_root_id=build_record_id,
+        )
+
     async def create_build_record(self, **kwargs):  # noqa: ANN003
-        return type("ArtifactVersion", (), {"id": "av_child_1"})()
+        return BuildRecord(id="av_child_1", version_number=1, lineage_root_id="parent", **kwargs)
 
 
 async def _passing_validation(**kwargs):  # noqa: ANN003
-    return {"success": True, "validation_status": "passed", "execution_mode": "isolated_workspace_copy"}
+    return {
+        "validation_status": "passed",
+        "app_bundle_acceptance_result": {"status": "passed", "passed": True},
+        "app_validation_result": {"validation_status": "passed", "validation_strategy": "docker"},
+    }
 
 
 def _worker(
@@ -150,7 +162,7 @@ def _worker(
 ) -> ScopedRefinementCodingWorker:
     return ScopedRefinementCodingWorker(
         config_loader=lambda: _config(acp_enabled=acp_enabled),
-        source_validation_runner=_passing_validation,
+        candidate_validation_runner=_passing_validation,
         artifact_store=_FakeArtifactStore(),
         output_root=tmp_path,
         provider=structured,
@@ -164,7 +176,7 @@ async def test_multi_file_scope_dispatches_to_acp(tmp_path: Path) -> None:
     structured = _StubProvider("control_plane_coding", _proposal("control_plane_coding"))
 
     result = await _worker(tmp_path, acp=acp, structured=structured).execute(
-        _request(validation_strategy="local")
+        _request(validation_strategy="docker")
     )
 
     assert acp.calls == 1
@@ -186,7 +198,7 @@ async def test_single_file_scope_stays_on_structured(tmp_path: Path) -> None:
     structured = _StubProvider("control_plane_coding", single)
 
     result = await _worker(tmp_path, acp=acp, structured=structured).execute(
-        _request(files={_FILE_A: "a"}, validation_strategy="local")
+        _request(files={_FILE_A: "a"}, validation_strategy="docker")
     )
 
     assert acp.calls == 0
@@ -201,7 +213,7 @@ async def test_operational_acp_failure_falls_back_to_structured(tmp_path: Path, 
     structured = _StubProvider("control_plane_coding", _proposal("control_plane_coding"))
 
     result = await _worker(tmp_path, acp=acp, structured=structured).execute(
-        _request(validation_strategy="local")
+        _request(validation_strategy="docker")
     )
 
     assert acp.calls == 1
@@ -225,7 +237,7 @@ async def test_scope_rejection_never_falls_back(tmp_path: Path) -> None:
     structured = _StubProvider("control_plane_coding", _proposal("control_plane_coding"))
 
     result = await _worker(tmp_path, acp=acp, structured=structured).execute(
-        _request(validation_strategy="local")
+        _request(validation_strategy="docker")
     )
 
     assert acp.calls == 1
@@ -241,7 +253,7 @@ async def test_acp_disabled_config_never_dispatches_to_acp(tmp_path: Path) -> No
     structured = _StubProvider("control_plane_coding", _proposal("control_plane_coding"))
 
     result = await _worker(tmp_path, acp=acp, structured=structured, acp_enabled=False).execute(
-        _request(validation_strategy="local")
+        _request(validation_strategy="docker")
     )
 
     assert acp.calls == 0

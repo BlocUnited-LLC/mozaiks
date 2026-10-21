@@ -28,6 +28,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from mozaiksai.core.events.unified_event_dispatcher import UnifiedEventDispatcher
 from mozaiksai.core.runtime.composition.module_event_provenance import (
     normalize_module_event_provenance,
     normalize_module_reaction_provenance,
@@ -37,6 +38,7 @@ from mozaiksai.core.runtime.composition.module_event_router import (
     ModuleEventRouter,
     _is_secret_context_key,
     _render_template,
+    is_router_reaction_context,
 )
 from mozaiksai.core.runtime.composition.platform_hooks import (
     PlatformExtensionBundle,
@@ -391,6 +393,48 @@ class TestRegister:
         registered_handler = dispatcher.register_handler.call_args.args[1]
         assert inspect.iscoroutinefunction(registered_handler)
 
+    def test_register_is_idempotent_and_unregister_preserves_other_listeners(self):
+        mod = _loaded_module("m1", reactions=[_reaction_model("a.event")])
+        router = _router([mod])
+        dispatcher = UnifiedEventDispatcher(taxonomy_advisory=True)
+
+        def ordinary_listener(_envelope):
+            return None
+
+        dispatcher.register_handler("a.event", ordinary_listener)
+        assert router.register(dispatcher) == 1
+        assert router.register(dispatcher) == 0
+        assert len(dispatcher._event_handlers["a.event"]) == 2
+        assert router.unregister() == 1
+        assert dispatcher._event_handlers["a.event"] == [ordinary_listener]
+        assert router.unregister() == 0
+        assert router.register(dispatcher) == 1
+        assert router.unregister() == 1
+
+    def test_partial_registration_rolls_back_even_when_register_appends_then_raises(self):
+        mod = _loaded_module(
+            "m1",
+            reactions=[_reaction_model("a.event"), _reaction_model("b.event")],
+        )
+        router = _router([mod])
+
+        class FailingDispatcher(UnifiedEventDispatcher):
+            def register_handler(self, handler_or_event_type, handler=None):
+                super().register_handler(handler_or_event_type, handler)
+                if handler_or_event_type == "b.event":
+                    raise RuntimeError("registration failed")
+
+        dispatcher = FailingDispatcher(taxonomy_advisory=True)
+        with pytest.raises(RuntimeError, match="registration failed"):
+            router.register(dispatcher)
+        assert dispatcher._event_handlers.get("a.event", []) == []
+        assert dispatcher._event_handlers.get("b.event", []) == []
+        assert router.unregister() == 0
+
+        replacement = UnifiedEventDispatcher(taxonomy_advisory=True)
+        assert router.register(replacement) == 2
+        assert router.unregister() == 2
+
 
 class TestStaticReactionValidation:
     def test_handler_target_must_resolve_when_handler_is_registered(self):
@@ -490,6 +534,124 @@ class TestHandleEventHandlerTarget:
         await router.handle_event("order.created", envelope)
         assert len(called) == 1
         assert called[0]["order_id"] == "o-1"
+
+    @pytest.mark.asyncio
+    async def test_legacy_flat_webhook_payload_reaches_handler_with_reaction_identity(self):
+        received = []
+        reaction_id = "promoter_commissions.reconcile_payment_succeeded"
+        event_type = "hosted.mozaikspay.payment.succeeded"
+
+        def matches(ctx):
+            return is_router_reaction_context(
+                ctx,
+                event_type=event_type,
+                reaction_id=reaction_id,
+                source_module_id="promoter_commissions",
+                target_kind="handler",
+                target_ref="on_event",
+            )
+
+        class Handler:
+            async def on_event(
+                self, ctx, *, session_id, payment_id, app_id, tenant_id, environment
+            ):
+                received.append({
+                    "session_id": session_id,
+                    "payment_id": payment_id,
+                    "app_id": app_id,
+                    "tenant_id": tenant_id,
+                    "environment": environment,
+                    "ctx_app_id": ctx.app_id,
+                    "ctx_tenant_id": ctx.tenant_id,
+                    "event_type": ctx.event_provenance.event_type,
+                    "event_shape": ctx.event_provenance.envelope_shape,
+                    "reaction_id": ctx.reaction_provenance.reaction_id,
+                    "reaction_module": ctx.reaction_provenance.source_module_id,
+                    "reaction_target": ctx.reaction_provenance.target_ref,
+                    "dispatch_authority": getattr(ctx, "dispatch_authority", None),
+                    "router_context_valid": matches(ctx),
+                    "forged_context_valid": matches(SimpleNamespace(
+                        event_provenance=ctx.event_provenance,
+                        reaction_provenance=ctx.reaction_provenance,
+                    )),
+                })
+
+        reaction = _handler_target_reaction(
+            event_type,
+            handler_method="on_event",
+            reaction_id=reaction_id,
+        )
+        producer = _with_event_schema(
+            _loaded_module("mozaikspay"),
+            event_type=event_type,
+            payload_schema={
+                "type": "object",
+                "required": ["session_id", "payment_id", "app_id", "tenant_id", "environment"],
+                "properties": {
+                    field: {"type": "string"}
+                    for field in ("session_id", "payment_id", "app_id", "tenant_id", "environment")
+                },
+                "additionalProperties": False,
+            },
+        )
+        consumer = _loaded_module(
+            "promoter_commissions", reactions=[reaction], handler=Handler()
+        )
+        router = _router([producer, consumer])
+        flat_event = {
+            "session_id": "session-1",
+            "payment_id": "payment-1",
+            "app_id": "customer-app",
+            "tenant_id": "tenant-1",
+            "environment": "production",
+        }
+        await router.handle_event(event_type, flat_event)
+
+        with pytest.raises(ModuleEventPayloadValidationError):
+            await router.handle_event(
+                event_type, {key: value for key, value in flat_event.items() if key != "payment_id"}
+            )
+
+        assert received == [{
+            "session_id": "session-1",
+            "payment_id": "payment-1",
+            "app_id": "customer-app",
+            "tenant_id": "tenant-1",
+            "environment": "production",
+            "ctx_app_id": "customer-app",
+            "ctx_tenant_id": "tenant-1",
+            "event_type": event_type,
+            "event_shape": "legacy_flat",
+            "reaction_id": "promoter_commissions.reconcile_payment_succeeded",
+            "reaction_module": "promoter_commissions",
+            "reaction_target": "on_event",
+            "dispatch_authority": None,
+            "router_context_valid": True,
+            "forged_context_valid": False,
+        }]
+
+    @pytest.mark.asyncio
+    async def test_malformed_structured_payload_does_not_pass_envelope_metadata_to_handler(self):
+        received = []
+
+        class Handler:
+            async def on_event(self, ctx, **kwargs):
+                received.append(kwargs)
+
+        event_type = "domain.orders.created"
+        reaction = _handler_target_reaction(event_type)
+        router = _router([_loaded_module("orders", reactions=[reaction], handler=Handler())])
+        await router.handle_event(
+            event_type,
+            {
+                "type": event_type,
+                "source": {"layer": "module", "module_id": "orders"},
+                "tenant": {"app_id": "app-1", "tenant_id": "tenant-1"},
+                "payload": None,
+            },
+        )
+
+        assert received == [{}]
 
     @pytest.mark.asyncio
     async def test_skips_when_handler_method_missing_from_target(self):
@@ -826,6 +988,25 @@ class TestHandleEventNotificationTarget:
 
 class TestCreateNotification:
     @pytest.mark.asyncio
+    async def test_notification_stores_workspace_from_event_provenance(self):
+        stored = []
+
+        async def notification_store(record):
+            stored.append(record)
+
+        mod = _loaded_module(
+            "support",
+            notifications=[_notification_rule("support.created", rule_id="alert", module_id="support")],
+        )
+        router = _router([mod], notification_store=notification_store)
+        envelope = _envelope()
+        envelope["tenant"]["workspace_id"] = "workspace-a"
+        envelope["payload"]["workspace_id"] = "forged-workspace"
+        await router.handle_event("support.created", envelope)
+
+        assert stored[0]["workspace_id"] == "workspace-a"
+
+    @pytest.mark.asyncio
     async def test_structured_envelope_uses_payload_for_template(self):
         stored = []
 
@@ -965,6 +1146,57 @@ class TestCreateNotification:
             _envelope(payload={"recipient_ids": ["user-2", "user-3", "user-2"]}),
         )
         assert stored[0]["audience"]["user_ids"] == ["user-2", "user-3"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {}, {"recipient_id": None}, {"recipient_id": ""}, {"recipient_id": "  "},
+            {"recipient_id": []}, {"recipient_id": ["  "]},
+            {"recipient_id": ["user-2", " "]}, {"recipient_id": 42},
+            {"recipient_id": {"id": "user-2"}},
+        ],
+    )
+    async def test_direct_recipient_rule_skips_invalid_payload(self, payload):
+        stored = []
+        emitted = []
+
+        async def notification_store(record):
+            stored.append(record)
+
+        async def event_emitter(event_type, event):
+            emitted.append((event_type, event))
+
+        router = _router(notification_store=notification_store, event_emitter=event_emitter)
+        await router._create_notification(
+            _notification_rule(
+                "ev.recipient", rule_id="direct-recipient", module_id="m1",
+                audience={"user_id_field": "recipient_id"},
+            ),
+            "ev.recipient",
+            _envelope(payload=payload),
+        )
+        assert stored == []
+        assert emitted == []
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("field", [None, "", "  ", 42])
+    async def test_direct_recipient_rule_skips_invalid_field_name(self, field):
+        stored = []
+
+        async def notification_store(record):
+            stored.append(record)
+
+        router = _router(notification_store=notification_store)
+        await router._create_notification(
+            _notification_rule(
+                "ev.recipient", rule_id="direct-recipient", module_id="m1",
+                audience={"user_id_field": field},
+            ),
+            "ev.recipient",
+            _envelope(payload={"recipient_id": "user-42"}),
+        )
+        assert stored == []
 
     @pytest.mark.asyncio
     async def test_secret_keys_stripped_from_context_fields(self):

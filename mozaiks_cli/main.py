@@ -17,9 +17,10 @@ Commands:
     mozaiks serve [path]      Start the Mozaiks runtime for an app workspace
     mozaiks onboard           Guide setup for an existing scaffold
     mozaiks studio          Print workspace status or open Studio
-    mozaiks add <feature>     Add feature to existing project
+    mozaiks add <feature>     Add feature to existing project (or --preset <tier>)
     mozaiks gen <mode>        Convenience shortcut: generate from a prompt
     mozaiks migrations status Read-only generated-app migration health
+    mozaiks package android  Package an existing app workspace for Android
     mozaiks context index    Index local workspace App Intelligence
     mozaiks sync-agent-guidance  Sync app-local coding-agent guidance safely
     mozaiks info              Show current config and available presets
@@ -36,6 +37,7 @@ from mozaiks_cli.commands import (
     init_command,
     migrations_command,
     onboard_command,
+    package_command,
     quickstart_command,
     serve_command,
     studio_command,
@@ -184,8 +186,14 @@ def create_parser():
     )
     serve_parser.add_argument(
         "--listen",
-        default="0.0.0.0",
-        help="Interface to bind (default: 0.0.0.0)",
+        default="127.0.0.1",
+        help=(
+            "Interface to bind (default: 127.0.0.1, this machine only). "
+            "Use --listen 0.0.0.0 to listen on all interfaces, for example in a container. "
+            "With authentication off, other machines are refused unless AUTH_ANON_ACCESS "
+            "is public (anonymous visitors) or open (development access for every client); "
+            "serve refuses AUTH_ANON_ACCESS=local on such an address."
+        ),
     )
     serve_parser.add_argument(
         "--reload",
@@ -297,21 +305,39 @@ def create_parser():
         action="store_true",
         help="Launch Studio services without opening the browser",
     )
+    studio_parser.add_argument(
+        "--listen",
+        default="127.0.0.1",
+        help=(
+            "Interface the launched backend and frontend bind with --open "
+            "(default: 127.0.0.1, this machine only; use 0.0.0.0 for all interfaces). "
+            "With authentication off, other machines are refused unless "
+            "AUTH_ANON_ACCESS=open (development access for every client); the launcher "
+            "refuses AUTH_ANON_ACCESS=local on such an address."
+        ),
+    )
 
     # mozaiks add
     add_parser = subparsers.add_parser(
         "add",
         help="Add feature to existing project",
-        description="Enable a feature in your Mozaiks project.",
+        description=(
+            "Enable one feature in your Mozaiks project, or switch it to a tier "
+            "preset with --preset. Give exactly one of the two."
+        ),
     )
-    add_parser.add_argument(
+    add_target = add_parser.add_mutually_exclusive_group(required=True)
+    add_target.add_argument(
         "feature",
+        nargs="?",
+        default=None,
         choices=["modules", "event_bus", "auth", "admin", "chat_ui"],
         help="Feature to enable",
     )
-    add_parser.add_argument(
+    add_target.add_argument(
         "--preset",
-        help="Upgrade to a preset instead of individual feature",
+        choices=["engine", "chat", "integrated", "full"],
+        help="Switch to a tier preset instead of enabling one feature (clears feature overrides)",
     )
 
     # mozaiks gen
@@ -344,7 +370,7 @@ def create_parser():
     )
     gen_parser.add_argument(
         "--validation-strategy",
-        choices=["e2b", "docker", "local", "skip"],
+        choices=["e2b", "docker", "skip"],
         default=None,
         help="App validation strategy for AppGenerator runs (default: resolved from the current environment)",
     )
@@ -492,6 +518,21 @@ def create_parser():
         help="Overwrite guidance files with current templates",
     )
 
+    package_parser = subparsers.add_parser(
+        "package", help="Package an existing app workspace for a delivery target",
+    )
+    package_targets = package_parser.add_subparsers(dest="target", required=True)
+    android_parser = package_targets.add_parser(
+        "android", help="Prepare portable Android sources and compile a debug APK",
+    )
+    android_parser.add_argument("workspace", help="Canonical workspace containing app/app.json")
+    android_parser.add_argument("--config", required=True, help="Android delivery request JSON")
+    android_parser.add_argument("--output", required=True, help="New or empty output directory")
+    android_parser.add_argument(
+        "--prepare-only", action="store_true",
+        help="Export source and tooling without installing dependencies or compiling",
+    )
+
     # mozaiks info
     info_parser = subparsers.add_parser(
         "info",
@@ -518,17 +559,27 @@ def main():
 
     try:
         if args.command == "init":
-            init_command.run(args)
+            result = init_command.run(args)
+            if result:
+                sys.exit(result)
         elif args.command == "quickstart":
-            quickstart_command.run(args)
+            result = quickstart_command.run(args)
+            if result:
+                sys.exit(result)
         elif args.command == "serve":
             serve_command.run(args)
         elif args.command == "onboard":
-            onboard_command.run(args)
+            result = onboard_command.run(args)
+            if result:
+                sys.exit(result)
         elif args.command == "studio":
-            studio_command.run(args)
+            result = studio_command.run(args)
+            if result:
+                sys.exit(result)
         elif args.command == "add":
-            add_command.run(args)
+            result = add_command.run(args)
+            if result:
+                sys.exit(result)
         elif args.command == "gen":
             # Interactive mode if no mode or prompt provided
             if not args.mode or not args.prompt:
@@ -541,6 +592,10 @@ def main():
             result = migrations_command.run(args)
             if result:
                 sys.exit(result)
+        elif args.command == "package":
+            result = package_command.run(args)
+            if result:
+                sys.exit(result)
         elif args.command == "context":
             result = context_command.run(args)
             if result:
@@ -550,7 +605,9 @@ def main():
             if result:
                 sys.exit(result)
         elif args.command == "info":
-            info_command.run(args)
+            result = info_command.run(args)
+            if result:
+                sys.exit(result)
         else:
             parser.print_help()
             sys.exit(1)
@@ -558,7 +615,10 @@ def main():
         print("\nAborted.")
         sys.exit(130)
     except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
+        message = str(e)
+        # A refusal boxed between "=" rules (mozaiks_cli.unauthenticated_bind)
+        # already opens with its own "Error:" line.
+        print(message if message.startswith("=") else f"Error: {message}", file=sys.stderr)
         sys.exit(1)
 
 

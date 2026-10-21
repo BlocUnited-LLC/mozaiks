@@ -73,3 +73,49 @@ async def test_platform_startup_health_does_not_retain_an_earlier_failure(monkey
     assert platform.app.state.startup_degraded is False
     assert platform.app.state.startup_degraded_reason is None
     assert platform.app.state.failed_module_names == []
+
+
+@pytest.mark.asyncio
+async def test_worker_process_rejects_app_load_failure(monkeypatch):
+    from mozaiksai.core.auth.adapters import registry
+    from mozaiksai.hosts import platform
+
+    monkeypatch.setenv("MOZAIKS_STARTUP_SERVICE_PROFILE", "worker")
+    monkeypatch.setattr(registry, "validate_auth_provider_configuration", lambda: None)
+    monkeypatch.setattr(
+        platform.AppLoader, "load", AsyncMock(side_effect=platform.AppLoadError("invalid app contract"))
+    )
+    with pytest.raises(platform.AppLoadError, match="invalid app contract"):
+        await platform._platform_startup()
+
+
+@pytest.mark.asyncio
+async def test_invalid_process_profile_rejected_before_app_load(monkeypatch):
+    from mozaiksai.core.auth.adapters import registry
+    from mozaiksai.core.runtime.composition.extensions import StartupServiceProfileError
+    from mozaiksai.hosts import platform
+
+    monkeypatch.setenv("MOZAIKS_STARTUP_SERVICE_PROFILE", "operator")
+    monkeypatch.setattr(registry, "validate_auth_provider_configuration", lambda: None)
+    app_load = AsyncMock()
+    monkeypatch.setattr(platform.AppLoader, "load", app_load)
+    with pytest.raises(StartupServiceProfileError, match="host or worker"):
+        await platform._platform_startup()
+    app_load.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_worker_process_requires_loaded_module(monkeypatch):
+    from mozaiksai.core.auth.adapters import registry
+    from mozaiksai.core.runtime.app.loader import AppDefinition, AppLoadResult
+    from mozaiksai.core.runtime.composition.extensions import StartupServiceProfileError
+    from mozaiksai.hosts import platform
+
+    monkeypatch.setenv("MOZAIKS_STARTUP_SERVICE_PROFILE", "worker")
+    monkeypatch.setattr(registry, "validate_auth_provider_configuration", lambda: None)
+    monkeypatch.setattr(platform, "load_data_migrations", lambda _root: [])
+    monkeypatch.setattr(platform.AppLoader, "load", AsyncMock(return_value=AppLoadResult(
+        definition=AppDefinition(name="Worker Test", version="1.0"), modules=[],
+    )))
+    with pytest.raises(StartupServiceProfileError, match="no loaded modules"):
+        await platform._platform_startup()

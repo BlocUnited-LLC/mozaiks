@@ -31,6 +31,18 @@ test('a resolution failure is re-thrown, not swallowed', async () => {
   );
 });
 
+test('the chat page re-throws a resolution failure too', async () => {
+  // Live run 2026-10-12: the chat page's pending transition answered 400
+  // "option_id is required" and its handler returned false, so the Continue
+  // button did nothing and TransitionScreen never showed the error.
+  const src = await read('pages/ChatPage.js');
+  const start = src.indexOf('const handlePendingTransitionNavigate');
+  const handler = src.slice(start, src.indexOf('\n    [', start));
+  const tail = handler.slice(handler.lastIndexOf('} catch (err) {'));
+  assert.match(tail, /throw err;/, 'handlePendingTransitionNavigate must propagate the failure');
+  assert.doesNotMatch(tail, /return false;/, 'returning false strands the caller with no way to know it failed');
+});
+
 test('the detail from the API becomes the message', async () => {
   const src = await read('components/RouteRenderer.jsx');
   // A bare "Failed to resolve transition" tells the user nothing actionable.

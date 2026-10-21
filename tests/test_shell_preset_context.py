@@ -138,9 +138,9 @@ def test_shell_preset_hook_replaces_section_without_dropping_trailing_content() 
 def test_shell_preset_hook_injects_warning_when_catalog_missing() -> None:
     agent = _FakeAgent("AppSchemaAgent")
 
-    with patch(
-        "factory_app.workflows.AppGenerator.tools.hook_shell_preset_context._load_shell_presets",
-        return_value=None,
+    with patch.dict(
+        inject_shell_preset_context.__globals__,
+        {"_load_shell_presets": lambda: None},
     ):
         _run_hook(agent)
 

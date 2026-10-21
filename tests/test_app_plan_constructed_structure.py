@@ -2,7 +2,8 @@
 
 The fixture's model payload is the unchanged response captured three times in
 the 2026-09-26 live traversal. Its context is a projection of the stored approved
-inputs. Structural tests explicitly replace its invalid auth ownership with a
+inputs, with the labelled current-schema page rendering declarations added
+after capture. Structural tests explicitly replace its invalid auth ownership with a
 project-members domain module; no database, credentials, or model calls are needed.
 """
 

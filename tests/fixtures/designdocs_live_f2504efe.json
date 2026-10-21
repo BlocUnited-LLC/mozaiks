@@ -452,7 +452,8 @@
         "intent": "Show key task metrics at a glance.",
         "config_hint": "{\"items\":[{\"label\":\"Total Tasks\",\"value_key\":\"total_tasks\"},{\"label\":\"Completed\",\"value_key\":\"completed_tasks\"}]}"
        }
-      ]
+      ],
+      "ui_surface": "declarative_page"
      },
      {
       "name": "Task Management",
@@ -472,7 +473,8 @@
         "intent": "Modal to create a new task.",
         "config_hint": "{\"title\":\"New Task\",\"size\":\"medium\"}"
        }
-      ]
+      ],
+      "ui_surface": "declarative_page"
      },
      {
       "name": "User Authentication",
@@ -486,7 +488,8 @@
         "intent": "Authenticate user credentials.",
         "config_hint": "{\"fields\":[{\"name\":\"email\",\"type\":\"string\"},{\"name\":\"password\",\"type\":\"string\"}]}"
        }
-      ]
+      ],
+      "ui_surface": "declarative_page"
      }
     ]
    },
@@ -674,7 +677,8 @@
         "intent": "Show key task metrics at a glance.",
         "config_hint": "{\"items\":[{\"label\":\"Total Tasks\",\"value_key\":\"total_tasks\"},{\"label\":\"Completed\",\"value_key\":\"completed_tasks\"}]}"
        }
-      ]
+      ],
+      "ui_surface": "declarative_page"
      },
      {
       "name": "Task Management",
@@ -694,7 +698,8 @@
         "intent": "Modal to create a new task.",
         "config_hint": "{\"title\":\"New Task\",\"size\":\"medium\"}"
        }
-      ]
+      ],
+      "ui_surface": "declarative_page"
      },
      {
       "name": "User Authentication",
@@ -708,7 +713,8 @@
         "intent": "Authenticate user credentials.",
         "config_hint": "{\"fields\":[{\"name\":\"email\",\"type\":\"string\"},{\"name\":\"password\",\"type\":\"string\"}]}"
        }
-      ]
+      ],
+      "ui_surface": "declarative_page"
      }
     ]
    },
@@ -936,5 +942,6 @@
     }
    }
   }
- ]
+ ],
+ "fixture_schema_migration": "Fixture schema migration: ui_surface=declarative_page makes the prior declarative rendering assumption explicit; this field was not emitted by the recorded model."
 }

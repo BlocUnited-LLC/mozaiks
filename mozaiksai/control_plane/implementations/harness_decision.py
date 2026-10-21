@@ -271,13 +271,19 @@ class FirstPartyHarnessDecisionPolicy:
         selected_paths: list[str],
         result: CodingWorkerResult,
     ) -> HarnessDecision:
-        staged = result.status == "validated"
+        staged = bool(result.metadata.get("build_record_id"))
         messages = {
             "validated": "Scoped patch staged for review.",
             "planned": "Scoped patch planned; no changes staged.",
             "ineligible": "Scoped patch is not eligible; no changes staged.",
             "failed": "Scoped patch failed; no changes staged.",
         }
+        if staged and result.status == "planned":
+            messages["planned"] = "Draft patch saved; validation is incomplete."
+        elif staged and result.status == "failed":
+            messages["failed"] = "Draft patch saved with failed checks; review the validation results."
+        elif not staged and result.status == "validated":
+            messages["validated"] = "Patch validation passed, but no saved review artifact is available."
         return HarnessDecision(
             decision_type="auto_patch",
             message=messages[result.status],

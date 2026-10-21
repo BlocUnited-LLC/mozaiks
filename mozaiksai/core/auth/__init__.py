@@ -35,9 +35,12 @@ Quick Start:
 
 Configuration (environment variables):
 
-    # Provider Selection (auto-detected if not set)
+    # Provider Selection (auto-detected if not set; nothing set refuses to start)
     AUTH_PROVIDER=none|jwt|supabase|keycloak
     AUTH_ENABLED=true|false   # false = same as AUTH_PROVIDER=none
+    # With authentication off: whom the host serves (see anonymous_access.py).
+    # Set with no provider configured, it also turns authentication off.
+    AUTH_ANON_ACCESS=local|public|open   # local (default): this machine only
 
     # Generic JWT Configuration
     AUTH_JWKS_URL=https://.../.well-known/jwks.json
@@ -48,6 +51,10 @@ Configuration (environment variables):
     AUTH_ACCESS_TOKEN_TYPE_VALUE=access
     AUTH_USER_ID_CLAIM=sub
     AUTH_EMAIL_CLAIM=email
+    # JSON true gates app.json admins. Unset: email_verified when the email
+    # claim is "email", else nothing is verified. Set it only to a claim that
+    # vouches for the AUTH_EMAIL_CLAIM value.
+    AUTH_EMAIL_VERIFIED_CLAIM=
     AUTH_ROLES_CLAIM=roles
     AUTH_SCOPES_CLAIM=scp
     AUTH_SCOPES_FORMAT=space|array

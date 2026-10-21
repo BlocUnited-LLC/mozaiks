@@ -51,6 +51,42 @@ through the shell boundary, then inspect the rendered body with `gh pr view`.
 
 **Read [ARCHITECTURE.md](../ARCHITECTURE.md) first.** That file is the source of truth for how the system works.
 
+## Pull Request Volume, Review, And CI Cost
+
+Open pull requests are shared coordination state. A long list hides what is
+ready, and every push re-runs CI. Keep the list short and every entry live.
+
+- **One pull request per finished piece of work.** Claim a task with one draft
+  pull request, then keep intermediate steps as commits on that branch. Do not
+  open a stack of drafts for the steps of one task. Run `gh pr ready <n>` once
+  the work is complete and locally verified; a draft cannot merge.
+- **Close a pull request the day the carrier that contains its change merges.**
+  Comment with the carrier's pull request number and merge SHA. The closed pull
+  request keeps its commits (`refs/pull/<n>/head`) even after its branch is
+  cleaned up. An open duplicate only misleads the next agent.
+- **Do not rebase just to stay current.** Rebase or update a branch only when it
+  is next to merge or a conflict blocks review. Main requires branches to be up
+  to date, so the order is: update the branch, wait for green CI, then have
+  that exact head reviewed and merged. If a clean update from main is needed
+  after a review, the reviewer re-confirms with `git range-diff` that the pull
+  request's own commits are unchanged and clears the new SHA.
+- **Keep expensive optional checks scoped.** Emulator, native-acceptance,
+  visual-regression, and paid-provider jobs run only when their relevant paths
+  change or on explicit request. A required check must still report a status
+  on every pull request: skip work inside the job rather than with a
+  workflow-level path filter, which leaves a required check pending forever.
+- **Nothing merges without an independent review of the exact head.** The
+  reviewer records the cleared head SHA in a pull request comment; the merge
+  is bound to exactly that SHA with `--match-head-commit`. Do not arm
+  auto-merge, on any pull request. In this repository the required review
+  cannot be satisfied by the single collaborator every agent pushes as, so an
+  armed auto-merge fires only when the review gate is lowered, which is how an
+  unrelated pull request merged unreviewed (see Repository Settings And Merge
+  Authority). For a pull request pushed by the agents' account, report the
+  reviewed head SHA and let the maintainer merge it. Pull requests from other
+  authors, such as Dependabot, follow the fast path in
+  `.claude/rules/pr-merge-policy.md`.
+
 ## Host and Interface Boundaries
 
 This repo uses layered FastAPI hosts as the canonical OSS server composition:

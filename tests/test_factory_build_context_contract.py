@@ -28,6 +28,11 @@ EXPECTED_WEBAPP_BUILDER_CATALOGS = {
     "language_profile.yaml",
 }
 
+EXPECTED_MOBILE_CATALOGS = {
+    "package.json",
+    "package-lock.json",
+}
+
 EXPECTED_INTEGRATIONS_CATALOGS = {
     "catalog.yaml",
 }
@@ -91,6 +96,8 @@ def test_factory_build_context_uses_named_context_roots() -> None:
             allowed |= EXPECTED_AGENTGENERATOR_PATTERNBOOKS
         if context_root.name == "webapp_builder":
             allowed |= EXPECTED_WEBAPP_BUILDER_CATALOGS
+        if context_root.name == "mobile":
+            allowed |= EXPECTED_MOBILE_CATALOGS
         if context_root.name == "integrations":
             allowed |= EXPECTED_INTEGRATIONS_CATALOGS
         if context_root.name == "mozaikspay":
@@ -103,6 +110,12 @@ def test_factory_build_context_uses_named_context_roots() -> None:
         assert actual <= allowed, (
             f"{context_root} has non-canonical build-context entries: {sorted(actual - allowed)}"
         )
+
+
+def test_mobile_tooling_catalogs_are_declared_context_assets() -> None:
+    context = yaml.safe_load((FACTORY_BUILD_CONTEXT / "mobile/context.yaml").read_text(encoding="utf-8"))
+    catalogs = {asset["path"] for asset in context["assets"] if asset["kind"] == "catalog"}
+    assert catalogs == EXPECTED_MOBILE_CATALOGS
 
 
 def test_context_yaml_is_structural_not_semantic_guidance() -> None:

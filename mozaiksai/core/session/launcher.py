@@ -8,6 +8,8 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
+from pydantic import TypeAdapter
+
 from logs.logging_config import get_core_logger
 from mozaiksai.core.data.persistence.persistence_manager import (
     SERVER_OWNED_SESSION_FIELDS,
@@ -25,7 +27,7 @@ from mozaiksai.core.workflow.context.authority import (
 from mozaiksai.core.workflow.pack.config import get_transition, load_global_pack_graph
 from mozaiksai.core.workflow.pack.schema import WorkflowTransition
 
-from .build_binding import RunBuildBinding
+from .build_binding import BuildIdentity, RunBuildBinding
 from .build_context import revalidate_build_context
 from .model import RoutingDecision, TriggerInput
 from .trigger_routing import TriggerRoutingContribution
@@ -493,10 +495,10 @@ async def launch_transition(
     elif build_registry_id is not None:
         fields = await get_platform_hooks().call_chat_session_fields(
             app_id=app_id, user_id=user_id, workflow_name="", chat_id=str(uuid4()),
-            trigger_source="transition", build_registry_id=build_registry_id,
+            phase="route", trigger_source="transition", build_registry_id=build_registry_id,
         )
-        binding = RunBuildBinding.model_validate(fields.get("run_build_binding"))
-        router = router.for_target(binding.target_app_id)
+        target_app_id = TypeAdapter(BuildIdentity).validate_python(fields.get("target_app_id"))
+        router = router.for_target(target_app_id)
 
     pack = load_global_pack_graph()
     source_transition = get_transition(pack, transition_id) if pack is not None else None

@@ -254,7 +254,7 @@ outputs into active runtime paths.
 Workflow resolution is single-root by default. A running host binds to one
 workflow root via `MOZAIKS_WORKFLOWS_PATH` rather than auto-merging app and
 factory roots. Studio defaults to `factory_app/workflows/`; app/product hosts
-prefer the workspace root's `workflows/`.
+use the workspace root's `workflows/` and serve none when it is absent.
 
 Use `MOZAIKS_GENERATED_ARTIFACTS_PATH`, defaulting to:
 

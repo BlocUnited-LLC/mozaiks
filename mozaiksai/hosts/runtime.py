@@ -39,6 +39,7 @@ from mozaiksai.core.auth import (
     require_user_scope,
 )
 from mozaiksai.core.auth.dependencies import (
+    is_shared_development_identity,
     validate_path_app_id,
     validate_path_id,
 )
@@ -72,6 +73,7 @@ from mozaiksai.core.workflow.workflow_manager import (
     get_workflow_transport,
     workflow_status_summary,
 )
+from mozaiksai.hosts.source_path_policy import authorize_http_workflow_source_paths
 from mozaiksai.version import __version__
 
 env = os.getenv("ENVIRONMENT", "development").lower()
@@ -419,6 +421,8 @@ async def runtime_lifespan(_: FastAPI):
 
 register_app_lifespan(app, runtime_lifespan)
 
+_PUBLIC_WORKFLOW_COUNTS = ("total_workflows", "loaded_workflows", "error_workflows")
+
 
 @app.get("/api/health/live")
 async def health_liveness():
@@ -496,12 +500,16 @@ async def health_check():
     except Exception as exc:
         raise HTTPException(status_code=503, detail="MongoDB unreachable") from exc
 
+    # Counts only: workflow names, handler metadata and the workflow root's
+    # filesystem path describe the deployment and are not for an
+    # unauthenticated caller. Signed-in callers list workflows via /api/workflows.
     status = workflow_status_summary()
+    workflows = {key: status.get(key, 0) for key in _PUBLIC_WORKFLOW_COUNTS}
 
     return {
         "status": "healthy",
         "timestamp": datetime.now(UTC).isoformat(),
-        "workflows": status,
+        "workflows": workflows,
         "transport": "initialized" if simple_transport else "not_initialized",
     }
 
@@ -660,10 +668,9 @@ async def start_chat(
     client_request_id = data.get("client_request_id")
     force_new = str(data.get("force_new", "false")).lower() in {"1", "true", "yes", "on"}
     transport_purpose = str(data.get("transport_purpose") or "").strip().lower()
-    context_variables = _validate_context_for_workflow(
-        workflow_name,
-        data.get("context_variables") if isinstance(data.get("context_variables"), dict) else {},
-    )
+    requested_context = data.get("context_variables") if isinstance(data.get("context_variables"), dict) else {}
+    authorize_http_workflow_source_paths(requested_context, principal=principal)
+    context_variables = _validate_context_for_workflow(workflow_name, requested_context)
 
     idempotency_window_sec = int(os.getenv("CHAT_START_IDEMPOTENCY_SEC", "15"))
     reuse_cutoff = datetime.now(UTC) - timedelta(seconds=idempotency_window_sec)
@@ -808,6 +815,18 @@ async def trigger_workflow(
     """Create a runtime workflow session for programmatic callers."""
     validate_path_id(workflow_name, "workflow_name")
     _validate_internal_api_key(request)
+    # Without an internal key this programmatic route is open to any principal,
+    # so with authentication off an anonymous visitor (AUTH_ANON_ACCESS=public)
+    # must not start runs: only a validated token or development access may.
+    if not os.getenv("INTERNAL_API_KEY", "").strip() and not (
+        principal.is_authenticated or principal.has_local_development_access
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Workflow trigger requires an internal API key or development access",
+        )
+
+    authorize_http_workflow_source_paths(body.context or {}, principal=principal)
 
     from mozaiksai.core.workflow.workflow_manager import workflow_manager
 
@@ -1123,7 +1142,9 @@ async def websocket_endpoint(
             and resolved_doc.get("status") == int(WorkflowStatus.IN_PROGRESS)
         ):
             existing_task = simple_transport._background_tasks.get(resolved_chat_id)
-            if not (existing_task and not existing_task.done()):
+            if not (existing_task and not existing_task.done()) and await simple_transport._passive_start_rejection(
+                chat_id=resolved_chat_id, app_id=app_id, user_id=user_id, workflow_name=resolved_workflow_name,
+            ) is None:
                 conn = simple_transport.connections.setdefault(resolved_chat_id, {})
                 conn["autostarted"] = True
                 _agent_start_task = asyncio.create_task(
@@ -1225,7 +1246,38 @@ async def handle_user_input(
         message=message,
         app_id=app_id,
     )
-    return {"status": "Message received and is being processed.", "result": result}
+    if isinstance(result, dict) and (
+        result.get("input_accepted") is True
+        or (result.get("status") == "success" and result.get("input_accepted") is not False)
+    ):
+        message_status = (
+            "Message reached the workflow, but the run failed."
+            if result.get("run_status") == "failed"
+            else "Message received and is being processed."
+        )
+        return {"status": message_status, "delivery_state": "accepted", "result": result}
+
+    refused = isinstance(result, dict) and (
+        result.get("input_accepted") is False
+        or result.get("route") in {"terminal_session", "chat_lock_busy", "chat_lock_unavailable"}
+        or (
+            result.get("route") == "workflow_resume"
+            and result.get("error_code") == "WORKFLOW_EXECUTION_FAILED"
+        )
+    )
+    if refused:
+        return JSONResponse(
+            status_code=409,
+            content={"status": "Message was not accepted.", "delivery_state": "refused", "result": result},
+        )
+    return JSONResponse(
+        status_code=503,
+        content={
+            "status": "Message delivery could not be confirmed. Check this chat before retrying.",
+            "delivery_state": "unknown",
+            "result": result,
+        },
+    )
 
 
 @app.post("/chat/{app_id}/{chat_id}/component_action")
@@ -1241,7 +1293,7 @@ async def handle_component_action(
     if simple_transport is None:
         raise HTTPException(status_code=503, detail="Transport service is not available")
 
-    if principal.user_id != "anonymous":
+    if not is_shared_development_identity(principal):
         coll = await _chat_coll()
         owned = await coll.find_one(
             {"_id": chat_id, "user_id": principal.user_id, **build_app_scope_filter(app_id)},
@@ -1297,6 +1349,28 @@ async def submit_tool_call_response(
     )
     if not success:
         raise HTTPException(status_code=404, detail="UI tool event not found or already completed")
+    return {"status": "success"}
+
+
+@app.post("/api/workflow-feedback/rendered")
+async def acknowledge_workflow_feedback_render(
+    request: Request,
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    """Accept a client's visibility report in its authenticated session."""
+    if simple_transport is None:
+        raise HTTPException(status_code=503, detail="Transport service is not available")
+    try:
+        data = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload") from exc
+    if not isinstance(data, dict) or set(data) != {"event_id"}:
+        raise HTTPException(status_code=400, detail="Only event_id is accepted")
+    event_id = data["event_id"]
+    if not isinstance(event_id, str) or not event_id or len(event_id) > 256:
+        raise HTTPException(status_code=400, detail="Invalid event_id")
+    if not await simple_transport.acknowledge_workflow_feedback_render_for_user(event_id, principal=principal):
+        raise HTTPException(status_code=404, detail="Feedback invitation not found")
     return {"status": "success"}
 
 

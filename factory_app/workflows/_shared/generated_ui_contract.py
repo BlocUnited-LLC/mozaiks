@@ -97,7 +97,8 @@ PUBLIC_IMPORT_RE = re.compile(
     r"import\s*\{(?P<specifiers>[^}]+)\}\s*from\s*['\"]@mozaiks/chat-ui/ui['\"]"
 )
 REGISTER_COMPONENT_RE = re.compile(
-    r"\bregisterComponent\s*\(\s*['\"`](?P<name>[A-Za-z_$][\w$.-]*)['\"`]",
+    r"\bregisterComponent\s*\(\s*['\"`](?P<name>[A-Za-z_$][\w$.-]*)['\"`]"
+    r"(?:\s*,\s*(?P<binding>[A-Za-z_$][\w$]*)(?=\s*[,)]))?",
 )
 IMPORT_BINDING_RE = re.compile(
     r"import\s+(?P<default>[A-Za-z_$][\w$]*)\s+from\s+['\"](?P<default_source>[^'\"]+)['\"]"
@@ -238,8 +239,8 @@ def _route_manifest_pages_from_content(content: str, *, source_label: str) -> tu
     return [page for page in pages if isinstance(page, dict)], []
 
 
-def _parse_registered_components(source: str) -> set[str]:
-    return {match.group("name") for match in REGISTER_COMPONENT_RE.finditer(source)}
+def _parse_registered_component_bindings(source: str) -> dict[str, str | None]:
+    return {match.group("name"): match.group("binding") for match in REGISTER_COMPONENT_RE.finditer(source)}
 
 
 def _parse_imports_and_local_definitions(
@@ -278,14 +279,17 @@ def _parse_imports_and_local_definitions(
 
 
 def _resolve_relative_import(base_dir: PurePosixPath, source_path: str) -> str:
+    if "\\" in source_path or ":" in source_path or "\x00" in source_path:
+        return ""
     resolved = base_dir.joinpath(source_path)
     parts: list[str] = []
     for part in resolved.parts:
         if part in ("", "."):
             continue
         if part == "..":
-            if parts:
-                parts.pop()
+            if not parts:
+                return ""
+            parts.pop()
             continue
         parts.append(part)
     normalized = PurePosixPath(*parts)
@@ -304,6 +308,51 @@ def _import_path_exists(import_path: str, file_names: set[str]) -> bool:
         if path.with_suffix(suffix).as_posix() in file_names:
             return True
     return False
+
+
+def resolve_registered_component_files(
+    files: dict[str, str], *, source_label: str, registry_paths: set[str] | None = None,
+) -> tuple[dict[str, set[str]], list[str]]:
+    """Resolve registry keys through their actual JS binding and local import."""
+    registered_files: dict[str, set[str]] = {}
+    warnings: list[str] = []
+    file_names = set(files)
+    for filename, source in files.items():
+        if registry_paths is not None and filename not in registry_paths:
+            continue
+        if not filename.endswith(("index.js", "index.jsx")):
+            continue
+        matches = list(REGISTER_COMPONENT_RE.finditer(source))
+        call_count = len(re.findall(r"\bregisterComponent\s*\(", source))
+        if call_count != len(matches) or any(not match.group("binding") for match in matches):
+            warnings.append(f"{source_label} {filename} has a dynamic or unresolved component registration.")
+        names = [match.group("name") for match in matches]
+        for name in sorted(set(names)):
+            if names.count(name) > 1:
+                warnings.append(f"{source_label} {filename} registers component '{name}' more than once.")
+        registrations = _parse_registered_component_bindings(source)
+        bindings, imports = _parse_imports_and_local_definitions(source, filename=filename)
+        for component, binding in registrations.items():
+            registered_files.setdefault(component, set())
+            if not binding or binding not in bindings:
+                warnings.append(
+                    f"{source_label} {filename} registers component '{component}' but does not import or define its registered binding '{binding or '<missing>'}'."
+                )
+                continue
+            import_path = imports.get(binding)
+            if import_path is not None:
+                if not import_path:
+                    warnings.append(
+                        f"{source_label} {filename} registers component '{component}' through an unsafe relative import."
+                    )
+                    continue
+                if not _import_path_exists(import_path, file_names):
+                    warnings.append(
+                        f"{source_label} {filename} registers component '{component}' from missing file '{import_path}'."
+                    )
+                else:
+                    registered_files[component].add(import_path)
+    return registered_files, warnings
 
 
 def _parse_admin_registry(content: str, *, source_label: str) -> tuple[dict[str, Any] | None, list[str]]:
@@ -1079,7 +1128,6 @@ def audit_app_ui_bundle_integrity(
         return []
 
     warnings: list[str] = []
-    file_names = set(files)
     route_pages: list[dict[str, Any]] = []
     route_auth_refs: list[dict[str, str]] = []
 
@@ -1121,21 +1169,8 @@ def audit_app_ui_bundle_integrity(
         if ref is not None:
             route_auth_refs.append(ref)
 
-    registry_files = {
-        filename: content
-        for filename, content in files.items()
-        if filename.endswith("index.js") or filename.endswith("index.jsx")
-    }
-    registered_components: dict[str, list[str]] = {}
-    available_bindings: dict[str, set[str]] = {}
-    import_sources: dict[str, dict[str, str]] = {}
-
-    for filename, source in registry_files.items():
-        for component in _parse_registered_components(source):
-            registered_components.setdefault(component, []).append(filename)
-        bindings, imports = _parse_imports_and_local_definitions(source, filename=filename)
-        available_bindings[filename] = bindings
-        import_sources[filename] = imports
+    registered_files, registry_warnings = resolve_registered_component_files(files, source_label=source_label)
+    warnings.extend(registry_warnings)
 
     route_components: dict[str, set[str]] = {}
     for index, page in enumerate(route_pages):
@@ -1156,25 +1191,10 @@ def audit_app_ui_bundle_integrity(
         if not component:
             continue
         route_components.setdefault(component, set()).add(route_path or "<missing path>")
-        if component not in registered_components and component not in APP_AUTH_COMPONENTS:
+        if component not in registered_files and component not in APP_AUTH_COMPONENTS:
             warnings.append(
                 f"{source_label} {label} path '{route_path or '<missing path>'}' references component '{component}' but no registerComponent('{component}', ...) call was found in ui/index.js."
             )
-
-    for component, registry_paths in registered_components.items():
-        for registry_path in registry_paths:
-            bindings = available_bindings.get(registry_path, set())
-            imports = import_sources.get(registry_path, {})
-            if component not in bindings:
-                warnings.append(
-                    f"{source_label} {registry_path} registers component '{component}' but does not import or define a binding with that name."
-                )
-                continue
-            import_path = imports.get(component)
-            if import_path and not _import_path_exists(import_path, file_names):
-                warnings.append(
-                    f"{source_label} {registry_path} registers component '{component}' from missing file '{import_path}'."
-                )
 
     custom_page_files = [
         filename
@@ -1183,22 +1203,15 @@ def audit_app_ui_bundle_integrity(
         and PurePosixPath(filename).suffix.lower() in VALID_CUSTOM_ROUTE_EXTENSIONS
     ]
     for filename in custom_page_files:
-        component_name = PurePosixPath(filename).stem
-        if component_name not in registered_components:
+        if not any(filename in paths for paths in registered_files.values()):
             warnings.append(
-                f"{source_label} custom page file '{filename}' exports component '{component_name}' but that component is not registered in ui/index.js."
+                f"{source_label} custom page file '{filename}' is not imported by a registered component in ui/index.js."
             )
 
     for component, paths in route_components.items():
-        if component not in registered_components:
+        if component not in registered_files:
             continue
-        has_route_file = any(
-            PurePosixPath(filename).stem == component
-            and filename.startswith("ui/pages/custom/")
-            for filename in custom_page_files
-        )
-        has_import = any(component in imports for imports in import_sources.values())
-        if not has_route_file and not has_import:
+        if not registered_files.get(component):
             warnings.append(
                 f"{source_label} route component '{component}' for path(s) {', '.join(sorted(paths))} has no matching custom page file or registry import."
             )
@@ -1266,4 +1279,5 @@ __all__ = [
     "audit_page_schemas",
     "custom_route_bundle_page_files",
     "dedupe",
+    "resolve_registered_component_files",
 ]

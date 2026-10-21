@@ -42,6 +42,8 @@ The workflow converts scanner evidence paths and recommendations into the module
 `evidence_ref` and `remediation` fields. Missing persistence stays visible in the
 advisory review, and zero inspected files yields `not_assessed`. An empty findings
 collection does not prove a saved passing assessment; this module stores findings.
+The rule it applies to permissionless actions is the decision table in
+[Generated Action Protection](../app/generated-action-protection.md).
 
 ---
 
@@ -165,6 +167,45 @@ to an action, workflow, page, or transition `target`. The runtime validates
 that `capability_id` values are unique within the module and that `target`
 references a declared action.
 
+### Async action budgets
+
+`actions[].timeout_seconds` is an optional server-declared integer from 1 through
+3600 seconds. Omitted or null keeps `MODULE_ACTION_TIMEOUT_SECONDS` (default 30;
+the existing process setting 0 disables the default timeout). A declared value
+replaces that default for this action only. Strings, booleans, fractional values,
+zero, and values outside the bounds are rejected during loading and generation.
+
+For example, a module's internal background action may declare:
+
+```yaml
+- id: process_exports
+  description: Process one queued export with bounded cleanup.
+  handler_method: process_exports
+  api_surface: internal
+  permissions: []
+  timeout_seconds: 1860
+```
+
+`ModuleExecutor.register_loaded_module()` carries the validated budget from the
+manifest. Direct server registration uses `action_timeouts={"process_exports": 1860}`;
+unknown action references fail. Caller params and HTTP request metadata cannot
+change the budget. Authorization and entitlement checks are unchanged.
+
+The executor cancels timed-out async handlers and returns `ACTION_TIMEOUT` after
+their cancellation cleanup finishes. External cancellation still propagates.
+Handlers must cooperate with cancellation and bound their own cleanup; this is
+not a hard process kill deadline. Services retain ownership of subprocess cleanup,
+durable outcomes, and recovery leases, which must cover execution and cleanup.
+Synchronous handlers retain existing behavior and are not timed out; use async
+handlers for I/O or background work. A `startup_service` may schedule dispatch
+through the executor; it does not establish a separate action authority.
+
+AppGenerator emits the same optional field, materialization validates it before
+writing YAML, and bundle admission reuses the runtime validator. Ordinary
+generated CRUD actions continue to inherit the default.
+
+### Action exposure
+
 `actions[].api_surface` declares the intended external HTTP exposure of an
 action. Common values include `public`, `public_readonly`, `internal`, and
 `admin_internal`. When auth is enabled, the platform requires an authenticated
@@ -182,6 +223,12 @@ returns `RECORD_NOT_FOUND`, and the module HTTP routes return 404 with the same
 generic message for missing and foreign records. Other `LookupError` subclasses,
 including programming errors such as `KeyError` and `IndexError`, remain server
 errors.
+
+If a module action's token guard raises `TokenUsageDenied`, the executor keeps
+the denial code and recovery metadata. Module HTTP dispatch returns 402 for
+`INSUFFICIENT_TOKENS` or 403 for `TOKEN_USAGE_SCOPE_MISSING`, with the guard's
+metadata under `detail.extra_data`. It does not turn those denials into a
+generic execution failure.
 
 `internal` and `admin_internal` actions are rejected with 404 on the public
 module route, which also fails closed when the surface map was never populated
@@ -221,7 +268,11 @@ after scope resolution.
 when the action belongs to the generated app's own SaaS feature-gate model and
 requires an active plan grant before executing. The `ModuleExecutor` checks
 `EntitlementPort.check(capability_id, app_id=..., user_id=..., tenant_id=...,
-workspace_id=...)` and returns `ENTITLEMENT_REQUIRED` on denial. Non-SaaS apps
+workspace_id=...)` and returns `ENTITLEMENT_REQUIRED` on denial. `user_id`,
+`tenant_id` and `workspace_id` come from the verified identity: the token's
+claims, or a membership the scope hook asserted with `verified_tenant_id` or
+`verified_workspace_id`. `app_id` is the dispatch app. Plain resolved
+`tenant_id` and `workspace_id` never select a plan. Non-SaaS apps
 use `NoOpEntitlementAdapter` and are entirely unaffected — no configuration
 needed. Never set `entitlement_gate` on `admin_internal` actions.
 
@@ -243,8 +294,9 @@ data-contract alias. The platform wires the OSS `ConfiguredEntitlementAdapter`
 at startup and the adapter checks active assignment records before dispatch.
 When `assignment_store.workspace_id_field` is declared, assignment lookup is
 workspace-aware: exact app/tenant/workspace/user records are checked before
-broader tenant, workspace, user, or app-level fallback records. For non-SaaS
-apps, no subscription config is needed.
+broader tenant, workspace, user, or app-level fallback records. The user,
+tenant, and workspace come from the dispatch's verified identity, never from
+requested scope. For non-SaaS apps, no subscription config is needed.
 
 This OSS primitive is not hosted-product licensing. Hosted products such as
 Mozaiks App may decide whether an app/workspace can use a proprietary hosted
@@ -329,6 +381,79 @@ events:
         item_id: { type: string }
         owner_id: { type: string }
 ```
+
+The runtime checks every `ctx.emit` in a module action before dispatch. It
+refuses an event when the action does not list it in `emits`, when the payload
+fails the event's `payload_schema`, or when that schema cannot be evaluated. A
+refused event is not dispatched, so no reaction or notification runs for it. It
+does not fail the action: the action's writes may already be committed, so the
+action keeps its handler's outcome.
+
+`ctx.emit` returns normally either way, and its value says which happened:
+
+- An `EventDispatchOutcome`: the event reached the runtime bus. It contains
+  synchronous, payload-free listener results. It may still report a failed or
+  missing downstream reaction.
+- A `ModuleEventRejection`: the event was refused. It carries the event id, the
+  event type, the category (`undeclared`, `value_invalid` or `schema_invalid`)
+  and the schema rule the event failed, never payload contents.
+- `None`: no bus was wired, or a caller-supplied/test context gave no receipt.
+
+An outbox that requires one consumer must check that exact reaction, not just
+the absence of a rejection or the dispatcher's overall success. A skipped,
+failed, missing, or merely invoked reaction does not acknowledge the outbox
+entry. A module handler returns `ModuleReactionEffectAck(effect_id=...)` only
+after verifying its own durable record. `required.success` then requires both
+that explicit effect reference and completion in the durable reaction ledger.
+The `ok` status alone records invocation; `completed` records a prior
+completion of the same scoped identity, and carries the stored effect reference
+on replay. Neither is an ACK without the reference and durable completion.
+An active lease, retry delay, dead letter, or permission skip remains
+unsuccessful. The outbox still owns durable delivery and controlled replay.
+It persists the event ID and reuses it for each emission; a new ID cannot
+inherit the previous event's completion evidence. It must keep the payload
+immutable for that ID because the reaction ledger does not compare replay
+payloads.
+
+```python
+from mozaiksai.core.runtime.composition.module_event_router import (
+    ModuleReactionEffectAck, required_module_reaction,
+)
+
+async def on_item_created(self, ctx, *, item_id):
+    record_id = await self.service.apply_and_verify(ctx, item_id=item_id)
+    return ModuleReactionEffectAck(effect_id=record_id)
+
+async def replay_outbox(ctx, outbox_event_id, payload):
+    outcome = await ctx.emit(
+        "domain.my_module.item_created", payload, event_id=outbox_event_id
+    )
+    required = required_module_reaction(
+        outcome, module_id="downstream", reaction_id="downstream.apply_item"
+    )
+    if not required.success:
+        ...  # keep the delivery pending for an authorized, idempotent retry
+```
+
+The rejection is also named on the dispatch result
+(`ModuleResult.rejected_events`) and on the dispatch audit. It is logged at ERROR
+as `MODULE_EVENT_REJECTED` and counted in `ModuleExecutor.health()`. The
+AppGenerator runtime smoke fails a generated bundle on any rejected event.
+
+The emitted-event contract checks belong to the context `ModuleExecutor`
+builds for a dispatched action. Other contexts may not apply those checks:
+
+- **No event bus wired.** Emitting does nothing and returns `None`.
+- **Caller-supplied context.** A context passed to `ModuleExecutor.execute`
+  keeps its own emitter and may return a test-specific value.
+- **Reaction handlers.** A reaction handler's `ctx.emit` sends its event
+  straight to the bus and returns its dispatch receipt when wired. There the
+  event router checks only the event's
+  `payload_schema`, and only when exactly one module declares a schema for that
+  event type, before running that event's reactions. It drops an invalid event.
+  It never checks a reaction-emitted event against any `emits` list.
+- **Contexts that code builds itself,** such as the stub context of the
+  generated cron script.
 
 ### `contracts/reactions.yaml`
 
@@ -554,6 +679,7 @@ extensions:
 
   - kind: startup_service
     entrypoint: backend.worker:MyService
+    profile: worker
 ```
 
 Two kinds:
@@ -561,6 +687,31 @@ Two kinds:
   module-local generic external webhook receiver or custom inbound callback route.
 - `startup_service` — starts a background service for the process lifetime. Use
   for a module-local audit/event subscriber or polling worker.
+
+Startup services have two finite process profiles: `host` (the default when
+`profile` is omitted or null) and `worker`. The ordinary app host runs only `host`
+services. A separately operated process sets
+`MOZAIKS_STARTUP_SERVICE_PROFILE=worker` and starts only services declared
+with `profile: worker`. That process still loads the app and its module
+contracts; the profile selects startup services only. It does not mount or
+unmount API routers, grant action permissions, or create a background module
+dispatch bypass. An invalid process profile or a worker profile with no
+declared services aborts startup. A worker also aborts if its app or any module
+fails to load. A worker startup failure stops any worker services started
+earlier in that process.
+
+Only `profile: worker` is an explicit manifest value; omit `profile` (or use
+null in generated contracts) for the ordinary host. A worker service must
+expose a callable `start()` method. The profile selector does not skip
+platform `on_startup` hooks, data migrations, event registration, or route
+mounting. Studio's preview-session maintenance runs only in the host profile;
+other process work must be safe in both processes or gated by its owner.
+Keep the worker host private and bound
+to loopback; the service profile alone does not create a no-listener daemon.
+
+Keep `profile` absent for existing app services and all `api_router` entries.
+Configure a separate worker process only when the app has an operational
+boundary and a declared service that belongs there.
 
 Runtime extension rules:
 

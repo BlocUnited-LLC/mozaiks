@@ -195,3 +195,34 @@ def test_existing_database_model_config_remains_a_reported_source(monkeypatch):
     assert not summary["llm"]["api_key_set"]
     collection.find_one.assert_awaited_once()
 
+
+@pytest.mark.parametrize(
+    ("environ", "expected"),
+    [
+        ({}, (False, False, None)),
+        ({"AUTH_ENABLED": "false"}, (False, False, None)),
+        ({"AUTH_ANON_ACCESS": "public"}, (False, False, None)),
+        (
+            {
+                "KEYCLOAK_URL": "https://idp.example.invalid",
+                "KEYCLOAK_REALM": "apps",
+                "KEYCLOAK_CLIENT_ID": "app-api",
+            },
+            (True, True, "keycloak"),
+        ),
+        ({"AUTH_ENABLED": "maybe"}, (False, False, None)),
+    ],
+    ids=["not_configured", "explicit_off", "posture_alone", "auto_detected_provider", "invalid"],
+)
+def test_auth_status_reads_the_runtime_auth_resolution(monkeypatch, environ, expected) -> None:
+    from mozaiksai.core.auth.adapters import registry as auth_registry
+
+    module = _isolated_runtime_summary(monkeypatch)
+    for name in auth_registry._ALL_AUTH_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+    for name, value in environ.items():
+        monkeypatch.setenv(name, value)
+
+    auth = asyncio.run(module.build_integrations_summary())["integrations"]["auth"]
+
+    assert (auth["configured"], auth["enabled"], auth["provider"]) == expected

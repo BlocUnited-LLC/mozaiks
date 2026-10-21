@@ -44,9 +44,19 @@ def test_resolve_studio_scope_rejects_app_mismatch() -> None:
 
 def test_resolve_studio_scope_uses_default_user_for_anonymous_principal() -> None:
     scope = resolve_studio_scope(
-        _principal(user_id="anonymous"),
+        _principal(user_id="anonymous", auth_provenance="local_development"),
         app_id="app-1",
         default_user_id="demo-user",
     )
 
     assert scope == StudioScope(app_id="app-1", user_id="demo-user")
+
+
+def test_resolve_studio_scope_keeps_an_anonymous_visitor_as_itself() -> None:
+    scope = resolve_studio_scope(
+        _principal(user_id="anonymous"),
+        app_id="app-1",
+        default_user_id="demo-user",
+    )
+
+    assert scope == StudioScope(app_id="app-1", user_id="anonymous")

@@ -26,6 +26,7 @@ from mozaiksai.core.workflow.generator_support.page_plan_utils import (
     module_action_index,
     normalize_planned_page_content,
     pack_template_page_errors,
+    validate_planned_custom_routes,
     validate_planned_page,
 )
 
@@ -105,6 +106,18 @@ def _apply_planned_page_contracts(
         if str(task.get("task_type") or "").strip() != "page_bundle":
             continue
         task_id = str(task.get("task_id") or "").strip()
+        if task_id not in failed_tasks:
+            validate_planned_custom_routes(
+                file_map, pages=pages,
+                owned_paths={
+                    path for raw_path in task.get("owned_paths") or []
+                    if (path := safe_relpath(str(raw_path or ""))) and path not in pack_outputs
+                },
+                baseline_files=(
+                    detach(context_variables.get("generated_files"))
+                    if context_variables is not None and context_variables.get("build_mode") == "revision" else None
+                ),
+            )
         for raw_path in task.get("owned_paths") or []:
             # file_map keys are safe_relpath-canonical because every producer
             # runs them through it. Canonicalize this side with the same rule so
@@ -269,6 +282,13 @@ def _apply_app_config_contracts(
     context_variables: Any,
 ) -> list[dict[str, str]]:
     file_map = {str(f["filename"]): str(f["content"]) for f in code_files if f.get("filename")}
+    if "app.json" in file_map:
+        app_manifest = json.loads(file_map["app.json"])
+        if not isinstance(app_manifest, dict):
+            raise ValueError("app.json must be a JSON object")
+        if app_manifest.get("appId") != app_id:
+            app_manifest["appId"] = app_id
+            file_map["app.json"] = json.dumps(app_manifest, indent=2, ensure_ascii=False) + "\n"
     captured_theme = (
         context_variables.get("captured_theme_config") if context_variables is not None else None
     )
@@ -401,8 +421,10 @@ async def _assemble_app_tasks(
     ):
         raise ValueError("No AppGenerator schema artifacts, task batch outputs, or accumulated code files are available for assembly")
 
-    # Pack-owned files come only from the selected packs' templates, applied
-    # below; no worker, repair or earlier assembly copy of one is merged.
+    # Pack-owned files come only from the selected packs' templates; no worker,
+    # repair or earlier assembly copy of one is merged. Resolve them BEFORE
+    # canonical compilation so persistent template modules receive the same
+    # policy, schemas, account handlers and method closure as authored modules.
     pack_outputs = pack_owned_outputs(context_variables)
     kept_outputs: list[dict[str, Any]] = []
     for output in feature_outputs:
@@ -415,6 +437,16 @@ async def _assemble_app_tasks(
         kept_outputs.append(kept)
     feature_outputs = kept_outputs
 
+    app_build_plan = (
+        detach(context_variables.get("app_build_plan"))
+        if context_variables and hasattr(context_variables, "get") else None
+    )
+    template_files = _apply_managed_capability_templates(
+        [], app_build_plan=app_build_plan, context_variables=context_variables,
+    )
+    if template_files:
+        feature_outputs.append({"code_files": template_files})
+
     result = await assemble_features(
         app_id=str(app_id),
         feature_outputs=feature_outputs,
@@ -423,10 +455,7 @@ async def _assemble_app_tasks(
             if context_variables and hasattr(context_variables, "get")
             else None
         ),
-        app_build_plan=(
-            detach(context_variables.get("app_build_plan"))
-            if context_variables and hasattr(context_variables, "get") else None
-        ),
+        app_build_plan=app_build_plan,
         data_contract=(
             detach(context_variables.get("data_contract"))
             if context_variables and hasattr(context_variables, "get") else None
@@ -439,18 +468,7 @@ async def _assemble_app_tasks(
         context_variables=context_variables,
     )
 
-    app_build_plan = (
-        detach(context_variables.get("app_build_plan"))
-        if context_variables and hasattr(context_variables, "get")
-        else None
-    )
     code_files = result.get("code_files", [])
-
-    code_files = _apply_managed_capability_templates(
-        code_files,
-        app_build_plan=app_build_plan,
-        context_variables=context_variables,
-    )
     code_files = _apply_planned_page_contracts(
         code_files,
         app_build_plan,

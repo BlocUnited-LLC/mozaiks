@@ -254,7 +254,8 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
     assert models["CiSecretRequirements"]["fields"]["optional"]["items"] == "CiSecretRequirement"
     assert models["CiSecretRequirements"]["fields"]["workflow_inputs"]["items"] == "CiWorkflowInputRequirement"
     assert models["DeploymentTemplateManifest"]["fields"]["validation_status"]["values"] == ["pending", "valid", "invalid"]
-    assert models["AppValidation"]["fields"]["validation_strategy"]["values"] == ["e2b", "docker", "local", "skip"]
+    assert models["AppValidationStrategy"]["values"] == ["e2b", "docker", "skip"]
+    assert models["AppValidation"]["fields"]["validation_strategy"]["type"] == "AppValidationStrategy"
     assert models["AppValidation"]["fields"]["validation_status"]["values"] == ["passed", "failed", "skipped"]
     admin_panel_fields = models["ModuleAdminPanel"]["fields"]
     assert admin_panel_fields["page"]["type"] == "str"
@@ -305,7 +306,7 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_removed_operation
     assert "services/routes/admin.py" in source
     assert "APIRouter" in source
     assert "self-contained FastAPI" in source
-    assert "`app/app.json` `admins`" in source
+    assert "`app.json` `admins` (bundle-relative; physical workspace path `app/app.json`)" in source
     assert "`platform/config/admin.json`" not in source
     assert "Otherwise set `admin_yaml: null`" in source
     assert "derive panels from the module's declared actions" in source
@@ -313,7 +314,9 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_removed_operation
     assert "app_validation_strategy" in source
     assert "validation_status" in source
     assert "validate_app_build" in source
-    assert "passed` or explicit `skipped`" in source
+    assert "Deterministic acceptance and build execution have both passed" in source
+    assert "Skipped or pending checks do not permit export" in source
+    assert "passed` or explicit `skipped`" not in source
     assert "provider-neutral outputs from the deployment contract" in source
     assert "Deployment, DNS/domain, billing, wallet, and platform operations may be supplied by managed platform capabilities" in source
     assert "Do not generate provider adapters for those operations into a customer app bundle" in source
@@ -457,6 +460,12 @@ def test_refinement_harness_codegen_seeds_refinement_policy_yaml() -> None:
     runtime_yaml = yaml.safe_load(file_map["config/refinement_policy.yaml"])
     assert runtime_yaml["schema_version"] == "mozaiks.refinement.policy.v1"
     assert runtime_yaml["classifier"]["llm_profile"] == "classifier"
+    assert runtime_yaml["scope"]["llm_profile"] == "impact_analyzer"
+    assert runtime_yaml["contract_surface"]["llm_profile"] == "impact_analyzer"
+    assert runtime_yaml["contract_surface"]["regeneration_llm_profile"] == "codegen"
+    assert runtime_yaml["coding"]["llm_profile"] == "codegen"
+    assert "planner_replanner" not in runtime_yaml["llm_profiles"]
+    assert "reviewer_validator" not in runtime_yaml["llm_profiles"]
 
 
 def test_appgenerator_download_tool_does_not_inject_removed_admin_surfaces() -> None:

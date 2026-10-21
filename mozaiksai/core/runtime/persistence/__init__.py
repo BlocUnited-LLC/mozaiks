@@ -23,6 +23,7 @@ from .app_data import (
     known_data_aliases,
     load_app_data_contract,
 )
+from .errors import is_unique_constraint_violation
 from .indexes import (
     DatabaseIndexApplyError,
     DataContractIndexPlanItem,
@@ -52,6 +53,7 @@ from .naming import (
     scope_metadata,
     short_stable_hash,
 )
+from .platform_modules import CollectionAccess, PlatformModuleDeclarations
 from .startup_policy import (
     DATABASE_STARTUP_POLICY_ENV,
     DatabaseStartupPolicyError,
@@ -66,8 +68,10 @@ __all__ = [
     "PersistenceCollection",
     "PersistencePrincipal",
     "PersistenceScopeError",
+    "PlatformModuleDeclarations",
     "AppData",
     "AppDataAliasError",
+    "CollectionAccess",
     "DataContractLoadError",
     "DataContractIndexPlanItem",
     "DataContractIndexRunResult",
@@ -89,6 +93,7 @@ __all__ = [
     "get_migration_health_report",
     "index_data_contract_by_entity",
     "known_data_aliases",
+    "is_unique_constraint_violation",
     "load_app_data_contract",
     "load_data_contract",
     "load_data_migrations",

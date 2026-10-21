@@ -30,7 +30,7 @@ from uuid import uuid4
 from pymongo import ReturnDocument, UpdateOne
 
 from logs.logging_config import get_workflow_logger
-from mozaiksai.core.core_config import get_mongo_client
+from mozaiksai.core.core_config import current_mongo_client, get_mongo_client
 from mozaiksai.core.multitenant import build_app_scope_filter, coalesce_app_id, dual_write_app_scope
 from mozaiksai.core.runtime.persistence.distributed_lock import assert_chat_mutable
 from mozaiksai.core.workflow.outputs.runtime_validation import normalize_json_candidate_text
@@ -208,6 +208,9 @@ class PersistenceManager:
 
     def __init__(self):
         self.client: Any | None = None
+        # The process client this manager bound itself; a caller-supplied
+        # client is never this object, so it is never replaced.
+        self._process_client: Any | None = None
         self._init_lock = asyncio.Lock()
         logger.info("PersistenceManager created (lazy init)")
 
@@ -272,13 +275,22 @@ class PersistenceManager:
                 migrated,
             )
 
+    def _holds_usable_client(self) -> bool:
+        # Managers held by module and router singletons outlive a host, and
+        # host shutdown closes the process client. A process client this
+        # manager bound is rebound once it is no longer the open one; a client
+        # a caller supplied is theirs and is kept.
+        if self.client is None:
+            return False
+        return self.client is not self._process_client or self.client is current_mongo_client()
+
     async def _ensure_client(self) -> None:
-        if self.client is not None:
+        if self._holds_usable_client():
             return
         async with self._init_lock:
-            if self.client is not None:
+            if self._holds_usable_client():
                 return
-            self.client = get_mongo_client()
+            self.client = self._process_client = get_mongo_client()
             try:
                 # Primary chat session collection (canonical)
                 coll = self.client[SYSTEM_DATABASE][RuntimeCollections.CHAT_SESSIONS]
@@ -954,17 +966,21 @@ class AG2PersistenceManager:
             if status is not WorkflowStatus.IN_PROGRESS:
                 raise ChatSessionTerminalError(status)
 
-    async def chat_session_exists(
+    async def chat_has_resumable_run(
         self,
         chat_id: str,
         app_id: str,
         workflow_name: str | None = None,
     ) -> bool:
-        """Return whether an in-progress session exists for this app/workflow.
+        """Return whether this app/workflow chat has an in-progress run to resume.
 
-        This is intentionally separate from ``assert_chat_resumable``: an
-        absent session is valid when starting a new run, while a present
-        in-progress session must be resumed after a process restart.
+        This is intentionally separate from ``assert_chat_resumable``: a chat
+        with no run yet is valid when starting a new run, while one that already
+        ran and is still in progress must be resumed after a process restart.
+        Sessions are created in progress before their first run, so a run
+        counts as started once the run stream holds an event. The first user
+        message is written there just before its run starts, so a process that
+        stops between the two leaves a chat this reports as resumable.
         """
         if not app_id:
             raise ValueError("app_id is required")
@@ -976,7 +992,9 @@ class AG2PersistenceManager:
         doc = await coll.find_one(query, {"status": 1})
         if not isinstance(doc, dict):
             return False
-        return WorkflowStatus(doc.get("status")) is WorkflowStatus.IN_PROGRESS
+        if WorkflowStatus(doc.get("status")) is not WorkflowStatus.IN_PROGRESS:
+            return False
+        return bool(await self.load_run_events(chat_id=chat_id, app_id=app_id))
 
     async def mark_chat_completed(self, chat_id: str, app_id: str | None = None) -> bool:
         return await self._mark_chat_terminal(chat_id, app_id, WorkflowStatus.COMPLETED)
@@ -1872,6 +1890,91 @@ class AG2PersistenceManager:
                 logger.debug("[TOOL_CALL_METADATA] Failed to persist tool-call state in %s", chat_id)
         except Exception as e:
             logger.error("[TOOL_CALL_METADATA] Failed to attach metadata for %s: %s", chat_id, e, exc_info=True)
+
+    async def save_workflow_feedback_receipt(self, evidence: dict[str, Any]) -> bool:
+        """Insert one immutable authenticated UI response in its owning session.
+
+        Called by the owner-checked transport, never a model tool or public route.
+        Receipts are kept separately from replaceable tool display metadata.
+        """
+        from mozaiksai.core.workflow.outcome_feedback import WorkflowFeedbackEvidence
+
+        receipt = WorkflowFeedbackEvidence.model_validate(evidence).model_dump(mode="json")
+        app_id, chat_id = receipt["app_id"], receipt["chat_id"]
+        key = self._workflow_tool_call_storage_key(receipt["ui_event_id"])
+        path = f"workflow_ui_state.feedback_receipts.{key}"
+        query = {"_id": chat_id, **build_app_scope_filter(app_id), "user_id": receipt["user_id"]}
+        coll = await self._coll()
+        result = await coll.update_one(
+            {**query, path: {"$exists": False}},
+            {"$set": {path: receipt}},
+        )
+        if result.matched_count:
+            return True
+        prior = await self.get_workflow_feedback_receipt(
+            app_id=app_id, chat_id=chat_id, user_id=receipt["user_id"],
+            ui_event_id=receipt["ui_event_id"],
+        )
+        # Idempotent retries retain the first observed timestamp and answer.
+        return bool(prior and all(
+            prior.get(field) == value for field, value in receipt.items() if field != "observed_at"
+        ))
+
+    async def get_workflow_feedback_receipt(
+        self, *, app_id: str, chat_id: str, user_id: str, ui_event_id: str,
+    ) -> dict[str, Any] | None:
+        """Read feedback only through an exact app/session/owner/event binding."""
+        if not all(isinstance(value, str) and value for value in (app_id, chat_id, user_id, ui_event_id)):
+            return None
+        key = self._workflow_tool_call_storage_key(ui_event_id)
+        path = f"workflow_ui_state.feedback_receipts.{key}"
+        coll = await self._coll()
+        doc = await coll.find_one(
+            {"_id": chat_id, **build_app_scope_filter(app_id), "user_id": user_id},
+            {path: 1},
+        )
+        receipt = (((doc or {}).get("workflow_ui_state") or {}).get("feedback_receipts") or {}).get(key)
+        return deepcopy(receipt) if isinstance(receipt, dict) else None
+
+    async def save_workflow_feedback_render_receipt(self, evidence: dict[str, Any]) -> bool:
+        """Keep the first authenticated client-visible acknowledgement per event."""
+        from mozaiksai.core.workflow.outcome_feedback import WorkflowFeedbackRenderReceipt
+
+        receipt = WorkflowFeedbackRenderReceipt.model_validate(evidence).model_dump(mode="json")
+        app_id, chat_id = receipt["app_id"], receipt["chat_id"]
+        key = self._workflow_tool_call_storage_key(receipt["ui_event_id"])
+        path = f"workflow_ui_state.feedback_render_receipts.{key}"
+        query = {"_id": chat_id, **build_app_scope_filter(app_id), "user_id": receipt["user_id"]}
+        coll = await self._coll()
+        result = await coll.update_one(
+            {**query, path: {"$exists": False}},
+            {"$set": {path: receipt}},
+        )
+        if result.matched_count:
+            return True
+        prior = await self.get_workflow_feedback_render_receipt(
+            app_id=app_id, chat_id=chat_id, user_id=receipt["user_id"],
+            ui_event_id=receipt["ui_event_id"],
+        )
+        return bool(prior and all(
+            prior.get(field) == value for field, value in receipt.items() if field != "observed_at"
+        ))
+
+    async def get_workflow_feedback_render_receipt(
+        self, *, app_id: str, chat_id: str, user_id: str, ui_event_id: str,
+    ) -> dict[str, Any] | None:
+        """Read one render acknowledgement through exact session ownership."""
+        if not all(isinstance(value, str) and value for value in (app_id, chat_id, user_id, ui_event_id)):
+            return None
+        key = self._workflow_tool_call_storage_key(ui_event_id)
+        path = f"workflow_ui_state.feedback_render_receipts.{key}"
+        coll = await self._coll()
+        doc = await coll.find_one(
+            {"_id": chat_id, **build_app_scope_filter(app_id), "user_id": user_id},
+            {path: 1},
+        )
+        receipt = (((doc or {}).get("workflow_ui_state") or {}).get("feedback_render_receipts") or {}).get(key)
+        return deepcopy(receipt) if isinstance(receipt, dict) else None
 
     async def update_tool_call_state(
         self,

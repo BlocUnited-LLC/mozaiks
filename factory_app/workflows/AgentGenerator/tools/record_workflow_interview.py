@@ -34,7 +34,9 @@ def _context_set(context_variables: Any | None, key: str, value: Any) -> None:
         context_variables[key] = value
 
 
-async def record_workflow_interview(context_variables: Any = None) -> dict[str, str]:
+async def record_workflow_interview(
+    agent_message: str, context_variables: Any = None,
+) -> dict[str, str]:
     if context_variables is None:
         raise ValueError("Workflow interview requires runtime context")
 
@@ -47,6 +49,8 @@ async def record_workflow_interview(context_variables: Any = None) -> dict[str, 
 
     if not str(result.get("agent_message") or "").strip():
         raise ValueError("Workflow interview requires a user-facing message")
+    if agent_message != result["agent_message"]:
+        raise ValueError("Workflow interview message must match its validated output")
 
     outcome = str(result["outcome"])
     _context_set(context_variables, "interview_outcome", outcome)

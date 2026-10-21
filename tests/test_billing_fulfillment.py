@@ -60,6 +60,10 @@ class _Collection:
                 continue
             actual = doc.get(key)
             if isinstance(expected, dict):
+                if not any(operator.startswith("$") for operator in expected):
+                    if actual != expected:
+                        return False
+                    continue
                 for operator, operand in expected.items():
                     if operator == "$ne":
                         if isinstance(actual, list):
@@ -218,6 +222,67 @@ def _subscriptions_config() -> SubscriptionsConfig:
                             "amount": 1000,
                             "cadence": "monthly",
                         }
+                    ],
+                },
+            ],
+        }
+    )
+
+
+def _v2_subscriptions_config(
+    *, missing_store: bool = False, shared_store: bool = False, duplicate_plan: bool = False
+) -> SubscriptionsConfig:
+    return SubscriptionsConfig.model_validate(
+        {
+            "schema_version": "mozaiks.subscriptions.v2",
+            "label": "Multi-product SaaS",
+            # A v2 subscription must never fall back to this root store.
+            "assignment_store": {
+                "data_alias": "root.assignments",
+                "user_id_field": "user_id",
+            },
+            "token_wallets": [
+                {
+                    "wallet_id": "ai_tokens",
+                    "label": "AI tokens",
+                    "unit": "tokens",
+                    "usage_meter_id": "ai_tokens",
+                    "scope": "user",
+                }
+            ],
+            "products": [
+                {
+                    "product_id": "ai",
+                    "label": "AI",
+                    "default_plan_id": "ai_free",
+                    "assignment_store": None if missing_store else {
+                        "data_alias": "ai.assignments",
+                        "user_id_field": "user_id",
+                        "active_statuses": ["active"],
+                    },
+                    "plans": [
+                        {"plan_id": "ai_free", "label": "Free", "capabilities": []},
+                        {
+                            "plan_id": "ai_pro",
+                            "label": "Pro",
+                            "capabilities": ["ai.chat"],
+                            "token_allowances": [
+                                {"wallet_id": "ai_tokens", "amount": 500, "cadence": "monthly"}
+                            ],
+                        },
+                    ],
+                },
+                {
+                    "product_id": "reports",
+                    "label": "Reports",
+                    "default_plan_id": "reports_free",
+                    "assignment_store": {
+                        "data_alias": "ai.assignments" if shared_store else "reports.assignments",
+                        "user_id_field": "user_id",
+                    },
+                    "plans": [
+                        {"plan_id": "reports_free", "label": "Free"},
+                        {"plan_id": "ai_pro" if duplicate_plan else "reports_pro", "label": "Pro"},
                     ],
                 },
             ],
@@ -464,6 +529,296 @@ async def test_unknown_static_plan_without_snapshot_is_rejected() -> None:
 
 
 @pytest.mark.asyncio
+async def test_v2_unique_plan_infers_product_and_credits_paid_snapshot() -> None:
+    collections: dict[str, _Collection] = {}
+    database = _Database()
+    ledger = TokenWalletLedger(database=database)
+    service = BillingFulfillmentService(
+        config=_v2_subscriptions_config(),
+        ledger=ledger,
+        collection_resolver=lambda alias: collections.setdefault(alias, _Collection()),
+    )
+
+    result = await service.apply(
+        BillingFulfillmentCommand(
+            command_id="cmd_v2_paid_snapshot",
+            event_type="subscription_activated",
+            source="test",
+            app_id="app_1",
+            user_id="user_1",
+            plan_id="ai_pro",
+            subject_revision=3,
+            token_allowances=[
+                {"wallet_id": "ai_tokens", "amount": 350, "cadence": "monthly"}
+            ],
+            occurred_at=datetime(2026, 7, 1, tzinfo=UTC),
+        )
+    )
+
+    assert result.success is True
+    assert result.effects[0].details["data_alias"] == "ai.assignments"
+    assert set(collections) == {"ai.assignments"}
+    assignment = await _assignment(collections["ai.assignments"])
+    assert assignment["plan_id"] == "ai_pro"
+    assert assignment["billing_revision"] == 3
+    assert assignment["granted_capabilities"] == [{"capability_id": "ai.chat"}]
+    assert assignment["token_allowances"][0]["amount"] == 350
+    assert assignment["plan_snapshot"]["token_allowances"][0]["amount"] == 350
+    balance = await ledger.query_balance(app_id="app_1", user_id="user_1")
+    assert balance["balance"] == 350
+
+
+@pytest.mark.asyncio
+async def test_v2_explicit_empty_paid_snapshot_does_not_grant_catalog_allowance() -> None:
+    assignments = _Collection()
+    ledger = _AllowancePeriodLedger()
+    service = BillingFulfillmentService(
+        config=_v2_subscriptions_config(),
+        ledger=ledger,  # type: ignore[arg-type]
+        collection_resolver=lambda _alias: assignments,
+    )
+
+    result = await service.apply(
+        BillingFulfillmentCommand(
+            command_id="cmd_v2_empty_snapshot",
+            event_type="subscription_activated",
+            source="test",
+            app_id="app_1",
+            user_id="user_1",
+            plan_id="ai_pro",
+            token_allowances=[],
+        )
+    )
+
+    assert result.effects[1].reason == "no_token_allowances"
+    assert ledger.calls == []
+    assignment = await _assignment(assignments)
+    assert assignment["token_allowances"] == []
+    assert assignment["plan_snapshot"]["token_allowances"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "expires_at", "expected_reason", "expected_calls"),
+    [
+        ("pending", None, "inactive_subscription", 0),
+        ("active", datetime(2020, 1, 1, tzinfo=UTC), "expired", 0),
+        ("active", datetime(2099, 1, 1, tzinfo=UTC), None, 1),
+    ],
+)
+async def test_v2_allowance_requires_active_unexpired_assignment(
+    status: str,
+    expires_at: datetime | None,
+    expected_reason: str | None,
+    expected_calls: int,
+) -> None:
+    assignments = _Collection()
+    ledger = _AllowancePeriodLedger()
+    service = BillingFulfillmentService(
+        config=_v2_subscriptions_config(),
+        ledger=ledger,  # type: ignore[arg-type]
+        collection_resolver=lambda _alias: assignments,
+    )
+
+    result = await service.apply(
+        BillingFulfillmentCommand(
+            command_id=f"cmd_v2_{status}_{expected_reason or 'eligible'}",
+            event_type="subscription_activated",
+            source="test",
+            app_id="app_1",
+            user_id="user_1",
+            product_id="ai",
+            plan_id="ai_pro",
+            status=status,
+            expires_at=expires_at,
+            token_allowances=[
+                {"wallet_id": "ai_tokens", "amount": 350, "cadence": "monthly"}
+            ],
+        )
+    )
+
+    assignment = await _assignment(assignments)
+    assert assignment["status"] == status
+    assert result.effects[0].status == "applied"
+    assert result.effects[1].reason == expected_reason
+    assert len(ledger.calls) == expected_calls
+
+
+@pytest.mark.asyncio
+async def test_v2_missing_assignment_store_cannot_credit_paid_allowance() -> None:
+    ledger = _AllowancePeriodLedger()
+    service = BillingFulfillmentService(
+        config=_v2_subscriptions_config(missing_store=True),
+        ledger=ledger,  # type: ignore[arg-type]
+    )
+
+    result = await service.apply(
+        BillingFulfillmentCommand(
+            command_id="cmd_v2_missing_store",
+            event_type="subscription_activated",
+            source="test",
+            app_id="app_1",
+            user_id="user_1",
+            plan_id="ai_pro",
+        )
+    )
+
+    assert result.success is False
+    assert result.effects[0].status == "rejected"
+    assert result.effects[0].reason == "assignment_store_missing"
+    assert result.effects[1].reason == "assignment_store_missing"
+    assert ledger.calls == []
+
+
+@pytest.mark.asyncio
+async def test_v1_missing_assignment_store_also_cannot_credit_allowance() -> None:
+    ledger = _AllowancePeriodLedger()
+    config = SubscriptionsConfig.model_validate(
+        {**_subscriptions_config().model_dump(mode="json"), "assignment_store": None}
+    )
+    service = BillingFulfillmentService(config=config, ledger=ledger)  # type: ignore[arg-type]
+
+    result = await service.apply(
+        BillingFulfillmentCommand(
+            command_id="cmd_v1_missing_store",
+            event_type="subscription_activated",
+            source="test",
+            app_id="app_1",
+            user_id="user_1",
+            plan_id="pro",
+        )
+    )
+
+    assert result.effects[0].status == "skipped"
+    assert result.effects[0].reason == "assignment_store_missing"
+    assert result.effects[1].reason == "assignment_store_missing"
+    assert ledger.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("product_id", "plan_id", "expected_reason"),
+    [
+        (None, "ai_pro", "ambiguous_plan"),
+        ("missing", "ai_pro", "unknown_product"),
+        ("ai", "reports_free", "unknown_plan"),
+    ],
+)
+async def test_v2_product_identity_rejects_ambiguous_or_unknown_selection(
+    product_id: str | None, plan_id: str, expected_reason: str
+) -> None:
+    ledger = _AllowancePeriodLedger()
+    collections: dict[str, _Collection] = {}
+    service = BillingFulfillmentService(
+        config=_v2_subscriptions_config(duplicate_plan=True),
+        ledger=ledger,  # type: ignore[arg-type]
+        collection_resolver=lambda alias: collections.setdefault(alias, _Collection()),
+    )
+
+    result = await service.apply(
+        BillingFulfillmentCommand(
+            command_id=f"cmd_v2_{expected_reason}",
+            event_type="subscription_activated",
+            source="test",
+            app_id="app_1",
+            user_id="user_1",
+            product_id=product_id,
+            plan_id=plan_id,
+            token_allowances=[
+                {"wallet_id": "ai_tokens", "amount": 350, "cadence": "monthly"}
+            ],
+        )
+    )
+
+    assert result.success is False
+    assert result.effects[0].reason == expected_reason
+    assert result.effects[1].status == "skipped"
+    assert collections == {}
+    assert ledger.calls == []
+
+
+@pytest.mark.asyncio
+async def test_v2_products_cannot_share_an_unqualified_assignment_store() -> None:
+    ledger = _AllowancePeriodLedger()
+    collections: dict[str, _Collection] = {}
+    service = BillingFulfillmentService(
+        config=_v2_subscriptions_config(shared_store=True),
+        ledger=ledger,  # type: ignore[arg-type]
+        collection_resolver=lambda alias: collections.setdefault(alias, _Collection()),
+    )
+
+    result = await service.apply(
+        BillingFulfillmentCommand(
+            command_id="cmd_v2_shared_store",
+            event_type="subscription_activated",
+            source="test",
+            app_id="app_1",
+            user_id="user_1",
+            product_id="ai",
+            plan_id="ai_pro",
+        )
+    )
+
+    assert result.success is False
+    assert result.effects[0].reason == "shared_assignment_store"
+    assert collections == {}
+    assert ledger.calls == []
+
+
+@pytest.mark.asyncio
+async def test_v2_product_revisions_have_separate_wallet_subjects() -> None:
+    class _RevisionLedger(_AllowancePeriodLedger):
+        def __init__(self) -> None:
+            super().__init__()
+            self.heads: dict[tuple[str, str], int] = {}
+
+        async def advance_subject_revision(self, **kwargs) -> bool:
+            key = (kwargs["wallet_id"], kwargs["subject_key"])
+            revision = kwargs["subject_revision"]
+            if self.heads.get(key, -1) > revision:
+                return False
+            self.heads[key] = revision
+            return True
+
+    ledger = _RevisionLedger()
+    collections: dict[str, _Collection] = {}
+    service = BillingFulfillmentService(
+        config=_v2_subscriptions_config(),
+        ledger=ledger,  # type: ignore[arg-type]
+        collection_resolver=lambda alias: collections.setdefault(alias, _Collection()),
+    )
+    ai = BillingFulfillmentCommand(
+        command_id="cmd_ai_revision",
+        event_type="subscription_activated",
+        source="test",
+        app_id="app_1",
+        user_id="user_1",
+        product_id="ai",
+        plan_id="ai_pro",
+        subject_revision=7,
+        token_allowances=[{"wallet_id": "ai_tokens", "amount": 350, "cadence": "monthly"}],
+    )
+    reports = BillingFulfillmentCommand(
+        command_id="cmd_reports_revision",
+        event_type="subscription_activated",
+        source="test",
+        app_id="app_1",
+        user_id="user_1",
+        product_id="reports",
+        plan_id="reports_pro",
+        subject_revision=2,
+        token_allowances=[{"wallet_id": "ai_tokens", "amount": 100, "cadence": "monthly"}],
+    )
+
+    assert service._subject_key(ai) != service._subject_key(reports)
+    assert (await service.apply(ai)).success is True
+    assert (await service.apply(reports)).success is True
+    assert len(ledger.calls) == 2
+    assert [call["product_id"] for call in ledger.calls] == ["ai", "reports"]
+    assert set(collections) == {"ai.assignments", "reports.assignments"}
+
+
+@pytest.mark.asyncio
 async def test_durable_fulfillment_replays_and_rejects_command_id_conflicts() -> None:
     database = _Database()
     assignments = _Collection()
@@ -673,13 +1028,16 @@ def _clear_auth_env(monkeypatch) -> None:
         # these tests exercise the un-granted anonymous path.
         "AUTH_ANON_ROLES",
         "AUTH_ANON_SCOPES",
+        "AUTH_ANON_ACCESS",
     ):
         monkeypatch.delenv(var, raising=False)
 
 
 def test_fulfillment_ingress_fails_closed_when_auth_merely_unconfigured(monkeypatch) -> None:
     """Implicit demo mode (no auth config at all) + no INTERNAL_API_KEY must NOT
-    make the fulfillment ingress callable without authentication."""
+    make the fulfillment ingress callable without authentication: the request
+    has no principal, exactly like a request without a token on an
+    authenticated host, and the ingress refuses it."""
     from mozaiksai.core.auth.adapters.registry import reset_auth_adapter
 
     _clear_auth_env(monkeypatch)
@@ -688,14 +1046,79 @@ def test_fulfillment_ingress_fails_closed_when_auth_merely_unconfigured(monkeypa
         client = _ingress_client(monkeypatch)
         resp = client.post("/api/billing/fulfillment/apply", json=_INGRESS_PAYLOAD)
         assert resp.status_code == 403
+        assert "requires an internal API key" in resp.json()["detail"]
         listing = client.get("/api/admin/billing/fulfillment?app_id=app_1")
         assert listing.status_code == 403
     finally:
         reset_auth_adapter()
 
 
+@pytest.mark.parametrize(
+    ("access", "client_host", "status"),
+    [
+        ("local", "127.0.0.1", 200),
+        ("local", "172.20.0.1", 403),
+        ("public", "127.0.0.1", 403),
+        ("public", "172.20.0.1", 403),
+        ("open", "172.20.0.1", 200),
+    ],
+)
+def test_fulfillment_ingress_local_branch_requires_development_access(
+    monkeypatch, access, client_host, status
+) -> None:
+    """The explicit-disable dev branch serves only requests granted development
+    access: this machine under local, anyone under open, never a public visitor."""
+    from mozaiksai.core.auth.adapters.registry import reset_auth_adapter
+
+    _clear_auth_env(monkeypatch)
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("AUTH_ANON_ACCESS", access)
+    reset_auth_adapter()
+    try:
+        client = _ingress_client(monkeypatch)
+        client = TestClient(
+            client.app,
+            raise_server_exceptions=False,
+            client=(client_host, 50000),
+            base_url="http://localhost:8000",
+        )
+        resp = client.post("/api/billing/fulfillment/apply", json=_INGRESS_PAYLOAD)
+        assert resp.status_code == status
+    finally:
+        reset_auth_adapter()
+
+
+@pytest.mark.parametrize("client_host", [None, "172.20.0.1"], ids=["testclient", "docker_gateway"])
+def test_fulfillment_ingress_internal_key_works_from_a_client_the_local_posture_refuses(
+    monkeypatch, client_host
+) -> None:
+    """A hosted fulfillment sender is not this machine: under AUTH_ANON_ACCESS=local
+    it has no principal (optional_user gives None), and its internal key still
+    authorizes, exactly as on an authenticated host."""
+    from mozaiksai.core.auth.adapters.registry import reset_auth_adapter
+
+    _clear_auth_env(monkeypatch)
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("INTERNAL_API_KEY", "configured-key-0123456789abcdef")
+    reset_auth_adapter()
+    try:
+        client = _ingress_client(monkeypatch)
+        if client_host is not None:
+            client = TestClient(client.app, raise_server_exceptions=False, client=(client_host, 50000))
+        keyed = client.post(
+            "/api/billing/fulfillment/apply",
+            json=_INGRESS_PAYLOAD,
+            headers={"x-internal-api-key": "configured-key-0123456789abcdef"},
+        )
+        assert keyed.status_code == 200
+        assert client.post("/api/billing/fulfillment/apply", json=_INGRESS_PAYLOAD).status_code == 403
+    finally:
+        reset_auth_adapter()
+
+
 def test_fulfillment_ingress_allows_explicitly_disabled_auth_dev_mode(monkeypatch) -> None:
-    """AUTH_ENABLED=false is the explicit development contract — local dev keeps working."""
+    """AUTH_ENABLED=false is the explicit development contract — local dev
+    (a request from this machine) keeps working."""
     from mozaiksai.core.auth.adapters.registry import reset_auth_adapter
 
     _clear_auth_env(monkeypatch)
@@ -703,6 +1126,12 @@ def test_fulfillment_ingress_allows_explicitly_disabled_auth_dev_mode(monkeypatc
     reset_auth_adapter()
     try:
         client = _ingress_client(monkeypatch)
+        client = TestClient(
+            client.app,
+            raise_server_exceptions=False,
+            client=("127.0.0.1", 50000),
+            base_url="http://localhost:8000",
+        )
         resp = client.post("/api/billing/fulfillment/apply", json=_INGRESS_PAYLOAD)
         assert resp.status_code == 200
         assert resp.json()["status"] == "applied"
@@ -720,6 +1149,13 @@ def test_fulfillment_ingress_requires_key_when_key_configured_even_if_auth_disab
     reset_auth_adapter()
     try:
         client = _ingress_client(monkeypatch)
+        # From this machine, so the request does have development access.
+        client = TestClient(
+            client.app,
+            raise_server_exceptions=False,
+            client=("127.0.0.1", 50000),
+            base_url="http://localhost:8000",
+        )
         no_key = client.post("/api/billing/fulfillment/apply", json=_INGRESS_PAYLOAD)
         assert no_key.status_code == 403
         wrong_key = client.post(
@@ -1266,10 +1702,13 @@ def test_unfenced_command_document_omits_the_revision_field() -> None:
     unfenced = _subscription_command("cmd_unfenced", plan_id="pro")
     document = _command_document(unfenced)
     assert "subject_revision" not in document
+    assert "product_id" not in document
 
-    # The hash a pre-#497 build would have produced, reconstructed from the
-    # same canonical rules without the field existing at all.
-    baseline = dict(document)
+    # The hash an older build produced before either optional field existed.
+    baseline = unfenced.model_dump(mode="json")
+    baseline.pop("subject_revision")
+    baseline.pop("product_id")
+    assert document == baseline
     assert _command_hash(unfenced) == _json_hash(baseline)
 
 

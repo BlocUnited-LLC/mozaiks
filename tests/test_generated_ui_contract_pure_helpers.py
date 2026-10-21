@@ -92,16 +92,20 @@ Covers helpers NOT already tested in test_generated_ui_contract.py:
     - whitespace only → False
     - valid string → True
 
-  _parse_registered_components:
-    - no registerComponent → empty set
-    - single call → component name returned
-    - multiple calls → all names returned
+  _parse_registered_component_bindings:
+    - no registerComponent → empty mapping
+    - single call → registry key mapped to local binding
+    - multiple calls → all bindings returned
     - double-quoted name → included
     - backtick-quoted name → included
+    - distinct registry key and binding → exact mapping preserved
+    - missing binding → None so the audit can reject it
 """
 from __future__ import annotations
 
 from pathlib import PurePosixPath
+
+import pytest
 
 from factory_app.workflows._shared.generated_ui_contract import (
     _bundle_file_map,
@@ -111,12 +115,55 @@ from factory_app.workflows._shared.generated_ui_contract import (
     _looks_like_local_card_shell,
     _non_empty_string,
     _parse_public_imports,
-    _parse_registered_components,
+    _parse_registered_component_bindings,
     _resolve_relative_import,
     _section_children,
     _strings_from_value,
     dedupe,
+    resolve_registered_component_files,
 )
+
+
+def test_registered_component_resolution_can_be_limited_to_app_registry():
+    files = {
+        "ui/index.js": "import { View as Local } from './pages/custom/focus.jsx'; registerComponent('Focus', Local);",
+        "ui/pages/custom/focus.jsx": "export function View() {}",
+        "workflows/Other/ui/index.js": "import Other from './Other.jsx'; registerComponent('Focus', Other);",
+        "workflows/Other/ui/Other.jsx": "export default function Other() {}",
+    }
+    registered, warnings = resolve_registered_component_files(files, source_label="test", registry_paths={"ui/index.js"})
+    assert registered == {"Focus": {"ui/pages/custom/focus.jsx"}}
+    assert warnings == []
+    all_registered, _ = resolve_registered_component_files(files, source_label="test")
+    assert len(all_registered["Focus"]) == 2
+
+
+@pytest.mark.parametrize("extra", [
+    "registerComponent('Focus', Focus);", "registerComponent(key, Focus);",
+    "registerComponent('Other', () => Focus);", "registerComponent(`Other${suffix}`, Focus);",
+])
+def test_registry_duplicate_and_dynamic_calls_report_ambiguity(extra):
+    files = {
+        "ui/index.js": "import Focus from './pages/custom/focus.jsx'; registerComponent('Focus', Focus); " + extra,
+        "ui/pages/custom/focus.jsx": "export default function Focus() {}",
+    }
+    _, warnings = resolve_registered_component_files(files, source_label="test")
+    assert warnings
+
+
+@pytest.mark.parametrize("relative", ["../../ui/pages/custom/focus.jsx", "./pages/../../../../ui/pages/custom/focus.jsx"])
+def test_registry_import_cannot_escape_then_reenter_bundle(relative):
+    files = {
+        "ui/index.js": f"import Focus from '{relative}'; registerComponent('Focus', Focus);",
+        "ui/pages/custom/focus.jsx": "export default function Focus() {}",
+    }
+    registered, warnings = resolve_registered_component_files(files, source_label="test")
+    assert registered == {"Focus": set()}
+    assert any("unsafe relative import" in warning for warning in warnings)
+
+
+def test_relative_import_can_traverse_within_bundle():
+    assert _resolve_relative_import(PurePosixPath("ui/components"), "../pages/custom/focus.jsx") == "ui/pages/custom/focus.jsx"
 
 # ---------------------------------------------------------------------------
 # 1. dedupe
@@ -533,34 +580,36 @@ class TestNonEmptyString:
 
 
 # ---------------------------------------------------------------------------
-# 12. _parse_registered_components
+# 12. _parse_registered_component_bindings
 # ---------------------------------------------------------------------------
 
-class TestParseRegisteredComponents:
-    def test_no_register_call_returns_empty_set(self):
-        assert _parse_registered_components("const x = 1;") == set()
+class TestParseRegisteredComponentBindings:
+    def test_no_register_call_returns_empty_mapping(self):
+        assert _parse_registered_component_bindings("const x = 1;") == {}
 
     def test_single_quoted_name(self):
-        result = _parse_registered_components("registerComponent('MyWidget', MyWidget);")
-        assert "MyWidget" in result
+        result = _parse_registered_component_bindings("registerComponent('MyWidget', MyWidget);")
+        assert result == {"MyWidget": "MyWidget"}
 
     def test_double_quoted_name(self):
-        result = _parse_registered_components('registerComponent("DashboardCard", DashboardCard);')
-        assert "DashboardCard" in result
+        result = _parse_registered_component_bindings('registerComponent("DashboardCard", DashboardCard);')
+        assert result == {"DashboardCard": "DashboardCard"}
 
     def test_backtick_quoted_name(self):
-        result = _parse_registered_components("registerComponent(`StatusPanel`, StatusPanel);")
-        assert "StatusPanel" in result
+        result = _parse_registered_component_bindings("registerComponent(`StatusPanel`, StatusPanel);")
+        assert result == {"StatusPanel": "StatusPanel"}
 
     def test_multiple_calls_all_returned(self):
         code = (
             "registerComponent('Comp1', Comp1);\n"
             "registerComponent('Comp2', Comp2);\n"
         )
-        result = _parse_registered_components(code)
-        assert "Comp1" in result
-        assert "Comp2" in result
+        result = _parse_registered_component_bindings(code)
+        assert result == {"Comp1": "Comp1", "Comp2": "Comp2"}
 
-    def test_returns_set(self):
-        result = _parse_registered_components("registerComponent('X', X);")
-        assert isinstance(result, set)
+    def test_registry_key_maps_to_distinct_local_binding(self):
+        result = _parse_registered_component_bindings("registerComponent('timer', TimerPage, { description: 'Timer' });")
+        assert result == {"timer": "TimerPage"}
+
+    def test_missing_binding_is_retained_for_audit_rejection(self):
+        assert _parse_registered_component_bindings("registerComponent('TimerPage');") == {"TimerPage": None}

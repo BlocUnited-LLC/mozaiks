@@ -105,6 +105,188 @@ Current implementation status:
   endpoints for enabled actions.
 - External repo, overlay, and full-migration write-back modes are modeled but
   still need provider-specific execution and UX actions.
+- The approved managed-execution context projection passes only editable source
+  files to a coding request. Prohibited and read-only paths override allowed
+  prefixes, and source contents outside the editable scope are excluded. This
+  projection does not execute a repository change or connect the hosted handoff
+  to the generated-app coding worker.
+
+### Approved Repository Patch Candidate
+
+`finalize_repository_patch` is the offline OSS bridge from an authenticated
+`ApprovedExecutionContext` to a reviewable `external_patch` candidate for an
+existing repository. It accepts a host-verified `RepositorySnapshotEvidence`,
+exact selected baseline files, a disposable `StagedCodingWorkspace`, a
+`StagedPatchProposal`, and the host's per-path `validate_path` policy. The host
+must load the persisted approved snapshot, verify its digest and repository
+identity and plan/request/app IDs against the approval, and fetch regular UTF-8
+files at the immutable `baseline_commit_sha` before staging. The snapshot digest is opaque to OSS:
+the hosted digest includes tenant and excluded-path evidence that is absent
+from `ApprovedExecutionContext`.
+The snapshot has no build-registry ID; the host verifies the approved context's
+`build_registry_id` against its app registry when it retrieves the snapshot and
+again before publishing a PR.
+
+The finalizer checks every selected file against the approved `sha256:` file
+manifest, harvests the stopped provider's staged tree, rejects symlinks and
+unselected files, and requires the provider's proposal to match the observed
+create, update, and delete operations and bytes. Creates and deletes require
+exact `create_paths` and `delete_paths` in the approved plan digest; directory
+scope alone never grants them. A create also requires a host callback that
+proves absence and no path collision in the complete Git tree at the pinned
+baseline, including excluded entries. It calls the host path policy for baseline,
+selected, observed, and proposed paths; broad approved scopes do not bypass
+host-specific protected descendants. The returned
+`RepositoryPatchCandidate` contains the approval and provider identities,
+nullable before/after hashes, updated content or a deletion, unified diffs, and required gate names.
+Its `validation_state` is `pending` and `mutation_allowed` is `false`.
+The candidate contract is `mozaiks.refinement.repository_patch.v2`.
+
+This function reads the staged tree and does not invoke an agent, run validation
+commands, persist a review record, publish a branch/PR, or mutate the source
+repository. The host must isolate the coding provider to the disposable tree
+and keep that tree stable while the finalizer harvests it. A host-owned
+review/publisher must satisfy required gates and recheck the destination
+baseline before publication.
+
+For an isolated executor, `export_repository_workspace_archive` captures every
+selected file from the stopped provider's disposable tree before that tree is
+deleted. It refuses ungranted creates or deletes, links, non-exact UTF-8 content,
+and archives outside explicit count and byte budgets. The exporter must run
+inside an OS-isolated worker with filesystem and memory limits because the
+canonical workspace harvester reads files before the archive budget is checked.
+It uses the existing
+deterministic archive envelope; it does not serialize the provider's own
+changed-file claims as observation. The authenticated host caps the archive
+before parsing and calls `stage_repository_workspace_archive` with the same
+approved context, verified snapshot, exact selected baseline, and path policy.
+The host checks the raw central-directory count and declared sizes before ZIP
+parsing can allocate entry objects. It then verifies canonical archive metadata,
+exact approved operation paths, hashes, and strict UTF-8, and writes output bytes only
+into a fresh private staging tree first materialized from the approved baseline.
+It passes that tree to `finalize_repository_patch` and reports any failure to
+remove the tree after review candidate creation.
+No ZIP entry is extracted by path. Deletion-only output uses a repository-specific
+empty transport marker; the shared deterministic archive contract still rejects
+empty ZIPs. The bridge accepts only portable UTF-8 files and remains inactive
+until the hosted product binds a trusted executor and full-tree absence proof.
+The host may pass selected tests or docs to an isolated ACP turn through
+`select_repository_read_only_files`. Each file must be within both an approved
+allowed path and an approved read-only path, outside prohibited paths, accepted
+by the host's per-file policy, and hash-equal to the immutable snapshot. The
+selection has explicit file and byte limits. A read-only path grants no new
+read authority by itself, even under a broad read-only prefix. The executor
+materializes these files in a separate read-only manifest. Post-turn harvest
+rejects edits or deletion, including when create/delete flags are enabled,
+and excludes those files from the archive and candidate's changed-file list.
+The repository candidate uses host-derived summary and rationale, never the
+agent's reply or ACP plan events. Raw provider results can still quote inspected
+text; the Docker transport drops those fields and replaces proposal ID and
+provider ID with host-owned metadata. The host must not persist or publish raw
+provider text or events. Changed file content and diffs can also contain text
+copied from inspection files, so the host must apply its content policy before
+persisting or showing a candidate or publishing a PR.
+The generated-app coding worker rejects requests carrying inspection files;
+only the isolated repository provider proof uses this contract today.
+Changed `app/security/secrets.yaml` content must pass the names-only secret
+contract, while root `.env*.example` templates are excluded from this first
+repository patch lane and read-only inspection until an equivalent content
+gate is available.
+
+`execute_repository_docker_turn` is the host-side transport for one scoped
+`CodingWorkerRequest`. For exact create or delete grants, the trusted worker
+passes the approved execution context, matching snapshot, path policy, and a
+host callback that proves each create path absent from the complete typed tree
+at the pinned commit. The transport checks selected baseline and read-only
+inspection hashes before starting Docker. Only the selected file contents and
+exact operation paths enter the container; the full snapshot and host callback
+stay with the trusted worker. A separate trusted worker process or service with
+local Docker socket access must call it; the App Zero web host and the agent
+container must never mount or receive that socket. The trusted caller supplies
+a prebuilt image reference and its separately approved immutable local image ID
+outside the request. The transport resolves the reference locally and rejects a
+different ID before creating a container or passing source. It creates by that
+ID and verifies the created container's image before start. The approved ID
+must come from trusted build or image-manifest evidence; resolving the tag during
+the request cannot establish approval. The transport uses an empty Docker CLI
+config and minimal CLI environment, passes only the task and selected
+editable/read-only files on
+stdin, and checks the created container before starting it. The container has
+no network, bind or volume mounts, Docker log retention, or forwarded host
+credentials; image environment keys outside the finite offline image contract
+are rejected before start. The container runs as a nonroot user with a read-only
+root, limited tmpfs, CPU, memory,
+processes and wall time. Output is byte-capped before strict JSON parsing.
+The worker archive must match the selected file set adjusted only for approved
+creates and deletes, and use the canonical archive format. A deletion-only turn
+uses the repository bridge's empty archive marker. Container removal targets a
+random host-generated name even when the
+create response is lost. A static label also lets the trusted worker inspect
+and remove abandoned turns. A Docker daemon that finishes a timed-out create
+after cleanup remains a residual daemon race for that worker to monitor.
+
+The Docker result exposes only a strict, bounded token measurement in its
+separate `usage` field. Provider model names, message text, and operational
+events remain outside the sanitized proposal. A trusted host may record that
+measurement through `record_isolated_acp_usage` using the original host-owned
+request, a stable durable attempt ID, and a model identifier from trusted
+configuration. A malformed or missing measurement cannot invalidate a valid
+patch or create a usage receipt. These advisory ACP measurements enter the
+existing runtime usage ledger directly and never trigger token-wallet debits.
+
+The returned proposal and archive carry no approval authority. The host must
+still call `stage_repository_workspace_archive` and `finalize_repository_patch`
+with its verified snapshot, immutable baseline files, selected paths, and path
+policy. `repository_patch_digest` gives the host one canonical digest over a
+validated v2 candidate, including operation paths, hashes, content, review
+text, and required gates. It sorts operation and gate lists before hashing;
+validation and publication must use that same candidate digest and separately
+verify the approved baseline. The opt-in fake-agent Docker test proves this offline transport; it
+does not perform a live model turn. The executor is not wired into a hosted
+route or enabled in refinement policy. Live ACP needs a dedicated minimal
+image, controlled model credential delivery and egress, a trusted job worker,
+and a binding to persisted approval and source snapshot before activation.
+The proof worker fails the synthetic turn if its known ACP agent reports
+outbound network access, host-secret visibility, or unexpected host files from
+either its own process or an AG2 terminal request. Those agent-authored probe
+values are useful only for this controlled offline fixture; a live agent's
+reply can never attest to its own isolation.
+
+`infra/docker/Dockerfile.acp-worker` combines the already built offline proof
+worker image and pinned real ACP adapter image. Its one-shot entrypoint still
+selects the synthetic agent and runs through `execute_repository_docker_turn`
+with `--network none`; the real Codex and Claude adapters only initialize in
+separate credential-free checks. Build those two parent images first, then run:
+
+```powershell
+docker build -f infra/docker/Dockerfile.acp-worker -t mozaiks-acp-worker:local .
+$env:MOZAIKS_ACP_WORKER_PROOF_IMAGE_ID = (docker image inspect --format '{{.Id}}' mozaiks-acp-worker:local).Trim()
+$env:MOZAIKS_RUN_ACP_WORKER_IMAGE_PROOF = '1'
+python -m pytest -q --no-cov tests/test_acp_worker_image.py
+```
+
+This checks that the selected-file worker and both adapter binaries coexist in
+one disposable image. It does not exercise model-backed coding or authorize
+network access, a credential, or PR publication. The image inherits the proof
+base's Factory and synthetic-agent files; a live worker needs a separate minimal
+image after its isolation decision and acceptance gates are satisfied.
+
+The image ID lookup above is test setup for this offline proof. A trusted
+production caller must use an independently approved ID, not accept whichever
+ID a mutable tag resolves to when the request arrives. The separate opt-in
+repository proof test uses `MOZAIKS_REPOSITORY_DOCKER_PROOF_IMAGE_ID` for the
+approved local ID of `mozaiks-acp-proof:local`. The required CI isolation job
+binds that variable to the ID of the proof image it just built and checks that
+all three offline Docker cases ran. This CI test setup grants no production
+image approval.
+
+The offline ACP proof image consumes the host's exact `create_paths` and
+`delete_paths` alongside selected files. Its coding provider remains
+update-only by default; only that isolated worker instance receives operation
+grants. It tells the agent the granted paths, then checks the observed
+workspace against those exact grants before returning a proposal. The archive
+exporter repeats the operation check, including a canonical empty archive for
+deletion-only turns. Host snapshot and finalizer checks remain authoritative.
 
 ---
 

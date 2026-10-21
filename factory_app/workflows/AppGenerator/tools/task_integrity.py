@@ -8,11 +8,7 @@ from collections.abc import Iterable
 from typing import Any, NoReturn
 
 from mozaiksai.core.workflow.context.frozen import detach
-from mozaiksai.core.workflow.generator_support.code_files import safe_relpath
-from mozaiksai.core.workflow.generator_support.page_plan_utils import (
-    _page_stem_from_path,
-    _page_stems,
-)
+from mozaiksai.core.workflow.generator_support.code_files import planned_page_path, safe_relpath
 from mozaiksai.core.workflow.task_batches import (
     optional_task_output_paths,
     task_evidence_digest,
@@ -173,14 +169,12 @@ def planned_artifact_diagnostics(context: Any, files: dict[str, str]) -> list[di
         return diagnostics
     if "app.json" not in files and not any(item["path"] == "app.json" for item in diagnostics):
         add("PLANNED_ARTIFACT_MISSING", "app.json", owners.get("app.json"), "required app manifest is missing")
-    present_pages = {_page_stem_from_path(path) for path in files}
     for page in plan.get("pages") or []:
-        if not isinstance(page, dict) or present_pages.intersection(_page_stems(page)):
+        if not isinstance(page, dict):
             continue
-        planned_paths = [path for path in owners if _page_stem_from_path(path) in _page_stems(page)]
-        for path in planned_paths or [f"ui/pages/{str(page.get('page_id') or page.get('name') or 'unknown')}.yaml"]:
-            if not any(item["path"] == path for item in diagnostics):
-                add("PLANNED_ARTIFACT_MISSING", path, owners.get(path), "required planned page is missing")
+        path = planned_page_path(page)
+        if path not in files and not any(item["path"] == path for item in diagnostics):
+            add("PLANNED_ARTIFACT_MISSING", path, owners.get(path), "required planned page is missing")
     for module in plan.get("modules") or []:
         if not isinstance(module, dict) or not module.get("module_id"):
             continue
@@ -194,6 +188,10 @@ def planned_artifact_diagnostics(context: Any, files: dict[str, str]) -> list[di
 
 def artifact_snapshot_digest(context: Any, files: dict[str, str]) -> str:
     """Bind acceptance to its approved inputs and the exact exported contents."""
+    revision = (
+        _get(context, "build_mode") == "revision"
+        and _get(context, "workflow_sequence") not in {"conceptual_replan", "full_rebuild"}
+    )
     snapshot = {
         "plan": _get(context, "app_build_plan"),
         "tasks": _get(context, "app_task_batch_items"),
@@ -201,6 +199,12 @@ def artifact_snapshot_digest(context: Any, files: dict[str, str]) -> str:
         "binding": _get(context, "run_build_binding"),
         "files": files,
     }
+    if revision:
+        snapshot["revision_source_artifact_version_id"] = (
+            _get(context, "revision_source_artifact_version_id") or _get(context, "artifact_version_id")
+        )
+        snapshot["revision_asset_evidence"] = _get(context, "revision_asset_evidence")
+        snapshot["deleted_files"] = _get(context, "deleted_files")
     encoded = json.dumps(snapshot, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 

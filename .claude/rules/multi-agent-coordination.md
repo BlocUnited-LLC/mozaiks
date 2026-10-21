@@ -19,9 +19,6 @@ your branch too — this is how a single in-progress refactor turns into a
 cascading chain of broken PRs. Instead:
 - Wait for the dependency PR to merge (green CI, actually merged into `main`),
   then branch from fresh `origin/main`.
-- If you truly cannot wait, say so explicitly in your PR description ("stacked
-  on #123, will rebase once it merges") so reviewers know why checks are red,
-  and rebase onto `main` the moment the base PR lands.
 
 **Always work in an isolated worktree, never directly in the shared main
 checkout.** Multiple agents run git commands in the same main checkout folder
@@ -82,25 +79,27 @@ git checkout main && git reset --hard origin/main
 git checkout -b cc/<short-description>    # cc/ prefix = Claude Code
 # ... do work, commit -s ...
 git push -u origin cc/<short-description>
-gh pr create --title "..." --body "..."
-gh pr merge <number> --squash --delete-branch --auto
+gh pr create --draft --title "..." --body-file <file>
+gh pr ready <number>   # once the work is complete and locally verified
+# no --auto: the maintainer merges the exact head an independent reviewer cleared
 ```
 
 **Every commit must be signed off (DCO) — always use `git commit -s`, never
 plain `git commit -m`.** This repo is under the Developer Certificate of
 Origin (see [DCO.md](../../DCO.md)); a commit without a `Signed-off-by:`
-trailer fails the `dco` check. That check is not yet in the `main` branch
-protection required-checks list, so `--auto` can still merge a PR with a
-failing `dco` check — do not treat a green auto-merge as proof you signed off
-correctly. If you forgot on the last commit, fix it before pushing (or before
-leaving a PR open) with `git commit --amend -s --no-edit && git push --force-with-lease`;
+trailer fails the `dco` check, which branch protection requires, so a missing
+sign-off blocks the merge. If you forgot on the last commit, fix it before
+pushing (or before leaving a PR open) with `git commit --amend -s --no-edit && git push --force-with-lease`;
 for several unsigned commits use `git rebase --signoff origin/main` first.
 
-Auto-merge is enabled repo-wide. Request it right when you open the PR — do
-not wait around watching CI yourself. GitHub merges automatically once every
-required check passes, so nobody has to remember to come back and click
-merge. If a check fails, auto-merge just never fires; fix the check and the
-same `--auto` request still applies once you push again.
+Do not arm auto-merge. The required review cannot be satisfied by the single
+collaborator every agent pushes as, so an armed auto-merge fires only when the
+review gate is lowered, and an unrelated PR once merged unreviewed that way.
+An independent reviewer clears an exact head SHA; the maintainer merges it.
+Pull requests from other authors, such as Dependabot, follow the fast path in
+[pr-merge-policy.md](pr-merge-policy.md).
+The full rule, with the PR-volume and CI-cost rules, is
+[Pull Request Volume, Review, And CI Cost](../../docs/agent-engineering-contract.md#pull-request-volume-review-and-ci-cost).
 
 ## Branch Naming Convention
 

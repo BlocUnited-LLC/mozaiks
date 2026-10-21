@@ -56,6 +56,8 @@ async def test_platform_profile_contract_uses_host_defaults_for_local_dev(monkey
         roles=[],
         scopes=[],
         raw_claims={},
+        # The auth-off development principal (this machine, AUTH_ANON_ACCESS=local).
+        auth_provenance="local_development",
     )
 
     result = await platform_app.get_current_user_profile(app_id=None, principal=principal)

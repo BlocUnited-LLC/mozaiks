@@ -49,12 +49,22 @@ async def test_health_endpoint_succeeds_with_fake_mongo_ping(monkeypatch) -> Non
     client = _FakeMongoClient()
     monkeypatch.setattr(runtime, "mongo_client", client)
     monkeypatch.setattr(runtime, "simple_transport", object())
-    monkeypatch.setattr(runtime, "workflow_status_summary", lambda: {"running": 0})
+    monkeypatch.setattr(runtime, "workflow_status_summary", lambda: {
+        "total_workflows": 2,
+        "loaded_workflows": 1,
+        "error_workflows": 1,
+        "workflow_names": ["Billing", "Support"],
+        "registered_workflows": ["billing"],
+        "metadata": {"billing": {"transport": "websocket"}},
+        "base_path": "/srv/app/workflows",
+    })
 
     result = await runtime.health_check()
 
     assert result["status"] == "healthy"
-    assert result["workflows"] == {"running": 0}
+    # Counts only: names, handler metadata and the root's path stay private.
+    assert result["workflows"] == {"total_workflows": 2, "loaded_workflows": 1, "error_workflows": 1}
+    assert "/srv/app" not in repr(result)
     assert "transport" in result
     assert client.admin.calls == [(("ping",), {})]
 

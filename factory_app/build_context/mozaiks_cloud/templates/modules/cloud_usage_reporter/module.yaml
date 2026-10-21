@@ -9,7 +9,8 @@ module:
     endpoint. Sink-agnostic: silently idle when no mozaiks_cloud connector
     or MOZAIKS_CLOUD_* configuration exists — the app never phones home by
     default. Aggregate counts only; no per-user or per-session data leaves
-    the app.
+    the app. Reporting requires MOZAIKS_CLOUD_APP_ID or MOZAIKS_APP_ID; when
+    both are set they must match.
   capability_source: managed_capability
   provider: mozaiks_cloud
 

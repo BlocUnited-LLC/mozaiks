@@ -87,7 +87,7 @@ def _bundle():
             "pages": [
                 {
                     "name": "Users",
-                    "route": "/users",
+                    "ui_surface": "declarative_page", "route": "/users",
                     "layout": "full-width",
                     "intent": "Manage users",
                     "sections": [

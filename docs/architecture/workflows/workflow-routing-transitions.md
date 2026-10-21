@@ -48,6 +48,21 @@ the runtime validates the bearer token and checks that the requested scope
 matches the authenticated principal. Local no-auth operation remains governed
 by runtime configuration, not by a browser-side bypass.
 
+### Starting a Factory app from Studio
+
+The Factory app-type selector registers a draft through `POST /api/studio/apps`
+before resolving the chosen journey. Its third `onResolve` argument carries
+`{build_registry_id}` as launch metadata. The shell retains that selector across
+chained transitions and retries and sends it at the top level of
+`POST /api/transitions/resolve`, outside workflow context.
+
+The existing `chat_session_fields` hook has a read-only `route` phase to resolve
+the owned target before selecting a target-scoped router. It does not allocate a
+build or an active chat. The `prepare` phase establishes the build binding when
+the actual workflow and chat are known. Missing or foreign targets fail closed.
+Retrying a failed transition keeps the draft and user choices; it does not
+register another app or relax target ownership.
+
 ### Failed Workflow Retry
 
 Studio's existing `POST /api/workflows/trigger` accepts `retry_failed: true`
@@ -58,7 +73,24 @@ The optional `build_registry_id` is a selector, not target authority. Retry
 rejects context, trigger payload, journey, action, and artifact-key overrides.
 Ordinary source-chat launches without this flag retain their existing behavior.
 
-A genesis retry starts fresh. A refinement retry uses the saved typed change
+Reopening a failed chat uses the existing authenticated chat metadata route.
+Its optional `failure_message` is the nonblank string named by the loaded
+workflow's validated `failure_message_key`, read from the same scoped session
+snapshot as status `2`. Missing workflow configuration, absent text, and other
+statuses return no failure detail. No context object or guessed feedback field
+is exposed. Studio shows this text in a collapsed details card only when the
+current transcript has no visible `workflow_failure` message; changing the
+session or receiving nonfailed metadata clears the fallback. This projection
+does not write session state or insert synthetic messages into model history.
+
+A genesis retry starts with fresh execution state and preserves the saved
+`coding_participation` choice (`autonomous` or `guided`) through the existing
+launch-context authority check. Missing choices retain the workflow default;
+invalid persisted values fail before launch. Other failed-run state is not
+copied. Approved concept, design, theme and subscription inputs continue to
+resolve through the workflow's existing artifact references.
+
+A refinement retry uses the saved typed change
 request, selected baseline record, and journey through
 `TriggerRoutingContribution`; it does not reclassify the request or allocate a
 new build. Missing, foreign, retired, or inconsistent baseline records fail
@@ -296,6 +328,32 @@ routes against the reviewed bundle rather than an ambient app workspace.
 If the trigger response is `harness_decision`, the chat shell must feed it into
 the shared pending harness decision UI before launching any downstream workflow.
 
+The App Workbench opens on the draft preview and change request. Code, raw
+diffs, validation commands, and export tools remain available through explicit
+controls. Refinement acceptance and activation remain separate, server-authorized
+actions. A genesis artifact can already be the current version; the user still
+reviews it and explicitly activates it. Delivery confirmation remains visible
+when the workflow requires it.
+When a registry run is in `review` and names a saved artifact, the app's primary
+Studio action opens its existing Build Review page, even if the earlier build
+conversation is still recorded. Opening that page loads the saved version; it
+does not start a workflow or allocate a preview. Drafts without a saved artifact
+retain their existing build conversation or Building destination.
+Build and integration warning details start collapsed, with their count visible;
+failed and skipped checks remain visible. Expanding integration warnings reveals
+the full list without changing the validation result or promotion gate.
+Review notes, including text-diff omissions, remain available separately from
+the always-visible validation blocker.
+A failed preview attempt stops status observation and keeps its original error
+until an explicit retry, stop, or version change. Preview errors are shown as
+collapsed plain-text details. The chat typing indicator follows current loading
+state: historical tool output cannot restart it after an interactive request or
+terminal event has stopped activity.
+Scoped refinement preserves the exported bundle's root `.env.example`,
+`.env.staging.example`, and `.env.production.example` templates. Actual environment
+files and nested credential paths remain blocked; the existing deployment
+acceptance checks still reject real secret values in those templates.
+
 ## Dependencies
 
 Dependencies are hard prerequisites and belong on workflow entries:
@@ -390,6 +448,92 @@ product expansion, not an automatic full-repository rewrite. Both choices route
 into `brownfield_repo_input`, which asks which repo to analyze before
 `ExistingAppDiscovery` starts. The selected internal value (`light_integration`
 or `full_migration`) becomes downstream scope context.
+
+### Concept intake readiness
+
+ValueEngine intake returns a strict `ValueInterviewResult` with `agent_message`
+and `outcome: needs_input | ready`. Its workflow-local `record_value_interview`
+auto tool validates the output before the existing outcome wrapper records
+`interview_outcome` and the bounded `interview_attempts` counter. Both have only
+deterministic tool writer authority. `ready` routes to research; `needs_input`
+returns to the user; invalid output or exhausted attempts fails the workflow.
+Conversation text never changes readiness. A sufficient user brief advances
+without another confirmation or implementation vocabulary in the chat.
+
+Readiness starts concept research only. The separate structured concept review
+still requires owner approval before downstream generation. No sequence,
+entrypoint, or app authorization boundary changes with this intake contract.
+
+Concept review `request_changes` requires nonblank feedback. The review tool
+persists it as `concept_review_feedback` and returns `changes_requested`, which
+routes directly back to `GapAnalysisAgent` without another chat message. The
+revised concept is a new draft with a fresh review ID and no approved scope until
+the owner approves that draft. Cancellation, stale or invalid responses, and the
+existing three-attempt review limit still fail closed.
+
+After a draft-bound approval and its reviewed summary are persisted, ValueEngine
+updates the existing Studio app registry name through its service. The write is
+conditional on the review owner, execution host, target app, registry ID and
+current build ID. It changes only name metadata and timestamps, preserving app
+identity, lifecycle, build history and bindings. Manual/imported names retain
+precedence; stale or foreign bindings cannot rename a record or advance this
+approval tool. Cancel, changes requested and failed review persistence do not
+write a name. Registry list projections retain nullable names and name metadata
+so unnamed builds display a readable draft label until approval. Existing saved
+records are not renamed retroactively by this change.
+
+DesignDocs uses its existing `design_docs_save_feedback` as the terminal failure
+explanation, so a rejected design reports the actionable reason in the workflow UI.
+
+### Autonomous stages with nothing to generate
+
+Only exact `coding_participation: autonomous` suppresses the extra review for
+two validated empty decisions. SubscriptionContractDesigner records an explicit
+no-contract result as `not_required`, with `user_confirmed: false`, after its
+existing concept and contract guards. AgentGenerator records a validated empty
+workflow partition as `not_required` and uses its existing `no_workflows` route.
+Both must persist their actual disposition before completing. Nonempty plans,
+collaborative mode, and missing or unknown modes retain their existing reviews.
+App validation, final artifact review, acceptance, and promotion gates still apply.
+
+DesignDocs defaults `coding_participation` to `guided`. Brownfield and refinement
+sequences that do not visit the participation selector therefore keep these
+reviews; an explicit upstream `autonomous` choice is preserved by context relay.
+
+### Discovery human continuation
+
+`ExistingAppDiscovery/transition_graph.yaml` explicitly routes human replies
+back to the unfinished discovery stage using `identity_complete`,
+`capabilities_complete`, `plan_complete`, and `decomposition_complete`.
+The runtime's initial user-to-agent dispatch is bootstrap-only. It does not
+substitute for these workflow-local return edges, including after reconnect.
+
+Selecting an `adoption_level` does not confirm the adoption plan. The planner
+remains at its human review boundary until the user confirms the recommendation
+and `record_adoption_plan` validates the workflow's typed `AgentAugmentationPlan`.
+The tool records the existing finite adoption choice and scope together with
+`plan_complete`; text alone cannot advance this stage. Embed/bridge then proceeds
+to assembly. Ecosystem/gradual modernization first reviews decomposition and
+records its typed `ModuleDecompositionPlan` through `record_module_decomposition`.
+Both agents acknowledge successful recording conversationally. Neither uses NEXT
+as a completion writer. Decomposition remains workflow-local evidence.
+
+The recorded plan, adoption choice, and completion flags use existing deterministic
+tool writer authority. Automatic structured-output projection cannot replace the
+approved plan. Assembly rejects a conflicting adoption choice before persistence
+and uses the recorded plan for approved scope rather than accepting scope changes
+from the assembler's synthesis.
+
+Assembly has no additional human review boundary. Its automatic save tool uses
+the canonical tool outcome contract: one deterministic attempt, `saved` only
+after all required artifact drafts persist and the final `AppContextVersion`
+registers successfully. That outcome terminates discovery as `workflow_complete`.
+Missing output, mapping/persistence errors, or a missing fresh tool result fail
+closed; preloaded version references and agent text cannot report completion.
+Failure leaves the prior current context intact and does not publish new save
+references. The overview refresh is best effort after durable registration.
+This completes discovery, without authorizing source changes, app bundle
+promotion, or a cross-workflow handoff.
 
 ### Brownfield App Intelligence UX
 

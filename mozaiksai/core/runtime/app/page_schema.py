@@ -639,6 +639,18 @@ class AppPageSchema(PageContractModel):
     meta: AppPageMeta | None = None
     sections: list[AppPageSection]
 
+    @field_validator("name")
+    @classmethod
+    def _name_is_file_basename(cls, value: str) -> str:
+        if (
+            not value.strip()
+            or value in {".", ".."}
+            or any(character in value for character in "/\\:")
+            or any(ord(character) < 32 for character in value)
+        ):
+            raise PageContractRule("name must be a page filename without path separators, colons, or control characters")
+        return value
+
     @field_validator("route")
     @classmethod
     def _route_is_safe(cls, value: str) -> str:

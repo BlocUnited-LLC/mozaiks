@@ -1,0 +1,26 @@
+{
+  "header": {
+    "logo": {
+      "src": "common-ground-mark.svg",
+      "wordmark": "common-ground-wordmark.svg",
+      "alt": "Common Ground",
+      "href": "/community"
+    },
+    "pages": [],
+    "actions": []
+  },
+  "shortcuts": { "profile": ["signout", "signin"] },
+  "navigation": { "policy": { "autoFromPages": false } },
+  "notifications": { "show": false },
+  "footer": { "visible": false },
+  "mobile": { "bottomBar": { "visible": false, "items": [] } },
+  "chrome": {
+    "defaultMode": "standard",
+    "modes": {
+      "standard": {
+        "desktop": { "header": true, "footer": false, "bottomBar": false, "localNav": false },
+        "mobile": { "header": true, "footer": false, "bottomBar": false, "localNav": false }
+      }
+    }
+  }
+}

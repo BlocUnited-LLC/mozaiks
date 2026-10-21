@@ -5,5 +5,6 @@ prompt_middleware:
 - agent: DesignDocsAgent
   filename: ../_shared/brownfield_adoption_context.py
   function: inject_brownfield_adoption_context
-
-
+- agent: DesignDocsAgent
+  filename: ../_shared/ui_surface_context.py
+  function: inject_ui_surface_context

@@ -62,8 +62,9 @@ Current repo-local infra uses those assets directly.
 
 Examples from the current implementation:
 
-- Docker Compose mounts Keycloak realm and theme assets from
-  `factory_app/app/brand/`
+- Local Docker Compose mounts Keycloak realm and theme assets from
+  `factory_app/app/brand/`; production Compose requires a separate
+  operator-owned realm import and retains only the theme mount
 - Studio host bootstrap falls back to `factory_app/app/` when no external app
   workspace is supplied
 - Studio host bootstrap prefers `factory_app/workflows/` as the workflow root
@@ -190,12 +191,23 @@ Resolved in this pass:
 1. `infra/docker/Dockerfile` no longer references removed root files
    (the removed root launcher and stale workspace paths). It installs the
    real `mozaiks` package from `pyproject.toml` and serves `factory_app/`
-   through `mozaiks serve . --host studio`.
+   through `mozaiks serve . --host studio --listen 0.0.0.0` (`mozaiks serve`
+   binds `127.0.0.1` unless a container passes `--listen`). With no auth
+   configuration at all the host refuses to start. With authentication off,
+   `AUTH_ANON_ACCESS` decides whom it serves: `local` (the default) gives
+   development access to requests from this machine only and is refused on a
+   non-loopback `--listen`; `open` gives every client that can connect
+   development access and prints a warning; `public` serves every client as
+   an anonymous visitor without development access. Generated public apps
+   declare only `AUTH_ANON_ACCESS=public` in their image (Dockerfile `ENV`,
+   `.env*.example`, manifest `auth.runtime_env`), so an operator who adds
+   identity-provider settings turns authentication on.
 2. `infra/helm/mozaiks/values.yaml` liveness probe now targets the route that
    actually exists (`/api/health/live`), not `/api/health/liveness`.
 3. `infra/compose/docker-compose.yml`'s dev `app` service no longer runs a
    removed-launcher command with no matching dependency; it runs
-   `mozaiks serve . --host studio --reload` against the bind-mounted repo.
+   `mozaiks serve . --host studio --listen 0.0.0.0 --reload` against the
+   bind-mounted repo.
 4. CI now has an `infra-build` job (`.github/workflows/ci.yml`) that builds
    `infra/docker/Dockerfile`, smoke-runs the image against a real MongoDB
    until `/api/health` reports healthy, and lints/renders the Helm chart with

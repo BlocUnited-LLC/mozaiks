@@ -299,4 +299,26 @@ test.describe('ENTITLEMENT_REQUIRED → navigate to /pricing', () => {
     await page.waitForSelector('[data-testid="gated-feature-error"]', { timeout: 5000 })
     expect(page.url()).not.toContain('/pricing')
   })
+
+  test('does NOT mistake a token denial on HTTP 402 for a plan entitlement', async ({ page }) => {
+    suppressExpectedErrors(page)
+    await mockShellAndTheme(page)
+    await page.route('**/api/modules/premium_reports/generate_report', (route) =>
+      route.fulfill({
+        status: 402,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          detail: {
+            error: 'Insufficient token balance',
+            error_code: 'INSUFFICIENT_TOKENS',
+          },
+        }),
+      })
+    )
+
+    await page.goto('/gated-feature')
+
+    await expect(page.getByTestId('gated-feature-error')).toContainText('Insufficient token balance')
+    await expect(page).toHaveURL(/\/gated-feature$/)
+  })
 })

@@ -6,6 +6,7 @@ import {
   loadShellAuth,
   LoginPage,
   AuthCallbackPage,
+  themeProvider,
 } from '@mozaiks/chat-ui';
 import * as platformExtensions from '@platform/extensions';
 
@@ -20,7 +21,7 @@ function bootstrap() {
       apiBaseUrl,
       createAppAuthAdapter: Reflect.get(platformExtensions, 'createAuthAdapter'),
       env: import.meta.env,
-    }).then(({ authAdapter, shellConfig }) => {
+    }).then(async ({ authAdapter, shellConfig }) => {
       window.mozaiksAuth = authAdapter;
       // App initialization runs only after the host's authentication bootstrap.
       const register = Reflect.get(platformExtensions, 'register');
@@ -35,6 +36,7 @@ function bootstrap() {
         ...(wsBaseUrl ? { wsUrl: wsBaseUrl } : {}),
         auth: authAdapter,
       });
+      await themeProvider.initializeTheme(shellConfig.appId || 'default');
       return { authAdapter, shellConfig, apiAdapter };
     }).catch(error => { bootstrapPromise = undefined; throw error; });
   }

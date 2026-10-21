@@ -8,7 +8,9 @@ exchange reads the session-router snapshot and the host ``ask_context`` hook.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -26,8 +28,9 @@ class _FakePersistence:
     async def fetch_general_chat_transcript(self, **kwargs) -> None:  # noqa: ANN003
         return None
 
-    async def append_general_message(self, **kwargs) -> None:  # noqa: ANN003
+    async def append_general_message(self, **kwargs) -> dict[str, Any]:  # noqa: ANN003
         self.appended.append(kwargs)
+        return {"event_id": f"general_saved_{len(self.appended)}", **kwargs}
 
 
 class _CapturingService:
@@ -121,6 +124,74 @@ async def test_general_exchange_uses_session_snapshot_and_ask_context_hook(monke
     assert call["workspace_context"] == {"Workspace apps": "8 total — 8 draft"}
     assert call["ui_context"] == {"page_context": "Apps page", "page_path": "/apps"}
     assert transport.sent_messages and transport.sent_messages[-1]["content"] == "grounded answer"
+
+
+@pytest.mark.asyncio
+async def test_general_exchange_forwards_persisted_identity_for_repeated_messages(monkeypatch):
+    """History and live replies share identity without deduplicating equal text."""
+    import mozaiksai.core.session as session_module
+    from mozaiksai.core.runtime.composition import platform_hooks as hooks_module
+    from mozaiksai.core.tokens.manager import TokenManager
+
+    router = SimpleNamespace(get_session_snapshot=AsyncMock(return_value={}))
+    monkeypatch.setattr(session_module, "get_session_router", lambda: router)
+    hooks = AsyncMock()
+    hooks.call_ask_context.return_value = {}
+    monkeypatch.setattr(hooks_module, "get_platform_hooks", lambda: hooks)
+    monkeypatch.setattr(general_mode_module, "_load_general_agent_service", _CapturingService)
+    monkeypatch.setattr(TokenManager, "emit_usage_delta", AsyncMock())
+    transport = _StubTransport()
+
+    for _ in range(2):
+        await transport._handle_general_agent_exchange(
+            chat_id="carrier_1", ws_id=42, user_message="repeat this", ui_context=None
+        )
+
+    assert [event[0]["metadata"]["general_message_id"] for event in transport.sent_events] == [
+        "general_saved_1", "general_saved_3"
+    ]
+    assert [message["metadata"]["general_message_id"] for message in transport.sent_messages] == [
+        "general_saved_2", "general_saved_4"
+    ]
+    assert [message["content"] for message in transport.sent_messages] == [
+        "grounded answer", "grounded answer"
+    ]
+
+    # An unpersisted System response must not borrow the preceding user's ID.
+    monkeypatch.setattr(general_mode_module, "_load_general_agent_service", lambda: None)
+    await transport._handle_general_agent_exchange(
+        chat_id="carrier_1", ws_id=42, user_message="try again", ui_context=None
+    )
+    assert transport.sent_events[-1][0]["metadata"]["general_message_id"] == "general_saved_5"
+    assert transport.sent_messages[-1]["agent_name"] == "System"
+    assert "general_message_id" not in transport.sent_messages[-1]["metadata"]
+
+
+@pytest.mark.asyncio
+async def test_general_exchange_does_not_invent_persisted_identity_on_write_failure(monkeypatch):
+    import mozaiksai.core.session as session_module
+    from mozaiksai.core.runtime.composition import platform_hooks as hooks_module
+    from mozaiksai.core.tokens.manager import TokenManager
+
+    router = SimpleNamespace(get_session_snapshot=AsyncMock(return_value={}))
+    monkeypatch.setattr(session_module, "get_session_router", lambda: router)
+    hooks = AsyncMock()
+    hooks.call_ask_context.return_value = {}
+    monkeypatch.setattr(hooks_module, "get_platform_hooks", lambda: hooks)
+    monkeypatch.setattr(general_mode_module, "_load_general_agent_service", _CapturingService)
+    monkeypatch.setattr(TokenManager, "emit_usage_delta", AsyncMock())
+    transport = _StubTransport()
+    monkeypatch.setattr(
+        transport.persistence, "append_general_message", AsyncMock(side_effect=RuntimeError("offline"))
+    )
+
+    await transport._handle_general_agent_exchange(
+        chat_id="carrier_1", ws_id=42, user_message="hello", ui_context=None
+    )
+
+    assert "general_message_id" not in transport.sent_events[0][0]["metadata"]
+    assert "general_message_id" not in transport.sent_messages[0]["metadata"]
+    assert transport.sent_messages[0]["content"] == "grounded answer"
 
 
 @pytest.mark.asyncio

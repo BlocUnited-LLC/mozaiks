@@ -25,11 +25,21 @@ AUTH_PROVIDER=
 AUTH_ANON_ROLES=admin,user
 ```
 
+`AUTH_ENABLED=false` gives development access (the anonymous user with
+`AUTH_ANON_ROLES`, dev personas, trusted module dispatch) to requests from this
+machine only: `AUTH_ANON_ACCESS` defaults to `local`, and every other request
+is refused. Open the app at `http://localhost:<port>` or
+`http://127.0.0.1:<port>`. A browser reaches a container through Docker's
+gateway, not as the container's own machine, so a container whose port is
+published on `127.0.0.1` only needs `AUTH_ANON_ACCESS=open` instead. With no
+auth settings at all the host refuses to start. See
+[Auth setup](../architecture/verified/auth-setup.md#running-without-authentication).
+
 The shared shell first loads `/api/shell-config`. Only a backend response
-confirming explicitly disabled authentication in a permitted local environment
-enables the development identity. The backend supplies that identity and its
-configured roles. A failed bootstrap, missing OIDC authority, or frontend mock
-flag does not enable it.
+confirming explicitly disabled authentication in a permitted local environment,
+to a request that has development access, enables the development identity.
+The backend supplies that identity and its configured roles. A failed
+bootstrap, missing OIDC authority, or frontend mock flag does not enable it.
 
 Factory keeps `authRequired: true` in its authored manifest. Local development
 is an explicit operator mode resolved by the shared runtime, rather than a
@@ -131,8 +141,11 @@ with user or workspace owned collections still requires authentication.
 Unknown values, including the retired `none` label, fail before materialization.
 Public or undeclared auth cannot carry logical roles; declare a login strategy
 when roles are needed. The `role-based` strategy must declare at least one role.
-Use `public` for a public app. Local `AUTH_ENABLED=false` remains an explicit
-runtime setting and does not change the app's declared auth intent.
+Use `public` for a public app. Its deployment artifacts set
+`AUTH_ANON_ACCESS=public`, so visitors are served anonymously without
+development access. Local `AUTH_ENABLED=false` remains an explicit runtime
+setting for this machine only and does not change the app's declared auth
+intent.
 
 Final bundle composition adds the shared login and callback entries to the normal
 route manifest after app-schema and auth-scaffold output are combined. Authored

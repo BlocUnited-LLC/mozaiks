@@ -366,6 +366,7 @@ Current enforcement:
 
 * event namespace prefixes are validated;
 * `module.yaml.actions[].emits` must reference declared events;
+* `ctx.emit` checks each event against the action's `emits` and the event's `payload_schema` (which must also be evaluable) before dispatch. An event that fails is never dispatched, and it never fails the action that emitted it: the action's writes may already be committed. `ctx.emit` returns the `ModuleEventRejection` (event id, type, the schema rule it failed; never payload contents), or `None` once the event is on the bus. The rejection is also named on the dispatch result and audit, logged at ERROR and counted;
 * reaction targets must use canonical target kinds and required fields;
 * notification reactions must reference declared notification IDs;
 * generated-app validation checks event, reaction, workflow, capability, and handler wiring;
@@ -375,7 +376,7 @@ Known pre-1.0 hardening gaps:
 
 | Gap | Current status |
 | --- | --- |
-| Runtime event payload-schema enforcement | Event `payload_schema` is declared and validated as metadata, but runtime emit-time JSON Schema enforcement is not yet a hard guarantee. |
+| Event contract enforcement outside module actions | `ctx.emit` enforces `emits` and `payload_schema` for module actions whose context the executor builds. Events emitted from reaction handlers bypass the executor. The `ModuleEventRouter` checks only their `payload_schema`, and only when exactly one module declares a schema for the type, before running reactions. It drops an invalid one without naming it on any dispatch result, and it never checks them against `emits`. An executor composed without an event emitter, or given a caller-supplied context, performs no check. |
 | Reaction idempotency | `idempotency_key` is part of the reaction contract, but the router does not yet enforce idempotency. |
 | Reaction permissions | Reaction `permissions` are declared/provenanced, but reaction dispatch does not re-enter public module permission checks. |
 | Cycle detection | No hard deterministic reaction-cycle detector is currently part of runtime validation. |

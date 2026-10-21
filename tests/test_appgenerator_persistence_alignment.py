@@ -119,6 +119,20 @@ def test_app_plan_agent_explicitly_forbids_legacy_config_data_path() -> None:
     assert "config/data_migrations" not in block
 
 
+def test_persistence_serializer_identity_agrees_across_planner_schema_and_catalog() -> None:
+    fields = yaml.safe_load(_read(APPGEN / "structured_outputs.yaml"))["models"]["AppBuildTask"]["fields"]
+    constraints = yaml.safe_load(_read(APPGEN_CATALOGS / "file_contracts.yaml"))["task_contracts"]["persistence_contract"]["hard_constraints"]
+    guidance = (_agent_block("AppPlanAgent"), fields["task_type"]["description"],
+                fields["surface_id"]["description"], "\n".join(constraints))
+    for text in guidance:
+        assert "surface_id=data_contract" in text
+        assert "capability_pack_id=null" in text
+    assert "`initial_agent: DatabaseAgent`" in guidance[0]
+    for text in guidance[1:]:
+        assert "initial_agent=DatabaseAgent" in text
+    assert "data/contract.json serializer" in fields["capability_pack_id"]["description"]
+
+
 def test_service_agent_treats_runtime_persistence_as_ownership_boundary() -> None:
     block = _agent_block("ServiceAgent")
     assert "Runtime `context.persistence.collection(module_id, collection_name)` enforces" in block
@@ -128,6 +142,16 @@ def test_service_agent_treats_runtime_persistence_as_ownership_boundary() -> Non
     assert "no implicit admin or cross-owner bypass" in block
     assert "Do not access raw Mongo collections" in block
     assert "must not import or call `get_mongo_client()`" in block
+
+
+def test_service_agent_distinguishes_final_inventory_from_model_source() -> None:
+    block = _agent_block("ServiceAgent")
+    assert "final backend artifact inventory, including code-rendered files" in block
+    assert "authoritative list of backend stub files to implement" not in block
+    assert "Omit policy.py and schemas.py from python_files and code_files" in block
+    planner = _agent_block("AppPlanAgent")
+    assert "In task initial_message, distinguish final artifact ownership from model implementation" in planner
+    assert "Keep their owned_paths, but never ask a worker to generate their source or placeholder stubs" in planner
 
 
 def test_injected_catalogs_assign_collection_scope_to_runtime() -> None:

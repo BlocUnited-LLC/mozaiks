@@ -301,6 +301,7 @@ async def test_entitlement_dispatch_docker_integration(
     from mozaiksai.core.runtime.app.entitlements import ConfiguredEntitlementAdapter
     from mozaiksai.core.runtime.app.loader import AppLoader
     from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, ModuleRequest
+    from mozaiksai.core.runtime.persistence.adapter import PersistencePrincipal
 
     # Reset the cached Motor client so a fresh one is created on the current
     # event loop. pytest-rerunfailures reruns the test on a new loop; without
@@ -369,6 +370,7 @@ async def test_entitlement_dispatch_docker_integration(
                 app_id=app_id,
                 user_id="user_free",
                 params={"report_id": "r1"},
+                persistence_principal=PersistencePrincipal(user_id="user_free"),
                 authority=enforce_authority(),  # user request — triggers entitlement check
             )
         )
@@ -407,6 +409,7 @@ async def test_entitlement_dispatch_docker_integration(
                 app_id=app_id,
                 user_id="user_pro",
                 params={"report_id": "r1"},
+                persistence_principal=PersistencePrincipal(user_id="user_pro"),
                 authority=enforce_authority(),  # user request — triggers entitlement check
             )
         )
@@ -423,6 +426,7 @@ async def test_entitlement_dispatch_docker_integration(
                 app_id=app_id,
                 user_id="user_free",
                 params={"report_id": "r1"},
+                persistence_principal=PersistencePrincipal(user_id="user_free"),
                 authority=enforce_authority(),  # user request — triggers entitlement check
             )
         )
@@ -439,6 +443,7 @@ async def test_entitlement_dispatch_docker_integration(
                 app_id=app_id,
                 user_id="user_free",
                 params={},
+                persistence_principal=PersistencePrincipal(user_id="user_free"),
                 authority=enforce_authority(),  # user request — triggers entitlement check
             )
         )
@@ -468,6 +473,7 @@ async def test_entitlement_dispatch_docker_integration(
                 app_id=app_id,
                 user_id="user_pro",
                 params={"report_id": "r1"},
+                persistence_principal=PersistencePrincipal(user_id="user_pro"),
                 authority=enforce_authority(),  # user request — triggers entitlement check
             )
         )

@@ -62,7 +62,7 @@ actions:
                 type: ["string", "null"]
               app_usage_count:
                 type: integer
-                description: Number of distinct apps that currently declare this catalog integration.
+                description: Number of the caller's registered apps that currently declare this catalog integration.
         summary:
           type: object
           properties:
@@ -329,7 +329,7 @@ actions:
       required: [service, secret_value]
       properties:
         workspace_id:
-          description: Optional workspace scope override. Defaults to the current request workspace.
+          description: Optional. When given, it must name the caller's verified workspace; any other workspace is refused.
           type: string
         service:
           type: string
@@ -364,7 +364,7 @@ actions:
       type: object
       properties:
         workspace_id:
-          description: Optional workspace scope override. Defaults to the current request workspace.
+          description: Optional. When given, it must name the caller's verified workspace; any other workspace is refused.
           type: string
     output_schema:
       type: object
@@ -389,7 +389,7 @@ actions:
       required: [service]
       properties:
         workspace_id:
-          description: Optional workspace scope override. Defaults to the current request workspace.
+          description: Optional. When given, it must name the caller's verified workspace; any other workspace is refused.
           type: string
         service:
           type: string
@@ -428,7 +428,7 @@ actions:
       required: [service]
       properties:
         workspace_id:
-          description: Optional workspace scope override. Defaults to the current request workspace.
+          description: Optional. When given, it must name the caller's verified workspace; any other workspace is refused.
           type: string
         service:
           type: string

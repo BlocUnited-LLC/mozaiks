@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import os
+from unittest.mock import AsyncMock
 
 import pytest
 import yaml
 
+from factory_app.workflows.AppGenerator.tools import app_runtime_smoke, app_validation
 from factory_app.workflows.AppGenerator.tools.app_validation import run_app_bundle_acceptance_gate
 from factory_app.workflows.AppGenerator.tools.export_app_code import resolve_export_gate
 from scripts.smoke_appgenerator_live_acceptance import (
@@ -20,6 +22,7 @@ from scripts.smoke_appgenerator_live_acceptance import (
     run_live_agentgenerator_to_appgenerator_acceptance_smoke,
     validate_appgenerator_acceptance_handoff,
 )
+from tests._generated_acceptance_fixtures import stub_contained_generated_runtime
 
 
 def _live_appgenerator_acceptance_smoke_enabled() -> bool:
@@ -27,13 +30,33 @@ def _live_appgenerator_acceptance_smoke_enabled() -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+@pytest.fixture
+def completed_validation_boundaries(monkeypatch):
+    """Unit fixtures for runtime subprocess and contained build, not live evidence.
+
+    Admission, static checks, repair, context persistence and export remain real.
+    Only these two script-success tests opt into completed execution fixtures.
+    """
+    smoke = stub_contained_generated_runtime(monkeypatch, app_validation)
+    build = AsyncMock(return_value=app_validation._base_result(strategy="docker", status="passed"))
+    monkeypatch.setattr(app_validation, "_run_sandbox_validation", build)
+    return smoke, build
+
+
 @pytest.mark.asyncio
-async def test_appgenerator_acceptance_handoff_fixture_passes_deterministic_gate() -> None:
+async def test_appgenerator_acceptance_handoff_fixture_passes_deterministic_gate(completed_validation_boundaries) -> None:
     result = await validate_appgenerator_acceptance_handoff()
 
     assert result["success"] is True, result["validation_errors"]
     assert result["app_bundle_acceptance_status"] == "passed"
     assert result["export_gate"]["allow_export"] is True
+    assert result["app_validation_result"]["validation_status"] == "passed"
+    assert result["context"]["app_validation_strategy_used"] == "docker"
+    assert result["context"]["integration_tests_passed"] is True
+    smoke, build = completed_validation_boundaries
+    smoke.assert_awaited_once()
+    build.assert_awaited_once()
+    assert SUPPORT_HANDLER_PATH in build.await_args.kwargs["resolved_files"]
     assert result["app_bundle_validation_evidence"]["failed"] == []
     assert "workflow_integration" in result["app_bundle_validation_evidence"]["completed"]
     assert result["runtime_loader"]["loaded"] is True
@@ -42,7 +65,7 @@ async def test_appgenerator_acceptance_handoff_fixture_passes_deterministic_gate
 
 
 @pytest.mark.asyncio
-async def test_appgenerator_repair_loop_scopes_handler_correction_and_exports() -> None:
+async def test_appgenerator_repair_loop_scopes_handler_correction_and_exports(completed_validation_boundaries) -> None:
     result = await run_deterministic_appgenerator_repair_loop_smoke()
 
     assert result["success"] is True, result["validation_errors"]
@@ -53,10 +76,46 @@ async def test_appgenerator_repair_loop_scopes_handler_correction_and_exports() 
     assert result["repaired_acceptance_status"] == "passed"
     assert result["repaired_bundle_repair"]["status"] == "passed"
     assert result["export_gate"]["allow_export"] is True
+    assert result["app_validation_result"]["validation_status"] == "passed"
+    assert result["context"]["app_validation_strategy_used"] == "docker"
+    smoke, build = completed_validation_boundaries
+    assert smoke.await_count == 2
+    build.assert_awaited_once()
+    assert "class SupportTicketsModule:" in build.await_args.kwargs["resolved_files"][SUPPORT_HANDLER_PATH]
     assert result["packaging"]["handler_matches_contract"] is True
     assert result["packaging"]["preserved_unrelated_output"] is True
     assert result["runtime_loader"]["loaded"] is True
     assert "class SupportTicketsModule:" in result["context"]["generated_files"][SUPPORT_HANDLER_PATH]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("repair", [False, True], ids=["handoff", "repaired-handler"])
+async def test_script_cannot_export_when_runtime_smoke_has_no_database(monkeypatch, repair):
+    monkeypatch.setattr(app_runtime_smoke, "resolve_smoke_mongo_uri", lambda: None)
+    build = AsyncMock(side_effect=AssertionError("An incomplete runtime gate must not reach the build."))
+    monkeypatch.setattr(app_validation, "_run_sandbox_validation", build)
+    result = await (
+        run_deterministic_appgenerator_repair_loop_smoke() if repair
+        else validate_appgenerator_acceptance_handoff()
+    )
+
+    assert result["success"] is False
+    assert result["export_gate"]["allow_export"] is False
+    assert result["app_validation_result"]["validation_status"] == "pending"
+    context = result["context"]
+    assert context["integration_tests_passed"] is False
+    acceptance = context["app_bundle_acceptance_result"]
+    assert acceptance["status"] == "pending"
+    assert acceptance["validation_evidence"]["failed"] == []
+    assert acceptance["validation_evidence"]["skipped"] == ["app_runtime_load_worker", "app_runtime_smoke"]
+    assert "workflow_integration" in acceptance["validation_evidence"]["completed"]
+    assert "snapshot_digest" not in acceptance
+    build.assert_not_awaited()
+    if repair:
+        assert result["initial_acceptance_status"] == "failed"
+        assert result["initial_bundle_repair"]["target_agent"] == "ServiceAgent"
+        assert result["packaging"]["handler_matches_contract"] is True
+        assert result["packaging"]["preserved_unrelated_output"] is True
 
 
 def test_appgenerator_acceptance_fixture_wires_workflow_capability_not_raw_workflow_name() -> None:

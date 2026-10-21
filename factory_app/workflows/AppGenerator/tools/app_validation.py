@@ -3,7 +3,7 @@ App validation tool for generated applications.
 
 This tool can:
 - resolve generated files from an explicit `files` mapping or the current admitted artifacts
-- validate the generated app with an explicit strategy: `e2b`, `docker`, `local`, or `skip`
+- validate the generated app with an explicit strategy: `e2b`, `docker`, or `skip`
 - run build/test commands
 - optionally start a preview server (e2b and docker strategies expose a URL)
 """
@@ -16,11 +16,11 @@ import hashlib
 import json
 import logging
 import os
+import posixpath
 import re
 import shlex
-import subprocess
-import sys
 import tempfile
+import zipfile
 
 logger = logging.getLogger(__name__)
 from collections.abc import Iterable
@@ -28,6 +28,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
+from anyio import CancelScope
 
 from factory_app.workflows._shared.workflow_integration import (
     workflow_integration_metadata_from_context,
@@ -35,6 +36,10 @@ from factory_app.workflows._shared.workflow_integration import (
 from factory_app.workflows.AppGenerator.tools import app_runtime_smoke
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     admitted_app_file_map,
+)
+from factory_app.workflows.AppGenerator.tools.hydrate_app_revision_context import (
+    revision_asset_evidence,
+    revision_baseline_required,
 )
 from factory_app.workflows.AppGenerator.tools.render_auth_scaffold import (
     save_auth_scaffold,
@@ -54,10 +59,10 @@ from factory_app.workflows.AppGenerator.tools.task_integrity import (
     planned_artifact_diagnostics,
 )
 from logs.logging_config import get_workflow_logger
+from mozaiksai.core.artifacts.content_store import ContentNotFoundError
 from mozaiksai.core.runtime.app.auth_contract import AppAuthContractError
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
-    local_app_validation_available,
     resolve_app_validation_strategy,
 )
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
@@ -68,17 +73,13 @@ from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
 )
 
 # Set on a validation result that failed because the validation environment
-# (sandbox provider, local toolchain) was unavailable, not because of the app.
+# (sandbox provider) was unavailable, not because of the app.
 INFRASTRUCTURE_FAILURE = "infrastructure_failure"
-
-
-def _local_validation_available() -> bool:
-    return local_app_validation_available()
 
 
 def _base_result(*, strategy: str, status: str) -> dict[str, Any]:
     return {
-        "success": status != "failed",
+        "success": status == "passed",
         "validation_strategy": strategy,
         "validation_status": status,
         "strategy_reason": "",
@@ -106,16 +107,14 @@ def _safe_relpath(raw: str) -> str | None:
 
 
 def _is_safe_build_command(command: str) -> bool:
-    """Return True when *command* looks like a safe build/test shell command.
+    """Reject shell syntax outside the bounded sandbox build commands.
 
     Blocks shell metacharacters that enable command chaining or substitution:
     ``;``, ``&&``, ``||``, ``|``, backtick, ``$(…)``, and output redirection
     (``>`` / ``<``).  Also rejects commands that contain null bytes.
 
-    This is defence-in-depth against prompt-injection attacks where a
-    compromised or confused agent emits shell payloads inside
-    ``validation_commands``.  Legitimate build commands (``npm install``,
-    ``npm run build``, ``python -m pytest``, etc.) never need these characters.
+    A package script can still execute arbitrary code; all candidate commands
+    run only inside the selected disposable sandbox.
     """
     if not command or "\x00" in command:
         return False
@@ -155,46 +154,17 @@ def _read_package_scripts_from_text(package_text: str) -> dict[str, Any]:
     return scripts if isinstance(scripts, dict) else {}
 
 
-def _read_package_scripts_from_dir(root: Path) -> dict[str, Any]:
-    package_path = root / "package.json"
-    if not package_path.exists():
-        return {}
-    try:
-        return _read_package_scripts_from_text(package_path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
+def _strip_ansi(value: str) -> str:
+    return re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", value)
 
 
-async def _run_local_command(
-    *,
-    command: str,
-    cwd: Path,
-    timeout_seconds: int,
-    env: dict[str, str] | None = None,
-) -> tuple[int, str, str]:
-    process = await asyncio.create_subprocess_shell(
-        command,
-        cwd=str(cwd),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        env=env,
-    )
-    try:
-        stdout_bytes, stderr_bytes = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)
-    except TimeoutError as exc:
-        process.kill()
-        await process.communicate()
-        raise RuntimeError(f"Command timed out after {timeout_seconds}s: {command}") from exc
-
-    stdout = stdout_bytes.decode("utf-8", errors="replace") if stdout_bytes else ""
-    stderr = stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else ""
-    return int(process.returncode or 0), stdout, stderr
-
-
-def parse_build_errors(build_output: str) -> list[dict[str, Any]]:
+def parse_build_errors(
+    build_output: str, *, app_root: str | None = None, cwd: str | None = None,
+) -> list[dict[str, Any]]:
     if not isinstance(build_output, str) or not build_output:
         return []
 
+    build_output = _strip_ansi(build_output)
     errors: list[dict[str, Any]] = []
 
     ts_pattern = r"([^\s]+):(\d+):(\d+)\s*[-–]\s*error\s+\w+:\s*(.+)"
@@ -219,6 +189,35 @@ def parse_build_errors(build_output: str) -> list[dict[str, Any]]:
             }
         )
 
+    vite_patterns = (
+        r"\[UNRESOLVED_IMPORT\]\s+(Could not resolve .+?) in ([^\r\n]+)",
+        r'(?:\[vite\]: )?(Rollup failed to resolve import .+?) from "([^"\r\n]+)"',
+        r'((?:Could not resolve|Could not load) .+?) from "([^"\r\n]+)"',
+    )
+    for pattern in vite_patterns:
+        for match in re.finditer(pattern, build_output):
+            item = {"file": match.group(2).strip(), "message": match.group(1).strip()}
+            if item not in errors:
+                errors.append(item)
+
+    # Vite/Rolldown names the exporting file in the headline, but the source
+    # location identifies the importer that must correct its binding.
+    missing_export = r"\[MISSING_EXPORT\]\s+([^\r\n]+)\r?\n[^\r\n]*\[\s*(.+):(\d+):(\d+)\s*\]"
+    for match in re.finditer(missing_export, build_output):
+        errors.append({
+            "file": match.group(2).strip(), "line": int(match.group(3)),
+            "column": int(match.group(4)), "message": match.group(1).strip(),
+        })
+
+    if app_root is not None and cwd is not None:
+        root = posixpath.normpath(app_root.replace("\\", "/")).rstrip("/") + "/"
+        for error in errors:
+            filename = str(error["file"]).replace("\\", "/")
+            absolute = filename.startswith("/") or re.match(r"^[A-Za-z]:/", filename)
+            resolved = posixpath.normpath(filename if absolute else posixpath.join(cwd.replace("\\", "/"), filename))
+            # Only the actual staged app root can produce a canonical repair path.
+            # Similar suffixes outside that root remain unowned diagnostics.
+            error["file"] = resolved[len(root):] if resolved.startswith(root) else resolved
     return errors
 
 
@@ -229,7 +228,11 @@ async def _resolve_files(
     wf_logger,
 ) -> tuple[dict[str, str], str | None, str | None]:
     if files is not None:
-        return _safe_files_map(files), None, None
+        return (
+            _safe_files_map(files),
+            _context_get(context_variables, "chat_id"),
+            _context_get(context_variables, "app_id"),
+        )
     return (
         admitted_app_file_map(context_variables),
         _context_get(context_variables, "chat_id"),
@@ -859,12 +862,10 @@ def _canonical_workspace_files(files: dict[str, str]) -> dict[str, str]:
     return staged
 
 
-def _canonical_build_steps(root: str, shell: str, *, sandbox: bool) -> list[tuple[str, str]]:
-    join = shlex.join if sandbox or os.name != "nt" else subprocess.list2cmdline
-    python = "python" if sandbox else sys.executable
+def _canonical_build_steps(root: str, shell: str) -> list[tuple[str, str]]:
     return [
-        (join([python, "-m", "compileall", "-q", "."]), root),
-        (join(["node", f"{shell}/node_modules/vite/bin/vite.js", "build", "--outDir", f"{root}/build"]), shell),
+        (shlex.join(["python", "-m", "compileall", "-q", "."]), root),
+        (shlex.join(["node", f"{shell}/node_modules/vite/bin/vite.js", "build", "--outDir", f"{root}/build"]), shell),
     ]
 
 
@@ -877,7 +878,17 @@ def _canonical_build_environment(root: str) -> dict[str, str]:
         "VITE_MOZAIKS_HOST": "platform",
         "PYTHON_DOTENV_DISABLED": "1",
         "CI": "1",
+        "MOZAIKS_REQUIRE_TAILWIND_SOURCE_LINKS": "1",
     }
+
+
+_MAX_APP_BUILD_TIMEOUT_SECONDS = 120
+
+
+def _bounded_validation_timeout(timeout_seconds: int) -> int:
+    if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, int) or timeout_seconds < 1:
+        raise ValueError("App build timeout must be a positive integer")
+    return min(timeout_seconds, _MAX_APP_BUILD_TIMEOUT_SECONDS)
 
 
 async def _run_sandbox_validation(
@@ -896,14 +907,24 @@ async def _run_sandbox_validation(
     identity is recorded on the result so the run that produced a validation
     outcome is durable evidence rather than an ephemeral local variable.
     """
-    from mozaiksai.core.adapters import get_sandbox_adapter
+    from mozaiksai.core.adapters import DockerSandboxAdapter, get_sandbox_adapter
     from mozaiksai.core.sandbox.preview_sessions import (
         sandbox_resource_environment,
         sandbox_workspace_root,
     )
 
     try:
-        adapter = get_sandbox_adapter(strategy)
+        timeout_seconds = _bounded_validation_timeout(timeout_seconds)
+    except ValueError as exc:
+        return {**_base_result(strategy=strategy, status="failed"), "errors": [str(exc)]}
+
+    image_id: str | None = None
+    try:
+        if strategy == "docker":
+            image_id = await asyncio.to_thread(app_runtime_smoke._preflight_generated_image)
+            adapter = DockerSandboxAdapter(image=image_id)
+        else:
+            adapter = get_sandbox_adapter(strategy)
     except Exception as exc:
         logger.error("sandbox_adapter_unavailable strategy=%s exception=%s", strategy, type(exc).__name__)
         return {
@@ -913,6 +934,8 @@ async def _run_sandbox_validation(
         }
 
     result = _base_result(strategy=strategy, status="passed")
+    if image_id is not None:
+        result["sandbox_image_id"] = image_id
     session_id: str | None = None
     try:
         canonical = "app.json" in resolved_files
@@ -921,7 +944,7 @@ async def _run_sandbox_validation(
         resource_env = sandbox_resource_environment() if canonical else {}
         build_env = _canonical_build_environment(root) if root is not None else {}
         steps = (
-            _canonical_build_steps(root, resource_env["MOZAIKS_WEB_SHELL_PATH"], sandbox=True)
+            _canonical_build_steps(root, resource_env["MOZAIKS_WEB_SHELL_PATH"])
             if root is not None else [(cmd, None) for cmd in commands]
         )
         if strategy == "e2b" and os.getenv("E2B_TIMEOUT"):
@@ -931,7 +954,7 @@ async def _run_sandbox_validation(
             timeout_seconds = min(timeout_seconds, configured_timeout)
         session = await adapter.create_session(
             timeout_seconds=timeout_seconds,
-            metadata=session_metadata or {"purpose": "app_validation"},
+            metadata={**(session_metadata or {}), "purpose": "app_validation"},
             **({"envs": {**resource_env, **build_env}} if canonical else {}),
         )
         session_id = session.session_id
@@ -970,7 +993,11 @@ async def _run_sandbox_validation(
             if run_result.stderr and "warning" in run_result.stderr.lower():
                 result["warnings"].append(run_result.stderr)
 
-        result["parsed_errors"] = parse_build_errors(result.get("build_output", ""))
+        result["parsed_errors"] = parse_build_errors(
+            result.get("build_output", ""),
+            app_root=f"{root}/app" if canonical and root is not None else None,
+            cwd=cwd if canonical else None,
+        )
 
         if not canonical and result["validation_status"] == "passed":
             try:
@@ -1030,104 +1057,17 @@ async def _run_sandbox_validation(
         return result
     finally:
         if session_id is not None:
-            try:
-                result["sandbox_terminated"] = bool(await adapter.terminate_session(session_id=session_id))
-            except Exception as exc:
-                logger.error("sandbox_cleanup_failed session=%s exception=%s", session_id, type(exc).__name__)
-                result["sandbox_terminated"] = False
+            # Request cancellation must not interrupt provider teardown.
+            with CancelScope(shield=True):
+                try:
+                    result["sandbox_terminated"] = bool(await adapter.terminate_session(session_id=session_id))
+                except Exception as exc:
+                    logger.error("sandbox_cleanup_failed session=%s exception=%s", session_id, type(exc).__name__)
+                    result["sandbox_terminated"] = False
             result["preview_url"] = None
             if not result["sandbox_terminated"]:
                 result.update(success=False, validation_status="failed", **{INFRASTRUCTURE_FAILURE: True})
                 result["errors"].append("Sandbox cleanup could not be confirmed; retry cleanup using the recorded session ID.")
-
-
-async def _run_local_validation(
-    *,
-    resolved_files: dict[str, str],
-    commands: list[str],
-    start_dev_server: bool,
-    timeout_seconds: int,
-) -> dict[str, Any]:
-    if not _local_validation_available():
-        return {
-            **_base_result(strategy="local", status="failed"),
-            "errors": ["Local validation requested but npm is not available on this runtime host"],
-            INFRASTRUCTURE_FAILURE: True,
-        }
-
-    result = _base_result(strategy="local", status="passed")
-    env = os.environ.copy()
-    env.setdefault("CI", "1")
-
-    try:
-        with tempfile.TemporaryDirectory(prefix="mozaiks-app-validation-") as temp_dir:
-            root = Path(temp_dir)
-            canonical = "app.json" in resolved_files
-            _write_files_to_dir(root, _canonical_workspace_files(resolved_files) if canonical else resolved_files)
-            if canonical:
-                from mozaiksai.resources import resolve_web_shell_root
-
-                shell = resolve_web_shell_root()
-                if shell is None or not (shell / "node_modules/vite/bin/vite.js").is_file():
-                    raise ValueError("Install shared web shell dependencies before local app validation")
-                env.update(_canonical_build_environment(root.as_posix()))
-                steps = _canonical_build_steps(root.as_posix(), shell.as_posix(), sandbox=False)
-            else:
-                steps = [(cmd, str(root)) for cmd in commands]
-
-            for cmd, cwd in steps:
-                if not _is_safe_build_command(cmd):
-                    if canonical:
-                        raise ValueError("Invalid canonical build command configuration")
-                    result["warnings"].append(
-                        f"Skipped unsafe validation command (contains shell metacharacters): {cmd!r}"
-                    )
-                    continue
-                exit_code, stdout, stderr = await _run_local_command(
-                    command=cmd,
-                    cwd=Path(cwd),
-                    timeout_seconds=timeout_seconds,
-                    env=env,
-                )
-                _append_command_output(result, command=cmd, stdout=stdout, stderr=stderr)
-                if exit_code != 0:
-                    result["success"] = False
-                    result["validation_status"] = "failed"
-                    result["errors"].append(f"{cmd} failed: {stderr or stdout}")
-                    break
-                if stderr and "warning" in stderr.lower():
-                    result["warnings"].append(stderr)
-
-            result["parsed_errors"] = parse_build_errors(result.get("build_output", ""))
-
-            if not canonical and result["validation_status"] == "passed":
-                scripts = _read_package_scripts_from_dir(root)
-                if "test" in scripts:
-                    exit_code, stdout, stderr = await _run_local_command(
-                        command="npm test -- --watchAll=false",
-                        cwd=root,
-                        timeout_seconds=timeout_seconds,
-                        env=env,
-                    )
-                    result["test_results"] = stdout
-                    if exit_code != 0:
-                        result["warnings"].append(f"Tests failed: {stderr or stdout}")
-
-            if start_dev_server and result["validation_status"] == "passed":
-                result["warnings"].append(
-                    "Local validation does not start a preview server; preview_url is null."
-                )
-
-            return result
-    except Exception as exc:
-        return {
-            **result,
-            "success": False,
-            "validation_status": "failed",
-            "errors": [f"Local validation error: {exc}"],
-            "preview_url": None,
-            INFRASTRUCTURE_FAILURE: True,
-        }
 
 
 def _trim_validation_result(result: dict[str, Any]) -> dict[str, Any]:
@@ -1263,12 +1203,31 @@ def _check_result(
 def _result_check(result: dict[str, Any], *, default_id: str, default_message: str) -> dict[str, Any]:
     checks = result.get("checks")
     if isinstance(checks, list) and checks and isinstance(checks[0], dict):
-        return dict(checks[0])
+        check = dict(checks[0])
+        if result.get("status") in {"skipped", "pending"}:
+            check["details"] = {**check.get("details", {}), "blocking": True}
+        return check
     return _check_result(
         check_id=default_id,
         passed=bool(result.get("passed")),
         message=default_message,
     )
+
+
+def _acceptance_readiness(subresults: dict[str, dict[str, Any]]) -> tuple[str, dict[str, list[str]]]:
+    """Aggregate required gates, preserving checks that have not run.
+
+    Each gate determines applicability from the app contracts before execution;
+    a successful not-applicable check can pass. A skipped applicable gate cannot.
+    """
+    skipped = sorted(name for name, result in subresults.items() if result.get("status") in {"skipped", "pending"})
+    completed = sorted(
+        name for name, result in subresults.items()
+        if result.get("status") in {None, "passed", "success"} and result.get("passed") is True
+    )
+    failed = sorted(name for name in subresults if name not in skipped and name not in completed)
+    status = "failed" if failed else "pending" if skipped or not completed else "passed"
+    return status, {"completed": completed, "failed": failed, "skipped": skipped}
 
 
 def _runtime_quality_result(generated_files: dict[str, str]) -> dict[str, Any]:
@@ -1302,151 +1261,84 @@ def _runtime_quality_result(generated_files: dict[str, str]) -> dict[str, Any]:
 
 
 async def _app_runtime_load_result(generated_files: dict[str, str]) -> dict[str, Any]:
-    failed_tests: list[dict[str, Any]] = []
-    warnings: list[str] = []
-    details: dict[str, Any] = {
-        "app_name": None,
-        "module_names": [],
-        "failed_module_names": [],
-        "page_names": [],
-        "workflow_names": [],
-        "subscriptions_loaded": False,
-    }
-
-    if not generated_files:
-        failed_tests.append(
-            {
-                "test": "app_runtime_load",
-                "error": "No generated files were available for runtime app loading.",
-                "fix_suggestion": "Assemble a complete app bundle with app.json before validation or export.",
-            }
-        )
-    else:
-        from mozaiksai.core.runtime.app.loader import AppLoader
-
-        with tempfile.TemporaryDirectory(prefix="mozaiks-app-runtime-load-") as tmp:
-            app_root = Path(tmp) / "app"
-            _write_files_to_dir(app_root, generated_files)
-            # Ensure every Python package directory under app_root has an
-            # __init__.py so Python treats them as regular packages, not
-            # namespace packages.  Namespace packages aggregate paths from all
-            # sys.path entries; regular packages resolve from the first match.
-            # Missing __init__.py files lead to import failures when sys.path
-            # has stale entries left by previous AppLoader.load() calls in the
-            # same process (common in test suites).
-            # Process bottom-up (reverse sorted) so parent directories like
-            # `services/` inherit the marker from child packages that already
-            # contain .py files (e.g. `services/integrations/`).
-            for dir_path in sorted(app_root.rglob("*"), reverse=True):
-                if not dir_path.is_dir() or dir_path == app_root:
-                    continue
-                init_file = dir_path / "__init__.py"
-                if init_file.exists():
-                    continue
-                has_py = any(f.suffix == ".py" for f in dir_path.iterdir() if f.is_file())
-                has_pkg_child = any(
-                    (child / "__init__.py").exists()
-                    for child in dir_path.iterdir()
-                    if child.is_dir()
-                )
-                if has_py or has_pkg_child:
-                    init_file.write_text("", encoding="utf-8")
-            # Snapshot global import state so this call is test-isolated.
-            _modules_before = dict(sys.modules)
-            try:
-                loaded = await AppLoader.load(str(app_root))
-                details = {
-                    "app_name": loaded.definition.name,
-                    "module_names": [module.name for module in loaded.modules],
-                    "failed_module_names": list(loaded.failed_module_names),
-                    "page_names": [page.name for page in loaded.definition.pages],
-                    "workflow_names": [workflow.name for workflow in loaded.definition.workflows],
-                    "subscriptions_loaded": loaded.subscriptions_config is not None,
-                }
-                for module_name in loaded.failed_module_names:
-                    error = (loaded.module_load_errors.get(module_name) or "AppLoader could not load module.").replace(str(app_root), "app")
-                    undeclared_event = error.startswith("module.yaml action ") and " emits undeclared event " in error
-                    failed_tests.append(
-                        {
-                            "test": "app_runtime_module_load",
-                            "module": module_name,
-                            "path": (
-                                f"modules/{module_name}/contracts/events.yaml" if undeclared_event
-                                else f"modules/{module_name}/backend/handler.py"
-                            ),
-                            "error": error,
-                            "fix_suggestion": (
-                                "Declare the action's custom event in module_contract.events_yaml under its exact "
-                                "domain.-prefixed type, with version, producer, and payload contract, and emit that "
-                                "type. Canonical create/update/delete events are declared and emitted by code."
-                                if undeclared_event else
-                                "Fix the module contract, companion manifests, handler entrypoint, "
-                                "or app-owned service imports so AppLoader.load() can load every module."
-                            ),
-                        }
-                    )
-            except Exception as exc:
-                failed_tests.append(
-                    {
-                        "test": "app_runtime_load",
-                        "error": f"AppLoader.load() failed: {exc}",
-                        "fix_suggestion": (
-                            "Ensure app.json, modules/*/module.yaml, contracts/*.yaml, "
-                            "backend handlers, and app-level service imports are loadable."
-                        ),
-                    }
-                )
-            finally:
-                # Remove only this validation workspace's imports. Other
-                # workflows can legitimately import modules while load awaits.
-                roots = {str(app_root.resolve()), str(app_root.parent.resolve())}
-                sys.path[:] = [entry for entry in sys.path if entry not in roots]
-                for key, value in list(sys.modules.items()):
-                    filename = getattr(value, "__file__", None)
-                    if isinstance(filename, str) and Path(filename).is_relative_to(app_root):
-                        if key in _modules_before:
-                            sys.modules[key] = _modules_before[key]
-                        else:
-                            sys.modules.pop(key, None)
-                for key, value in _modules_before.items():
-                    if key not in sys.modules and (
-                        key == "services" or key.startswith(("services.", "mozaiks_runtime_module_"))
-                    ):
-                        sys.modules[key] = value
-
-    passed = not failed_tests
-    return {
-        "contract_version": "1.0",
-        "passed": passed,
-        "checks": [
-            _check_result(
-                check_id="app_runtime_load",
-                passed=passed,
-                message=(
-                    "Generated app bundle loads through AppLoader."
-                    if passed
-                    else f"{len(failed_tests)} app runtime load issue(s) found."
-                ),
-                details={
-                    **details,
-                    "failed_test_count": len(failed_tests),
-                },
-            )
-        ],
-        "failed_tests": failed_tests,
-        "warnings": warnings,
-        "details": details,
-    }
+    """Get nonauthoritative AppLoader repair diagnostics from a contained worker."""
+    return await app_runtime_smoke.run_contained_generated_app_runtime_load(generated_files)
 
 
-async def _app_runtime_smoke_result(generated_files: dict[str, str]) -> dict[str, Any]:
+def require_contained_imported_smoke_runner():
+    """Fail before imported source is staged when the contained runner is absent."""
+    runner = getattr(app_runtime_smoke, "run_contained_imported_app_runtime_smoke", None)
+    if not callable(runner):
+        raise ValueError("Contained imported-source runtime smoke is unavailable")
+    return runner
+
+
+async def _app_runtime_smoke_result(
+    generated_files: dict[str, str], *, binary_assets: dict[str, bytes] | None = None,
+    contained_imported_source: bool = False,
+) -> dict[str, Any]:
     """Boot the bundle in the runtime smoke's child process; generated code never runs here."""
+    if not contained_imported_source and not binary_assets:
+        return await app_runtime_smoke.run_contained_generated_app_runtime_smoke(generated_files)
+    contained_runner = require_contained_imported_smoke_runner() if contained_imported_source else None
     with tempfile.TemporaryDirectory(prefix="mozaiks-app-runtime-smoke-", ignore_cleanup_errors=True) as tmp:
         app_root = Path(tmp) / "app"
         _write_files_to_dir(app_root, generated_files)
+        for rel_path, content in (binary_assets or {}).items():
+            safe = _safe_relpath(rel_path)
+            if not safe or safe in generated_files:
+                raise ValueError("Runtime smoke binary asset path is invalid or overlaps text source")
+            out_path = app_root / safe
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_bytes(content)
+        if contained_imported_source:
+            source_digests = {
+                path: hashlib.sha256(content.encode("utf-8")).hexdigest()
+                for path, content in generated_files.items()
+            }
+            source_digests.update({
+                path: hashlib.sha256(content).hexdigest()
+                for path, content in (binary_assets or {}).items()
+            })
+            return await contained_runner(app_root, expected_source_sha256=source_digests)
         return await app_runtime_smoke.run_app_runtime_smoke(
             app_root, mongo_uri=app_runtime_smoke.resolve_smoke_mongo_uri(),
         )
+
+
+def _runtime_load_from_observer_smoke(smoke: dict[str, Any]) -> dict[str, Any]:
+    """Use the separate observer's HTTP readiness result for imported source."""
+    raw_outcomes = smoke.get("results")
+    outcomes = [item for item in raw_outcomes if isinstance(item, dict)
+                and item.get("check") == "boot.http_ready"] if isinstance(raw_outcomes, list) else []
+    failed = [item for item in outcomes if item.get("status") == "failed"]
+    passed = (
+        smoke.get("status") == "passed" and smoke.get("passed") is True
+        and len(outcomes) == 1 and not failed and outcomes[0].get("status") == "passed"
+        and smoke.get("observed_boot") == {"check": "boot.http_ready", "status": "passed"}
+        and smoke.get("observer_origin") == "trusted_external_probe_v1"
+    )
+    skipped = smoke.get("status") == "skipped"
+    status = "skipped" if skipped else "passed" if passed else "failed"
+    return {
+        "contract_version": "1.0",
+        "status": status,
+        "passed": None if skipped else passed,
+        "skipped_reason": smoke.get("skipped_reason") if skipped else None,
+        "checks": [{
+            "id": "app_runtime_load", "status": status,
+            "passed": None if skipped else passed,
+            "message": "The separate runtime observer checked loopback app readiness.",
+            "details": {"blocking": not passed, "outcomes": outcomes},
+        }],
+        "failed_tests": [] if skipped or passed else [{
+            "test": "app_runtime_load", "error": (
+                "; ".join(str(item.get("message") or "") for item in failed)
+                or "The external observer did not confirm app HTTP readiness."
+            ),
+        }],
+        "warnings": [],
+    }
 
 
 async def _agent_backend_integration_result(context_variables: Any | None) -> dict[str, Any]:
@@ -1965,11 +1857,78 @@ def _assembly_failure(context_variables: Any | None, *, prepare_recovery: bool =
     return result
 
 
+async def run_authored_app_source_acceptance_gate(
+    *,
+    files: dict[str, str],
+    inherited_ui_root: Path,
+    runtime_binary_assets: dict[str, bytes] | None = None,
+) -> dict[str, Any]:
+    """Validate an imported app root under an explicit authored-source contract.
+
+    The source is parsed here but executed only by the contained runtime smoke.
+    This contract does not claim generated-output policy, workspace-root
+    workflows, provider readiness, or deployed behavior.
+    """
+    from mozaiksai.core.validation.workspace import (
+        registered_ui_components,
+        validate_authored_app_file_map,
+    )
+
+    binary_assets = runtime_binary_assets or {}
+    if not files or not isinstance(files.get("app.json"), str) or set(files) & set(binary_assets):
+        raise ValueError("Authored app root is missing app.json or has overlapping source paths")
+    inherited = registered_ui_components(inherited_ui_root)
+    diagnostics = validate_authored_app_file_map(files, inherited_components=inherited)
+    errors = [item for item in diagnostics if item.severity == "error"]
+    source_digests = {
+        path: hashlib.sha256(content.encode("utf-8") if isinstance(content, str) else content).hexdigest()
+        for path, content in {**files, **binary_assets}.items()
+    }
+    snapshot_digest = hashlib.sha256(json.dumps(
+        source_digests, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+    inherited_ui_registry_sha256 = hashlib.sha256(json.dumps(
+        sorted(inherited), separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+    static_check = {
+        "id": "authored_app_contracts", "passed": not errors,
+        "diagnostics": [
+            {"code": item.code, "path": item.path, "message": item.message, "severity": item.severity}
+            for item in diagnostics
+        ],
+    }
+    result: dict[str, Any] = {
+        "validation_contract": "authored_app_root_acceptance_v2",
+        "validation_scope": "app_root_only",
+        "excluded_observer_checks": ["event_rejection"],
+        "inherited_ui_registry_sha256": inherited_ui_registry_sha256,
+        "snapshot_digest": snapshot_digest,
+        "checks": [static_check],
+    }
+    if errors:
+        return {**result, "status": "failed", "passed": False}
+
+    smoke = await _app_runtime_smoke_result(
+        files, binary_assets=binary_assets, contained_imported_source=True,
+    )
+    runtime_load = _runtime_load_from_observer_smoke(smoke)
+    result["app_runtime_load"] = runtime_load
+    result["app_runtime_smoke"] = smoke
+    result["checks"].extend([
+        {"id": "app_runtime_load", "passed": runtime_load.get("passed") is True},
+        {"id": "app_runtime_smoke", "passed": smoke.get("passed") is True},
+    ])
+    passed = all(check["passed"] for check in result["checks"])
+    return {**result, "status": "passed" if passed else "failed", "passed": passed}
+
+
 async def run_app_bundle_acceptance_gate(
     *,
     files: dict[str, str] | None = None,
     context_variables: Any | None = None,
     capability_packs: list[dict[str, Any]] | None = None,
+    contained_imported_source: bool = False,
+    runtime_binary_assets: dict[str, bytes] | None = None,
 ) -> dict[str, Any]:
     """Run the deterministic app-bundle acceptance gate.
 
@@ -2002,6 +1961,17 @@ async def run_app_bundle_acceptance_gate(
     from .validate_wiring import validate_wiring
 
     required_bundle_errors: list[str] = []
+    if revision_baseline_required(context_variables):
+        _context_set(context_variables, "revision_asset_evidence", None)
+        try:
+            _, source_evidence = await revision_asset_evidence(context_variables, generated_files)
+            _context_set(
+                context_variables, "revision_source_artifact_version_id",
+                source_evidence["source_artifact_version_id"],
+            )
+            _context_set(context_variables, "revision_asset_evidence", source_evidence)
+        except (OSError, ValueError, zipfile.BadZipFile, ContentNotFoundError) as exc:
+            required_bundle_errors.append(f"Revision source assets are unavailable: {exc}")
     if not generated_files:
         required_bundle_errors.append("No generated files were available for app-bundle acceptance.")
     if "app.json" not in generated_files:
@@ -2114,6 +2084,38 @@ async def run_app_bundle_acceptance_gate(
     )
     app_runtime_load_result = await _app_runtime_load_result(generated_files)
     runtime_smoke_result = await _app_runtime_smoke_result(generated_files)
+    runtime_smoke_result = app_runtime_smoke.apply_generated_acceptance_scope(
+        runtime_smoke_result, generated_files,
+        os.environ.get("MOZAIKS_APP_RUNTIME_IMAGE_ID", "").strip(),
+    )
+    load_worker_verified = (
+        app_runtime_load_result.get("worker_containment_verified") is True
+        and app_runtime_load_result.get("validator_image_id") == runtime_smoke_result.get("validator_image_id")
+        and app_runtime_load_result.get("source_content_sha256") == runtime_smoke_result.get("source_content_sha256")
+        and bool(app_runtime_load_result.get("validator_image_id"))
+        and bool(app_runtime_load_result.get("source_content_sha256"))
+    )
+    load_worker_result = {
+        "contract_version": "1.0",
+        "status": "passed" if load_worker_verified else "skipped",
+        "passed": load_worker_verified if load_worker_verified else None,
+        "skipped_reason": (
+            None if load_worker_verified else
+            app_runtime_load_result.get("skipped_reason") or
+            "contained AppLoader worker source, image, or cleanup was not verified"
+        ),
+        "checks": [{
+            "id": "app_runtime_load_worker",
+            "status": "passed" if load_worker_verified else "skipped",
+            "passed": load_worker_verified if load_worker_verified else None,
+            "message": (
+                "Contained AppLoader worker completed and was removed."
+                if load_worker_verified else "Contained AppLoader worker could not be verified."
+            ),
+            "details": {"blocking": not load_worker_verified},
+        }],
+        "failed_tests": [],
+    }
 
     completeness_result = {
         "passed": not planned_diagnostics,
@@ -2146,21 +2148,18 @@ async def run_app_bundle_acceptance_gate(
         "functional_completeness": functional_result,
         "workflow_integration": workflow_integration_result,
         "app_runtime_load": app_runtime_load_result,
+        "app_runtime_load_worker": load_worker_result,
         "app_runtime_smoke": runtime_smoke_result,
     }
-    # A skipped check is reported as skipped: never a pass, and not a failure to
-    # repair. Acceptance can still pass; skipped_checks says what did not run.
-    skipped = sorted(name for name, result in subresults.items() if result.get("status") == "skipped")
+    # Candidate Python executes in the loader worker and can forge its JSON.
+    # Only the host-confirmed worker boundary and external smoke are evidence.
+    required_subresults = {name: value for name, value in subresults.items() if name != "app_runtime_load"}
+    acceptance_status, validation_evidence = _acceptance_readiness(required_subresults)
+    skipped = validation_evidence["skipped"]
     skipped_checks = [
-        {"id": name, "reason": subresults[name].get("skipped_reason") or "skipped"} for name in skipped
+        {"id": name, "reason": required_subresults[name].get("skipped_reason") or "skipped"} for name in skipped
     ]
-    passed_by_check = {
-        name: bool(result.get("passed"))
-        for name, result in subresults.items() if name not in skipped
-    }
-    failed = sorted(name for name, passed in passed_by_check.items() if not passed)
-    completed = sorted(name for name, passed in passed_by_check.items() if passed)
-    acceptance_passed = not failed
+    acceptance_passed = acceptance_status == "passed"
 
     failed_tests: list[dict[str, Any]] = []
     warnings: list[str] = []
@@ -2184,9 +2183,16 @@ async def run_app_bundle_acceptance_gate(
                     }
                 )
 
+    loader_diagnostic_check = _result_check(
+        app_runtime_load_result, default_id="app_runtime_load",
+        default_message="AppLoader repair diagnostic completed.",
+    )
+    loader_diagnostic_check["details"] = {
+        **loader_diagnostic_check.get("details", {}), "blocking": False,
+    }
     result = {
         "contract_version": "1.0",
-        "status": "passed" if acceptance_passed else "failed",
+        "status": acceptance_status,
         "passed": acceptance_passed,
         "checks": [
             _result_check(completeness_result, default_id="planned_completeness", default_message="Approved plan completeness checked."),
@@ -2198,14 +2204,11 @@ async def run_app_bundle_acceptance_gate(
             _result_check(runtime_quality_result, default_id="module_runtime_quality", default_message="Module runtime quality check completed."),
             _result_check(functional_result, default_id="functional_completeness", default_message="Functional completeness check completed."),
             _result_check(workflow_integration_result, default_id="workflow_integration", default_message="Workflow integration check completed."),
-            _result_check(app_runtime_load_result, default_id="app_runtime_load", default_message="App runtime load check completed."),
+            loader_diagnostic_check,
+            _result_check(load_worker_result, default_id="app_runtime_load_worker", default_message="Contained AppLoader worker checked."),
             _result_check(runtime_smoke_result, default_id="app_runtime_smoke", default_message="App runtime smoke completed."),
         ],
-        "validation_evidence": {
-            "completed": completed,
-            "failed": failed,
-            "skipped": skipped,
-        },
+        "validation_evidence": validation_evidence,
         "skipped_checks": skipped_checks,
         "failed_tests": failed_tests,
         "warnings": warnings,
@@ -2230,7 +2233,7 @@ async def run_app_bundle_acceptance_gate(
     recovery_request = prepare_task_recovery(context_variables)
     bundle_repair = _prepare_bundle_repair(
         {"passed": acceptance_passed, "diagnostics": repair_diagnostics},
-        context_variables, select_repairs=recovery_request is None,
+        context_variables, select_repairs=recovery_request is None and not acceptance_passed,
     )
     result["bundle_repair"] = bundle_repair
     result["task_recovery_request"] = recovery_request
@@ -2275,13 +2278,6 @@ async def validate_app_build(
     validation_strategy: str | None = None,
     context_variables: Any | None = None,
 ) -> dict[str, Any]:
-    try:
-        env_timeout = os.getenv("E2B_TIMEOUT")
-        if env_timeout and timeout_seconds == 120:
-            timeout_seconds = int(env_timeout)
-    except Exception:
-        pass
-
     workflow_name = "AppGenerator"
     chat_id = None
     app_id = None
@@ -2294,6 +2290,13 @@ async def validate_app_build(
         pass
 
     wf_logger = get_workflow_logger(workflow_name=workflow_name, chat_id=chat_id, app_id=app_id)
+    try:
+        timeout_seconds = _bounded_validation_timeout(timeout_seconds)
+    except ValueError as exc:
+        result = {**_base_result(strategy="skip", status="failed"), "errors": [str(exc)]}
+        _persist_validation_context(context_variables=context_variables, result=result)
+        return result
+
     resolved_files, chat_id, app_id = await _resolve_files(
         files=files,
         context_variables=context_variables,
@@ -2330,18 +2333,7 @@ async def validate_app_build(
     if strategy == "skip":
         result = _base_result(strategy="skip", status="skipped")
         result["strategy_reason"] = strategy_reason
-        result["warnings"].append("App validation was explicitly skipped by strategy.")
-        _persist_validation_context(context_variables=context_variables, result=result)
-        return result
-
-    if strategy == "local":
-        result = await _run_local_validation(
-            resolved_files=resolved_files,
-            commands=list(commands),
-            start_dev_server=bool(start_dev_server),
-            timeout_seconds=timeout_seconds,
-        )
-        result["strategy_reason"] = strategy_reason
+        result["warnings"].append(f"App validation did not execute: {strategy_reason}.")
         _persist_validation_context(context_variables=context_variables, result=result)
         return result
 
@@ -2410,7 +2402,7 @@ def _host_temp_paths() -> re.Pattern[str]:
 
 def _scrubbed_error(error: Any) -> str:
     """One line, with this host's temp paths removed: per-run noise, not app content."""
-    return " ".join(_host_temp_paths().sub("<temp>", str(error)).split())
+    return " ".join(_host_temp_paths().sub("<temp>", _strip_ansi(str(error))).split())
 
 
 def _readable_error(error: Any) -> str:
@@ -2421,30 +2413,45 @@ def _readable_error(error: Any) -> str:
 
 
 def _blocking_errors(acceptance: dict[str, Any], validation: dict[str, Any] | None) -> list[str]:
-    """The errors that stop this build, from repair diagnostics, else validation."""
-    diagnostics = (acceptance.get("bundle_repair") or {}).get("diagnostics") or []
-    errors = [item.get("error") for item in diagnostics if isinstance(item, dict)]
+    """Keep the original cause alongside ownership and validation diagnostics."""
+    repair = (validation or {}).get("bundle_repair") or acceptance.get("bundle_repair") or {}
+    diagnostics = repair.get("diagnostics") or []
+    errors = [acceptance["error"]] if acceptance.get("error") else []
+    errors.extend(item.get("error") for item in diagnostics if isinstance(item, dict))
     if not any(errors):
         errors = list((validation or {}).get("errors") or [])
-    if not any(errors) and acceptance.get("error"):
-        errors = [acceptance["error"]]
+    if not any(errors):
+        errors = [
+            f"{item['id']}: {item['reason']}"
+            for item in acceptance.get("skipped_checks", [])
+        ]
+    if not any(errors) and (validation or {}).get("validation_status") in {"pending", "skipped"}:
+        errors = ["Required build validation did not complete."]
     return list(dict.fromkeys(_readable_error(error) for error in errors if error))
 
 
-def _build_failure_message(errors: list[str], *, no_progress: bool, infrastructure: bool) -> str:
+def _build_failure_message(
+    errors: list[str], *, no_progress: bool, infrastructure: bool, unverified: bool,
+) -> str:
     if infrastructure:
         headline = (
-            "The app build cannot continue: the validation environment was unavailable. "
-            "This is an environment problem, not a defect in the app; retry the build "
-            "once validation infrastructure is available."
+            "The app build is unverified: the validation environment was unavailable. "
+            "Restore the validation environment and run validation again before "
+            "exporting or promoting this app."
         )
         label = "Validation environment errors:"
+    elif unverified:
+        headline = (
+            "The app build is unverified: required validation did not complete. "
+            "Run the required validation before exporting or promoting this app."
+        )
+        label = "Incomplete validation:"
     else:
         headline = (
             "The app build cannot continue: validation ran again on an unchanged bundle "
             "and failed the same way."
             if no_progress
-            else "The app build cannot continue: validation found errors that no repair step can fix."
+            else "The app build cannot continue: the available automatic repair steps could not resolve the validation errors."
         )
         label = "Blocking errors:"
     if not errors:
@@ -2471,7 +2478,7 @@ def _record_validation_outcome(
     to act. When this outcome ends the run, the gate also writes the message
     that names the blocking errors; otherwise it clears it.
     """
-    repair = acceptance.get("bundle_repair") or {}
+    repair = (validation or {}).get("bundle_repair") or acceptance.get("bundle_repair") or {}
     recovery_request = acceptance.get("task_recovery_request")
     fingerprint = {
         "bundle": _digest(files),
@@ -2492,18 +2499,21 @@ def _record_validation_outcome(
     _context_set(context_variables, "app_validation_no_progress", no_progress)
     # Recovery and a selected repair change the bundle before the next check,
     # so only an outcome with neither ends the run (transition_graph.yaml).
-    ends_run = (
-        repair.get("target_agent") is None
-        and recovery_request is None
-        and (no_progress or repair.get("status") == "blocked")
+    unverified = not passed and (
+        acceptance.get("status") == "pending"
+        or (acceptance.get("passed") is True and (validation or {}).get("validation_status") in {"pending", "skipped"})
     )
+    infrastructure = not passed and bool((validation or {}).get(INFRASTRUCTURE_FAILURE))
+    ends_run = not passed and repair.get("target_agent") is None and recovery_request is None
+    _context_set(context_variables, "app_validation_ends_run", ends_run)
     _context_set(
         context_variables,
         "app_build_failure_message",
         _build_failure_message(
             _blocking_errors(acceptance, validation),
             no_progress=no_progress,
-            infrastructure=bool((validation or {}).get(INFRASTRUCTURE_FAILURE)),
+            infrastructure=infrastructure,
+            unverified=unverified,
         )
         if ends_run
         else None,
@@ -2564,7 +2574,7 @@ async def validate_app_bundle_from_request(
         validation = await validate_app_build(
             files=materialized_files, commands=commands,
             start_dev_server=bool(request.get("start_dev_server", True)),
-            timeout_seconds=int(request.get("timeout_seconds") or 120),
+            timeout_seconds=request.get("timeout_seconds", 120),
             validation_strategy=request.get("validation_strategy"), context_variables=context_variables,
         )
     else:
@@ -2584,7 +2594,21 @@ async def validate_app_bundle_from_request(
     app_runtime_load_result = acceptance_result["app_runtime_load"]
     runtime_smoke_result = acceptance_result["app_runtime_smoke"]
     bundle_repair = acceptance_result.get("bundle_repair")
-    validation_passed = str(validation.get("validation_status") or "").strip().lower() in {"passed", "skipped"}
+    if acceptance_result.get("passed") and validation.get("validation_status") == "failed":
+        diagnostics = [
+            {"path": item["file"], "error": f"{item['file']}: {item['message']}"}
+            for item in validation.get("parsed_errors") or []
+            if not validation.get(INFRASTRUCTURE_FAILURE) and isinstance(item, dict) and item.get("file") and item.get("message")
+        ]
+        if not diagnostics:
+            diagnostics = [{"error": _scrubbed_error(error)} for error in validation.get("errors") or []]
+        bundle_repair = _prepare_bundle_repair(
+            {"passed": False, "diagnostics": diagnostics}, context_variables,
+            select_repairs=not validation.get(INFRASTRUCTURE_FAILURE),
+        )
+        validation["bundle_repair"] = bundle_repair
+        _persist_validation_context(context_variables=context_variables, result=validation)
+    validation_passed = str(validation.get("validation_status") or "").strip().lower() == "passed"
     combined_passed = bool(validation_passed and acceptance_result.get("passed"))
     _context_set(context_variables, "integration_tests_passed", combined_passed)
     integration_test_result = {
@@ -2596,6 +2620,7 @@ async def validate_app_bundle_from_request(
         "functional_completeness": functional_result,
         "workflow_integration": workflow_integration_result,
         "app_runtime_load": app_runtime_load_result,
+        "app_runtime_load_worker": acceptance_result["app_runtime_load_worker"],
         "app_runtime_smoke": runtime_smoke_result,
         "bundle_repair": bundle_repair,
         "skipped_checks": acceptance_result["skipped_checks"],
@@ -2623,6 +2648,7 @@ async def validate_app_bundle_from_request(
         "generated_app_functional_completeness_result": functional_result,
         "workflow_integration_validation_result": workflow_integration_result,
         "app_runtime_load_result": app_runtime_load_result,
+        "app_runtime_load_worker_result": acceptance_result["app_runtime_load_worker"],
         "app_runtime_smoke_result": runtime_smoke_result,
         "bundle_repair": bundle_repair,
         "integration_tests_passed": combined_passed,

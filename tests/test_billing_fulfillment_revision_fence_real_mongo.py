@@ -838,8 +838,8 @@ async def test_partially_applied_command_reports_superseded(harness) -> None:
     # allowance that is still to come is the effect that gets invalidated.
     original_apply = service._apply_assignment
 
-    async def _apply_then_lose(command, *, plan):
-        effect = await original_apply(command, plan=plan)
+    async def _apply_then_lose(command, *, target, plan):
+        effect = await original_apply(command, target=target, plan=plan)
         if command.command_id == old_command.command_id:
             await harness.ledger.advance_subject_revision(
                 app_id=harness.app_id,
@@ -1419,7 +1419,7 @@ async def test_only_a_pre_effect_failure_releases_the_command(harness) -> None:
     command = harness.command("cmd_post_effect", plan_id="pro", subject_revision=1)
     original_allowances = service._apply_plan_allowances
 
-    async def _explode(_command, *, plan):
+    async def _explode(_command, *, target, plan):
         raise RuntimeError("something failed after the assignment committed")
 
     service._apply_plan_allowances = _explode

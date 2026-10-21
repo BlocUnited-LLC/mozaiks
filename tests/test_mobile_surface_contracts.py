@@ -75,16 +75,17 @@ def test_shell_header_and_widget_stay_mobile_tolerant() -> None:
     assert "max-h-[82dvh]" in layout_source
     assert "top-24 w-[min" not in layout_source
 
-    assert 'fixed right-0 bottom-6 z-50 widget-safe-bottom' in widget_source
-    # The collapsed toggle is the only entry point to the assistant on a
-    # non-chat route, so it must stay high-contrast against the page: an opaque
-    # card surface with a solid primary edge, never a faint translucent tab.
+    # The widget renders after the shell for keyboard order, so it sits below
+    # the z-50 header and its menus and above the z-40 mobile bottom bar.
+    assert 'fixed right-0 bottom-6 z-[45] widget-safe-bottom' in widget_source
+    assert 'fixed right-4 bottom-4 z-[45] flex flex-col' in widget_source
+    # Routes without a mobile bottom bar keep the high-contrast floating toggle.
     assert 'rounded-l-2xl border-2 border-r-0 border-primary/70 bg-card' in widget_source
-    # The mark scales at the same 768px boundary the responsive smoke asserts
-    # against (<=52px wide under it, <=64px at or above), so the desktop toggle
-    # stays prominent without crowding a phone's screen edge.
-    assert 'h-7 w-7 transition-transform group-hover:scale-110 md:h-9 md:w-9' in widget_source
-    assert 'px-2 py-5' in widget_source and 'md:px-2.5' in widget_source
+    # The compact mobile tab retains a 44px-wide touch target. The desktop
+    # toggle keeps its larger mark and padding at the same 768px boundary.
+    assert 'min-w-11' in widget_source
+    assert 'h-5 w-5 transition-transform group-hover:scale-110 md:h-9 md:w-9' in widget_source
+    assert 'px-2 py-2' in widget_source and 'md:px-2.5 md:py-5' in widget_source
     assert 'w-[26rem] max-w-[calc(100vw-2.5rem)] h-[50vh] md:h-[70vh] min-h-[360px]' in widget_source
 
 
@@ -123,7 +124,7 @@ def test_support_escalation_uses_profile_support_tab() -> None:
     assert "page_url:" not in widget_source
     assert "subjectParams.set('username', username)" in profile_source
     assert "const subjectSuffix = subjectParams.toString() ? `?${subjectParams}` : '';" in profile_source
-    assert "fetchWithAuth(`${backendUrl}/api/me/profile-pages${subjectSuffix}`, {}, auth)" in profile_source
+    assert "fetchWithAuth(`${backendUrl}/api/me/profile-pages${subjectSuffix}`, { signal }, auth)" in profile_source
     assert "fetchWithAuth(`${backendUrl}/api/me/profile-panels" not in profile_source
     assert "fetchWithAuth(`${backendUrl}/api/me/profile-tabs" not in profile_source
     assert "supportTrace('support_request:create:start'" in widget_source
@@ -157,7 +158,7 @@ def test_widget_ask_waits_for_persisted_general_mode_before_flushing() -> None:
     assert "wsStatus === 'connected' && generalModeReady" in widget_source
     assert "const [generalModeReady, setGeneralModeReady] = useState(false);" in widget_ws_source
     assert "setGeneralModeReady(true);" in widget_ws_source
-    assert "if (!wsRef.current || !generalModeReady) return false;" in widget_ws_source
+    assert "if (!wsRef.current || !readyRef.current || !acknowledgedIdRef.current) return false;" in widget_ws_source
 
 
 def test_dialog_and_overlay_primitives_use_mobile_sheet_layout() -> None:
@@ -284,6 +285,7 @@ def test_factory_app_surface_routes_are_all_covered_by_smoke() -> None:
         "CarryForwardReportPanel",
         "PricingHealthPanel",
         "MetricDetailPanel",
+            "GenesisImportReview",
     }
 
 
@@ -317,6 +319,7 @@ def test_factory_app_react_files_are_classified() -> None:
         "factory_app/app/admin/pages/PricingHealthPanel.jsx",
         # Universal metric drill-down drawer, opened from analytics surfaces
         "factory_app/app/admin/pages/MetricDetailPanel.jsx",
+        "factory_app/app/admin/pages/GenesisImportReview.jsx",
         "factory_app/app/ui/components/StudioShared.jsx",
         "factory_app/app/ui/components/HarnessDecisionCard.jsx",
         "factory_app/app/ui/components/OnboardingTour.jsx",
@@ -325,8 +328,9 @@ def test_factory_app_react_files_are_classified() -> None:
         "factory_app/workflows/ExistingAppDiscovery/ui/AppIntelligenceOverviewCard.jsx",
         "factory_app/workflows/ExistingAppDiscovery/ui/AppIntelligenceProgressCard.jsx",
         "factory_app/workflows/ExistingAppDiscovery/ui/RepoAccessRecoveryCard.jsx",
-        # AppReview workflow agentic UI artifact — emitted by present_review_summary
+        # AppReview workflow-owned browser artifacts — summary and preview workspace
         "factory_app/workflows/AppReview/ui/AppReview/AppReviewSummary.jsx",
+        "factory_app/workflows/AppReview/ui/AppReview/AppReviewWorkspace.jsx",
         # SubscriptionContractDesigner agentic UI artifact — approval card for contract review
         "factory_app/workflows/SubscriptionContractDesigner/ui/SubscriptionContractDesigner/SubscriptionContractReview.jsx",
     }
@@ -338,29 +342,25 @@ def test_factory_app_react_files_are_classified() -> None:
 
 
 
-def test_widget_always_offers_workflow_access() -> None:
-    """The widget is ask-only, so its workspace button is the user's only route
-    back into a running build from a non-chat route. It must never be hidden
-    behind an active-session check, and it must reach *any* running session —
-    not only the one this browser last touched."""
+def test_widget_offers_declared_or_resumable_workflow_access() -> None:
+    """Any owned running session remains reachable, while apps without a
+    workflow session or declared entrypoint do not invent a destination."""
     widget_source = _read("chat-ui/src/components/chat/PersistentChatWidget.jsx")
 
-    # Rendered unconditionally (support mode swaps the panel, not the button).
-    assert "{!inSupportMode && (" in widget_source
-    assert "hasActiveWorkflow && !inSupportMode" not in widget_source
+    assert "{!inSupportMode && hasWorkflowAccess && (" in widget_source
 
     # Server-side session list, not just this browser's stored pointers.
     assert "/api/sessions/list/" in widget_source
     assert "const [workflowSessions, setWorkflowSessions] = useState([]);" in widget_source
 
-    # One session resumes directly, several open a picker, none starts one.
+    # One session resumes directly; several open the existing picker.
     assert "const handleWorkflowAccess = () => {" in widget_source
     assert "if (workflowSessions.length > 1) {" in widget_source
     assert "handleBackToWorkspace(workflowSessions[0]);" in widget_source
-    assert "navigate('/chat?mode=workflow');" in widget_source
+    assert "navigate('/chat?mode=workflow');" not in widget_source
 
     # An explicit pick must win over the stored per-browser chat id.
-    assert "const handleBackToWorkspace = (target = null) => {" in widget_source
+    assert "const handleBackToWorkspace = (target = resumableWorkflow) => {" in widget_source
     assert "target?.chat_id" in widget_source
 
 
@@ -431,12 +431,10 @@ def test_widget_no_sessions_routes_to_declared_fresh_start_entrypoint() -> None:
     assert "freshStartPath = null," in widget_source
     assert "navigate(freshStartPath);" in widget_source
 
-    # The guessed-workflow route stays only as a last resort for an app that
-    # declares no entrypoint at all.
+    # An app with no workflow target must not expose a guessed workflow route.
     access_block = widget_source.split("const handleWorkflowAccess")[1].split("};")[0]
-    assert access_block.index("navigate(freshStartPath);") < access_block.index(
-        "navigate('/chat?mode=workflow');"
-    )
+    assert "navigate('/chat?mode=workflow');" not in access_block
+    assert "!inSupportMode && hasWorkflowAccess" in widget_source
 
 
 def test_factory_declares_a_fresh_start_entrypoint() -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import posixpath
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -10,6 +11,19 @@ from logs.logging_config import get_core_logger
 from mozaiksai.core.ports.sandbox import SandboxRunResult, SandboxSessionInfo
 
 logger = get_core_logger("e2b_sandbox")
+_SEALED_PURPOSE = "sealed_candidate_preview"
+_ORDINARY_PURPOSES = frozenset({"artifact_preview", "app_validation"})
+_PINNED_BUILD_REF = re.compile(
+    r"^(?:[A-Za-z0-9][A-Za-z0-9._-]*/)?[A-Za-z0-9][A-Za-z0-9._-]*:"
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+
+
+def _public_traffic_allowed(network: Any) -> bool | None:
+    if isinstance(network, dict):
+        return network.get("allow_public_traffic")
+    return None
+
 
 try:
     from e2b.exceptions import NotFoundException
@@ -49,13 +63,22 @@ class E2BSandboxAdapter:
     ) -> SandboxSessionInfo:
         info = dict(metadata or {})
         host = getattr(sandbox, "sandbox_domain", None)
-        if host:
+        if host and info.get("purpose") != _SEALED_PURPOSE:
             info.setdefault("sandbox_domain", host)
         return SandboxSessionInfo(
             session_id=str(getattr(sandbox, "sandbox_id", "") or ""),
             provider="e2b",
             preview_url=preview_url,
             metadata=info,
+        )
+
+    async def _connected_session_info(self, sandbox: Any) -> SandboxSessionInfo:
+        details = await asyncio.to_thread(sandbox.get_info)
+        metadata = getattr(details, "metadata", None)
+        # Unknown provider metadata must not reveal a sealed session host.
+        purpose = metadata.get("purpose") if isinstance(metadata, dict) else None
+        return self._session_info(
+            sandbox, metadata=None if purpose in _ORDINARY_PURPOSES else {"purpose": _SEALED_PURPOSE},
         )
 
     async def _connect_sandbox(self, session_id: str, timeout_seconds: int | None = None):
@@ -65,9 +88,14 @@ class E2BSandboxAdapter:
                 await asyncio.to_thread(sandbox.set_timeout, timeout_seconds)
             return sandbox
         sandbox_cls = self._require_sdk()
+        info = await asyncio.to_thread(sandbox_cls.get_info, session_id)
+        metadata = getattr(info, "metadata", None)
+        if not isinstance(metadata, dict) or metadata.get("purpose") not in _ORDINARY_PURPOSES:
+            # The SDK's connect() can resume a paused sandbox between inspection
+            # and connection. Sealed sessions must be killed and recreated.
+            raise RuntimeError("Sealed or unclassified E2B session cannot reconnect")
         if timeout_seconds is None:
             # SDK connect renews the lifetime; preserve the provider's deadline.
-            info = await asyncio.to_thread(sandbox_cls.get_info, session_id)
             timeout_seconds = max(1, int((info.end_at - datetime.now(UTC)).total_seconds()))
         sandbox = await asyncio.to_thread(sandbox_cls.connect, session_id, timeout=timeout_seconds)
         self._sessions[session_id] = sandbox
@@ -91,12 +119,31 @@ class E2BSandboxAdapter:
     ) -> SandboxSessionInfo:
         sandbox_cls = self._require_sdk()
         timeout = timeout_seconds if timeout_seconds is not None else self._default_timeout_seconds
+        request_metadata = dict(metadata or {})
+        purpose = request_metadata.setdefault("purpose", "artifact_preview")
+        if purpose not in _ORDINARY_PURPOSES and purpose != _SEALED_PURPOSE:
+            raise ValueError("Unsupported E2B sandbox purpose")
+        sealed = purpose == _SEALED_PURPOSE
+        if sealed:
+            if not template or not _PINNED_BUILD_REF.fullmatch(template):
+                raise ValueError("Sealed E2B preview requires an exact template build reference")
+            if envs:
+                raise ValueError("Sealed E2B preview cannot receive environment values")
+        isolation = (
+            {
+                "allow_internet_access": False,
+                "network": {"allow_public_traffic": False},
+                "lifecycle": {"on_timeout": "kill", "auto_resume": False},
+            }
+            if sealed else {}
+        )
         creation = asyncio.create_task(asyncio.to_thread(
             sandbox_cls.create,
             template=template or self._default_template,
             timeout=timeout,
-            metadata=metadata,
+            metadata=request_metadata,
             envs=envs,
+            **isolation,
         ))
         try:
             sandbox = await asyncio.shield(creation)
@@ -107,8 +154,32 @@ class E2BSandboxAdapter:
             except Exception as exc:
                 logger.error("cancelled_sandbox_cleanup_failed exception=%s", type(exc).__name__)
             raise
+        if sealed:
+            try:
+                details = await asyncio.to_thread(sandbox.get_info)
+                network = getattr(details, "network", None)
+                lifecycle = getattr(details, "lifecycle", None)
+                if (
+                    getattr(details, "allow_internet_access", None) is not False
+                    or _public_traffic_allowed(network) is not False
+                    or not isinstance(lifecycle, dict)
+                    or lifecycle.get("on_timeout") != "kill"
+                    or lifecycle.get("auto_resume") is not False
+                    or getattr(details, "metadata", {}).get("purpose") != _SEALED_PURPOSE
+                    or not getattr(details, "template_id", None)
+                ):
+                    raise RuntimeError("E2B did not confirm sealed preview isolation")
+            except (Exception, asyncio.CancelledError):
+                await asyncio.to_thread(sandbox.kill)
+                raise
+            session_metadata = {"purpose": _SEALED_PURPOSE, "template_id": details.template_id}
+        else:
+            session_metadata = {}
         self._sessions[sandbox.sandbox_id] = sandbox
-        return self._session_info(sandbox, metadata={"template": template or self._default_template or "default"})
+        return self._session_info(sandbox, metadata={
+            "template": template or self._default_template or "default",
+            **session_metadata,
+        })
 
     async def connect(
         self,
@@ -117,7 +188,7 @@ class E2BSandboxAdapter:
         timeout_seconds: int | None = None,
     ) -> SandboxSessionInfo:
         sandbox = await self._connect_sandbox(session_id, timeout_seconds=timeout_seconds)
-        return self._session_info(sandbox)
+        return await self._connected_session_info(sandbox)
 
     async def write_files(
         self,
@@ -127,6 +198,9 @@ class E2BSandboxAdapter:
         cwd: str | None = None,
     ) -> dict[str, Any]:
         sandbox = await self._connect_sandbox(session_id)
+        metadata = getattr(await asyncio.to_thread(sandbox.get_info), "metadata", None)
+        if not isinstance(metadata, dict) or metadata.get("purpose") not in _ORDINARY_PURPOSES:
+            raise ValueError("Sealed E2B preview does not accept mutable file writes")
         written = []
         for path, content in files.items():
             resolved = self._resolve_path(path, cwd)
@@ -157,6 +231,11 @@ class E2BSandboxAdapter:
         timeout_seconds: float | None = 60.0,
     ) -> SandboxRunResult:
         sandbox = await self._connect_sandbox(session_id)
+        if envs:
+            details = await asyncio.to_thread(sandbox.get_info)
+            metadata = getattr(details, "metadata", None)
+            if not isinstance(metadata, dict) or metadata.get("purpose") not in _ORDINARY_PURPOSES:
+                raise ValueError("Sealed E2B preview cannot receive command environment values")
         try:
             result = await asyncio.to_thread(
                 sandbox.commands.run,
@@ -194,6 +273,13 @@ class E2BSandboxAdapter:
         port: int,
     ) -> str | None:
         sandbox = await self._connect_sandbox(session_id)
+        details = await asyncio.to_thread(sandbox.get_info)
+        metadata = getattr(details, "metadata", None)
+        network = getattr(details, "network", None)
+        if not isinstance(metadata, dict) or metadata.get("purpose") not in _ORDINARY_PURPOSES or (
+            network is not None and _public_traffic_allowed(network) is False
+        ):
+            return None
         host = await asyncio.to_thread(sandbox.get_host, port)
         if not host:
             return None
@@ -208,13 +294,12 @@ class E2BSandboxAdapter:
     ) -> SandboxSessionInfo:
         sandbox = await self._connect_sandbox(session_id)
         await asyncio.to_thread(sandbox.set_timeout, timeout_seconds)
-        return self._session_info(sandbox)
+        return await self._connected_session_info(sandbox)
 
     async def terminate_session(self, *, session_id: str) -> bool:
         try:
-            sandbox = await self._connect_sandbox(session_id)
-            # E2B kill() returns False only for HTTP 404; other API failures raise.
-            await asyncio.to_thread(sandbox.kill)
+            # Reconnecting can resume a paused sandbox; teardown must kill by ID.
+            await asyncio.to_thread(self._require_sdk().kill, session_id)
         except _NOT_FOUND_ERRORS:
             pass
         self._sessions.pop(session_id, None)

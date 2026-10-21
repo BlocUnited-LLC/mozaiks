@@ -556,7 +556,7 @@ async def test_module_executor_wraps_handler_events_in_canonical_envelope(tmp_pa
 
 
 @pytest.mark.asyncio
-async def test_module_executor_rejects_invalid_emitted_event_payload(tmp_path: Path) -> None:
+async def test_module_executor_rejects_invalid_emitted_event_without_failing_the_action(tmp_path: Path) -> None:
     module_dir = _write_canonical_module(tmp_path)
     module_dir.joinpath("backend", "handler.py").write_text(
         """
@@ -592,12 +592,13 @@ class TasksModule:
         )
     )
 
-    assert result.success is False
-    assert result.error_code == "INVALID_EVENT_PAYLOAD"
-    assert "domain.tasks.task_created" in (result.error or "")
-    assert "module=tasks" in (result.error or "")
-    assert "action=create" in (result.error or "")
+    assert result.success is True
+    assert result.data == {"task_id": "task_1", "title": "Draft"}
     assert emitted == []
+    [rejection] = result.rejected_events
+    assert (rejection.event_type, rejection.category, rejection.reason) == (
+        "domain.tasks.task_created", "value_invalid", "Missing required properties: 'title'.",
+    )
 
 
 @pytest.mark.asyncio
@@ -1047,6 +1048,56 @@ extensions:
     )
 
     with pytest.raises(ModuleLoadError, match="module-local"):
+        ModuleLoader(str(tmp_path)).load("tasks")
+
+
+@pytest.mark.asyncio
+async def test_loaded_worker_profile_starts_only_declared_worker(tmp_path: Path) -> None:
+    from mozaiksai.core.runtime.composition.extensions import start_module_services, stop_services
+
+    module_dir = _write_canonical_module(tmp_path)
+    module_dir.joinpath("runtime_extensions.yaml").write_text(
+        """schema_version: mozaiks.runtime_extensions.v1
+extensions:
+  - kind: startup_service
+    entrypoint: backend.worker:Worker
+    profile: worker
+""",
+        encoding="utf-8",
+    )
+    module_dir.joinpath("backend", "worker.py").write_text(
+        """class Worker:
+    def start(self):
+        self.started = True
+
+    def stop(self):
+        self.started = False
+""",
+        encoding="utf-8",
+    )
+    loaded = ModuleLoader(str(tmp_path)).load("tasks")
+    assert loaded.manifests.runtime_extensions.extensions[0].profile == "worker"
+    assert await start_module_services([loaded], profile="host") == []
+    services = await start_module_services([loaded], profile="worker")
+    assert len(services) == 1 and services[0].started is True
+    await stop_services(services)
+    assert services[0].started is False
+
+
+def test_module_loader_rejects_unknown_runtime_service_profile(tmp_path: Path) -> None:
+    from mozaiksai.core.runtime.app.module_loader import ModuleLoadError
+
+    module_dir = _write_canonical_module(tmp_path)
+    module_dir.joinpath("runtime_extensions.yaml").write_text(
+        """schema_version: mozaiks.runtime_extensions.v1
+extensions:
+  - kind: startup_service
+    entrypoint: backend.worker:Worker
+    profile: operator
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(ModuleLoadError, match="profile"):
         ModuleLoader(str(tmp_path)).load("tasks")
 
 

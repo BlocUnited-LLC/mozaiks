@@ -7,6 +7,7 @@ import os
 import re
 import shlex
 import shutil
+import site
 import subprocess
 import sys
 import tempfile
@@ -24,6 +25,7 @@ from mozaiksai.core.utils.sequences import dedupe_strings
 
 from .app_context import get_current_app_intelligence_snapshot
 from .app_intelligence_jobs import AppIntelligenceIndexJob, get_latest_app_intelligence_index_job
+from .process_environment import source_process_env
 
 try:  # pragma: no cover - import failures are represented as skipped fallback checks.
     import yaml
@@ -242,11 +244,13 @@ def run_app_source_validation(
     command_runner: ValidationCommandRunner | None = None,
     source: Literal["app_intelligence_context", "explicit_workspace"] = "explicit_workspace",
 ) -> AppSourceValidationResult:
-    """Run framework-aware validation commands in an isolated source workspace.
+    """Run framework-aware validation in a disposable workspace copy by default.
 
     Command execution is intentionally opt-in through ``confirm_execution``.
     Detected commands run with ``shell=False`` after argv parsing, executable
-    allowlisting, and working-directory containment checks.
+    allowlisting, and working-directory containment checks. Repository-defined
+    commands require a trusted injected runner; the default host subprocess is
+    blocked because a workspace copy and reduced environment do not isolate it.
     """
     started = datetime.now(UTC)
     start_monotonic = time.monotonic()
@@ -314,14 +318,24 @@ def run_app_source_validation(
             warnings=[*warnings, "validation_command_execution_requires_confirmation"],
         )
 
+    if runnable and command_runner is None:
+        planned = [
+            item.model_copy(update={
+                "status": "skipped",
+                "skip_reason": "host_command_execution_requires_isolation",
+            }) if item.status == "planned" else item
+            for item in planned
+        ]
+        runnable = []
+        warnings.append("host_command_execution_requires_isolation")
+
     timeout = max(5, min(int(timeout_seconds or 120), 900))
-    runner = command_runner or _run_subprocess_command
     command_results: list[AppValidationCommandResult] = []
     fallback_checks: list[AppValidationFallbackCheckResult] = []
     overlay_count = 0
     execution_mode: Literal["isolated_workspace_copy", "direct_workspace", "not_executed"] = "not_executed"
 
-    if runnable:
+    if runnable and command_runner is not None:
         with _validation_workspace(root=root, copy_workspace=copy_workspace) as validation_root:
             execution_mode = "isolated_workspace_copy" if copy_workspace else "direct_workspace"
             overlay_count = _apply_overlay_files(validation_root, overlay_files)
@@ -331,7 +345,7 @@ def run_app_source_validation(
                         item,
                         root=validation_root,
                         timeout_seconds=timeout,
-                        runner=runner,
+                        runner=command_runner,
                     )
                 )
             if command_results and all(result.status == "skipped" for result in command_results):
@@ -342,9 +356,17 @@ def run_app_source_validation(
             overlay_count = _apply_overlay_files(validation_root, overlay_files)
             fallback_checks = run_app_validation_fallback_checks(validation_root)
 
+    status = _aggregate_status(
+        command_results=command_results,
+        fallback_checks=fallback_checks,
+        planned_commands=planned,
+        selected_kinds=selected,
+    )
+    if status == "warning":
+        warnings.append("Required source validation commands did not all complete; static checks alone do not establish readiness.")
     return _validation_result(
         app_id=resolved_app_id,
-        status=_aggregate_status(command_results=command_results, fallback_checks=fallback_checks),
+        status=status,
         source=source,
         execution_mode=execution_mode,
         framework_detection=detection,
@@ -519,7 +541,7 @@ def _execute_validation_command(
             resolved_argv,
             workdir,
             timeout_seconds,
-            _validation_env(),
+            _validation_env(root),
         )
     except subprocess.TimeoutExpired:
         return AppValidationCommandResult(
@@ -839,13 +861,32 @@ def _aggregate_status(
     *,
     command_results: Sequence[AppValidationCommandResult],
     fallback_checks: Sequence[AppValidationFallbackCheckResult],
+    planned_commands: Sequence[AppValidationCommandPlanItem],
+    selected_kinds: Sequence[str],
 ) -> AppValidationStatus:
+    """Only completed applicable commands establish source-validation readiness.
+
+    Unselected commands are not obligations. Rejected, bounded-out, or unavailable
+    selected commands remain obligations; syntax-only fallbacks cannot satisfy them.
+    """
     statuses = [item.status for item in command_results] + [item.status for item in fallback_checks]
     if any(status == "failed" for status in statuses):
         return "failed"
-    if any(status == "passed" for status in statuses):
+    required = [item for item in planned_commands if item.kind in selected_kinds]
+    completed = {
+        (item.kind, item.command, item.working_directory)
+        for item in command_results if item.status == "passed"
+    }
+    if (
+        any(item.kind in DEFAULT_VALIDATION_KINDS for item in required)
+        and all(
+            item.status == "planned" and (item.kind, item.command, item.working_directory) in completed
+            for item in required
+        )
+        and all(status == "passed" for status in statuses)
+    ):
         return "passed"
-    if any(status == "warning" for status in statuses):
+    if any(status in {"passed", "warning"} for status in statuses):
         return "warning"
     return "skipped"
 
@@ -889,9 +930,12 @@ def _validation_result(
     )
 
 
-def _validation_env() -> dict[str, str]:
-    env = dict(os.environ)
-    env["CI"] = env.get("CI") or "true"
+def _validation_env(workspace_root: Path) -> dict[str, str]:
+    env = source_process_env(workspace_root)
+    # User-installed Python validators must remain importable when HOME points
+    # at the disposable workspace rather than the host profile.
+    env["PYTHONUSERBASE"] = site.getuserbase()
+    env["CI"] = "true"
     env["MOZAIKS_APP_VALIDATION"] = "1"
     return env
 

@@ -17,6 +17,10 @@ registry:
   DiscoveryArtifactAssemblerAgent: ExistingAppAugmentationArtifact
 
 models:
+  AdoptionLevel:
+    type: literal
+    values: [embed, bridge, ecosystem, gradual_modernization]
+
   UnresolvedQuestion:
     type: model
     description: Something discovery could not fully confirm yet.
@@ -314,7 +318,7 @@ models:
     description: How the existing app should adopt Mozaiks incrementally.
     fields:
       adoption_level:
-        type: str
+        type: AdoptionLevel
         description: >
           Recommended starting level - "embed", "bridge", "ecosystem", or
           "gradual_modernization". Embed/bridge normally feed the user-facing
@@ -563,7 +567,7 @@ models:
       ecosystem. This is not a canonical top-level AppContext artifact.
     fields:
       adoption_level:
-        type: str
+        type: AdoptionLevel
         description: The confirmed adoption level that triggered decomposition.
       migration_complexity:
         type: str

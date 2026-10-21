@@ -10,7 +10,6 @@ from mozaiksai.control_plane import (
     ChangeClass,
     ChangeIntent,
     ControlPlaneCheckpointManifest,
-    ControlPlaneCodingCapabilityConfig,
     ControlPlaneConfig,
     ControlPlaneManifest,
     ControlPlanePoliciesManifest,
@@ -81,10 +80,8 @@ class _FakeArtifactStore:
 def _enabled_control_plane() -> ControlPlaneConfig:
     return ControlPlaneConfig(
         enabled=True,
-        coding=ControlPlaneCodingCapabilityConfig(
-            enabled=True,
-            llm_config={"model": "gpt-5.2-codex", "temperature": 0.1},
-        ),
+        llm_profiles={"impact_analyzer": {"llm_config": {"model": "gpt-5.2-codex", "temperature": 0.1}}},
+        scope={"enabled": True, "llm_profile": "impact_analyzer"},
     )
 
 

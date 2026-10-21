@@ -127,6 +127,14 @@ Backends selected by `auto`:
 | `AZURE_KEY_VAULT_NAME` is set | `AzureKeyVaultConnectorVaultBackend` |
 | No Azure vault configured | `MongoConnectorVaultBackend` (default) |
 
+`get_secret` reports `status: found | not_found | error` alongside its existing
+`success` and `secret_value` fields. Only `found` carries a usable secret;
+`not_found` means the backend confirmed that the named secret is absent. Azure
+requires the Key Vault `SecretNotFound` error code; an unrelated 404, unavailable
+vault, authentication failure, transport failure, or unreadable encrypted value
+is `error`. Callers that create a new secret after a read must proceed only on
+`not_found` and must treat a missing status as an error.
+
 `MongoConnectorVaultBackend` stores Fernet-encrypted secrets in the `ConnectorSecrets`
 collection in the same MongoDB instance. Encryption key priority:
 
@@ -144,12 +152,32 @@ Rules:
 - MongoDB (`Connectors` collection) stores connector metadata, status, timestamps,
   and ownership only — never raw secrets.
 - `ConnectorSecrets` collection stores encrypted secret values managed by
-  `MongoConnectorVaultBackend`. These are framework-internal records, not app data.
+  `MongoConnectorVaultBackend`. Each record is uniquely keyed by
+  `(scope, scope_id, normalized_service)` where `scope` is `app` or `workspace`.
+  These are framework-internal records, not app data.
+- Azure secret names include the scope kind and a digest of the normalized full
+  prefix and complete connector identity. Reads verify the latest identity tags.
+  Stores and name-wide deletes verify the tags on every existing version and
+  fail closed when version listing is unavailable or any version is unowned.
+  Azure needs secret get and list permissions for these mutations.
+- Distinct deployments using Mongo connector secrets need separate Mongo
+  instances; the Mongo key does not include the Azure
+  name prefix, and the fixed system database ignores a URI database suffix.
+- The vault backend requires an explicit scope on every save, read, and delete.
+  Unqualified older records are never used as a fallback.
+- Before upgrading an environment with saved connectors, run the private
+  metadata-only inventory described in the workspace integration guide. Old
+  records need operator review; ambiguous records need credential re-entry.
+  Retained unqualified records keep the inventory unready until separately reviewed
+  cleanup, even after scoped credentials have been re-entered.
 - Azure Key Vault remains the recommended backend for production deployments that
   already operate Key Vault infrastructure.
 - A connector is `active` when `secret_available: true` (secret stored in vault).
   It is `metadata_only` only when the save itself failed — not simply because no
-  external vault is configured.
+  external vault is configured. Old unqualified secret metadata does not count as ready
+  after the scoped vault contract is installed. A connector saved under a
+  different active backend is also unready until its credential is configured
+  in the selected backend.
 
 ### 3. App Business Data
 
@@ -234,6 +262,8 @@ membership for that authenticated actor. Omission preserves the signed token's
 workspace claim; explicit `None` revokes workspace ownership. Plain
 `workspace_id`, action inputs, requested scope, and mutable context fields never
 grant ownership. The assertion is accepted only from the registered host hook.
+The hook's `verified_tenant_id` assertion keys module entitlement lookups only;
+persistence never reads it, and stored rows keep the dispatch tenant.
 
 Auth-disabled local, development, and test hosts use an explicit logged
 development principal with stable workspace `development`. This authority is
@@ -252,6 +282,15 @@ collections receive no additional owner filter.
 Repos call `ctx.persistence.collection(module_id, collection_name)` using the
 declared collection `name`. A declared `entity` value resolves to the same
 physical collection and ownership policy; unknown references fail closed.
+A filter that repeats the principal's own owner or app identity adds no
+condition and is not matched twice, so owned upserts may name the owner field.
+
+Platform modules a host mounts into a workspace, such as Studio's built-in
+modules, are bound by their own bundle's `data/contract.json` rather than the
+workspace's. Each dispatch's persistence is composed for the dispatching module:
+app modules keep the workspace contract and cannot reach platform collections,
+and a platform module reaches only the collections declared for it. See
+[Data Contracts](../../app/data-contracts.md#platform-modules-mounted-into-a-workspace).
 
 Aggregations operate on the caller's owned rows. Foreign-collection stages and
 aggregation writes cannot bypass the boundary, and admin permissions do not
@@ -262,6 +301,19 @@ In mixed apps, literal access to an owned physical collection is rejected.
 Unowned aliases remain usable through a bounded Mongo-compatible facade that
 supports their existing operations and safe aggregation cursors; it prevents
 foreign-collection stages and database introspection from exposing owned rows.
+Each method binds its call against the installed driver's contract for that
+operation: primary arguments (filter, update, document, pipeline and so on) by
+position or by the driver's keyword but not both, plus only the options the
+driver defines for that operation (such as sessions, comments, sorts, upserts,
+index hints, time limits, `skip`/`limit` for counts, and
+`allowDiskUse`/`batchSize` for aggregations). Any other option, a surplus
+positional argument, or a raw query command envelope in a read filter is refused
+before the driver builds a command. An aggregation pipeline, on this facade and
+on owner-scoped collections, is copied once into plain documents, and that copy
+is both what the stage validator checks and what the driver sends.
+Bounded handles keep a module's mistakes inside its own collections; they are
+not a sandbox against hostile code running in the host process, which can reach
+the database by other means.
 Apps with no owned collections retain raw alias behavior. Scoped shared
 collections must declare their owning surface; missing ownership fails loading.
 Index changes on owned collections remain host startup work: module calls cannot

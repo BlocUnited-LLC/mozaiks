@@ -964,6 +964,12 @@ async def create_agents(
         if beta_response_schema is not None:
             middleware.append(RetryMiddleware(max_retries=2))
 
+        # Innermost: preflight and prompt projection run before UI activity,
+        # and every actual model call (including a retry) gets a fresh signal.
+        from ..execution.middleware import build_activity_middleware
+
+        middleware.append(build_activity_middleware(context_bridge=context_bridge))
+
         # Create beta Agent
         agent = Agent(
             agent_name,

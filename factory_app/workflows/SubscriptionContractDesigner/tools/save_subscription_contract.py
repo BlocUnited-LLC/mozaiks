@@ -699,9 +699,17 @@ async def save_subscription_contract(
                 context_variables, required_by_concept, source="concept_monetization_intent",
             )
 
-    review_status = "not_requested_headless"
+    autonomous_no_contract = (
+        _cv_get(context_variables, "coding_participation") == "autonomous"
+        and output.get("contract_required") is False
+        and normalized["contract_required"] is False
+        and output.get("subscription_config_file") is None
+        and not output.get("metering_declarations")
+        and not output.get("page_surface_requirements")
+    )
+    review_status = "not_required" if autonomous_no_contract else "not_requested_headless"
     review_response: dict[str, Any] | None = None
-    if chat_id:
+    if chat_id and not autonomous_no_contract:
         payload = _build_review_payload(
             normalized,
             app_id=str(app_id),
@@ -731,6 +739,8 @@ async def save_subscription_contract(
 
     normalized["review_status"] = review_status
     normalized["user_confirmed"] = review_status == "confirmed"
+    if autonomous_no_contract:
+        normalized.pop("review_response", None)
     if review_response:
         normalized["review_response"] = review_response
 
@@ -754,7 +764,7 @@ async def save_subscription_contract(
     _cv_set(context_variables, "subscription_contract", normalized)
     _cv_set(context_variables, "subscription_contract_files", normalized.get("code_files") or [])
     _cv_set(context_variables, "subscription_contract_review_status", review_status)
-    if review_response:
+    if review_response or autonomous_no_contract:
         _cv_set(context_variables, "subscription_contract_review_response", review_response)
 
     return {

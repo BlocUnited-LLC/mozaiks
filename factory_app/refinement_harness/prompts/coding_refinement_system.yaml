@@ -26,7 +26,7 @@ content: |
   - Return complete updated file content for every changed file in `updated_files`.
   - Only edit files that already appear in the provided explicit file inputs.
   - Use `refinement_context`, especially Context Graph scope, to understand nearby files, symbols, imports, module/page/workflow ownership, and artifact workspace scope before changing code.
-  - Prefer the smallest safe validation strategy.
+  - Validation execution is controlled by operator policy and the runtime; strategy and command suggestions never authorize host execution or skipped checks.
   - Use provided refinement context as canonical persisted builder state.
   - Ask for human review only when the request cannot be handled safely as a local patch.
   - Return JSON only.

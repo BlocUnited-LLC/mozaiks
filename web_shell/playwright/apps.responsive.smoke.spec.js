@@ -103,6 +103,9 @@ const appsPayload = {
       name: 'Campaign Revision Workbench',
       description: 'Release revision blocked on stakeholder feedback.',
       status: 'needs_revision',
+      chat_app_id: 'factory-session-app',
+      active_chat_id: 'campaign-revision-chat',
+      active_workflow_id: 'AppGenerator',
       created_at: '2025-02-01T09:00:00Z',
       updated_at: '2025-02-04T18:25:00Z',
     },
@@ -910,6 +913,33 @@ function buildMetricDetailPayload(appId, metricId) {
   };
 }
 
+function savedBuildBundle(versionId = 'ver-17') {
+  const pending = versionId === 'ver-16';
+  return {
+    app_id: APP_ID,
+    artifact_version_id: versionId,
+    build_family: 'app_bundle',
+    build_key: 'app_bundle',
+    workbench_ui: { component: 'AppWorkbench', workflow_name: 'AppGenerator' },
+    workbench: {
+      app_id: appConfig.appId, target_app_id: APP_ID, build_registry_id: 'demo_campaign_revision',
+      artifact_version_id: versionId, build_family: 'app_bundle', build_key: 'app_bundle',
+      title: `Saved build ${versionId}`,
+      generated_files: { 'README.md': `# Saved fixture ${versionId}` },
+      app_validation_status: pending ? 'pending' : 'passed',
+      app_validation_strategy_used: 'local',
+      validation_result: { validation_status: pending ? 'pending' : 'passed', validation_strategy: 'local' },
+      integration_test_result: { passed: !pending, checks: [], failed_tests: [] },
+    },
+    review: {
+      lifecycle_status: 'draft', validation_status: pending ? 'pending' : 'passed', review_status: pending ? 'pending' : 'validated',
+      can_accept: !pending, can_reject: true, can_promote: false, changed_file_count: 1,
+      validation_blocker: pending ? 'Required runtime checks have not passed.' : null,
+      risk_notes: ['Review the saved app before activation.'],
+    },
+  };
+}
+
 async function mockStudioApis(page) {
   await page.route('**/api/shell-config', async (route) => {
     await route.fulfill({
@@ -1069,6 +1099,20 @@ async function mockStudioApis(page) {
     });
   });
 
+  await page.route('**/api/studio/build/artifacts/*/bundle?**', async (route) => {
+    const versionId = new URL(route.request().url()).pathname.split('/').at(-2);
+    await route.fulfill({ json: savedBuildBundle(versionId) });
+  });
+  await page.route('**/api/studio/build/artifacts/*/review?**', async (route) => {
+    const versionId = new URL(route.request().url()).pathname.split('/').at(-2);
+    await route.fulfill({ json: { review: savedBuildBundle(versionId).review } });
+  });
+  await page.route('**/api/sandbox?**', async (route) => {
+    expect(route.request().method()).toBe('GET');
+    expect(new URL(route.request().url()).searchParams.get('build_registry_id')).toBeTruthy();
+    await route.fulfill({ json: { sessions: [] } });
+  });
+
   await page.route('**/api/studio/integrations?**', async (route) => {
     const url = new URL(route.request().url());
     const payload = buildAppStudioPayload(url.searchParams.get('app_id') || APP_ID);
@@ -1204,6 +1248,325 @@ test.beforeEach(async ({ page }) => {
   await mockStudioApis(page);
 });
 
+test('mobile shell navigation uses icons and keeps readable action labels', async ({ page }, testInfo) => {
+  await page.goto('/apps');
+  await page.getByRole('dialog', { name: /Onboarding step 1 of 3/i })
+    .getByRole('button', { name: 'Skip tour' }).click();
+  const navigation = page.getByRole('navigation', { name: 'Mobile app navigation' });
+
+  if (page.viewportSize().width >= 768) {
+    await expect(navigation).toBeHidden();
+  } else {
+    await expect(navigation).toBeVisible();
+    for (const label of ['Create App', 'Alerts', 'Account']) {
+      const button = navigation.getByRole('button', { name: label });
+      await expect(button).toBeVisible();
+      await expect(button.locator('svg.shell-mobile-bottom-icon')).toHaveCount(1);
+      await expect(button.locator('.shell-mobile-bottom-glyph')).toHaveAttribute('aria-hidden', 'true');
+    }
+    await expect(navigation.getByRole('button', { name: 'Open assistant' })).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+  }
+
+  if (process.env.MOBILE_NAV_QA_DIR) {
+    fs.mkdirSync(process.env.MOBILE_NAV_QA_DIR, { recursive: true });
+    await page.screenshot({
+      path: path.join(process.env.MOBILE_NAV_QA_DIR, `${testInfo.project.name}-studio-navigation.png`),
+    });
+  }
+});
+
+test('mobile shell navigation keeps an app configured icon and label', async ({ page }) => {
+  await page.route('**/api/shell-config', async (route) => {
+    await route.fulfill({
+      json: {
+        ...composedShellConfig,
+        mobile: {
+          bottomBar: {
+            items: [
+              { id: 'create', label: 'My workspace', action: 'navigate', path: '/apps', icon: 'settings.svg' },
+              { id: 'notifications', label: 'Special', action: 'navigate', path: '/usage', iconLabel: 'S' },
+            ],
+          },
+        },
+      },
+    });
+  });
+  await page.goto('/apps');
+  await page.getByRole('dialog', { name: /Onboarding step 1 of 3/i })
+    .getByRole('button', { name: 'Skip tour' }).click();
+  const navigation = page.getByRole('navigation', { name: 'Mobile app navigation' });
+
+  if (page.viewportSize().width < 768) {
+    const button = navigation.getByRole('button', { name: 'My workspace' });
+    await expect(button).toBeVisible();
+    await expect(button.locator('.shell-mobile-bottom-icon')).toHaveCSS('mask-image', /settings\.svg/);
+    const labeledButton = navigation.getByRole('button', { name: 'Special' });
+    await expect(labeledButton.locator('.shell-mobile-bottom-glyph')).toHaveText('S');
+    await expect(labeledButton.locator('svg')).toHaveCount(0);
+    await expect(navigation.getByRole('button')).toHaveCount(3);
+  }
+});
+
+test('assistant bottom action leaves mobile controls tappable and opens the chat panel', async ({ page }, testInfo) => {
+  await page.goto('/apps');
+  await page.getByRole('dialog', { name: /Onboarding step 1 of 3/i })
+    .getByRole('button', { name: 'Skip tour' }).click();
+  const navigation = page.getByRole('navigation', { name: 'Mobile app navigation' });
+  const launcher = page.locator('.widget-floating-launcher');
+
+  if (page.viewportSize().width >= 768) {
+    await expect(navigation).toBeHidden();
+    await expect(launcher.getByRole('button', { name: 'Open assistant' })).toBeVisible();
+    await launcher.getByRole('button', { name: 'Open assistant' }).click();
+    await expect(page.locator('#mozaiks-assistant-panel')).toBeVisible();
+    await page.getByRole('button', { name: 'Minimize' }).click();
+    await expect(launcher.getByRole('button', { name: 'Open assistant' })).toBeVisible();
+  } else {
+    await expect(navigation).toBeVisible();
+    await expect(launcher).toBeHidden();
+    const assistant = navigation.getByRole('button', { name: 'Open assistant' });
+    await expect(assistant).toHaveAttribute('aria-expanded', 'false');
+
+    const search = page.getByPlaceholder('Search apps...');
+    const searchBox = await search.boundingBox();
+    await page.mouse.click(searchBox.x + searchBox.width - 10, searchBox.y + searchBox.height - 10);
+    await expect(search).toBeFocused();
+    await search.fill('member growth');
+    await expect(page.getByText('Member Growth Studio').first()).toBeVisible();
+    await search.fill('');
+
+    const live = page.locator('main').getByRole('button', { name: /^Live/ });
+    await live.click();
+    await expect(live).toHaveClass(/bg-primary\/10/);
+    await expect(page.getByText('Member Growth Studio').first()).toBeVisible();
+    await expect(assistant).toHaveAttribute('aria-expanded', 'false');
+
+    const navButtons = navigation.getByRole('button');
+    for (let index = 0; index < await navButtons.count(); index += 1) {
+      const button = navButtons.nth(index);
+      const bounds = await button.boundingBox();
+      const topmost = await page.evaluate(({ x, y }) => {
+        const target = document.elementFromPoint(x, y);
+        return target?.closest('button')?.classList.contains('shell-mobile-bottom-item') || false;
+      }, { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 });
+      expect(topmost).toBe(true);
+    }
+
+    await assistant.focus();
+    await expect(assistant).toBeFocused();
+    await page.keyboard.press('Enter');
+    const closeAssistant = navigation.getByRole('button', { name: 'Close assistant' });
+    await expect(closeAssistant).toHaveAttribute('aria-expanded', 'true');
+    await expect(closeAssistant).toHaveAttribute('aria-controls', 'mozaiks-assistant-panel');
+    await expect(page.locator('#mozaiks-assistant-panel')).toBeVisible();
+    const openNavLayout = await navigation.evaluate((element) => ({
+      width: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+      scrollLeft: element.scrollLeft,
+      buttons: [...element.querySelectorAll('button')].map((button) => {
+        const rect = button.getBoundingClientRect();
+        const topmost = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+        return {
+          left: rect.left,
+          right: rect.right,
+          topmost: topmost?.closest('button') === button,
+        };
+      }),
+    }));
+    expect(openNavLayout.scrollWidth).toBeLessThanOrEqual(openNavLayout.width);
+    expect(openNavLayout.scrollLeft).toBe(0);
+    for (const button of openNavLayout.buttons) {
+      expect(button.left).toBeGreaterThanOrEqual(0);
+      expect(button.right).toBeLessThanOrEqual(openNavLayout.width);
+      expect(button.topmost).toBe(true);
+    }
+    await expectNoHorizontalOverflow(page);
+    if (process.env.MOBILE_NAV_QA_DIR) {
+      fs.mkdirSync(process.env.MOBILE_NAV_QA_DIR, { recursive: true });
+      await page.screenshot({
+        path: path.join(process.env.MOBILE_NAV_QA_DIR, `${testInfo.project.name}-assistant-open.png`),
+      });
+      await navigation.screenshot({
+        path: path.join(process.env.MOBILE_NAV_QA_DIR, `${testInfo.project.name}-assistant-open-bar.png`),
+      });
+    }
+    await closeAssistant.focus();
+    await page.keyboard.press('Enter');
+    await expect(assistant).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.locator('#mozaiks-assistant-panel')).toHaveCount(0);
+    await assistant.click();
+    await expect(page.locator('#mozaiks-assistant-panel')).toBeVisible();
+    await navigation.getByRole('button', { name: 'Close assistant' }).click();
+    await expect(page.locator('#mozaiks-assistant-panel')).toHaveCount(0);
+    await expect(launcher).toBeHidden();
+    if (process.env.MOBILE_NAV_QA_DIR) {
+      fs.mkdirSync(process.env.MOBILE_NAV_QA_DIR, { recursive: true });
+      await page.screenshot({
+        path: path.join(process.env.MOBILE_NAV_QA_DIR, `${testInfo.project.name}-assistant-bottom-action.png`),
+      });
+    }
+
+    for (const label of ['Create App', 'Alerts', 'Account']) {
+      await navigation.getByRole('button', { name: label }).click();
+      await expect(page).not.toHaveURL(/\/apps$/);
+      await expect(page.locator('#mozaiks-assistant-panel')).toHaveCount(0);
+      await page.goto('/apps');
+    }
+  }
+
+  if (process.env.MOBILE_NAV_QA_DIR && page.viewportSize().width >= 768) {
+    fs.mkdirSync(process.env.MOBILE_NAV_QA_DIR, { recursive: true });
+    await page.screenshot({
+      path: path.join(process.env.MOBILE_NAV_QA_DIR, `${testInfo.project.name}-assistant-bottom-action.png`),
+    });
+  }
+});
+
+test('assistant panel follows the bottom bar in keyboard tab order', async ({ page, isMobile }, testInfo) => {
+  test.skip(!isMobile, 'Mobile bottom bar only');
+  await page.goto('/apps');
+  await page.getByRole('dialog', { name: /Onboarding step 1 of 3/i })
+    .getByRole('button', { name: 'Skip tour' }).click();
+  const navigation = page.getByRole('navigation', { name: 'Mobile app navigation' });
+  const panel = page.locator('#mozaiks-assistant-panel');
+  const focusInsidePanel = () => page.evaluate(() => Boolean(document.activeElement?.closest('#mozaiks-assistant-panel')));
+
+  const assistant = navigation.getByRole('button', { name: 'Open assistant' });
+  await assistant.focus();
+  await page.keyboard.press('Enter');
+  await expect(panel).toBeVisible();
+  const closeAssistant = navigation.getByRole('button', { name: 'Close assistant' });
+  await expect(closeAssistant).toBeFocused();
+  // The panel is rendered after the bar that opens it, so Tab reaches the
+  // assistant widget next instead of wrapping to the top of the document.
+  expect(await navigation.evaluate((element) => Boolean(
+    element.compareDocumentPosition(document.getElementById('mozaiks-assistant-panel')) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ))).toBe(true);
+  await page.keyboard.press('Tab');
+  await expect(page.getByTitle('Minimize', { exact: true })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect.poll(focusInsidePanel).toBe(true);
+  if (process.env.MOBILE_NAV_QA_DIR) {
+    fs.mkdirSync(process.env.MOBILE_NAV_QA_DIR, { recursive: true });
+    await page.screenshot({
+      path: path.join(process.env.MOBILE_NAV_QA_DIR, `${testInfo.project.name}-assistant-panel-focus.png`),
+    });
+  }
+  // Shift+Tab walks straight back to the tab that opened the panel.
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Shift+Tab');
+  await expect(closeAssistant).toBeFocused();
+  expect(await focusInsidePanel()).toBe(false);
+  await page.keyboard.press('Enter');
+  await expect(panel).toHaveCount(0);
+  await expect(assistant).toBeFocused();
+});
+
+test('header menus stay above the open assistant panel on short desktop viewports', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'Desktop header menus and floating assistant only');
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto('/apps');
+  await page.getByRole('dialog', { name: /Onboarding step 1 of 3/i })
+    .getByRole('button', { name: 'Skip tour' }).click();
+  await page.locator('.widget-floating-launcher').getByRole('button', { name: 'Open assistant' }).click();
+  await expect(page.locator('#mozaiks-assistant-panel')).toBeVisible();
+  const header = page.locator('header');
+
+  // The assistant renders after the shell for keyboard order, so it must sit
+  // on a lower layer than the fixed header or it covers the header menus.
+  for (const viewport of [{ width: 1280, height: 720 }, { width: 1366, height: 768 }]) {
+    await page.setViewportSize(viewport);
+    const bell = header.getByTitle('Notifications', { exact: true });
+    await bell.click();
+    // A trial click runs the hit-target check without navigating away.
+    await header.getByRole('button', { name: 'View all notifications' }).click({ trial: true, timeout: 5000 });
+    await bell.click();
+    await expect(header.getByRole('button', { name: 'View all notifications' })).toHaveCount(0);
+
+    const profile = header.getByTitle('Developer', { exact: true });
+    await profile.click();
+    await header.getByRole('button', { name: /^sign out$/i }).click({ trial: true, timeout: 5000 });
+    await profile.click();
+    await expect(header.getByRole('button', { name: /^sign out$/i })).toHaveCount(0);
+    await expect(page.locator('#mozaiks-assistant-panel')).toBeVisible();
+  }
+});
+
+test('mobile shell navigation shows a letter for a page whose id is its path', async ({ page, isMobile }, testInfo) => {
+  test.skip(!isMobile, 'Mobile bottom bar only');
+  await page.route('**/api/shell-config', async (route) => {
+    await route.fulfill({ json: {
+      ...composedShellConfig,
+      // No id, so the auto-built bottom bar item falls back to the path as its id.
+      header: { ...composedShellConfig.header, pages: [{ label: 'Docs', path: '/docs' }] },
+    } });
+  });
+  await page.goto('/apps');
+  await page.getByRole('dialog', { name: /Onboarding step 1 of 3/i })
+    .getByRole('button', { name: 'Skip tour' }).click();
+  const navigation = page.getByRole('navigation', { name: 'Mobile app navigation' });
+  const docs = navigation.getByRole('button', { name: 'Docs' });
+  await expect(docs).toBeVisible();
+  await expect(docs.locator('.shell-mobile-bottom-glyph')).toHaveText('D');
+  await expect(docs.locator('.shell-mobile-bottom-icon')).toHaveCount(0);
+  await expect(navigation.getByRole('button', { name: 'Alerts' }).locator('svg.shell-mobile-bottom-icon')).toHaveCount(1);
+  await expectNoHorizontalOverflow(page);
+  if (process.env.MOBILE_NAV_QA_DIR) {
+    fs.mkdirSync(process.env.MOBILE_NAV_QA_DIR, { recursive: true });
+    await page.screenshot({
+      path: path.join(process.env.MOBILE_NAV_QA_DIR, `${testInfo.project.name}-path-id-letter.png`),
+    });
+  }
+});
+
+test('assistant launcher remains on mobile shells without a bottom bar', async ({ page, isMobile }) => {
+  test.skip(!isMobile, 'Mobile shell fallback only');
+  await page.route('**/api/shell-config', async (route) => {
+    await route.fulfill({ json: {
+      ...composedShellConfig,
+      mobile: { bottomBar: { visible: false } },
+    } });
+  });
+  await page.goto('/apps');
+  await expect(page.getByRole('navigation', { name: 'Mobile app navigation' })).toHaveCount(0);
+  await expect(page.locator('.widget-floating-launcher').getByRole('button', { name: 'Open assistant' })).toBeVisible();
+});
+
+test('five configured mobile tabs retain their labels beside Assistant', async ({ page, isMobile }, testInfo) => {
+  test.skip(!isMobile, 'Mobile bottom bar only');
+  const configured = [
+    { id: 'home', label: 'Home', path: '/apps' },
+    { id: 'projects', label: 'Projects', path: '/usage', iconLabel: 'P' },
+    { id: 'alerts', label: 'Alerts', path: '/notifications' },
+    { id: 'profile', label: 'Account', path: '/me' },
+    { id: 'create', label: 'Create', path: '/create' },
+  ];
+  await page.route('**/api/shell-config', async (route) => {
+    await route.fulfill({ json: {
+      ...composedShellConfig,
+      mobile: { bottomBar: { items: configured } },
+    } });
+  });
+  await page.goto('/apps');
+  await page.getByRole('dialog', { name: /Onboarding step 1 of 3/i })
+    .getByRole('button', { name: 'Skip tour' }).click();
+  const navigation = page.getByRole('navigation', { name: 'Mobile app navigation' });
+  await expect(navigation.getByRole('button')).toHaveCount(6);
+  for (const { label } of configured) {
+    await expect(navigation.getByRole('button', { name: label })).toBeVisible();
+  }
+  await expect(navigation.getByRole('button', { name: 'Projects' }).locator('.shell-mobile-bottom-glyph')).toHaveText('P');
+  await expect(navigation.getByRole('button', { name: 'Open assistant' })).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+  if (process.env.MOBILE_NAV_QA_DIR) {
+    fs.mkdirSync(process.env.MOBILE_NAV_QA_DIR, { recursive: true });
+    await page.screenshot({
+      path: path.join(process.env.MOBILE_NAV_QA_DIR, `${testInfo.project.name}-six-tabs.png`),
+    });
+  }
+});
+
 test('apps route stays responsive across desktop and mobile widths', async ({ page }) => {
   await page.goto('/apps');
   const main = page.locator('main');
@@ -1224,11 +1587,9 @@ test('apps route stays responsive across desktop and mobile widths', async ({ pa
     await expect(main.getByRole('button', { name: 'Continue Build' }).first()).toBeVisible();
     await expect(main.getByRole('button', { name: 'Dashboard' }).first()).toBeVisible();
 
-    const widgetButton = page.locator('.widget-safe-bottom button').first();
-    await expect(widgetButton).toBeVisible();
-    const widgetBox = await widgetButton.boundingBox();
-    expect(widgetBox).not.toBeNull();
-    expect(widgetBox.width).toBeLessThanOrEqual(52);
+    await expect(page.locator('.widget-floating-launcher')).toBeHidden();
+    await expect(page.getByRole('navigation', { name: 'Mobile app navigation' })
+      .getByRole('button', { name: 'Open assistant' })).toBeVisible();
   } else {
     await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeHidden();
     await expect(page.getByRole('columnheader', { name: 'Updated' })).toBeVisible();
@@ -1421,7 +1782,7 @@ test('app overview route stays responsive across desktop and mobile widths', asy
   await expect(main.getByRole('heading', { name: 'Overview', exact: true })).toBeVisible();
   await expect(main.getByText('Campaign Revision Workbench').first()).toBeVisible();
   await expect(main.getByText('Next step').first()).toBeVisible();
-  await expect(main.getByRole('link', { name: 'Continue Build' }).first()).toBeVisible();
+  await expect(main.getByRole('link', { name: 'Continue Build' })).toHaveCount(0);
   await expect(main.getByRole('heading', { name: 'Approval required' })).toBeVisible();
   await expect(main.getByRole('heading', { name: 'Activity' })).toBeVisible();
   await expect(main.getByText('Runtime cost').first()).toBeVisible();
@@ -1439,6 +1800,156 @@ test('app overview route stays responsive across desktop and mobile widths', asy
     await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeHidden();
   }
 });
+
+async function mockOverviewProgress(page, {
+  lifecycle = 'building',
+  currentBuildRun = {
+    build_id: 'q-build', phase: 'genesis', status: lifecycle,
+    active_chat_id: 'q-chat', active_workflow_id: 'AppGenerator',
+  },
+  description = 'A focus timer that tracks completed sessions.',
+  revenue = null,
+  cost = 0,
+} = {}) {
+  // A current registry run without a separately saved build request or plan,
+  // and no deployed runtime history. Top-level chat fields are deliberately stale.
+  const summary = {
+    app: {
+      ...getWorkspaceApp(), name: 'FocusSprint', description,
+      status: lifecycle, lifecycle_state: lifecycle,
+      lifecycle_label: lifecycle === 'needs_revision' ? 'Needs Revision' : lifecycle === 'active' ? 'Active' : 'Building',
+      chat_app_id: 'factory-session-app',
+      active_chat_id: currentBuildRun ? 'stale-chat' : null,
+      active_workflow_id: currentBuildRun ? 'ValueEngine' : null,
+      current_build_run: currentBuildRun,
+    },
+    financials: { total_revenue_usd: revenue },
+  };
+  const responses = [
+    ['**/api/modules/user_onboarding/get_onboarding_status**', buildOnboardingStatusPayload({ dismissed: true })],
+    ['**/api/studio/overview?**', summary],
+    ['**/api/studio/build?**', { build: { plan_state: 'not_started', approval_state: 'not_started' } }],
+    ['**/api/studio/build/history?**', { artifact_versions: [] }],
+    ['**/api/admin/stats*', { tracked_chats: 0 }],
+    ['**/api/admin/runs*', { runs: [] }],
+    ['**/api/admin/usage?**', { totals: { estimated_cost_usd: cost } }],
+    ['**/api/studio/analytics/**', { metrics: {}, insights: [] }],
+    [`**/api/studio/apps/${APP_ID}/context`, {
+      context_readiness: { status: 'missing' }, context_graph_status: { available: false, node_count: 0, edge_count: 0 },
+    }],
+  ];
+  for (const [pattern, body] of responses) {
+    await page.route(pattern, route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) }));
+  }
+}
+
+for (const lifecycle of ['building', 'needs_revision']) {
+  test(`app overview shows current ${lifecycle} progress before optional diagnostics`, async ({ page }, testInfo) => {
+    await mockOverviewProgress(page, { lifecycle });
+    await page.goto(`/apps/${APP_ID}/overview`);
+    const main = page.locator('main');
+    await expect(main.getByRole('heading', { name: 'FocusSprint' })).toBeVisible();
+    await expect(main.getByText('A focus timer that tracks completed sessions.')).toBeVisible();
+    await expect(main.getByText('Current step: App Generator')).toBeVisible();
+    const resume = main.getByRole('link', { name: 'Continue Build', exact: true });
+    await expect(resume).toHaveAttribute('href', '/chat?workflow=AppGenerator&mode=workflow&chat_id=q-chat&app_id=factory-session-app');
+    await expect(resume).toBeInViewport({ ratio: 1 });
+    expect(await resume.evaluate(link => {
+      const rect = link.getBoundingClientRect();
+      return link.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
+    })).toBe(true);
+    await expect(main.getByText('Not started', { exact: true })).toHaveCount(0);
+    await expect(main.getByText(/No builds yet|No build sessions yet|AI-Powered Workflows|concept brief is captured/)).toHaveCount(0);
+    await expect(main.getByRole('heading', { name: 'App intelligence' })).toBeHidden();
+    await expect(main.getByRole('group', { name: 'Revenue', exact: true })).toBeHidden();
+    await expectNoHorizontalOverflow(page);
+    await page.screenshot({ path: testInfo.outputPath(`overview-${lifecycle}.png`), fullPage: true });
+
+    const details = main.locator('details').filter({ has: page.locator('summary', { hasText: 'Runtime and source details' }) });
+    await expect(details).not.toHaveAttribute('open', '');
+    await details.locator('summary').click();
+    await expect(main.getByRole('heading', { name: 'App intelligence' })).toBeVisible();
+    await expect(main.getByRole('heading', { name: 'Activity' })).toBeVisible();
+    const margin = main.getByRole('group', { name: 'Margin', exact: true });
+    await expect(margin).toContainText('Pending');
+    await expect(margin).not.toContainText('$0.00');
+    await expectNoHorizontalOverflow(page);
+  });
+}
+
+for (const chatId of [null, 'previous-build-chat']) {
+  test(`review-ready overview opens its saved build with chat ${chatId}`, async ({ page }) => {
+    await mockOverviewProgress(page, {
+      lifecycle: 'review',
+      currentBuildRun: {
+        build_id: 'q-build', phase: 'refinement', status: 'review',
+        artifact_version_id: 'ver-17', active_chat_id: chatId, active_workflow_id: 'AppGenerator',
+      },
+    });
+    await page.route('**/api/studio/build/history?**', route => route.fulfill({
+      json: buildAppStudioPayload(APP_ID).buildHistory,
+    }));
+    const mutations = [];
+    page.on('request', request => {
+      if (request.method() === 'POST') mutations.push(new URL(request.url()).pathname);
+    });
+    await page.goto(`/apps/${APP_ID}/overview`);
+    const main = page.locator('main');
+    const review = main.getByRole('link', { name: 'Review builds', exact: true });
+    await expect(review).toHaveAttribute('href', `/apps/${APP_ID}/activity`);
+    await expect(main.getByText('Preview your saved version, request changes, then accept and activate it when ready.')).toBeVisible();
+    await expect(main.getByRole('link', { name: 'Continue Build', exact: true })).toHaveCount(0);
+    await expect(main.getByText(/A build conversation link is not available/)).toHaveCount(0);
+    await review.click();
+    await expect(page.getByText('Saved build ver-17', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Start draft preview', exact: true })).toBeVisible();
+    // The shell reads onboarding status through a POST module action.
+    expect(mutations.filter(path => path !== '/api/modules/user_onboarding/get_onboarding_status')).toEqual([]);
+    await expectNoHorizontalOverflow(page);
+  });
+}
+
+for (const missingField of ['active_chat_id', 'active_workflow_id']) {
+  test(`app overview without ${missingField} opens Building without inventing a resume`, async ({ page }) => {
+    await mockOverviewProgress(page, { currentBuildRun: null, description: null });
+    // An incomplete saved binding must not synthesize ValueEngine or resume a new chat.
+    await page.route('**/api/studio/overview?**', route => route.fulfill({
+      status: 200, contentType: 'application/json', body: JSON.stringify({ app: {
+        ...getWorkspaceApp(), name: 'FocusSprint', description: null,
+        status: 'building', lifecycle_state: 'building', lifecycle_label: 'Building',
+        active_chat_id: 'orphan-chat', active_workflow_id: 'AppGenerator', [missingField]: null, current_build_run: {},
+      } }),
+    }));
+    await page.goto(`/apps/${APP_ID}/overview`);
+    const main = page.locator('main');
+    await expect(main.getByText('App description is not available.')).toBeVisible();
+    await expect(main.getByText('Latest saved build progress.')).toHaveCount(0);
+    await expect(main.getByRole('link', { name: 'Continue Build' })).toHaveCount(0);
+    const building = main.getByRole('link', { name: 'Open Building', exact: true });
+    await expect(building).toHaveAttribute('href', `/apps/${APP_ID}/building`);
+    await building.click();
+    await expect(page).toHaveURL(new RegExp(`/apps/${APP_ID}/building$`));
+    await expect(main.getByRole('heading', { name: 'Building', exact: true })).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+  });
+}
+
+for (const [revenue, cost, expected] of [[100, 40, '$60.00'], [null, 40, 'Pending'], [100, null, 'Pending']]) {
+  test(`active app overview preserves runtime metrics with revenue ${revenue} and cost ${cost}`, async ({ page }) => {
+    await mockOverviewProgress(page, { lifecycle: 'active', currentBuildRun: null, revenue, cost });
+    await page.goto(`/apps/${APP_ID}/overview`);
+    const main = page.locator('main');
+    await expect(main.getByRole('group', { name: 'Revenue', exact: true })).toBeVisible();
+    await expect(main.getByRole('group', { name: 'Runtime Cost', exact: true })).toBeVisible();
+    await expect(main.getByRole('heading', { name: 'Activity' })).toBeVisible();
+    await expect(main.locator('summary', { hasText: 'Runtime and source details' })).toHaveCount(0);
+    const margin = main.getByRole('group', { name: 'Margin', exact: true });
+    await expect(margin).toContainText(expected);
+    if (expected === 'Pending') await expect(margin).not.toContainText('%');
+    await expect(main.getByRole('link', { name: 'Open App Studio' })).toHaveCount(0);
+    await expectNoHorizontalOverflow(page);
+  });
+}
 
 test('app building route stays responsive across desktop and mobile widths', async ({ page }) => {
   await page.goto(`/apps/${APP_ID}/building`);
@@ -1722,14 +2233,42 @@ test('app access route stays responsive across desktop and mobile widths', async
   }
 });
 
-test('app build review route stays responsive across desktop and mobile widths', async ({ page }) => {
+test.describe('saved artifact review', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.route('**/api/modules/user_onboarding/get_onboarding_status**', route => route.fulfill({
+      json: buildOnboardingStatusPayload({ dismissed: true }),
+    }));
+  });
+
+test('app build review route stays responsive across desktop and mobile widths', async ({ page }, testInfo) => {
+  const mutations = [];
+  page.on('request', request => {
+    if (request.method() === 'POST' && /\/api\/(workflows|artifacts|sandbox|studio\/build)/.test(request.url())) mutations.push(request.url());
+  });
   await page.goto(`/apps/${APP_ID}/activity`);
   const main = page.locator('main');
 
   await expect(main.getByRole('heading', { name: 'Build Review', exact: true })).toBeVisible();
+  await expect(main.getByText('Saved build ver-17', { exact: true })).toBeVisible();
+  await expect(main.getByRole('button', { name: 'Start draft preview', exact: true })).toBeVisible();
+  await expect(main.getByRole('button', { name: 'Accept artifact', exact: true })).toBeVisible();
+  await expect(main.getByRole('button', { name: /Download Bundle|Confirm app bundle/ })).toHaveCount(0);
+  await expect(main.getByRole('heading', { name: 'Build versions' })).toBeHidden();
+  expect(mutations).toEqual([]);
+  await expectNoHorizontalOverflow(page);
+  await page.screenshot({ path: testInfo.outputPath('saved-build-review.png'), fullPage: true });
+
+  await main.getByLabel('Starting version', { exact: true }).selectOption('ver-16');
+  await expect(main.getByText('Saved build ver-16', { exact: true })).toBeVisible();
+  await expect(main.getByText('Saved build ver-17', { exact: true })).toHaveCount(0);
+  await expect(main.getByText('Required runtime checks have not passed.', { exact: true })).toBeVisible();
+  await expect(main.getByRole('button', { name: 'Accept artifact', exact: true })).toHaveCount(0);
+  await expect(main.getByRole('button', { name: 'Activate this draft', exact: true })).toHaveCount(0);
+  expect(mutations).toEqual([]);
+
+  await main.getByText('Build history and preservation reports', { exact: true }).click();
   await expect(main.getByRole('heading', { name: 'Build versions' })).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Selected artifact review' })).toBeVisible();
-  await expect(main.getByText('Build artifact').first()).toBeVisible();
+  await expect(main.getByText('No carry-forward preservation report for this build.').first()).toBeVisible();
   await expectNoHorizontalOverflow(page);
 
   const viewport = page.viewportSize();
@@ -1740,6 +2279,261 @@ test('app build review route stays responsive across desktop and mobile widths',
   } else {
     await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeHidden();
   }
+});
+
+test('saved build review retries errors and starts preview only on explicit action', async ({ page }) => {
+  let attempts = 0;
+  const previewRequests = [];
+  await page.route('**/api/studio/build/artifacts/ver-17/bundle?**', async route => {
+    attempts += 1;
+    expect(new URL(route.request().url()).searchParams.get('build_registry_id')).toBe('demo_campaign_revision');
+    await route.fulfill(attempts === 1
+      ? { status: 503, json: { detail: 'Saved archive temporarily unavailable.' } }
+      : { json: savedBuildBundle() });
+  });
+  await page.route('**/api/artifacts/*/sandbox?**', async route => {
+    previewRequests.push(route.request().url());
+    await route.fulfill({ status: 409, json: { detail: 'Preview fixture does not provision a sandbox.' } });
+  });
+  await page.goto(`/apps/${APP_ID}/activity`);
+  await expect(page.getByText('Saved archive temporarily unavailable.', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Retry opening build' }).click();
+  await expect(page.getByText('Saved build ver-17', { exact: true })).toBeVisible();
+  expect(attempts).toBe(2);
+  expect(previewRequests).toEqual([]);
+  await page.getByRole('button', { name: 'Start draft preview', exact: true }).click();
+  await page.getByText('Preview details', { exact: true }).click();
+  await expect(page.getByText('Preview fixture does not provision a sandbox.', { exact: true })).toBeVisible();
+  expect(previewRequests).toHaveLength(1);
+  expect(new URL(previewRequests[0]).pathname).toBe('/api/artifacts/ver-17/sandbox');
+  expect(new URL(previewRequests[0]).searchParams.get('build_registry_id')).toBe('demo_campaign_revision');
+});
+
+for (const mismatch of ['version', 'app', 'registry']) {
+  test(`saved build review rejects a mismatched ${mismatch} response`, async ({ page }) => {
+    await page.route('**/api/studio/build/artifacts/ver-17/bundle?**', async route => {
+      const body = savedBuildBundle();
+      if (mismatch === 'version') body.artifact_version_id = 'other-version';
+      if (mismatch === 'app') body.workbench.target_app_id = 'other-app';
+      if (mismatch === 'registry') body.workbench.build_registry_id = 'other-registry';
+      await route.fulfill({ json: body });
+    });
+    await page.goto(`/apps/${APP_ID}/activity`);
+    await expect(page.getByText('The saved build response does not match the selected app and version.', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Start draft preview', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Accept artifact', exact: true })).toHaveCount(0);
+  });
+}
+
+test('saved build review ignores a late response from an earlier selection', async ({ page }) => {
+  let releaseOld;
+  let oldRequested = false;
+  const oldGate = new Promise(resolve => { releaseOld = resolve; });
+  await page.route('**/api/studio/build/artifacts/ver-16/bundle?**', async route => {
+    oldRequested = true;
+    await oldGate;
+    await route.fulfill({ json: savedBuildBundle('ver-16') }).catch(() => {});
+  });
+  try {
+    await page.goto(`/apps/${APP_ID}/activity`);
+    await expect(page.getByText('Saved build ver-17', { exact: true })).toBeVisible();
+    await page.getByLabel('Starting version', { exact: true }).selectOption('ver-16');
+    await expect.poll(() => oldRequested).toBe(true);
+    await expect(page.getByText('Saved build ver-17', { exact: true })).toBeHidden();
+    await page.getByLabel('Starting version', { exact: true }).selectOption('ver-17');
+    await expect(page.getByText('Saved build ver-17', { exact: true })).toBeVisible();
+    releaseOld();
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await expect(page.getByText('Saved build ver-16', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('Saved build ver-17', { exact: true })).toBeVisible();
+  } finally { releaseOld(); }
+});
+
+test('saved build review retains preview ownership when switching versions', async ({ page }) => {
+  const commands = [];
+  await page.route('**/preview-fixture', route => route.fulfill({
+    contentType: 'text/html',
+    body: '<h1>Isolated preview fixture</h1><button onclick="this.textContent=\'Preview is interactive\'">Try preview</button>',
+  }));
+  await page.routeWebSocket('**/ws/sandbox/**', socket => socket.close());
+  await page.route('**/api/artifacts/*/sandbox?**', async route => {
+    const versionId = new URL(route.request().url()).pathname.split('/').at(-2);
+    commands.push(`allocate:${versionId}`);
+    await route.fulfill({ json: { sandboxId: `sandbox-${versionId}` } });
+  });
+  await page.route('**/api/sandbox/**', async route => {
+    const parts = new URL(route.request().url()).pathname.split('/');
+    const action = parts.at(-1);
+    const sandboxId = parts.at(-2);
+    commands.push(`${action}:${sandboxId}`);
+    await route.fulfill({ json: action === 'start' || action === 'status'
+      ? { status: 'running', previewUrl: new URL('/preview-fixture', page.url()).href }
+      : { status: action === 'stop' ? 'stopped' : 'synced' } });
+  });
+  await page.goto(`/apps/${APP_ID}/activity`);
+  await page.getByRole('button', { name: 'Start draft preview', exact: true }).click();
+  await expect(page.getByRole('link', { name: 'Open draft preview', exact: true })).toBeVisible();
+  expect(commands).toEqual(['allocate:ver-17', 'sync:sandbox-ver-17', 'start:sandbox-ver-17']);
+  const preview = page.frameLocator('iframe[title="Draft app preview"]');
+  await preview.getByRole('button', { name: 'Try preview', exact: true }).click();
+  await expect(preview.getByRole('button', { name: 'Preview is interactive', exact: true })).toBeVisible();
+  await page.getByLabel('Starting version', { exact: true }).selectOption('ver-16');
+  await expect(page.getByText('Saved build ver-16', { exact: true })).toBeVisible();
+  await expect(page.getByText('Preview based on version ver-17', { exact: true })).toBeVisible();
+  await expect(page.getByText('A different draft is selected.', { exact: true })).toBeVisible();
+  await expect(preview.getByRole('button', { name: 'Preview is interactive', exact: true })).toBeVisible();
+  expect(commands.filter(command => !command.startsWith('status:'))).toEqual([
+    'allocate:ver-17', 'sync:sandbox-ver-17', 'start:sandbox-ver-17',
+  ]);
+  await expect(page.getByRole('button', { name: 'Start draft preview', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Update preview', exact: true }).click();
+  await expect(page.getByText('Preview based on version ver-16', { exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Open draft preview', exact: true })).toBeVisible();
+  await expect(preview.getByRole('button', { name: 'Try preview', exact: true })).toBeVisible();
+  expect(commands.filter(command => !command.startsWith('status:'))).toEqual([
+    'allocate:ver-17', 'sync:sandbox-ver-17', 'start:sandbox-ver-17',
+    'stop:sandbox-ver-17', 'allocate:ver-16', 'sync:sandbox-ver-16', 'start:sandbox-ver-16',
+  ]);
+});
+
+test('saved build review preserves candidate source through a failed selection and parent refresh', async ({ page }) => {
+  let failOtherVersion = true;
+  let triggerCount = 0;
+  let releaseNextRefinement;
+  const nextRefinementGate = new Promise(resolve => { releaseNextRefinement = resolve; });
+  const receipts = [];
+  const candidateReview = {
+    ...savedBuildBundle().review, coding_summary: 'Candidate A2 review evidence',
+    can_accept: true, can_promote: false, lifecycle_status: 'draft',
+  };
+  const parentReview = { ...savedBuildBundle().review, can_accept: false, can_promote: true, lifecycle_status: 'current' };
+  const acceptedVersions = [];
+  await page.routeWebSocket('**/ws/sandbox/**', socket => socket.close());
+  await page.route('**/api/studio/build/artifacts/ver-17/bundle?**', route => route.fulfill({ json: { ...savedBuildBundle(), review: parentReview } }));
+  await page.route('**/api/studio/build/artifacts/ver-17/review?**', route => route.fulfill({ json: { review: parentReview } }));
+  await page.route('**/api/studio/build/artifacts/candidate-a2/review?**', route => route.fulfill({ json: { review: candidateReview } }));
+  await page.route('**/api/studio/build/artifacts/*/accept?**', async route => {
+    acceptedVersions.push(new URL(route.request().url()).pathname.split('/').at(-2));
+    await route.fulfill({ json: { accepted: true, review: { ...candidateReview, can_accept: false, can_promote: true, lifecycle_status: 'current' } } });
+  });
+  await page.route('**/api/workflows/trigger', async route => {
+    triggerCount += 1;
+    if (triggerCount > 1) {
+      await nextRefinementGate;
+      return route.fulfill({ status: 503, json: { detail: 'Next refinement unavailable.' } });
+    }
+    return route.fulfill({ json: {
+      execution_mode: 'coding_worker', coding_worker: {
+        status: 'validated', metadata: { build_record_id: 'candidate-a2' },
+        applied_files: { 'README.md': '# Validated candidate A2' },
+        validation_result: { validation_status: 'passed', validation_strategy: 'docker', app_bundle_acceptance_result: { passed: true }, app_validation_result: { validation_status: 'passed', validation_strategy: 'docker' } },
+      },
+    } });
+  });
+  await page.route('**/api/studio/build/artifacts/ver-16/bundle?**', route => route.fulfill(failOtherVersion
+    ? { status: 503, json: { detail: 'Version B temporarily unavailable.' } }
+    : { json: savedBuildBundle('ver-16') }));
+  await page.route('**/api/artifacts/*/sandbox?**', async route => {
+    const versionId = new URL(route.request().url()).pathname.split('/').at(-2);
+    receipts.push({ action: 'allocate', versionId });
+    await route.fulfill({ json: { sandboxId: `sandbox-${versionId}` } });
+  });
+  await page.route('**/api/sandbox/**', async route => {
+    const action = new URL(route.request().url()).pathname.split('/').at(-1);
+    if (action === 'sync') receipts.push({ action, files: route.request().postDataJSON().files });
+    // Observe the real hook's source/identity binding without provisioning a preview.
+    await route.fulfill(action === 'start'
+      ? { status: 409, json: { detail: 'Preview fixture does not provision a sandbox.' } }
+      : { json: { status: action === 'stop' ? 'stopped' : 'synced' } });
+  });
+  await page.goto(`/apps/${APP_ID}/activity`);
+  await page.getByPlaceholder('Describe the change').fill('Make candidate A2.');
+  await page.getByRole('button', { name: 'Apply change', exact: true }).click();
+  await expect(page.getByText('Draft validated and saved for review.', { exact: true })).toBeVisible();
+  await expect(page.getByText('Version candidate-a2', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Candidate A2 review evidence', { exact: true })).toBeHidden();
+  await page.getByRole('region', { name: 'Artifact review', exact: true }).getByText('Change summary', { exact: true }).click();
+  await expect(page.getByText('Candidate A2 review evidence', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Accept artifact', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Activate this draft', exact: true })).toHaveCount(0);
+  await expect(page.getByText('Strategy: docker', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Apply change', exact: true }).click();
+  try {
+    await expect.poll(() => triggerCount).toBe(2);
+    await expect(page.getByText('Strategy: docker', { exact: true })).toBeVisible();
+    await expect(page.getByText('Draft validated and saved for review.', { exact: true })).toBeVisible();
+  } finally { releaseNextRefinement(); }
+  await expect(page.getByText('Next refinement unavailable.', { exact: true })).toBeVisible();
+  await expect(page.getByText('Strategy: docker', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Start draft preview', exact: true }).click();
+  await expect.poll(() => receipts.filter(item => item.action === 'sync').length).toBe(1);
+  await page.getByLabel('Starting version', { exact: true }).selectOption('ver-16');
+  await expect(page.getByText('Version B temporarily unavailable.', { exact: true })).toBeVisible();
+  await page.getByLabel('Starting version', { exact: true }).selectOption('ver-17');
+  await expect(page.getByText('Saved build ver-17', { exact: true })).toBeVisible();
+  await expect(page.getByText('Preview based on version candidate-a2', { exact: true })).toBeVisible();
+  await expect(page.getByText('Candidate A2 review evidence', { exact: true })).toBeVisible();
+  await expect(page.getByText('Strategy: docker', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Accept artifact', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Activate this draft', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Start draft preview', exact: true }).click();
+  await expect.poll(() => receipts.filter(item => item.action === 'sync').length).toBe(2);
+  expect(receipts.filter(item => item.action === 'allocate').map(item => item.versionId)).toEqual(['candidate-a2', 'candidate-a2']);
+  expect(receipts.filter(item => item.action === 'sync').map(item => item.files)).toEqual([
+    [{ path: 'README.md', content: '# Validated candidate A2' }],
+    [{ path: 'README.md', content: '# Validated candidate A2' }],
+  ]);
+  await page.getByRole('button', { name: 'Accept artifact', exact: true }).click();
+  await expect.poll(() => acceptedVersions).toEqual(['candidate-a2']);
+
+  failOtherVersion = false;
+  await page.getByLabel('Starting version', { exact: true }).selectOption('ver-16');
+  await expect(page.getByText('Saved build ver-16', { exact: true })).toBeVisible();
+  await expect(page.getByText('Preview based on version candidate-a2', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Start draft preview', exact: true }).click();
+  await expect.poll(() => receipts.filter(item => item.action === 'sync').length).toBe(3);
+  await expect(page.getByText('Preview based on version ver-16', { exact: true })).toBeVisible();
+  expect(receipts.filter(item => item.action === 'allocate').at(-1).versionId).toBe('ver-16');
+  expect(receipts.filter(item => item.action === 'sync').at(-1).files).toEqual([{ path: 'README.md', content: '# Saved fixture ver-16' }]);
+});
+
+for (const actionLabel of ['Apply change', 'Redesign theme']) {
+  test(`saved build review ignores an old ${actionLabel} result after selection changes`, async ({ page }) => {
+    let releaseResponse;
+    let triggerRequested = false;
+    const responseGate = new Promise(resolve => { releaseResponse = resolve; });
+    const reviewRequests = [];
+    page.on('request', request => {
+      if (/\/api\/studio\/build\/artifacts\/[^/]+\/review/.test(request.url())) reviewRequests.push(request.url());
+    });
+    await page.route('**/api/workflows/trigger', async route => {
+      triggerRequested = true;
+      expect(route.request().postDataJSON().trigger_payload.refinement_request.artifact_version_id).toBe('ver-17');
+      await responseGate;
+      await route.fulfill({ json: {
+        execution_mode: 'coding_worker', coding_worker: {
+          status: 'validated', metadata: { build_record_id: 'old-selection-candidate' },
+          applied_files: { 'README.md': 'Old selection candidate files' },
+          validation_result: { validation_status: 'passed', app_bundle_acceptance_result: { passed: true }, app_validation_result: { validation_status: 'passed' } },
+        },
+      } });
+    });
+    try {
+      await page.goto(`/apps/${APP_ID}/activity`);
+      await page.getByPlaceholder('Describe the change').fill('Update the opened draft.');
+      await page.getByRole('button', { name: actionLabel, exact: true }).click();
+      await expect.poll(() => triggerRequested).toBe(true);
+      await page.getByLabel('Starting version', { exact: true }).selectOption('ver-16');
+      await expect(page.getByText('Saved build ver-16', { exact: true })).toBeVisible();
+      releaseResponse();
+      await expect(page.getByRole('button', { name: 'Apply change', exact: true })).toBeEnabled();
+      await expect(page.getByText('Draft validated and saved for review.', { exact: true })).toHaveCount(0);
+      await expect(page.getByText('Version ver-16', { exact: true }).first()).toBeVisible();
+      expect(reviewRequests.some(url => url.includes('old-selection-candidate'))).toBe(false);
+    } finally { releaseResponse(); }
+  });
+}
+
 });
 
 test('mobile app Studio navigation keeps route transitions stable', async ({ page }) => {

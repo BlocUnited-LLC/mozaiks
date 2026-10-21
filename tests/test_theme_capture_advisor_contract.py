@@ -25,7 +25,7 @@ def test_new_app_runs_propose_a_complete_look_instead_of_surveying() -> None:
     assert "NEW APP" in text and "PROPOSE, DO NOT SURVEY" in text
     assert "ONE complete proposal per turn" in text
     assert "Always justify from the product's use" in text
-    assert "Always offer the lighter alternative" in text
+    assert "Offer an alternative only when the user has not already chosen or delegated" in text
     assert "name a hex code" in text
 
 
@@ -46,9 +46,24 @@ def test_theme_interview_receives_the_approved_concept() -> None:
     context = yaml.safe_load((THEME_DIR / "context_variables.yaml").read_text(encoding="utf-8"))
 
     definitions = context["definitions"]
-    for key in ("concept_overview", "value_proposition", "target_user"):
+    for key in ("concept_overview", "value_proposition", "target_user", "value_manifest"):
         assert key in definitions, f"{key} must be declared for theme reasoning"
 
     injected = context["agents"]["ThemeInterviewAgent"]["variables"]
-    for key in ("concept_overview", "value_proposition", "target_user"):
+    for key in ("concept_overview", "value_proposition", "target_user", "value_manifest"):
         assert key in injected, f"{key} must reach ThemeInterviewAgent"
+
+
+def test_every_theme_stage_preserves_explicit_intent_and_interview_waits_for_answers():
+    agents = yaml.safe_load(_agents_text())["agents"]
+    for agent in agents:
+        prompt = "\n".join(section["content"] for section in agent["prompt_sections"])
+        assert "value_manifest.brand_intent" in prompt
+        assert "palette, appearance, font and density" in prompt
+    interview = "\n".join(section["content"] for section in agents[0]["prompt_sections"])
+    assert "Set outcome to needs_input whenever your message asks for a decision" in interview
+    assert "Set ready only when no question remains unanswered" in interview
+    model = yaml.safe_load((THEME_DIR / "structured_outputs.yaml").read_text(encoding="utf-8"))
+    description = model["models"]["ThemeInterviewResult"]["fields"]["outcome"]["description"]
+    assert "whenever agent_message asks for a decision" in description
+    assert "no question remains unanswered" in description

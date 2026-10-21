@@ -21,7 +21,6 @@ from mozaiksai.core.admin.contract import (
 from mozaiksai.core.admin.email_promotion import is_admin_by_email
 from mozaiksai.core.admin.paths import resolve_admin_app_root as resolve_admin_app_root_path
 from mozaiksai.core.admin.registry import load_admin_registry
-from mozaiksai.core.auth.adapters.registry import is_auth_enabled
 from mozaiksai.core.auth.dependencies import UserPrincipal, require_user
 from mozaiksai.core.data.models import WorkflowStatus
 
@@ -259,31 +258,53 @@ async def _require_admin(
     authorization: HTTPAuthorizationCredentials | None = Depends(_bearer),
 ) -> UserPrincipal:
     """
-    Admin gate with three escalating checks:
+    Admin gate with two checks:
 
-    1. Auth provider granted "admin" role in the JWT          (production)
-    2. User's email is in app.json admins allowlist           (default path)
-    3. Auth is disabled (dev mode) — pass through             (local dev)
+    1. The principal carries the "admin" role: granted by the auth provider,
+       or, with authentication off, by AUTH_ANON_ROLES to a request that has
+       development access (a fresh scaffold grants it)
+    2. The principal's email is in the app.json admins allowlist, and the
+       identity provider verified that email (``email_verified``)
 
-    Any of the three is sufficient. All three can coexist.
+    Either is sufficient. An unverified email never is: on a provider with
+    self-registration, anyone can sign up with an admin's address before the
+    admin does. Development access needs no verification, because it may
+    already assume any role. Authentication being off is never sufficient on
+    its own: anonymous visitors carry no roles and no email.
     """
     principal = await require_user(request, authorization)
 
-    # Already has admin role (auth provider assigned it)
+    # Already has admin role (auth provider or AUTH_ANON_ROLES assigned it)
     if principal.has_role("admin"):
         return principal
 
-    # Email allowlist promotion
+    # Email allowlist promotion, for a verified email only
     if is_admin_by_email(principal.email):
-        logger.debug("[admin] email-promoted to admin: %s", principal.email)
-        principal.roles = list(principal.roles) + ["admin"]
-        return principal
+        if principal.email_verified or principal.has_local_development_access:
+            logger.debug("[admin] email-promoted to admin: %s", principal.email)
+            principal.roles = list(principal.roles) + ["admin"]
+            return principal
+        # The refusal says only "Admin access required", like any other, so a
+        # self-registered account cannot learn which addresses are admins.
+        logger.warning(
+            "ADMIN_EMAIL_UNVERIFIED: user_id=%r provider=%r has an email on the app.json "
+            "admins allowlist that its identity provider has not verified "
+            "(email_verified is not true); admin not granted",
+            principal.user_id,
+            principal.provider,
+        )
 
-    # Dev mode with no roles configured — let it through so devs aren't locked out
-    if not is_auth_enabled() and not principal.roles:
-        logger.debug("[admin] auth disabled + no roles — passing through for dev")
-        return principal
-
+    if principal.has_local_development_access:
+        # Development access without the admin role: authentication off, and a
+        # workspace whose AUTH_ANON_ROLES does not grant it (scaffolds created
+        # before AUTH_ANON_ROLES=admin,user was written, for example).
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Admin access required. With authentication off, give the anonymous user "
+                "the admin role: set AUTH_ANON_ROLES=admin,user."
+            ),
+        )
     raise HTTPException(status_code=403, detail="Admin access required")
 
 

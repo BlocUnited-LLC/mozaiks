@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 from mozaiksai.core.workflow.generator_support.connector_service import (
     compute_connector_health,
+    delete_connector,
     get_connector,
     get_connector_inventory,
     get_secret,
@@ -153,8 +154,8 @@ class _FakeVaultBackend:
             "secret_prefix": "test",
         }
 
-    async def store_secret(self, *, scope_id: str, service: str, secret_value: str, display_name=None, ttl_days: int = 30):
-        key = (scope_id, service)
+    async def store_secret(self, *, scope: str, scope_id: str, service: str, secret_value: str, display_name=None, ttl_days: int = 30):
+        key = (scope, scope_id, service)
         self.secrets[key] = secret_value
         return {
             "success": True,
@@ -164,8 +165,8 @@ class _FakeVaultBackend:
             "secret_available": True,
         }
 
-    async def get_secret(self, *, scope_id: str, service: str):
-        key = (scope_id, service)
+    async def get_secret(self, *, scope: str, scope_id: str, service: str):
+        key = (scope, scope_id, service)
         value = self.secrets.get(key)
         return {
             "success": value is not None,
@@ -176,8 +177,8 @@ class _FakeVaultBackend:
             "error": None if value is not None else "missing",
         }
 
-    async def delete_secret(self, *, scope_id: str, service: str):
-        key = (scope_id, service)
+    async def delete_secret(self, *, scope: str, scope_id: str, service: str):
+        key = (scope, scope_id, service)
         existed = key in self.secrets
         self.secrets.pop(key, None)
         return {
@@ -350,7 +351,7 @@ def test_connector_service_uses_vault_backend_when_available(monkeypatch) -> Non
     connector = asyncio.run(
         get_connector(scope=ConnectorStore.SCOPE_APP, scope_id="app_1", service="payment_provider", store=store)
     )
-    secret = asyncio.run(get_secret(scope_id="app_1", service="payment_provider"))
+    secret = asyncio.run(get_secret(scope="app", scope_id="app_1", service="payment_provider"))
 
     assert stored["success"] is True
     assert stored["connector"]["secret_storage"] == "fake_vault"
@@ -366,6 +367,84 @@ def test_connector_service_uses_vault_backend_when_available(monkeypatch) -> Non
     assert connector["health"]["missing_fields"] == []
     assert secret["success"] is True
     assert secret["secret_value"] == SECRET_VALUE
+
+
+def test_legacy_vault_metadata_does_not_report_connector_ready() -> None:
+    store = ConnectorStore(pm=_FakePersistenceManager())
+    asyncio.run(store.upsert(
+        scope="app",
+        scope_id="same",
+        service="payment_provider",
+        status="active",
+        secret_storage="mongo",
+        secret_available=True,
+        key_length=20,
+        extra={"secret_name": "old-unqualified-name"},
+    ))
+    record = asyncio.run(get_connector(scope="app", scope_id="same", service="payment_provider", store=store))
+    assert record is not None
+    assert record["ready"] is False
+    assert record["configured"] is False
+    inventory = asyncio.run(get_connector_inventory(
+        scope="app", scope_id="same", required_services=["payment_provider"], store=store
+    ))
+    assert inventory["ready_services"] == []
+    assert inventory["known_but_unready_required_services"] == ["payment_provider"]
+
+
+def test_connector_saved_in_other_backend_is_not_passively_ready(monkeypatch) -> None:
+    import mozaiksai.core.workflow.generator_support.connector_service as connector_service
+    from mozaiksai.core.secrets.connector_vault import NoopConnectorVaultBackend, _secret_name
+
+    store = ConnectorStore(pm=_FakePersistenceManager())
+    asyncio.run(store.upsert(
+        scope="app", scope_id="same", service="billing", status="active",
+        secret_storage="mongo", secret_available=True, key_length=20,
+        extra={"secret_name": _secret_name("app", "same", "billing")},
+    ))
+    monkeypatch.setattr(connector_service, "get_connector_vault_backend", NoopConnectorVaultBackend)
+    record = asyncio.run(get_connector(scope="app", scope_id="same", service="billing", store=store))
+    assert record is not None
+    assert record["ready"] is False
+
+
+def test_service_save_get_and_delete_keep_app_and_workspace_secrets_apart(monkeypatch) -> None:
+    import mozaiksai.core.workflow.generator_support.connector_service as connector_service
+
+    store = ConnectorStore(pm=_FakePersistenceManager())
+    backend = _FakeVaultBackend()
+    monkeypatch.setattr(connector_service, "get_connector_vault_backend", lambda: backend)
+    for scope, value in (("app", "app-value"), ("workspace", "workspace-value")):
+        stored = asyncio.run(save_connector(
+            scope=scope, scope_id="same", service="billing", secret_value=value, store=store
+        ))
+        assert stored["success"]
+        assert asyncio.run(get_secret(scope=scope, scope_id="same", service="billing"))["secret_value"] == value
+    deleted = asyncio.run(delete_connector(scope="app", scope_id="same", service="billing", store=store))
+    assert deleted["secret_deleted"]
+    assert asyncio.run(get_secret(scope="app", scope_id="same", service="billing"))["success"] is False
+    assert asyncio.run(get_secret(scope="workspace", scope_id="same", service="billing"))["secret_value"] == "workspace-value"
+
+
+def test_failed_vault_delete_keeps_connector_metadata_for_operator_review(monkeypatch) -> None:
+    import mozaiksai.core.workflow.generator_support.connector_service as connector_service
+
+    store = ConnectorStore(pm=_FakePersistenceManager())
+    backend = _FakeVaultBackend()
+    monkeypatch.setattr(connector_service, "get_connector_vault_backend", lambda: backend)
+    assert asyncio.run(save_connector(
+        scope="app", scope_id="same", service="billing", secret_value="value", store=store
+    ))["success"]
+
+    async def refused_delete(*, scope: str, scope_id: str, service: str):
+        return {"success": False, "error": "Secret identity history could not be verified."}
+
+    monkeypatch.setattr(backend, "delete_secret", refused_delete)
+    result = asyncio.run(delete_connector(scope="app", scope_id="same", service="billing", store=store))
+    assert result["deleted"] is False
+    assert result["secret_deleted"] is False
+    assert result["error"] == "Secret identity history could not be verified."
+    assert asyncio.run(store.get(scope="app", scope_id="same", service="billing")) is not None
 
 
 def test_connector_inventory_summarizes_ready_vs_missing_services(monkeypatch) -> None:

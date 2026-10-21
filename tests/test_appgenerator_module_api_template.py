@@ -17,8 +17,8 @@ Verifies that the generated ui/lib/moduleApi.js template:
  13.  Does not propagate secret-shaped fields (tokens, api_key) as named attrs.
  14.  getAccessToken reads from window.mozaiksAuth or sessionStorage fallback keys.
  15.  authHeaders returns Authorization: Bearer when token is present.
- 16.  moduleAction is injected into bundles by generate_and_download when absent.
- 17.  generate_and_download does NOT overwrite an agent-provided moduleApi.js.
+ 16.  Assembly includes moduleAction before validation when absent.
+ 17.  Assembly preserves an admitted app-provided moduleApi.js.
  18.  agents.yaml instructs custom routes to import moduleAction from moduleApi.js.
  19.  agents.yaml instructs custom routes to catch err.error_code for branching.
  20.  file_contracts.yaml lists ui/lib/moduleApi.js as optional page_bundle output.
@@ -35,8 +35,13 @@ No payment provider, MozaiksPay, refund-specific, or hosted-product names in thi
 """
 from __future__ import annotations
 
+import json
 import re
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
 
 _WORKSPACE = Path(__file__).resolve().parents[1]
 _AGENTS_YAML_PATH = _WORKSPACE / "factory_app" / "workflows" / "AppGenerator" / "agents.yaml"
@@ -141,6 +146,166 @@ class TestModuleApiTemplateModule:
         assert "INSUFFICIENT_TOKENS" in js
         assert "metadata.top_up_route" in js
         assert "metadata.billing_route" in js
+
+
+@pytest.mark.parametrize(
+    "source_path",
+    [
+        None,
+        "examples/canonical-apps/community/app/ui/lib/moduleApi.js",
+        "web_shell/playwright/fixtures/generated-app/app/ui/lib/moduleApi.js",
+    ],
+)
+def test_token_denial_takes_precedence_over_http_402_entitlement_fallback(source_path):
+    """Execute the generated helper and its mirrors against both denial types."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required to execute the generated browser helper")
+    js = _template_js() if source_path is None else (_WORKSPACE / source_path).read_text(encoding="utf-8")
+    cases = [
+        {"status": 402, "error_code": "INSUFFICIENT_TOKENS"},
+        {"status": 402, "code": "INSUFFICIENT_TOKENS"},
+        {"status": 402, "data": {"error_code": "INSUFFICIENT_TOKENS"}},
+        {"status": 402, "data": {"code": "INSUFFICIENT_TOKENS"}},
+        {"status": 402, "data": {"detail": {"error_code": "INSUFFICIENT_TOKENS"}}},
+        {"status": 402, "data": {"detail": {"code": "INSUFFICIENT_TOKENS"}}},
+        {"status": 402, "data": {"extra_data": {"error_code": "INSUFFICIENT_TOKENS"}}},
+        {"status": 402, "error_code": "ENTITLEMENT_REQUIRED"},
+        {"status": 402, "data": {"detail": {"error_code": "ENTITLEMENT_REQUIRED"}}},
+        {"status": 402},
+        {"status": 500, "error_code": "RECORD_NOT_FOUND"},
+    ]
+    script = (
+        js
+        + "\nconst cases = "
+        + json.dumps(cases)
+        + ";\nconsole.log(JSON.stringify(cases.map(err => ["
+        + "isInsufficientTokensError(err), isEntitlementRequiredError(err)])))\n"
+    )
+    completed = subprocess.run(
+        [node, "--input-type=module"], input=script, capture_output=True, text=True, timeout=15
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout) == (
+        [[True, False]] * 7
+        + [[False, True]] * 3
+        + [[False, False]]
+    )
+
+
+def test_module_action_preserves_fastapi_token_metadata_and_bodyless_402_fallback():
+    """The actual fetch path must unwrap detail while retaining recovery metadata."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required to execute the generated browser helper")
+    script = _template_js() + """
+async function denialResult() {
+  try {
+    await moduleAction('reports', 'generate', {})
+    return { unexpectedSuccess: true }
+  } catch (err) {
+    return {
+      status: err.status,
+      code: err.error_code || null,
+      recoveryAction: err.data?.extra_data?.recovery_action || null,
+      token: isInsufficientTokensError(err),
+      entitlement: isEntitlementRequiredError(err),
+    }
+  }
+}
+globalThis.fetch = async () => ({
+  ok: false,
+  status: 402,
+  json: async () => ({ detail: {
+    error: 'Insufficient token balance',
+    error_code: 'INSUFFICIENT_TOKENS',
+    extra_data: { recovery_action: 'contact_admin' },
+  } }),
+})
+const tokenDenial = await denialResult()
+globalThis.fetch = async () => ({
+  ok: false,
+  status: 402,
+  json: async () => { throw new Error('non-JSON body') },
+})
+const bodylessDenial = await denialResult()
+console.log(JSON.stringify({ tokenDenial, bodylessDenial }))
+"""
+    completed = subprocess.run(
+        [node, "--input-type=module"], input=script, capture_output=True, text=True, timeout=15
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout) == {
+        "tokenDenial": {
+            "status": 402,
+            "code": "INSUFFICIENT_TOKENS",
+            "recoveryAction": "contact_admin",
+            "token": True,
+            "entitlement": False,
+        },
+        "bodylessDenial": {
+            "status": 402,
+            "code": None,
+            "recoveryAction": None,
+            "token": False,
+            "entitlement": True,
+        },
+    }
+
+
+def test_generated_token_recovery_honors_administrator_contact_without_inventing_a_route():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required to execute the generated browser helper")
+    metadata = [
+        {"recovery_action": "contact_admin"},
+        {"recovery_action": "contact_admin", "billing_route": "/billing"},
+        {"recovery_action": "contact_admin", "billing_route": "/billing", "contact_route": "/help"},
+        {"recovery_action": "contact_admin", "contact_route": "https://outside.example/help"},
+        {"recovery_action": "contact_admin", "contact_route": "//outside.example/help"},
+        {"recovery_action": "contact_admin", "contact_route": "/\\outside.example/help"},
+        {"recovery_action": "top_up", "top_up_route": "/token-packs"},
+        {"recovery_action": "top_up", "top_up_route": "//outside.example/help"},
+        {"recovery_action": "top_up", "top_up_route": "/\\outside.example/help"},
+        {"recovery_action": "upgrade"},
+    ]
+    errors = [{"data": {"extra_data": item}} for item in metadata]
+    script = (
+        _template_js()
+        + "\nconsole.log(JSON.stringify("
+        + json.dumps(errors)
+        + ".map(err => insufficientTokensRecoveryPath(err))))\n"
+    )
+    completed = subprocess.run(
+        [node, "--input-type=module"], input=script, capture_output=True, text=True, timeout=15
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout) == [
+        None, None, "/help", None, None, None, "/token-packs", "/billing",
+        "/billing", "/billing",
+    ]
+
+
+def test_generated_entitlement_recovery_stays_inside_the_app():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required to execute the generated browser helper")
+    errors = [
+        {"data": {"upgrade_route": "/plans/pro"}},
+        {"data": {"upgrade_route": "//outside.example/plans"}},
+        {"data": {"billing_route": "https://outside.example/billing"}},
+    ]
+    script = (
+        _template_js()
+        + "\nconsole.log(JSON.stringify("
+        + json.dumps(errors)
+        + ".map(err => entitlementUpgradePath(err))))\n"
+    )
+    completed = subprocess.run(
+        [node, "--input-type=module"], input=script, capture_output=True, text=True, timeout=15
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout) == ["/plans/pro", "/pricing", "/pricing"]
 
 
 # ---------------------------------------------------------------------------
@@ -305,27 +470,66 @@ class TestModuleApiAuthHelpers:
 
 class TestModuleApiInjection:
 
-    def test_generate_download_injects_module_api(self):
-        """generate_and_download.py injects ui/lib/moduleApi.js when absent from bundle."""
-        src = _generate_download_text()
-        assert "ui/lib/moduleApi.js" in src, (
-            "generate_and_download must reference the ui/lib/moduleApi.js injection path"
-        )
-        assert "get_module_api_template" in src, (
-            "generate_and_download must call get_module_api_template to inject the file"
-        )
+    @pytest.mark.parametrize("authored_helper", [None, "export function moduleAction() {}\n"])
+    def test_assembly_closes_custom_route_helper_before_validation(self, authored_helper):
+        from factory_app.workflows.AppGenerator.tools.assembly_phase import _merge_code_files
 
-    def test_generate_download_does_not_overwrite_agent_provided(self):
-        """generate_and_download does NOT overwrite a moduleApi.js the agent already produced."""
-        src = _generate_download_text()
-        # The guard pattern must check 'not in files_map' before injecting
-        assert (
-            '"ui/lib/moduleApi.js" not in files_map' in src
-            or "'ui/lib/moduleApi.js' not in files_map" in src
-        ), (
-            "generate_and_download must guard injection with 'not in files_map' "
-            "so agent-provided moduleApi.js is preserved"
-        )
+        files = {
+            "app.json": json.dumps({"appId": "assembly-test", "appName": "Assembly test", "authRequired": False}),
+            "ui/pages/custom/items.jsx": "import { moduleAction } from '../../lib/moduleApi.js';\nexport default () => null;\n",
+        }
+        if authored_helper is not None:
+            files["ui/lib/moduleApi.js"] = authored_helper
+        entries = [{"filename": name, "content": content} for name, content in files.items()]
+        assembled = _merge_code_files([{"code_files": entries}])
+        result = {item["filename"]: item["content"] for item in assembled}
+
+        assert result["ui/lib/moduleApi.js"] == (authored_helper or _template_js())
+        assert result["ui/pages/custom/items.jsx"] == files["ui/pages/custom/items.jsx"]
+        assert _merge_code_files([{"code_files": assembled}]) == assembled
+
+    def test_export_does_not_add_an_unvalidated_client(self):
+        assert "get_module_api_template" not in _generate_download_text()
+
+
+@pytest.mark.parametrize("api_base, expected_http, expected_socket", [
+    (None, "", "wss://preview.example.test/socket"),
+    ("", "", "wss://preview.example.test/socket"),
+    ("/", "", "wss://preview.example.test/socket"),
+    ("/backend/", "/backend", "wss://preview.example.test/backend/socket"),
+    ("https://api.example.test/", "https://api.example.test", "wss://api.example.test/socket"),
+    ("http://api.example.test/", "http://api.example.test", "ws://api.example.test/socket"),
+])
+def test_generated_client_uses_configured_or_same_origin_transport(api_base, expected_http, expected_socket):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required to execute the generated browser helper")
+    environment = {"VITE_APP_ID": "transport-test"}
+    if api_base is not None:
+        environment["VITE_API_URL"] = api_base
+    source = _template_js().replace("import.meta.env", f"({json.dumps(environment)})")
+    script = source + "\n" + """
+globalThis.window = {
+  location: {origin: 'https://preview.example.test'},
+  mozaiksAuth: {getAccessToken: () => 'test-access-token'},
+};
+const requests = [];
+globalThis.fetch = async (url, options) => {
+  requests.push({url, method: options.method, authorization: options.headers.Authorization});
+  return {ok: true, json: async () => ({saved: true})};
+};
+await moduleAction('inventory', 'create_item', {title: 'Example'});
+await startWorkflow('ExampleWorkflow');
+console.log(JSON.stringify({requests, socket: moduleWebSocketUrl('/socket', {room: 'one two'})}));
+"""
+    completed = subprocess.run([node, "--input-type=module"], input=script, capture_output=True, text=True, timeout=15)
+    assert completed.returncode == 0, completed.stderr
+    result = json.loads(completed.stdout)
+    assert result["requests"] == [
+        {"url": expected_http + "/api/modules/inventory/create_item", "method": "POST", "authorization": "Bearer test-access-token"},
+        {"url": expected_http + "/api/chats/transport-test/ExampleWorkflow/start", "method": "POST", "authorization": "Bearer test-access-token"},
+    ]
+    assert result["socket"] == expected_socket + "?room=one+two"
 
 
 # ---------------------------------------------------------------------------
@@ -352,6 +556,11 @@ class TestAgentsYamlModuleApiGuidance:
         )
         assert "INSUFFICIENT_TOKENS" in agent_section
         assert "insufficientTokensRecoveryPath" in agent_section
+        assert "navigate only when it returns a route" in agent_section
+        assert "If it returns null, stay on the current page" in agent_section
+        assert "contact an administrator" in agent_section
+        assert "never navigate to null" in agent_section
+        assert "`recovery_action=contact_admin` has no safe contact route" in _agents_text()
 
 
 # ---------------------------------------------------------------------------
@@ -382,6 +591,10 @@ class TestFileContractsModuleApi:
         )
         assert "INSUFFICIENT_TOKENS" in page_bundle
         assert "insufficientTokensRecoveryPath" in page_bundle
+        assert "navigate only when it returns a route" in page_bundle
+        assert "If it returns null, stay on the current page" in page_bundle
+        assert "administrator-contact guidance" in page_bundle
+        assert "never navigate to null" in page_bundle
 
 
 # ---------------------------------------------------------------------------

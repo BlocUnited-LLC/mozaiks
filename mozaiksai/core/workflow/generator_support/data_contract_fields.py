@@ -113,6 +113,17 @@ def record_id_field(collection: Mapping[str, Any], names: list[str]) -> str:
     return "_id"
 
 
+def read_lookup_field(collection: Mapping[str, Any]) -> str:
+    """The canonical get input addresses search_by, then declared id, then Mongo _id."""
+    names = {field["name"] for field in collection.get("fields") or []}
+    lookup = collection.get("search_by") or ("id" if "id" in names else "_id")
+    if lookup != "_id" and lookup not in names:
+        raise DataContractFieldError(
+            f"collection {collection.get('name')!r} search_by {lookup!r} must name a declared field"
+        )
+    return str(lookup)
+
+
 def _determined_encoding(kind: Any, raw: Any) -> str | None:
     """The JSON a default that fails to decode unambiguously means, if it means exactly one value.
 
@@ -237,7 +248,11 @@ def validate_collection_fields(collection: Mapping[str, Any], location: str) -> 
                 f"set type 'string'{_as_string_default(field.get('default'))}, or set enum null to keep type {kind!r}"
             )
         has_default, _value = parse_default(field, location)
-        if kind in STRUCTURED_FIELD_TYPES and field.get("required") and not has_default:
+        # Workflow/platform writers can supply required structured evidence.
+        # Only canonical create inputs have the closed scalar request limit.
+        lifecycle = collection.get("lifecycle")
+        writer = lifecycle.get("write_mode") if isinstance(lifecycle, Mapping) else None
+        if kind in STRUCTURED_FIELD_TYPES and field.get("required") and not has_default and writer not in {"workflow_write", "platform_sync"}:
             raise DataContractFieldError(
                 f"{location}: required field {field.get('name')!r} has structured type {kind!r}, which "
                 "canonical create input cannot carry; declare a JSON default "
@@ -260,6 +275,7 @@ __all__ = [
     "is_managed_timestamp",
     "normalize_structured_defaults",
     "parse_default",
+    "read_lookup_field",
     "record_id_field",
     "validate_collection_fields",
 ]

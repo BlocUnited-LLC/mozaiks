@@ -360,6 +360,18 @@ models:
       route:
         type: str
         description: Primary route path for the page.
+      ui_surface:
+        type: literal
+        values:
+        - declarative_page
+        - custom_react_page
+        description: >
+          Required rendering decision preserved by app planning. Use
+          declarative_page when shipped primitives and supported shell configuration
+          faithfully express the approved composition, visual hierarchy, responsive
+          behavior, and interaction. Use custom_react_page only for a real primitive
+          gap in that approved experience, including required local state, event
+          handlers, or canvas. This grants no additional routes or module actions.
       layout:
         type: literal
         values:
@@ -374,7 +386,7 @@ models:
       sections:
         type: list
         items: UIPageSection
-        description: Ordered list of primitive sections composing the page.
+        description: Ordered primitive composition hints. A custom React page may have no sections; preserve its approved composition, visual hierarchy, responsive behavior, and interaction in intent and the frontend design document, never invent primitive config to imitate them.
 
   ExperienceSpec:
     type: model
@@ -407,7 +419,7 @@ models:
         description: Complete data design document in Markdown.
       experience_spec:
         type: ExperienceSpec
-        description: Typed UI experience specification — navigation model, brand direction, and the complete declarative page structure with primitive-level section intent. This is the machine-readable contract that AppPlanAgent uses as the authoritative page source.
+        description: Typed UI experience specification — navigation model, brand direction, and the complete approved page inventory with each page's rendering surface, layout, intent, and any valid primitive-level section hints. Custom pages may have no sections. This is the machine-readable contract that AppPlanAgent uses as the authoritative page source.
       surface_map:
         type: DesignSurfaceMap
         description: Canonical typed surface realization contract mirrored into the saved backend and ui_schema docs.

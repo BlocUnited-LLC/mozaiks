@@ -32,7 +32,8 @@ async def test_workflow_catalog_exposes_structured_output_component_mapping() ->
     assert value_engine["handoff_style"] == "continuous_chat"
     assert value_engine["structured_outputs"]["GapAnalysisAgent"] == "ConceptBlueprint"
     assert value_engine["structured_output_components"] == {
-        "GapAnalysisAgent": "ConceptBlueprint"
+        "GapAnalysisAgent": "ConceptBlueprint",
+        "ValueInterviewAgent": "ValueInterviewResult",
     }
 
 

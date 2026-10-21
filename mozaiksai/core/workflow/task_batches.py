@@ -59,6 +59,7 @@ from .generator_support.page_plan_utils import (
     module_action_index_from_context,
     normalize_page_structure,
     normalize_planned_page_content,
+    validate_planned_custom_routes,
     validate_planned_page,
     workflow_names_from_context,
 )
@@ -1123,6 +1124,10 @@ async def _run_one_task(
                 rejected_output = None
                 continue
             candidate_json: str | None = None
+            # Rejections of a model-authored copy of a code-rendered file are
+            # collected, not raised, so the one bounded correction also sees
+            # the attempt's ownership errors instead of spending a round each.
+            rendered_failures: list[str] = []
             try:
                 output = _normalize_agent_reply(runner_result.output)
                 if not isinstance(output, dict):
@@ -1173,7 +1178,7 @@ async def _run_one_task(
                     raise ValueError("\n".join(page_failures))
                 policies = materialize_task_module_policies(
                     canonical_file_map, task=task,
-                    data_contract=data_contract,
+                    data_contract=data_contract, failures=rendered_failures,
                 )
                 canonical_file_map.update(policies)
                 schemas = materialize_task_module_schemas(
@@ -1257,10 +1262,15 @@ async def _run_one_task(
                         path for path in _normalize_owned_paths(task.get("owned_paths"))
                         if _page_stem_from_path(path)
                     ]
-                _validate_task_output_ownership(batch, task, output)
+                ownership_failures = [*rendered_failures, *_task_output_ownership_errors(batch, task, output)]
+                if ownership_failures:
+                    raise ValueError("\n".join(ownership_failures))
                 _validate_exclusive_task_paths(task, output, all_task_items)
             except ValueError as exc:
                 message = str(exc)
+                deferred_failures = [failure for failure in rendered_failures if failure not in message]
+                if deferred_failures:
+                    message = "\n".join([*deferred_failures, message])
                 # Repeated rejection is no progress. Opted-in batches retain the
                 # first rejection so Factory can select one bounded correction.
                 deferred = bool(batch.recovery and not recovery_episode)
@@ -1451,6 +1461,11 @@ def _normalize_owned_page_files_from_plan(
                 continue
             file_map[safe] = str(content)
 
+    validate_planned_custom_routes(
+        file_map, pages=_planned_pages(base_context),
+        owned_paths=set(_normalize_owned_paths(task.get("owned_paths"))),
+        baseline_files=base_context.get("generated_files") if base_context.get("build_mode") == "revision" else None,
+    )
     owned_page_paths = [
         path
         for path in _normalize_owned_paths(task.get("owned_paths"))
@@ -1539,34 +1554,43 @@ def _validate_task_output_ownership(
     task: dict[str, Any],
     output: dict[str, Any],
 ) -> None:
+    errors = _task_output_ownership_errors(batch, task, output)
+    if errors:
+        raise ValueError("\n".join(errors))
+
+
+def _task_output_ownership_errors(
+    batch: TaskBatchSpec,
+    task: dict[str, Any],
+    output: dict[str, Any],
+) -> list[str]:
+    """Every ownership error of one output: unowned and missing paths are reported together."""
     if not batch.result.require_owned_paths:
-        return
+        return []
 
     task_id = str(task.get("task_id") or "").strip()
     owned_paths = set(_normalize_owned_paths(task.get("owned_paths")))
     if not owned_paths:
-        raise ValueError(
-            f"task batch {batch.id!r} requires owned_paths, but task {task_id!r} declares none"
-        )
+        return [f"task batch {batch.id!r} requires owned_paths, but task {task_id!r} declares none"]
 
     emitted_paths = set(extract_code_file_map_from_payload(output))
     if not emitted_paths:
-        raise ValueError(
-            f"task batch {batch.id!r} task {task_id!r} did not emit any code files"
-        )
+        return [f"task batch {batch.id!r} task {task_id!r} did not emit any code files"]
 
+    errors: list[str] = []
     optional_paths = optional_task_output_paths(task)
     unexpected = sorted(emitted_paths.difference(owned_paths).difference(optional_paths))
     if unexpected:
-        raise ValueError(
+        errors.append(
             f"task batch {batch.id!r} task {task_id!r} emitted files outside owned_paths: {unexpected}"
         )
 
     missing = sorted(owned_paths.difference(emitted_paths).difference(optional_paths))
     if missing:
-        raise ValueError(
+        errors.append(
             f"task batch {batch.id!r} task {task_id!r} did not emit required owned_paths: {missing}"
         )
+    return errors
 
 
 def _validate_exclusive_task_paths(

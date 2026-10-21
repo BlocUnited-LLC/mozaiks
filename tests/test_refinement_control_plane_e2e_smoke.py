@@ -250,9 +250,8 @@ def test_refinement_control_plane_smoke_resolves_llm_profiles_without_provider_a
     assert classifier_config == config.llm_profiles["classifier"].llm_config
     assert codegen_config == config.llm_profiles["codegen"].llm_config
 
-    missing_reference = ControlPlaneConfig.model_validate(
-        {"enabled": True, "classifier": {"enabled": True, "llm_profile": "classifier"}}
-    )
     with pytest.raises(ValueError, match="references unknown LLM profile 'classifier'"):
-        missing_reference.resolve_capability_llm_config("classifier")
+        ControlPlaneConfig.model_validate(
+            {"enabled": True, "classifier": {"enabled": True, "llm_profile": "classifier"}}
+        )
 

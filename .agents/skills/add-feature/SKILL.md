@@ -4,7 +4,7 @@ description: Add features to an existing Mozaiks project. Helps users upgrade ti
 argument-hint: "[optional: feature name or preset]"
 ---
 
-**Before starting:** `git fetch origin && gh pr list --state open && git log origin/main --oneline -3` — if another agent has an open PR touching the same files you need, wait for it to merge or branch off it instead of main.
+**Before starting:** `git fetch origin && gh pr list --state open && git log origin/main --oneline -3` — if another agent has an open PR touching the same files you need, wait for it to merge, then branch from fresh `origin/main`.
 
 Help the user add features to an existing Mozaiks project.
 
@@ -108,7 +108,7 @@ Next steps:
 ### Adding **admin**
 ```
 Next steps:
-1. Configure admins in app/app.json
+1. Configure admins in app/app.json (each email must be verified by your identity provider)
 2. Access admin portal at /admin
 3. Requires auth to be enabled
 ```
@@ -117,7 +117,9 @@ Next steps:
 ```
 Next steps:
 1. Install frontend deps once: npm --prefix web_shell install
-2. Start frontend: .\scripts\run-frontend.ps1 (or npm --prefix web_shell run dev -- --host 0.0.0.0 --port 3000 --strictPort)
+2. Start frontend: .\scripts\run-frontend.ps1 (or npm --prefix web_shell run dev -- --host 127.0.0.1 --port 3000 --strictPort)
+   With authentication off, the backend serves only this machine (AUTH_ANON_ACCESS=local); the dev proxy marks
+   other machines' requests and they are refused. To serve them, configure auth, or set AUTH_ANON_ACCESS=open.
 3. Configure branding in the active app bundle brand directory
 4. Access chat/UI at http://localhost:3000
 5. By default, web_shell resolves factory_app/app unless PLATFORM_PATH or -AppWorkspacePath is set

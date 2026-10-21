@@ -158,8 +158,9 @@ function ChatMessage({ message, message_from, agentName: agentNameRaw, isTokenMe
             <div className="message-header">
               <span className="msg-sender-chip agent">{agentName || 'Agent'}</span>
             </div>
-            <div className="message-body w-full flex items-center gap-2.5 pt-0.5">
-              <div className="flex items-center gap-1.5">
+            <div className="message-body w-full flex items-center gap-2.5 pt-0.5" role="status" aria-live="polite" aria-label="Assistant activity">
+              <span>Working on this step…</span>
+              <div className="flex items-center gap-1.5" aria-hidden="true">
                 <div className="w-1.5 h-1.5 bg-[var(--color-primary-light)] rounded-full animate-bounce [animation-delay:0ms] opacity-80"></div>
                 <div className="w-1.5 h-1.5 bg-[var(--color-primary-light)] rounded-full animate-bounce [animation-delay:160ms] opacity-80"></div>
                 <div className="w-1.5 h-1.5 bg-[var(--color-primary-light)] rounded-full animate-bounce [animation-delay:320ms] opacity-80"></div>
@@ -174,6 +175,21 @@ function ChatMessage({ message, message_from, agentName: agentNameRaw, isTokenMe
   if (!hasRenderableContent && !isTokenMessage && !isWarningMessage) {
     // Allow non-text system messages that are rendered via metadata (e.g., attachment indicators)
     if (!(message_from === 'system' && attachment)) return null;
+  }
+
+  if (message_from === 'system' && messageMetadata.event_type === 'workflow_failure') {
+    return (
+      <div className="message-container">
+        <section className="workflow-failure-message" aria-label="Workflow failure">
+          <h3>This step couldn’t finish</h3>
+          <p>Review the details below for what needs attention.</p>
+          <details>
+            <summary>View failure details</summary>
+            <div className="message-body" dangerouslySetInnerHTML={renderMarkdown(message)} />
+          </details>
+        </section>
+      </div>
+    );
   }
 
   // System attachment indicator branch
@@ -215,7 +231,7 @@ function ChatMessage({ message, message_from, agentName: agentNameRaw, isTokenMe
             <div className="message-header justify-end">
               <span className="msg-sender-chip user">You</span>
             </div>
-            <div className="message-body w-full flex justify-start text-left font-semibold">
+            <div className="message-body w-full flex justify-start text-left">
               {renderMessageContent(message)}
             </div>
           </div>
@@ -265,7 +281,7 @@ function ChatMessage({ message, message_from, agentName: agentNameRaw, isTokenMe
               </button>
             )}
           </div>
-          <div className="message-body w-full flex font-semibold">
+          <div className="message-body w-full flex">
             {renderMessageContent(message)}
           </div>
           {traceOpen && traceItems.length > 0 && (

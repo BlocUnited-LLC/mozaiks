@@ -62,17 +62,14 @@ async def submit_revision_request(
     if not request_text:
         raise ValueError("revision_request is required when action='revise'")
 
+    chat_id = str(ctx.get("chat_id") or "").strip()
+    if not chat_id:
+        raise ValueError("Revision requests require a review chat session")
     refinement_payload = build_refinement_request_payload(ctx, request_text)
     mark_review_revision_submitted(ctx, refinement_payload)
 
     # Emit a WebSocket event so the frontend can trigger the refinement
     # control plane. Context variables remain the canonical state record.
-    chat_id = None
-    if hasattr(ctx, "get"):
-        try:
-            chat_id = str(ctx.get("chat_id") or "").strip() or None
-        except Exception:
-            chat_id = None
     event_payload = build_revision_event_payload(ctx, request_text)
     try:
         from mozaiksai.core.transport.simple_transport import SimpleTransport

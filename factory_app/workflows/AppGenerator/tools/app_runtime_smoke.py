@@ -1,54 +1,78 @@
-"""Runtime smoke gate: boot a generated app bundle and use it as two people.
+"""Runtime smoke gates: boot an app bundle and use it as two people.
 
-The static acceptance checks read files. This gate runs the bundle: it loads
-it with the platform host's ``AppLoader``, applies its declared indexes and
-migrations to a disposable database on the host's configured Mongo, mounts its
-API router extensions, and calls its module actions through the real module
-router over an in-process ASGI client as synthetic signed-in principals.
+Production generated-app acceptance uses a contained Docker app with private
+MongoDB and a separate source-free observer. The direct host child path remains
+for trusted repository fixtures. Both paths load through the platform's
+``AppLoader``, apply declared indexes and migrations, and exercise module
+actions as synthetic signed-in principals.
 
 Every check is derived from the bundle's own contracts: ``data/contract.json``
 collections and their canonical action ids, ``module.yaml`` schemas, gates and
 surfaces, ``config/subscriptions.yaml`` plans and assignment store, and the
 token scopes ``config/auth.yaml`` grants. Nothing is configured per app.
 
-Generated code never runs in the factory process. ``run_app_runtime_smoke``
-(the parent, called by acceptance) creates the disposable database, starts
-``python -m`` this module as a child process and drops the database however
-the child ends. The child's environment holds only what a Python process needs
-to start on this OS (no host secrets, provider keys or Mongo URI; the database
-URI arrives on stdin), it is killed at a hard total time limit, and it streams
-each check result back as one JSON line so a killed run still reports what it
-finished. Inside the child the composed app is dispatched in enforce mode with
-its own (empty) platform hook registry, an in-memory audit log, a local event
-recorder and no usage metering; module persistence, entitlement reads and
-migration history all use the disposable database. Startup services are not
-started: they run outside module dispatch with their own clients.
+The trusted-fixture child path starts this module with a restricted environment,
+uses a disposable host database and enforces a hard time limit. Production
+acceptance never invokes that path. Both paths dispatch in enforce mode with an
+empty platform hook registry, in-memory audit and no usage metering. Startup
+services are not started because they run outside module dispatch with their
+own clients.
+
+The direct trusted-fixture smoke records an event rejected by the runtime as
+its own failed check. The contained external observer cannot see that internal
+rejection. Generated-app acceptance records this limit in its versioned scope
+without claiming the candidate made no invalid emission attempt.
 """
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
 import json
 import logging
 import os
+import re
+import shutil
+import stat
 import subprocess
 import sys
+import tempfile
+import threading
 import time
 import traceback
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
+from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
 
+from anyio import CancelScope
 from fastapi import FastAPI, Request
+from httpx import TimeoutException
+
+from mozaiksai.core.adapters.local_docker_cli import _docker_cli_env, _docker_prefix
 
 logger = logging.getLogger(__name__)
 
 SMOKE_CONTRACT_VERSION = "1.0"
+GENERATED_ACCEPTANCE_SCOPE_VERSION = "2.0"
 SMOKE_TIMEOUT_SECONDS = 60.0
 _CHILD_MODULE = "factory_app.workflows.AppGenerator.tools.app_runtime_smoke"
 _EVENT_PREFIX = "@@mozaiks-runtime-smoke@@ "
 _SMOKE_DATABASE_PREFIX = "mozaiks_runtime_smoke_"
+_CONTAINED_APP_ROOT = PurePosixPath("/workspace/app")
+_CONTAINED_PLAN_ROOT = PurePosixPath("/workspace/plan")
+_CONTAINED_IMAGE = "mozaiks-sandbox:local"
+_GENERATED_IMAGE_ENV = "MOZAIKS_APP_RUNTIME_IMAGE_ID"
+_GENERATED_LOAD_TIMEOUT_SECONDS = 90
+_GENERATED_LOAD_RESULT_LIMIT = 128 * 1024
+_MAX_IMPORTED_SOURCE_BYTES = 64_000_000
+_MAX_IMPORTED_SOURCE_FILES = 4096
+_CONTAINER_STARTUP_SECONDS = 20.0
+_CONTAINER_STDOUT_LIMIT_BYTES = 4_000_000
+_CONTAINER_STDERR_LIMIT_BYTES = 256_000
 _PING_TIMEOUT_SECONDS = 5.0
 _STEP_TIMEOUT_SECONDS = 20.0
 _REQUEST_TIMEOUT_SECONDS = 10.0
@@ -57,6 +81,7 @@ _RUNTIME_LOGGER = "mozaiks.workflow"
 # The child's environment: what a Python process needs to start on this OS. No
 # other host variable (secrets, provider keys, MONGO_URI, MOZAIKS_*) is passed.
 _CHILD_ENVIRONMENT = ("PATH", "PATHEXT", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "TEMP", "TMP", "TMPDIR",
+                      "APPDATA",  # Windows Python needs this to locate its installed user-site packages.
                       "LANG", "LC_ALL", "LC_CTYPE")
 
 _FIX_SUGGESTION = (
@@ -106,6 +131,10 @@ class _ChildRun:
     stderr: str
     returncode: int | None
     timed_out: bool
+    cleanup_failed: bool = False
+    output_truncated: bool = False
+    contained: bool = False
+    app_exited: bool = False
 
 
 class _ChildProcess:
@@ -116,11 +145,13 @@ class _ChildProcess:
         self.cancelled = False
 
     def run(self, app_root: Path, request: dict[str, Any], timeout_seconds: float) -> _ChildRun:
+        environment = child_environment()
+        environment["USERPROFILE" if os.name == "nt" else "HOME"] = str(app_root.parent)
         self.process = subprocess.Popen(
             [sys.executable, "-m", _CHILD_MODULE],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding="utf-8", errors="replace",
-            env=child_environment(), cwd=str(app_root.parent),
+            env=environment, cwd=str(app_root.parent),
         )
         if self.cancelled:  # the gate was cancelled while the process was being created
             self.process.kill()
@@ -163,16 +194,647 @@ async def run_app_runtime_smoke(
         try:
             run = await asyncio.to_thread(child.run, app_root, request, timeout_seconds)
         except BaseException:
-            await asyncio.to_thread(child.kill)
+            # ASGI cancellation must not leave generated code running.
+            with CancelScope(shield=True):
+                await asyncio.to_thread(child.kill)
             raise
         finally:
-            try:
-                await client.drop_database(database_name)
-            except Exception as exc:
-                logger.warning("APP_RUNTIME_SMOKE_DROP_FAILED: database=%s error=%s", database_name, type(exc).__name__)
+            with CancelScope(shield=True):
+                try:
+                    await client.drop_database(database_name)
+                except Exception as exc:
+                    logger.warning("APP_RUNTIME_SMOKE_DROP_FAILED: database=%s error=%s", database_name, type(exc).__name__)
         return _child_result(run, mongo_uri=mongo_uri, timeout_seconds=timeout_seconds, started=started)
     finally:
         client.close()
+
+
+def _is_link_or_reparse(metadata: os.stat_result) -> bool:
+    return stat.S_ISLNK(metadata.st_mode) or bool(
+        getattr(metadata, "st_file_attributes", 0)
+        & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    )
+
+
+def _copy_imported_app(
+    app_root: Path, destination: Path, *, expected_sha256: Mapping[str, str] | None = None,
+) -> None:
+    """Copy only regular staged app files into the sole host path mounted by Docker."""
+    root_stat = app_root.lstat()
+    if _is_link_or_reparse(root_stat) or not stat.S_ISDIR(root_stat.st_mode):
+        raise ValueError("imported app root must be a directory, not a symlink")
+    destination.mkdir()
+    total_bytes = 0
+    file_count = 0
+    copied_paths: set[str] = set()
+    def fail_walk(error: OSError) -> None:
+        raise error
+
+    for root, directories, files in os.walk(app_root, followlinks=False, onerror=fail_walk):
+        source_dir = Path(root)
+        relative_dir = source_dir.relative_to(app_root)
+        for name in directories:
+            source = source_dir / name
+            source_stat = source.lstat()
+            if _is_link_or_reparse(source_stat) or not stat.S_ISDIR(source_stat.st_mode):
+                raise ValueError("imported app contains a directory link")
+            (destination / relative_dir / name).mkdir()
+        for name in files:
+            source = source_dir / name
+            relative_path = (relative_dir / name).as_posix()
+            if expected_sha256 is not None and relative_path not in expected_sha256:
+                raise ValueError("imported app contains a file outside the verified source")
+            source_stat = source.lstat()
+            if (_is_link_or_reparse(source_stat) or not stat.S_ISREG(source_stat.st_mode)
+                    or source_stat.st_nlink != 1):
+                raise ValueError("imported app contains a link or special file")
+            file_count += 1
+            total_bytes += source_stat.st_size
+            if file_count > _MAX_IMPORTED_SOURCE_FILES or total_bytes > _MAX_IMPORTED_SOURCE_BYTES:
+                raise ValueError("imported app exceeds the source smoke limit")
+            target = destination / relative_dir / name
+            digest = hashlib.sha256()
+            with source.open("rb") as reader, target.open("xb") as writer:
+                copied = 0
+                while chunk := reader.read(1024 * 1024):
+                    copied += len(chunk)
+                    if copied > source_stat.st_size:
+                        raise ValueError("imported app changed while staging")
+                    digest.update(chunk)
+                    writer.write(chunk)
+                if copied != source_stat.st_size:
+                    raise ValueError("imported app changed while staging")
+            if expected_sha256 is not None and digest.hexdigest() != expected_sha256[relative_path]:
+                raise ValueError("imported app bytes differ from the verified source")
+            copied_paths.add(relative_path)
+    if expected_sha256 is not None and copied_paths != set(expected_sha256):
+        raise ValueError("imported app is missing a verified source file")
+    if not (destination / "app.json").is_file():
+        raise ValueError("imported app has no app.json")
+
+
+def _copy_probe_plan(staged_root: Path, plan_root: Path) -> None:
+    """Give the observer declarative contracts only; app Python stays in the other container."""
+    paths = [Path("app.json"), Path("data/contract.json"), Path("config/auth.yaml"),
+             Path("config/subscriptions.yaml")]
+    modules_root = staged_root / "modules"
+    if modules_root.is_dir():
+        paths.extend(Path("modules") / module.name / "module.yaml"
+                     for module in modules_root.iterdir() if module.is_dir())
+    plan_root.mkdir()
+    for relative in paths:
+        source = staged_root / relative
+        if source.is_file():
+            target = plan_root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, target)
+
+
+def _container_removed(name: str, *, config_dir: str) -> bool:
+    """Force removal and verify that Docker no longer knows the container."""
+    command = _docker_prefix(config_dir)
+    environment = _docker_cli_env()
+    try:
+        subprocess.run([*command, "rm", "-f", name], capture_output=True, timeout=10,
+                       check=False, env=environment)
+        remaining = subprocess.run(
+            [*command, "ps", "-a", "--filter", f"name=^/{name}$", "--format", "{{.Names}}"],
+            capture_output=True, text=True, timeout=5, check=False, env=environment,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return remaining.returncode == 0 and name not in remaining.stdout.splitlines()
+
+
+class _ContainedDockerProcess:
+    """Run untrusted app and image-owned observer in separate container processes."""
+
+    def __init__(self) -> None:
+        self.name = f"mozaiks-imported-smoke-{uuid4().hex[:20]}"
+        self.probe_name = f"{self.name}-observer"
+        self._config = tempfile.TemporaryDirectory(prefix="mozaiks-smoke-docker-cli-")
+        self._docker_command = _docker_prefix(self._config.name)
+        self._docker_environment = _docker_cli_env()
+        self.app_process: subprocess.Popen[bytes] | None = None
+        self.probe_process: subprocess.Popen[bytes] | None = None
+        self.cancelled = False
+        self.run_started = threading.Event()
+        self.registration_done = threading.Event()
+
+    def close(self) -> None:
+        self._config.cleanup()
+
+    def run(self, app_root: Path, plan_root: Path, image: str, timeout_seconds: float,
+            observer_nonce: str) -> _ChildRun:
+        database_name = f"{_SMOKE_DATABASE_PREFIX}{observer_nonce[:20]}"
+        app_command = [
+            *self._docker_command, "create", "--log-driver=none", "--name", self.name,
+            "--network=none", "--read-only", "--init", "--cap-drop=ALL",
+            "--security-opt=no-new-privileges", "--pids-limit=128",
+            "--memory=1g", "--memory-swap=1g", "--cpus=1",
+            "--user=10001:10001",
+            "--tmpfs=/tmp:rw,nosuid,nodev,size=512m",
+            "--tmpfs=/workspace/logs:rw,nosuid,nodev,size=16m",
+            f"--mount=type=bind,source={app_root},target={_CONTAINED_APP_ROOT},readonly",
+            "--env=PYTHON_DOTENV_DISABLED=1", "--env=PYTHONDONTWRITEBYTECODE=1",
+            "--env=PYTHONUNBUFFERED=1", "--env=MONGO_URI=",
+            image, "python", "-m", _CHILD_MODULE, "--contained-serve", database_name, observer_nonce,
+        ]
+        probe_command = [
+            *self._docker_command, "create", "--log-driver=none", "--name", self.probe_name,
+            f"--network=container:{self.name}", "--read-only", "--init", "--cap-drop=ALL",
+            "--security-opt=no-new-privileges", "--pids-limit=128",
+            "--memory=1g", "--memory-swap=1g", "--cpus=1",
+            "--user=10001:10001",
+            "--tmpfs=/tmp:rw,nosuid,nodev,size=64m",
+            "--tmpfs=/workspace/logs:rw,nosuid,nodev,size=16m",
+            f"--mount=type=bind,source={plan_root},target={_CONTAINED_PLAN_ROOT},readonly",
+            "--env=PYTHON_DOTENV_DISABLED=1", "--env=PYTHONDONTWRITEBYTECODE=1",
+            "--env=PYTHONUNBUFFERED=1", "--env=MONGO_URI=",
+            image, "python", "-m", _CHILD_MODULE, "--trusted-probe", database_name, observer_nonce,
+        ]
+        timed_out = False
+        output = [bytearray() for _ in range(4)]
+        truncated = [False] * 4
+        returncode: int | None = None
+        creation_error = ""
+        readers: list[threading.Thread] = []
+
+        def drain(process: subprocess.Popen[bytes], index: int, limit: int) -> None:
+            stream = process.stdout if index % 2 == 0 else process.stderr
+            assert stream is not None
+            try:
+                while chunk := os.read(stream.fileno(), 8192):
+                    remaining = max(0, limit - len(output[index]))
+                    output[index].extend(chunk[:remaining])
+                    if len(chunk) > remaining:
+                        truncated[index] = True
+            except OSError:
+                truncated[index] = True
+
+        def attach(process: subprocess.Popen[bytes], stdout_index: int) -> None:
+            for index, limit in ((stdout_index, _CONTAINER_STDOUT_LIMIT_BYTES),
+                                 (stdout_index + 1, _CONTAINER_STDERR_LIMIT_BYTES)):
+                reader = threading.Thread(target=drain, args=(process, index, limit), daemon=True)
+                reader.start()
+                readers.append(reader)
+
+        def register(command: list[str]) -> bool:
+            nonlocal creation_error
+            try:
+                created = subprocess.run(
+                    command, stdin=subprocess.DEVNULL, capture_output=True,
+                    timeout=_CONTAINER_STARTUP_SECONDS, check=False,
+                    env=self._docker_environment,
+                )
+                if created.returncode == 0:
+                    return True
+                creation_error = "Docker could not register the contained smoke"
+            except (OSError, subprocess.TimeoutExpired):
+                creation_error = "Docker container registration did not complete"
+            return False
+
+        self.run_started.set()
+        if self.cancelled:
+            self.registration_done.set()
+            return _ChildRun("", "contained smoke was cancelled before registration", None, False, contained=True)
+        try:
+            if register(app_command) and not self.cancelled:
+                self.app_process = subprocess.Popen(
+                    [*self._docker_command, "start", "--attach", self.name],
+                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    env=self._docker_environment,
+                )
+                attach(self.app_process, 0)
+                # Docker needs the app container running before a second container
+                # can join its isolated loopback namespace.
+                deadline = time.monotonic() + _CONTAINER_STARTUP_SECONDS
+                while time.monotonic() < deadline and not self.cancelled:
+                    inspected = subprocess.run(
+                        [*self._docker_command, "inspect", "--format", "{{.State.Running}}", self.name],
+                        capture_output=True, text=True, timeout=5, check=False,
+                        env=self._docker_environment,
+                    )
+                    if inspected.returncode == 0 and inspected.stdout.strip() == "true":
+                        break
+                    if self.app_process.poll() is not None:
+                        break
+                    time.sleep(0.1)
+                else:
+                    creation_error = "Contained app did not start"
+                if not creation_error and not self.cancelled and register(probe_command):
+                    self.probe_process = subprocess.Popen(
+                        [*self._docker_command, "start", "--attach", self.probe_name],
+                        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                        env=self._docker_environment,
+                    )
+                    attach(self.probe_process, 2)
+            self.registration_done.set()
+            if self.probe_process is not None:
+                try:
+                    self.probe_process.wait(timeout=timeout_seconds)
+                    returncode = self.probe_process.returncode
+                except subprocess.TimeoutExpired:
+                    timed_out = True
+                    self.probe_process.kill()
+                    self.probe_process.wait(timeout=5)
+        finally:
+            self.registration_done.set()
+            app_exited = self.app_process is not None and self.app_process.poll() is not None
+            cleanup_failed = not _container_removed(self.probe_name, config_dir=self._config.name)
+            cleanup_failed = not _container_removed(self.name, config_dir=self._config.name) or cleanup_failed
+            for reader in readers:
+                reader.join(timeout=5)
+            if any(reader.is_alive() for reader in readers):
+                truncated[2] = True
+        return _ChildRun(
+            output[2].decode("utf-8", errors="replace"),
+            creation_error or output[3].decode("utf-8", errors="replace")
+            or output[1].decode("utf-8", errors="replace"),
+            returncode, timed_out, cleanup_failed=cleanup_failed,
+            output_truncated=any(truncated), contained=True, app_exited=app_exited,
+        )
+
+    def kill(self) -> None:
+        self.cancelled = True
+        if not self.run_started.is_set():
+            return
+        if not self.registration_done.wait(timeout=2 * _CONTAINER_STARTUP_SECONDS + 5):
+            raise RuntimeError("Docker container registration could not be confirmed during cancellation")
+        try:
+            for process in (self.probe_process, self.app_process):
+                if process is not None and process.poll() is None:
+                    process.kill()
+                    process.wait(timeout=5)
+        finally:
+            _container_removed(self.probe_name, config_dir=self._config.name)
+            _container_removed(self.name, config_dir=self._config.name)
+
+
+def preflight_contained_imported_smoke(
+    *, image: str | None = None, expected_image_id: str | None = None,
+) -> str:
+    """Require Docker and the exact trusted image ID before imported-source staging."""
+    from mozaiksai.core.adapters.docker_sandbox import docker_available
+
+    if not docker_available():
+        raise RuntimeError("contained Docker validation is unavailable")
+    pinned_image_id = expected_image_id or os.environ.get("MOZAIKS_IMPORTED_SMOKE_IMAGE_ID")
+    if not pinned_image_id:
+        raise RuntimeError("contained validator image identity is unconfigured")
+    selected_image = image or os.environ.get("DOCKER_SANDBOX_IMAGE") or _CONTAINED_IMAGE
+    try:
+        with tempfile.TemporaryDirectory(prefix="mozaiks-smoke-docker-cli-") as config_dir:
+            inspected = subprocess.run(
+                [*_docker_prefix(config_dir), "image", "inspect", "--format", "{{.Id}}", selected_image],
+                capture_output=True, text=True, timeout=5, check=False, env=_docker_cli_env(),
+            )
+    except (OSError, subprocess.TimeoutExpired):
+        raise RuntimeError("contained Docker image is unavailable") from None
+    image_id = inspected.stdout.strip() if inspected.returncode == 0 else ""
+    if image_id != pinned_image_id or not image_id.startswith("sha256:") or len(image_id) != 71:
+        raise RuntimeError("contained Docker image is unavailable")
+    return image_id
+
+
+async def run_contained_imported_app_runtime_smoke(
+    app_root: Path, *, timeout_seconds: float = SMOKE_TIMEOUT_SECONDS, image: str | None = None,
+    expected_source_sha256: Mapping[str, str] | None = None,
+    expected_image_id: str | None = None,
+) -> dict[str, Any]:
+    """Smoke verified imported bytes with a private MongoDB and no container egress."""
+    started = time.monotonic()
+    if not expected_source_sha256:
+        return _imported_observer_scope(_contained_unavailable(
+            "verified imported-source digests are unavailable", started=started,
+        ))
+    try:
+        image_id = await asyncio.to_thread(
+            preflight_contained_imported_smoke, image=image, expected_image_id=expected_image_id,
+        )
+    except RuntimeError as exc:
+        return _imported_observer_scope(_contained_unavailable(str(exc), started=started))
+    with tempfile.TemporaryDirectory(prefix="mozaiks-imported-smoke-") as temporary:
+        staged_root = Path(temporary) / "app"
+        plan_root = Path(temporary) / "plan"
+        try:
+            _copy_imported_app(app_root, staged_root, expected_sha256=expected_source_sha256)
+            _copy_probe_plan(staged_root, plan_root)
+        except (OSError, ValueError) as exc:
+            return _imported_observer_scope(_summary([{
+                "check": "smoke.source", "status": "failed", "path": None,
+                "message": f"Imported app cannot be staged safely: {type(exc).__name__}: {exc}",
+            }], {}, started=started))
+        child = _ContainedDockerProcess()
+        observer_nonce = uuid4().hex
+        try:
+            run = await asyncio.to_thread(child.run, staged_root, plan_root, image_id, timeout_seconds,
+                                          observer_nonce)
+        except Exception as exc:
+            with CancelScope(shield=True):
+                await asyncio.to_thread(child.kill)
+            return _imported_observer_scope(_summary([{
+                "check": "smoke.container", "status": "failed", "path": None,
+                "message": f"Contained runtime smoke could not complete: {type(exc).__name__}.",
+            }], {}, started=started))
+        except BaseException:
+            with CancelScope(shield=True):
+                await asyncio.to_thread(child.kill)
+            raise
+        finally:
+            child.close()
+        result = _child_result(run, mongo_uri="", timeout_seconds=timeout_seconds, started=started)
+        events = _events(run.stdout)
+        boot = [index for index, event in enumerate(events) if event.get("event") == "outcome"
+                and event.get("check") == "boot.http_ready" and event.get("status") == "passed"]
+        done = [index for index, event in enumerate(events) if event.get("event") == "done"]
+        valid_receipt = (bool(events) and len(boot) == 1 and len(done) == 1
+                         and boot[0] < done[0] == len(events) - 1
+                         and all(event.get("observer_nonce") == observer_nonce for event in events))
+        if result["status"] == "passed" and not valid_receipt:
+            result = _summary([*result["results"], {
+                "check": "smoke.observer", "status": "failed", "path": None,
+                "message": "The external observer did not return one matching boot and completion receipt.",
+            }], result, started=started)
+        result["validator_image_id"] = image_id
+        result["source_content_sha256"] = hashlib.sha256(json.dumps(
+            expected_source_sha256, sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")).hexdigest()
+        if result["status"] == "passed" and valid_receipt:
+            result["observer_origin"] = "trusted_external_probe_v1"
+            result["observer_run_id"] = observer_nonce
+            result["observed_boot"] = {"check": "boot.http_ready", "status": "passed"}
+            result["observer_completion_verified"] = True
+            result["observer_cleanup_verified"] = not run.cleanup_failed
+        return _imported_observer_scope(result)
+
+
+def _preflight_generated_image() -> str:
+    """Resolve a locally inspected image ID before generated bytes are staged."""
+    image_id = os.environ.get(_GENERATED_IMAGE_ENV, "").strip()
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", image_id):
+        raise RuntimeError(f"{_GENERATED_IMAGE_ENV} must name an immutable local image ID")
+
+    # The local-only CLI owner is being integrated separately. Its absence must
+    # keep this draft's generated acceptance path closed.
+    from mozaiksai.core.adapters.docker_sandbox import docker_available
+
+    if not docker_available():
+        raise RuntimeError("contained Docker validation is unavailable")
+    with tempfile.TemporaryDirectory(prefix="mozaiks-docker-cli-") as config_dir:
+        try:
+            inspected = subprocess.run(
+                [*_docker_prefix(config_dir), "image", "inspect", "--format", "{{.Id}}", image_id],
+                capture_output=True, text=True, timeout=5, check=False, env=_docker_cli_env(),
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            raise RuntimeError("contained Docker image is unavailable") from None
+    if inspected.returncode != 0 or inspected.stdout.strip() != image_id:
+        raise RuntimeError("contained Docker image is unavailable")
+    return image_id
+
+
+def _generated_source_digests(files: Mapping[str, str]) -> dict[str, str]:
+    if not files or len(files) > _MAX_IMPORTED_SOURCE_FILES:
+        raise ValueError("generated app exceeds the contained source limit")
+    digests: dict[str, str] = {}
+    total = 0
+    for raw_path, content in files.items():
+        if not isinstance(raw_path, str) or not isinstance(content, str):
+            raise ValueError("generated app contains invalid source content")
+        path = PurePosixPath(raw_path.replace("\\", "/"))
+        if (not raw_path or path.is_absolute() or ":" in raw_path or "\x00" in raw_path
+                or any(part == ".." for part in path.parts) or str(path) == "."
+                or str(path) in digests):
+            raise ValueError("generated app contains an unsafe source path")
+        data = content.encode("utf-8")
+        total += len(data)
+        if total > _MAX_IMPORTED_SOURCE_BYTES:
+            raise ValueError("generated app exceeds the contained source limit")
+        digests[str(path)] = hashlib.sha256(data).hexdigest()
+    if "app.json" not in digests:
+        raise ValueError("generated app has no app.json")
+    return digests
+
+
+def _source_content_sha256(digests: Mapping[str, str]) -> str:
+    return hashlib.sha256(json.dumps(
+        digests, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+
+
+def generated_acceptance_scope() -> dict[str, Any]:
+    """The narrower claim made only by contained generated-app acceptance."""
+    return {
+        "version": GENERATED_ACCEPTANCE_SCOPE_VERSION,
+        "excluded_observer_checks": ["event_rejection"],
+    }
+
+
+def generated_smoke_evidence_issue(
+    result: Mapping[str, Any], files: Mapping[str, str], expected_image_id: str,
+) -> str | None:
+    """Check the host-owned observer evidence before applying the generated scope."""
+    try:
+        expected_source_digest = _source_content_sha256(_generated_source_digests(files))
+    except (UnicodeError, ValueError):
+        return "generated source identity could not be verified"
+    if result.get("status") != "passed" or result.get("passed") is not True:
+        return "the external observer did not pass"
+    if result.get("observer_unverified_checks") != ["event_rejection"]:
+        return "the external observer's unverified checks differ from the generated scope"
+    if (not re.fullmatch(r"sha256:[0-9a-f]{64}", expected_image_id)
+            or result.get("validator_image_id") != expected_image_id):
+        return "the external observer image identity does not match the pinned image"
+    if result.get("source_content_sha256") != expected_source_digest:
+        return "the external observer source identity does not match the generated snapshot"
+    if (result.get("observer_origin") != "trusted_external_probe_v1"
+            or not re.fullmatch(r"[0-9a-f]{32}", str(result.get("observer_run_id") or ""))
+            or result.get("observed_boot") != {"check": "boot.http_ready", "status": "passed"}
+            or result.get("observer_completion_verified") is not True):
+        return "the external observer boot and completion receipts were not verified"
+    if result.get("observer_cleanup_verified") is not True:
+        return "the external observer container cleanup was not verified"
+    outcomes = result.get("results")
+    checks = result.get("checks")
+    if (not isinstance(outcomes, list) or not outcomes
+            or not all(isinstance(row, dict) and row.get("status") in {"passed", "not_run"}
+                       for row in outcomes)
+            or sum(row.get("check") == "boot.http_ready" and row.get("status") == "passed"
+                   for row in outcomes) != 1
+            or not isinstance(checks, list) or len(checks) != 1
+            or not isinstance(checks[0], dict) or checks[0].get("id") != "app_runtime_smoke"
+            or checks[0].get("status") != "passed" or checks[0].get("passed") is not True
+            or result.get("failed_tests") != []):
+        return "the external observer runtime checks did not all complete successfully"
+    details = checks[0].get("details")
+    if (not isinstance(details, dict) or details.get("status") != "passed"
+            or details.get("check_count") != sum(row["status"] == "passed" for row in outcomes)
+            or details.get("failed_check_count") != 0
+            or details.get("not_run_check_count") != sum(row["status"] == "not_run" for row in outcomes)):
+        return "the external observer runtime check summary does not match its outcomes"
+    return None
+
+
+def _generated_scope_pending(result: dict[str, Any], reason: str) -> dict[str, Any]:
+    """Retain observer evidence while refusing an incomplete generated claim."""
+    result.pop("acceptance_scope", None)
+    result["status"] = "pending"
+    result["passed"] = None
+    result["skipped_reason"] = reason
+    result["checks"] = [{
+        "id": "app_runtime_smoke", "status": "pending", "passed": None,
+        "message": f"Contained runtime acceptance awaits {reason}.",
+        "details": {"status": "pending", "blocking": True},
+    }]
+    return result
+
+
+def apply_generated_acceptance_scope(
+    result: dict[str, Any], files: Mapping[str, str], expected_image_id: str,
+) -> dict[str, Any]:
+    """Admit only the exact generated scope on a fully verified observer run."""
+    if result.get("status") != "passed":
+        result.pop("acceptance_scope", None)
+        return result
+    issue = generated_smoke_evidence_issue(result, files, expected_image_id)
+    if not issue and ("acceptance_scope" in result
+                      and result["acceptance_scope"] != generated_acceptance_scope()):
+        issue = "the generated acceptance scope differs from the approved contract"
+    if issue:
+        return _generated_scope_pending(result, issue)
+    result["acceptance_scope"] = generated_acceptance_scope()
+    return result
+
+
+def _stage_generated_source(root: Path, files: Mapping[str, str]) -> None:
+    for path, content in files.items():
+        target = root / PurePosixPath(path.replace("\\", "/"))
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8", newline="")
+
+
+def _generated_load_unavailable(reason: str) -> dict[str, Any]:
+    return {
+        "contract_version": "1.0", "status": "skipped", "passed": None,
+        "skipped_reason": reason,
+        "checks": [{
+            "id": "app_runtime_load", "status": "skipped", "passed": None,
+            "message": f"Contained AppLoader check unavailable: {reason}.",
+            "details": {"blocking": True},
+        }],
+        "failed_tests": [], "warnings": [], "details": {},
+    }
+
+
+async def run_contained_generated_app_runtime_load(files: dict[str, str]) -> dict[str, Any]:
+    """Collect AppLoader repair diagnostics in Docker; the smoke remains the authority."""
+    files = dict(files)
+    try:
+        digests = _generated_source_digests(files)
+        image_id = await asyncio.to_thread(_preflight_generated_image)
+    except (ImportError, RuntimeError, UnicodeError, ValueError) as exc:
+        return _generated_load_unavailable(str(exc) if not isinstance(exc, ImportError)
+                                           else "fixed-local Docker validation is unavailable")
+
+    from mozaiksai.core.adapters.docker_sandbox import DockerSandboxAdapter
+
+    adapter = DockerSandboxAdapter(image=image_id, default_timeout_seconds=_GENERATED_LOAD_TIMEOUT_SECONDS + 30)
+    session_id: str | None = None
+    result: dict[str, Any] | None = None
+    failure: str | None = None
+    try:
+        creation = asyncio.create_task(adapter.create_session(
+            timeout_seconds=_GENERATED_LOAD_TIMEOUT_SECONDS + 30,
+            metadata={"purpose": "app_runtime_diagnostic"},
+            envs={"PYTHON_DOTENV_DISABLED": "1"},
+        ))
+        try:
+            session = await asyncio.shield(creation)
+        except BaseException:
+            with CancelScope(shield=True):
+                try:
+                    created = await creation
+                except Exception:
+                    pass
+                else:
+                    await adapter.terminate_session(session_id=created.session_id)
+            raise
+        session_id = session.session_id
+        staged_files: dict[str, str | bytes] = dict(files)
+        await adapter.write_files(session_id=session_id, files=staged_files, cwd="/workspace/app")
+        execution = await adapter.run_command(
+            session_id=session_id,
+            command=(
+                "python -m factory_app.workflows.AppGenerator.tools.app_runtime_load_probe "
+                "--app-root /workspace/app --output /workspace/app-runtime-load.json "
+                "> /workspace/app-runtime-load.log 2>&1"
+            ),
+            cwd="/workspace", timeout_seconds=_GENERATED_LOAD_TIMEOUT_SECONDS,
+        )
+        if not execution.success:
+            failure = "contained AppLoader worker did not complete"
+        else:
+            output = await adapter.run_command(
+                session_id=session_id,
+                command=f"head -c {_GENERATED_LOAD_RESULT_LIMIT + 1} /workspace/app-runtime-load.json",
+                cwd="/workspace", timeout_seconds=10,
+            )
+            if not output.success or len(output.stdout.encode("utf-8")) > _GENERATED_LOAD_RESULT_LIMIT:
+                failure = "contained AppLoader worker returned no bounded result"
+            else:
+                decoded = json.loads(output.stdout)
+                if (not isinstance(decoded, dict) or decoded.get("contract_version") != "1.0"
+                        or not isinstance(decoded.get("passed"), bool)
+                        or not isinstance(decoded.get("checks"), list)
+                        or not isinstance(decoded.get("failed_tests"), list)
+                        or not isinstance(decoded.get("details"), dict)):
+                    failure = "contained AppLoader worker returned an invalid result"
+                else:
+                    result = decoded
+    except Exception as exc:
+        logger.warning("APP_RUNTIME_LOAD_CONTAINMENT_FAILED: %s", type(exc).__name__)
+        failure = "contained AppLoader worker could not complete"
+    finally:
+        if session_id is not None:
+            with CancelScope(shield=True):
+                try:
+                    removed = await adapter.terminate_session(session_id=session_id)
+                except Exception:
+                    removed = False
+            if not removed:
+                failure = "contained AppLoader worker removal could not be confirmed"
+    if failure or result is None:
+        return _generated_load_unavailable(failure or "contained AppLoader worker returned no result")
+    # This flag is host-owned: candidate Python can forge the diagnostic JSON,
+    # but it cannot attest that the host removed its worker afterward.
+    result["worker_containment_verified"] = True
+    result["validator_image_id"] = image_id
+    result["source_content_sha256"] = _source_content_sha256(digests)
+    return result
+
+
+async def run_contained_generated_app_runtime_smoke(files: dict[str, str]) -> dict[str, Any]:
+    """Stage generated bytes only after image preflight, then use the external probe."""
+    started = time.monotonic()
+    files = dict(files)
+    try:
+        digests = _generated_source_digests(files)
+        image_id = await asyncio.to_thread(_preflight_generated_image)
+    except (ImportError, RuntimeError, UnicodeError, ValueError) as exc:
+        reason = str(exc) if not isinstance(exc, ImportError) else "fixed-local Docker validation is unavailable"
+        return _contained_unavailable(reason, started=started)
+    try:
+        with tempfile.TemporaryDirectory(prefix="mozaiks-generated-smoke-") as temporary:
+            app_root = Path(temporary) / "app"
+            _stage_generated_source(app_root, files)
+            result = await run_contained_imported_app_runtime_smoke(
+                app_root, expected_source_sha256=digests,
+                image=image_id, expected_image_id=image_id,
+            )
+    except OSError:
+        return _contained_unavailable("generated app source staging failed", started=started)
+    return apply_generated_acceptance_scope(result, files, image_id)
 
 
 def _redact(text: str, mongo_uri: str) -> str:
@@ -195,7 +857,7 @@ def _events(stdout: str) -> list[dict[str, Any]]:
 
 def _child_result(run: _ChildRun, *, mongo_uri: str, timeout_seconds: float, started: float) -> dict[str, Any]:
     events = _events(run.stdout)
-    outcomes = [{key: value for key, value in event.items() if key != "event"} for event in events
+    outcomes = [{key: value for key, value in event.items() if key not in {"event", "observer_nonce"}} for event in events
                 if event.get("event") == "outcome"]
     done = next((event for event in reversed(events) if event.get("event") == "done"), None)
     activity = next((event for event in reversed(events) if event.get("event") in {"calling", "step"}), None)
@@ -211,12 +873,28 @@ def _child_result(run: _ChildRun, *, mongo_uri: str, timeout_seconds: float, sta
             "message": f"The runtime smoke was stopped at its {timeout_seconds:.0f}s limit{where}. Generated code "
                        "must not block or wait on unreachable services when its actions are called.",
         })
-    elif done is None:
+    elif done is None or (run.contained and run.returncode != 0):
         tail = " ".join(run.stderr.strip().splitlines()[-3:])[-600:]
+        phase = "before finishing" if done is None else "after reporting completion"
         outcomes.append({
             "check": "smoke.process", "status": "failed", "path": path,
-            "message": f"The runtime smoke process exited with code {run.returncode}{where} before finishing: "
+            "message": f"The runtime smoke process exited with code {run.returncode}{where} {phase}: "
                        f"{tail or 'no output'}",
+        })
+    if run.app_exited:
+        outcomes.append({
+            "check": "smoke.process", "status": "failed", "path": None,
+            "message": "The imported app container exited before the external observer finished.",
+        })
+    if run.cleanup_failed:
+        outcomes.append({
+            "check": "smoke.cleanup", "status": "failed", "path": None,
+            "message": "The contained runtime smoke could not confirm Docker container removal.",
+        })
+    if run.output_truncated:
+        outcomes.append({
+            "check": "smoke.output", "status": "failed", "path": None,
+            "message": "The contained runtime smoke exceeded its bounded output limit.",
         })
     for outcome in outcomes:
         outcome["message"] = _redact(str(outcome.get("message") or ""), mongo_uri)
@@ -267,6 +945,12 @@ class _Entity:
     def label(self) -> str:
         return f"{self.module}.{self.collection.get('name')}"
 
+    @property
+    def lookup_field(self) -> str:
+        from mozaiksai.core.workflow.generator_support.data_contract_fields import read_lookup_field
+
+        return read_lookup_field(self.collection)
+
 
 class _RunLogCapture(logging.Handler):
     """Keep the runtime's warning and error records (the child runs one smoke)."""
@@ -300,6 +984,19 @@ def _skipped(reason: str, *, started: float) -> dict[str, Any]:
     }
 
 
+def _contained_unavailable(reason: str, *, started: float) -> dict[str, Any]:
+    result = _skipped(reason, started=started)
+    result["checks"][0]["details"]["blocking"] = True
+    return result
+
+
+def _imported_observer_scope(result: dict[str, Any]) -> dict[str, Any]:
+    # A rejected ctx.emit leaves no HTTP or Mongo trace. A's in-process
+    # rejection list cannot be evidence for the separate trusted observer.
+    result["observer_unverified_checks"] = ["event_rejection"]
+    return result
+
+
 # --------------------------------------------------------------------------- the run
 
 
@@ -321,6 +1018,12 @@ class _SmokeRun:
         self.workspace_claims = False
         self.last_exception_path: str | None = None
         self.permission_denials: set[tuple[str, str]] = set()
+        # (module, action, rejection) for every emitted event the runtime rejected.
+        self.rejected_events: list[tuple[str, str, Any]] = []
+        self.reported_rejections: set[tuple[str, str, str, str, str]] = set()
+        self.external_server = False
+        self.external_probe = False
+        self.probe_nonce = ""
 
     @property
     def database(self) -> Any:
@@ -412,21 +1115,63 @@ class _SmokeRun:
             status, body, summary = await self._request(method, module, action, self._with_scopes(principal, missing), params)
         return status, body, summary
 
+    def _record_rejected_event(self, module: str, action: str, principal: _Principal, rejection: Any) -> None:
+        """An emitted event the runtime rejected fails its own check, once per action, event and reason.
+
+        The action's response cannot show it: the runtime reports an action
+        whose handler completed as succeeded and only names the rejected event
+        on the dispatch result. No reaction or notification runs for it.
+        """
+        key = (module, action, rejection.event_type, rejection.category, rejection.reason)
+        if key in self.reported_rejections:
+            return
+        self.reported_rejections.add(key)
+        if rejection.category == "undeclared":
+            problem = f"which {module}.{action} does not declare in its module.yaml emits"
+            path = f"modules/{module}/module.yaml"
+        elif rejection.category == "schema_invalid":
+            problem = f"whose payload_schema in contracts/events.yaml cannot be evaluated ({rejection.reason})"
+            path = f"modules/{module}/contracts/events.yaml"
+        else:
+            problem = (f"whose payload does not satisfy the payload_schema contracts/events.yaml declares for it "
+                       f"(at {rejection.schema_path}: {rejection.reason})")
+            path = f"modules/{module}/backend/service.py"
+        self.record(
+            f"event.{module}.{action}.{rejection.event_type}", False,
+            f"{module}.{action} as user {principal.label} emitted {rejection.event_type} (event {rejection.event_id}) "
+            f"{problem}. The runtime did not dispatch it, so no reaction or notification ran for it, although the "
+            "action itself succeeded.",
+            path=path,
+        )
+
     async def _request(
         self, method: str, module: str, action: str, principal: _Principal, params: dict[str, Any],
     ) -> tuple[int, Any, str]:
         since = len(self.capture.records)
+        rejected_since = len(self.rejected_events)
         self.emit("calling", module=module, action=action, principal=principal.label)
         url = f"/api/modules/{module}/{action}"
         headers = {"Authorization": f"Bearer {principal.token}"}
+        if self.external_probe:
+            assertion = {
+                "nonce": self.probe_nonce, "user_id": principal.user_id,
+                "workspace_id": principal.workspace_id, "label": principal.label,
+                "extra_scopes": list(principal.extra_scopes),
+            }
+            headers["X-Mozaiks-Smoke-Principal"] = base64.urlsafe_b64encode(
+                json.dumps(assertion, separators=(",", ":")).encode("utf-8")
+            ).decode("ascii")
         try:
             if method == "GET":
                 request = self.http.get(url, params={key: str(value) for key, value in params.items()}, headers=headers)
             else:
                 request = self.http.post(url, json=params, headers=headers)
             response = await asyncio.wait_for(request, timeout=_REQUEST_TIMEOUT_SECONDS)
-        except TimeoutError:
+        except (TimeoutError, TimeoutException):
             return 0, None, f"no response within {_REQUEST_TIMEOUT_SECONDS:.0f}s"
+        finally:
+            for rejected_module, rejected_action, rejection in self.rejected_events[rejected_since:]:
+                self._record_rejected_event(rejected_module, rejected_action, principal, rejection)
         try:
             body = response.json()
         except ValueError:
@@ -580,8 +1325,16 @@ async def _boot(run: _SmokeRun, initial_environment: set[str]) -> bool:
     def alias_collection(alias: str) -> Any:
         return run.database[_alias_collection_name(alias, contract)]
 
+    class _ObservedModuleExecutor(ModuleExecutor):
+        """Keeps the events each dispatch rejected; the HTTP response carries only the action's data."""
+
+        async def execute(self, request: Any, context: Any = None) -> Any:
+            result = await super().execute(request, context)
+            run.rejected_events.extend((request.module, request.action, item) for item in result.rejected_events)
+            return result
+
     hooks = PlatformHookRegistry()
-    executor = ModuleExecutor(
+    executor = _ObservedModuleExecutor(
         event_emitter=run.record_event,
         entitlement_checker=(
             ConfiguredEntitlementAdapter(config=load.subscriptions_config, collection_resolver=alias_collection)
@@ -599,6 +1352,7 @@ async def _boot(run: _SmokeRun, initial_environment: set[str]) -> bool:
     registry.register(executor)
 
     app = FastAPI()
+    app.state.loaded_app_id = run.app_id
     app.state.executor_registry = registry
     app.state.module_action_surfaces = {module.name: module.action_api_surface_map for module in load.modules}
     app.state.failed_module_names = sorted(load.failed_module_names)
@@ -610,9 +1364,29 @@ async def _boot(run: _SmokeRun, initial_environment: set[str]) -> bool:
     ))
 
     async def resolve_principal(request: Request) -> UserPrincipal | None:
-        header = request.headers.get("authorization") or ""
-        token = header[7:].strip() if header.lower().startswith("bearer ") else ""
-        principal = next((item for item in run.principals.values() if item.token == token), None)
+        principal: _Principal | None
+        if run.external_server:
+            encoded = request.headers.get("x-mozaiks-smoke-principal") or ""
+            if not encoded or len(encoded) > 4096:
+                return None
+            try:
+                data = json.loads(base64.urlsafe_b64decode(encoded).decode("utf-8"))
+                if (not isinstance(data, dict) or data.get("nonce") != run.probe_nonce
+                        or not isinstance(data.get("user_id"), str)
+                        or not isinstance(data.get("label"), str)
+                        or not isinstance(data.get("extra_scopes"), list)
+                        or not all(isinstance(scope, str) for scope in data["extra_scopes"])
+                        or data.get("workspace_id") is not None
+                        and not isinstance(data["workspace_id"], str)):
+                    return None
+                principal = _Principal(data["label"], data["user_id"], "",
+                                       data.get("workspace_id"), tuple(data["extra_scopes"]))
+            except (ValueError, UnicodeError):
+                return None
+        else:
+            header = request.headers.get("authorization") or ""
+            token = header[7:].strip() if header.lower().startswith("bearer ") else ""
+            principal = next((item for item in run.principals.values() if item.token == token), None)
         if principal is None:
             return None
         return UserPrincipal(
@@ -635,6 +1409,14 @@ async def _boot(run: _SmokeRun, initial_environment: set[str]) -> bool:
     )
     app.dependency_overrides[optional_user] = resolve_principal
     app.dependency_overrides[module_router.module_dispatch_environment] = lambda: environment
+    if run.external_server:
+        @app.get("/__mozaiks_smoke_ready")
+        async def smoke_ready() -> dict[str, Any]:
+            return {
+                "app_id": run.app_id,
+                "modules": sorted(module.name for module in load.modules),
+                "failed_modules": sorted(load.failed_module_names),
+            }
 
     declared_routers = _declared_extensions(load.modules, "api_router")
     if declared_routers:
@@ -858,6 +1640,52 @@ def _assignment_store_defect(run: _SmokeRun, item: _PlanStore, plan: Any) -> tup
     return None
 
 
+def _assignment_collection(contract: dict[str, Any] | None, alias: str) -> Mapping[str, Any] | None:
+    """Find the declared collection behind an assignment alias, including alias-only mappings."""
+    from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
+
+    name = _alias_collection_name(alias, contract)
+    collections = [
+        collection
+        for _owner, _kind, collection in iter_data_contract_collections(contract, require_complete_ownership=False)
+        if str(collection.get("mongo_collection") or collection.get("collection") or collection.get("name") or "") == name
+    ]
+    if not collections:
+        return None
+    return next((collection for collection in collections if collection.get("data_alias") == alias), collections[0])
+
+
+def _unique_assignment_value(name: str, field: Mapping[str, Any]) -> Any:
+    """Use a fresh value for an otherwise absent key in a declared unique index."""
+    kind = _kind({}, field)
+    if kind in {None, "string"}:
+        if _enum({}, field):
+            raise ValueError(f"Cannot seed a distinct value for enumerated unique assignment field {name!r}")
+        return f"smoke-{name}-{uuid4().hex}"
+    if kind in {"integer", "number"}:
+        return uuid4().int % (1 << 53)
+    if kind == "datetime":
+        return datetime.now(UTC).isoformat()
+    raise ValueError(f"Cannot seed a distinct value for unique assignment field {name!r} of type {kind!r}")
+
+
+def _required_assignment_value(name: str, field: Mapping[str, Any], store: Any, plan: Any) -> Any:
+    from mozaiksai.core.workflow.generator_support.data_contract_fields import parse_default
+
+    if name == store.capabilities_field:
+        return list(plan.capabilities or [])
+    if name == store.plan_snapshot_field:
+        return {"granted_capabilities": list(plan.capabilities or [])}
+    if name == "plan_name" and field.get("type") == "string":
+        return plan.label
+    if name in {"created_at", "updated_at"} and field.get("type") in {"string", "datetime"}:
+        return datetime.now(UTC).isoformat()
+    has_default, value = parse_default(field, f"assignment_store field {name!r}")
+    if has_default:
+        return value
+    raise ValueError(f"required assignment_store field {name!r} has no declared default or known fixture value")
+
+
 async def _seed_assignment(run: _SmokeRun, principal: _Principal, item: _PlanStore, plan: Any) -> bool:
     """Write one active assignment through the declared assignment_store data alias.
 
@@ -882,6 +1710,33 @@ async def _seed_assignment(run: _SmokeRun, principal: _Principal, item: _PlanSto
         record[store.tenant_id_field] = None
     if store.workspace_id_field:
         record[store.workspace_id_field] = None
+    try:
+        collection = _assignment_collection(run.load.data_contract, store.data_alias)
+        if collection is not None:
+            fields = {
+                str(entry.get("name")): entry
+                for entry in collection.get("fields") or []
+                if isinstance(entry, Mapping) and entry.get("name")
+            }
+            for index in collection.get("indexes") or []:
+                if not isinstance(index, Mapping) or index.get("unique") is not True:
+                    continue
+                for key in index.get("keys") or []:
+                    if not isinstance(key, Mapping):
+                        continue
+                    name = str(key.get("field") or "")
+                    if name and name not in record:
+                        if name not in fields:
+                            raise ValueError(f"Unique assignment index field {name!r} is not declared")
+                        record[name] = _unique_assignment_value(name, fields[name])
+            for name, field in fields.items():
+                if field.get("required") and name not in record:
+                    record[name] = _required_assignment_value(name, field, store, plan)
+    except ValueError as exc:
+        message = f"Cannot seed assignment_store from data/contract.json: {exc}."
+        if not any(outcome.message == message for outcome in run.outcomes):
+            run.record("subscriptions.assignment_store", False, message, path="data/contract.json")
+        return False
     await run.database[_alias_collection_name(store.data_alias, run.load.data_contract)].insert_one(record)
     return True
 
@@ -906,6 +1761,12 @@ def _record_id(entity: _Entity, body: Any) -> Any:
     if isinstance(item, Mapping) and item.get(entity.id_field) is not None:
         return item.get(entity.id_field)
     return body.get(entity.id_field)
+
+
+def _lookup_value(entity: _Entity, stored: Mapping[str, Any] | None) -> str | None:
+    """Use the stored canonical get key; it need not be the generated write id."""
+    value = stored.get(entity.lookup_field) if stored is not None else None
+    return str(value) if value is not None else None
 
 
 async def _stored(run: _SmokeRun, entity: _Entity, record_id: Any) -> dict[str, Any] | None:
@@ -1005,6 +1866,8 @@ async def _crud(run: _SmokeRun, entity: _Entity) -> None:
     else:
         run.record(f"{tag}.a_create", True, f"A created {entity.entity} {entity.id_field}={record_id!r}.")
     has_record = stored is not None
+    lookup_value = _lookup_value(entity, stored)
+    no_lookup = f"the stored record has no value for canonical get lookup {entity.lookup_field!r}"
 
     def listed_ids(body: Any) -> list[Any] | None:
         items = _items(body)
@@ -1034,12 +1897,14 @@ async def _crud(run: _SmokeRun, entity: _Entity) -> None:
                    path=None if found_nothing else failure_path())
         if not has_record:
             run.not_run(f"{tag}.a_get", no_record)
+        elif lookup_value is None:
+            run.record(f"{tag}.a_get", False, no_lookup, path=path_repo)
         else:
-            status, body, summary = await run.call("GET", entity.module, actions["get"], a, {"id": record_id})
+            status, body, summary = await run.call("GET", entity.module, actions["get"], a, {"id": lookup_value})
             item = body.get("item") if isinstance(body, Mapping) else None
             if not 200 <= status < 300 or not isinstance(item, Mapping) or item.get(entity.id_field) != record_id:
                 run.record(f"{tag}.a_get", False,
-                           f"{describe(actions['get'], 'A')}(id={record_id!r}): expected 2xx with A's record, got {summary}.",
+                           f"{describe(actions['get'], 'A')}(id={lookup_value!r}): expected 2xx with A's record, got {summary}.",
                            path=failure_path())
             else:
                 run.record(f"{tag}.a_get", True, "A reads its own record by id.")
@@ -1062,15 +1927,17 @@ async def _crud(run: _SmokeRun, entity: _Entity) -> None:
     if owned and "get" in actions:
         if not has_record:
             run.not_run(f"{tag}.b_get_isolated", no_record)
+        elif lookup_value is None:
+            run.not_run(f"{tag}.b_get_isolated", no_lookup)
         else:
-            status, body, summary = await run.call("GET", entity.module, actions["get"], b, {"id": record_id})
+            status, body, summary = await run.call("GET", entity.module, actions["get"], b, {"id": lookup_value})
             item = body.get("item") if isinstance(body, Mapping) else None
             if 200 <= status < 300 and isinstance(item, Mapping) and item:
                 run.record(f"{tag}.b_get_isolated", False,
-                           f"{describe(actions['get'], 'B')}(id={record_id!r}) returned user A's record.", path=path_repo)
+                           f"{describe(actions['get'], 'B')}(id={lookup_value!r}) returned user A's record.", path=path_repo)
             elif status >= 500 or status == 0:
                 run.record(f"{tag}.b_get_isolated", False,
-                           f"{describe(actions['get'], 'B')}(id={record_id!r}): expected 404, got {summary}.",
+                           f"{describe(actions['get'], 'B')}(id={lookup_value!r}): expected 404, got {summary}.",
                            path=failure_path())
             else:
                 run.record(f"{tag}.b_get_isolated", True, f"B cannot read A's record ({status}).")
@@ -1176,7 +2043,8 @@ async def _gated_params(
         record_id = _record_id(entity, body) if 200 <= status < 300 else None
         record_id = record_id if record_id is not None else "smoke-missing-record"
         if operation == "get":
-            return "GET", {"id": record_id}
+            stored = await _stored(run, entity, record_id)
+            return "GET", {"id": _lookup_value(entity, stored) or "smoke-missing-record"}
         return "POST", {entity.id_field: record_id}
     return "POST", _required_params(_input_schema(module, action), {})
 
@@ -1295,8 +2163,10 @@ def _summary(outcomes: list[dict[str, Any]], meta: Mapping[str, Any], *, started
 __all__ = [
     "SMOKE_TIMEOUT_SECONDS",
     "child_environment",
+    "preflight_contained_imported_smoke",
     "resolve_smoke_mongo_uri",
     "run_app_runtime_smoke",
+    "run_contained_imported_app_runtime_smoke",
 ]
 
 
@@ -1335,10 +2205,11 @@ async def _child_run(request: Mapping[str, Any], emit: Callable[..., None], init
     )
 
 
-def _child_main() -> int:
+def _child_main(request: Mapping[str, Any] | None = None) -> int:
     """Entry point of ``python -m`` this module: one smoke run, results as JSON lines on stdout."""
     initial_environment = set(os.environ)
-    request = json.loads(sys.stdin.read() or "{}")
+    if request is None:
+        request = json.loads(sys.stdin.read() or "{}")
     channel = os.fdopen(os.dup(sys.stdout.fileno()), "w", encoding="utf-8")
     sys.stdout = sys.stderr  # generated code's prints never reach the result channel
 
@@ -1351,5 +2222,179 @@ def _child_main() -> int:
     return 0
 
 
+async def _serve_imported_app(database_name: str, observer_nonce: str, mongo_uri: str) -> int:
+    """A serves untrusted app behavior; its stdout is never a result channel."""
+    import uvicorn
+    from motor.motor_asyncio import AsyncIOMotorClient
+
+    client: Any = AsyncIOMotorClient(mongo_uri, serverSelectionTimeoutMS=2000)
+    run = _SmokeRun(Path(_CONTAINED_APP_ROOT), client, database_name, lambda *_args, **_kwargs: None)
+    run.external_server = True
+    run.probe_nonce = observer_nonce
+    try:
+        booted = await _boot(run, set(os.environ))
+        if not booted or any(outcome.passed is False for outcome in run.outcomes):
+            return 1
+        await run.http.aclose()
+        run.http = None
+        server = uvicorn.Server(uvicorn.Config(run.app, host="127.0.0.1", port=8000,
+                                               access_log=False, log_level="warning"))
+        await server.serve()
+        return 0
+    finally:
+        if run.http is not None:
+            await run.http.aclose()
+        client.close()
+
+
+def _probe_contracts(run: _SmokeRun) -> None:
+    """Load only copied declarative files; B has no imported Python mount."""
+    import yaml
+
+    from mozaiksai.core.runtime.app.module_loader import ModuleDefinition
+    from mozaiksai.core.runtime.app.subscriptions_loader import load_subscriptions_config
+    from mozaiksai.core.runtime.persistence.intent_loader import (
+        iter_data_contract_collections,
+        load_data_contract,
+    )
+    from mozaiksai.core.workflow.generator_support.module_write_actions import auth_contract_scopes
+
+    root = run.app_root
+    modules_root = root / "modules"
+    modules = []
+    if modules_root.is_dir():
+        for directory in sorted(modules_root.iterdir()):
+            manifest = directory / "module.yaml"
+            if directory.is_dir() and manifest.is_file():
+                modules.append(ModuleDefinition.model_validate(yaml.safe_load(
+                    manifest.read_text(encoding="utf-8"))))
+    app_config = json.loads((root / "app.json").read_text(encoding="utf-8"))
+    contract = load_data_contract(root)
+    run.load = SimpleNamespace(
+        modules=modules, data_contract=contract,
+        subscriptions_config=load_subscriptions_config(root),
+        definition=SimpleNamespace(config=app_config),
+    )
+    run.app_id = _app_id(run.load)
+    auth_yaml = root / "config" / "auth.yaml"
+    run.scopes = sorted(auth_contract_scopes(
+        {"config/auth.yaml": auth_yaml.read_text(encoding="utf-8")} if auth_yaml.is_file() else {}
+    ))
+    run.workspace_claims = any(
+        collection.get("tenancy") == "per_workspace"
+        for _owner, _kind, collection in iter_data_contract_collections(contract, require_complete_ownership=False)
+    )
+
+
+async def _probe_imported_app(database_name: str, observer_nonce: str,
+                              emit: Callable[..., None]) -> None:
+    """B checks loopback HTTP and Mongo from a process without imported source."""
+    from httpx import AsyncClient, HTTPError
+    from motor.motor_asyncio import AsyncIOMotorClient
+
+    mongo_uri = "mongodb://127.0.0.1:27017/?directConnection=true"
+    client: Any = AsyncIOMotorClient(mongo_uri, serverSelectionTimeoutMS=2000)
+    run = _SmokeRun(Path(_CONTAINED_PLAN_ROOT), client, database_name, emit)
+    run.external_probe = True
+    run.probe_nonce = observer_nonce
+    run.http = AsyncClient(base_url="http://127.0.0.1:8000", timeout=_REQUEST_TIMEOUT_SECONDS,
+                           trust_env=False)
+    try:
+        _probe_contracts(run)
+        expected_modules = sorted(module.name for module in run.load.modules)
+        deadline = time.monotonic() + _CONTAINER_STARTUP_SECONDS
+        response: Any = None
+        while time.monotonic() < deadline:
+            try:
+                response = await run.http.get("/__mozaiks_smoke_ready", timeout=1.0)
+                if response.status_code == 200:
+                    break
+            except (HTTPError, OSError, TimeoutError):
+                pass
+            await asyncio.sleep(0.2)
+        try:
+            observed = response.json() if response is not None and response.status_code == 200 else {}
+        except ValueError:
+            observed = {}
+        ready = (isinstance(observed, dict) and bool(expected_modules)
+                 and observed.get("app_id") == run.app_id
+                 and observed.get("modules") == expected_modules
+                 and observed.get("failed_modules") == [])
+        run.record("boot.http_ready", ready,
+                   f"Loopback app endpoint {'reported the expected app and modules' if ready else 'did not report the expected app and modules'}.")
+        if ready:
+            await client.admin.command("ping")
+            entities = _contract_entities(run)
+            for entity in entities:
+                await _crud(run, entity)
+            await _entitlements(run, entities)
+    except Exception as exc:
+        run.record("smoke.error", False,
+                   f"The external observer could not complete: {type(exc).__name__}: {exc}")
+    finally:
+        await run.http.aclose()
+        client.close()
+    emit(
+        "done", app_id=run.app_id,
+        principals={
+            label: {"user_id": principal.user_id, "workspace_id": principal.workspace_id,
+                    "scopes": [*run.scopes, *principal.extra_scopes]}
+            for label, principal in run.principals.items()
+        },
+        events_emitted=[],
+    )
+
+
+def _trusted_probe_main(database_name: str, observer_nonce: str) -> int:
+    def emit(kind: str, **data: Any) -> None:
+        print(_EVENT_PREFIX + json.dumps(
+            {"event": kind, "observer_nonce": observer_nonce, **data}, default=str,
+        ), flush=True)
+
+    asyncio.run(_probe_imported_app(database_name, observer_nonce, emit))
+    return 0
+
+
+def _contained_main(database_name: str, observer_nonce: str) -> int:
+    """Start disposable MongoDB and the imported app server on isolated loopback."""
+    from pymongo import MongoClient
+
+    database_dir = Path(tempfile.mkdtemp(prefix="mozaiks-smoke-mongo-", dir="/tmp"))
+    mongod = subprocess.Popen(
+        ["mongod", "--dbpath", str(database_dir), "--bind_ip", "127.0.0.1", "--port", "27017",
+         "--nounixsocket", "--quiet"],
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    mongo_uri = "mongodb://127.0.0.1:27017/?directConnection=true"
+    client: MongoClient[dict[str, Any]] = MongoClient(
+        mongo_uri, serverSelectionTimeoutMS=500, connectTimeoutMS=500,
+    )
+    try:
+        deadline = time.monotonic() + _CONTAINER_STARTUP_SECONDS
+        while time.monotonic() < deadline and mongod.poll() is None:
+            try:
+                client.admin.command("ping")
+                break
+            except Exception:
+                time.sleep(0.2)
+        else:
+            print("Contained smoke MongoDB did not start", file=sys.stderr)
+            return 1
+        return asyncio.run(_serve_imported_app(database_name, observer_nonce, mongo_uri))
+    finally:
+        client.close()
+        if mongod.poll() is None:
+            mongod.terminate()
+            try:
+                mongod.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                mongod.kill()
+                mongod.wait(timeout=5)
+
+
 if __name__ == "__main__":
+    if len(sys.argv) == 4 and sys.argv[1] == "--contained-serve":
+        raise SystemExit(_contained_main(sys.argv[2], sys.argv[3]))
+    if len(sys.argv) == 4 and sys.argv[1] == "--trusted-probe":
+        raise SystemExit(_trusted_probe_main(sys.argv[2], sys.argv[3]))
     raise SystemExit(_child_main())

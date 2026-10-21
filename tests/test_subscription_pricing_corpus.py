@@ -286,6 +286,13 @@ async def test_ec56c080_labelled_concept_repair_saves_and_app_plan_accepts(monke
     for key, value in entry["context"].items():
         if key not in {"user_id", "chat_id", "run_build_binding", "app_id"}:
             app_context.set(key, deepcopy(value))
+    # This labelled repaired scenario also declares its existing static pages
+    # under the current design schema. The recorded source projection and hash
+    # above remain unchanged; this is not a claim about the original model.
+    experience = deepcopy(entry["context"]["experience_spec"])
+    for page in experience["pages"]:
+        page["ui_surface"] = "declarative_page"
+    app_context.set("experience_spec", experience)
     app_context.set("subscription_contract", saved)
     app_context.set("app_plan_attempts", 0)
     reviewed = review_app_build_plan(AppBuildPlan=plan, context_variables=app_context)

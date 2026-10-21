@@ -89,9 +89,11 @@ def resolve_workflows_root(
     resolved_active_root = resolve_active_app_root()
     unconfigured_root = _unconfigured_active_app_root()
     if resolved_active_root != unconfigured_root:
-        for app_workflows_root in candidate_app_workflows_roots(resolved_active_root):
-            if app_workflows_root.is_dir():
-                return app_workflows_root
+        # An active app owns its workflow root whether or not the directory
+        # exists: an app that declares no workflows serves none, never the
+        # packaged Factory workflows. Studio selects the Factory root
+        # explicitly through MOZAIKS_WORKFLOWS_PATH.
+        return candidate_app_workflows_roots(resolved_active_root)[0]
 
     repo_factory_root = _repo_factory_workflows_root()
     if repo_factory_root.is_dir():

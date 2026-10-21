@@ -599,6 +599,7 @@ async def test_platform_startup_applies_indexes_when_data_contract_is_loaded(mon
     await platform._platform_startup()
 
     assert calls == [{"intent": intent, "app_id": "app_1"}]
+    assert platform.app.state.loaded_app_id == "app_1"
 
 
 @pytest.mark.asyncio
@@ -690,10 +691,12 @@ async def test_platform_startup_without_data_contract_does_not_require_index_bac
     monkeypatch.setattr(platform, "apply_database_indexes", must_not_apply)
     monkeypatch.setattr(platform, "load_data_migrations", lambda _root: [])
     monkeypatch.setattr(platform, "get_platform_hooks", lambda: FakeHooks())
+    monkeypatch.setattr(platform, "_resolve_default_app_id", lambda: "default")
 
     await platform._platform_startup()
 
     assert platform.app.state.database_index_readiness is None
+    assert platform.app.state.loaded_app_id == "default"
 
 
 @pytest.mark.asyncio

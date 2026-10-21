@@ -611,7 +611,7 @@
     "billing_pack",
     "analytics_pack"
    ],
-   "concept_overview": "TaskTracker Pro is a personal task management app designed for authenticated users, featuring a user-friendly interface that allows individuals to easily create, update, and manage tasks with a focus on simplicity and clarity. The app includes personalized dashboards and advanced filtering capabilities tailored specifically for users\u2019 individual needs.",
+   "concept_overview": "TaskTracker Pro is a personal task management app designed for authenticated users, featuring a user-friendly interface that allows individuals to easily create, update, and manage tasks with a focus on simplicity and clarity. The app includes personalized dashboards and advanced filtering capabilities tailored specifically for users’ individual needs.",
    "constraints": [
     "No external integrations",
     "Maintain a clean interface",
@@ -662,7 +662,7 @@
      "label": "Personalized User Dashboard",
      "likely_surface_kind": "ui_only",
      "owner_hint": "app",
-     "rationale": "The dashboard will serve as the main visual stimulus for users\u2019 productivity.",
+     "rationale": "The dashboard will serve as the main visual stimulus for users’ productivity.",
      "source_capability_packs": [
       "analytics_pack"
      ],
@@ -682,7 +682,7 @@
      "label": "Subscription Management",
      "likely_surface_kind": "module",
      "owner_hint": "app",
-     "rationale": "Essential for managing users\u2019 subscription statuses and unlocking premium features.",
+     "rationale": "Essential for managing users’ subscription statuses and unlocking premium features.",
      "source_capability_packs": [
       "billing_pack"
      ],
@@ -894,7 +894,8 @@
        "intent": "Displays key metrics regarding task completion and overdue tasks.",
        "primitive": "SummaryStrip"
       }
-     ]
+     ],
+     "ui_surface": "declarative_page"
     },
     {
      "intent": "Use billing_portal for list_plans, open_billing_portal.",
@@ -908,7 +909,8 @@
        "intent": "Use billing_portal for list_plans, open_billing_portal.",
        "primitive": "PageHeader"
       }
-     ]
+     ],
+     "ui_surface": "declarative_page"
     },
     {
      "intent": "Use billing_portal for get_subscription_status, list_plans, start_subscription_checkout, open_billing_portal.",
@@ -922,7 +924,8 @@
        "intent": "Use billing_portal for get_subscription_status, list_plans, start_subscription_checkout, open_billing_portal.",
        "primitive": "PageHeader"
       }
-     ]
+     ],
+     "ui_surface": "declarative_page"
     },
     {
      "intent": "Use billing_portal for get_usage_status, get_token_status, start_token_top_up.",
@@ -936,7 +939,8 @@
        "intent": "Use billing_portal for get_usage_status, get_token_status, start_token_top_up.",
        "primitive": "PageHeader"
       }
-     ]
+     ],
+     "ui_surface": "declarative_page"
     }
    ]
   },
@@ -1538,7 +1542,7 @@
      "header": "X-MozaiksPay-Contract-Version",
      "mismatch_error_code": "contract_version_mismatch"
     },
-    "description": "Machine-readable interface spec for the MozaiksPay provider API. Consumed by generated SaaS apps via mozaikspay_client.py. Served by the selected MozaiksPay-compatible provider. The hosted MozaiksPay service is the default provider implementation, but self-hosted or alternative providers may satisfy this same app-facing contract.\nThis file defines ONLY the public interface \u2014 request shape, response shape, auth scheme, and which fields are forbidden from responses. No payment provider logic, fee calculations, or subscription business rules belong here.\n",
+    "description": "Machine-readable interface spec for the MozaiksPay provider API. Consumed by generated SaaS apps via mozaikspay_client.py. Served by the selected MozaiksPay-compatible provider. The hosted MozaiksPay service is the default provider implementation, but self-hosted or alternative providers may satisfy this same app-facing contract.\nThis file defines ONLY the public interface — request shape, response shape, auth scheme, and which fields are forbidden from responses. No payment provider logic, fee calculations, or subscription business rules belong here.\n",
     "drift_guard": {
      "consumer": "generated-saas-apps",
      "description": "Changes to this file must be reflected in: - The selected provider server implementation - The generated client template (templates/services/integrations/mozaikspay_client.py) - The generated billing_portal schemas (templates/modules/billing_portal/backend/schemas.py) If any of these diverge, generated SaaS apps will break silently at runtime.\n",
@@ -1994,7 +1998,7 @@
       "400": "Invalid request body (missing return_url, unsafe URL, etc.).",
       "401": "Missing or invalid MozaiksPay API key or client credentials.",
       "403": "MozaiksPay credential app or user/tenant/workspace scope does not allow this request.",
-      "404": "No subscription found for this scope (subscription_status only \u2014 not an HTTP 404)."
+      "404": "No subscription found for this scope (subscription_status only — not an HTTP 404)."
      }
     },
     "schema_version": "mozaiks.provider_api_contract.v1",
@@ -2172,5 +2176,6 @@
   "plan": "AppPlanAgent AppBuildPlan from the AG2 WAL ag2.packet (3 byte-identical submissions)",
   "plan_sha256": "e662b18e60c92ea6ec56e5de6c6d64edc88bbca2f7a8e2c812b44249da0a6cf9",
   "run": "live release acceptance at OSS 95ad6325bd5fb6126e62ebe664ac658301c0b24e"
- }
+ },
+ "fixture_schema_migration": "Fixture schema migration: ui_surface=declarative_page makes the prior declarative rendering assumption explicit; this field was not emitted by the recorded model."
 }

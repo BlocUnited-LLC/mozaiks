@@ -285,6 +285,7 @@ class ReactionIdempotencyStore:
         workspace_id: str | None,
         idempotency_key_str: str,
         claim_token: str,
+        effect_id: str | None = None,
     ) -> bool:
         """Mark this reaction as successfully completed.
 
@@ -305,9 +306,60 @@ class ReactionIdempotencyStore:
                 "status": "claimed",
                 "claim_token": claim_token,
             },
-            {"$set": {"status": "completed", "completed_at": self._now_fn()}},
+            {"$set": {
+                "status": "completed", "completed_at": self._now_fn(),
+                "effect_id": effect_id,
+            }},
         )
         return bool(result.modified_count == 1)
+
+    async def is_completed(
+        self,
+        *,
+        app_id: str,
+        tenant_id: str | None,
+        workspace_id: str | None,
+        idempotency_key_str: str,
+    ) -> bool:
+        """Confirm terminal completion for this exact scoped reaction identity.
+
+        A denied claim alone cannot distinguish completion from an active lease,
+        retry delay, or dead letter. Completion is terminal, so a positive read
+        remains valid if another worker changes its claim while we inspect it.
+        """
+        completed, _ = await self.completion(
+            app_id=app_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+            idempotency_key_str=idempotency_key_str,
+        )
+        return completed
+
+    async def completion(
+        self,
+        *,
+        app_id: str,
+        tenant_id: str | None,
+        workspace_id: str | None,
+        idempotency_key_str: str,
+    ) -> tuple[bool, str | None]:
+        """Read a completed reaction's optional module-confirmed effect reference."""
+        record = await self._collection().find_one(
+            {
+                **self._key_filter(
+                    app_id=app_id,
+                    tenant_id=tenant_id,
+                    workspace_id=workspace_id,
+                    idempotency_key_str=idempotency_key_str,
+                ),
+                "status": "completed",
+            },
+            {"effect_id": 1},
+        )
+        if record is None:
+            return False, None
+        effect_id = record.get("effect_id")
+        return True, effect_id if isinstance(effect_id, str) and effect_id else None
 
     async def mark_failed(
         self,

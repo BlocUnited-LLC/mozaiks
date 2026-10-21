@@ -16,7 +16,11 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.auth import UserPrincipal, require_user_scope
-from mozaiksai.core.auth.dependencies import validate_path_id, validate_user_id_against_principal
+from mozaiksai.core.auth.dependencies import (
+    is_shared_development_identity,
+    validate_path_id,
+    validate_user_id_against_principal,
+)
 from mozaiksai.core.chat_attachments.attachments import handle_chat_upload
 from mozaiksai.core.multitenant import build_app_scope_filter
 from mozaiksai.hosts import runtime as runtime_app
@@ -172,7 +176,7 @@ async def list_chats(
     try:
         coll = await runtime_app._chat_coll()
         query: dict[str, Any] = {"workflow_name": workflow_name, **build_app_scope_filter(app_id)}
-        if principal.user_id != "anonymous":
+        if not is_shared_development_identity(principal):
             query["user_id"] = principal.user_id
         docs = await coll.find(query).sort("created_at", -1).to_list(length=20)
         return {"chat_ids": [doc.get("_id") for doc in docs]}
@@ -194,7 +198,7 @@ async def chat_exists(
     try:
         coll = await runtime_app._chat_coll()
         query: dict[str, Any] = {"_id": chat_id, "workflow_name": workflow_name, **build_app_scope_filter(app_id)}
-        if principal.user_id != "anonymous":
+        if not is_shared_development_identity(principal):
             query["user_id"] = principal.user_id
         doc = await coll.find_one(query, {"_id": 1, "transport_purpose": 1})
         if doc and _is_ask_carrier_session(doc):
@@ -216,17 +220,25 @@ async def chat_meta(
     validate_path_id(chat_id, "chat_id")
     try:
         from mozaiksai.core.data.persistence.persistence_manager import extract_last_artifact
+        from mozaiksai.core.workflow.workflow_manager import get_workflow_manager
 
         has_children = False
 
         coll = await runtime_app._chat_coll()
         projection = {"cache_seed": 1, "workflow_ui_state.last_artifact": 1, "status": 1, "_id": 1, "workflow_name": 1}
+        failure_key = get_workflow_manager().get_config(workflow_name).get("failure_message_key")
+        if isinstance(failure_key, str) and failure_key:
+            projection[failure_key] = 1
         query: dict[str, Any] = {"_id": chat_id, "workflow_name": workflow_name, **build_app_scope_filter(app_id)}
-        if principal.user_id != "anonymous":
+        if not is_shared_development_identity(principal):
             query["user_id"] = principal.user_id
         doc = await coll.find_one(query, projection)
         if not doc:
             return {"exists": False}
+
+        failure_message = doc.get(failure_key) if isinstance(failure_key, str) and doc.get("status") == 2 else None
+        if not isinstance(failure_message, str) or not failure_message.strip():
+            failure_message = None
 
         run_history = await runtime_app.persistence_manager.load_run_history(
             chat_id=chat_id,
@@ -255,6 +267,7 @@ async def chat_meta(
             "has_children": has_children,
             "cache_seed": doc.get("cache_seed"),
             "status": doc.get("status"),
+            "failure_message": failure_message,
             "run_history_count": run_history_count,
             "last_artifact": extract_last_artifact(doc),
             "artifact_instance_id": artifact_instance_id,

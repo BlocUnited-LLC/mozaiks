@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import pytest
 import yaml
 
 from factory_app.workflows.AppGenerator.tools.app_plan_review import review_app_build_plan
-from factory_app.workflows.AppGenerator.tools.app_validation import _app_runtime_load_result
+from factory_app.workflows.AppGenerator.tools.app_runtime_load_probe import probe_app_root
+from factory_app.workflows.AppGenerator.tools.app_validation import _write_files_to_dir
 from factory_app.workflows.AppGenerator.tools.repair_policy import prepare_bundle_repair
 from factory_app.workflows.AppGenerator.tools.task_integrity import (
     RepairOwnershipError,
@@ -33,6 +36,13 @@ def _event_files():
     module["actions"][1]["emits"] = [EVENT_TYPE]
     files[MODULE_PATH] = yaml.safe_dump(module, sort_keys=False)
     return files
+
+
+async def _trusted_fixture_load(files):
+    with TemporaryDirectory(prefix="mozaiks-event-contract-test-") as temporary:
+        app_root = Path(temporary) / "app"
+        _write_files_to_dir(app_root, files)
+        return await probe_app_root(app_root)
 
 
 def _context(files, *, event_owner=None):
@@ -74,7 +84,7 @@ async def test_real_runtime_event_failure_routes_to_contract_owner_without_mutat
         "app_build_plan", "app_task_batch_items", "app_task_batch_results", "generated_files",
     )}
 
-    runtime = await _app_runtime_load_result(files)
+    runtime = await _trusted_fixture_load(files)
     assert runtime["passed"] is False
     assert len(runtime["failed_tests"]) == 1
     diagnostic = runtime["failed_tests"][0]
@@ -99,13 +109,13 @@ async def test_real_runtime_event_failure_routes_to_contract_owner_without_mutat
 @pytest.mark.asyncio
 async def test_declaring_event_resolves_loader_failure_without_weakening_loader():
     files = _event_files()
-    failed = await _app_runtime_load_result(files)
+    failed = await _trusted_fixture_load(files)
     assert failed["passed"] is False
     files[EVENT_PATH] = yaml.safe_dump({"schema_version": "mozaiks.events.v1", "events": [{
         "type": EVENT_TYPE, "version": 1, "producer": "orders",
         "payload_schema": {"type": "object", "properties": {"order_id": {"type": "string"}}},
     }]})
-    repaired = await _app_runtime_load_result(files)
+    repaired = await _trusted_fixture_load(files)
     assert repaired["passed"] is True, repaired
 
 

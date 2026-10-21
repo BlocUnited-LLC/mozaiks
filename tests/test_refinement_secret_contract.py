@@ -32,7 +32,7 @@ def test_names_only_contract_survives_refinement_packaging_and_restore(tmp_path,
     (baseline / path).write_text("changed later", encoding="utf-8")
     assert (snapshot / path).read_text(encoding="utf-8") == _CONTRACT
     target = tmp_path / "target"
-    _restore_bundle_to_target(zip_path=archive_path, target_dir=target, workspace_layout=True)
+    _restore_bundle_to_target(bundle_bytes=archive_path.read_bytes(), target_dir=target, workspace_layout=True)
     assert (target / "app/security/secrets.yaml").read_text(encoding="utf-8") == _CONTRACT
 
 
@@ -53,7 +53,7 @@ def test_credential_values_in_contract_fail_all_write_boundaries(tmp_path):
         archive.writestr("app.json", "{}")
         archive.writestr(path, content)
     with pytest.raises(HTTPException) as caught:
-        _restore_bundle_to_target(zip_path=archive_path, target_dir=tmp_path / "target", workspace_layout=True)
+        _restore_bundle_to_target(bundle_bytes=archive_path.read_bytes(), target_dir=tmp_path / "target", workspace_layout=True)
     assert caught.value.status_code == 400
     assert not list((tmp_path / "target").iterdir())
     assert "not-for-export" not in caught.value.detail

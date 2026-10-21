@@ -102,12 +102,14 @@ class TestThemeConfigMerged:
     def test_has_fonts(self, theme):
         assert "fonts" in theme
         body = theme["fonts"]["body"]
-        assert body["family"] == "Rajdhani"
-        assert "googleFont" in body
+        assert body["family"] == "system-ui"
+        assert not body.get("googleFont")
+        assert not body.get("src")
 
     def test_has_heading_font(self, theme):
         heading = theme["fonts"]["heading"]
-        assert heading["family"] == "Orbitron"
+        assert heading["family"] == "Oxanium"
+        assert heading["localFont"] is True
 
     def test_has_logo_font(self, theme):
         logo = theme["fonts"]["logo"]
@@ -160,8 +162,9 @@ class TestThemeConfigMerged:
         assert "paddingX" in page
         assert "sectionGap" in page
 
-    def test_theme_fonts_include_brand_font(self, theme):
-        assert theme["fonts"]["body"]["family"] == "Rajdhani"
+    def test_brand_heading_font_is_bundled(self, theme):
+        font_path = theme["fonts"]["heading"]["src"].removeprefix("/")
+        assert (_app_root() / "brand" / font_path).is_file()
 
 
 class TestShellConfig:

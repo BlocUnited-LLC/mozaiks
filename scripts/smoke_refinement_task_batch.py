@@ -101,8 +101,8 @@ def _request_payload(spec: CombinedSmokeSpec) -> dict[str, Any]:
 async def _route_spec(spec: CombinedSmokeSpec) -> dict[str, Any]:
     smoke_refinement_classifier._load_dotenv()
     refinement_policy_config = load_refinement_policy_config(APP_ROOT)
-    llm_profile_used = str(refinement_policy_config.classifier.llm_profile or "raw_llm_config")
     classifier_llm_config = refinement_policy_config.resolve_capability_llm_config("classifier")
+    llm_profile_used = str(refinement_policy_config.classifier.llm_profile)
     # Provider availability is a local environment check, not an LLM call.
     # Keep this synchronous so the real classifier request is reached.
     provider_ok, provider_message = smoke_refinement_classifier._provider_available()

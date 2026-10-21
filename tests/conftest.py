@@ -15,9 +15,153 @@ To run workspace-dependent tests against another workspace locally:
 from __future__ import annotations
 
 import os
+import sys
+import tempfile
 from pathlib import Path
+from types import FunctionType, ModuleType
 
 import pytest
+
+# Existing deterministic Factory tests feed source authored in this repository.
+# They exercise repair/build contracts using the trusted fixture probes, while
+# test_app_acceptance_isolation.py exercises the production Docker boundary.
+_TRUSTED_GENERATED_APP_FIXTURE_TESTS = {
+    "test_agentgenerator_generate_and_download_collection.py",
+    "test_ai_research_workspace_golden_path.py",
+    "test_app_auth_generation.py",
+    "test_app_build_failure_routing.py",
+    "test_app_runtime_smoke.py",
+    "test_app_validation_readiness.py",
+    "test_app_validation_strategy.py",
+    "test_appgenerator_assembly_failures.py",
+    "test_appgenerator_bounded_recovery.py",
+    "test_appgenerator_download_admission.py",
+    "test_appgenerator_export_snapshot.py",
+    "test_appgenerator_generate_and_download_persistence.py",
+    "test_appgenerator_recovery_resume.py",
+    "test_appgenerator_recovery_routing.py",
+    "test_appgenerator_revision_baseline.py",
+    "test_appgenerator_task_integrity.py",
+    "test_appgenerator_wiring_acceptance_boundary.py",
+    "test_appplan_materialization_acceptance.py",
+    "test_appschema_scoped_manifest.py",
+    "test_ask_context_contract_closure.py",
+    "test_brownfield_agentgenerator_acceptance.py",
+    "test_continuous_deterministic_materialization.py",
+    "test_deterministic_page_materialization.py",
+    "test_e2e_deterministic_acceptance_gate.py",
+    "test_factory_bundle_promotion_to_host_load.py",
+    "test_factory_regression_suite.py",
+    "test_generated_app_archetype_matrix.py",
+    "test_generated_app_candidate_validation.py",
+    "test_generated_app_functional_acceptance.py",
+    "test_managed_capability_artifact_replay.py",
+    "test_materialized_bundle_production_runtime.py",
+    "test_offline_factory_build_sequence_smoke.py",
+    "test_offline_generated_build_acceptance.py",
+    "test_run_termination.py",
+    "test_smoke_appgenerator_live_acceptance.py",
+    "test_smoke_appgenerator_live_subscription.py",
+}
+
+
+@pytest.fixture(autouse=True)
+def _trusted_generated_app_fixture_probe(monkeypatch, request):
+    if request.node.path.name not in _TRUSTED_GENERATED_APP_FIXTURE_TESTS:
+        return
+
+    from factory_app.workflows.AppGenerator.tools import app_validation
+    validation_name = app_validation.__name__
+    validation_globals = {id(vars(app_validation)): vars(app_validation)}
+
+    def include_validation_reference(value):
+        if isinstance(value, ModuleType) and value.__name__ == validation_name:
+            validation_globals[id(vars(value))] = vars(value)
+        elif isinstance(value, FunctionType) and value.__module__ == validation_name:
+            validation_globals[id(value.__globals__)] = value.__globals__
+
+    test_namespace = vars(request.node.module)
+    for value in test_namespace.values():
+        include_validation_reference(value)
+        # Workflow loading evicts cached tool modules. A test or script that
+        # imported a gate before that reload still calls its original globals.
+        if isinstance(value, FunctionType) and value.__module__.startswith(("tests.", "scripts.")):
+            for imported in value.__globals__.values():
+                include_validation_reference(imported)
+        elif isinstance(value, ModuleType) and value.__name__.startswith(("tests.", "scripts.")):
+            for imported in vars(value).values():
+                include_validation_reference(imported)
+
+    for globals_dict in validation_globals.values():
+        smoke_module = globals_dict["app_runtime_smoke"]
+        fixture_image_id = "sha256:" + "a" * 64
+        monkeypatch.setenv("MOZAIKS_APP_RUNTIME_IMAGE_ID", fixture_image_id)
+
+        def fixture_source_digest(generated_files, *, _smoke=smoke_module):
+            try:
+                return _smoke._source_content_sha256(_smoke._generated_source_digests(generated_files))
+            except (UnicodeError, ValueError):
+                return None
+
+        async def trusted_fixture_load(
+            generated_files, *, _globals=globals_dict, _image_id=fixture_image_id,
+            _digest=fixture_source_digest,
+        ):
+            from factory_app.workflows.AppGenerator.tools.app_runtime_load_probe import (
+                probe_app_root,
+            )
+
+            with tempfile.TemporaryDirectory(prefix="mozaiks-test-runtime-load-") as temporary:
+                app_root = Path(temporary) / "app"
+                _globals["_write_files_to_dir"](app_root, generated_files)
+                result = await probe_app_root(app_root)
+                # This fixture runs repository-authored source directly and has
+                # no disposable Docker worker to remove.
+                result["worker_containment_verified"] = True
+                result["validator_image_id"] = _image_id
+                result["source_content_sha256"] = _digest(generated_files)
+                return result
+
+        async def trusted_fixture_smoke(
+            generated_files, *, _globals=globals_dict, _smoke=smoke_module,
+            _image_id=fixture_image_id, _digest=fixture_source_digest,
+        ):
+            with tempfile.TemporaryDirectory(prefix="mozaiks-test-runtime-smoke-") as temporary:
+                app_root = Path(temporary) / "app"
+                _globals["_write_files_to_dir"](app_root, generated_files)
+                result = await _smoke.run_app_runtime_smoke(
+                    app_root, mongo_uri=_smoke.resolve_smoke_mongo_uri(),
+                )
+                if result.get("status") == "passed":
+                    # Test-only synthetic observer receipt for repository-authored
+                    # fixtures. Production receipts come from the external probe.
+                    outcomes = result.get("results") or []
+                    if not any(row.get("check") == "boot.http_ready" for row in outcomes):
+                        outcomes = [*outcomes, {"check": "boot.http_ready", "status": "passed"}]
+                    result["results"] = outcomes
+                    result["checks"] = [{
+                        "id": "app_runtime_smoke", "status": "passed", "passed": True,
+                        "details": {
+                            "status": "passed",
+                            "check_count": sum(row.get("status") == "passed" for row in outcomes),
+                            "failed_check_count": 0,
+                            "not_run_check_count": sum(row.get("status") == "not_run" for row in outcomes),
+                        },
+                    }]
+                    result["failed_tests"] = []
+                    result["observer_unverified_checks"] = ["event_rejection"]
+                    result["observer_origin"] = "trusted_external_probe_v1"
+                    result["observer_run_id"] = "c" * 32
+                    result["observed_boot"] = {"check": "boot.http_ready", "status": "passed"}
+                    result["observer_completion_verified"] = True
+                    result["observer_cleanup_verified"] = True
+                    result["validator_image_id"] = _image_id
+                    result["source_content_sha256"] = _digest(generated_files)
+                return result
+
+        monkeypatch.setitem(globals_dict, "_app_runtime_load_result", trusted_fixture_load)
+        monkeypatch.setitem(globals_dict, "_app_runtime_smoke_result", trusted_fixture_smoke)
+        monkeypatch.setattr(smoke_module, "resolve_smoke_mongo_uri", lambda: None)
 
 
 def _repo_factory_app_bundle() -> Path:
@@ -79,6 +223,24 @@ def app_root() -> Path:
 
 
 @pytest.fixture(autouse=True)
+def _development_access_by_default(monkeypatch):
+    """Serve in-process test clients with development access unless a test says otherwise.
+
+    With authentication off a host grants development access only to requests
+    from this machine (``AUTH_ANON_ACCESS=local``), and Starlette's TestClient
+    is not a network peer at all (its client is ``"testclient"``). Tests that
+    do not configure auth therefore run as CI does (``AUTH_ENABLED=false``)
+    with ``AUTH_ANON_ACCESS=open``. Values already in the environment win, and
+    tests of auth behaviour set or delete these variables themselves.
+    """
+    if "AUTH_ENABLED" not in os.environ and "AUTH_PROVIDER" not in os.environ:
+        monkeypatch.setenv("AUTH_ENABLED", "false")
+    if "AUTH_ANON_ACCESS" not in os.environ:
+        monkeypatch.setenv("AUTH_ANON_ACCESS", "open")
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _isolate_chat_lock_state():
     """Reset the chat execution lock's process-level state before each test.
 
@@ -93,6 +255,42 @@ def _isolate_chat_lock_state():
 
     reset_chat_lock_state()
     yield
+
+
+def _unstart_shared_host_app() -> None:
+    """Drop the built middleware stack of the process-wide host app, if any.
+
+    The host is looked up, never imported, so this is inert for a process that
+    has not loaded one.
+    """
+    runtime_host = sys.modules.get("mozaiksai.hosts.runtime")
+    host_app = getattr(runtime_host, "app", None)
+    if host_app is not None:
+        host_app.middleware_stack = None
+
+
+@pytest.fixture(autouse=True)
+def _isolate_shared_host_app_start():
+    """Enter and leave every test with the process-wide host app not started.
+
+    ``mozaiksai.hosts.runtime`` owns one module-level FastAPI app, and the
+    platform host composes itself onto that same object when it is first
+    imported, registering an HTTP middleware on it. Starlette builds the
+    middleware stack on the app's first ASGI call and refuses
+    ``add_middleware`` from then on. A test that served a request through the
+    runtime app before anything in the process had imported the platform host
+    therefore made that import raise ``RuntimeError: Cannot add middleware
+    after an application has started`` in every later test, and whether that
+    happened depended only on which test files shared a CI shard.
+
+    The built stack is a cache of the registered middleware, so dropping it is
+    a complete un-start: the next ASGI call rebuilds it from whatever is
+    registered by then. Dropping it on the way in as well covers a stack built
+    outside a test body, such as a wider-scoped fixture's teardown.
+    """
+    _unstart_shared_host_app()
+    yield
+    _unstart_shared_host_app()
 
 
 

@@ -87,14 +87,18 @@ async def test_validation_materializes_auth_from_admitted_repairs_idempotently()
 
     result = await validate_app_bundle_from_request(request, context_variables=context)
 
-    assert result["integration_tests_passed"] is True, result
+    assert result["integration_tests_passed"] is False
+    assert result["app_bundle_acceptance_result"]["status"] == "pending", result
+    assert result["app_bundle_acceptance_result"]["validation_evidence"]["failed"] == []
     first = admitted_app_file_map(context)
     assert "post_login_default: /orders" in first["config/auth.yaml"]
     assert {page["path"] for page in json.loads(first["ui/route_manifest.json"])["pages"]} == {
         "/orders", "/help", "/login", "/auth/callback",
     }
     result = await validate_app_bundle_from_request(request, context_variables=context)
-    assert result["integration_tests_passed"] is True, result
+    assert result["integration_tests_passed"] is False
+    assert result["app_bundle_acceptance_result"]["status"] == "pending", result
+    assert result["app_bundle_acceptance_result"]["validation_evidence"]["failed"] == []
     assert admitted_app_file_map(context) == first
 
 

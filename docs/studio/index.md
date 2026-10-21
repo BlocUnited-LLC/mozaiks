@@ -27,6 +27,21 @@ Hidden detail routes can exist when a task needs deeper diagnostics:
 navigation. Create always starts a new app journey. Continue-build belongs on
 the existing app record.
 
+## App Ownership
+
+Studio app-scoped integration, connector, and source-context actions use the app
+registry to verify that the signed-in user owns the resolved app, including when
+the request omits `app_id` and resolves to the host default. An app missing from
+that user's registry view returns 404; a selected app that conflicts with an
+app-bound token still returns 403. The shared dashboard manifest remains
+available without selecting an app because it does not read app resources.
+
+With authentication disabled and local development access enabled, Studio uses
+the configured `MOZAIKS_DEFAULT_USER_ID` (default `demo-user`) as the single
+developer's registry owner. Apps created through Studio belong to that user,
+and later app-scoped management actions resolve ownership through the same
+registry record.
+
 ## User Reasoning
 
 Every Studio page should answer a concrete operator question:

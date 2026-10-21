@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import sys
 from dataclasses import dataclass, field
 from typing import Any, cast
 
@@ -54,9 +55,14 @@ class ModuleActionDispatchRequest:
 
 def _resolve_module_executor(app: Any | None) -> Any:
     if app is None:
-        from mozaiksai.hosts.platform import app as platform_app
-
-        app = platform_app
+        # Use the platform host this process already composed; never import it
+        # here. The platform host registers middleware on the runtime app at
+        # import, which a started app refuses, so on a serving runtime-only
+        # host the import could never complete and each attempt would write
+        # platform state onto the live app. A process that has not composed
+        # the platform host has no module runtime to dispatch to.
+        platform_host = sys.modules.get("mozaiksai.hosts.platform")
+        app = getattr(platform_host, "app", None)
 
     registry = getattr(getattr(app, "state", None), "executor_registry", None)
     executor = getattr(registry, "module_executor", None)

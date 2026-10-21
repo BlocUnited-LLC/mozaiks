@@ -5,7 +5,7 @@ argument-hint: "[docs task]"
 disable-model-invocation: true
 ---
 
-**Before starting:** `git fetch origin && gh pr list --state open && git log origin/main --oneline -3` — if another agent has an open PR touching the same files you need, wait for it to merge or branch off it instead of main.
+**Before starting:** `git fetch origin && gh pr list --state open && git log origin/main --oneline -3` — if another agent has an open PR touching the same files you need, wait for it to merge, then branch from fresh `origin/main`.
 
 Complete this docs task: $ARGUMENTS
 

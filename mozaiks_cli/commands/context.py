@@ -33,7 +33,7 @@ async def _run_index(args: Any) -> int:
     result = await index_workspace_app_intelligence(
         app_id=app_id,
         workspace_root=workspace,
-        artifact_key=(
+        workspace_key=(
             str(getattr(args, "artifact_key", "") or APP_INTELLIGENCE_WORKSPACE_ARTIFACT_KEY).strip()
             or APP_INTELLIGENCE_WORKSPACE_ARTIFACT_KEY
         ),

@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from mozaiksai.control_plane import app_validation as validation_module
 from mozaiksai.control_plane.app_validation import (
     plan_app_source_validation_commands,
     run_app_source_validation,
@@ -39,7 +40,7 @@ def test_mozaiks_pages_use_runtime_contracts_before_source_validation_passes(tmp
     result = run_app_source_validation(app_id="app_1", workspace_root=tmp_path)
     check = next(c for c in result.fallback_checks if c.name == "mozaiks_page_contracts")
     assert check.status == ("failed" if extra else "passed"), check.reason
-    assert result.validation_status == check.status
+    assert result.validation_status == ("failed" if extra else "warning")
 
 
 @pytest.mark.asyncio
@@ -61,7 +62,9 @@ async def test_staged_source_validation_does_not_require_an_indexed_workspace(tm
     assert result.validation_status == "failed"
 
 
-def test_app_source_validation_runs_safe_detected_commands_in_copy(tmp_path: Path) -> None:
+def test_app_source_validation_runs_safe_detected_commands_in_copy(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("MOZAIKS_TEST_HOST_SECRET", "sentinel")
+    monkeypatch.setenv("PYTHONPATH", "host-only-import-path")
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     (workspace / "pyproject.toml").write_text("[project]\nname = 'demo'\n", encoding="utf-8")
@@ -92,11 +95,77 @@ def test_app_source_validation_runs_safe_detected_commands_in_copy(tmp_path: Pat
     assert len(calls) == 1
     assert calls[0]["argv"][:3] == [sys.executable, "-m", "pytest"]
     assert calls[0]["env"]["MOZAIKS_APP_VALIDATION"] == "1"
+    assert calls[0]["env"]["CI"] == "true"
+    assert "MOZAIKS_TEST_HOST_SECRET" not in calls[0]["env"]
+    assert "PYTHONPATH" not in calls[0]["env"]
+    assert calls[0]["env"]["HOME"] == str(calls[0]["cwd"])
+    assert calls[0]["env"]["TEMP"] == str(calls[0]["cwd"])
     assert result.planned_commands[0].kind == "install"
     assert result.planned_commands[0].status == "skipped"
     assert result.planned_commands[0].skip_reason == "install_commands_require_include_install"
     assert result.command_results[0].status == "passed"
     assert result.workspace_root_present is True
+
+
+def test_validation_child_process_does_not_receive_host_secret(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("MOZAIKS_TEST_HOST_SECRET", "sentinel")
+    (tmp_path / "check_env.py").write_text(
+        "import os\n"
+        "if 'MOZAIKS_TEST_HOST_SECRET' in os.environ:\n"
+        "    raise RuntimeError('host secret reached validation child')\n",
+        encoding="utf-8",
+    )
+
+    result = run_app_source_validation(
+        app_id="app_1",
+        workspace_root=tmp_path,
+        framework_detection=_framework_detection(
+            [{"kind": "test", "command": "python check_env.py", "working_directory": "."}]
+        ),
+        confirm_execution=True,
+        command_runner=validation_module._run_subprocess_command,
+    )
+
+    assert result.validation_status == "passed", result.command_results
+    assert result.command_results[0].status == "passed"
+
+
+@pytest.mark.parametrize(
+    ("auth_enabled", "auth_provider", "anon_access"),
+    [("true", "jwt", "open"), ("false", "none", "local"), ("false", "none", "open")],
+)
+def test_default_source_validation_does_not_run_repository_code(
+    tmp_path: Path, monkeypatch, auth_enabled: str, auth_provider: str, anon_access: str,
+) -> None:
+    monkeypatch.setenv("AUTH_ENABLED", auth_enabled)
+    monkeypatch.setenv("AUTH_PROVIDER", auth_provider)
+    monkeypatch.setenv("AUTH_ANON_ACCESS", anon_access)
+    monkeypatch.setenv("AUTH_AUDIENCE", "source-validation-test")
+    workspace = tmp_path / "imported-repository"
+    workspace.mkdir()
+    marker = tmp_path / "host-marker"
+    (workspace / "pyproject.toml").write_text("[project]\nname = 'audit'\n", encoding="utf-8")
+    (workspace / "test_host_access.py").write_text(
+        "from pathlib import Path\n"
+        f"def test_host_access():\n    Path({str(marker)!r}).write_text('executed')\n",
+        encoding="utf-8",
+    )
+
+    result = run_app_source_validation(
+        app_id="app_1",
+        workspace_root=workspace,
+        framework_detection=_framework_detection(
+            [{"kind": "test", "command": "python -m pytest", "working_directory": "."}]
+        ),
+        confirm_execution=True,
+    )
+
+    assert not marker.exists()
+    assert result.command_results == []
+    assert result.planned_commands[0].status == "skipped"
+    assert result.planned_commands[0].skip_reason == "host_command_execution_requires_isolation"
+    assert result.validation_status == "warning"
+    assert any(check.name == "python_syntax" and check.status == "passed" for check in result.fallback_checks)
 
 
 def test_app_source_validation_rejects_unsafe_commands_and_uses_fallback(tmp_path: Path) -> None:
@@ -121,6 +190,7 @@ def test_app_source_validation_rejects_unsafe_commands_and_uses_fallback(tmp_pat
     assert result.planned_commands[0].status == "skipped"
     assert result.planned_commands[0].skip_reason == "unsafe_command_rejected"
     assert any(check.name == "json_manifest_parse" and check.status == "passed" for check in result.fallback_checks)
+    assert result.validation_status == "warning"
 
 
 def test_app_source_validation_fallback_applies_staged_overlay(tmp_path: Path) -> None:

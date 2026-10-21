@@ -24,6 +24,7 @@ export function LoginPage() {
   const { auth, user, loading } = useChatUI();
   const { navigation } = useNavigation();
   const location = useLocation();
+  const navigate = useNavigate();
   const contract = navigation.auth?.contract;
   const fallback = contract?.routes?.post_login_default || '/';
   const returnPath = safeReturnPath(new URLSearchParams(location.search).get('returnTo'), fallback);
@@ -37,7 +38,8 @@ export function LoginPage() {
     setPending(true);
     setError('');
     try {
-      await auth.login({ returnPath });
+      const result = await auth.login({ returnPath });
+      if (result?.returnPath) navigate(safeReturnPath(result.returnPath, fallback), { replace: true });
     } catch (failure) {
       console.error('Sign-in could not start:', failure);
       setError('Sign-in could not start. Please try again.');

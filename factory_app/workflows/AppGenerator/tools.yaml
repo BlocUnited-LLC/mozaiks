@@ -1,4 +1,20 @@
 tools:
+- agent: InterviewAgent
+  file: record_app_interview.py
+  function: record_app_interview
+  description: Validate typed app interview readiness before planning the approved scope.
+  tool_type: Agent_Tool
+  auto_tool_call: true
+  bind_to_agent: false
+  outcome:
+    context_key: interview_outcome
+    attempts_key: interview_attempts
+    result_field: outcome
+    values: [needs_input, ready, blocked]
+    error_value: blocked
+    max_attempts: 10
+    retry_on: [needs_input]
+
 - agent: [DatabaseAgent, ConfigMiddlewareAgent, ModelAgent, ServiceAgent, FrontendStubAgent, ControllerAgent, RefinementHarnessAgent]
   file: code_file_utils.py
   function: save_generated_code

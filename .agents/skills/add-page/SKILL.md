@@ -4,7 +4,7 @@ description: Add a frontend page (AppPageSchema) to an existing Mozaiks app.
 argument-hint: "[page name or description]"
 ---
 
-**Before starting:** `git fetch origin && gh pr list --state open && git log origin/main --oneline -3` — if another agent has an open PR touching the same files you need, wait for it to merge or branch off it instead of main.
+**Before starting:** `git fetch origin && gh pr list --state open && git log origin/main --oneline -3` — if another agent has an open PR touching the same files you need, wait for it to merge, then branch from fresh `origin/main`.
 
 Help the user add a **page** to an existing Mozaiks application.
 

@@ -16,10 +16,11 @@ Contract:
 - anything else (non-integer text, negatives, floats) is rejected rather than
   coerced
 
-Values are unbounded nonnegative integers. Cache expiry therefore compares
-*elapsed* time against the TTL (``now - fetched_at > ttl``) instead of adding
-the TTL to a float timestamp, so an arbitrarily large accepted TTL can never
-raise ``OverflowError`` during request-time cache use. See
+Values are unbounded nonnegative integers. A zero TTL always expires. Positive
+TTL expiry compares *elapsed* time against the TTL
+(``now - fetched_at > ttl``) instead of adding the TTL to a float timestamp,
+so an arbitrarily large accepted TTL can never raise ``OverflowError`` during
+request-time cache use. See
 :func:`cache_entry_is_expired`.
 """
 
@@ -103,10 +104,13 @@ def resolve_cache_ttl_setting(name: str, raw: str | None) -> int:
 def cache_entry_is_expired(fetched_at: float, ttl_seconds: int, *, now: float) -> bool:
     """Return whether a cache entry fetched at ``fetched_at`` has expired.
 
-    Mathematically equivalent to ``now > fetched_at + ttl_seconds`` but written
-    as an elapsed-time comparison. Python compares a float against an
+    Zero always expires, including when ``now`` equals ``fetched_at``. For a
+    positive TTL, the elapsed-time comparison is mathematically equivalent to
+    ``now > fetched_at + ttl_seconds``. Python compares a float against an
     arbitrary-precision int exactly, so this never converts a very large TTL to
     a float and never raises ``OverflowError`` — every TTL the parser accepts
     stays valid during real cache use.
     """
+    if ttl_seconds == 0:
+        return True
     return (now - fetched_at) > ttl_seconds

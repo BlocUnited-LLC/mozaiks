@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Annotated, Any, Literal, Self
 from urllib.parse import unquote, urlsplit
@@ -11,6 +12,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from mozaiksai.core.auth.adapters.registry import get_auth_adapter, resolve_auth_config
+from mozaiksai.core.auth.anonymous_access import resolve_anonymous_grant
 from mozaiksai.core.runtime.app.paths import APP_AUTH_CONFIG_PATH
 
 NonEmptyText = Annotated[str, Field(min_length=1, pattern=r"\S")]
@@ -45,6 +47,13 @@ class AuthRoutes(_ContractModel):
         return value
 
 
+class AndroidAuthFrontend(_ContractModel):
+    """Public native client handles; issuer and API authority stay shared."""
+
+    client_id_env: Literal["MOZAIKS_ANDROID_OIDC_CLIENT_ID"] = "MOZAIKS_ANDROID_OIDC_CLIENT_ID"
+    redirect_uri_env: Literal["MOZAIKS_ANDROID_OIDC_REDIRECT_URI"] = "MOZAIKS_ANDROID_OIDC_REDIRECT_URI"
+
+
 class AuthFrontend(_ContractModel):
     adapter: Literal["oidc_pkce"]
     client_id_env: Literal["VITE_OIDC_CLIENT_ID"]
@@ -53,6 +62,7 @@ class AuthFrontend(_ContractModel):
     redirect_uri_env: Literal["VITE_OIDC_REDIRECT_URI"]
     scope_env: Literal["VITE_OIDC_SCOPE"]
     default_scopes: list[NonEmptyText]
+    android: AndroidAuthFrontend = Field(default_factory=AndroidAuthFrontend)
 
     @field_validator("default_scopes")
     @classmethod
@@ -218,10 +228,26 @@ def compose_app_auth_routes(contract: AppAuthContract, pages: list[dict[str, Any
     return composed
 
 
-async def build_app_auth_projection(contract: AppAuthContract | None) -> dict[str, Any]:
-    """Expose public app behavior and the canonical runtime's effective auth mode."""
+async def build_app_auth_projection(
+    contract: AppAuthContract | None,
+    *,
+    client_scope: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Expose public app behavior and the canonical runtime's effective auth mode.
+
+    ``client_scope`` is the ASGI scope of the request the projection answers.
+    With it, the local development identity is projected only when that
+    request would get development access, so another machine asking a host
+    that serves only this machine is not told the anonymous user and roles.
+    """
     config = resolve_auth_config()
-    local_development = config.explicitly_disabled and config.environment.permits_no_auth
+    # Anonymous visitors (AUTH_ANON_ACCESS=public) are guests to the shell: no
+    # local development identity is projected for them.
+    local_development = config.grants_development_access
+    if local_development and client_scope is not None:
+        local_development = resolve_anonymous_grant(
+            client_scope, config, log_refusal=False
+        ).development_access
     user = None
     if local_development:
         claims = await get_auth_adapter().validate_token("")
@@ -236,7 +262,7 @@ async def build_app_auth_projection(contract: AppAuthContract | None) -> dict[st
             "tenant_id": claims.tenant_id,
             "workspace_id": claims.workspace_id,
         }
-    frontend = None
+    frontend: dict[str, Any] | None = None
     if contract is not None:
         handles = contract.frontend
         frontend = {
@@ -246,6 +272,15 @@ async def build_app_auth_projection(contract: AppAuthContract | None) -> dict[st
             "redirect_uri": os.getenv(handles.redirect_uri_env, "").strip(),
             "scope": os.getenv(handles.scope_env, "").strip(),
         }
+        android_client = os.getenv(handles.android.client_id_env, "").strip()
+        android_redirect = os.getenv(handles.android.redirect_uri_env, "").strip()
+        # Partial registration is unusable for Android but must not take the
+        # browser offline. Native consumers reject an absent profile.
+        if android_client and android_redirect:
+            frontend["android"] = {
+                "client_id": android_client,
+                "redirect_uri": android_redirect,
+            }
     return {
         "required": contract is not None,
         "contract": contract.model_dump(mode="json") if contract is not None else None,

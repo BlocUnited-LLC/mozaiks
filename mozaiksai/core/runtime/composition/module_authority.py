@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 from uuid import uuid4
 
+from mozaiksai.core.runtime.composition.module_event_provenance import ModuleEventRejection
+
 ModuleDispatchAuthorityKind = Literal[
     "authenticated_user",
     "public_http",
@@ -61,17 +63,28 @@ class ModuleDispatchAuthority:
 
 
 def _local_development_allowed() -> bool:
-    """local_development authority exists only while runtime auth is disabled
-    and the environment is one that permits unauthenticated operation, per the
-    canonical environment policy (recognized local/development/test names, or
-    no environment configured at all)."""
+    """local_development authority exists only in an environment that permits
+    unauthenticated operation, while runtime auth is off because the operator
+    explicitly disabled it, with an anonymous access policy that grants
+    development access (AUTH_ANON_ACCESS local or open). Implicit demo mode
+    and AUTH_ANON_ACCESS=public never qualify. Which request receives it is
+    decided by the principal's provenance."""
 
-    from mozaiksai.core.auth.adapters.registry import is_auth_enabled
+    from mozaiksai.core.auth.adapters import registry
+    from mozaiksai.core.auth.adapters.base import AuthError
     from mozaiksai.core.environment import environment_permits_no_auth
 
     if not environment_permits_no_auth():
         return False
-    return not is_auth_enabled()
+    try:
+        # Looked up on the module at call time, so a host or test that
+        # replaces registry.is_auth_enabled still decides "auth is on".
+        if registry.is_auth_enabled():
+            return False
+        return registry.resolve_auth_config().grants_development_access
+    except AuthError:
+        # An invalid configuration never grants it.
+        return False
 
 
 def workflow_user_authority(
@@ -230,6 +243,9 @@ class ModuleDispatchAudit:
     outcome: ModuleDispatchOutcome = "allowed"
     reason: str | None = None
     audit_tags: Mapping[str, str] = field(default_factory=dict)
+    # Events the action emitted that were not dispatched; they never change
+    # the outcome of an action whose handler completed.
+    rejected_events: tuple[ModuleEventRejection, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -261,4 +277,5 @@ class ModuleDispatchAudit:
             "outcome": self.outcome,
             "reason": self.reason,
             "audit_tags": dict(self.audit_tags),
+            "rejected_events": [rejection.to_dict() for rejection in self.rejected_events],
         }

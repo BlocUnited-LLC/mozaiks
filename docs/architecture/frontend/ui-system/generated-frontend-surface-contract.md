@@ -29,6 +29,34 @@ prompts. Agents must emit only these IDs:
 | Transition UI | workflow pack author / shell author | `extension_registry.json` + transition component | `RouteRenderer` / `TransitionScreen` |
 | Bounded custom UI | AppGenerator custom route bundle, module/admin JS stubs | `ui/route_manifest.json`, `ui/pages/custom/*.jsx`, explicit stub contracts | route/component registry |
 
+## Design-to-plan rendering boundary
+
+Every DesignDocs `ExperienceSpec.pages[]` entry explicitly declares `ui_surface`:
+`declarative_page` or `custom_react_page`. AppBuildPlan preserves that decision
+for the approved route. Plan review rejects a changed rendering contract before
+tasks run, with the required path and repair guidance. Prompt path guidance uses
+the same `planned_page_path` materializer as validation and task ownership.
+
+A custom page may have empty `sections` or valid primitive composition hints.
+Its `intent` retains the required interaction; fake primitive config cannot stand
+in for state and event handlers. One page task owns the custom JSX files,
+`ui/route_manifest.json`, and `ui/index.js` together. Local interaction may belong
+to a `ui_only` surface; persisted changes and reads remain bound to approved
+module actions and ownership policies.
+
+App-owned domain surfaces must use identifiers outside the platform ownership
+catalog's reserved names. For example, focus-session statistics cannot claim the
+platform authentication identifier `user_sessions`. Design validation returns
+rename guidance: update the surface ID, collection ownership and matching page
+bindings together while preserving domain data, actions and pages. It does not
+silently move those records into another module or weaken identity ownership.
+
+This is a pre-production contract replacement. A saved ExperienceSpec without
+`ui_surface` must re-enter DesignDocs through the existing design/build journey
+before app planning. There is no renderer guess or promotion compatibility path.
+Recorded test fixtures explicitly label their existing declarative realization;
+that migration is not evidence that the original model emitted the new field.
+
 ## Shared primitive foundation
 
 These surfaces should share one design foundation, not one authoring contract.

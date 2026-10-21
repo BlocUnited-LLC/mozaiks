@@ -58,8 +58,7 @@ class ArtifactScopeProposer:
         )
 
         config = self._load_config()
-        # Use dedicated scope capability config; fall back to coding profile if not declared.
-        llm_config = config.resolve_capability_llm_config("scope") or config.resolve_capability_llm_config("coding")
+        llm_config = config.resolve_capability_llm_config("scope")
         control_plane_context = await self._load_control_plane_context(
             refinement_request=refinement_request,
             routing_decision=routing_decision,

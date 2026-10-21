@@ -38,8 +38,8 @@ def _review_context(**overrides: Any) -> _Context:
         "artifact_version_id": "av_app_bundle_1",
         "bundle_path": "C:/Repos/BlocUnitedRepo/mozaiks/generated/apps/app_1/build_1/app",
         "lifecycle_state": "review",
-        "app_validation_status": "skipped",
-        "app_validation_strategy_used": "skip",
+        "app_validation_status": "passed",
+        "app_validation_strategy_used": "docker",
         "app_bundle_acceptance_status": "passed",
         "integration_tests_passed": True,
     }
@@ -83,6 +83,15 @@ def test_review_summary_blocks_promotion_when_handoff_is_incomplete() -> None:
     assert payload["revision_blockers"] == ["missing_review_bundle_path"]
 
 
+@pytest.mark.parametrize("status", ["skipped", "pending", "unknown"])
+def test_review_summary_requires_completed_build_validation(status: str) -> None:
+    payload = build_review_summary_payload(_review_context(app_validation_status=status))
+    assert payload["can_promote"] is False
+    assert payload["review_ready"] is False
+    assert payload["can_revise"] is True
+    assert "app_validation_not_passed" in payload["promotion_blockers"]
+
+
 def test_refinement_payload_matches_studio_trigger_contract() -> None:
     payload = build_refinement_request_payload(_review_context(), "Add dark mode.")
 
@@ -97,8 +106,8 @@ def test_refinement_payload_matches_studio_trigger_contract() -> None:
             "bundle_path": "C:/Repos/BlocUnitedRepo/mozaiks/generated/apps/app_1/build_1/app",
             "build_registry_id": "appreg_1",
             "build_id": "build_1",
-            "app_validation_status": "skipped",
-            "app_validation_strategy_used": "skip",
+            "app_validation_status": "passed",
+            "app_validation_strategy_used": "docker",
             "integration_tests_passed": True,
         },
     }
@@ -176,8 +185,8 @@ async def test_submit_revision_request_records_and_emits_refinement_payload(
                     "bundle_path": "C:/Repos/BlocUnitedRepo/mozaiks/generated/apps/app_1/build_1/app",
                     "build_registry_id": "appreg_1",
                     "build_id": "build_1",
-                    "app_validation_status": "skipped",
-                    "app_validation_strategy_used": "skip",
+                    "app_validation_status": "passed",
+                    "app_validation_strategy_used": "docker",
                     "integration_tests_passed": True,
                 },
             },
@@ -197,6 +206,53 @@ async def test_submit_revision_request_rejects_empty_revision() -> None:
         await submit_module.submit_revision_request(revision_request=" ", context_variables=ctx)
 
     assert "review_complete" not in ctx.data
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chat_id", [None, "", "   "])
+async def test_revision_without_a_chat_cannot_complete_or_broadcast(chat_id, monkeypatch):
+    module = importlib.import_module("factory_app.workflows.AppReview.tools.submit_revision_request")
+    from mozaiksai.core.transport.simple_transport import SimpleTransport
+
+    get_transport = AsyncMock()
+    monkeypatch.setattr(SimpleTransport, "get_instance", get_transport)
+    context = _review_context(chat_id=chat_id)
+    with pytest.raises(ValueError, match="review chat session"):
+        await module.submit_revision_request("Make the timer teal.", context_variables=context)
+    get_transport.assert_not_awaited()
+    assert "review_complete" not in context.data
+    assert "revision_submitted" not in context.data
+
+
+@pytest.mark.asyncio
+async def test_revision_reaches_only_its_websocket_through_real_transport(monkeypatch):
+    module = importlib.import_module("factory_app.workflows.AppReview.tools.submit_revision_request")
+    from mozaiksai.core.transport.simple_transport import SimpleTransport
+
+    class Socket:
+        def __init__(self):
+            self.messages = []
+
+        async def send_json(self, message):
+            self.messages.append(message)
+
+    source, other = Socket(), Socket()
+    transport = SimpleTransport()
+    transport.connections = {
+        "chat_review_1": {"websocket": source, "workflow_name": "AppReview"},
+        "other_chat": {"websocket": other, "workflow_name": "AppReview"},
+    }
+    monkeypatch.setattr(SimpleTransport, "get_instance", AsyncMock(return_value=transport))
+    result = await module.submit_revision_request("Make the timer teal.", context_variables=_review_context())
+    assert result["event_emitted"] is True
+    assert len(source.messages) == 1
+    assert not other.messages
+    envelope = source.messages[0]
+    assert envelope["schema_version"] == "mozaiks.ui.event.v1"
+    assert envelope["type"] == "chat.revision_requested"
+    assert envelope["data"]["refinement_request"] == "Make the timer teal."
+    assert envelope["data"]["artifact_version_id"] == "av_app_bundle_1"
+    assert envelope["data"]["extra"]["build_registry_id"] == "appreg_1"
 
 
 @pytest.mark.asyncio

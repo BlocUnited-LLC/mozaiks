@@ -11,7 +11,6 @@ export function useChatArtifactLayoutEffects({
   currentWorkflowName,
   restoreStoredArtifactForChat,
   layoutMode,
-  setLayoutMode,
   setIsMobileView,
   setForceOverlay,
   widgetOverlayOpen,
@@ -64,10 +63,6 @@ export function useChatArtifactLayoutEffects({
 
         setIsMobileView(mobile);
         setForceOverlay(mobile || shortViewport);
-
-        if (mobile && layoutMode === 'split') {
-          setLayoutMode('full');
-        }
       } catch {
         // Ignore window access failures during teardown or unusual embed contexts.
       }
@@ -81,7 +76,7 @@ export function useChatArtifactLayoutEffects({
       window.removeEventListener('resize', compute);
       window.removeEventListener('orientationchange', compute);
     };
-  }, [layoutMode, setForceOverlay, setIsMobileView, setLayoutMode]);
+  }, [setForceOverlay, setIsMobileView]);
 
   useEffect(() => {
     if (layoutMode !== 'view' && widgetOverlayOpen) {
@@ -102,13 +97,10 @@ export function useChatArtifactLayoutEffects({
   }, [isMobileView, isSidePanelOpen, layoutMode, setIsSidePanelOpen, setMobileDrawerState]);
 
   useEffect(() => {
-    if (!isMobileView) {
-      if (mobileDrawerState !== 'peek') {
-        setMobileDrawerState('peek');
-      }
-      return;
-    }
-  }, [isMobileView, mobileDrawerState, setMobileDrawerState]);
+    // Project the existing panel state when presentation changes. Resizing must
+    // not dispatch a layout change, which also closes the panel in the reducer.
+    setMobileDrawerState(isSidePanelOpen ? 'expanded' : 'peek');
+  }, [isMobileView, isSidePanelOpen, setMobileDrawerState]);
 
   useEffect(() => {
     if (!isSidePanelOpen) {

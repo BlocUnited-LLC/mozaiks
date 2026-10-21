@@ -20,7 +20,7 @@ function fixture() {
   const context = {
     input, URLSearchParams, AbortController, console,
     useCallback: callback => callback, useEffect() {}, useRef: current => ({ current }),
-    useState: initial => [stateIndex++ === 0 ? scope : initial, () => {}],
+    useState: initial => [stateIndex++ === 0 ? { scope, message: null } : initial, () => {}],
     useNavigate: () => url => navigation.push(url),
     useChatUI: () => ({ user: { id: 'owner', app_id: 'host' }, config: {}, auth: {} }),
     authFetch: async (url, options) => {

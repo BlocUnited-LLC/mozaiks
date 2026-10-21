@@ -214,7 +214,8 @@ def test_app_generator_page_contract_stays_declarative() -> None:
     }
 
     assert "Keep persistent app pages declarative." in content
-    assert "Only emit custom full-page React when a true primitive gap remains" in content
+    assert "Keep persistent app pages declarative when shipped primitives and supported shell configuration faithfully express the approved experience" in content
+    assert "Emit custom full-page React only for an approved custom_react_page with a real primitive gap" in content
     assert "`AppBuildPlan.pages[]` is the authoritative persistent page inventory" in content
     assert "Do NOT plan a second raw-frontend lane inside AppGenerator." in content
     assert "Persistent page materialization is driven by AppBuildPlan.pages[]" in content
@@ -814,7 +815,7 @@ def test_app_type_selector_emits_generic_monetization_selection_context() -> Non
     assert "monetization_enabled: true" in content
     assert "builder_options: {" in content
     assert "monetization: {" in content
-    assert "onResolve(optionId, resolveContext)" in content
+    assert "onResolve(optionId, resolveContext, { build_registry_id: registryRef.current })" in content
     assert "provider_backed_capability_selection" not in content
     assert "managed_capability_selection" not in content
     assert "mozaikspay" not in content.lower()

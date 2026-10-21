@@ -1,0 +1,8 @@
+{
+  "appId": "common-ground",
+  "appName": "Common Ground",
+  "version": "1.0.0",
+  "description": "A shared place for members to post ideas and have thoughtful conversations.",
+  "authRequired": true,
+  "startup": { "landing_spot": "/community" }
+}

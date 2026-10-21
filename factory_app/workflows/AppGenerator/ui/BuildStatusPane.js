@@ -15,13 +15,8 @@ const BuildStatusPane = ({
   config = {},
 }) => {
   const statusCfg = useMemo(() => config?.artifacts?.['build-status'] || {}, [config]);
-  // Logs default open only when there is something to debug; a passing
-  // build stays a slim strip so the app itself is the hero.
-  const [showLogs, setShowLogs] = useState(
-    statusCfg.showLogs === true ||
-    (statusCfg.showLogs !== false && validationStatus === 'failed')
-  );
-  const [showWarnings, setShowWarnings] = useState(statusCfg.collapseWarnings !== true);
+  const [showLogs, setShowLogs] = useState(statusCfg.showLogs === true);
+  const [showWarnings, setShowWarnings] = useState(statusCfg.collapseWarnings === false);
   const logRef = useRef(null);
 
   const parsedErrors = useMemo(() => {
@@ -84,15 +79,15 @@ const BuildStatusPane = ({
 
   const exportGateNote = useMemo(() => {
     if (validationStatus === 'failed') {
-      return 'Export is blocked server-side until validation is rerun successfully or explicitly skipped, and integration checks pass.';
+      return 'Fix the reported issue and run validation again before exporting.';
     }
-    if (!['passed', 'skipped'].includes(validationStatus)) {
-      return 'Export is blocked server-side until validation completes with a pass or explicit skip.';
+    if (validationStatus !== 'passed') {
+      return 'Required validation must pass before you can export or activate this draft.';
     }
     if (integrationPassed !== true) {
       return integrationPassed == null
-        ? 'Export is blocked server-side until integration checks run and pass.'
-        : 'Export is blocked server-side until integration checks pass.';
+        ? 'Integration checks still need to run before export.'
+        : 'Integration checks must pass before export.';
     }
     return null;
   }, [integrationPassed, validationStatus]);
@@ -151,7 +146,7 @@ const BuildStatusPane = ({
               {validationStatus === 'passed'
                 ? 'Build/test completed successfully.'
                 : validationStatus === 'skipped'
-                  ? 'Runtime validation was explicitly skipped for this run.'
+                  ? 'Build validation did not run. This draft remains unverified.'
                   : validationStatus === 'failed'
                     ? 'Review errors and retry generation/validation.'
                     : 'Validation has not completed yet.'}
@@ -170,6 +165,7 @@ const BuildStatusPane = ({
         </div>
         <button
           type="button"
+          aria-expanded={showLogs}
           onClick={() => setShowLogs((v) => !v)}
           className="px-3 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-xs text-[var(--color-text-secondary)] transition-colors flex items-center gap-1"
         >
@@ -219,60 +215,67 @@ const BuildStatusPane = ({
             )}
 
             {integrationFailures.length > 0 && (
-              <div className="mt-2 space-y-1">
-                {integrationFailures.slice(0, 10).map((f, idx) => (
-                  <div key={idx} className="text-[10px] font-mono text-[var(--color-text-secondary)]">
-                    <span className="text-[var(--color-error)]">{f.id || f.test || 'integration_check'}</span>
-                    <span className="ml-2">{f.message || f.error || ''}</span>
-                  </div>
-                ))}
-              </div>
+              <details className="mt-2 text-xs text-[var(--color-text-secondary)]">
+                <summary className="cursor-pointer text-[var(--color-error)]">
+                  {integrationFailures.length} failed check(s) to review
+                </summary>
+                <div className="mt-2 max-h-40 overflow-auto space-y-1 whitespace-pre-wrap [overflow-wrap:anywhere]">
+                  {integrationFailures.map((f, idx) => (
+                    <div key={idx} className="text-[10px] font-mono text-[var(--color-text-secondary)]">
+                      <span className="text-[var(--color-error)]">{f.id || f.test || 'integration_check'}</span>
+                      <span className="ml-2">{f.message || f.error || ''}</span>
+                    </div>
+                  ))}
+                </div>
+              </details>
             )}
 
             {integrationWarnings.length > 0 && (
-              <div className="mt-2 text-[10px] text-[var(--color-text-muted)] whitespace-pre-wrap">
-                {integrationWarnings.slice(0, 3).map((w, idx) => (
-                  <div key={idx}>- {String(w)}</div>
-                ))}
-                {integrationWarnings.length > 3 && <div>… {integrationWarnings.length - 3} more</div>}
-              </div>
+              <details className="mt-2 text-xs text-[var(--color-text-muted)]">
+                <summary className="cursor-pointer text-[var(--color-accent)]">
+                  {integrationWarnings.length} integration warning(s) to review
+                </summary>
+                <div className="mt-2 max-h-40 overflow-auto space-y-2 whitespace-pre-wrap [overflow-wrap:anywhere]">
+                  {integrationWarnings.map((w, idx) => <div key={idx}>{String(w)}</div>)}
+                </div>
+              </details>
             )}
           </div>
         </div>
       )}
 
       {parsedErrors.length > 0 && (
-        <div className="px-4 pb-3">
-          <div className="text-xs font-semibold text-[var(--color-error)] mb-2">{parsedErrors.length} error(s)</div>
-          <div className="space-y-1">
-            {parsedErrors.slice(0, 20).map((e, idx) => (
+        <details className="px-4 pb-3 text-xs">
+          <summary className="cursor-pointer font-semibold text-[var(--color-error)]">{parsedErrors.length} error(s) to review</summary>
+          <div className="mt-2 max-h-40 overflow-auto space-y-1 whitespace-pre-wrap [overflow-wrap:anywhere]">
+            {parsedErrors.map((e, idx) => (
               <div key={idx} className="text-xs font-mono text-[var(--color-text-secondary)]">
                 <span className="text-[var(--color-error)]">{e.file || 'unknown'}:{e.line || '?'}</span>
                 <span className="ml-2">{e.message || ''}</span>
               </div>
             ))}
-            {parsedErrors.length > 20 && <div className="text-[10px] text-[var(--color-text-muted)]">… {parsedErrors.length - 20} more</div>}
           </div>
-        </div>
+        </details>
       )}
 
       {rawErrors.length > 0 && parsedErrors.length === 0 && (
-        <div className="px-4 pb-3">
-          <div className="text-xs font-semibold text-[var(--color-error)] mb-2">{rawErrors.length} error(s)</div>
-          <div className="space-y-1">
-            {rawErrors.slice(0, 10).map((e, idx) => (
+        <details className="px-4 pb-3 text-xs">
+          <summary className="cursor-pointer font-semibold text-[var(--color-error)]">{rawErrors.length} error(s) to review</summary>
+          <div className="mt-2 max-h-40 overflow-auto space-y-1 whitespace-pre-wrap [overflow-wrap:anywhere]">
+            {rawErrors.map((e, idx) => (
               <div key={idx} className="text-xs font-mono text-[var(--color-text-secondary)]">
                 {String(e)}
               </div>
             ))}
           </div>
-        </div>
+        </details>
       )}
 
       {warnings.length > 0 && (
         <div className="px-4 pb-3">
           <button
             type="button"
+            aria-expanded={showWarnings}
             onClick={() => setShowWarnings((v) => !v)}
             className="text-xs text-[var(--color-accent)] hover:text-[var(--color-accent-light)] flex items-center gap-1"
           >
@@ -282,7 +285,7 @@ const BuildStatusPane = ({
           </button>
           {showWarnings && (
             <div className="mt-2 rounded-lg bg-black/30 border border-white/10 p-2 max-h-40 overflow-auto my-scroll1">
-              {warnings.slice(0, 50).map((w, idx) => (
+              {warnings.map((w, idx) => (
                 <div key={idx} className="text-[10px] font-mono text-[var(--color-text-secondary)] whitespace-pre-wrap">
                   {String(w)}
                 </div>

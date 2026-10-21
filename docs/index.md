@@ -6,7 +6,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/BlocUnited-LLC/mozaiks/blob/main/LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.11+-blue?logo=python)](https://www.python.org/)
-[![AG2](https://img.shields.io/badge/AG2-1.0_beta-green)](https://github.com/ag2ai/ag2)
+[![AG2](https://img.shields.io/badge/AG2-1.1.2-green)](https://github.com/ag2ai/ag2)
 
 </div>
 
@@ -14,8 +14,8 @@
 > [mozaiks.ai](https://mozaiks.ai), but you can self-host the framework and run
 > the builder locally.
 
-> Public PyPI and GitHub releases are not published yet. Install from a local
-> checkout instead.
+> Install the public package with `python -m pip install mozaiks`. Use an
+> editable checkout when contributing to the framework itself.
 
 ---
 

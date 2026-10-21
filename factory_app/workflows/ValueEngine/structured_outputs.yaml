@@ -3,13 +3,25 @@ schema_version: mozaiks.structured_outputs.v1
 # Planning schemas for app concept, capability mapping, and build decomposition
 
 registry:
-  # Interview and Research use free-form conversational output
-  ValueInterviewAgent: null
+  ValueInterviewAgent: ValueInterviewResult
+  # Research remains a free-form evidence summary.
   ResearchAgent: null
   # GapAnalysisAgent outputs structured ConceptBlueprint for UI artifact
   GapAnalysisAgent: ConceptBlueprint
 
 models:
+  ValueInterviewResult:
+    type: model
+    description: Typed readiness for researching the user's concept; never approval of a generated concept.
+    fields:
+      agent_message:
+        type: str
+        description: One brief product question or readiness acknowledgement. Use plain product language, never routing markers, module archetypes, or pack IDs.
+      outcome:
+        type: literal
+        values: [needs_input, ready]
+        description: needs_input only for missing product scope that blocks research; ready once the user supplied a concrete direction and smallest useful version. Readiness does not approve the concept.
+
   # =========================================================================
   # INTENT & CONCEPT MODELS
   # =========================================================================

@@ -6,11 +6,16 @@ create app-owned secret tables, or expose secret values to frontend read APIs.
 
 ## Storage
 
-Connector metadata is app-scoped platform state. It records service id,
+Connector metadata is app- or workspace-scoped platform state. It records service id,
 provider id, integration id, display name, status, public non-secret config,
 source workflow, and whether a vault secret is available. Secret values are
 stored only through the configured connector vault backend. If no vault is
 configured, metadata can still be saved, but the raw secret is not durable.
+Vault operations use the same explicit `(scope, scope_id, normalized_service)`
+identity as metadata. App overrides and workspace defaults can share an ID and
+service without sharing a credential. `resolve_connector` keeps the app-first,
+workspace-fallback metadata choice; the chosen record's scope governs its
+server-side secret read. Older unqualified vault records are not read.
 
 ## Inline Request
 
@@ -166,6 +171,7 @@ Secret access is server-only. A plugin receives a `ConnectorSecretReader`, not a
 secret value in its constructor or public inputs. The reader can resolve the
 vault secret for the current app/service, but the secret handle is not
 serialized, logged, returned to the frontend, or stored in connector metadata.
+For a workspace connector, the reader uses that workspace's scope and ID.
 
 Only safe health fields may be persisted:
 

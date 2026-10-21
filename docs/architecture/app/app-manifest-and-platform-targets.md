@@ -165,8 +165,11 @@ Local development convenience belongs in `.env`, for example:
 - `AUTH_ANON_ROLES=admin,user` when Studio management access is intended
 
 The backend resolves this explicit local mode and supplies its development
-identity through the shell bootstrap. Frontend flags do not grant identity or
-roles. The app manifest keeps the same authentication intent in every environment.
+identity through the shell bootstrap, to requests from this machine only
+(`AUTH_ANON_ACCESS=local`, the default). A container, which the browser
+reaches through Docker's gateway, uses `AUTH_ANON_ACCESS=open` with its port
+published on `127.0.0.1` only. Frontend flags do not grant identity or roles.
+The app manifest keeps the same authentication intent in every environment.
 
 ## Advanced Overrides
 

@@ -265,6 +265,11 @@ layers:
       Well-known operator capability domains. Select the pack; generate only the
       app-specific wiring, page composition, and event flow bindings — not pack internals.
     packs:
+      - id: outcome_feedback
+        covers: private human ratings and helpfulness for delivered workflow outcomes
+        capability_kind: operator_pack
+        use_when: Approved requirements ask users to rate workflow results
+        avoid_when: The task is model evaluation, simulated persona research, or investment scoring
       - id: messaging
         covers: app-scoped and workspace-scoped conversation threads, support conversations, and read state
         capability_kind: operator_pack

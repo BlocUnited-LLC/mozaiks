@@ -8,8 +8,12 @@ from mozaiks_cli.studio_launcher import launch_studio
 from mozaiks_cli.workspace import resolve_active_app_root, resolve_workspace_root
 
 
-def run(args) -> None:
-    """Execute the studio command."""
+def run(args) -> int:
+    """Execute the studio command.
+
+    Returns the process exit code: 0 on success, 1 when the workspace has no
+    valid Mozaiks scaffold.
+    """
     from mozaiksai.core.runtime.app import build_app_overview_summary, get_missing_studio_surfaces
 
     workspace_root = resolve_workspace_root(getattr(args, "directory", None))
@@ -22,7 +26,7 @@ def run(args) -> None:
         for rel_path in missing_surfaces:
             print(f"  - {rel_path}")
         print("Run 'mozaiks onboard --dir <workspace>' to create/configure a scaffold first.")
-        return
+        return 1
 
     from mozaiks_cli.commands.sync_agent_guidance import auto_sync_agent_guidance
     auto_sync_agent_guidance(workspace_root)
@@ -33,6 +37,7 @@ def run(args) -> None:
             backend_port=int(getattr(args, "backend_port", 8000)),
             frontend_port=int(getattr(args, "frontend_port", 3000)),
             open_browser=not bool(getattr(args, "no_browser", False)),
+            bind_host=str(getattr(args, "listen", "127.0.0.1")),
         )
         print("Studio launched.\n")
         print(f"Backend: {result['backend_url']}")
@@ -42,14 +47,15 @@ def run(args) -> None:
             print(f"Frontend: {result['frontend_url']}")
         else:
             print("Frontend shell unavailable; backend is running but Studio is not available in this environment.")
-        return
+        return 0
 
     summary = build_app_overview_summary(app_root, surface="cli-home", local_only=True)
     if getattr(args, "json_output", False):
         print(json.dumps(summary, indent=2, ensure_ascii=False))
-        return
+        return 0
 
     _print_app_overview(summary)
+    return 0
 
 
 def _print_app_overview(summary: dict) -> None:

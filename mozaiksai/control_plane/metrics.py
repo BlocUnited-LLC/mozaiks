@@ -8,8 +8,6 @@ alerting.
 Hooks:
   ControlPlaneBuildTimer  — context manager; logs stage start/end/failure
                             with wall-clock duration in milliseconds.
-  log_build_outcome       — single call to log the terminal success/failure
-                            of a full build or refinement request.
   check_token_usage       — logs a WARNING when a stage exceeds the token
                             threshold; safe to call with None counts.
 
@@ -102,64 +100,6 @@ def ControlPlaneBuildTimer(
         )
 
 
-def log_build_outcome(
-    *,
-    outcome: str,
-    request_id: str | None = None,
-    app_id: str | None = None,
-    change_class: str | None = None,
-    workflow_sequence: str | None = None,
-    duration_ms: int | None = None,
-    error: str | None = None,
-    extra: dict[str, Any] | None = None,
-) -> None:
-    """Log the terminal outcome of a full build or refinement request.
-
-    Call once at the top of the Refinement Engine flow after the final decision
-    or failure is known.
-
-    Args:
-        outcome:          "ok", "error", or "skipped"
-        request_id:       Refinement request ID.
-        app_id:           App being built.
-        change_class:     Classified change class (e.g. "patch", "feature").
-        workflow_sequence: Resolved workflow sequence ID.
-        duration_ms:      Total elapsed time in milliseconds.
-        error:            Error description when outcome is "error".
-        extra:            Additional structured fields to merge.
-    """
-    fields: dict[str, Any] = {
-        "cp_outcome": outcome,
-        "cp_request_id": request_id,
-        "cp_app_id": app_id,
-        "cp_change_class": change_class,
-        "cp_workflow_sequence": workflow_sequence,
-        "cp_duration_ms": duration_ms,
-        "cp_error": error,
-        **(extra or {}),
-    }
-    if outcome == "ok":
-        logger.info(
-            "cp_build_outcome: request=%s app=%s class=%s seq=%s %dms",
-            request_id,
-            app_id,
-            change_class,
-            workflow_sequence,
-            duration_ms or 0,
-            extra=fields,
-        )
-    elif outcome == "error":
-        logger.warning(
-            "cp_build_outcome_error: request=%s app=%s — %s",
-            request_id,
-            app_id,
-            error,
-            extra=fields,
-        )
-    else:
-        logger.debug("cp_build_outcome: %s", outcome, extra=fields)
-
-
 def check_token_usage(
     *,
     stage: str,
@@ -207,5 +147,4 @@ def check_token_usage(
 __all__ = [
     "ControlPlaneBuildTimer",
     "check_token_usage",
-    "log_build_outcome",
 ]

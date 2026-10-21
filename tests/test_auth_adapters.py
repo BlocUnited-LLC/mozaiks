@@ -300,6 +300,7 @@ class TestProviderDetectionFailClosed:
         for var in (
             "AUTH_ENABLED",
             "AUTH_PROVIDER",
+            "AUTH_ANON_ACCESS",
             "SUPABASE_URL",
             "KEYCLOAK_URL",
             "KEYCLOAK_REALM",
@@ -400,8 +401,13 @@ class TestProviderDetectionFailClosed:
         monkeypatch.setenv("AUTH_PROVIDER", "none")
         assert is_auth_explicitly_disabled() is True
 
-        # Enabled deployments are never "explicitly disabled".
+        # Choosing whom an unauthenticated host serves is explicit too.
         monkeypatch.delenv("AUTH_PROVIDER", raising=False)
+        monkeypatch.setenv("AUTH_ANON_ACCESS", "public")
+        assert is_auth_explicitly_disabled() is True
+
+        # Enabled deployments are never "explicitly disabled".
+        monkeypatch.delenv("AUTH_ANON_ACCESS", raising=False)
         monkeypatch.setenv("AUTH_ENABLED", "true")
         monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
         assert is_auth_explicitly_disabled() is False
@@ -957,7 +963,7 @@ class TestProviderConfigIdentity:
             "AUTH_NAME_CLAIM", "AUTH_SCOPES_CLAIM", "AUTH_SCOPES_FORMAT", "AUTH_APP_ID_CLAIM",
             "AUTH_CHAT_ID_CLAIM", "AUTH_TENANT_ID_CLAIM", "AUTH_WORKSPACE_ID_CLAIM",
             "AUTH_CLOCK_SKEW", "AUTH_ALGORITHMS", "AUTH_AUDIENCE", "AUTH_REQUIRED_SCOPE",
-            "AUTH_USER_ID_CLAIM", "AUTH_EMAIL_CLAIM", "AUTH_ROLES_CLAIM",
+            "AUTH_USER_ID_CLAIM", "AUTH_EMAIL_CLAIM", "AUTH_EMAIL_VERIFIED_CLAIM", "AUTH_ROLES_CLAIM",
             "AUTH_JWKS_CACHE_TTL", "AUTH_DISCOVERY_CACHE_TTL", "MOZAIKS_OIDC_TENANT_ID",
             "KEYCLOAK_CLIENT_ID", "KEYCLOAK_APP_ID_CLAIM", "KEYCLOAK_TENANT_ID_CLAIM",
             "KEYCLOAK_WORKSPACE_ID_CLAIM", "SUPABASE_JWT_SECRET",
@@ -994,6 +1000,10 @@ class TestProviderConfigIdentity:
             ("AUTH_NAME_CLAIM", "display_name"),
             ("AUTH_USER_ID_CLAIM", "oid"),
             ("AUTH_EMAIL_CLAIM", "upn"),
+            # Changed on its own, against the default email claim: a verified
+            # claim must vouch for the AUTH_EMAIL_CLAIM value, so the row above
+            # (upn) is not paired with this one.
+            ("AUTH_EMAIL_VERIFIED_CLAIM", "custom_email_verified"),
             ("AUTH_ROLES_CLAIM", "realm_access"),
             ("AUTH_APP_ID_CLAIM", "appid"),
             ("AUTH_CHAT_ID_CLAIM", "cid"),
@@ -2248,9 +2258,15 @@ class TestCacheTtlArithmetic:
         entry = CachedJWKS(keys={}, fetched_at=time.time(), ttl_seconds=ttl, source_url="u")
         assert entry.is_expired() is (ttl == 0)
 
-    @pytest.mark.parametrize("ttl", [0, 1, 31, 3600, 86400])
-    def test_helper_matches_original_boundary_semantics(self, ttl):
-        """For representable TTLs, reproduce `now > fetched_at + ttl` exactly."""
+    def test_zero_ttl_expires_at_same_clock_tick(self):
+        """Zero means always refetch, even when the clock has not advanced."""
+        from mozaiksai.core.auth.cache_ttl import cache_entry_is_expired
+
+        assert cache_entry_is_expired(1000.0, 0, now=1000.0) is True
+
+    @pytest.mark.parametrize("ttl", [1, 31, 3600, 86400])
+    def test_helper_matches_positive_ttl_boundary_semantics(self, ttl):
+        """Positive TTLs retain the strict expiry boundary."""
         from mozaiksai.core.auth.cache_ttl import cache_entry_is_expired
 
         assert cache_entry_is_expired(1000.0, ttl, now=1000.0 + ttl) is False
@@ -2793,3 +2809,99 @@ class TestConstructorSignatureBinding:
         signature = inspect.signature(namespace["_probe"])
         ok, _ = reg._bind_invocation(signature, mode)
         assert ok is expected
+
+
+# ---------------------------------------------------------------------------
+# Resolving the environment of a host that runs in another process
+# ---------------------------------------------------------------------------
+
+
+class TestProspectiveEnvironmentResolution:
+    """``resolve_auth_config(environ=...)`` is the same parser over a mapping,
+    and ``unused_provider_settings`` names provider signals not in effect."""
+
+    def test_a_mapping_is_resolved_instead_of_the_process_environment(self, monkeypatch):
+        from mozaiksai.core.auth.adapters.registry import resolve_auth_config
+
+        _set_matrix_env(
+            monkeypatch, {"AUTH_ENABLED": "true", "SUPABASE_URL": "https://x.supabase.co"}
+        )
+
+        prospective = resolve_auth_config(environ={"ENV": "development", "AUTH_ENABLED": "false"})
+
+        assert (prospective.provider, prospective.source) == ("none", "explicit_disable")
+        assert prospective.environment.name == "development"
+        assert prospective.settings["SUPABASE_URL"] == ""
+        assert resolve_auth_config().provider == "supabase"
+
+    @pytest.mark.parametrize(
+        ("environ", "message"),
+        [
+            ({"ENV": "production", "AUTH_ENABLED": "false"}, "not permitted in the 'production'"),
+            ({"ENV": "development", "ENVIRONMENT": "production"}, "Conflicting deployment environment"),
+            ({"AUTH_ENABLED": "flase"}, "Unrecognized AUTH_ENABLED"),
+            ({"AUTH_ENABLED": "true"}, "no authentication provider"),
+        ],
+    )
+    def test_a_mapping_is_held_to_the_same_fail_closed_rules(self, environ, message):
+        from mozaiksai.core.auth.adapters.registry import resolve_auth_config
+
+        with pytest.raises(AuthError, match=message):
+            resolve_auth_config(environ=environ)
+
+    @pytest.mark.parametrize(
+        ("environ", "unused"),
+        [
+            ({"AUTH_ENABLED": "false"}, ()),
+            (
+                {"AUTH_ENABLED": "false", "KEYCLOAK_URL": "https://idp", "KEYCLOAK_REALM": "apps"},
+                ("KEYCLOAK_URL", "KEYCLOAK_REALM"),
+            ),
+            ({"AUTH_PROVIDER": "none", "SUPABASE_URL": "https://x.supabase.co"}, ("SUPABASE_URL",)),
+            # Half a provider signal selects nothing: demo mode, signal unused.
+            ({"AUTH_ISSUER": "https://idp"}, ("AUTH_ISSUER",)),
+            # Claim mappings and other provider tuning are not provider signals.
+            ({"AUTH_ENABLED": "false", "AUTH_ALGORITHMS": "RS256", "AUTH_AUDIENCE": "api"}, ()),
+            (
+                {
+                    "AUTH_ENABLED": "true",
+                    "KEYCLOAK_URL": "https://idp",
+                    "KEYCLOAK_REALM": "apps",
+                    "KEYCLOAK_CLIENT_ID": "api",
+                    "AUTH_ISSUER": "https://idp",
+                },
+                (),
+            ),
+        ],
+    )
+    def test_unused_provider_settings_names_signals_that_are_not_in_effect(self, environ, unused):
+        from mozaiksai.core.auth.adapters.registry import (
+            resolve_auth_config,
+            unused_provider_settings,
+        )
+
+        assert unused_provider_settings(resolve_auth_config(environ=environ)) == unused
+
+    def test_provider_signals_are_exactly_what_auto_detection_reads(self):
+        """Guards the signal list against drifting from the resolver."""
+        import mozaiksai.core.auth.adapters.registry as reg
+
+        audience = {"AUTH_AUDIENCE": "api", "KEYCLOAK_CLIENT_ID": "api"}
+        selecting = {
+            ("SUPABASE_URL",): "supabase",
+            ("KEYCLOAK_URL", "KEYCLOAK_REALM"): "keycloak",
+            ("AUTH_JWKS_URL", "AUTH_ISSUER"): "jwt",
+            ("MOZAIKS_OIDC_DISCOVERY_URL",): "jwt",
+            ("MOZAIKS_OIDC_AUTHORITY",): "jwt",
+        }
+        for names, provider in selecting.items():
+            signal = dict.fromkeys(names, "https://idp.example.invalid")
+            assert reg.resolve_auth_config(environ={**audience, **signal}).provider == provider
+            for dropped in names:
+                rest = {name: value for name, value in signal.items() if name != dropped}
+                assert reg.resolve_auth_config(environ={**audience, **rest}).provider == "none"
+
+        assert {name for names in selecting for name in names} == set(reg._PROVIDER_SIGNAL_ENV_VARS)
+        mode = set(reg._AUTH_MODE_ENV_VARS)
+        for name in set(reg._ALL_AUTH_ENV_VARS) - mode - set(reg._PROVIDER_SIGNAL_ENV_VARS):
+            assert reg.resolve_auth_config(environ={name: "60"}).provider == "none", name

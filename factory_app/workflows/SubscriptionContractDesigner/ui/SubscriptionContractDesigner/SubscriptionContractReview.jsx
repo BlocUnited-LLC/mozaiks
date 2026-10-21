@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Button, Metric, Panel, StatusPill } from '@mozaiks/chat-ui/ui';
 
 function asList(value) {
@@ -153,14 +153,9 @@ export default function SubscriptionContractReview({ payload = {}, onResponse })
   const contractRequired = Boolean(payload.contract_required);
   const canRequestChanges = changeText.trim().length > 0 && submitted !== 'changes_requested';
 
-  const summary = useMemo(() => {
-    if (!contractRequired) {
-      return 'No app-owned subscription contract is required for this build.';
-    }
-    return payload.review_boundary?.summary || (
-      'This confirms the provider-neutral subscription contract for downstream app generation.'
-    );
-  }, [contractRequired, payload.review_boundary]);
+  const summary = payload.review_boundary?.summary || (
+    'This confirms the provider-neutral subscription contract for downstream app generation.'
+  );
 
   function confirmContract() {
     setSubmitted('confirmed');
@@ -182,6 +177,70 @@ export default function SubscriptionContractReview({ payload = {}, onResponse })
     });
   }
 
+  const changeRequestFields = (
+    <>
+      <textarea
+        aria-label="Requested changes"
+        value={changeText}
+        onChange={(event) => setChangeText(event.target.value)}
+        placeholder="Describe what should change before continuing."
+        rows={3}
+        className="min-h-[84px] rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary"
+        data-testid="subscription-contract-change-request"
+      />
+      <Button
+        variant="secondary"
+        disabled={!canRequestChanges}
+        onClick={requestChanges}
+        data-testid="request-subscription-contract-changes-cta"
+      >
+        {submitted === 'changes_requested' ? 'Changes Requested' : 'Request Changes'}
+      </Button>
+    </>
+  );
+
+  if (!contractRequired) {
+    return (
+      <Panel className="max-w-2xl">
+        <h2 className="break-words text-xl font-semibold text-foreground">
+          {payload.app_name || payload.app_id || 'Generated App'}
+        </h2>
+        <h3 className="mt-4 text-sm font-semibold text-foreground">No subscriptions</h3>
+        <p className="mt-1 text-sm text-muted-foreground">
+          No subscription plans are needed for this app.
+        </p>
+        <div className="mt-4">
+          <Button
+            variant="primary"
+            disabled={submitted === 'confirmed'}
+            onClick={confirmContract}
+            data-testid="confirm-subscription-contract-cta"
+          >
+            {submitted === 'confirmed' ? 'Confirmed' : 'Continue'}
+          </Button>
+        </div>
+        <details className="mt-4 border-t border-border/60 pt-3">
+          <summary className="cursor-pointer text-sm text-muted-foreground">Request changes</summary>
+          <div className="mt-3 flex flex-col gap-3">{changeRequestFields}</div>
+        </details>
+        {(payload.rationale || validationNotes.length > 0 || forbiddenOutputs.length > 0) && (
+          <details className="mt-3 border-t border-border/60 pt-3">
+            <summary className="cursor-pointer text-sm text-muted-foreground">Technical details</summary>
+            <div className="mt-3 flex flex-col gap-3 break-words">
+              {payload.rationale && <p className="text-sm text-muted-foreground">{payload.rationale}</p>}
+              {validationNotes.length > 0 && (
+                <Section title="Validation Notes"><TextList items={validationNotes} /></Section>
+              )}
+              {forbiddenOutputs.length > 0 && (
+                <Section title="Guardrails"><TextList items={forbiddenOutputs} /></Section>
+              )}
+            </div>
+          </details>
+        )}
+      </Panel>
+    );
+  }
+
   return (
     <Panel className="max-w-5xl">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
@@ -198,9 +257,7 @@ export default function SubscriptionContractReview({ payload = {}, onResponse })
             </p>
           )}
         </div>
-        <StatusPill tone={contractRequired ? 'warning' : 'success'}>
-          {contractRequired ? 'Contract Required' : 'No Contract Needed'}
-        </StatusPill>
+        <StatusPill tone="warning">Contract Required</StatusPill>
       </div>
 
       <div className="mb-4 rounded-lg border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning">
@@ -214,7 +271,6 @@ export default function SubscriptionContractReview({ payload = {}, onResponse })
         <Metric label="Gated Actions" value={moduleGates.length} />
       </div>
 
-      {contractRequired ? (
         <div className="flex flex-col gap-4">
           <Section title="Subscription Plans">
             <div className="grid gap-3">
@@ -308,14 +364,6 @@ export default function SubscriptionContractReview({ payload = {}, onResponse })
             </Section>
           )}
         </div>
-      ) : (
-        <Section title="No Subscription Contract">
-          <p className="text-sm text-muted-foreground">
-            Downstream generation should not create subscription settings, billing facades,
-            token wallets, entitlement gates, or usage-metered workflow changes for this build.
-          </p>
-        </Section>
-      )}
 
       {validationNotes.length > 0 && (
         <Section title="Validation Notes">
@@ -330,12 +378,6 @@ export default function SubscriptionContractReview({ payload = {}, onResponse })
       )}
 
       <div className="mt-4 rounded-lg border border-border/60 bg-background/60 p-4">
-        {/* With no contract there is nothing to attest to. Asking someone to
-            tick "this subscription plan contract matches what the user wants"
-            when the screen above reads "No app-owned subscription contract is
-            required for this build" - zero plans, zero wallets, zero gated
-            actions - is a blocking gate over an empty decision. */}
-        {contractRequired ? (
           <label className="flex items-start gap-3 text-sm text-foreground">
             <input
               type="checkbox"
@@ -350,43 +392,20 @@ export default function SubscriptionContractReview({ payload = {}, onResponse })
               it does not charge anyone, assign customers, or credit tokens.
             </span>
           </label>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            Nothing to approve here - this build has no subscription contract.
-            You can still ask for one below.
-          </p>
-        )}
 
         <div className="mt-4 flex flex-col gap-3">
           <Button
             variant="primary"
-            disabled={(contractRequired && !confirmed) || submitted === 'confirmed'}
+            disabled={!confirmed || submitted === 'confirmed'}
             onClick={confirmContract}
             data-testid="confirm-subscription-contract-cta"
           >
             {submitted === 'confirmed'
               ? 'Confirmed'
-              : contractRequired
-                ? 'Confirm Subscription Plan Contract'
-                : 'Continue'}
+              : 'Confirm Subscription Plan Contract'}
           </Button>
 
-          <textarea
-            value={changeText}
-            onChange={(event) => setChangeText(event.target.value)}
-            placeholder="Describe what should change before continuing."
-            rows={3}
-            className="min-h-[84px] rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary"
-            data-testid="subscription-contract-change-request"
-          />
-          <Button
-            variant="secondary"
-            disabled={!canRequestChanges}
-            onClick={requestChanges}
-            data-testid="request-subscription-contract-changes-cta"
-          >
-            {submitted === 'changes_requested' ? 'Changes Requested' : 'Request Changes'}
-          </Button>
+          {changeRequestFields}
         </div>
       </div>
     </Panel>

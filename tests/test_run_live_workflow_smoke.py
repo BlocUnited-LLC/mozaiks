@@ -155,19 +155,14 @@ def test_build_trigger_meta_pins_only_an_explicit_journey() -> None:
     }
 
 
-def test_build_uvicorn_config_defaults_to_lifespan_off() -> None:
+def test_build_uvicorn_config_runs_the_host_lifespan() -> None:
     config = _build_uvicorn_config(object(), 9001)
 
     assert config.host == "127.0.0.1"
     assert config.port == 9001
     assert config.access_log is False
-    assert config.lifespan == "off"
-
-
-def test_build_uvicorn_config_allows_lifespan_override() -> None:
-    config = _build_uvicorn_config(object(), 9001, lifespan="auto")
-
-    assert config.lifespan == "auto"
+    assert config.lifespan == "on"
+    assert config.timeout_graceful_shutdown is not None
 
 
 def test_load_tool_response_file_reads_scripted_replies_and_structured_payloads(tmp_path: Path) -> None:

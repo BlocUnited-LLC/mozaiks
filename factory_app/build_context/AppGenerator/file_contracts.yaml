@@ -16,14 +16,20 @@ description: >
 
   Authenticated app scaffolds are emitted idempotently through save_auth_scaffold
   before every app validation, outside AppBuildPlan build_tasks. config/auth.yaml
-  validates against the shared mozaiks.auth.v1 model; ui/auth/authAdapter.js
+  cannot be owned or emitted by a generated build task; admitted auth or the
+  canonical scaffold supplies permission choices for generated actions. The
+  auth contract validates against the shared mozaiks.auth.v1 model;
+  ui/auth/authAdapter.js
   delegates to @mozaiks/chat-ui/auth. Do not generate OIDC, token storage, or
   local demo identity implementations. Backend configuration selects auth mode.
+  The optional Android client uses the canonical frontend.android env handles;
+  never replace the browser client, issuer, or API audience to enable mobile.
+  Native client registration belongs to the host/operator, not generated code.
 
 task_contracts:
   page_bundle:
     owner_agent: AppSchemaAgent
-    summary: Declarative persistent app UI bundle for the page_bundle task.
+    summary: Persistent app UI through declarative pages or the bounded custom route bundle.
     required_outputs:
       - ui/pages/*.yaml
     optional_outputs:
@@ -39,7 +45,9 @@ task_contracts:
       - config/asset_manifest.json
     hard_constraints:
       - Persistent app pages stay declarative by default.
+      - Stateful local interactions such as start/pause/resume/reset timers, canvas input, and playable controls require the existing custom_react_page surface when shipped primitives cannot express their behavior. A Metric is display-only; never invent timer or action fields on it. The page_bundle owns the route-derived ui/pages/custom/<stem>.jsx plus ui/route_manifest.json and ui/index.js together; ordinary pages remain YAML.
       - Page filenames are case-sensitive lowercase identities derived by the canonical materializer from the final route segment (or the page name for /), with non-alphanumeric runs replaced by underscores. Copy exact planner-injected paths into owned_paths; display titles are not filenames. Never emit both uppercase and lowercase variants.
+      - AppPageSchema.name is a page identity, never a path. Use a plain filename basename without /, backslash, colon, or control characters; keep display punctuation in title. Standalone schema saves reject paths that escape the generated app root.
       - Emit exactly the current task's owned_paths. Required page outputs apply only to pages in that scope; a manifest-only task may emit pages as an empty list.
       - AppSchemaOutput.manifest is AppManifest or explicit null. A task owning app.json must emit AppManifest; otherwise emit null, which materializes neither app.json nor provenance.yaml. Do not emit a placeholder manifest or silently discard out-of-scope files.
       - New-app page_bundle tasks collectively own app.json and every planned page, with one manifest owner. Page-only revisions preserve app.json and unchanged pages from the verified baseline; full-bundle acceptance still requires a complete valid app. Standalone save_app_schema requires a non-null manifest.
@@ -64,9 +72,9 @@ task_contracts:
       - Pages that require reading URL query params on mount, polling an endpoint until state changes, or rendering conditional sections based on API response value must use custom_route_bundle; they cannot be expressed as declarative AppPageSchema.
       - A post-redirect confirmation page must not display confirmed/success state from the redirect URL alone. Confirmation must come from querying an app-owned module action after the backend has processed the event.
       - The model never writes endpoint URLs. Code renders api_endpoint for section reads and href for submit/delete from typed data_source pairs. Page-level filters, pagination limits, and record identifiers must go in payload or the module action input schema.
-      - Custom route JSX must call module actions through moduleAction() imported from ui/lib/moduleApi.js. This file is always present in the generated bundle. Do not write raw fetch() calls to /api/modules/** directly in page components.
+      - Custom route JSX must call module actions through the named moduleAction export from ui/lib/moduleApi.js (no default export). Assembly includes this helper before validation. Do not write raw fetch() calls to /api/modules/** directly in page components.
       - Custom route error handling must use err.error_code (and err.code) from the caught error object to branch on backend states. The generated moduleApi.js preserves structured error fields on thrown errors. Do not parse raw response text or HTTP status codes to infer error state.
-      - Custom routes that launch LLM-backed or token-metered actions/workflows must detect INSUFFICIENT_TOKENS with isInsufficientTokensError(err), navigate to insufficientTokensRecoveryPath(err), and return without retrying automatically.
+      - Custom routes that launch LLM-backed or token-metered actions/workflows must detect INSUFFICIENT_TOKENS with isInsufficientTokensError(err), call insufficientTokensRecoveryPath(err), and navigate only when it returns a route. If it returns null, stay on the current page with inline administrator-contact guidance. Return without automatically retrying; never navigate to null.
       - Custom routes that call entitlement-gated module actions must detect ENTITLEMENT_REQUIRED with isEntitlementRequiredError(err), navigate to entitlementUpgradePath(err), and return without retrying automatically. Both helpers are exported from ui/lib/moduleApi.js.
 
   module_contract:
@@ -110,6 +118,7 @@ task_contracts:
       - YAML declares the contract; downstream agents implement Python and JS stubs.
       - actions[].api_surface is part of the module contract. Use public or public_readonly only for anonymous-safe HTTP actions. Omit it or use null for authenticated UI/API actions. Internal/admin_internal actions reject every HTTP request, including authenticated requests; use them only for event reactions or trusted runtime dispatch, never page bindings.
       - Public/public_readonly actions are only anonymous entrypoints; they still dispatch with an enforce-mode authority carrying a concrete (possibly empty) permission set and still run actions[].permissions and actions[].entitlement_gate checks.
+      - Generated action permissions must resolve against admitted config/auth.yaml frontend.default_scopes, or the canonical webapp_builder auth scaffold when the approved plan or data ownership requires authentication and the auth file is not yet materialized. Module permission declarations and plan roles are not grant mappings; candidate auth edits cannot approve themselves. Unresolved restrictions fail task admission, repair persistence, and final materialization with module/action/permission diagnostics and declared scope choices. Preserve custom restrictions and repair against approved policy; never strip them or substitute unrelated scopes to make validation pass. Canonical CRUD normalization remains a separate code-owned policy. Requested scopes still require actual issuer grants at runtime.
       - External HTTP dispatch and internal runtime dispatch are separate paths. Internal event reactions may use api_surface=internal and permissions=[] because the event bus is the authorization boundary; do not mark internal reaction handlers public.
       - contracts/reactions.yaml target.kind may be handler, capability, notification, or service_adapter. service_adapter targets must declare target.adapter and target.adapter_method, point only to app-owned services/adapters/* support code, and must not be used to bypass facade modules, module state ownership, or managed-provider boundaries.
       - Emit contracts/reactions.yaml when approved scope declares an incoming, self, platform, or generated-workflow-triggered reaction. The typed reactions_yaml field is required for every emitted file. Do not infer reaction requirements from free-form text or from an empty outgoing event list.
@@ -139,6 +148,7 @@ task_contracts:
       - backend/schemas.py owns typed DTO/document shapes and pure helpers. For modules owning data_contract collections it is rendered by code and contains record TypedDicts, field constants, serialize_<entity> allowlists, create/update value helpers and id generation. Records are plain dicts.
       - Code renders canonical create_<entity>/update_<entity>/delete_<entity> actions and implementations for every collection whose lifecycle.write_mode is module_action. Create assigns the declared id (search_by) and stamps declared created_at/updated_at fields; update and delete address records by the declared id and return 404 outside the caller's scope; the runtime scopes and stamps ownership. ServiceAgent adds business logic only through optional module-level hooks in service.py (before_/after_ create/update/delete_<entity>), custom mutations and custom reads written against the rendered repo API.
       - Canonical actions carry no role permissions. Authored permissions or api_surface on owner-scoped canonical actions are removed with a logged normalization; on app_wide collections they fail closed because config/auth.yaml declares no role grants.
+      - Leave actions[].timeout_seconds null or absent for ordinary actions. A declared async background operation may set an integer budget from 1 through 3600 seconds. Runtime registration owns this budget; request params never override it. Services own cancellation cleanup and durable recovery, including lease margins beyond cleanup.
       - Runtime persistence owns collection tenancy enforcement. backend/policy.py provides optional deterministic ownership preflight helpers.
       - Code derives backend/policy.py from approved tenancy and owner_field, reading immutable ctx.persistence.principal identity. Additional permission checks belong in service.py. Generated modules must not trust request-supplied tenant_id, workspace_id, or user_id params as authorization.
       - backend/repo.py may use ctx.persistence.collection(module_id, collection_name) for generated module persistence.
@@ -175,6 +185,7 @@ task_contracts:
       - modules/{module_id}/backend/policy.py
       - modules/{module_id}/backend/schemas.py
     hard_constraints:
+      - The approved data/contract.json serializer has task_type=persistence_contract, surface_id=data_contract, surface_kind=module, capability_pack_id=null, initial_agent=DatabaseAgent, and owned_paths containing only data/contract.json. It is app-level structural work, not a new capability or module. Preserve the approved data work when correcting task labels; separately approved migrations use data_migrations tasks with their owning capability.
       - data_contract is the canonical source of truth for durable generated app collections.
       - data/contract.json is the exported app artifact for that bundle.
       - Any per_user or per_workspace collection deterministically requires app.json.authRequired=true and the canonical auth scaffold. AppSchema manifest auth intent cannot make an owned app public.
@@ -358,7 +369,7 @@ backend_helper_files:
     startup_service:
       required_stub: backend/{worker_file}.py
       service_class: "{ServiceClass}"
-      note: Must be declared in python_stubs before backend implementation generates it.
+      note: Must be declared in python_stubs before backend implementation generates it; profile is null for the ordinary host or worker for an explicitly separate worker process.
 
   event_pipeline_conventions:
     description: >

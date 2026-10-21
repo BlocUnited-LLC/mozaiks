@@ -22,8 +22,11 @@ import { getAppStudioSnapshot } from './appStudioDataHelpers.js'
 import {
   getApprovalStateLabel,
   getAppPrimaryAction,
+  getAppLifecycleLabel,
+  getAppStatusTone,
   getLifecycleGuidance,
   getPlanStateLabel,
+  isAppInBuild,
   normalizeAppStatus,
 } from './appStudioModel.js'
 import { DEFAULT_ANALYTICS_PERIOD, buildInsightItems } from './analyticsModel.js'
@@ -112,8 +115,8 @@ function formatPercentLabel(value, fallback = 'Pending') {
 }
 
 function formatMarginLabel(revenue, cost) {
-  if (revenue == null && cost == null) return 'Pending'
-  return formatCurrencyValue(Number(revenue || 0) - Number(cost || 0), '$0.00')
+  if (revenue == null || cost == null) return 'Pending'
+  return formatCurrencyValue(revenue - cost, 'Pending')
 }
 
 function buildDashboardMetrics(snapshot, totalCost, totalRuns) {
@@ -150,8 +153,8 @@ function buildDashboardMetrics(snapshot, totalCost, totalRuns) {
     app.total_users,
   )
   const llmCalls = readNumber(usageTotals.llm_calls, snapshot.usageRecord?.llm_calls)
-  const margin = revenue == null && totalCost == null ? null : Number(revenue || 0) - Number(totalCost || 0)
-  const marginRate = revenue && revenue > 0 ? (margin / revenue) * 100 : null
+  const margin = revenue == null || totalCost == null ? null : revenue - totalCost
+  const marginRate = margin != null && revenue > 0 ? (margin / revenue) * 100 : null
 
   return {
     revenue,
@@ -169,7 +172,7 @@ function buildDashboardMetrics(snapshot, totalCost, totalRuns) {
 
 // ─── Next Step Callout ────────────────────────────────────────────────────────
 
-function NextStepCallout({ nextStep, action }) {
+function NextStepCallout({ nextStep, action, onRefresh }) {
   if (!nextStep && !action) return null
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-primary/25 bg-primary/6 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
@@ -177,11 +180,14 @@ function NextStepCallout({ nextStep, action }) {
         <div className="text-[10px] font-semibold uppercase tracking-widest text-primary/55">Next step</div>
         <p className="mt-1 text-sm leading-relaxed text-foreground">{nextStep}</p>
       </div>
-      {action?.href && action?.label ? (
-        <LinkButton to={action.href} variant="secondary" size="sm" className="shrink-0 font-semibold">
-          {action.label}
-        </LinkButton>
-      ) : null}
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
+        {action?.href && action?.label ? (
+          <LinkButton to={action.href} variant="secondary" size="sm" className="font-semibold">
+            {action.label}
+          </LinkButton>
+        ) : null}
+        {onRefresh ? <ActionButton variant="outline" size="sm" onClick={onRefresh}>Refresh</ActionButton> : null}
+      </div>
     </div>
   )
 }
@@ -248,7 +254,7 @@ const KPI_ICONS = {
 function KpiCard({ id, label, value, detail }) {
   const Icon = KPI_ICONS[id]
   return (
-    <div className="flex flex-col gap-2 overflow-hidden rounded-xl border border-border/50 bg-card/70 px-5 py-4 shadow-sm shadow-black/4">
+    <div role="group" aria-label={label} className="flex flex-col gap-2 overflow-hidden rounded-xl border border-border/50 bg-card/70 px-5 py-4 shadow-sm shadow-black/4">
       <div className="flex items-center gap-1.5 text-muted-foreground/65">
         {Icon && <Icon className="h-3.5 w-3.5 shrink-0" />}
         <span className="text-[11px] font-semibold uppercase tracking-wider">{label}</span>
@@ -277,11 +283,12 @@ function KpiGrid({ items }) {
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
-function BuildStatusPanel({ build, latestArtifact, isApprovalPending, appId }) {
+function BuildStatusPanel({ build, currentBuildRun, latestArtifact, isApprovalPending, appId }) {
   const hasRequest = !!build.current_request?.text
-  const approvalState = build.approval_state
-  const planState = build.plan_state
-  const hasContent = hasRequest || latestArtifact || approvalState || planState
+  const approvalState = build.approval_state === 'not_started' ? null : build.approval_state
+  const planState = build.plan_state === 'not_started' ? null : build.plan_state
+  const hasContent = hasRequest || latestArtifact || approvalState || planState || currentBuildRun
+  const workflowLabel = currentBuildRun?.active_workflow_id?.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ')
 
   return (
     <Panel
@@ -289,8 +296,21 @@ function BuildStatusPanel({ build, latestArtifact, isApprovalPending, appId }) {
       eyebrow={isApprovalPending ? 'Action needed' : null}
       subtitle={isApprovalPending
         ? 'Review the current plan and respond before the build can progress.'
-        : 'Current request and artifact state.'}
+        : currentBuildRun ? 'Latest saved build progress.' : 'Current request and artifact state.'}
     >
+      {currentBuildRun ? (
+        <div className="mb-3 space-y-2">
+          {currentBuildRun.status ? (
+            <StatusPill tone={getAppStatusTone(currentBuildRun.status)}>
+              {getAppLifecycleLabel(currentBuildRun.status)}
+            </StatusPill>
+          ) : null}
+          {workflowLabel ? <p className="text-sm text-foreground">Current step: {workflowLabel}</p> : null}
+          {currentBuildRun.updated_at ? (
+            <p className="text-xs text-muted-foreground">Updated {formatRelativeTime(currentBuildRun.updated_at)}</p>
+          ) : null}
+        </div>
+      ) : null}
       {hasRequest ? (
         <p className="text-sm leading-6 text-foreground">{build.current_request.text}</p>
       ) : latestArtifact ? (
@@ -314,7 +334,7 @@ function BuildStatusPanel({ build, latestArtifact, isApprovalPending, appId }) {
         </div>
       ) : !hasContent ? (
         <p className="text-sm text-muted-foreground">
-          No build sessions yet. Start a build to track artifact history and approval state here.
+          No build details are available.
         </p>
       ) : null}
 
@@ -324,11 +344,11 @@ function BuildStatusPanel({ build, latestArtifact, isApprovalPending, appId }) {
           <div className="flex flex-wrap items-center gap-2">
             {approvalState && (
               <StatusPill tone={approvalTone(approvalState)}>
-                {getApprovalStateLabel(approvalState)}
+                Approval: {getApprovalStateLabel(approvalState)}
               </StatusPill>
             )}
             {planState && (
-              <StatusPill tone="default">{getPlanStateLabel(planState)}</StatusPill>
+              <StatusPill tone="default">Plan: {getPlanStateLabel(planState)}</StatusPill>
             )}
             {latestArtifact && hasRequest && (
               <StatusPill tone={validationTone(latestArtifact.validation_status)}>
@@ -351,7 +371,7 @@ function ActivityPanel({ snapshot, latestRun, totalRuns, appId }) {
         <div className="flex flex-col gap-0.5">
           <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/65">Chats</span>
           <span className="text-2xl font-bold tracking-tight text-foreground">
-            {formatCompactNumber(totalRuns, '0')}
+            {formatCompactNumber(totalRuns, 'Pending')}
           </span>
           <span className="text-xs text-muted-foreground/60">
             {latestRun ? formatRelativeTime(latestRun.started_at) : 'No runs yet'}
@@ -600,16 +620,25 @@ export default function AppOverviewPage() {
     || latestArtifact?.metadata?.carry_forward_report
     || null
   const latestRun = snapshot.runs[0] || null
-  const totalCost = Number(snapshot.usage?.totals?.estimated_cost_usd || 0)
-  const totalRuns = Number(snapshot.stats?.tracked_chats || 0)
+  const totalCost = readNumber(snapshot.usage?.totals?.estimated_cost_usd)
+  const totalRuns = readNumber(snapshot.stats?.tracked_chats)
 
   const lifecycle = normalizeAppStatus(snapshot.lifecycleState)
-  const isDraft = lifecycle === 'draft' && !latestArtifact && !build.current_request?.text
+  const currentBuildRun = snapshot.app.current_build_run?.build_id ? snapshot.app.current_build_run : null
+  const isBuilding = isAppInBuild(lifecycle)
+  const isDraft = lifecycle === 'draft' && !currentBuildRun && !latestArtifact && !build.current_request?.text
   const isApprovalPending = build.approval_state === 'pending'
   const isApprovalRejected = build.approval_state === 'rejected'
 
-  const primaryAction = getAppPrimaryAction(snapshot.app)
-  const nextStep = getLifecycleGuidance(lifecycle)
+  const appAction = getAppPrimaryAction(snapshot.app)
+  const primaryAction = appAction.href === `/apps/${encodeURIComponent(appId)}/overview` ? null : appAction
+  const nextStep = primaryAction?.kind === 'review'
+    ? 'Preview your saved version, request changes, then accept and activate it when ready.'
+    : isBuilding
+    ? primaryAction?.kind === 'build'
+      ? 'Open the build conversation to follow progress, review results, and respond when needed.'
+      : 'Open Building to review saved progress. A build conversation link is not available.'
+    : getLifecycleGuidance(lifecycle)
   const dashboardMetrics = buildDashboardMetrics(snapshot, totalCost, totalRuns)
 
   // The deterministic analytics service is the single authority for these
@@ -648,7 +677,7 @@ export default function AppOverviewPage() {
     {
       id: 'cost',
       label: 'Runtime Cost',
-      value: formatCurrencyValue(dashboardMetrics.cost, totalRuns > 0 ? '$0.00' : 'Pending'),
+      value: formatCurrencyValue(dashboardMetrics.cost, 'Pending'),
       detail: totalRuns > 0 ? `${formatCompactNumber(totalRuns, '0')} chats` : null,
     },
     {
@@ -666,7 +695,7 @@ export default function AppOverviewPage() {
     {
       id: 'chats',
       label: 'Chats',
-      value: formatCompactNumber(dashboardMetrics.chats, '0'),
+      value: formatCompactNumber(dashboardMetrics.chats, 'Pending'),
       detail: dashboardMetrics.llmCalls != null ? `${formatCompactNumber(dashboardMetrics.llmCalls, '0')} LLM calls` : null,
     },
   ]
@@ -681,17 +710,17 @@ export default function AppOverviewPage() {
           dataMode={dataMode}
           showBanner
           title="Overview"
-          subtitle="Top-level performance, cost, access, usage, and build state."
+          subtitle={isBuilding ? null : 'Performance, usage, and build history.'}
           summaryItems={[]}
-          actions={[{ id: 'refresh', label: 'Refresh', variant: 'outline' }]}
+          actions={isBuilding ? null : [{ id: 'refresh', label: 'Refresh', variant: 'outline' }]}
           onAction={(id) => id === 'refresh' && refresh()}
         />
 
-        {nextStep && <NextStepCallout nextStep={nextStep} action={primaryAction} />}
+        {nextStep && <NextStepCallout nextStep={nextStep} action={primaryAction} onRefresh={isBuilding ? refresh : null} />}
 
-        <KpiGrid items={kpiItems} />
+        {!isBuilding && <KpiGrid items={kpiItems} />}
 
-        {appInsights.length > 0 && <InsightList items={appInsights} />}
+        {!isBuilding && appInsights.length > 0 && <InsightList items={appInsights} />}
 
         {isApprovalPending && (
           <Alert variant="warning">
@@ -706,26 +735,43 @@ export default function AppOverviewPage() {
 
         {isDraft ? (
           <StudioInlineEmptyState
-            title="No builds yet"
-            description="Capture the first app brief to begin tracking this app through the build lifecycle. Artifact history, approval state, and runtime metrics will appear here once a build starts."
+            title="Build details are not available"
+            description="Open Building to review this app's build history."
           />
         ) : (
-          <div className="grid gap-5 xl:grid-cols-3">
+          <div className={isBuilding ? '' : 'grid gap-5 xl:grid-cols-3'}>
             <BuildStatusPanel
               build={build}
+              currentBuildRun={currentBuildRun}
               latestArtifact={latestArtifact}
               isApprovalPending={isApprovalPending}
               appId={appId}
             />
-            <AppIntelligencePanel context={data.context} appId={appId} />
-            <ActivityPanel
+            {!isBuilding && <AppIntelligencePanel context={data.context} appId={appId} />}
+            {!isBuilding && <ActivityPanel
               snapshot={snapshot}
               latestRun={latestRun}
               totalRuns={totalRuns}
               appId={appId}
-            />
+            />}
           </div>
         )}
+
+        {isBuilding ? (
+          <details className="rounded-xl border border-border/50 bg-card/70">
+            <summary className="cursor-pointer px-5 py-4 text-sm font-medium text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
+              Runtime and source details
+            </summary>
+            <div className="space-y-5 px-5 pb-5">
+              <KpiGrid items={kpiItems} />
+              {appInsights.length > 0 && <InsightList items={appInsights} />}
+              <div className="grid gap-5 lg:grid-cols-2">
+                <AppIntelligencePanel context={data.context} appId={appId} />
+                <ActivityPanel snapshot={snapshot} latestRun={latestRun} totalRuns={totalRuns} appId={appId} />
+              </div>
+            </div>
+          </details>
+        ) : null}
 
         {cfReport && <CarryForwardReportPanel report={cfReport} />}
 

@@ -9,7 +9,7 @@ export function useFailedWorkflowRetry({ appId, userId, chatId, workflowName, su
   const currentScope = useRef(scope);
   currentScope.current = scope;
   const request = useRef(null);
-  const [failedScope, setFailedScope] = useState(null);
+  const [failedSession, setFailedSession] = useState(null);
   const [attemptScope, setAttemptScope] = useState(null);
   const [launchedScope, setLaunchedScope] = useState(null);
   const { startWorkflow, starting, error } = useWorkflowStart();
@@ -21,12 +21,16 @@ export function useFailedWorkflowRetry({ appId, userId, chatId, workflowName, su
   const observeSessionMeta = useCallback((meta) => {
     if (currentScope.current !== scope || !meta || meta.chat_id !== chatId
       || meta.app_id !== appId || meta.workflow_name !== workflowName) return;
-    setFailedScope(meta.exists !== false && meta.chat_exists !== false
-      && isFailedWorkflowSession(meta.status) ? scope : null);
+    setFailedSession(meta.exists !== false && meta.chat_exists !== false
+      && isFailedWorkflowSession(meta.status) ? {
+        scope,
+        message: typeof meta.failure_message === 'string' && meta.failure_message.trim()
+          ? meta.failure_message : null,
+      } : null);
   }, [scope, appId, chatId, workflowName]);
 
   const available = Boolean(surface === 'studio' && mode === 'workflow' && !blocked
-    && appId && userId && chatId && workflowName && failedScope === scope);
+    && appId && userId && chatId && workflowName && failedSession?.scope === scope);
   const retry = useCallback(async () => {
     // A ref closes the same-tick double-click window before React renders disabled.
     if (!available || currentScope.current !== scope || request.current || launchedScope === scope) return null;
@@ -50,6 +54,7 @@ export function useFailedWorkflowRetry({ appId, userId, chatId, workflowName, su
   return {
     observeSessionMeta,
     available,
+    failureMessage: available ? failedSession.message : null,
     retry,
     starting: (starting && attemptScope === scope) || launchedScope === scope,
     error: attemptScope === scope ? error : null,

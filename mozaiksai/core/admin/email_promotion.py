@@ -2,14 +2,24 @@
 # FILE: mozaiksai/core/admin/email_promotion.py
 # DESCRIPTION: Email-based admin role promotion.
 #
-# If a logged-in user's email is listed in app.json "admins", they
-# receive the "admin" role at request time — no auth provider configuration
-# required. This is the primary way app builders access the admin portal.
+# If a logged-in user's email is listed in app.json "admins" and the identity
+# provider verified that email (a JSON-true email_verified claim, see
+# UserClaims.email_verified), they receive the "admin" role at request time.
+# This is the primary way app builders access the admin portal. An unverified
+# email is never promoted: with self-registration, anyone could sign up with an
+# admin's address first.
 #
 # Priority order for admin access:
 #   1. Auth provider already issued the "admin" role in the JWT  (production)
-#   2. Email matches app.json admins                            (default path)
+#   2. Verified email matches app.json admins                   (default path)
 #   3. AUTH_ANON_ROLES=admin,user in .env                        (dev/no-auth)
+#
+# This module only answers "is this address on the list"; the verified-email
+# requirement is enforced by the admin gate in admin/router.py.
+#
+# Matching is ASCII-only. Case folding non-ASCII text can turn one address into
+# another (the Kelvin sign U+212A lowercases to "k"), so a non-ASCII address,
+# in the token or in app.json, never matches.
 # ==============================================================================
 from __future__ import annotations
 
@@ -36,15 +46,20 @@ def get_admin_emails() -> list[str]:
     try:
         config = json.loads(path.read_text(encoding="utf-8"))
         raw: list[str] = config.get("admins") or []
-        return [e.lower().strip() for e in raw if isinstance(e, str) and e.strip()]
+        return [e.lower().strip() for e in raw if isinstance(e, str) and e.strip() and e.isascii()]
     except Exception as e:
         logger.warning("[admin] Could not read admins from app.json: %s", e)
         return []
 
 
 def is_admin_by_email(email: str | None) -> bool:
-    """Return True if email is in the app.json admins allowlist."""
-    if not email:
+    """Return True if email is in the app.json admins allowlist.
+
+    Membership alone grants nothing: the caller must also require that the
+    identity provider verified the email (``UserPrincipal.email_verified``).
+    A non-ASCII address never matches (see the module header).
+    """
+    if not email or not email.isascii():
         return False
     return email.lower().strip() in get_admin_emails()
 

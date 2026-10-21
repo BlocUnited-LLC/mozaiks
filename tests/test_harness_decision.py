@@ -71,7 +71,10 @@ def test_coding_result_decision_reports_actual_staging_status(status: str) -> No
     decision = FirstPartyHarnessDecisionPolicy().for_coding_result(
         routing_decision=_routing_decision(ChangeClass.PATCH),
         selected_paths=["app/ui/pages/Dashboard.jsx"],
-        result=CodingWorkerResult(eligible=status != "ineligible", status=status),
+        result=CodingWorkerResult(
+            eligible=status != "ineligible", status=status,
+            metadata={"build_record_id": "candidate"} if status == "validated" else {},
+        ),
     )
     assert "applied" not in decision.message.lower()
     assert decision.metadata["coding_status"] == status
@@ -82,6 +85,18 @@ def test_coding_result_decision_reports_actual_staging_status(status: str) -> No
     else:
         assert "no changes staged" in decision.message
         assert decision.metadata["scope_origin"] == "none"
+
+
+@pytest.mark.parametrize("status", ["planned", "failed"])
+def test_saved_unverified_draft_can_be_reviewed_without_claiming_validation(status):
+    decision = FirstPartyHarnessDecisionPolicy().for_coding_result(
+        routing_decision=_routing_decision(ChangeClass.PATCH), selected_paths=["ui/page.json"],
+        result=CodingWorkerResult(eligible=True, status=status, metadata={"build_record_id": "candidate"}),
+    )
+    assert decision.message.startswith("Draft patch saved")
+    assert "no changes staged" not in decision.message
+    assert decision.metadata["scope_origin"] == "staged"
+    assert [action.action_type for action in decision.actions] == ["review_patch"]
 
 
 def test_decision_policy_clarifies_low_confidence_scope() -> None:

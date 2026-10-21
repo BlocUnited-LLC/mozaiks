@@ -29,6 +29,12 @@ from .schemas import (
 
 logger = logging.getLogger(__name__)
 
+_SUPPORT_RELATED_TYPE = "workspace_support.request"
+
+
+def _is_support_thread(thread: dict[str, Any]) -> bool:
+    return thread.get("thread_type") == "support" or thread.get("related_type") == _SUPPORT_RELATED_TYPE
+
 
 class MessageService:
     def __init__(
@@ -42,10 +48,14 @@ class MessageService:
         self.messages = messages or MessageRepo()
         self.reads = reads or ReadStateRepo()
 
-    async def _get_authorized_thread(self, ctx, *, thread_id: str) -> dict[str, Any] | None:
+    async def _get_authorized_thread(
+        self, ctx, *, thread_id: str, allow_support_thread: bool = False
+    ) -> dict[str, Any] | None:
         for query in thread_identity_queries(ctx, thread_id=thread_id):
             thread = await self.threads.get(ctx, query=query)
             if thread:
+                if _is_support_thread(thread) and not allow_support_thread:
+                    return None
                 return thread
         return None
 
@@ -70,7 +80,13 @@ class MessageService:
         related_type: str | None = None,
         related_id: str | None = None,
         metadata: dict[str, Any] | None = None,
+        allow_support_thread: bool = False,
     ) -> dict[str, Any]:
+        if not allow_support_thread and (
+            normalize_thread_type(thread_type) == "support"
+            or normalize_string(related_type) == _SUPPORT_RELATED_TYPE
+        ):
+            raise PermissionError("support threads require a support request")
         created_by = actor_id(ctx)
         resolved_scope_type, resolved_scope_id = resolve_scope(ctx, scope_type=scope_type, scope_id=scope_id)
         resolved_subject_app_id = subject_app_id or (getattr(ctx, "app_id", None) if resolved_scope_type == "app" else None)
@@ -149,6 +165,10 @@ class MessageService:
             query["related_type"] = normalize_string(related_type)
         if related_id:
             query["related_id"] = normalize_string(related_id)
+        if query.get("thread_type") == "support" or query.get("related_type") == _SUPPORT_RELATED_TYPE:
+            return {"threads": [], "total": 0}
+        query.setdefault("thread_type", {"$ne": "support"})
+        query.setdefault("related_type", {"$ne": _SUPPORT_RELATED_TYPE})
         logger.info(
             "messages: list_threads query user_id=%s status=%s thread_type=%s scope_type=%s scope_id=%s subject_app_id=%s related_type=%s related_id=%s",
             actor_id(ctx),
@@ -175,8 +195,11 @@ class MessageService:
         thread_id: str,
         message_limit: int = 50,
         allow_nonparticipant_reader: bool = False,
+        allow_support_thread: bool = False,
     ) -> dict[str, Any]:
-        thread = await self._get_authorized_thread(ctx, thread_id=thread_id)
+        thread = await self._get_authorized_thread(
+            ctx, thread_id=thread_id, allow_support_thread=allow_support_thread
+        )
         if not thread:
             logger.warning("messages: get_thread not found thread_id=%s user_id=%s", thread_id, actor_id(ctx))
             return {"thread": None, "messages": [], "error": "thread not found"}
@@ -212,6 +235,7 @@ class MessageService:
         recipient_ids: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
         allow_nonparticipant_sender: bool = False,
+        allow_support_thread: bool = False,
     ) -> dict[str, Any]:
         clean_body = normalize_string(body)
         if not clean_body:
@@ -226,7 +250,9 @@ class MessageService:
             )
             return {"success": False, "error": f"message exceeds {MAX_MESSAGE_LENGTH} character limit"}
 
-        thread = await self._get_authorized_thread(ctx, thread_id=thread_id)
+        thread = await self._get_authorized_thread(
+            ctx, thread_id=thread_id, allow_support_thread=allow_support_thread
+        )
         if not thread:
             logger.warning("messages: send_message thread not found thread_id=%s sender_role=%s", thread_id, sender_role)
             return {"success": False, "error": "thread not found"}

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +19,7 @@ ControlPlaneLLMProfileId = Literal[
     "architecture",
     "planner_replanner",
     "codegen",
+    "surface_regeneration",
     "reviewer_validator",
 ]
 
@@ -28,25 +29,24 @@ ALLOWED_CONTROL_PLANE_LLM_PROFILE_IDS: tuple[str, ...] = (
     "architecture",
     "planner_replanner",
     "codegen",
+    "surface_regeneration",
     "reviewer_validator",
 )
 
 
 class ControlPlaneLLMProfileConfig(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     purpose: str = ""
-    default_temperature: float | None = None
     expected_behavior: str = ""
     llm_config: dict[str, Any] | None = None
 
 
 class ControlPlaneCapabilityConfig(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
     llm_profile: ControlPlaneLLMProfileId | None = None
-    llm_config: dict[str, Any] | None = None
 
 
 class ControlPlaneCodingProviderBudget(BaseModel):
@@ -61,7 +61,6 @@ class ControlPlaneCodingProviderBudget(BaseModel):
     max_files: int = Field(default=3, ge=1, le=50)
     max_diff_bytes: int = Field(default=262_144, ge=1024, le=16_777_216)
     max_wall_seconds: int = Field(default=600, ge=30, le=3600)
-    max_retries: int = Field(default=1, ge=0, le=3)
 
 
 class ControlPlaneACPProviderConfig(BaseModel):
@@ -92,6 +91,12 @@ class ControlPlaneCodingCapabilityConfig(ControlPlaneCapabilityConfig):
     providers: ControlPlaneCodingProvidersConfig = Field(default_factory=ControlPlaneCodingProvidersConfig)
 
 
+class ControlPlaneContractSurfaceCapabilityConfig(ControlPlaneCapabilityConfig):
+    """Separate models for contract-surface selection and file regeneration."""
+
+    regeneration_llm_profile: ControlPlaneLLMProfileId | None = None
+
+
 class ControlPlaneConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -101,7 +106,9 @@ class ControlPlaneConfig(BaseModel):
     llm_profiles: dict[ControlPlaneLLMProfileId, ControlPlaneLLMProfileConfig] = Field(default_factory=dict)
     classifier: ControlPlaneCapabilityConfig = Field(default_factory=ControlPlaneCapabilityConfig)
     coding: ControlPlaneCodingCapabilityConfig = Field(default_factory=ControlPlaneCodingCapabilityConfig)
-    contract_surface: ControlPlaneCapabilityConfig = Field(default_factory=ControlPlaneCapabilityConfig)
+    contract_surface: ControlPlaneContractSurfaceCapabilityConfig = Field(
+        default_factory=ControlPlaneContractSurfaceCapabilityConfig
+    )
     scope: ControlPlaneCapabilityConfig = Field(default_factory=ControlPlaneCapabilityConfig)
 
     @field_validator("llm_profiles", mode="before")
@@ -117,33 +124,53 @@ class ControlPlaneConfig(BaseModel):
             raise ValueError(f"Unknown refinement policy LLM profile id(s): {', '.join(unknown)}. Allowed: {allowed}.")
         return value
 
+    @model_validator(mode="after")
+    def _validate_enabled_checkpoint_profiles(self) -> ControlPlaneConfig:
+        if self.enabled:
+            for capability in ("classifier", "scope", "contract_surface", "coding"):
+                if getattr(self, capability).enabled:
+                    self.resolve_capability_llm_config(capability)
+            if self.contract_surface.enabled:
+                self.resolve_contract_surface_regeneration_llm_config()
+        return self
+
     def classifier_enabled(self) -> bool:
         return bool(self.enabled and self.classifier.enabled)
 
     def coding_enabled(self) -> bool:
         return bool(self.enabled and self.coding.enabled)
 
-    def resolve_capability_llm_config(self, capability: str) -> dict[str, Any] | None:
+    def _resolve_profile_llm_config(self, *, profile_id: ControlPlaneLLMProfileId | None, owner: str) -> dict[str, Any]:
+        if profile_id is None:
+            raise ValueError(f"{owner} requires llm_profile")
+        profile = self.llm_profiles.get(profile_id)
+        if profile is None:
+            raise ValueError(f"{owner} references unknown LLM profile '{profile_id}'")
+        llm_config = profile.llm_config
+        if not isinstance(llm_config, dict):
+            raise ValueError(f"{owner} LLM profile '{profile_id}' requires a non-empty model")
+        if "config_list" in llm_config:
+            raise ValueError(f"{owner} LLM profile '{profile_id}' must use a flat model configuration; config_list is not supported")
+        model = llm_config.get("model")
+        if not isinstance(model, str) or not model.strip():
+            raise ValueError(f"{owner} LLM profile '{profile_id}' requires a non-empty model")
+        return dict(llm_config)
+
+    def resolve_capability_llm_config(self, capability: str) -> dict[str, Any]:
         capability_config = getattr(self, capability, None)
         if not isinstance(capability_config, ControlPlaneCapabilityConfig):
             raise ValueError(f"Unknown refinement capability '{capability}'")
+        return self._resolve_profile_llm_config(
+            profile_id=capability_config.llm_profile,
+            owner=f"Refinement capability '{capability}'",
+        )
 
-        if capability_config.llm_profile:
-            profile = self.llm_profiles.get(capability_config.llm_profile)
-            if profile is None:
-                raise ValueError(
-                    f"Refinement capability '{capability}' references unknown LLM profile "
-                    f"'{capability_config.llm_profile}'."
-                )
-            if profile.llm_config is None:
-                raise ValueError(
-                    f"Refinement policy LLM profile '{capability_config.llm_profile}' does not declare llm_config."
-                )
-            return dict(profile.llm_config)
-
-        if capability_config.llm_config is not None:
-            return dict(capability_config.llm_config)
-        return None
+    def resolve_contract_surface_regeneration_llm_config(self) -> dict[str, Any]:
+        """Resolve the declared generation model before any surface call starts."""
+        return self._resolve_profile_llm_config(
+            profile_id=self.contract_surface.regeneration_llm_profile,
+            owner="contract_surface.regeneration_llm_profile",
+        )
 
 
 def resolve_ai_config_path(app_root: Path | None = None) -> Path:

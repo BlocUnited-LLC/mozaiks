@@ -8,12 +8,16 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 VALUE_ENGINE_DIR = REPO_ROOT / "factory_app" / "workflows" / "ValueEngine"
 
 
-def test_value_engine_interview_agent_uses_bare_next_completion_contract() -> None:
+def test_value_engine_interview_uses_typed_readiness_before_proposing() -> None:
     agents_text = (VALUE_ENGINE_DIR / "agents.yaml").read_text(encoding="utf-8")
-
-    assert "provide a concise summary" not in agents_text
-    assert "output EXACTLY:" in agents_text
-    assert "Do not add any summary, punctuation, or extra words in that message." in agents_text
+    interview_text = agents_text.split("- name: ResearchAgent")[0]
+    assert "ValueInterviewResult JSON" in interview_text
+    assert "no additional confirmation or alternative screens" in interview_text
+    assert "These readiness rules outrank" in interview_text
+    assert "NEXT" not in interview_text
+    assert "structured_outputs_required: true" in interview_text
+    assert "Speak about what users" in interview_text
+    assert "Ordinary local interaction does not imply an AI workflow" in interview_text
 
 
 def test_value_engine_interview_agent_infers_recognizable_concept_shorthand() -> None:
@@ -81,7 +85,7 @@ def test_value_engine_affirmation_does_not_authorise_an_invented_direction() -> 
     # no requirement that anything had been established first, so a user who
     # only ever said "yes" advanced straight into a fabricated concept.
     assert "happy with what is ALREADY on the table" in agents_text
-    assert "Emit NEXT only if a concrete app direction actually exists" in agents_text
+    assert "Return outcome: ready only if a concrete app direction actually exists" in agents_text
     assert "an affirmation is not an answer" in agents_text
     assert "Agreement is never permission to pick the product for them." in agents_text
 
@@ -131,13 +135,15 @@ def test_value_engine_interview_agent_is_grounded_in_the_buildable_menu() -> Non
     assert hooks[0]["agent"] == "ValueInterviewAgent"
 
 
-def test_value_engine_interview_complete_trigger_still_uses_exact_next() -> None:
-    context_config = yaml.safe_load((VALUE_ENGINE_DIR / "context_variables.yaml").read_text(encoding="utf-8"))
-    trigger = context_config["definitions"]["interview_complete"]["source"]["triggers"][0]
+def test_value_engine_menu_keeps_implementation_shapes_internal() -> None:
+    from factory_app.workflows.ValueEngine.tools.hook_buildable_menu_context import (
+        _format_archetypes,
+    )
 
-    assert trigger["type"] == "agent_text"
-    assert trigger["agent"] == "ValueInterviewAgent"
-    assert trigger["match"]["equals"] == "NEXT"
+    menu = _format_archetypes({"archetypes": {"workflow": {"description": "State transitions"}}})
+    assert "not user-facing labels" in menu
+    assert "not an AI" in menu
+    assert "a workflow module" not in menu
 
 
 def test_value_engine_existing_app_mode_overrides_greenfield_openers() -> None:

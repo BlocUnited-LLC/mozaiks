@@ -9,6 +9,7 @@ from mozaiks_cli.commands import info as info_command
 from mozaiks_cli.commands import init as init_command
 from mozaiks_cli.commands import migrations as migrations_command
 from mozaiks_cli.commands import onboard as onboard_command
+from mozaiks_cli.commands import package as package_command
 from mozaiks_cli.commands import quickstart as quickstart_command
 from mozaiks_cli.commands import serve as serve_command
 from mozaiks_cli.commands import studio as studio_command
@@ -26,4 +27,5 @@ __all__ = [
     "info_command",
     "gen_command",
     "migrations_command",
+    "package_command",
 ]

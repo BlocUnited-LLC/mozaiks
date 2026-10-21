@@ -6,7 +6,6 @@ Deployment artifacts belong to generate_and_download's deployment renderer.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any
 
 import yaml
@@ -17,10 +16,9 @@ from mozaiksai.core.runtime.app.auth_contract import (
 )
 from mozaiksai.core.workflow.context.context_utils import context_to_dict
 from mozaiksai.core.workflow.generator_support.code_files import materialize_collection_auth
+from mozaiksai.resources import resolve_factory_app_root
 
 from .code_file_utils import admitted_app_file_map, compose_bundle_auth_routes
-
-_TEMPLATES = Path(__file__).resolve().parents[3] / "build_context" / "webapp_builder" / "templates"
 
 
 def materialize_auth_scaffold(
@@ -39,18 +37,22 @@ def materialize_auth_scaffold(
     if generated["app.json"] != original_manifest:
         rendered["app.json"] = generated["app.json"]
     if manifest.get("authRequired") is True:
+        root = resolve_factory_app_root()
+        if root is None:
+            raise AppAuthContractError("Auth scaffolding requires the Factory templates")
+        templates = root / "build_context/webapp_builder/templates"
         if "config/auth.yaml" not in generated:
             startup = manifest.get("startup") or {}
             if not isinstance(startup, dict):
                 raise AppAuthContractError("Auth scaffolding requires app.json.startup to be an object")
             route = str(startup.get("landing_spot") or "/")
-            config = (_TEMPLATES / "config" / "auth.yaml").read_text(encoding="utf-8")
+            config = (templates / "config" / "auth.yaml").read_text(encoding="utf-8")
             config = yaml.safe_load(config.replace("{{AUTH_DEFAULT_ROUTE}}", "/"))
             config["routes"]["post_login_default"] = route
             validate_app_auth_contract(config)
             rendered["config/auth.yaml"] = yaml.safe_dump(config, sort_keys=False)
         if "ui/auth/authAdapter.js" not in generated:
-            rendered["ui/auth/authAdapter.js"] = (_TEMPLATES / "ui" / "auth" / "authAdapter.js").read_text(encoding="utf-8")
+            rendered["ui/auth/authAdapter.js"] = (templates / "ui" / "auth" / "authAdapter.js").read_text(encoding="utf-8")
         generated.update(rendered)
         compose_bundle_auth_routes(generated)
         rendered["ui/route_manifest.json"] = generated["ui/route_manifest.json"]

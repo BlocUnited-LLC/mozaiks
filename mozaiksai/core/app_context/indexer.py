@@ -319,6 +319,7 @@ async def persist_app_context_payload_artifact(
 ) -> ArtifactVersionDoc:
     """Persist a JSON AppContext payload artifact with canonical metadata."""
     raw = _json_bytes(payload)
+    content_sha256 = hashlib.sha256(raw).hexdigest()
     summary_payload: Any = payload
     content_metadata: dict[str, Any] = {}
     if len(raw) > _INLINE_CONTEXT_PAYLOAD_LIMIT_BYTES:
@@ -326,12 +327,12 @@ async def persist_app_context_payload_artifact(
         content_ref = await content_store.put_bundle(
             raw,
             app_id=app_id,
-            artifact_version_id=f"{build_family}-{build_key}",
+            artifact_version_id=f"{build_family}-{build_key}-{content_sha256}",
         )
         summary_payload = {
             "content_ref": content_ref,
             "content_backend": content_store.backend_name,
-            "content_sha256": hashlib.sha256(raw).hexdigest(),
+            "content_sha256": content_sha256,
             "content_size_bytes": len(raw),
             "content_format": "json",
         }
@@ -343,7 +344,7 @@ async def persist_app_context_payload_artifact(
         files_manifest=[
             {
                 "path": path,
-                "sha256": hashlib.sha256(raw).hexdigest(),
+                "sha256": content_sha256,
                 "size_bytes": len(raw),
                 "content_type": "application/json",
             }

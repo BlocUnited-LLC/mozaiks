@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime
+from types import EllipsisType
 from typing import Any, cast
 from uuid import uuid4
 
@@ -13,6 +14,7 @@ from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceMa
 from mozaiksai.core.multitenant import build_app_scope_filter
 
 from .policy import owner_filter
+from .schemas import GenesisAcceptanceReceipt, GenesisImportClaim
 
 IndexSpec = tuple[Sequence[tuple[str, int]], dict[str, Any]]
 APP_REGISTRY_COLLECTION = "AppRegistryRecords"
@@ -65,6 +67,149 @@ class AppRegistryRepo:
                 continue
             await coll.create_index(list(keys), **kwargs)
 
+    async def has_registered_target_app_id(self, *, app_ids: tuple[str, ...]) -> bool:
+        """Check target IDs globally without exposing a different owner's row."""
+        coll = await self._collection()
+        return await coll.find_one({"app_id": {"$in": list(app_ids)}}, {"_id": 1}) is not None
+
+    async def register_existing_app_record(
+        self, *, owner_user_id: str, app_id: str, chat_app_id: str, name: str | None,
+    ) -> dict[str, Any]:
+        """Claim a fixed, loaded host target once without changing build state."""
+        owner = owner_filter(owner_user_id)["owner_user_id"]
+        if not app_id or app_id != chat_app_id:
+            raise ValueError("Existing target must match its execution host")
+        await self.ensure_indexes()
+        coll = await self._collection()
+        now = datetime.now(UTC)
+        try:
+            doc = await coll.find_one_and_update(
+                {"app_id": app_id},
+                {"$setOnInsert": {
+                    "_id": f"appreg_{uuid4().hex}",
+                    "app_id": app_id,
+                    "chat_app_id": chat_app_id,
+                    "owner_user_id": owner,
+                    "name": name,
+                    "name_source": "imported_app",
+                    "name_status": "named" if name else "provisional",
+                    "description": None,
+                    "lifecycle_state": "draft",
+                    "bundle_path": None,
+                    "created_at": now,
+                    "updated_at": now,
+                }},
+                upsert=True,
+                return_document=ReturnDocument.AFTER,
+            )
+        except DuplicateKeyError:
+            # A concurrent claim may have won the unique app_id index.
+            doc = await coll.find_one({"app_id": app_id})
+        if not isinstance(doc, dict):
+            raise RuntimeError("Existing app target could not be registered")
+        if doc.get("owner_user_id") != owner or doc.get("chat_app_id") != chat_app_id:
+            raise ValueError("Existing app target is already bound to a different owner or host")
+        normalized = self._normalize_doc(doc)
+        if normalized is None:
+            raise RuntimeError("Existing app target could not be loaded")
+        return normalized
+
+    async def reserve_genesis_import(
+        self, *, build_registry_id: str, owner_user_id: str, app_id: str,
+        chat_app_id: str, claim: GenesisImportClaim,
+    ) -> dict[str, Any] | None:
+        """Atomically fence a first source import against normal Genesis start."""
+        await self.ensure_indexes()
+        coll = await self._collection()
+        claim_doc = claim.model_dump(mode="json")
+        now = datetime.now(UTC)
+        doc = await coll.find_one_and_update(
+            {
+                "_id": build_registry_id,
+                **owner_filter(owner_user_id),
+                "app_id": app_id,
+                "chat_app_id": chat_app_id,
+                "lifecycle_state": "draft",
+                "active_chat_id": None,
+                "current_build_run": None,
+                "artifact_version_id": None,
+                "bundle_path": None,
+                "genesis_import": {"$exists": False},
+            },
+            {"$set": {"genesis_import": claim_doc, "updated_at": now}},
+            return_document=ReturnDocument.AFTER,
+        )
+        if doc is None:
+            doc = await coll.find_one({"_id": build_registry_id, **owner_filter(owner_user_id)})
+            if not isinstance(doc, dict) or any((
+                doc.get("app_id") != app_id,
+                doc.get("chat_app_id") != chat_app_id,
+                doc.get("lifecycle_state") != "draft",
+                doc.get("active_chat_id") is not None,
+                doc.get("current_build_run") is not None,
+                doc.get("artifact_version_id") is not None,
+                doc.get("bundle_path") is not None,
+                doc.get("genesis_import") != claim_doc,
+            )):
+                return None
+        return self._normalize_doc(doc)
+
+    async def accept_genesis_import(
+        self, *, build_registry_id: str, owner_user_id: str, app_id: str,
+        chat_app_id: str, claim: GenesisImportClaim,
+        receipt: GenesisAcceptanceReceipt,
+    ) -> dict[str, Any] | None:
+        """Commit one exact owner review without advancing the live build pointer."""
+        if receipt.accepted_by != owner_user_id:
+            return None
+        await self.ensure_indexes()
+        coll = await self._collection()
+        claim_doc = claim.model_dump(mode="json")
+        accepted = {**claim_doc, "status": "accepted", "acceptance": receipt.model_dump(mode="python")}
+        now = datetime.now(UTC)
+        doc = await coll.find_one_and_update(
+            {
+                "_id": build_registry_id, **owner_filter(owner_user_id),
+                "app_id": app_id, "chat_app_id": chat_app_id,
+                "lifecycle_state": "draft", "active_chat_id": None,
+                "current_build_run": None, "artifact_version_id": None,
+                "bundle_path": None, "genesis_import": claim_doc,
+            },
+            {"$set": {"genesis_import": accepted, "updated_at": now}},
+            return_document=ReturnDocument.AFTER,
+        )
+        if doc is None:
+            doc = await coll.find_one({"_id": build_registry_id, **owner_filter(owner_user_id)})
+            if not isinstance(doc, dict):
+                return None
+            existing = doc.get("genesis_import")
+            try:
+                existing_receipt = GenesisAcceptanceReceipt.model_validate(
+                    existing.get("acceptance") if isinstance(existing, dict) else None
+                )
+            except ValueError:
+                return None
+            existing_accepted_at = existing_receipt.accepted_at
+            requested_accepted_at = receipt.accepted_at
+            if existing_accepted_at.tzinfo is None:
+                existing_accepted_at = existing_accepted_at.replace(tzinfo=UTC)
+            if requested_accepted_at.tzinfo is None:
+                requested_accepted_at = requested_accepted_at.replace(tzinfo=UTC)
+            same_receipt = (
+                existing_receipt.model_dump(exclude={"accepted_at"})
+                == receipt.model_dump(exclude={"accepted_at"})
+                and abs((existing_accepted_at - requested_accepted_at).total_seconds()) < 0.001
+            )
+            if not isinstance(existing, dict) or any((
+                doc.get("app_id") != app_id, doc.get("chat_app_id") != chat_app_id,
+                existing.get("status") != "accepted",
+                {key: existing.get(key) for key in claim_doc if key != "status"}
+                != {key: value for key, value in claim_doc.items() if key != "status"},
+                not same_receipt,
+            )):
+                return None
+        return self._normalize_doc(doc)
+
     async def upsert_app_record(
         self,
         *,
@@ -104,6 +249,8 @@ class AppRegistryRepo:
                 raise ValueError("App id is not available") from exc
         if existing is None:
             raise RuntimeError("App record ownership could not be established")
+        if isinstance(existing.get("genesis_import"), dict) and existing["genesis_import"].get("status") == "reserved":
+            raise ValueError("Registered app has a reserved Genesis import")
         build_registry_id = str(existing["_id"])
         existing_name_status = str((existing or {}).get("name_status") or "").strip()
         incoming_named = name_status == "named" and bool(name)
@@ -153,7 +300,11 @@ class AppRegistryRepo:
                 build_run,
             )
         doc = await coll.find_one_and_update(
-            {"_id": build_registry_id, **owner_filter(owner_user_id)},
+            {
+                "_id": build_registry_id,
+                **owner_filter(owner_user_id),
+                "genesis_import.status": {"$ne": "reserved"},
+            },
             {"$set": set_fields},
             return_document=ReturnDocument.AFTER,
         )
@@ -161,6 +312,40 @@ class AppRegistryRepo:
         if normalized is None:
             raise RuntimeError("App record could not be loaded after upsert")
         return normalized
+
+    async def update_concept_identity(
+        self, *, owner_user_id: str, execution_app_id: str, build_registry_id: str,
+        app_id: str, expected_build_id: str, name: str, description: str | None,
+    ) -> dict[str, Any] | None:
+        query = {
+            "_id": build_registry_id, **owner_filter(owner_user_id), "app_id": app_id,
+            "chat_app_id": execution_app_id, "current_build_run.build_id": expected_build_id,
+        }
+        coll = await self._collection()
+        existing = await coll.find_one(query)
+        if not existing:
+            return None
+        now = datetime.now(UTC)
+        updates: dict[str, Any] = {}
+        # Approval may name a generated draft, but cannot rename imported or
+        # manually named apps or replace an existing explicit description.
+        if existing.get("name_source") in {"provisional", "value_engine_concept"}:
+            query["name_source"] = existing["name_source"]
+            updates.update({
+                "name": name, "name_status": "named", "name_source": "value_engine_concept",
+                "named_at": existing.get("named_at") or now,
+            })
+        if description and not str(existing.get("description") or "").strip():
+            query["description"] = existing.get("description")
+            updates["description"] = description
+        if not updates:
+            return self._normalize_doc(existing)
+        query["updated_at"] = existing.get("updated_at")
+        updates["updated_at"] = now
+        doc = await coll.find_one_and_update(
+            query, {"$set": updates}, return_document=ReturnDocument.AFTER,
+        )
+        return self._normalize_doc(doc)
 
     async def update_lifecycle_state(
         self,
@@ -177,14 +362,22 @@ class AppRegistryRepo:
         expected_build_id: str | None = None,
         expected_artifact_version_id: str | None = None,
         expected_lifecycle_state: str | None = None,
+        expected_active_chat_id: str | None | EllipsisType = ...,
     ) -> dict[str, Any] | None:
-        query = {"_id": build_registry_id, **owner_filter(owner_user_id)}
+        query: dict[str, Any] = {
+            "_id": build_registry_id,
+            **owner_filter(owner_user_id),
+            "genesis_import.status": {"$ne": "reserved"},
+        }
         if expected_build_id is not None:
             query["current_build_run.build_id"] = expected_build_id
         if expected_artifact_version_id is not None:
             query["current_build_run.artifact_version_id"] = expected_artifact_version_id
         if expected_lifecycle_state is not None:
             query["lifecycle_state"] = expected_lifecycle_state
+        # Explicit None matches a missing/null chat; omission leaves it unconstrained.
+        if expected_active_chat_id is not ...:
+            query["active_chat_id"] = expected_active_chat_id
         await self.ensure_indexes()
         coll = await self._collection()
         existing = await coll.find_one(query)

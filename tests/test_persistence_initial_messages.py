@@ -318,7 +318,7 @@ async def test_known_malformed_persisted_value_fails_closed(monkeypatch, authent
             chat_id="chat-1",
             app_id="app-1",
             workflow_name="ValueEngine",
-            variables={"interview_complete": "true"},
+            variables={"interview_attempts": "1"},
         )
 
 
@@ -330,7 +330,7 @@ async def test_malformed_stored_value_fails_replay_closed(monkeypatch, authentic
             "_id": "chat-1",
             "app_id": "app-1",
             "workflow_name": "ValueEngine",
-            "interview_complete": "true",
+            "interview_attempts": "1",
             "concept_presented": True,
         }
     )
@@ -1097,10 +1097,10 @@ async def test_unloaded_workflow_fails_closed_instead_of_dropping_all_state(
             chat_id="chat-1",
             app_id="app-1",
             workflow_name="NotARegisteredWorkflow",
-            variables={"interview_complete": True},
+            variables={"interview_outcome": "ready"},
         )
 
-    doc["interview_complete"] = True
+    doc["interview_outcome"] = "ready"
     with pytest.raises(ValueError, match="unresolved_declarations"):
         await manager.fetch_chat_session_extra_context(
             chat_id="chat-1",

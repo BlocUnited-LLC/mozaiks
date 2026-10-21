@@ -111,8 +111,8 @@ generated business operations must bind to actual module actions. Runtime page
 schema parsing still permits safe host-owned/custom API paths; this check does
 not replace the host's routing contract or introduce a second runtime validator.
 
-`validation_strategy: skip` skips optional execution checks, not mandatory
-app-bundle acceptance or its wiring check. A zero-reference result only means
+`validation_strategy: skip` leaves build execution unverified; it does not
+establish acceptance or bypass mandatory wiring checks. A zero-reference result only means
 that inspected input contains no page API references, not that an absent input
 was successfully validated.
 
@@ -147,35 +147,33 @@ enabled, crashed on every write and denied paying users. `app_runtime_smoke`
 (`factory_app/workflows/AppGenerator/tools/app_runtime_smoke.py`) runs the
 bundle instead.
 
-**Process boundary.** Generated code never runs in the factory process.
-Acceptance writes the bundle to a temporary `app/` root and the gate starts
-`python -m factory_app.workflows.AppGenerator.tools.app_runtime_smoke`:
+**Process boundary.** Generated Python runs in disposable Docker containers,
+never in Studio or a host Python child. Before staging any generated source,
+the gate checks that local Docker can inspect the exact image ID in
+`MOZAIKS_APP_RUNTIME_IMAGE_ID`. A missing or mismatched ID makes acceptance
+`skipped` and blocks export. The AppLoader diagnostic probe runs as a non-root
+user in a read-only container with no network, published ports, or Docker log
+stream. Its only writable locations are size-limited temporary filesystems. Candidate Python can
+write the probe's JSON, so `app_runtime_load_passed` and the loader check supply
+repair diagnostics only; neither is promotion evidence. The host sets the
+separate `app_runtime_load_worker` check only after the bounded worker returns
+and its removal is confirmed. The runtime smoke uses a private MongoDB container
+and a source-free observer; that smoke and the host-owned worker check govern
+acceptance. Unconfirmed container cleanup blocks export.
+Build the local validator with
+`docker build -f infra/docker/Dockerfile.preview -t mozaiks-sandbox:local .`,
+then set `MOZAIKS_APP_RUNTIME_IMAGE_ID` to the full value from
+`docker image inspect --format '{{.Id}}' mozaiks-sandbox:local`. The gate never
+pulls an image automatically.
 
-- The child's environment holds only what a Python process needs to start on
-  the operating system: `PATH`, `SYSTEMROOT`, temp directories, locale. It also
-  gets `PYTHONPATH` for the factory's own code and `PYTHON_DOTENV_DISABLED=1`.
-  No host secret, provider key, `MOZAIKS_*` setting or `MONGO_URI` is passed.
-- The disposable database URI and name arrive on stdin.
-- If loading the runtime still adds an environment variable (a `.env` file
-  read), the child refuses to run generated code. Mozaiks requires
-  python-dotenv 1.2 or later, which honors `PYTHON_DOTENV_DISABLED`.
-- The parent kills the child at a hard total limit (60 s by default) and drops
-  the database whether the child finished, crashed, timed out or the gate was
-  cancelled.
-- The child streams each check result as one JSON line, so a killed run still
-  reports every check it finished. The timeout failure names the action that
-  was running.
-- Every message is redacted of the database URI before it is returned.
-
-**Boot.** The child loads the bundle with `AppLoader.load()` and applies the
-declared indexes and data migrations to the disposable database
-(`mozaiks_runtime_smoke_*` on the host's configured Mongo). It registers modules
+**Boot.** The contained app loads the bundle with `AppLoader.load()` and applies the
+declared indexes and data migrations to its private disposable database. It registers modules
 with `ModuleExecutor.register_loaded_module`, the same call the platform host
 makes, and mounts the `api_router` extensions. **Startup services are not
 started.** They run outside module dispatch with their own clients and
 credentials, so the smoke cannot keep them inside the disposable database. They
 are reported `not_run`, and only the deployed app starts them. Requests go
-through the real module router over an in-process ASGI client inside the child:
+through the real module router over an in-process ASGI client inside the contained app:
 no port.
 
 **Two-user CRUD.** For every collection whose canonical create action
@@ -210,7 +208,7 @@ every signed-in user. That is reported once per action. The call is then
 repeated for the same user with exactly the missing permissions, so the defects
 behind it are reported in the same pass.
 
-**Dispatch collaborators.** Inside the child, the composed app is dispatched in
+**Dispatch collaborators.** Inside the contained app, the composed app is dispatched in
 enforce mode through a `ModuleDispatchEnvironment` dependency override:
 
 - an empty `PlatformHookRegistry`, an in-memory audit log, local event
@@ -220,8 +218,107 @@ enforce mode through a `ModuleDispatchEnvironment` dependency override:
 
 The host's auth mode, platform hooks, audit log, usage metering and system
 database are never used. A hosted factory may register module scope, permission,
-policy and audit hooks. With the database dropped, nothing the smoke wrote
-remains on the host's Mongo.
+policy and audit hooks. Generated-app smoke does not receive the host's Mongo
+URI or write to the host database.
+
+### Imported-source runtime smoke
+
+An imported Genesis can contain arbitrary Python. Its proposed acceptance path uses
+`run_contained_imported_app_runtime_smoke(app_root, expected_source_sha256=...)`
+on the exact staged app bytes. The caller supplies every verified source-file
+digest; the runner checks the copied mount bytes and rejects missing or extra
+files. Generated-app acceptance now delegates to this contained runner after
+its own image preflight; imported Genesis callers still opt in separately.
+
+Before staging imported source, a caller can use
+`preflight_contained_imported_smoke()` to require a reachable local Docker
+daemon and an exact pinned validator image. It raises on missing capability and
+returns the immutable image ID. The runner repeats the same preflight before
+copying source and runs both containers by that ID; a successful early check
+does not replace the execution-time check.
+
+The imported backend copies up to 4,096 regular files and 64 MB into a private
+temporary directory, rejecting links and special files. It runs two disposable
+containers from the same pinned local image. Container A mounts the verified app
+copy read-only, starts MongoDB and the app on its isolated loopback interface,
+and has `--network=none`. Container B joins only A's network namespace. B mounts
+only a read-only projection of `app.json`, the data/auth/subscriptions contracts,
+and module manifests. It has no app Python, source repository, Docker socket, or
+shared writable mount, and uses its own process and mount namespaces. Both
+containers use a read-only root, a non-root user, dropped capabilities, no new
+privileges, and CPU, memory, process, temporary storage and time limits.
+
+The image-owned observer in B probes A over loopback HTTP and inspects the
+disposable MongoDB directly. It runs the two-user CRUD and entitlement checks
+from the declarative contracts. A's stdout is diagnostic only; the host parses
+result events only from B, validates a per-run nonce and one HTTP boot/completion
+receipt, and sets `observer_origin: trusted_external_probe_v1`, `observer_run_id`,
+and `observed_boot` only on a passing result. The host retains the verified
+source-content digest and exact validator image ID. Docker registers both names
+before starting each container so cancellation can remove them. Both are forcibly
+removed and their absence checked after success, failure, timeout, or cancellation.
+A failed teardown or bounded-output violation fails the smoke. No host Mongo URI,
+credential, provider key, source repository, Docker socket, or host workspace is
+mounted or passed to either container.
+
+The observer verifies externally visible HTTP and Mongo behavior. The runtime
+drops a rejected `ctx.emit` before dispatch while preserving the action's write
+and HTTP success; the rejection exists only in A's process. B therefore cannot
+distinguish a rejected emit from no emit. Contained results declare
+`observer_unverified_checks: [event_rejection]`, including when their observed
+checks pass. A's reported rejection list is not trusted evidence. The ordinary
+in-process smoke detects rejected events, but imported Genesis acceptance must
+stay closed under its separate admission contract. `observer_origin` attests
+the source of the bounded observations, not parity with every in-process smoke
+check.
+
+### Generated-app contained acceptance scope 2.0
+
+[ADR 0020](../../adr/0020-generated-app-contained-runtime-acceptance-scope.md)
+defines the narrower generated-app claim. Its only
+`acceptance_scope.excluded_observer_checks` value is `event_rejection`.
+The generated result retains `observer_unverified_checks: [event_rejection]`;
+that field is never cleared or described as independently verified. The
+platform-wired action emitter rejects invalid declared events before dispatch,
+as proven by framework tests. The contained observer does not establish that a
+particular candidate attempted no rejected `ctx.emit` or emitted every event
+needed by its intended behavior. Required downstream event effects need their
+own external acceptance checks.
+
+The generated gate attaches `acceptance_scope: {version: "2.0",
+excluded_observer_checks: [event_rejection]}` only after the host checks all
+supported external outcomes, one matching boot and completion receipt, the
+trusted observer origin and run ID, exact generated-source digest, locally
+preflighted immutable validator image ID, and confirmed removal of both
+containers. Its contained AppLoader worker must also have host-confirmed
+cleanup and matching source/image identity. A missing, altered, or extra
+unverified check leaves the generated gate pending and issues no snapshot
+digest. Imported Genesis does not use this generated scope.
+
+Build validation is a separate required gate. Generated apps can select only
+`docker`, explicit `e2b`, or `skip`; `skip` blocks promotion. The Docker build
+path inspects the same immutable local image ID before staging source and runs
+offline as a non-root user with a read-only image and bounded writable space.
+Candidate package scripts never run through a host npm subprocess. A passing
+runtime scope cannot override a failed or skipped build.
+
+The preview image must be rebuilt after changing this smoke module:
+`docker build -f infra/docker/Dockerfile.preview -t mozaiks-sandbox:local .`.
+An operator can select an equivalent trusted local image with
+`DOCKER_SANDBOX_IMAGE`; imported source cannot select the image.
+Set `MOZAIKS_IMPORTED_SMOKE_IMAGE_ID` to the trusted local image ID returned by
+`docker image inspect --format '{{.Id}}' mozaiks-sandbox:local`. The gate checks
+that ID and runs by ID, so a later tag change cannot swap the validator between
+inspection and execution. It returns the image ID and copied-source digest as
+candidate Genesis evidence.
+Docker or image unavailability yields a skipped, blocking smoke result.
+The image is never pulled automatically during this gate. Docker Engine and the
+trusted preview image are local prerequisites; no paid service is required.
+The observer separates the evidence channel from imported app Python, including
+its stdout file descriptor and interpreter monkeypatches. A finite black-box
+test cannot prove every future behavior of adversarial code: an app can still
+choose behavior based on incoming requests. Retain exact-source review and
+independent promotion approval for adversarial code.
 
 **Results.** Each check passes, fails or did not run, with one message naming
 the action, the user, the expected response and the actual one. A 5xx carries
@@ -238,12 +335,26 @@ the file each one names:
 | Index or alias defect | `data/contract.json` |
 | Plan or assignment defect | `config/subscriptions.yaml` |
 
-With no configured database, or an unreachable one, the check reports
-`skipped` with the reason (`passed: null`, `status: "skipped"`). Acceptance
+When Docker or the pinned image is unavailable, the check reports `skipped`
+with the reason (`passed: null`, `status: "skipped"`). The generated smoke
+starts its own disposable MongoDB; host `MONGO_URI` is not a prerequisite. Acceptance
 lists it in `validation_evidence.skipped` and `skipped_checks` with that reason.
-It is neither completed nor failed, so acceptance can still pass. The build
-status pane shows the integration checks as skipped (amber), not as a clean
-pass.
+It is neither completed nor failed. The aggregate acceptance remains `pending`
+with `passed: false` until required checks complete; an actual contract failure
+still makes it `failed`. A skipped smoke contributes no app-code repair
+diagnostic. Missing validation infrastructure must be restored before a build
+can become ready. There is no persisted-draft revalidation endpoint yet: run
+the build workflow to produce a new validated artifact; this may use model calls.
+No accepted snapshot
+digest is issued for an unverified candidate.
+
+Source refinement follows the same distinction. Every selected, applicable
+detected validation command must complete successfully. Unselected commands do
+not block that source-validation result; rejected, unavailable or truncated
+selected commands do. Static fallback checks retain their individual results,
+but syntax-only success is an aggregate `warning`, not readiness. Empty or
+all-skipped validation stays `skipped`. These outcomes preserve a reviewable
+draft without declaring it validated or eligible for promotion.
 
 **Not covered.** Module reactions, workflow triggers, pages and startup services
 are not exercised. Custom actions are called only when they carry an entitlement
@@ -251,22 +362,15 @@ gate. Actions on the `internal` and `admin_internal` surfaces are out of scope:
 signed-in users cannot call them over HTTP. `public` and `public_readonly`
 actions are called like any other, as a signed-in user.
 
-**Known follow-ups.** These are not handled by the gate yet:
+**Known follow-ups.** Pack-owned permissions outside `config/auth.yaml`
+default scopes (commerce) are reported as ungrantable. Failures on code-rendered
+files without an owning task remain blocked for repair. Only the exact
+generated-app scope above permits the one known unverified observer check;
+other unverified checks remain pending. The Docker validator image must be
+built and pinned by the operator; the gate never downloads one on demand.
 
-- Outbound calls to unconfigured integrations run in the child and fail or wait
-  until the time limit.
-- Pack-owned permissions outside `config/auth.yaml` default scopes (commerce)
-  are reported as ungrantable.
-- The host's Mongo credentials are not yet scoped to the disposable database.
-- Stale `mozaiks_runtime_smoke_*` databases left by a killed factory process are
-  not swept.
-- Failures on code-rendered files (no owning task) are blocked for repair rather
-  than routed.
-- Generated code runs as the factory's operating-system user without a
-  filesystem sandbox.
-
-**Proof.** `tests/test_app_runtime_smoke.py` runs the gate through the child
-process on real Mongo against two recorded bundles
+**Proof.** `tests/test_app_runtime_smoke.py` exercises the retained trusted-fixture
+child path on real Mongo against two recorded bundles
 (`tests/fixtures/runtime_smoke_*.json`):
 
 - The 93a7 replay fails for its known reasons: null index name, migration
@@ -274,8 +378,18 @@ process on real Mongo against two recorded bundles
   crash on every create and on a missing id, and paying users denied. With the
   create crash repaired, the stored record shows the wrong id and owner fields.
 - The fdfa818e run replayed at c8b9ea2e passes every check.
-- Further tests cover the hard timeout, the child environment, startup services
-  and the no-subscriptions case.
+- Further tests cover the trusted fixture's hard timeout, child environment,
+  startup services and the no-subscriptions case.
+
+`tests/test_app_acceptance_isolation.py` verifies that generated acceptance
+delegates to the contained loader and smoke runners, blocks when the image is
+unavailable, and admits only the exact generated scope with trusted observer
+evidence. Its opt-in real Docker test loads the recorded good bundle and
+observes its HTTP boot with a pinned local image even when ambient Docker
+host, context, and config settings
+point elsewhere. The independently unverified rejected-event check remains
+visible in the accepted scope; the contained invalid-emission fixture shows
+why that check cannot be claimed as verified.
 
 The suite-wide conftest gives every other test no smoke database, so acceptance
 tests that do not opt in report `skipped`.
@@ -762,6 +876,67 @@ The focused regression suites are `test_factory_auto_tool_acceptance.py`,
 `test_design_docs_bundle_persistence.py`, `test_subscription_contract_designer.py`,
 and `test_structured_output_runtime_contracts.py`. They complement, but do not
 replace, an authenticated live generated-app CRUD/refinement/export proof.
+
+## Scoped refinement candidates
+
+`validate_generated_app_candidate` in `mozaiksai.core.validation` connects the
+existing Factory acceptance and build validators for a complete, explicit file
+snapshot. The coding worker merges only approved changes into the saved baseline,
+validates that candidate, and persists a canonical bundle archive with its own
+acceptance and build results. Both must pass before the candidate is validated.
+Parent validation and source-index checks cannot certify a new candidate.
+
+Execution strategy comes from operator policy and the request, never a model's
+suggestion. `skip` runs neither acceptance nor build execution and cannot activate
+the candidate. Acceptance uses the pinned local Docker image for AppLoader
+diagnostics and the contained runtime smoke; Docker or E2B can separately isolate
+the compilation stage. This entrypoint proves explicit bundle correctness. It
+does not replay Genesis task execution or manufacture task evidence from a
+refinement request.
+
+Saved archives use the same canonical identity and digest checks as normal builds.
+The existing Studio lifecycle registers the exact candidate for review; explicit
+acceptance and promotion remain separate from generating or validating edits.
+
+## App root route acceptance
+
+When `app.json` declares `startup.landing_spot: "/"`, a page declared at `/`
+renders through the shared component registry and route authentication wrapper.
+Authentication is required by default; only `meta.requiresAuth: false` makes a
+page public. A missing registered component reports the binding error instead of
+silently opening Chat.
+
+Chat remains the root fallback when the app declares no root page. The explicit
+`/chat/*` and `/app/*` routes retain their core chat owner. An explicit non-root
+landing spot retains its redirect from `/`.
+
+The browser regressions in `appJourneyStart.browser.test.js` exercise the actual
+renderer with declared routes, authentication states, and landing redirects.
+These isolated component tests do not qualify a generated app's preview,
+interactions, or persistence; those still require the generated bundle's live
+acceptance journey.
+
+## Saved build review
+
+Studio's app Build Review page loads the selected saved app bundle through the
+authenticated artifact bundle endpoint. It verifies the returned app, registry,
+and version binding before rendering the endpoint's registered Workbench through
+the shared UI-tool renderer. Opening or changing a selection does not resume a
+workflow or start a preview. Preview remains an explicit Workbench action.
+
+The existing Workbench owns scoped refinement and server-gated acceptance and
+activation. Saved review has no workflow export-confirmation response. Build
+history and preservation reports remain available in a disclosure; failed bundle
+loads offer a retry, and cancelled or stale selections cannot display another
+version's payload. Responsive browser fixtures exercise this composition with
+mocked HTTP boundaries; live preview and generated app behavior require their
+own acceptance evidence.
+
+Within the Workbench, a completed refinement retains its own files, validation
+and review identity when the original saved-version payload refreshes or a later
+request fails. Responses from a previously opened version cannot replace the
+current selection. Server-confirmed acceptance and activation show separate
+receipts; activation reports when an app restart is required.
 
 ## Remaining Gaps
 

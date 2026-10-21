@@ -194,6 +194,38 @@ def test_workflow_catalog_survives_tool_loader_then_persistence_policy_restore()
         )
 
 
+def test_platform_host_import_survives_an_earlier_runtime_only_app_start() -> None:
+    """Serving the runtime app must not break a later first platform import.
+
+    ``tests/test_client_console_bridge.py`` serves a request through
+    ``mozaiksai.hosts.runtime.app`` and imports no other host. The platform
+    host registers a middleware on that same app object when it is imported,
+    which Starlette refuses once the app has built its middleware stack, so
+    every later test that imported ``mozaiksai.hosts.platform`` or
+    ``mozaiksai.hosts.studio`` for the first time failed with "Cannot add
+    middleware after an application has started". The hazard stayed dormant
+    while another file in the same CI shard imported the platform host at
+    collection time, and turned main red once new test files shifted the shard
+    composition so that none did.
+    """
+    runtime_only_starter = "tests/test_client_console_bridge.py"
+    first_platform_importers = [
+        "tests/test_host_composition_contract.py",
+        "tests/test_unified_admin_surface.py::test_platform_host_mounts_admin_api_routes",
+    ]
+
+    starter_first = _run_pytest([runtime_only_starter, *first_platform_importers])
+    assert starter_first.returncode == 0, (
+        "the platform host could not be imported after a test served a request "
+        f"through the runtime app:\n{starter_first.stdout}\n{starter_first.stderr}"
+    )
+
+    starter_last = _run_pytest([*first_platform_importers, runtime_only_starter])
+    assert starter_last.returncode == 0, (
+        f"inverted order failed:\n{starter_last.stdout}\n{starter_last.stderr}"
+    )
+
+
 def test_workspace_resolution_identical_before_and_after_host_import() -> None:
     """The resolved workspace root must not change when a host import precedes it."""
     probe = (

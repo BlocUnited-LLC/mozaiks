@@ -55,6 +55,20 @@ ACP must not select the workflow sequence, mutate the canonical artifact store
 directly, or promote its own output. Its result is evidence for the same
 validation and promotion path used by other coding providers.
 
+The current ACP adapter would launch a local subprocess. Scoped files and a
+post-run diff check limit what Mozaiks accepts, but they do not isolate that
+process from host files or disk-based agent logins. AG2 1.1.2 also services a
+direct ACP terminal request despite ``allow_terminal=False`` and would give
+that child the host environment. The shipped provider therefore refuses its
+default local execution path even if ACP is enabled in policy. An isolated
+execution provider must replace that path before live use. The in-process
+adapter never selects credentials from the host process environment; a caller
+must supply an explicit environment source. In controlled tests, Mozaiks
+forwards only the selected adapter's credential from that source: Anthropic for
+Claude Code, Codex or OpenAI for Codex, and none for OpenCode. This explicit
+source rule does not make a local subprocess safe: the isolated worker must
+also control the environment inherited by the agent process.
+
 ## Context authority
 
 Build contexts, `AppContext`, artifact revisions, and journey records remain
@@ -92,6 +106,9 @@ orchestration path.
 ## Decisions
 
 - Keep Mozaiks journey routing above AG2 workflow execution.
+- On cold resume, replay scoped persisted context into the durable AG2 channel
+  only after validating its replay contract. Keep live user context updates on
+  their separate writer authority.
 - Use AG2 Harness and Middleware within their documented agent-turn scope.
 - Use ACP as a provider boundary for controlled coding sessions.
 - Keep refinement classification, artifact scope, staging, validation, and

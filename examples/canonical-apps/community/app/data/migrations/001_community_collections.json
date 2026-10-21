@@ -1,0 +1,218 @@
+{
+  "migration_id": "001_community_collections",
+  "version": "1",
+  "operations": [
+    {
+      "type": "ensure_collection",
+      "module_id": "user_posts",
+      "entity_name": "posts"
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "user_posts",
+      "entity_name": "posts",
+      "index": {
+        "name": "posts_by_id",
+        "keys": [
+          [
+            "app_id",
+            1
+          ],
+          [
+            "post_id",
+            1
+          ]
+        ],
+        "unique": true
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "user_posts",
+      "entity_name": "posts",
+      "index": {
+        "name": "posts_by_author_created",
+        "keys": [
+          [
+            "app_id",
+            1
+          ],
+          [
+            "author_id",
+            1
+          ],
+          [
+            "created_at",
+            -1
+          ]
+        ]
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "user_posts",
+      "entity_name": "posts",
+      "index": {
+        "name": "posts_by_status_created",
+        "keys": [
+          [
+            "app_id",
+            1
+          ],
+          [
+            "status",
+            1
+          ],
+          [
+            "visibility",
+            1
+          ],
+          [
+            "created_at",
+            -1
+          ]
+        ]
+      }
+    },
+    {
+      "type": "ensure_collection",
+      "module_id": "user_posts",
+      "entity_name": "reactions"
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "user_posts",
+      "entity_name": "reactions",
+      "index": {
+        "name": "reactions_by_post_user",
+        "keys": [
+          [
+            "app_id",
+            1
+          ],
+          [
+            "post_id",
+            1
+          ],
+          [
+            "user_id",
+            1
+          ]
+        ],
+        "unique": true
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "user_posts",
+      "entity_name": "reactions",
+      "index": {
+        "name": "reactions_by_user",
+        "keys": [
+          [
+            "app_id",
+            1
+          ],
+          [
+            "user_id",
+            1
+          ],
+          [
+            "created_at",
+            -1
+          ]
+        ]
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "user_posts",
+      "entity_name": "reactions",
+      "index": {
+        "name": "reactions_by_post_type",
+        "keys": [
+          [
+            "app_id",
+            1
+          ],
+          [
+            "post_id",
+            1
+          ],
+          [
+            "reaction_type",
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "type": "ensure_collection",
+      "module_id": "user_posts",
+      "entity_name": "comments"
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "user_posts",
+      "entity_name": "comments",
+      "index": {
+        "name": "comments_by_id",
+        "keys": [
+          [
+            "app_id",
+            1
+          ],
+          [
+            "comment_id",
+            1
+          ]
+        ],
+        "unique": true
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "user_posts",
+      "entity_name": "comments",
+      "index": {
+        "name": "comments_by_post_created",
+        "keys": [
+          [
+            "app_id",
+            1
+          ],
+          [
+            "post_id",
+            1
+          ],
+          [
+            "created_at",
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "user_posts",
+      "entity_name": "comments",
+      "index": {
+        "name": "comments_by_author",
+        "keys": [
+          [
+            "app_id",
+            1
+          ],
+          [
+            "author_id",
+            1
+          ],
+          [
+            "created_at",
+            -1
+          ]
+        ]
+      }
+    }
+  ]
+}

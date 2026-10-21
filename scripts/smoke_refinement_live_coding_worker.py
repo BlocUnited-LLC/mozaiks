@@ -131,6 +131,10 @@ class _SmokeArtifactStore:
                 "canonical_inputs_version": dict(kwargs.get("canonical_inputs_version") or {}),
                 "lifecycle_status": lifecycle_status.value,
                 "validation_status": validation_status.value,
+                "app_validation_status": kwargs.get("app_validation_status"),
+                "app_validation_strategy": kwargs.get("app_validation_strategy"),
+                "sandbox_session_id": kwargs.get("sandbox_session_id"),
+                "sandbox_provider": kwargs.get("sandbox_provider"),
                 "files_manifest": list(kwargs.get("files_manifest") or []),
                 "commit_metadata": commit_metadata.model_dump(mode="python"),
             }
@@ -140,9 +144,19 @@ class _SmokeArtifactStore:
 
     async def get_build_record(self, **kwargs):  # noqa: ANN003
         build_record_id = str(kwargs.get("build_record_id") or "")
+        app_id = str(kwargs.get("app_id") or "")
         for version in self.created_versions:
-            if version.id == build_record_id:
+            if version.id == build_record_id and version.app_id == app_id:
                 return version
+        # The smoke scenarios own these pack-free baselines before any child is saved.
+        for spec in _scenario_specs():
+            if spec.artifact_version_id == build_record_id and spec.app_id == app_id:
+                return ArtifactVersionDoc(
+                    id=spec.artifact_version_id, app_id=spec.app_id,
+                    build_family="app_bundle", build_key="app_bundle",
+                    version_number=1, lineage_root_id=spec.artifact_version_id,
+                    commit_metadata={"metadata": {"capability_packs": []}},
+                )
         return None
 
     async def list_build_records(self, **kwargs):  # noqa: ANN003
@@ -549,7 +563,9 @@ def _build_manual_validation_runner():
             "success": True,
             "validation_status": "skipped",
             "execution_mode": "not_executed",
-            "overlay_file_count": len(kwargs.get("overlay_files") or {}),
+            "file_count": len(kwargs.get("files") or {}),
+            "app_bundle_acceptance_result": {"status": "skipped", "passed": False},
+            "app_validation_result": {"validation_status": "skipped", "validation_strategy": "skip"},
             "preview_url": None,
             "command_results": [],
             "fallback_checks": [],
@@ -707,7 +723,7 @@ async def _run_scenario(
                 source_file_map=source_before,
                 plan=plan,
             ),
-            source_validation_runner=_manual_validation_runner,
+            candidate_validation_runner=_manual_validation_runner,
             artifact_store=artifact_store,
             output_root=tmp_path / "generated_refinements",
         )

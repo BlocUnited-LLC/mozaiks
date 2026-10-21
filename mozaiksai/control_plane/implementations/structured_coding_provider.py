@@ -57,7 +57,7 @@ class StructuredOutputCodingProvider:
     async def execute(self, request: CodingWorkerRequest) -> StagedPatchProposal:
         tool_context_loaded = False
         try:
-            llm_config = self._load_config().resolve_capability_llm_config("coding") or {}
+            llm_config = self._load_config().resolve_capability_llm_config("coding")
             system_prompt = self._load_system_prompt()
             control_plane_context = await self._load_control_plane_context(request)
             tool_context_loaded = bool(control_plane_context)
@@ -238,7 +238,7 @@ class StructuredOutputCodingProvider:
             "request": request.raw_user_request,
             "file_paths": sorted(request.files.keys()),
             "input_files": request.files,
-            "validation_strategy_hint": request.validation_strategy or "auto",
+            "validation_strategy": request.validation_strategy,
             "start_preview_requested": bool(request.start_preview),
             "context_seed": request.context_seed,
             "metadata": request.metadata,
@@ -246,6 +246,7 @@ class StructuredOutputCodingProvider:
         }
         lines = [
             "Plan a scoped coding refinement for this Mozaiks artifact request.",
+            "Validation execution is owned by the operator and runtime. Your strategy and command fields are advisory; they cannot choose host execution or skip required checks.",
             "Return JSON only.",
             "payload_json:",
             json.dumps(payload, indent=2, sort_keys=True, default=str),
@@ -254,7 +255,7 @@ class StructuredOutputCodingProvider:
             (
                 '{"summary":"...","owned_paths":["..."],'
                 '"updated_files":[{"path":"relative/path","content":"full file content"}],'
-                '"validation_strategy":"skip|local",'
+                '"validation_strategy":"e2b|docker|skip",'
                 '"validation_commands":["..."],"start_preview":false,'
                 '"needs_human_review":false,"rationale":"..."}'
             ),

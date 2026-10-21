@@ -13,7 +13,8 @@ def test_readme_uses_concise_setup_guidance() -> None:
     readme = _read("README.md")
 
     assert "If setup fails, check three things first:" in readme
-    assert "Mozaiks is not published as a public PyPI package yet." in readme
+    assert "Install the public package from PyPI:" in readme
+    assert "python -m pip install mozaiks" in readme
     assert 'python -m pip install -e ".[dev]"' in readme
     assert "python -m mozaiks quickstart --dir .\\mozaiks-workspace" in readme
     assert "Docker Desktop is not required" in readme
@@ -21,7 +22,7 @@ def test_readme_uses_concise_setup_guidance() -> None:
     assert "mid-flight-journeys.md" not in readme
     assert "pipx" not in readme
     assert "python -m venv .venv" not in readme
-    assert "python -m pip install mozaiks" not in readme
+    assert "Mozaiks is not published as a public PyPI package yet." not in readme
     assert "set an LLM API key before running builds." in readme
     assert "developer entrypoint" not in readme
     assert "internal host name" not in readme

@@ -3,7 +3,74 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { buildSync } from 'esbuild';
 import validateAllConfigs from '../../chat-ui/src/config/validateConfig.js';
-import { clearThemeCache, getTheme } from '../../chat-ui/src/styles/themeProvider.js';
+import { clearThemeCache, getCachedTheme, getTheme, getThemeMetadata } from '../../chat-ui/src/styles/themeProvider.js';
+
+test('concurrent theme consumers share the pending load and cached result', async (t) => {
+  const previousFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = previousFetch; clearThemeCache(); });
+  const requests = [];
+  let release;
+  const pending = new Promise(resolve => { release = resolve; });
+  globalThis.fetch = async url => {
+    requests.push(url);
+    if (url === '/api/theme-config') await pending;
+    return { ok: true, json: async () => ({ identity: { name: 'Bakery' } }) };
+  };
+  const first = getTheme('bakery');
+  const second = getTheme('bakery');
+  assert.equal(getCachedTheme('bakery'), null);
+  assert.deepEqual(requests, ['/api/theme-config']);
+  release();
+  const [a, b] = await Promise.all([first, second]);
+  assert.equal(a, b);
+  assert.equal(await getTheme('bakery'), a);
+  assert.equal(getCachedTheme('bakery'), a);
+  assert.equal(getThemeMetadata('bakery').source, 'config');
+  assert.deepEqual(requests, ['/api/theme-config', '/api/themes/bakery']);
+});
+
+test('an invalidated pending theme cannot replace a newer cache entry', async (t) => {
+  const previousFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = previousFetch; clearThemeCache(); });
+  let releaseOld;
+  let requests = 0;
+  globalThis.fetch = async url => {
+    if (url !== '/api/theme-config') return { ok: false };
+    if (++requests === 1) {
+      await new Promise(resolve => { releaseOld = resolve; });
+      return { ok: true, json: async () => ({ identity: { name: 'Old' } }) };
+    }
+    return { ok: true, json: async () => ({ identity: { name: 'Current' } }) };
+  };
+  const old = getTheme('bakery');
+  clearThemeCache('bakery');
+  const current = await getTheme('bakery');
+  releaseOld();
+  assert.equal((await old).branding.name, 'Old');
+  assert.equal(getCachedTheme('bakery'), current);
+  assert.equal((await getTheme('bakery')).branding.name, 'Current');
+});
+
+test('a stalled base-theme request settles through the existing fallback', async (t) => {
+  const previousFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = previousFetch; clearThemeCache(); });
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let requestSignal;
+  globalThis.fetch = async (url, options) => {
+    if (url !== '/api/theme-config') return { ok: false };
+    requestSignal = options.signal;
+    return new Promise((_, reject) => options.signal.addEventListener('abort', () => {
+      reject(new Error('request aborted'));
+    }));
+  };
+  const pending = getTheme('unavailable');
+  t.mock.timers.tick(3999);
+  assert.equal(requestSignal.aborted, false);
+  t.mock.timers.tick(1);
+  assert.equal((await pending).branding.name, 'App');
+  assert.equal(requestSignal.aborted, true);
+  assert.equal(getThemeMetadata('unavailable').source, 'fallback');
+});
 
 test('only custom overrides for the active app replace declared brand values', async (t) => {
   const previousFetch = globalThis.fetch;

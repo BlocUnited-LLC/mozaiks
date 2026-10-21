@@ -76,11 +76,19 @@ def _authorize_fulfillment(
     # (AUTH_ENABLED=false or AUTH_PROVIDER=none), which the canonical auth
     # resolution rejects outright in protected environments
     # (staging/production) — so this branch cannot open there even if startup
-    # validation was somehow bypassed. Implicit demo mode (auth merely
-    # unconfigured) and a missing/misconfigured INTERNAL_API_KEY fail closed
-    # instead of turning this ingress into an unauthenticated endpoint.
-    if is_auth_explicitly_disabled() and not os.getenv("INTERNAL_API_KEY", "").strip():
-        return principal.user_id if principal is not None else "local_dev"
+    # validation was somehow bypassed — and this request must have been
+    # granted development access (this machine, or AUTH_ANON_ACCESS=open).
+    # Implicit demo mode (auth merely unconfigured), anonymous visitors
+    # (AUTH_ANON_ACCESS=public) and a missing/misconfigured INTERNAL_API_KEY
+    # fail closed instead of turning this ingress into an unauthenticated
+    # endpoint.
+    if (
+        is_auth_explicitly_disabled()
+        and principal is not None
+        and principal.has_local_development_access
+        and not os.getenv("INTERNAL_API_KEY", "").strip()
+    ):
+        return principal.user_id
 
     raise HTTPException(
         status_code=403,

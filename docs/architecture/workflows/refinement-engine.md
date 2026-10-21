@@ -360,12 +360,33 @@ Allowed profile ids:
 | Profile | Purpose |
 |---|---|
 | `classifier` | Classify refinement requests into stable `patch`, `design`, `feature`, or `core` classes |
-| `impact_analyzer` | Support artifact impact and routing analysis |
-| `planner_replanner` | Plan or replan higher-scope refinement work after routing |
-| `codegen` | Generate scoped code or artifact patches |
-| `reviewer_validator` | Review generated changes and validate contract conformance |
+| `impact_analyzer` | Select bounded file scope and contract surfaces |
+| `architecture` | Advisory context for conceptual replans and full rebuilds; the workflow runner does not yet resolve this model |
+| `planner_replanner` | Optional dry-run plan role; no separate live model call |
+| `codegen` | Generate structured-output patches and regenerate selected contract surfaces |
+| `surface_regeneration` | Optional separate model for contract-surface file generation |
+| `reviewer_validator` | Optional dry-run plan role; no separate live model call |
 
-Capabilities reference profiles by id:
+The first-party policy maps these settings to actual work:
+
+| Policy field | Used for | First-party profile |
+|---|---|---|
+| `classifier.llm_profile` | Classifying the request | `classifier` |
+| `scope.llm_profile` | Selecting files for a bounded patch | `impact_analyzer` |
+| `contract_surface.llm_profile` | Selecting surfaces for a feature or design change | `impact_analyzer` |
+| `contract_surface.regeneration_llm_profile` | Regenerating files in selected surfaces | `codegen` |
+| `coding.llm_profile` | Generating a structured-output patch | `codegen` |
+| `coding.providers.acp.adapter` | Selecting a separate ACP coding agent | `claude_code` when ACP is enabled |
+
+The ACP adapter does not consume the `codegen` profile's model. Surface
+regeneration requires its own declared profile with a non-empty model before
+the first AG2 call, even when `coding.enabled` is false. The first-party
+policy shares `codegen` across both generation steps. To tune them separately,
+declare `surface_regeneration` and point
+`contract_surface.regeneration_llm_profile` at it. The first-party policy
+does not declare the optional dry-run-only profiles.
+`coding.llm_profile` remains required when ACP is enabled because the current
+provider selection can fall back to structured-output coding.
 
 ```yaml
 schema_version: mozaiks.refinement.policy.v1
@@ -383,15 +404,15 @@ classifier:
 ```
 
 This is an indirection layer only. It does not tune models, change AG2
-execution semantics, or introduce a new workflow. Existing raw
-`classifier.llm_config` and `coding.llm_config` fallback remains valid for
-workspaces that have not moved to profile references, but new Refinement Engine
-configuration should prefer `llm_profile`.
+execution semantics, or introduce a new workflow. Each enabled refinement
+capability must name a declared profile with a non-empty model. Inline
+capability `llm_config` is rejected; model settings live only in `llm_profiles`.
 
 Rules:
 
 - unknown profile ids fail configuration validation
-- capability references to undeclared profiles fail resolution clearly
+- enabled capability references to missing profiles or models fail when policy loads
+- `contract_surface.regeneration_llm_profile` must resolve to a profile with an explicit model when the surface capability is enabled
 - no per-agent hidden model overrides should be added for Refinement Engine or
   refinement lanes
 - raw provider/model config may live inside the central profile registry, but
@@ -619,6 +640,11 @@ Current first-party coding worker path:
   validates the merged staged artifact workspace, and can persist a child artifact
   version for the refined bundle
 - persisted child artifact versions enter Studio review as `draft`
+- app candidates pass both the existing explicit-file acceptance gate and the
+  operator-selected app build validator. Source-index checks and parent evidence
+  cannot certify the edited candidate; skipped execution blocks activation.
+- saved candidates use canonical ZIP identity and digest verification, including
+  verified parent bytes before refinement and verified candidate bytes at activation
 - Studio review is now a first-class lifecycle step with:
   - diff preview against the parent artifact version
   - selected scope and coding summary

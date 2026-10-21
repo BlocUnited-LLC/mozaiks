@@ -6,6 +6,7 @@ import pytest
 
 from factory_app.app.modules.messages.backend.service import MessageService
 from mozaiksai.core.runtime.app.module_loader import ModuleLoader
+from mozaiksai.core.runtime.persistence.adapter import PersistencePrincipal
 
 
 class _FakeCollection:
@@ -71,7 +72,8 @@ class _FakeCollection:
 
 
 class _FakePersistence:
-    def __init__(self):
+    def __init__(self, principal=None):
+        self.principal = principal
         self.collections = {
             ("messages", "threads"): _FakeCollection(),
             ("messages", "messages"): _FakeCollection(),
@@ -101,8 +103,11 @@ async def test_messages_create_thread_and_send_message_emit_domain_events():
         thread_type="support",
         related_type="workspace_support.request",
         related_id="sr_1",
+        allow_support_thread=True,
     )
-    sent = await service.send_message(ctx, thread_id=created["thread"]["thread_id"], body="Hello")
+    sent = await service.send_message(
+        ctx, thread_id=created["thread"]["thread_id"], body="Hello", allow_support_thread=True
+    )
 
     assert created["thread"]["participant_ids"] == ["user_1", "user_2"]
     assert sent["success"] is True
@@ -154,7 +159,7 @@ async def test_message_thread_lookup_requires_authorized_scope():
 @pytest.mark.asyncio
 async def test_workspace_scope_thread_can_be_messaged_from_current_workspace():
     emitted = []
-    persistence = _FakePersistence()
+    persistence = _FakePersistence(PersistencePrincipal("user_1", "workspace_1"))
     ctx = SimpleNamespace(
         app_id="app_1",
         workspace_id="workspace_1",
@@ -184,7 +189,12 @@ async def test_workspace_scope_thread_can_be_messaged_from_current_workspace():
 
 @pytest.mark.asyncio
 async def test_create_thread_rejects_scope_id_outside_current_context():
-    ctx = SimpleNamespace(app_id="app_1", workspace_id="workspace_1", user_id="user_1", persistence=_FakePersistence())
+    ctx = SimpleNamespace(
+        app_id="app_1",
+        workspace_id="workspace_1",
+        user_id="user_1",
+        persistence=_FakePersistence(PersistencePrincipal("user_1", "workspace_1")),
+    )
 
     with pytest.raises(PermissionError, match="app message scope"):
         await MessageService().create_thread(ctx, scope_type="app", scope_id="other_app")
@@ -197,5 +207,9 @@ def test_active_messages_module_contract_loads():
     loaded = ModuleLoader("factory_app/app").load("messages")
 
     assert loaded.name == "messages"
+    schemas = loaded.action_schemas_map
+    assert "support" not in schemas["create_thread"]["input"]["properties"]["thread_type"]["enum"]
+    assert "support" not in schemas["list_threads"]["input"]["properties"]["thread_type"]["enum"]
+    assert "allow_support_thread" not in schemas["get_thread"]["input"].get("properties", {})
     assert "domain.messages.message_sent" in loaded.manifests.events.event_types
     assert loaded.manifests.notifications.notifications[0].audience.user_id_field == "recipient_ids"

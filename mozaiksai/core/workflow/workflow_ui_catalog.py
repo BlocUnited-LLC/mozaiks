@@ -74,6 +74,17 @@ _WORKFLOW_UI_PRIMITIVES: tuple[WorkflowUIPrimitive, ...] = (
         description="Typed structured form for multi-field user input and validation.",
     ),
     WorkflowUIPrimitive(
+        primitive_id="outcome_feedback",
+        owner="workflow",
+        category="interaction",
+        default_display="inline",
+        response_mode="form",
+        realization="shipped_component",
+        shipped_component="OutcomeFeedback",
+        plannable=True,
+        description="Optional human rating (1–5), helpfulness, and reported outcome after result delivery; skip is allowed.",
+    ),
+    WorkflowUIPrimitive(
         primitive_id="record_picker",
         owner="workflow",
         category="interaction",
@@ -452,6 +463,7 @@ def format_workflow_ui_catalog_guidance() -> str:
     lines.append("")
     lines.append("Rules:")
     lines.append("- Use `composer_reply` for plain natural-language feedback instead of generating an inline text box.")
+    lines.append("- Use `outcome_feedback` only when approved requirements request actual user ratings after a delivered result. Use `collect_workflow_feedback` from `mozaiksai.core.workflow.outcome_feedback` with runtime-injected context and a server-owned outcome ID; persist via the app's declared feedback module action. Never fabricate ratings, collect free-text transcripts, or treat skipped/unanswered requests as success. Feedback is optional and must not gate result delivery.")
     lines.append("- Use a plannable workflow primitive when the user must approve, choose, edit, upload, or review structured content.")
     lines.append("- Use `progress_stepper` for workflow-owned inline stepper/status cards with app-specific stages.")
     lines.append("- Do not encode shell status surfaces as workflow-local React components; the shell owns run banners and generic background status feeds.")

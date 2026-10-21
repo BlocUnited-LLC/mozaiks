@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from mozaiksai.core.auth import UserPrincipal, optional_user
 from mozaiksai.core.auth.adapters.registry import is_auth_enabled
-from mozaiksai.core.auth.dependencies import validate_path_app_id
+from mozaiksai.core.auth.dependencies import ANONYMOUS_ACCESS_REFUSAL_STATE
 from mozaiksai.core.metrics.usage_instrumentation import record_action_invocation
 from mozaiksai.core.runtime.composition.module_authority import (
     ModuleDispatchAuthority,
@@ -217,16 +217,10 @@ def _reconcile_reserved_params(
     way, so both need the same schema-aware treatment. For each reserved word
     present in params:
 
-      - If the target action's own input schema declares that word as a
-        business property, the value stays in params so schema validation and
-        the handler call see it (many actions scope by app_id, or take a
-        target-subject user_id such as add_member's invitee or
-        update_member_role's subject). "user_id" specifically is never
-        promoted into context in this case: doing so would let a target
-        subject's id silently override the authenticated actor's identity,
-        letting an action's own business input hijack actor identity
-        resolution downstream (authorization checks would then run as the
-        target user instead of the real caller).
+      - If the target action's input schema declares a business app_id or
+        user_id, that value stays in params only. A target app or user cannot
+        replace the host app or authenticated actor in execution context.
+        Other declared context fields retain their existing scoped behavior.
       - Otherwise, the value is promoted into context_overrides (when not
         already set there) and removed from params, since the handler method
         is invoked as handler.method(ctx, **params) and does not accept this
@@ -244,7 +238,7 @@ def _reconcile_reserved_params(
         if key not in params:
             continue
         declared_as_business_param = key in action_input_properties
-        if not (key == "user_id" and declared_as_business_param):
+        if not (key in {"app_id", "user_id"} and declared_as_business_param):
             context_overrides.setdefault(key, params[key])
         if not declared_as_business_param:
             params.pop(key, None)
@@ -334,36 +328,52 @@ async def _execute_module_action(
 
     environment = environment or module_dispatch_environment()
     auth_enabled = environment.authentication_enabled
-    if auth_enabled and principal is None and not _is_public_module_action(request, module_name, action_name):
+    # No principal is a caller without credentials, whatever the auth mode:
+    # with authentication off, optional_user returns None only when the
+    # anonymous access policy refused the request, and says why.
+    if principal is None and not _is_public_module_action(request, module_name, action_name):
+        refusal = getattr(getattr(request, "state", None), ANONYMOUS_ACCESS_REFUSAL_STATE, None)
+        if refusal is not None:
+            raise HTTPException(status_code=refusal.status_code or 403, detail=refusal.detail)
         raise HTTPException(status_code=401, detail="Missing authorization token")
+    # Development access is a property of the principal minted for this
+    # request (core/auth/anonymous_access.py), never of the process-wide auth
+    # mode: an anonymous visitor of an unauthenticated host is bound to its
+    # own identity and enforced exactly like an authenticated caller.
+    development_access = (
+        not auth_enabled
+        and isinstance(principal, UserPrincipal)
+        and principal.has_local_development_access
+    )
 
     # Snapshot authenticated claims before host scope hooks receive the mutable
     # UserPrincipal. Requested workspace selection remains separate metadata.
     persistence_principal = environment.persistence_principal(principal)
 
-    # IDOR gate: when an explicit app_id was supplied (not derived from the token),
-    # verify it matches the authenticated principal's token claim. This prevents a
-    # caller from executing actions scoped to a foreign app by passing ?app_id=other.
-    # Must run before executor availability checks so auth errors take priority.
-    explicit_app_id = context_overrides.get("app_id") or request.query_params.get("app_id")
-    if explicit_app_id and principal is not None:
-        validate_path_app_id(principal, str(explicit_app_id))
+    # The loaded bundle owns module execution identity. A target app_id in an
+    # action's declared params is business data, never an execution override.
+    # A token or explicit execution context must agree with this host even
+    # when the token has no app claim.
+    loaded_app_id = getattr(request.app.state, "loaded_app_id", None)
+    if not isinstance(loaded_app_id, str) or not loaded_app_id.strip():
+        raise HTTPException(status_code=503, detail="Loaded app identity unavailable")
+    app_id = loaded_app_id.strip()
+    requested_app_ids = (context_overrides.get("app_id"), request.query_params.get("app_id"))
+    if (principal is not None and principal.app_id and principal.app_id != app_id) or any(
+        value is not None and str(value).strip() != app_id for value in requested_app_ids
+    ):
+        raise HTTPException(status_code=403, detail="App ID does not match the loaded app")
 
-    app_id = (
-        explicit_app_id
-        or (principal.app_id if principal else None)
-        or "default"
-    )
-
-    # HTTP query-string user_id is an authenticated override only. In local
-    # no-auth mode, optional_user already resolves the stable anonymous/dev
-    # principal, and trusted callers that need an explicit execution user pass
-    # context_overrides directly instead of relying on external query params.
+    # HTTP query-string user_id is a bound-identity override only. With
+    # development access, optional_user already resolves the stable
+    # anonymous/dev principal, and trusted callers that need an explicit
+    # execution user pass context_overrides directly instead of relying on
+    # external query params.
     requested_user_id = context_overrides.get("user_id")
-    if requested_user_id is None and auth_enabled:
+    if requested_user_id is None and not development_access:
         requested_user_id = request.query_params.get("user_id")
     if (
-        auth_enabled
+        not development_access
         and principal is not None
         and requested_user_id
         and str(requested_user_id).strip() != str(principal.user_id)
@@ -430,6 +440,8 @@ async def _execute_module_action(
         raise HTTPException(
             status_code=403, detail="Operator scope resolution failed"
         ) from exc
+    if dispatch_scope.get("app_id") != app_id:
+        raise HTTPException(status_code=403, detail="Resolved app ID does not match the loaded app")
     # Admin-lane dispatch is always enforce-mode with the operator's resolved
     # permissions — never trusted_bypass over HTTP, including local
     # development (ADR-0001). Per-action module.yaml permissions are then
@@ -442,13 +454,13 @@ async def _execute_module_action(
             actor_id=str(user_id) if user_id else None,
             permissions=tuple(dispatch_scope.get("permissions") or []),
         )
-    # When auth is disabled (dev/local mode), optional_user still returns an
-    # anonymous principal so downstream code has a stable user shape. Treat all
-    # such module HTTP calls as trusted local dispatch so module permission
-    # declarations don't block the Studio admin UI. In production
-    # (AUTH_ENABLED=true), non-public HTTP callers must carry a token with
-    # explicit scopes that become the enforce-mode authority's permissions.
-    elif not auth_enabled:
+    # A request granted development access (authentication off, and this
+    # machine or AUTH_ANON_ACCESS=open) is trusted local dispatch so module
+    # permission declarations don't block the Studio admin UI. Everyone else is
+    # enforced: authenticated callers with their token's scopes, and anonymous
+    # callers (visitors of an unauthenticated host, or public actions without a
+    # token) as public HTTP with the scopes their principal carries.
+    elif development_access:
         authority = ModuleDispatchAuthority(
             kind="local_development",
             permission_mode="trusted_bypass",
@@ -458,7 +470,7 @@ async def _execute_module_action(
     else:
         authority_kind = cast(
             ModuleDispatchAuthorityKind,
-            "authenticated_user" if principal is not None else "public_http",
+            "authenticated_user" if principal is not None and auth_enabled else "public_http",
         )
         authority = ModuleDispatchAuthority(
             kind=authority_kind,
@@ -535,6 +547,10 @@ async def _execute_module_action(
         status_code = 403
     elif result.error_code == "ENTITLEMENT_REQUIRED":
         status_code = 402
+    elif result.error_code == "INSUFFICIENT_TOKENS":
+        status_code = 402
+    elif result.error_code in {"TOKEN_USAGE_SCOPE_MISSING", "TOKEN_USAGE_DENIED"}:
+        status_code = 403
     elif result.error_code == "INVALID_PARAMS":
         status_code = 400
     else:
@@ -551,15 +567,19 @@ async def _execute_module_action(
             result.error,
         )
 
-    raise HTTPException(
-        status_code=status_code,
-        detail={
-            "error": result.error or "Module action failed",
-            "error_code": result.error_code or "EXECUTION_ERROR",
-            "module": module_name,
-            "action": action_name,
-        },
-    )
+    detail: dict[str, Any] = {
+        "error": result.error or "Module action failed",
+        "error_code": result.error_code or "EXECUTION_ERROR",
+        "module": module_name,
+        "action": action_name,
+    }
+    if (
+        result.error_code in {"INSUFFICIENT_TOKENS", "TOKEN_USAGE_SCOPE_MISSING", "TOKEN_USAGE_DENIED"}
+        and isinstance(result.data, dict)
+        and isinstance(result.data.get("extra_data"), dict)
+    ):
+        detail["extra_data"] = result.data["extra_data"]
+    raise HTTPException(status_code=status_code, detail=detail)
 
 
 # ---------------------------------------------------------------------------
@@ -577,9 +597,9 @@ async def execute_module_action_get(
     # Reserved execution-context words are query-string-only here and are
     # never promoted into the trusted execution context from GET query
     # params (that would let an unauthenticated caller set app_id/user_id/etc
-    # via a URL). app_id has its own explicit, IDOR-guarded query fallback in
-    # _execute_module_action; the rest are simply not meaningful as GET
-    # action inputs today, so they are stripped to avoid handler TypeErrors.
+    # via a URL). Query app_id is checked against the loaded host identity in
+    # _execute_module_action; the other reserved words are not GET action
+    # inputs, so they are stripped to avoid handler TypeErrors.
     params = {
         key: value
         for key, value in request.query_params.items()

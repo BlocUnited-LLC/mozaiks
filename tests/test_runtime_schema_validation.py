@@ -256,7 +256,7 @@ async def test_output_value_invalid_policy_remains_warning_only() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("schema", (*_BROKEN_SCHEMAS, [], "", 0))
-async def test_executor_rejects_bad_event_schema_before_emission(schema: Any) -> None:
+async def test_executor_rejects_event_under_bad_schema_without_failing_the_action(schema: Any) -> None:
     emitted = []
 
     async def emit(event_type, envelope):
@@ -270,8 +270,10 @@ async def test_executor_rejects_bad_event_schema_before_emission(schema: Any) ->
     executor = ModuleExecutor(event_emitter=emit)
     executor.register("probe", Handler(), action_method_map={"run": "run"}, event_payload_schemas={"domain.probe.changed": schema})
     result = await executor.execute(_request(module="probe", action="run"))
-    assert result.success is False
-    assert result.error_code == "INVALID_EVENT_PAYLOAD"
+    assert (result.success, result.data) == (True, {})
+    assert [(item.event_type, item.category) for item in result.rejected_events] == [
+        ("domain.probe.changed", "schema_invalid"),
+    ]
     assert emitted == []
 
 
@@ -354,11 +356,13 @@ async def test_explicit_empty_schema_never_bypasses_validation_in_any_caller(bou
         executor = ModuleExecutor(event_emitter=emit)
         executor.register("probe", Handler(), action_method_map={"run": "run"}, event_payload_schemas={"domain.probe.changed": {}})
         result = await executor.execute(_request(module="probe", action="run"))
-        assert result.error_code == "INVALID_EVENT_PAYLOAD"
+        # The event is never dispatched; the action that emitted it still completed.
+        assert [item.category for item in result.rejected_events] == ["schema_invalid"]
         assert emitted == []
-    else:
-        executor = ModuleExecutor()
-        executor.register("probe", _Handler(), action_method_map={"run": "run"}, action_schemas={"run": {boundary: {}}})
-        result = await executor.execute(_request(module="probe", action="run"))
-        assert result.error_code == ("INVALID_PARAMS" if boundary == "input" else "INVALID_OUTPUT_SCHEMA")
+        assert result.success is True
+        return
+    executor = ModuleExecutor()
+    executor.register("probe", _Handler(), action_method_map={"run": "run"}, action_schemas={"run": {boundary: {}}})
+    result = await executor.execute(_request(module="probe", action="run"))
+    assert result.error_code == ("INVALID_PARAMS" if boundary == "input" else "INVALID_OUTPUT_SCHEMA")
     assert result.success is False

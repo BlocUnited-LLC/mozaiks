@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 from logs.logging_config import get_core_logger
@@ -24,12 +24,17 @@ class PersistencePrincipal:
     """Authenticated ownership identity, separate from requested dispatch scope.
 
     Runtime authentication or an explicit local development identity supplies
-    the actor. Only a host's verified membership assertion may select workspace.
+    the actor. ``tenant_id`` is the tenant the validated credential is bound
+    to; requested dispatch scope never sets it. Only a host's verified
+    membership assertion may select tenant or workspace. Persistence
+    ownership reads user and workspace; module entitlement lookups read user,
+    tenant and workspace.
     """
 
     user_id: str
     workspace_id: str | None = None
     source: Literal["authenticated", "development"] = "authenticated"
+    tenant_id: str | None = None
 
     @classmethod
     def from_authenticated_user(cls, principal: UserPrincipal | None) -> PersistencePrincipal | None:
@@ -45,7 +50,11 @@ class PersistencePrincipal:
         except AuthError:
             return None
         if principal.is_authenticated and auth_enabled:
-            return cls(user_id=principal.user_id, workspace_id=principal.workspace_id)
+            return cls(
+                user_id=principal.user_id,
+                workspace_id=principal.workspace_id,
+                tenant_id=principal.tenant_id or None,
+            )
         return cls._development(principal.user_id)
 
     @classmethod
@@ -75,14 +84,29 @@ class PersistencePrincipal:
                     return None
             except (TypeError, ValueError):
                 return None
-        return cls(user_id=principal.user_id, workspace_id=principal.workspace_id)
+        return cls(
+            user_id=principal.user_id,
+            workspace_id=principal.workspace_id,
+            tenant_id=principal.tenant_id or None,
+        )
 
     @classmethod
     def _development(cls, user_id: str) -> PersistencePrincipal | None:
-        from mozaiksai.core.auth.adapters.registry import is_auth_enabled
-        from mozaiksai.core.environment import environment_permits_no_auth
+        """Ownership identity of an unauthenticated principal.
 
-        if not environment_permits_no_auth() or is_auth_enabled():
+        Only an explicit disable in an environment that permits it qualifies;
+        implicit demo mode owns nothing. The user id is the principal's: a
+        caller-named user only with development access, otherwise the fixed
+        anonymous visitor id.
+        """
+        from mozaiksai.core.auth.adapters import AuthError
+        from mozaiksai.core.auth.adapters.registry import resolve_auth_config
+
+        try:
+            config = resolve_auth_config()
+        except AuthError:
+            return None
+        if not (config.explicitly_disabled and config.environment.permits_no_auth):
             return None
         logger.warning(
             "PERSISTENCE_DEVELOPMENT_PRINCIPAL user_id=%s workspace_id=development", user_id,
@@ -90,12 +114,18 @@ class PersistencePrincipal:
         return cls(user_id=user_id, workspace_id="development", source="development")
 
     def with_host_scope(self, scope: Mapping[str, Any]) -> PersistencePrincipal:
-        """Apply the hook registry's explicit, host-verified membership assertion."""
-        if "_verified_workspace_id" not in scope:
-            return self
-        return PersistencePrincipal(
-            user_id=self.user_id, workspace_id=scope["_verified_workspace_id"], source=self.source,
-        )
+        """Apply the hook registry's explicit, host-verified membership assertions.
+
+        Only the registry's private verified keys are read. A plain requested
+        ``tenant_id`` or ``workspace_id`` in the same scope never changes the
+        principal.
+        """
+        asserted = {
+            field: scope[key]
+            for key, field in (("_verified_tenant_id", "tenant_id"), ("_verified_workspace_id", "workspace_id"))
+            if key in scope
+        }
+        return replace(self, **asserted) if asserted else self
 
 
 class PersistenceScopeError(PermissionError):

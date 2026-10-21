@@ -223,6 +223,35 @@ def test_deployment_env_for_cloud_pack_declares_secret_and_optional() -> None:
     assert "MOZAIKS_CLOUD_API_BASE" in optional_vars, (
         "MOZAIKS_CLOUD_API_BASE must be declared as optional env when cloud pack is selected"
     )
+    assert "MOZAIKS_CLOUD_USAGE_API_KEY" not in (secret_vars | optional_vars | set(env.get("required", [])))
+
+
+def test_usage_key_is_not_required_by_ordinary_cloud_pack_deployment() -> None:
+    from factory_app.workflows.AppGenerator.tools.deployment_contract import (
+        build_deploy_target_spec,
+        build_deployment_template_manifest,
+    )
+
+    env = _deployment_env_for_capability_packs([_cloud_pack_descriptor()])
+    spec = build_deploy_target_spec(
+        app_id="test_app",
+        deployment_profile="generic_container",
+        include_dockerfiles=False,
+        include_workflow=False,
+        extra_required_variables=env["required"],
+        extra_optional_variables=env["optional"],
+        extra_secret_variables=env["secret"],
+        extra_public_variables=env["public"],
+    )
+    manifest = build_deployment_template_manifest(
+        app_id="test_app",
+        deployment_profile="generic_container",
+        deploy_target_spec=spec,
+        generated_files={},
+    )
+    assert "MOZAIKS_CLOUD_API_KEY" in manifest["secret_env"]
+    assert "MOZAIKS_CLOUD_USAGE_API_KEY" not in manifest["secret_env"]
+    assert "MOZAIKS_CLOUD_USAGE_API_KEY" not in manifest["required_env"]
 
 
 def test_deployment_env_absent_when_pack_not_selected() -> None:

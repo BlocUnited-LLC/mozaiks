@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
+import { FiMessageCircle } from "react-icons/fi";
 import { useNavigation } from "../../providers/NavigationProvider";
 import { useNavigationActions } from "../../navigation/useNavigationActions";
 import {
@@ -12,6 +13,7 @@ import {
 import { useChatUI } from "../../context/ChatUIContext";
 import { useAppEventBus } from "../../ui/hooks/useAppEventBus.js";
 import { fetchNotificationCount } from "./notificationApi.js";
+import ShellNavigationIcon, { hasNamedIcon } from "./ShellNavigationIcon.jsx";
 import "./header-styles.css";
 
 const buildAutoItems = ({ headerPages, header, notifications, profile, shellAuth, actionContext }) => {
@@ -25,6 +27,8 @@ const buildAutoItems = ({ headerPages, header, notifications, profile, shellAuth
         items.push({
           id: item.id || item.path,
           label: item.label || item.id || "Page",
+          icon: item.icon,
+          iconLabel: item.iconLabel,
           action: "navigate",
           path: item.path,
         });
@@ -41,6 +45,8 @@ const buildAutoItems = ({ headerPages, header, notifications, profile, shellAuth
     items.push({
       id: primaryAction.id || primaryAction.path || primaryAction.href,
       label: primaryAction.label || "Action",
+      icon: primaryAction.icon,
+      iconLabel: primaryAction.iconLabel,
       action: "navigate",
       path: primaryAction.path,
       href: primaryAction.href,
@@ -52,6 +58,7 @@ const buildAutoItems = ({ headerPages, header, notifications, profile, shellAuth
     items.push({
       id: "notifications",
       label: "Alerts",
+      icon: notifications.icon,
       action: "navigate",
       path: notifications.path,
     });
@@ -70,6 +77,8 @@ const buildAutoItems = ({ headerPages, header, notifications, profile, shellAuth
     items.push({
       id: profileItem.id || "profile",
       label: profileItem.label || "Account",
+      icon: profileItem.icon || profile.icon,
+      iconLabel: profileItem.iconLabel,
       action: "navigate",
       path: profileItem.path,
     });
@@ -87,7 +96,17 @@ const buildAutoItems = ({ headerPages, header, notifications, profile, shellAuth
 const MobileBottomBar = ({ route = null, shellMode = null }) => {
   const location = useLocation();
   const handleNavigationItem = useNavigationActions();
-  const { login, logout, user } = useChatUI();
+  const {
+    login,
+    logout,
+    user,
+    isInWidgetMode,
+    isWidgetVisible,
+    isChatOverlayOpen,
+    setIsChatOverlayOpen,
+    unreadChatCount,
+    setUnreadChatCount,
+  } = useChatUI();
   const { mobile, headerPages, header, notifications, profile, auth: shellAuth } = useNavigation();
   const [notificationCount, setNotificationCount] = useState(0);
   const actionContext = useMemo(
@@ -148,6 +167,8 @@ const MobileBottomBar = ({ route = null, shellMode = null }) => {
 
   if (bottomBar.visible === false || items.length === 0) return null;
 
+  const showAssistant = isInWidgetMode && isWidgetVisible;
+
   const execute = async (item) => {
     if (item.action === "signout" || item.id === "signout") {
       await logout?.();
@@ -173,13 +194,35 @@ const MobileBottomBar = ({ route = null, shellMode = null }) => {
             className={`shell-mobile-bottom-item${active ? " is-active" : ""}`}
           >
             <span className="shell-mobile-bottom-glyph" aria-hidden="true">
-              {(item.iconLabel || item.label || item.id || "?").slice(0, 1).toUpperCase()}
+              <ShellNavigationIcon
+                icon={item.icon || (!item.iconLabel && hasNamedIcon(item.id) ? item.id : null)}
+                fallback={(item.iconLabel || item.label || item.id || "?").slice(0, 1).toUpperCase()}
+              />
               {showBadge && <span className="shell-mobile-bottom-badge">{notificationCount > 9 ? "9+" : notificationCount}</span>}
             </span>
             <span className="shell-mobile-bottom-label">{item.label || item.id}</span>
           </button>
         );
       })}
+      {showAssistant && (
+        <button
+          type="button"
+          className={`shell-mobile-bottom-item${isChatOverlayOpen ? " is-active" : ""}`}
+          onClick={() => {
+            setIsChatOverlayOpen((open) => !open);
+            setUnreadChatCount(0);
+          }}
+          aria-label={isChatOverlayOpen ? "Close assistant" : "Open assistant"}
+          aria-expanded={isChatOverlayOpen}
+          aria-controls="mozaiks-assistant-panel"
+        >
+          <span className="shell-mobile-bottom-glyph" aria-hidden="true">
+            <FiMessageCircle className="shell-mobile-bottom-icon" />
+            {unreadChatCount > 0 && <span className="shell-mobile-bottom-badge">{unreadChatCount > 9 ? "9+" : unreadChatCount}</span>}
+          </span>
+          <span className="shell-mobile-bottom-label">Assistant</span>
+        </button>
+      )}
     </nav>
   );
 };

@@ -17,10 +17,12 @@ from mozaiksai.core.runtime.app.entitlements import (
     ConfiguredEntitlementAdapter,
 )
 from mozaiksai.core.runtime.app.subscriptions_loader import (
+    PlanDef,
     SubscriptionsConfig,
     TokenWalletDef,
     load_subscriptions_config,
 )
+from mozaiksai.core.tokens.plan_resolution import resolve_v2_wallet_plans
 from mozaiksai.core.tokens.wallet import TokenWalletLedger, get_token_wallet_ledger
 from mozaiksai.core.workflow.paths import resolve_active_app_root
 
@@ -131,10 +133,14 @@ class TokenUsageGuard:
         required_tokens: int = 1,
     ) -> TokenUsageDecision:
         config = self._load_config()
-        if config is None or not config.token_wallets:
+        if config is None or not config.effective_token_wallets:
             return TokenUsageDecision(allowed=True, reason="not_configured")
 
-        wallets = [wallet for wallet in config.token_wallets if wallet.auto_debit_usage]
+        wallets = [
+            wallet for wallet in config.effective_token_wallets
+            if wallet.auto_debit_usage
+            and (not config.products or wallet.usage_meter_id == "ai_tokens")
+        ]
         if not wallets:
             return TokenUsageDecision(allowed=True, reason="auto_debit_disabled")
 
@@ -152,18 +158,46 @@ class TokenUsageGuard:
         required = _positive_int(required_tokens)
         ledger = self._ledger or get_token_wallet_ledger()
 
-        plan_id = await ConfiguredEntitlementAdapter(
+        entitlements = ConfiguredEntitlementAdapter(
             config=config,
             collection_resolver=self._collection_resolver,
-        ).current_plan_id(
+        )
+        plan_id = await entitlements.current_plan_id(
             app_id=app_id_text,
             user_id=user_id_text,
             tenant_id=tenant_id_text,
             workspace_id=workspace_id_text,
         )
 
-        plan_declared = any(plan.plan_id == plan_id for plan in config.plans)
-        if plan_id and plan_declared:
+        if config.products:
+            try:
+                wallet_plans = await resolve_v2_wallet_plans(
+                    config=config,
+                    entitlements=entitlements,
+                    app_id=app_id_text,
+                    user_id=user_id_text,
+                    tenant_id=tenant_id_text,
+                    workspace_id=workspace_id_text,
+                )
+                payable_wallet_plans = {
+                    wallet.wallet_id: wallet_plans[wallet.wallet_id]
+                    for wallet in wallets
+                    if wallet.wallet_id in wallet_plans
+                    and wallet_plans[wallet.wallet_id].status == "resolved"
+                    and wallet_plans[wallet.wallet_id].grant_authority == "runtime_default"
+                    and wallet_plans[wallet.wallet_id].allowances
+                }
+                if payable_wallet_plans:
+                    await ledger.ensure_resolved_wallet_allowances(
+                        config=config,
+                        app_id=app_id_text,
+                        wallet_plans=payable_wallet_plans,
+                        user_id=user_id_text,
+                        tenant_id=tenant_id_text,
+                    )
+            except Exception as exc:
+                logger.debug("token allowance preflight sync skipped: %s", exc)
+        elif plan_id and any(plan.plan_id == plan_id for plan in config.plans):
             try:
                 await ledger.ensure_plan_allowances(
                     config=config,
@@ -195,6 +229,50 @@ class TokenUsageGuard:
             )
             current_balance = int(balance.get("balance") or 0)
             if current_balance < required:
+                recovery = self._recovery_metadata(config, wallet)
+                product_top_up_available = any(
+                    top_up.wallet_id == wallet.wallet_id and top_up.active
+                    for product in config.products
+                    for top_up in product.top_up_products
+                )
+                if (
+                    recovery["recovery_action"] == "upgrade"
+                    and not recovery["top_up_product_ids"]
+                    and not product_top_up_available
+                ):
+                    recovery_plan_id = plan_id
+                    plans = config.plans
+                    if config.products:
+                        owning_products = [
+                            product
+                            for product in config.products
+                            if any(
+                                allowance.wallet_id == wallet.wallet_id
+                                for plan in product.plans
+                                for allowance in plan.token_allowances
+                            )
+                        ]
+                        # A shared wallet has no single subscription plan authority.
+                        recovery_plan_id = None
+                        plans = []
+                        if len(owning_products) == 1:
+                            product = owning_products[0]
+                            plans = product.plans
+                            recovery_plan_id = await entitlements.current_plan_id(
+                                app_id=app_id_text,
+                                user_id=user_id_text,
+                                tenant_id=tenant_id_text,
+                                workspace_id=workspace_id_text,
+                                product_id=product.product_id,
+                            )
+                    if self._terminal_monthly_plan(plans, wallet.wallet_id, recovery_plan_id):
+                        recovery.update(
+                            recovery_action="contact_admin",
+                            billing_route=None,
+                            top_up_route=None,
+                            upgrade_route=None,
+                            recovery_message=None,
+                        )
                 return TokenUsageDecision(
                     allowed=False,
                     reason="insufficient_balance",
@@ -207,7 +285,7 @@ class TokenUsageGuard:
                     user_id=user_id_text if wallet.scope == "user" else None,
                     tenant_id=tenant_id_text if wallet.scope == "tenant" else None,
                     workspace_id=workspace_id_text,
-                    **self._recovery_metadata(config, wallet),
+                    **recovery,
                 )
 
         return TokenUsageDecision(allowed=True, reason="sufficient_balance")
@@ -275,6 +353,27 @@ class TokenUsageGuard:
             "recovery_message": getattr(configured, "message", None),
             "top_up_product_ids": tuple(product.product_id for product in top_up_products),
         }
+
+    @staticmethod
+    def _terminal_monthly_plan(
+        plans: list[PlanDef], wallet_id: str, plan_id: str | None,
+    ) -> bool:
+        """Compare declared monthly credits only when the plan ladder is unambiguous."""
+        if not plan_id:
+            return False
+        amounts: dict[str, int] = {}
+        for plan in plans:
+            allowances = [
+                allowance for allowance in plan.token_allowances
+                if allowance.wallet_id == wallet_id
+            ]
+            if len(allowances) > 1 or (allowances and allowances[0].cadence != "monthly"):
+                return False
+            amounts[plan.plan_id] = allowances[0].amount if allowances else 0
+        current_amount = amounts.get(plan_id)
+        if current_amount is None or not any(amount > 0 for amount in amounts.values()):
+            return False
+        return not any(amount > current_amount for amount in amounts.values())
 
 
 __all__ = ["TokenUsageDecision", "TokenUsageDenied", "TokenUsageGuard"]

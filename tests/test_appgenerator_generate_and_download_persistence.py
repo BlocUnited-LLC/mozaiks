@@ -160,6 +160,12 @@ def test_register_app_bundle_artifact_version_sets_context_and_parent(monkeypatc
             "artifact_version_id": "av_parent_1",
             "build_id": "build_1",
             "build_registry_id": "appreg_1",
+            "app_build_plan": {"capability_packs": [{
+                "id": "operator_readiness", "capability_source": "config_file",
+                "pack_source_path": "/installed/operator_readiness",
+                "version": "1.0.0", "config": {"profile": "local"},
+            }]},
+            "available_capability_packs": [{"id": "unselected_pack"}],
             "app_bundle_acceptance_status": "passed",
             "app_bundle_acceptance_result": {
                 "status": "passed",
@@ -198,6 +204,9 @@ def test_register_app_bundle_artifact_version_sets_context_and_parent(monkeypatc
     assert metadata["build_registry_id"] == "appreg_1"
     assert metadata["app_bundle_acceptance"]["status"] == "passed"
     assert metadata["validation_evidence"]["failed"] == []
+    assert metadata["capability_packs"] == context.data["app_build_plan"]["capability_packs"]
+    context.data["app_build_plan"]["capability_packs"][0]["config"]["profile"] = "changed"
+    assert metadata["capability_packs"][0]["config"]["profile"] == "local"
     assert context.data["artifact_version_id"] == "av_bundle_1"
 
 
@@ -301,6 +310,8 @@ def test_generate_and_download_uses_canonical_build_root_and_propagates_registra
     monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path / "generated"))
     monkeypatch.setattr(generate_and_download_module, "_inject_agent_context_env", noop)
     monkeypatch.setattr(generate_and_download_module, "run_app_bundle_acceptance_gate", passed_acceptance)
+    # This case isolates persistence after admission; gate behavior is tested separately below.
+    monkeypatch.setattr(generate_and_download_module, "resolve_export_gate", lambda *args, **kwargs: {"allow_export": True})
     monkeypatch.setattr(
         generate_and_download_module,
         "_register_app_bundle_artifact_version",
@@ -356,7 +367,7 @@ def test_requested_github_export_failure_does_not_report_ready(monkeypatch, tmp_
         }
         context_variables.set("app_bundle_acceptance_result", accepted)
         context_variables.set("app_bundle_acceptance_status", "passed")
-        context_variables.set("app_validation_status", "skipped")
+        context_variables.set("app_validation_status", "passed")
         context_variables.set("integration_tests_passed", True)
         return accepted
 
@@ -377,6 +388,39 @@ def test_requested_github_export_failure_does_not_report_ready(monkeypatch, tmp_
     assert result["status"] == ("success" if succeeded else "error")
     assert result["outcome"] == ("ready" if succeeded else "blocked")
     assert Path(result["bundle_zip"]).exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("build_status", [None, "pending", "skipped", "failed"])
+async def test_download_rejects_unverified_build_before_writing_or_registering(monkeypatch, tmp_path, build_status):
+    module = generate_and_download_module
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path / "generated"))
+    monkeypatch.setattr(module, "_inject_agent_context_env", AsyncMock())
+    registration = AsyncMock()
+    monkeypatch.setattr(module, "_register_app_bundle_artifact_version", registration)
+
+    async def contract_checks_pass(*, files, context_variables, **kwargs):
+        from factory_app.workflows.AppGenerator.tools.task_integrity import artifact_snapshot_digest
+
+        result = {"passed": True, "status": "passed", "snapshot_digest": artifact_snapshot_digest(context_variables, files)}
+        context_variables.set("app_bundle_acceptance_result", result)
+        context_variables.set("app_bundle_acceptance_status", "passed")
+        # Re-running contract checks cannot stand in for the missing build.
+        context_variables.set("integration_tests_passed", True)
+        return result
+
+    monkeypatch.setattr(module, "run_app_bundle_acceptance_gate", contract_checks_pass)
+    context = _Context({
+        "chat_id": "chat", "app_id": "app", "build_id": "build",
+        "generated_files": {"app.json": '{"app_id":"app"}'},
+        "app_build_plan": {"build_tasks": []}, "app_validation_status": build_status,
+    })
+    result = await module.generate_and_download({}, "Draft", context_variables=context)
+    assert result["status"] == "error"
+    assert result["outcome"] == "blocked"
+    assert result["export_gate"]["allow_export"] is False
+    registration.assert_not_awaited()
+    assert not (tmp_path / "generated").exists()
 
 
 @pytest.mark.parametrize("agent,outcome", [
@@ -408,6 +452,7 @@ async def test_packaging_publishes_registered_review_path_under_real_context_aut
     from factory_app.app.modules.app_registry.backend.service import AppRegistryService
 
     module = generate_and_download_module
+    monkeypatch.setattr(module, "resolve_export_gate", lambda *args, **kwargs: {"allow_export": True})
     root = Path(__file__).resolve().parents[1]
     definitions = yaml.safe_load((root / "factory_app/workflows/AppGenerator/context_variables.yaml").read_text(encoding="utf-8"))["definitions"]
     if reject_handoff:

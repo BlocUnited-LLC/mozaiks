@@ -17,6 +17,9 @@ prompt_middleware:
   filename: tools/hook_ai_pack_archetype_context.py
   function: inject_ai_pack_archetype_context
 - agent: WorkflowBundleBuilderAgent
+  filename: hook_primitive_catalog.py
+  function: inject_primitive_catalog
+- agent: WorkflowBundleBuilderAgent
   function: mozaiksai.core.workflow.context.projection.inject_build_context_projections
 - agent: WorkflowBundleBuilderAgent
   filename: ../_shared/subscription_contract_context.py

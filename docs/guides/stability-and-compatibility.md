@@ -15,7 +15,7 @@ and the self-host acceptance suite. Stable within a pre-1.0 minor version.
 Breaking changes require a CHANGELOG entry and a version bump.
 
 **What is in Tier 1:**
-- Module dispatch public API: `dispatch_module_action`, `ModuleActionDispatchRequest`, `ModuleDispatchScope`, `ModuleDispatchMetadata`, `ModuleDispatchAuthority`, `ModuleDispatchProvenance`, `ModuleExecutionPolicyInput`, `ModuleExecutionPolicyDecision`, `ModuleDispatchAudit`, `ModuleEventProvenance`, `ModuleReactionProvenance`, `ModuleReactionAudit`
+- Module dispatch public API: `dispatch_module_action`, `ModuleActionDispatchRequest`, `ModuleDispatchScope`, `ModuleDispatchMetadata`, `ModuleDispatchAuthority`, `ModuleDispatchProvenance`, `ModuleExecutionPolicyInput`, `ModuleExecutionPolicyDecision`, `ModuleDispatchAudit`, `ModuleEventProvenance`, `ModuleEventRejection`, `ModuleReactionProvenance`, `ModuleReactionAudit`
 - Platform extension contract: `PlatformExtensionBundle`, `PLATFORM_EXTENSION_SCHEMA_VERSION`
 - Validation facade: `validate_generated_app_bundle`, `GeneratedAppValidationRequest`, `GeneratedAppValidationResult`, `GeneratedAppValidationDiagnostic`
 - Studio scope: `StudioScope`, `resolve_studio_scope`
@@ -40,7 +40,9 @@ surfaces are working but the interface shape may still move.
 - `mozaiks sync-agent-guidance` (contributor tooling; format may change)
 - `mozaiks migrations status` (diagnostic; schema may change)
 - `mozaiks quickstart` and `mozaiks onboard` (onboarding paths; UX still being refined)
-- `ConnectorVaultBackend` and all vault backend implementations (interface stable, adapters may add params)
+- `ConnectorVaultBackend` and all vault backend implementations (0.2.0 requires
+  explicit app/workspace scope for every secret operation; older vault records
+  need an operator-reviewed migration or credential re-entry)
 - Telemetry and observability hooks (`AG2_OTEL_*`, `INSIGHTS_*`)
 - `RUNTIME_PLATFORM_EXTENSIONS` injection mechanism (hook names stable; new hooks may be added)
 
@@ -104,12 +106,13 @@ first.
 
 Current version: see `mozaiksai.__version__`.
 
-The package is pre-1.0 and not yet published to PyPI. Install from a local
-editable checkout. See [self-hosting guide](self-hosting.md) and
-[releasing.md](../releasing.md) for the current publication status.
+The package is pre-1.0 and published on PyPI. Install it with
+`python -m pip install mozaiks`; use a local editable checkout when contributing
+to the framework. See [self-hosting guide](self-hosting.md) and
+[releasing.md](../releasing.md) for release policy.
 
 Do not depend on a specific pre-1.0 `0.x.y` version as a stable API target.
-Pin to a specific git SHA for reproducible builds until 1.0.
+Pin an exact package version or git SHA for reproducible builds until 1.0.
 
 ### Workspace acceptance
 

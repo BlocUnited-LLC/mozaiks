@@ -59,7 +59,10 @@ not in this app workspace.
 Multiple coding agents may work in this repo simultaneously. Always run
 `git fetch origin && gh pr list --state open` before starting to avoid stomping
 on in-flight changes. Use `cc/` branch prefix for Claude Code and `codex/` for
-Codex. Create a PR and immediately enable auto-merge: `gh pr merge <n> --squash --delete-branch --auto`.
+Codex. Open one PR per finished piece of work, and close a PR the day another
+merged PR carries its change. Do not arm auto-merge: merge only the exact head
+an independent reviewer cleared, with
+`gh pr merge <n> --squash --delete-branch --match-head-commit <sha>`.
 
 See `.claude/rules/multi-agent-coordination.md` for the full protocol.
 

@@ -134,22 +134,14 @@ function Spinner() {
   );
 }
 
-function ErrorState({ message }) {
+function ErrorState({ message, onRetry }) {
   return (
     <div className="flex items-center justify-center py-20">
       <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-6 py-4 text-sm text-destructive max-w-sm text-center">
-        {message}
+        <p role="alert">{message}</p>
+        {onRetry && <button type="button" onClick={onRetry} className="mt-3 rounded-lg border border-current px-3 py-1.5">Try again</button>}
       </div>
     </div>
-  );
-}
-
-function CameraIcon({ className = 'h-4 w-4' }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
-      <circle cx="12" cy="13" r="4" />
-    </svg>
   );
 }
 
@@ -157,33 +149,11 @@ function CameraIcon({ className = 'h-4 w-4' }) {
 // Hero
 // ---------------------------------------------------------------------------
 
-function fileToDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => resolve(e.target.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
-function heroStorageKey(username, field) {
-  return `mozaiks_profile_${field}_${username || 'me'}`;
-}
-
 function ProfileHero({ profile, isOwner, backendUrl, auth, onEdited }) {
-  const coverInputRef = useRef(null);
-  const avatarInputRef = useRef(null);
-  const storageId = profile.username || 'me';
-
+  const saveRequest = useRef(null);
   const [editing, setEditing] = useState(false);
   const [displayName, setDisplayName] = useState(profile.display_name || profile.username || '');
   const [bio, setBio] = useState(profile.bio || '');
-  const [coverPreview, setCoverPreview] = useState(
-    profile.cover_url || localStorage.getItem(heroStorageKey(storageId, 'cover')) || null
-  );
-  const [avatarPreview, setAvatarPreview] = useState(
-    profile.avatar_url || localStorage.getItem(heroStorageKey(storageId, 'avatar')) || null
-  );
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
 
@@ -193,27 +163,12 @@ function ProfileHero({ profile, isOwner, backendUrl, auth, onEdited }) {
   const roles = profile.roles || [];
   const avatarText = initials(name, profile.email);
 
-  function handleCoverChange(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    fileToDataUrl(file).then((dataUrl) => {
-      setCoverPreview(dataUrl);
-      try { localStorage.setItem(heroStorageKey(storageId, 'cover'), dataUrl); } catch (_) {}
-    });
-    e.target.value = '';
-  }
-
-  function handleAvatarChange(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    fileToDataUrl(file).then((dataUrl) => {
-      setAvatarPreview(dataUrl);
-      try { localStorage.setItem(heroStorageKey(storageId, 'avatar'), dataUrl); } catch (_) {}
-    });
-    e.target.value = '';
-  }
+  useEffect(() => () => saveRequest.current?.abort(), []);
 
   async function handleSave() {
+    if (saveRequest.current) return;
+    const controller = new AbortController();
+    saveRequest.current = controller;
     setSaving(true);
     setSaveError(null);
     try {
@@ -221,14 +176,19 @@ function ProfileHero({ profile, isOwner, backendUrl, auth, onEdited }) {
       const res = await fetchWithAuth(`${backendUrl}/api/me`, {
         method: 'PUT',
         body: JSON.stringify(body),
+        signal: controller.signal,
       }, auth);
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      if (controller.signal.aborted) return;
       setEditing(false);
       onEdited?.();
     } catch (e) {
-      setSaveError(e.message);
+      if (!controller.signal.aborted) setSaveError(e.message);
     } finally {
-      setSaving(false);
+      if (!controller.signal.aborted) {
+        saveRequest.current = null;
+        setSaving(false);
+      }
     }
   }
 
@@ -236,21 +196,8 @@ function ProfileHero({ profile, isOwner, backendUrl, auth, onEdited }) {
     <div>
       {/* Cover */}
       <div className="relative h-36 sm:h-48 w-full overflow-hidden bg-gradient-to-br from-primary/30 via-primary/10 to-secondary/20">
-        {coverPreview && (
-          <img src={coverPreview} alt="" className="absolute inset-0 h-full w-full object-cover" />
-        )}
-        {isOwner && (
-          <>
-            <button
-              type="button"
-              onClick={() => coverInputRef.current?.click()}
-              className="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-xl border border-white/20 bg-black/45 backdrop-blur-sm px-3 py-1.5 text-xs font-medium text-white hover:bg-black/65 transition-colors"
-            >
-              <CameraIcon className="h-3.5 w-3.5" />
-              Change cover
-            </button>
-            <input ref={coverInputRef} type="file" accept="image/*" className="sr-only" onChange={handleCoverChange} />
-          </>
+        {profile.cover_url && (
+          <img src={profile.cover_url} alt="" className="absolute inset-0 h-full w-full object-cover" />
         )}
       </div>
 
@@ -259,25 +206,12 @@ function ProfileHero({ profile, isOwner, backendUrl, auth, onEdited }) {
         <div className="flex items-end justify-between gap-4 -mt-12">
           <div className="relative group">
             <div className="h-24 w-24 rounded-full border-4 border-card overflow-hidden flex items-center justify-center bg-primary/15 shadow-lg flex-shrink-0">
-              {avatarPreview ? (
-                <img src={avatarPreview} alt={name} className="h-full w-full object-cover" />
+              {profile.avatar_url ? (
+                <img src={profile.avatar_url} alt={name} className="h-full w-full object-cover" />
               ) : (
                 <span className="text-3xl font-bold text-primary">{avatarText}</span>
               )}
             </div>
-            {isOwner && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => avatarInputRef.current?.click()}
-                  className="absolute inset-0 rounded-full flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity"
-                  title="Change photo"
-                >
-                  <CameraIcon className="h-6 w-6 text-white" />
-                </button>
-                <input ref={avatarInputRef} type="file" accept="image/*" className="sr-only" onChange={handleAvatarChange} />
-              </>
-            )}
           </div>
 
           <div className="pb-2 flex gap-2">
@@ -630,19 +564,6 @@ function IconRailLayout({ allPages, activePage, onSelect, isOwner }) {
 }
 
 // ---------------------------------------------------------------------------
-// Demo fallback
-// ---------------------------------------------------------------------------
-
-const DEMO_PROFILE = {
-  username: 'demo.user',
-  display_name: 'Demo User',
-  email: 'demo@mozaiks.app',
-  bio: 'Building on Mozaiks.',
-  roles: ['admin'],
-  created_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 180).toISOString(),
-};
-
-// ---------------------------------------------------------------------------
 // Sign-in not enabled
 // ---------------------------------------------------------------------------
 
@@ -675,13 +596,22 @@ export default function ProfilePage() {
 }
 
 function PersonProfile() {
-  const params = useParams();
+  const { username = null } = useParams();
+  const { config, auth, api, user } = useChatUI();
+  const backendUrl = getHostApiBaseUrl(config, api);
+  const identity = user?.id || user?.user_id || user?.sub || '';
+  // Changing the signed-in person or viewed profile clears all private content
+  // and editing state before the next request can render.
+  return <ProfileView key={JSON.stringify([backendUrl, identity, username])}
+    username={username} backendUrl={backendUrl} auth={auth} />;
+}
+
+function ProfileView({ username, backendUrl, auth }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const username = params.username || null;
-  const { config, auth, api } = useChatUI();
-  const backendUrl = getHostApiBaseUrl(config, api);
   const isOwner = !username;
+  const profileRequest = useRef(null);
+  const [reload, setReload] = useState(0);
 
   const searchParams = new URLSearchParams(location.search);
   const urlTabParam = searchParams.get('tab') || null;
@@ -695,44 +625,44 @@ function PersonProfile() {
   const [layout, setLayout] = useState('top_nav');
   const [pagesBySection, setPagesBySection] = useState({});
   const [pagesLoading, setPagesLoading] = useState(true);
+  const [pagesError, setPagesError] = useState(false);
   const [activePage, setActivePage] = useState(urlTabParam || null);
 
   // --- Data loading ---
 
   const loadProfile = useCallback(async () => {
-    if (!backendUrl) {
-      setProfile(DEMO_PROFILE);
-      setProfileLoading(false);
-      return;
-    }
+    profileRequest.current?.abort();
+    const controller = new AbortController();
+    profileRequest.current = controller;
     setProfileLoading(true);
+    setProfile(null);
     setProfileError(null);
     try {
       const endpoint = isOwner
         ? `${backendUrl}/api/me`
         : `${backendUrl}/api/users/${encodeURIComponent(username)}`;
-      const res = await fetchWithAuth(endpoint, {}, auth);
+      const res = await fetchWithAuth(endpoint, { signal: controller.signal }, auth);
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-      setProfile(await res.json());
-    } catch (e) {
-      if (isOwner) {
-        setProfile(DEMO_PROFILE);
-      } else {
-        setProfileError(e.message);
+      const body = await res.json();
+      if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('Invalid profile response');
+      if (![body.user_id, body.username].some(value => typeof value === 'string' && value.trim())) {
+        throw new Error('Profile identity is missing');
       }
+      if (!controller.signal.aborted) setProfile(body);
+    } catch (e) {
+      if (!controller.signal.aborted) setProfileError(e.message);
     } finally {
-      setProfileLoading(false);
+      if (!controller.signal.aborted) setProfileLoading(false);
     }
   }, [backendUrl, auth, isOwner, username]);
 
-  const loadConfig = useCallback(async () => {
-    if (!backendUrl) return;
+  const loadConfig = useCallback(async (signal) => {
     try {
-      const res = await fetchWithAuth(`${backendUrl}/api/me/profile-config`, {}, auth);
+      const res = await fetchWithAuth(`${backendUrl}/api/me/profile-config`, { signal }, auth);
       if (res.ok) {
         const body = await res.json();
         const lyt = body?.layout;
-        if (typeof lyt === 'string' && VALID_LAYOUTS.has(lyt)) {
+        if (!signal.aborted && typeof lyt === 'string' && VALID_LAYOUTS.has(lyt)) {
           setLayout(lyt);
           profileTrace('config:layout', { layout: lyt });
         }
@@ -740,44 +670,65 @@ function PersonProfile() {
     } catch (_) {}
   }, [backendUrl, auth]);
 
-  const loadPages = useCallback(async () => {
+  const loadPages = useCallback(async (signal) => {
     setPagesLoading(true);
+    setPagesError(false);
+    setPagesBySection({});
     let sections = {};
 
-    if (backendUrl) {
-      const subjectParams = new URLSearchParams();
-      if (!isOwner && username) subjectParams.set('username', username);
-      const subjectSuffix = subjectParams.toString() ? `?${subjectParams}` : '';
+    const subjectParams = new URLSearchParams();
+    if (!isOwner && username) subjectParams.set('username', username);
+    const subjectSuffix = subjectParams.toString() ? `?${subjectParams}` : '';
 
-      try {
-        const res = await fetchWithAuth(`${backendUrl}/api/me/profile-pages${subjectSuffix}`, {}, auth);
-        if (res.ok) {
-          const body = await res.json();
-          if (body?.sections && !Array.isArray(body.sections) && typeof body.sections === 'object') {
-            sections = body.sections;
-            profileTrace('pages:v2:sections', { sectionIds: Object.keys(sections) });
-          } else if (Array.isArray(body?.pages)) {
-            for (const page of body.pages) {
-              const s = page.section || 'overview';
-              if (!sections[s]) sections[s] = [];
-              sections[s].push(page);
-            }
-            profileTrace('pages:v2:flat', { total: body.pages.length });
-          }
+    try {
+      const res = await fetchWithAuth(`${backendUrl}/api/me/profile-pages${subjectSuffix}`, { signal }, auth);
+      if (!res.ok) throw new Error('Profile sections unavailable');
+      const body = await res.json();
+      const validPages = pages => Array.isArray(pages) && pages.every(page =>
+        page && typeof page === 'object' && !Array.isArray(page)
+        && typeof page.id === 'string' && page.id.trim());
+      if (body?.sections && !Array.isArray(body.sections) && typeof body.sections === 'object') {
+        if (!Object.values(body.sections).every(validPages)) throw new Error('Invalid profile sections');
+        sections = body.sections;
+        profileTrace('pages:v2:sections', { sectionIds: Object.keys(sections) });
+      } else if (Array.isArray(body?.pages)) {
+        if (!validPages(body.pages)) throw new Error('Invalid profile pages');
+        for (const page of body.pages) {
+          const s = page.section || 'overview';
+          if (!sections[s]) sections[s] = [];
+          sections[s].push(page);
         }
-      } catch (_) {
+        profileTrace('pages:v2:flat', { total: body.pages.length });
+      } else {
+        throw new Error('Profile sections are missing');
+      }
+    } catch (_) {
+      if (!signal.aborted) {
+        setPagesError(true);
         profileWarn('pages:v2:error', {});
       }
-
     }
 
-    setPagesBySection(sections);
-    setPagesLoading(false);
+    if (!signal.aborted) {
+      setPagesBySection(sections);
+      setPagesLoading(false);
+    }
   }, [backendUrl, auth, isOwner, username]);
 
-  useEffect(() => { loadProfile(); }, [loadProfile]);
-  useEffect(() => { loadConfig(); }, [loadConfig]);
-  useEffect(() => { loadPages(); }, [loadPages]);
+  useEffect(() => {
+    loadProfile();
+    return () => profileRequest.current?.abort();
+  }, [loadProfile, reload]);
+  useEffect(() => {
+    const controller = new AbortController();
+    loadConfig(controller.signal);
+    return () => controller.abort();
+  }, [loadConfig, reload]);
+  useEffect(() => {
+    const controller = new AbortController();
+    loadPages(controller.signal);
+    return () => controller.abort();
+  }, [loadPages, reload]);
 
   // --- Derived state ---
 
@@ -816,7 +767,8 @@ function PersonProfile() {
   // --- Render ---
 
   if (profileLoading) return <Spinner />;
-  if (profileError && !profile) return <ErrorState message={`Could not load profile: ${profileError}`} />;
+  if (profileError || !profile) return <ErrorState message="Could not load this profile. Please try again."
+    onRetry={() => setReload(value => value + 1)} />;
 
   // Align to the shared content measure (--mz-content-max, theme-configurable
   // per app) so this route fills wide viewports like the workspace surfaces
@@ -836,6 +788,8 @@ function PersonProfile() {
           onEdited={loadProfile}
         />
 
+        {pagesError && <ErrorState message="Could not load profile sections."
+          onRetry={() => setReload(value => value + 1)} />}
         {!pagesLoading && allPages.length > 0 && (
           <>
             {layout === 'top_nav'      && <TopNavLayout {...layoutProps} />}

@@ -137,6 +137,7 @@ def _client(
     failed_module_names: list[str] | None = None,
     action_surfaces: dict[str, dict[str, str | None]] | None = None,
 ) -> TestClient:
+    platform_host.app.state.loaded_app_id = "host-app"
     platform_host.app.state.failed_module_names = failed_module_names or []
     platform_host.app.state.module_action_surfaces = action_surfaces or {}
     # Mirror the module-level registry (which tests may have monkeypatched) into
@@ -209,18 +210,17 @@ def test_post_params_envelope_preserves_reserved_action_input(monkeypatch) -> No
         "/api/modules/orders/inspect_app_input",
         json={
             "params": {"app_id": "app-resource"},
-            "context": {"app_id": "app-resource"},
         },
     )
 
     assert resp.status_code == 200
     assert resp.json() == {
-        "ctx_app_id": "app-resource",
+        "ctx_app_id": "host-app",
         "param_app_id": "app-resource",
     }
 
 
-def test_post_raw_body_keeps_reserved_fields_as_legacy_context_only(monkeypatch) -> None:
+def test_post_raw_body_keeps_host_app_context(monkeypatch) -> None:
     executor = ModuleExecutor()
     executor.register("orders", _OrdersHandler(), action_method_map=_ORDERS_ACTIONS)
     registry = ExecutorRegistry()
@@ -232,7 +232,7 @@ def test_post_raw_body_keeps_reserved_fields_as_legacy_context_only(monkeypatch)
     resp = client.post(
         "/api/modules/orders/inspect_payload",
         json={
-            "app_id": "app-context",
+            "app_id": "host-app",
             "user_id": "user-context",
             "label": "kept",
         },
@@ -240,7 +240,7 @@ def test_post_raw_body_keeps_reserved_fields_as_legacy_context_only(monkeypatch)
 
     assert resp.status_code == 200
     assert resp.json() == {
-        "ctx_app_id": "app-context",
+        "ctx_app_id": "host-app",
         "ctx_user_id": "user-context",
         "params": {"label": "kept"},
     }
@@ -390,7 +390,7 @@ def test_authenticated_module_dispatch_uses_scope_hook_result(monkeypatch) -> No
                 scopes=["access_as_user"],
                 raw_claims={},
                 provider="mock",
-                app_id="app-token",
+                app_id="host-app",
                 tenant_id="tenant-token",
                 workspace_id="workspace-token",
             )
@@ -402,7 +402,7 @@ def test_authenticated_module_dispatch_uses_scope_hook_result(monkeypatch) -> No
         async def call_module_scope(self, **kwargs):
             self.called_with = kwargs
             return {
-                "app_id": "app-resolved",
+                "app_id": "host-app",
                 "user_id": "u1",
                 "tenant_id": "tenant-resolved",
                 "workspace_id": "workspace-resolved",
@@ -438,14 +438,14 @@ def test_authenticated_module_dispatch_uses_scope_hook_result(monkeypatch) -> No
 
     assert resp.status_code == 200
     assert hooks.called_with["requested_scope"] == {
-        "app_id": "app-token",
+        "app_id": "host-app",
         "tenant_id": "tenant-token",
         "workspace_id": "workspace-token",
         "user_id": "u1",
     }
     assert hooks.called_with["default_permissions"] == ["access_as_user"]
     assert resp.json() == {
-        "app_id": "app-resolved",
+        "app_id": "host-app",
         "user_id": "u1",
         "tenant_id": "tenant-resolved",
         "workspace_id": "workspace-resolved",
@@ -468,7 +468,7 @@ def test_authenticated_module_dispatch_uses_authenticated_user_authority(monkeyp
                 scopes=["orders.read"],
                 raw_claims={},
                 provider="mock",
-                app_id="app-token",
+                app_id="host-app",
             )
 
     executor = ModuleExecutor()

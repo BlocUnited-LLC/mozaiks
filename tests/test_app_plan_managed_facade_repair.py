@@ -70,9 +70,9 @@ def _plan_and_context(*, monetized=True, collapsed=True):
     )
     if not monetized:
         plan.pop("monetization_provider")
-    pages = [{"name": name, "route": f"/{name.lower()}"} for name in ("Dashboard", "Tasks")]
+    pages = [{"name": name, "ui_surface": "declarative_page", "route": f"/{name.lower()}"} for name in ("Dashboard", "Tasks")]
     if monetized:
-        pages += deepcopy(_facade_contract()["pages"])
+        pages += [{**deepcopy(page), "ui_surface": "declarative_page"} for page in _facade_contract()["pages"]]
     plan["pages"] = [
         {
             **page, "purpose": f"Use {page['name'].lower()}",

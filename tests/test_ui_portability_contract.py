@@ -302,6 +302,10 @@ def test_custom_react_coexists_with_schema_native_in_scanner() -> None:
             "  return <SurfaceCard><h1 className=\"text-foreground\">Special</h1></SurfaceCard>;\n"
             "}\n"
         ),
+        "ui/index.js": (
+            "import SpecialPage from './pages/custom/SpecialPage';\n"
+            "export function register(registerComponent) { registerComponent('SpecialPage', SpecialPage); }\n"
+        ),
         # Route manifest referencing both
         "ui/route_manifest.json": json.dumps({
             "pages": [

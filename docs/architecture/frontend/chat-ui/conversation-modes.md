@@ -103,6 +103,23 @@ This enforcement happens inside `uiSurfaceReducer.js`. When a `SET_CONVERSATION_
 
 ---
 
+## Readable workspace presentation
+
+Studio's default `app/brand/theme_config.json` uses system body text, a local
+Oxanium heading font, the existing Mozaiks wordmark image, and a solid background.
+Chat text uses the active app's body font at normal weight; emphasis retains that
+font. App previews continue to load their own brand configuration.
+
+Concept review shows the app name, a short benefit, core features, and the declared
+approval action without requiring a full report read. Product, design, and technical
+details expand on demand. Technical IDs stay in that disclosure. Submission errors
+remain visible and never imply approval; expired interactions must be reopened.
+
+Saved revision results use the Studio artifact-bundle response's `workbench_ui`
+descriptor (`component`, `workflow_name`) to open the registered review surface.
+The generic chat page does not choose a Factory workflow. A missing descriptor
+shows an error instead of guessing a component owner.
+
 ## Message caches
 
 Each mode has its own message array in context. They are independent and both survive navigation:

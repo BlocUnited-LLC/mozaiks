@@ -671,8 +671,17 @@ def _canonical_experience_spec(raw: Any, *, surface_map: dict[str, Any]) -> dict
             raise ValueError(f"experience_spec.pages[{idx}] must be an object")
         if not page.get("name") or not page.get("route"):
             raise ValueError(f"experience_spec.pages[{idx}] requires name and route")
+        ui_surface = page.get("ui_surface")
+        if ui_surface not in {"declarative_page", "custom_react_page"}:
+            raise ValueError(
+                f"experience_spec.pages[{idx}].ui_surface must explicitly be "
+                "declarative_page or custom_react_page; choose the rendering contract "
+                "that preserves the requested interaction."
+            )
         sections = page.get("sections")
-        if not isinstance(sections, list) or not sections:
+        if not isinstance(sections, list):
+            raise ValueError(f"experience_spec.pages[{idx}].sections must be a list")
+        if ui_surface == "declarative_page" and not sections:
             raise ValueError(f"experience_spec.pages[{idx}].sections must be a non-empty list")
         for sidx, section in enumerate(sections):
             if not isinstance(section, dict):
@@ -751,6 +760,7 @@ def _materialize_facade_pages(
                 page = {
                     "name": name,
                     "route": route,
+                    "ui_surface": "declarative_page",
                     "layout": "full-width",
                     "intent": intent,
                     "sections": [{

@@ -168,16 +168,20 @@ async def test_http_lookup_failure_cannot_complete_or_buffer(harness):
     assert harness.transport._buffered_tool_call_responses == {}
 
 
-@pytest.mark.parametrize(("user_id", "auth_enabled", "allowed"), [
-    ("anonymous", False, True),
-    ("anonymous", True, False),
-    ("other-dev-user", False, False),
-    ("owner", False, True),
+@pytest.mark.parametrize(("user_id", "provenance", "allowed"), [
+    # The shared development identity (auth off, this machine or AUTH_ANON_ACCESS=open).
+    ("anonymous", "local_development", True),
+    # An anonymous visitor (AUTH_ANON_ACCESS=public) and a token whose subject is "anonymous".
+    ("anonymous", "anonymous", False),
+    ("anonymous", "token_validated", False),
+    ("other-dev-user", "local_development", False),
+    ("owner", "anonymous", True),
 ])
-async def test_http_anonymous_bypass_requires_explicit_local_no_auth(harness, monkeypatch, user_id, auth_enabled, allowed):
+async def test_http_anonymous_bypass_requires_the_shared_development_identity(
+    harness, user_id, provenance, allowed
+):
     _pending(harness)
-    harness.principal = _principal(user_id)
-    monkeypatch.setattr(auth_registry, "is_auth_enabled", lambda: auth_enabled)
+    harness.principal = _principal(user_id, auth_provenance=provenance)
     response = await _http(harness)
     assert response.status_code == (200 if allowed else 404)
     assert harness.transport.pending_tool_call_responses["evt-owned"].done() is allowed

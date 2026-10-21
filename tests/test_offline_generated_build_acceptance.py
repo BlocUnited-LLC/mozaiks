@@ -16,6 +16,7 @@ from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import sc
 from factory_app.workflows.AppGenerator.tools.materialize_app_config_contracts import (
     materialize_app_config_contracts,
 )
+from factory_app.workflows.AppGenerator.tools.render_auth_scaffold import materialize_auth_scaffold
 from mozaiksai.core.runtime.app.loader import AppLoader
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.frozen import detach
@@ -228,6 +229,7 @@ def _generated_saas_build_files() -> dict[str, str]:
                 "appId": "analytics-saas",
                 "appName": "Analytics SaaS",
                 "version": "1.0.0",
+                "authRequired": True,
                 "startup": {"landing_spot": "/reports"},
             }
         ),
@@ -436,7 +438,7 @@ class EntitlementDispatchService:
         return {"deactivated": True}
 """,
     }
-    return materialize_data_contract(
+    generated = materialize_data_contract(
         files,
         data_contract={"version": "1", "surfaces": [], "shared_collections": []},
         subscription_contract={
@@ -444,6 +446,12 @@ class EntitlementDispatchService:
             "subscription_config_file": yaml.safe_load(files["config/subscriptions.yaml"]),
         },
     )
+    auth_scaffold = materialize_auth_scaffold(generated)
+    auth_config = yaml.safe_load(auth_scaffold["config/auth.yaml"])
+    auth_config["frontend"]["default_scopes"].append("reports.read")
+    auth_scaffold["config/auth.yaml"] = yaml.safe_dump(auth_config, sort_keys=False)
+    generated.update(auth_scaffold)
+    return generated
 
 
 def _write_files(root: Path, files: dict[str, str]) -> None:
@@ -484,7 +492,8 @@ async def _admit_offline_fixture(monkeypatch, context, files, *, module_actions,
         "app.json", "config/ai.json", "config/shell.json", "ui/route_manifest.json", f"ui/pages/{page}.yaml",
     ], [task_id for module_id in module_actions for task_id in (f"{module_id}.contract", f"{module_id}.services")], surface_kind="ui_only")
     plan = {
-        "app_kind": "saas" if saas else "internal_app", "auth_strategy": "public", "roles": [], "entities": [],
+        "app_kind": "saas" if saas else "internal_app", "auth_strategy": "basic-login" if saas else "public",
+        "roles": [], "entities": [],
         "pages": [{"name": page.title(), "route": f"/{page}", "purpose": "Use the declared module actions."}],
         "capability_packs": [{
             "capability_pack_id": module_id, "surface_id": module_id, "surface_kind": "module",
@@ -535,7 +544,7 @@ async def _admit_offline_fixture(monkeypatch, context, files, *, module_actions,
     admitted_files = {file["filename"]: file["content"] for key, output in accepted.items()
                       if not key.startswith("_") for file in output["code_files"]}
     # No task owns config/subscriptions.yaml; assembly writes it from the approved contract.
-    assembly_owned = {"config/subscriptions.yaml"} if saas else set()
+    assembly_owned = {"config/subscriptions.yaml", "config/auth.yaml", "ui/auth/authAdapter.js"} if saas else set()
     assert set(admitted_files) == set(files) - assembly_owned
     for file in materialize_app_config_contracts(
         app_id=str(context.get("app_id")), app_build_plan=detach(context.get("app_build_plan")),
@@ -543,6 +552,9 @@ async def _admit_offline_fixture(monkeypatch, context, files, *, module_actions,
     ):
         if file["filename"] in assembly_owned:
             admitted_files[file["filename"]] = file["content"]
+    if saas:
+        admitted_files["config/auth.yaml"] = files["config/auth.yaml"]
+        admitted_files["ui/auth/authAdapter.js"] = files["ui/auth/authAdapter.js"]
     assert set(admitted_files) == set(files)
     context.set("generated_files", admitted_files)
     return admitted_files, accepted
@@ -557,6 +569,9 @@ async def test_offline_generated_build_acceptance_gate_loads_runtime_app(tmp_pat
     """
 
     monkeypatch.setenv("MOZAIKS_APP_VALIDATION_STRATEGY", "skip")
+    monkeypatch.setattr(
+        validate_app_bundle_from_request.__globals__["app_runtime_smoke"], "resolve_smoke_mongo_uri", lambda: None,
+    )
     files = _generated_build_files()
     context = ContextVariablesBridge(
         {
@@ -581,13 +596,14 @@ async def test_offline_generated_build_acceptance_gate_loads_runtime_app(tmp_pat
         context_variables=context,
     )
 
-    assert validation["status"] == "success", validation["app_bundle_acceptance_result"]["failed_tests"]
+    assert validation["status"] == "failed"
+    assert validation["app_bundle_acceptance_result"]["validation_evidence"]["skipped"] == ["app_runtime_load_worker", "app_runtime_smoke"]
     assert detach(context.get("app_task_batch_results")) == accepted
-    assert validation["app_bundle_acceptance_result"]["status"] == "passed"
-    assert validation["integration_tests_passed"] is True
-    assert context.get("app_bundle_acceptance_status") == "passed"
+    assert validation["app_bundle_acceptance_result"]["status"] == "pending"
+    assert validation["integration_tests_passed"] is False
+    assert context.get("app_bundle_acceptance_status") == "pending"
     assert not context.get("app_bundle_validation_evidence")["failed"]
-    assert context.get("integration_tests_passed") is True
+    assert context.get("integration_tests_passed") is False
     assert context.get("bundle_scan_result")["passed"] is True
     assert context.get("wiring_validation_result")["passed"] is True
     assert context.get("module_implementation_validation_result")["passed"] is True
@@ -645,7 +661,7 @@ async def test_offline_generated_build_acceptance_blocks_unwired_page_endpoint()
 
 
 @pytest.mark.asyncio
-async def test_offline_generated_build_acceptance_blocks_runtime_loader_failure() -> None:
+async def test_offline_generated_build_acceptance_reports_runtime_loader_diagnostic() -> None:
     files = _generated_build_files()
     files["modules/orders/backend/service.py"] = """
 from services.integrations.missing_orders_client import MissingOrdersClient
@@ -682,8 +698,9 @@ class OrdersService:
     )
     gate = resolve_export_gate(context)
 
-    assert acceptance["status"] == "failed"
-    assert "app_runtime_load" in acceptance["validation_evidence"]["failed"]
+    assert acceptance["status"] == "pending"
+    assert "app_runtime_load" not in acceptance["validation_evidence"]["failed"]
+    assert acceptance["validation_evidence"]["skipped"] == ["app_runtime_load_worker", "app_runtime_smoke"]
     assert context.get("app_runtime_load_passed") is False
     assert context.get("app_runtime_load_result")["passed"] is False
     assert gate["allow_export"] is False
@@ -726,6 +743,9 @@ def test_scan_flags_unknown_entitlement_gate() -> None:
 
 @pytest.mark.asyncio
 async def test_offline_saas_build_acceptance_gate_passes(monkeypatch) -> None:
+    monkeypatch.setattr(
+        validate_app_bundle_from_request.__globals__["app_runtime_smoke"], "resolve_smoke_mongo_uri", lambda: None,
+    )
     """Happy-path acceptance gate for a self-hosted SaaS app with entitlement gating."""
     monkeypatch.setenv("MOZAIKS_APP_VALIDATION_STRATEGY", "skip")
     files = _generated_saas_build_files()
@@ -755,11 +775,12 @@ async def test_offline_saas_build_acceptance_gate_passes(monkeypatch) -> None:
         context_variables=context,
     )
 
-    assert validation["status"] == "success", validation["app_bundle_acceptance_result"]["failed_tests"]
+    assert validation["status"] == "failed"
+    assert validation["app_bundle_acceptance_result"]["validation_evidence"]["skipped"] == ["app_runtime_load_worker", "app_runtime_smoke"]
     assert detach(context.get("app_task_batch_results")) == accepted
-    assert validation["app_bundle_acceptance_result"]["status"] == "passed"
-    assert validation["integration_tests_passed"] is True
-    assert context.get("app_bundle_acceptance_status") == "passed"
+    assert validation["app_bundle_acceptance_result"]["status"] == "pending"
+    assert validation["integration_tests_passed"] is False
+    assert context.get("app_bundle_acceptance_status") == "pending"
     assert not context.get("app_bundle_validation_evidence")["failed"]
     assert context.get("bundle_scan_result")["passed"] is True
     assert context.get("wiring_validation_result")["passed"] is True

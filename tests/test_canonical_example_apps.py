@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -8,6 +9,8 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 
+from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import scan_app_contracts
+from mozaiksai.core.account import account_data_registry
 from mozaiksai.core.admin.registry import AdminRegistry, build_admin_shell_routes
 from mozaiksai.core.auth.adapters import registry as auth_registry
 from mozaiksai.core.auth.adapters.base import BaseAuthAdapter, UserClaims
@@ -18,7 +21,7 @@ from mozaiksai.core.runtime.composition import module_executor as module_executo
 from mozaiksai.core.runtime.composition.executor_registry import ExecutorRegistry
 from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor
 from mozaiksai.core.validation import scan_functional_generated_app
-from mozaiksai.hosts import platform
+from mozaiksai.hosts import platform, shell_config
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES_ROOT = ROOT / "examples" / "canonical-apps"
@@ -171,6 +174,7 @@ async def _configure_app(name: str, monkeypatch: pytest.MonkeyPatch) -> Any:
     registry.register(executor)
     monkeypatch.setattr(platform, "executor_registry", registry)
     platform.app.state.executor_registry = registry
+    platform.app.state.loaded_app_id = str(loaded.definition.config["appId"])
     platform.app.state.failed_module_names = []
     platform.app.state.module_action_surfaces = {
         module.name: module.action_api_surface_map for module in loaded.modules
@@ -189,9 +193,11 @@ async def _configure_app(name: str, monkeypatch: pytest.MonkeyPatch) -> Any:
         ("project-hub", {"projects", "tasks"}, {"projects", "tasks"}, set()),
         ("reporting-saas", {"entitlement_dispatch", "reports"}, {"reports"}, set()),
         ("research-ops", {"incidents", "research"}, {"operations", "research"}, {"ResearchWorkflow"}),
+        ("community", {"user_posts"}, set(), set()),
     ],
 )
-async def test_canonical_example_workspace_loads_real_contracts(name, modules, pages, workflows) -> None:
+async def test_canonical_example_workspace_loads_real_contracts(name, modules, pages, workflows, monkeypatch) -> None:
+    monkeypatch.setattr(account_data_registry, "_handlers", {})
     loaded = await AppLoader.load(str(_app_root(name)))
 
     assert loaded.failed_module_names == []
@@ -200,7 +206,7 @@ async def test_canonical_example_workspace_loads_real_contracts(name, modules, p
     assert {workflow.name for workflow in loaded.definition.workflows} == workflows
 
 
-@pytest.mark.parametrize("name", ["project-hub", "reporting-saas", "research-ops"])
+@pytest.mark.parametrize("name", ["project-hub", "reporting-saas", "research-ops", "community"])
 def test_canonical_example_has_no_functional_bundle_gaps(name: str) -> None:
     app_root = _app_root(name)
     files = {
@@ -210,6 +216,36 @@ def test_canonical_example_has_no_functional_bundle_gaps(name: str) -> None:
     }
 
     assert scan_functional_generated_app(files) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["project-hub", "reporting-saas", "community"])
+async def test_authenticated_example_routes_resolve_without_navigation(
+    name: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app_root = _app_root(name)
+    files = {
+        path.relative_to(app_root).as_posix(): path.read_text(encoding="utf-8")
+        for path in app_root.rglob("*")
+        if path.is_file() and "__pycache__" not in path.parts
+    }
+    assert scan_app_contracts(files) == []
+
+    auth_routes = yaml.safe_load(files["config/auth.yaml"])["routes"]
+    manifest_pages = json.loads(files["ui/route_manifest.json"])["pages"]
+    monkeypatch.setattr(shell_config, "resolve_app_root", lambda: app_root)
+    shell = await shell_config.build_shell_config(surface="platform")
+
+    for key in ("login", "callback"):
+        path = auth_routes[key]
+        declared = [page for page in manifest_pages if page["path"] == path]
+        resolved = [page for page in shell["pages"] if page["path"] == path]
+        assert len(declared) == len(resolved) == 1
+        assert resolved[0]["component"] == ("LoginPage" if key == "login" else "AuthCallbackPage")
+        assert resolved[0]["meta"]["requiresAuth"] is False
+        assert resolved[0]["meta"]["appShell"] is False
+        assert declared[0]["navigation"]["include"] is False
+        assert path not in {item.get("path") for item in shell["navigation"]["items"]}
 
 
 @pytest.mark.asyncio
@@ -283,6 +319,7 @@ async def test_research_ops_loads_workflow_admin_and_module_http(monkeypatch: py
 def _restore_runtime_state():
     previous_state = {
         "executor_registry": getattr(platform.app.state, "executor_registry", None),
+        "loaded_app_id": getattr(platform.app.state, "loaded_app_id", None),
         "failed_module_names": list(getattr(platform.app.state, "failed_module_names", [])),
         "module_action_surfaces": deepcopy(getattr(platform.app.state, "module_action_surfaces", {})),
         "page_schemas": deepcopy(getattr(platform.app.state, "page_schemas", {})),
@@ -293,6 +330,7 @@ def _restore_runtime_state():
 
     initialize_workflows(str(FACTORY_WORKFLOWS_ROOT))
     platform.app.state.executor_registry = previous_state["executor_registry"]
+    platform.app.state.loaded_app_id = previous_state["loaded_app_id"]
     platform.app.state.failed_module_names = previous_state["failed_module_names"]
     platform.app.state.module_action_surfaces = previous_state["module_action_surfaces"]
     platform.app.state.page_schemas = previous_state["page_schemas"]

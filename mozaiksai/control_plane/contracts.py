@@ -37,13 +37,26 @@ class RefinementLane(StrEnum):
 ContractSurfaceKind = Literal[
     "module_action",    # module.yaml + handler + service + schemas (+ repo/policy)
     "module_contract",  # module.yaml declarations only (events, capabilities, settings)
-    "page_binding",     # ui/pages/*.yaml + app.json
+    "page_binding",     # saved schema page or registered custom page source
     "data_schema",      # schemas.py + optionally data/contract.json
     "workflow_tool",    # tools.yaml + tool Python file
     "workflow_agent",   # agents.yaml + structured_outputs.yaml + transition_graph.yaml
-    "ui_component",     # ui/{WorkflowName}/components/*.js
+    "ui_component",     # workflow-owned ui_config.yaml
     "app_config",       # app.json, shell.json, theme_config.json
 ]
+
+ContractSurfaceTargetKind = Literal["module", "page", "workflow", "app"]
+
+CONTRACT_SURFACE_TARGET_KINDS: dict[ContractSurfaceKind, ContractSurfaceTargetKind] = {
+    "module_action": "module",
+    "module_contract": "module",
+    "data_schema": "module",
+    "page_binding": "page",
+    "workflow_tool": "workflow",
+    "workflow_agent": "workflow",
+    "ui_component": "workflow",
+    "app_config": "app",
+}
 
 # Canonical dependency ordering — lower runs first.
 CONTRACT_SURFACE_DEPENDENCY_ORDER: dict[str, int] = {
@@ -72,10 +85,8 @@ CONTRACT_SURFACE_CANONICAL_PATHS: dict[str, list[str]] = {
         "modules/{target_id}/module.yaml",
         "modules/{target_id}/contracts/events.yaml",
     ],
-    "page_binding": [
-        "ui/pages/{target_id}.yaml",
-        "app.json",
-    ],
+    # Page paths resolve through the saved schema / route and component registry.
+    "page_binding": [],
     "data_schema": [
         "modules/{target_id}/backend/schemas.py",
     ],
@@ -175,6 +186,10 @@ class ControlPlaneToolDefinition(BaseModel):
     available_to: list[str] = Field(default_factory=list)
 
 
+MAX_READ_ONLY_INSPECTION_FILES = 20
+MAX_READ_ONLY_INSPECTION_BYTES = 2_097_152
+
+
 class CodingWorkerRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -192,6 +207,7 @@ class CodingWorkerRequest(BaseModel):
     source_surface: str | None = None
     change_class: str
     files: dict[str, str] = Field(default_factory=dict)
+    read_only_files: dict[str, str] = Field(default_factory=dict, repr=False)
     validation_strategy: str | None = None
     start_preview: bool = False
     context_seed: dict[str, Any] = Field(default_factory=dict)
@@ -201,6 +217,10 @@ class CodingWorkerRequest(BaseModel):
     def validate_build_binding(self) -> CodingWorkerRequest:
         if self.run_build_binding is not None and self.run_build_binding.target_app_id != self.artifact_app_id:
             raise ValueError("Coding request target does not match its server build binding")
+        if len(self.read_only_files) > MAX_READ_ONLY_INSPECTION_FILES or sum(
+            len(content.encode("utf-8")) for content in self.read_only_files.values()
+        ) > MAX_READ_ONLY_INSPECTION_BYTES:
+            raise ValueError("CODING_READ_ONLY_BUDGET: inspection context exceeds 20 files or 2 MiB")
         return self
 
     @model_validator(mode="before")
@@ -236,14 +256,25 @@ class ScopeProposal(BaseModel):
     signals: list[str]
 
 
-class ContractSurfaceUpdate(BaseModel):
-    """One contract surface to update as part of a targeted regeneration plan."""
-
+class ContractSurfaceTarget(BaseModel):
+    """Finite surface identity shared by classifier output and execution plans."""
     model_config = ConfigDict(extra="forbid")
 
     kind: ContractSurfaceKind
     target_id: str = Field(min_length=1)
-    target_kind: str = Field(min_length=1)
+    target_kind: ContractSurfaceTargetKind
+
+    @model_validator(mode="after")
+    def validate_target_kind(self) -> ContractSurfaceTarget:
+        expected = CONTRACT_SURFACE_TARGET_KINDS[self.kind]
+        if self.target_kind != expected:
+            raise ValueError(f"{self.kind} requires target_kind={expected}")
+        return self
+
+
+class ContractSurfaceUpdate(ContractSurfaceTarget):
+    """One contract surface to update as part of a targeted regeneration plan."""
+
     affected_paths: list[str] = Field(default_factory=list)
     dependency_order: int = Field(default=0, ge=0)
     rationale: str = Field(min_length=1)
@@ -345,14 +376,28 @@ def is_secret_sensitive_path(path: str) -> bool:
     if is_secret_contract_path(path):
         return False
     normalized = str(path or "").replace("\\", "/").lower()
-    # Bundle-root example configuration is distributable, just like env.example.
-    # Actual .env variants and examples nested under credential paths stay blocked.
-    if normalized == ".env.example":
+    # Only the canonical bundle-root deployment templates are distributable.
+    # Actual .env variants and nested/arbitrary examples remain secret-sensitive.
+    # Candidate acceptance still validates their names-only placeholder contents.
+    if normalized in {".env.example", ".env.staging.example", ".env.production.example"}:
         return False
     parts = [part for part in normalized.split("/") if part]
     return any(term in normalized for term in SECRET_SENSITIVE_PATH_TERMS) or any(
         part == ".env" for part in parts
     )
+
+
+def is_repository_env_template_path(path: str) -> bool:
+    """Root environment templates need a names-only gate before repository use."""
+    return path.casefold() in {".env.example", ".env.staging.example", ".env.production.example"}
+
+
+_WINDOWS_RESERVED_DEVICE_NAMES = frozenset(
+    {"con", "prn", "aux", "nul"}
+    | {f"com{index}" for index in range(1, 10)}
+    | {f"lpt{index}" for index in range(1, 10)}
+    | {f"{prefix}{index}" for prefix in ("com", "lpt") for index in ("¹", "²", "³")}
+)
 
 
 def safe_artifact_relpath(raw: Any) -> str | None:
@@ -362,7 +407,7 @@ def safe_artifact_relpath(raw: Any) -> str | None:
     values, empty strings, null bytes, POSIX-absolute and UNC paths,
     drive-qualified Windows paths (which ``PurePosixPath`` would treat as
     relative, letting ``workspace / path`` escape the workspace on Windows),
-    and any path with a ``..`` traversal component.
+    traversal components, and Windows-unsafe file names.
     """
     if not isinstance(raw, str):
         return None
@@ -374,6 +419,13 @@ def safe_artifact_relpath(raw: Any) -> str | None:
     posix_path = PurePosixPath(normalized)
     if posix_path.is_absolute() or any(part == ".." for part in posix_path.parts):
         return None
+    for part in posix_path.parts:
+        if (
+            part.endswith((".", " "))
+            or part.split(".", 1)[0].casefold() in _WINDOWS_RESERVED_DEVICE_NAMES
+            or any(char in '<>:"|?*' or ord(char) < 32 for char in part)
+        ):
+            return None
     return str(posix_path)
 
 
@@ -397,7 +449,7 @@ class CodingWorkerPlan(BaseModel):
     summary: str = Field(min_length=1)
     owned_paths: list[str]
     updated_files: list[FileUpdate]
-    validation_strategy: Literal["skip", "local"]
+    validation_strategy: Literal["e2b", "docker", "skip"]
     validation_commands: list[str]
     start_preview: bool
     needs_human_review: bool
@@ -410,8 +462,14 @@ class ProposedFileChange(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     path: str = Field(min_length=1)
-    op: Literal["create", "update"] = "update"
-    content: str
+    op: Literal["create", "update", "delete"] = "update"
+    content: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_operation_content(self) -> ProposedFileChange:
+        if (self.op == "delete") != (self.content is None):
+            raise ValueError("delete requires no content; create and update require content")
+        return self
 
 
 class ProviderEventRecord(BaseModel):

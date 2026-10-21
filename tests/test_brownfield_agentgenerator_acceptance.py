@@ -447,6 +447,7 @@ async def _run_platform_acceptance(
 ) -> tuple[dict[str, str], Path, Any]:
     previous_state = {
         "executor_registry": getattr(platform.app.state, "executor_registry", None),
+        "loaded_app_id": getattr(platform.app.state, "loaded_app_id", None),
         "subscriptions_config": getattr(platform.app.state, "subscriptions_config", None),
         "failed_module_names": list(getattr(platform.app.state, "failed_module_names", [])),
         "startup_degraded": getattr(platform.app.state, "startup_degraded", False),
@@ -485,6 +486,7 @@ async def _run_platform_acceptance(
 
         initialize_workflows(str(WORKFLOWS_ROOT))
         platform.app.state.executor_registry = previous_state["executor_registry"]
+        platform.app.state.loaded_app_id = previous_state["loaded_app_id"]
         platform.app.state.subscriptions_config = previous_state["subscriptions_config"]
         platform.app.state.failed_module_names = previous_state["failed_module_names"]
         platform.app.state.startup_degraded = previous_state["startup_degraded"]

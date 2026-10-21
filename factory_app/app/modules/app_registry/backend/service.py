@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import re
+from types import EllipsisType
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from mozaiksai.core.session.build_binding import BuildTargetReference, RunBuildBinding
 
-from .policy import normalize_optional_text, validate_lifecycle_state
-from .schemas import ensure_create_payload, ensure_status_payload
+from .policy import is_generic_app_name, normalize_optional_text, validate_lifecycle_state
+from .schemas import (
+    GenesisAcceptanceReceipt,
+    GenesisImportClaim,
+    ensure_create_payload,
+    ensure_status_payload,
+)
 
 if TYPE_CHECKING:
     from .repo import AppRegistryRepo
@@ -30,6 +36,37 @@ class AppRegistryService:
             repo = AppRegistryRepo()
         self.repo = repo
 
+    async def register_existing_app_record(
+        self, *, owner_user_id: str, app_id: str, chat_app_id: str, name: str | None,
+    ) -> dict[str, Any]:
+        """Register a server-verified existing target without starting a build."""
+        return await self.repo.register_existing_app_record(
+            owner_user_id=owner_user_id, app_id=app_id,
+            chat_app_id=chat_app_id, name=name,
+        )
+
+    async def has_registered_target_app_id(self, *, app_ids: tuple[str, ...]) -> bool:
+        return await self.repo.has_registered_target_app_id(app_ids=app_ids)
+
+    async def reserve_genesis_import(
+        self, *, build_registry_id: str, owner_user_id: str, app_id: str,
+        chat_app_id: str, claim: GenesisImportClaim,
+    ) -> dict[str, Any] | None:
+        return await self.repo.reserve_genesis_import(
+            build_registry_id=build_registry_id, owner_user_id=owner_user_id,
+            app_id=app_id, chat_app_id=chat_app_id, claim=claim,
+        )
+
+    async def accept_genesis_import(
+        self, *, build_registry_id: str, owner_user_id: str, app_id: str,
+        chat_app_id: str, claim: GenesisImportClaim,
+        receipt: GenesisAcceptanceReceipt,
+    ) -> dict[str, Any] | None:
+        return await self.repo.accept_genesis_import(
+            build_registry_id=build_registry_id, owner_user_id=owner_user_id,
+            app_id=app_id, chat_app_id=chat_app_id, claim=claim, receipt=receipt,
+        )
+
     async def resolve_build_binding(
         self,
         *,
@@ -43,6 +80,7 @@ class AppRegistryService:
         resume: bool = False,
         refinement: bool = False,
         allow_create: bool = False,
+        allow_current_build: bool = False,
     ) -> RunBuildBinding:
         """Bind a build through authenticated registry/session ownership.
 
@@ -93,7 +131,20 @@ class AppRegistryService:
                 raise ValueError("Persisted build target does not match the registry")
             if binding is None and not refinement:
                 active_chat = record.get("active_chat_id")
-                if not active_chat:
+                if isinstance(record.get("genesis_import"), dict) and record["genesis_import"].get("status") == "reserved":
+                    raise ValueError("Registered app has a reserved Genesis import")
+                if not active_chat and allow_current_build:
+                    current = record.get("current_build_run") or {}
+                    if (record.get("lifecycle_state") not in {"review", "needs_revision", "active"}
+                            or not current.get("artifact_version_id")):
+                        raise ValueError("Registered app has no saved build available for review")
+                    # Inline execution can save a build without a workflow chat.
+                    # Factory review may bind that owned build; it does not start one.
+                    binding = RunBuildBinding.model_validate({
+                        "build_registry_id": build_registry_id, "target_app_id": record["app_id"],
+                        "build_id": current.get("build_id"), "phase": current.get("phase"),
+                    })
+                elif not active_chat:
                     if not allow_create or record.get("lifecycle_state") != "draft":
                         raise ValueError("Registered app has no resumable build session")
                     binding = RunBuildBinding(
@@ -174,6 +225,8 @@ class AppRegistryService:
                 f"registered_host={(record or {}).get('chat_app_id')!r}, "
                 f"record_found={record is not None})"
             )
+        if isinstance(record.get("genesis_import"), dict) and record["genesis_import"].get("status") == "reserved":
+            raise ValueError("Registered app has an unaccepted Genesis import")
         binding = RunBuildBinding(
             build_registry_id=record["build_registry_id"], target_app_id=record["app_id"],
             build_id=f"build_{uuid4().hex}", phase="refinement",
@@ -232,6 +285,24 @@ class AppRegistryService:
         )
         return {"success": True, "app": app}
 
+    async def apply_approved_concept_identity(
+        self, *, owner_user_id: str, execution_app_id: str, binding: RunBuildBinding, name: str,
+        description: str | None = None,
+    ) -> dict[str, Any]:
+        """Project approved identity onto the bound target, preserving explicit metadata."""
+        approved_name = normalize_optional_text(name)
+        if approved_name is None or is_generic_app_name(approved_name):
+            raise ValueError("An approved concept requires a specific product name")
+        if not normalize_optional_text(execution_app_id):
+            raise ValueError("execution_app_id is required")
+        app = await self.repo.update_concept_identity(
+            owner_user_id=owner_user_id, execution_app_id=execution_app_id,
+            build_registry_id=binding.build_registry_id, app_id=binding.target_app_id,
+            expected_build_id=binding.build_id, name=approved_name,
+            description=normalize_optional_text(description),
+        )
+        return {"success": app is not None, "app": app}
+
     async def update_build_status(
         self,
         *,
@@ -246,6 +317,7 @@ class AppRegistryService:
         current_build_run: dict[str, Any] | None = None,
         expected_build_id: str | None = None,
         expected_lifecycle_state: str | None = None,
+        expected_active_chat_id: str | None | EllipsisType = ...,
     ) -> dict[str, Any]:
         payload = ensure_status_payload(
             build_registry_id=build_registry_id,
@@ -269,6 +341,7 @@ class AppRegistryService:
             current_build_run=payload["current_build_run"],
             expected_build_id=expected_build_id,
             expected_lifecycle_state=expected_lifecycle_state,
+            expected_active_chat_id=expected_active_chat_id,
         )
         return {"success": app is not None, "app": app}
 

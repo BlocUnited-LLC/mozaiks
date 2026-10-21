@@ -122,14 +122,39 @@ runtime_boundaries:
   - id: secret_by_reference_only
     rule: >
       Generated code contains only environment variable names
-      (MOZAIKS_CLOUD_API_KEY, MOZAIKS_CLOUD_API_BASE). Credential values
-      are resolved at runtime through ConnectorStore or env fallback.
-      No API key values appear in generated source.
+      (MOZAIKS_CLOUD_API_KEY, MOZAIKS_CLOUD_USAGE_API_KEY,
+      MOZAIKS_CLOUD_API_BASE). The optional usage key is read only by the
+      usage-report client and requires an explicit MOZAIKS_CLOUD_API_BASE;
+      operators supply both at runtime when reporting is enabled, rather
+      than declaring the usage key in the pack's deployment manifest.
+      The general credential resolves at runtime through the app-scoped
+      ConnectorStore record and its scoped vault secret. The environment is
+      a setup fallback only when no connector record exists; an unreadable or
+      incomplete saved connector fails closed. Never combine its provider
+      endpoint with an environment credential. No API key values appear in
+      generated source.
+  - id: facade_connector_scope
+    rule: >
+      Deployment and domain facade actions must resolve connector credentials
+      using the runtime-injected ctx.app_id, and fail when that identity is
+      missing. A request's app_id is provider operation data only; omitting or
+      changing it must not select another app's connector or skip its lookup.
+      Usage status verifies configured reporter identity against ctx.app_id; the
+      background reporter uses explicit MOZAIKS_CLOUD_APP_ID or MOZAIKS_APP_ID
+      and refuses missing or conflicting identities. Normal usage reporting
+      keeps this app scope; the explicit dedicated usage key remains separate.
   - id: no_provision_on_import
     rule: >
       Importing or constructing any MozaiksCloud sub-client must not provision,
       create, or modify external infrastructure. Side effects are confined to
       explicit authorized API method calls.
+  - id: usage_reporter_app_identity
+    rule: >
+      The optional usage reporter reads local metrics only for an explicitly
+      configured app identity. MOZAIKS_CLOUD_APP_ID is the hosted identity;
+      MOZAIKS_APP_ID may identify a standalone app. If both are set they must
+      match. Missing or conflicting identity never falls back to a default app
+      scope and never sends a usage report.
   - id: page_bindings
     rule: >
       Generated pages must call app-owned cloud_deployment and cloud_domain

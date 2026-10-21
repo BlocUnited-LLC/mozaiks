@@ -106,6 +106,22 @@ def test_source_hygiene_scan_passes_current_repo() -> None:
     assert gate.run_source_hygiene_scan() == []
 
 
+def test_source_hygiene_exempts_only_exact_test_index_upload_url() -> None:
+    gate = _load_gate_module()
+    release_path = ".github/workflows/release.yml"
+    canonical = "https://test.pypi.org/" + "leg" + "acy/"
+    other = "https://example.org/" + "leg" + "acy/"
+
+    def flagged(path: str, line: str) -> bool:
+        scanned = gate._source_hygiene_line_for_scan(path, line)
+        return any(pattern.search(scanned) for pattern in gate.SOURCE_HYGIENE_FORBIDDEN)
+
+    assert not flagged(release_path, f"repository-url: {canonical}")
+    assert flagged(release_path, f"repository-url: {other}")
+    assert flagged(release_path, f"repository-url: {canonical} {other}")
+    assert flagged("another/workflow.yml", f"repository-url: {canonical}")
+
+
 def test_source_hygiene_excludes_release_local_virtualenv() -> None:
     gate = _load_gate_module()
 

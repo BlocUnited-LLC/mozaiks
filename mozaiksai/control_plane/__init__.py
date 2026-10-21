@@ -52,6 +52,7 @@ from .config import (
     ControlPlaneCodingProviderBudget,
     ControlPlaneCodingProvidersConfig,
     ControlPlaneConfig,
+    ControlPlaneContractSurfaceCapabilityConfig,
     ControlPlaneLLMProfileConfig,
     load_ai_config_json,
     load_control_plane_config,
@@ -133,6 +134,26 @@ from .ports import (
     HarnessDecisionPolicyPort,
     RoutingPolicyPort,
     ScopeProposalPort,
+)
+from .repository_acp_usage import (
+    IsolatedACPUsage,
+    parse_isolated_acp_usage,
+    record_isolated_acp_usage,
+)
+from .repository_docker_executor import (
+    RepositoryDockerExecutionError,
+    RepositoryDockerTurn,
+    execute_repository_docker_turn,
+)
+from .repository_patch import (
+    RepositoryPatchCandidate,
+    RepositoryPatchFile,
+    RepositorySnapshotEvidence,
+    export_repository_workspace_archive,
+    finalize_repository_patch,
+    repository_patch_digest,
+    select_repository_read_only_files,
+    stage_repository_workspace_archive,
 )
 from .review_package import (
     REVIEW_PACKAGE_SCHEMA_VERSION,
@@ -242,6 +263,7 @@ __all__ = [
     "ControlPlaneCheckpointManifest",
     "ControlPlaneCheckpointRuntime",
     "ControlPlaneConfig",
+    "ControlPlaneContractSurfaceCapabilityConfig",
     "ControlPlaneHandlerResolutionError",
     "ControlPlaneLLMProfileConfig",
     "ControlPlaneManifest",
@@ -261,6 +283,19 @@ __all__ = [
     "ControlPlaneToolResult",
     "ApprovedExecutionContext",
     "build_coding_request_from_execution_context",
+    "RepositoryPatchCandidate",
+    "RepositoryPatchFile",
+    "RepositorySnapshotEvidence",
+    "RepositoryDockerExecutionError",
+    "RepositoryDockerTurn",
+    "execute_repository_docker_turn",
+    "IsolatedACPUsage",
+    "parse_isolated_acp_usage",
+    "record_isolated_acp_usage",
+    "export_repository_workspace_archive",
+    "finalize_repository_patch",
+    "repository_patch_digest",
+    "stage_repository_workspace_archive",
     "ControlPlaneToolsManifest",
     "ContextRefreshLaunchResult",
     "ContextRefreshLaunchStatus",
@@ -345,4 +380,5 @@ __all__ = [
     "run_app_validation_fallback_checks",
     "run_current_app_source_validation",
     "source_import_scan_policy",
+    "select_repository_read_only_files",
 ]

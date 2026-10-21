@@ -1,0 +1,305 @@
+name: Mobile packaging reference
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/mobile-reference.yml'
+      - 'examples/mobile-reference/**'
+      - 'examples/canonical-apps/community/app/**'
+      - 'examples/canonical-apps/community/scripts/**'
+      - 'examples/canonical-apps/community/tests/**'
+      - 'examples/canonical-apps/project-hub/**'
+      - 'factory_app/build_context/mobile/**'
+      - 'factory_app/workflows/AppGenerator/tools/android_delivery*'
+      - 'factory_app/workflows/AppGenerator/tools/android_export_policy.py'
+      - 'factory_app/workflows/AppGenerator/tools/resolve_managed_capability_templates.py'
+      - 'mozaiks_cli/**'
+      - 'tests/mobile/**'
+      - 'tests/test_android_delivery.py'
+      - 'tests/test_android_delivery_origins.py'
+      - 'tests/test_android_export_policy.py'
+      - 'tests/test_cli_android_packaging.py'
+      - 'mozaiksai/**'
+      - 'pyproject.toml'
+      - 'chat-ui/**'
+      - 'web_shell/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/mobile-reference.yml'
+      - 'examples/mobile-reference/**'
+      - 'examples/canonical-apps/community/app/**'
+      - 'examples/canonical-apps/community/scripts/**'
+      - 'examples/canonical-apps/community/tests/**'
+      - 'examples/canonical-apps/project-hub/**'
+      - 'factory_app/build_context/mobile/**'
+      - 'factory_app/workflows/AppGenerator/tools/android_delivery*'
+      - 'factory_app/workflows/AppGenerator/tools/android_export_policy.py'
+      - 'factory_app/workflows/AppGenerator/tools/resolve_managed_capability_templates.py'
+      - 'mozaiks_cli/**'
+      - 'tests/mobile/**'
+      - 'tests/test_android_delivery.py'
+      - 'tests/test_android_delivery_origins.py'
+      - 'tests/test_android_export_policy.py'
+      - 'tests/test_cli_android_packaging.py'
+      - 'mozaiksai/**'
+      - 'pyproject.toml'
+      - 'chat-ui/**'
+      - 'web_shell/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android-project:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      PYTHON_DOTENV_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: pip
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            chat-ui/package-lock.json
+            web_shell/package-lock.json
+            factory_app/build_context/mobile/package-lock.json
+      - name: Check reusable packaging contracts
+        run: |
+          python -m pip install -e ".[dev]"
+          python -m pytest -q --no-cov tests/test_android_delivery.py tests/test_android_delivery_origins.py tests/test_android_export_policy.py tests/test_cli_android_packaging.py
+          node --test tests/mobile/*.test.mjs
+      - name: Compile a separate external Project Hub workspace through the CLI
+        shell: python
+        run: |
+          import json
+          import os
+          import shutil
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          root = Path.cwd()
+          temporary = Path(os.environ['RUNNER_TEMP'])
+          source = temporary / 'mobile-project-hub-source'
+          output = temporary / 'mobile-project-hub-output'
+          shutil.copytree(root / 'examples/canonical-apps/project-hub/app', source / 'app')
+          config = temporary / 'project-hub-android.json'
+          config.write_text(json.dumps({
+              'schema_version': 'mozaiks.android_delivery.v1',
+              'package_id': 'org.mozaiks.examples.projecthub', 'display_name': 'Project Hub',
+              'version_name': '1.2.3', 'version_code': 7,
+              'backend_origin': 'https://runtime.example.invalid', 'build_type': 'release',
+          }))
+          env = {**os.environ, 'JAVA_HOME': os.environ['JAVA_HOME_21_X64']}
+          assert (Path(env['ANDROID_HOME']) / 'platforms/android-36').is_dir()
+          subprocess.run([sys.executable, '-m', 'mozaiks_cli', 'package', 'android', str(source),
+                          '--config', str(config), '--output', str(output)], env=env, check=True)
+          mobile = output / 'workspace/mobile'
+          receipt = json.loads((mobile / 'build-result.json').read_text())
+          assert receipt['status'] == 'succeeded' and receipt['device_acceptance'] == 'not_run'
+          assert receipt['android']['package_id'] == 'org.mozaiks.examples.projecthub'
+          assert receipt['android']['version_code'] == 7
+          assert receipt['artifact']['kind'] == 'unsigned_release_aab'
+          assert receipt['artifact']['path'] == 'android/app/build/outputs/bundle/release/app-release.aab'
+          assert not (source / 'app/ui/auth/capacitor').exists()
+          subprocess.run(['npm', 'audit', '--audit-level=moderate'], cwd=mobile, check=True)
+      - name: Retain packaging evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: mobile-packaging-evidence
+          retention-days: 7
+          if-no-files-found: error
+          path: ${{ runner.temp }}/mobile-project-hub-output/workspace/mobile/build-result.json
+      - name: Retain unsigned release AAB
+        uses: actions/upload-artifact@v7
+        with:
+          name: mobile-project-hub-unsigned-release-aab
+          retention-days: 7
+          if-no-files-found: error
+          path: ${{ runner.temp }}/mobile-project-hub-output/workspace/mobile/android/app/build/outputs/bundle/release/app-release.aab
+
+  native-acceptance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      PYTHON_DOTENV_DISABLED: '1'
+      COMMUNITY_LIVE_CONFIG: ${{ github.workspace }}/.local/evidence/community-env/native-ci/environment.json
+      MOBILE_ACCEPTANCE_EVIDENCE: ${{ github.workspace }}/.local/evidence/mobile-native
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: pip
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            chat-ui/package-lock.json
+            web_shell/package-lock.json
+            factory_app/build_context/mobile/package-lock.json
+      - name: Install pinned dependencies
+        run: |
+          python -m pip install -e ".[dev]"
+          npm ci --prefix web_shell
+      - name: Pull disposable local service images
+        run: |
+          bash scripts/ci/mongo_service.sh pull
+          docker pull quay.io/keycloak/keycloak:26.0
+      - name: Enable Android hardware acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Start owned services and compile the native acceptance APK
+        shell: python
+        run: |
+          import json
+          import os
+          import subprocess
+          import sys
+          import time
+          import tomllib
+          from importlib.metadata import version
+          from pathlib import Path
+
+          root = Path.cwd()
+          state_path = Path(os.environ['COMMUNITY_LIVE_CONFIG'])
+          evidence = state_path.parent
+          evidence.parent.mkdir(parents=True, exist_ok=True)
+          launcher = root / 'examples/canonical-apps/community/scripts/live_environment.py'
+          dependencies = tomllib.loads((root / 'pyproject.toml').read_text())['project']['dependencies']
+          required_ag2 = next(item.split('==')[1] for item in dependencies if item.startswith('ag2['))
+          assert version('ag2') == required_ag2
+          with (evidence.parent / 'native-owner.log').open('w') as owner_log:
+              owner = subprocess.Popen([
+                  sys.executable, str(launcher), 'start', '--evidence-dir', str(evidence),
+                  '--native-callback', 'org.mozaiks.examples.commonground:/auth/callback',
+                  '--client-origin', 'https://localhost',
+              ], stdin=subprocess.DEVNULL, stdout=owner_log, stderr=subprocess.STDOUT, start_new_session=True)
+          (evidence.parent / 'native-owner.json').write_text(json.dumps({'pid': owner.pid}))
+          deadline = time.monotonic() + 180
+          while True:
+              if owner.poll() is not None:
+                  raise RuntimeError('Native acceptance owner exited before readiness')
+              state = json.loads(state_path.read_text()) if state_path.exists() else {}
+              if state.get('status') == 'ready':
+                  break
+              if time.monotonic() > deadline:
+                  raise TimeoutError('Native acceptance services did not become ready')
+              time.sleep(0.5)
+          assert state['ag2_version'] == required_ag2
+          from factory_app.workflows.AppGenerator.tools.deployment_contract import materialize_android_workspace
+          config = json.loads((root / 'examples/mobile-reference/android.json').read_text())
+          result = materialize_android_workspace(root / 'examples/canonical-apps/community', config,
+                                                Path(os.environ['RUNNER_TEMP']) / 'mobile-common-ground')
+          mobile = Path(result['mobile_dir'])
+          env = {
+              **os.environ, **state['frontend_env'],
+              'MOZAIKS_PYTHON': sys.executable,
+              'JAVA_HOME': os.environ['JAVA_HOME_21_X64'],
+          }
+          subprocess.run(['node', str(mobile / 'build.mjs'), '--acceptance'], cwd=mobile, env=env, check=True)
+          from mozaiks_cli.commands.package import _verified_build_result
+          receipt = _verified_build_result(mobile)
+          assert receipt['acceptance_build'] is True
+          safe_evidence = Path(os.environ['MOBILE_ACCEPTANCE_EVIDENCE'])
+          safe_evidence.mkdir(parents=True, exist_ok=True)
+          (safe_evidence / 'packaging-evidence.json').write_text(json.dumps(receipt, indent=2))
+      - name: Exercise real external-browser auth and community actions on Android
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+        env:
+          MOBILE_ACCEPTANCE_APK: ${{ runner.temp }}/mobile-common-ground/workspace/mobile/android/app/build/outputs/apk/debug/app-debug.apk
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7
+          ram-size: 2048M
+          disable-animations: true
+          emulator-boot-timeout: 300
+          script: |
+            adb reverse tcp:18443 tcp:18443
+            adb reverse tcp:28443 tcp:28443
+            adb shell am set-debug-app --persistent com.android.chrome
+            timeout 8m node examples/mobile-reference/scripts/android-acceptance.mjs
+      - name: Stop owned services and record safe provenance
+        if: always()
+        shell: python
+        run: |
+          import json
+          import os
+          import signal
+          import subprocess
+          import sys
+          import time
+          from pathlib import Path
+
+          root = Path.cwd()
+          state_path = Path(os.environ['COMMUNITY_LIVE_CONFIG'])
+          evidence = state_path.parent
+          state = json.loads(state_path.read_text()) if state_path.exists() else {}
+          launcher = root / 'examples/canonical-apps/community/scripts/live_environment.py'
+          if state.get('status') == 'ready':
+              subprocess.run([sys.executable, str(launcher), 'stop', '--evidence-dir', str(evidence)], check=True, timeout=160)
+          elif not state or state.get('status') in ('starting', 'restarting'):
+              # Signal only the process created above, after verifying its command.
+              owner_file = evidence.parent / 'native-owner.json'
+              owner = json.loads(owner_file.read_text()) if owner_file.exists() else {}
+              pid = state.get('owner_pid') or owner.get('pid')
+              command_path = Path(f'/proc/{pid}/cmdline')
+              if pid and command_path.exists():
+                  command = command_path.read_bytes().split(b'\0')
+                  assert str(launcher).encode() in command and str(evidence).encode() in command
+                  os.kill(pid, signal.SIGINT)
+                  deadline = time.monotonic() + 90
+                  while time.monotonic() < deadline:
+                      state = json.loads(state_path.read_text()) if state_path.exists() else {}
+                      if state.get('cleanup_status') or not command_path.exists():
+                          break
+                      time.sleep(0.5)
+          state = json.loads(state_path.read_text()) if state_path.exists() else {}
+          keys = (
+              'source_sha', 'source_changes', 'ag2_version', 'images', 'api_generation',
+              'status', 'cleanup_status', 'cleanup_errors', 'forced_api_stop',
+              'native_callback', 'client_origin',
+          )
+          safe_evidence = Path(os.environ['MOBILE_ACCEPTANCE_EVIDENCE'])
+          safe_evidence.mkdir(parents=True, exist_ok=True)
+          (safe_evidence / 'service-provenance.json').write_text(json.dumps({key: state.get(key) for key in keys}, indent=2))
+          if state:
+              assert state.get('cleanup_status') == 'complete', state.get('cleanup_errors')
+      - name: Retain sanitized native acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mobile-native-acceptance
+          retention-days: 7
+          if-no-files-found: warn
+          include-hidden-files: true
+          path: |
+            .local/evidence/mobile-native/android-proof.json
+            .local/evidence/mobile-native/packaging-evidence.json
+            .local/evidence/mobile-native/service-provenance.json
+            .local/evidence/mobile-native/*.png
+      - name: Retain the acceptance APK matching the proof checksum
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mobile-native-acceptance-apk
+          retention-days: 7
+          if-no-files-found: warn
+          path: ${{ runner.temp }}/mobile-common-ground/workspace/mobile/android/app/build/outputs/apk/debug/app-debug.apk

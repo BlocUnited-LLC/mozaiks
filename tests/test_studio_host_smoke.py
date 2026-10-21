@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from mozaiksai.hosts import shell_config
@@ -14,7 +16,10 @@ async def test_studio_shell_config_injects_studio_routes(monkeypatch):
     monkeypatch.setenv("PLATFORM_PATH", str(active_app_root()))
     from mozaiksai.hosts import studio as studio_app
 
-    shell_config = await studio_app.get_studio_shell_config()
+    browser_on_this_machine = SimpleNamespace(
+        scope={"type": "http", "client": ("127.0.0.1", 50000), "headers": [(b"host", b"localhost:8000")]}
+    )
+    shell_config = await studio_app.get_studio_shell_config(browser_on_this_machine)
     page_paths = {page.get("path") for page in shell_config.get("pages", [])}
     header_paths = {
         page.get("path")
@@ -205,20 +210,27 @@ def test_notification_count_query_uses_platform_notification_intents():
         app_id="app_1",
     )
 
-    assert notifications_router._notification_query_for_principal(principal) == {
-        "status": "unread",
-        "app_id": "app_1",
-        "$or": [
-            {"audience.user_ids": "user_1"},
-            {"audience.roles": {"$in": ["admin"]}},
-            {"audience.permissions": {"$in": ["notifications.read"]}},
-            {
-                "$and": [
-                    {"$or": [{"audience.user_ids": {"$exists": False}}, {"audience.user_ids": []}]},
-                    {"$or": [{"audience.roles": {"$exists": False}}, {"audience.roles": []}]},
-                    {"$or": [{"audience.permissions": {"$exists": False}}, {"audience.permissions": []}]},
-                ]
-            },
+    query = notifications_router._notification_query_for_principal(
+        principal, "app_1", None, status="unread",
+    )
+    assert query["status"] == "unread"
+    assert query["app_id"] == "app_1"
+    assert query["$or"] == [
+        {"audience.user_ids": "user_1"},
+        {
+            "$and": [
+                {"$or": [{"audience.user_ids": {"$exists": False}}, {"audience.user_ids": []}]},
+                {"$or": [{"audience.roles": {"$exists": False}}, {"audience.roles": []}]},
+                {"$or": [{"audience.permissions": {"$exists": False}}, {"audience.permissions": []}]},
+            ]
+        },
+    ]
+    assert query["$and"][1] == {
+        "$and": [
+            {"workspace_id": {"$exists": False}},
+            {"tenant_id": {"$exists": False}},
+            {"$or": [{"audience.roles": {"$exists": False}}, {"audience.roles": []}]},
+            {"$or": [{"audience.permissions": {"$exists": False}}, {"audience.permissions": []}]},
         ],
     }
 

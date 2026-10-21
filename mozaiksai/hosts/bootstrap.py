@@ -84,7 +84,10 @@ def resolve_repo_host_defaults(
     if normalized_host == "studio":
         selected_root: Path | None = factory_workflows_root or app_workflows_root
     else:
-        selected_root = app_workflows_root if (app_workflows_root is not None and app_workflows_root.is_dir()) else factory_workflows_root
+        # A platform host serves only the app's own workflows. With none on
+        # disk the variable stays unset and root resolution binds the app's
+        # absent root, so the host loads zero workflows.
+        selected_root = app_workflows_root
     if selected_root is not None:
         updates["MOZAIKS_WORKFLOWS_PATH"] = str(selected_root)
     return updates

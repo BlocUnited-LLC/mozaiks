@@ -50,7 +50,7 @@ const pickDefaultFile = (filesMap) => {
   return keys.sort((a, b) => a.localeCompare(b))[0];
 };
 
-export function useAppValidationWorkbench(payload, themeConfig) {
+export function useAppValidationWorkbench(payload, themeConfig, candidateResult = null, activeArtifactVersionId = null) {
   const workbench = useMemo(() => {
     if (!payload || typeof payload !== 'object') return {};
     return payload.workbench && typeof payload.workbench === 'object' ? payload.workbench : payload;
@@ -68,23 +68,48 @@ export function useAppValidationWorkbench(payload, themeConfig) {
   }, [workbench]);
 
   const [filesMap, setFilesMap] = useState(initialFiles);
-  useEffect(() => setFilesMap(initialFiles), [initialFiles]);
+  const sourceArtifactVersionId = payload?.artifact_version_id || payload?.artifactVersionId || null;
+  const showingSourceArtifact = activeArtifactVersionId === sourceArtifactVersionId;
+  // A refreshed parent payload must not overwrite files belonging to an active
+  // refinement candidate. A newly opened version resumes ordinary hydration.
+  useEffect(() => {
+    if (showingSourceArtifact) setFilesMap(initialFiles);
+  }, [initialFiles, showingSourceArtifact]);
+
+  // A refinement carries evidence for its own exact snapshot. Never fill gaps
+  // from the parent bundle, even while the editor keeps that previous version.
+  const validationWorkbench = useMemo(() => {
+    if (!candidateResult) return workbench;
+    const evidence = normalizeValidation(candidateResult.validation_result);
+    const build = normalizeValidation(evidence.app_validation_result);
+    const acceptance = normalizeIntegrationResult(evidence.app_bundle_acceptance_result);
+    const status = evidence.validation_status || (candidateResult.status === 'failed' ? 'failed' : 'pending');
+    const hasPassedChecks = acceptance?.passed === true && build.validation_status === 'passed';
+    return {
+      validation_result: { ...build, ...evidence },
+      app_validation_status: status === 'passed' && !hasPassedChecks ? 'pending' : status,
+      app_validation_strategy_used: build.validation_strategy || evidence.validation_strategy || null,
+      app_validation_preview_url: build.preview_url || null,
+      integration_test_result: acceptance,
+      integration_tests_passed: acceptance?.passed ?? null,
+    };
+  }, [candidateResult, workbench]);
 
   const validationResult = useMemo(() => {
     return normalizeValidation(
-      workbench.validation_result ||
-      workbench.validationResult ||
-      workbench.app_validation_result ||
-      workbench.appValidationResult ||
-      workbench.validation ||
+      validationWorkbench.validation_result ||
+      validationWorkbench.validationResult ||
+      validationWorkbench.app_validation_result ||
+      validationWorkbench.appValidationResult ||
+      validationWorkbench.validation ||
       {}
     );
-  }, [workbench]);
+  }, [validationWorkbench]);
 
   const validationStatus = useMemo(() => {
     const explicitStatus =
-      workbench.app_validation_status ??
-      workbench.appValidationStatus ??
+      validationWorkbench.app_validation_status ??
+      validationWorkbench.appValidationStatus ??
       validationResult.validation_status ??
       validationResult.validationStatus;
     const normalized = normalizeValidationStatus(explicitStatus);
@@ -92,50 +117,50 @@ export function useAppValidationWorkbench(payload, themeConfig) {
     if (validationResult.success === true) return 'passed';
     if (validationResult.success === false) return 'failed';
     return 'pending';
-  }, [workbench, validationResult]);
+  }, [validationWorkbench, validationResult]);
 
   const validationStrategy = useMemo(() => {
     return normalizeValidationStrategy(
-      workbench.app_validation_strategy_used ||
-      workbench.appValidationStrategyUsed ||
+      validationWorkbench.app_validation_strategy_used ||
+      validationWorkbench.appValidationStrategyUsed ||
       validationResult.validation_strategy ||
       validationResult.validationStrategy ||
       null
     );
-  }, [workbench, validationResult]);
+  }, [validationWorkbench, validationResult]);
 
   const previewUrl = useMemo(() => {
     return safeString(
-      workbench.preview_url ||
-      workbench.previewUrl ||
-      workbench.app_validation_preview_url ||
-      workbench.appValidationPreviewUrl ||
+      validationWorkbench.preview_url ||
+      validationWorkbench.previewUrl ||
+      validationWorkbench.app_validation_preview_url ||
+      validationWorkbench.appValidationPreviewUrl ||
       validationResult.preview_url ||
       validationResult.previewUrl ||
       ''
     ) || null;
-  }, [workbench, validationResult]);
+  }, [validationWorkbench, validationResult]);
 
   const integrationTestResult = useMemo(() => {
     return normalizeIntegrationResult(
-      workbench.integration_test_result ||
-      workbench.integrationTestResult ||
-      workbench.integration_result ||
-      workbench.integrationResult ||
+      validationWorkbench.integration_test_result ||
+      validationWorkbench.integrationTestResult ||
+      validationWorkbench.integration_result ||
+      validationWorkbench.integrationResult ||
       null
     );
-  }, [workbench]);
+  }, [validationWorkbench]);
 
   const integrationPassed = useMemo(() => {
     const passed =
-      workbench.integration_tests_passed ??
-      workbench.integrationTestsPassed ??
+      validationWorkbench.integration_tests_passed ??
+      validationWorkbench.integrationTestsPassed ??
       integrationTestResult?.passed ??
       integrationTestResult?.success ??
       null;
     if (passed == null) return null;
     return Boolean(passed);
-  }, [workbench, integrationTestResult]);
+  }, [validationWorkbench, integrationTestResult]);
 
   const [selectedPath, setSelectedPath] = useState(() => pickDefaultFile(initialFiles));
   useEffect(() => {

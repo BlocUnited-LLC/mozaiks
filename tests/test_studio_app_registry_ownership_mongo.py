@@ -7,6 +7,7 @@ import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import httpx
@@ -17,8 +18,20 @@ from motor.motor_asyncio import AsyncIOMotorClient
 
 from factory_app.app.modules.app_registry.backend.handler import AppRegistryModule
 from factory_app.app.modules.app_registry.backend.repo import AppRegistryRepo
+from factory_app.app.modules.app_registry.backend.schemas import (
+    GenesisAcceptanceReceipt,
+    GenesisImportClaim,
+)
 from factory_app.app.modules.app_registry.backend.service import AppRegistryService
+from mozaiksai.core.artifacts import ArtifactLifecycleStatus, ArtifactValidationStatus
+from mozaiksai.core.artifacts.models import (
+    BuildRecord,
+    BuildRecordStatus,
+    BuildRecordValidationStatus,
+)
+from mozaiksai.core.artifacts.store import BuildRecordStore
 from mozaiksai.core.auth import reset_auth_adapter
+from mozaiksai.core.session.build_binding import RunBuildBinding
 
 
 @pytest_asyncio.fixture
@@ -87,6 +100,505 @@ async def _create(host, *, owner="alice"):
     )
     assert response.status_code == 200, response.text
     return response.json()["app"]
+
+
+@pytest.mark.parametrize("initial_chat,explicit_null", [(None, False), (None, True), ("source-review", False)])
+async def test_review_continuation_compare_and_swap_keeps_one_winner(registry_host, initial_chat, explicit_null):
+    host = registry_host
+    record = (await host.service.create_app_record(
+        owner_user_id="alice", status="review", chat_app_id="factory",
+        active_chat_id=initial_chat, active_workflow_id="AppReview",
+        current_build_run={"build_id": "inline-build", "phase": "refinement"},
+    ))["app"]
+    if explicit_null:
+        await host.collection.update_one({"_id": record["build_registry_id"]}, {"$set": {"active_chat_id": None}})
+    async def continue_review(chat_id):
+        return await host.service.update_build_status(
+            build_registry_id=record["build_registry_id"], owner_user_id="alice",
+            status="review", active_chat_id=chat_id, active_workflow_id="AppReview",
+            expected_build_id="inline-build", expected_lifecycle_state="review",
+            expected_active_chat_id=initial_chat,
+        )
+    outcomes = await asyncio.gather(continue_review("review-a"), continue_review("review-b"))
+    assert sum(outcome["success"] for outcome in outcomes) == 1
+    winner = next(outcome["app"]["active_chat_id"] for outcome in outcomes if outcome["success"])
+    final = await host.collection.find_one({"_id": record["build_registry_id"]})
+    assert final["active_chat_id"] == winner
+    assert final["current_build_run"]["active_chat_id"] == winner
+    # An omitted constraint keeps existing service callers' semantics.
+    unguarded = await host.service.update_build_status(
+        build_registry_id=record["build_registry_id"], owner_user_id="alice",
+        status="review", active_chat_id="review-explicit", expected_build_id="inline-build",
+    )
+    assert unguarded["success"] is True
+
+
+async def test_real_mongo_genesis_claim_blocks_generic_build_start(registry_host):
+    host = registry_host
+    target = await host.service.register_existing_app_record(
+        owner_user_id="alice", app_id="existing-app", chat_app_id="existing-app", name="Existing App",
+    )
+    claim = GenesisImportClaim(
+        build_record_id="av_" + "1" * 24, bundle_name="ExistingApp",
+        bundle_sha256="a" * 64, manifest_sha256="b" * 64, content_backend="local",
+        source_id="managed/existing", revision_id="c" * 40, tree_id="d" * 40,
+    )
+    args = {
+        "build_registry_id": target["build_registry_id"], "owner_user_id": "alice",
+        "app_id": "existing-app", "chat_app_id": "existing-app",
+    }
+    saved = await host.service.reserve_genesis_import(**args, claim=claim)
+    assert saved["genesis_import"] == claim.model_dump(mode="json")
+    assert (await host.service.reserve_genesis_import(**args, claim=claim))["build_registry_id"] == target["build_registry_id"]
+    changed = claim.model_copy(update={"bundle_sha256": "e" * 64})
+    assert await host.service.reserve_genesis_import(**args, claim=changed) is None
+    assert (await host.service.update_build_status(
+        owner_user_id="alice", build_registry_id=target["build_registry_id"],
+        status="building", expected_lifecycle_state="draft",
+        current_build_run={"build_id": "build_new", "phase": "genesis"},
+    ))["success"] is False
+    with pytest.raises(ValueError, match="reserved Genesis import"):
+        await host.service.resolve_build_binding(
+            owner_user_id="alice", app_id="existing-app", chat_id="chat_new",
+            workflow_name="ValueEngine", build_registry_id=target["build_registry_id"],
+            allow_create=True,
+        )
+    current = await host.collection.find_one({"_id": target["build_registry_id"]})
+    assert current["lifecycle_state"] == "draft"
+    assert current.get("current_build_run") is None
+
+
+async def test_real_mongo_genesis_review_cas_is_single_and_survives_refinement(registry_host):
+    host = registry_host
+    target = await host.service.register_existing_app_record(
+        owner_user_id="alice", app_id="existing-app", chat_app_id="existing-app", name="Existing App",
+    )
+    claim = GenesisImportClaim(
+        build_record_id="av_" + "1" * 24, bundle_name="ExistingApp",
+        bundle_sha256="a" * 64, manifest_sha256="b" * 64, content_backend="local",
+        source_id="managed/existing", revision_id="c" * 40, tree_id="d" * 40,
+    )
+    args = {
+        "build_registry_id": target["build_registry_id"], "owner_user_id": "alice",
+        "app_id": "existing-app", "chat_app_id": "existing-app", "claim": claim,
+    }
+    assert await host.service.reserve_genesis_import(**args)
+    first = GenesisAcceptanceReceipt(
+        accepted_by="alice", accepted_at=datetime.now(UTC), disclosure_sha256="d" * 64,
+        validation_sha256="e" * 64,
+    )
+    competing = first.model_copy(update={"validation_sha256": "f" * 64})
+    outcomes = await asyncio.gather(
+        host.service.accept_genesis_import(**args, receipt=first),
+        host.service.accept_genesis_import(**args, receipt=competing),
+    )
+    assert sum(outcome is not None for outcome in outcomes) == 1
+    winner = first if outcomes[0] is not None else competing
+    loser = competing if winner is first else first
+    assert await host.service.accept_genesis_import(**args, receipt=loser) is None
+    assert (await host.service.accept_genesis_import(**args, receipt=winner))["genesis_import"]["status"] == "accepted"
+    assert await host.service.accept_genesis_import(**{**args, "owner_user_id": "mallory"}, receipt=winner) is None
+    started = await host.service.update_build_status(
+        owner_user_id="alice", build_registry_id=target["build_registry_id"],
+        status="building", expected_lifecycle_state="draft",
+        current_build_run={"build_id": "build_later", "phase": "refinement"},
+    )
+    assert started["success"] is True
+    persisted = await host.collection.find_one({"_id": target["build_registry_id"]})
+    assert persisted["genesis_import"]["acceptance"]["validation_sha256"] == winner.validation_sha256
+    assert persisted["current_build_run"]["build_id"] == "build_later"
+
+
+async def test_real_mongo_genesis_artifact_projection_requires_matching_validation(registry_host):
+    versions = registry_host.collection.database["ArtifactVersions"]
+    store = BuildRecordStore.__new__(BuildRecordStore)
+    store._coll = AsyncMock(return_value=versions)
+    record = BuildRecord(
+        _id="av_" + "1" * 24, app_id="existing-app", build_family="app_bundle",
+        build_key="app_bundle", version_number=1, lineage_root_id="av_" + "1" * 24,
+        lifecycle_status=BuildRecordStatus.DRAFT,
+        validation_status=BuildRecordValidationStatus.PENDING,
+        commit_metadata={"author_user_id": "alice", "metadata": {
+            "bundle_mode": "brownfield_genesis_import", "bundle_sha256": "a" * 64,
+        }},
+    )
+    await versions.insert_one(record.model_dump(by_alias=True, mode="python"))
+    unvalidated = await store.accept_genesis_build_record(
+        app_id="existing-app", build_record_id=record.id, validation_sha256="e" * 64,
+    )
+    assert unvalidated.lifecycle_status == BuildRecordStatus.DRAFT
+    validation = {"bundle_sha256": "a" * 64, "sha256": "e" * 64}
+    checked = await store.mark_genesis_build_record_validated(
+        app_id="existing-app", build_record_id=record.id, validation=validation,
+    )
+    assert checked.validation_status == BuildRecordValidationStatus.PASSED
+    assert checked.app_validation_status == "passed"
+    wrong = await store.accept_genesis_build_record(
+        app_id="existing-app", build_record_id=record.id, validation_sha256="f" * 64,
+    )
+    assert wrong.lifecycle_status == BuildRecordStatus.DRAFT
+    accepted = await store.accept_genesis_build_record(
+        app_id="existing-app", build_record_id=record.id, validation_sha256="e" * 64,
+    )
+    assert accepted.lifecycle_status == BuildRecordStatus.CURRENT
+    assert (await store.accept_genesis_build_record(
+        app_id="existing-app", build_record_id=record.id, validation_sha256="e" * 64,
+    )).lifecycle_status == BuildRecordStatus.CURRENT
+
+
+async def test_real_mongo_imported_genesis_blocks_generic_store_mutations(registry_host):
+    versions = registry_host.collection.database["ArtifactVersions"]
+    store = BuildRecordStore.__new__(BuildRecordStore)
+    store._coll = AsyncMock(return_value=versions)
+    record = BuildRecord(
+        _id="av_" + "2" * 24, app_id="existing-app", build_family="app_bundle",
+        build_key="app_bundle", version_number=1, lineage_root_id="av_" + "2" * 24,
+        lifecycle_status=BuildRecordStatus.DRAFT,
+        validation_status=BuildRecordValidationStatus.PENDING,
+        commit_metadata={"author_user_id": "alice", "metadata": {
+            "bundle_mode": "brownfield_genesis_import", "bundle_sha256": "a" * 64,
+        }},
+    )
+    await versions.insert_one(record.model_dump(by_alias=True, mode="python"))
+    replacement = {"author_user_id": "alice", "metadata": {"bundle_name": "overwritten"}}
+    with pytest.raises(ValueError, match="dedicated owner-reviewed acceptance"):
+        await store.accept_build_record(
+            app_id=record.app_id, build_record_id=record.id, commit_metadata=replacement,
+        )
+    assert not await store.set_validation_status(
+        app_id=record.app_id, build_record_id=record.id,
+        validation_status=ArtifactValidationStatus.PASSED,
+        lifecycle_status=ArtifactLifecycleStatus.CURRENT, commit_metadata=replacement,
+    )
+    assert not await store.set_validation_status_for_build_record(
+        app_id=record.app_id, build_record_id=record.id,
+        validation_status=ArtifactValidationStatus.PASSED,
+        lifecycle_status=ArtifactLifecycleStatus.CURRENT, commit_metadata=replacement,
+    )
+    assert not await store.set_artifact_lifecycle_status(
+        app_id=record.app_id, artifact_version_id=record.id,
+        lifecycle_status=ArtifactLifecycleStatus.CURRENT,
+    )
+    assert not await store.reject_artifact_version(
+        app_id=record.app_id, artifact_version_id=record.id, reason="generic rejection",
+    )
+    assert not await store.mark_build_record_stale(
+        app_id=record.app_id, build_record_id=record.id, reason="generic invalidation",
+    )
+    assert not await store.mark_artifact_version_stale(
+        app_id=record.app_id, artifact_version_id=record.id, reason="generic invalidation",
+    )
+    assert await store.invalidate_build_family(
+        app_id=record.app_id, build_family="app_bundle", build_key="app_bundle",
+        reason="generic invalidation",
+    ) == 0
+    unchanged = await store.get_build_record(app_id=record.app_id, build_record_id=record.id)
+    assert unchanged.lifecycle_status == BuildRecordStatus.DRAFT
+    assert unchanged.validation_status == BuildRecordValidationStatus.PENDING
+    assert unchanged.commit_metadata.metadata == record.commit_metadata.metadata
+    assert (await store.mark_genesis_build_record_validated(
+        app_id=record.app_id, build_record_id=record.id,
+        validation={"bundle_sha256": "a" * 64, "sha256": "e" * 64},
+    )).validation_status == BuildRecordValidationStatus.PASSED
+    accepted = await store.accept_genesis_build_record(
+        app_id=record.app_id, build_record_id=record.id, validation_sha256="e" * 64,
+    )
+    assert accepted.lifecycle_status == BuildRecordStatus.CURRENT
+    assert not await store.set_validation_status_for_build_record(
+        app_id=record.app_id, build_record_id=record.id,
+        validation_status=ArtifactValidationStatus.PENDING,
+        commit_metadata={"author_user_id": "alice", "metadata": {"bundle_name": "overwritten"}},
+    )
+    assert (await store.get_build_record(
+        app_id=record.app_id, build_record_id=record.id,
+    )).commit_metadata.metadata["bundle_mode"] == "brownfield_genesis_import"
+    assert await store.mark_build_record_stale(
+        app_id=record.app_id, build_record_id=record.id, reason="later refinement",
+    )
+    assert (await store.get_build_record(
+        app_id=record.app_id, build_record_id=record.id,
+    )).lifecycle_status == BuildRecordStatus.STALE
+
+
+async def test_real_mongo_genesis_validation_race_keeps_receipt_projectable(registry_host):
+    host = registry_host
+    target = await host.service.register_existing_app_record(
+        owner_user_id="alice", app_id="existing-app", chat_app_id="existing-app", name="Existing App",
+    )
+    record_id = "av_" + "3" * 24
+    claim = GenesisImportClaim(
+        build_record_id=record_id, bundle_name="ExistingApp",
+        bundle_sha256="a" * 64, manifest_sha256="b" * 64, content_backend="local",
+        source_id="managed/existing", revision_id="c" * 40, tree_id="d" * 40,
+    )
+    args = {
+        "build_registry_id": target["build_registry_id"], "owner_user_id": "alice",
+        "app_id": "existing-app", "chat_app_id": "existing-app", "claim": claim,
+    }
+    assert await host.service.reserve_genesis_import(**args)
+    versions = host.collection.database["ArtifactVersions"]
+    store = BuildRecordStore.__new__(BuildRecordStore)
+    store._coll = AsyncMock(return_value=versions)
+    record = BuildRecord(
+        _id=record_id, app_id="existing-app", build_family="app_bundle",
+        build_key="app_bundle", version_number=1, lineage_root_id=record_id,
+        lifecycle_status=BuildRecordStatus.DRAFT,
+        validation_status=BuildRecordValidationStatus.PENDING,
+        commit_metadata={"author_user_id": "alice", "metadata": {
+            "bundle_mode": "brownfield_genesis_import", "bundle_sha256": "a" * 64,
+        }},
+    )
+    await versions.insert_one(record.model_dump(by_alias=True, mode="python"))
+    evidences = [
+        {"bundle_sha256": "a" * 64, "sha256": "e" * 64},
+        {"bundle_sha256": "a" * 64, "sha256": "f" * 64},
+    ]
+    await asyncio.gather(*(store.mark_genesis_build_record_validated(
+        app_id=record.app_id, build_record_id=record.id, validation=evidence,
+    ) for evidence in evidences))
+    winner = (await store.get_build_record(
+        app_id=record.app_id, build_record_id=record.id,
+    )).commit_metadata.metadata["genesis_validation"]
+    assert winner in evidences
+    receipt = GenesisAcceptanceReceipt(
+        accepted_by="alice", accepted_at=datetime.now(UTC), disclosure_sha256="d" * 64,
+        validation_sha256=winner["sha256"],
+    )
+    assert await host.service.accept_genesis_import(**args, receipt=receipt)
+    loser = next(evidence for evidence in evidences if evidence != winner)
+    after_retry = await store.mark_genesis_build_record_validated(
+        app_id=record.app_id, build_record_id=record.id, validation=loser,
+    )
+    assert after_retry.commit_metadata.metadata["genesis_validation"] == winner
+    projected = await store.accept_genesis_build_record(
+        app_id=record.app_id, build_record_id=record.id, validation_sha256=winner["sha256"],
+    )
+    assert projected.lifecycle_status == BuildRecordStatus.CURRENT
+
+
+async def _concept_target(host, *, name=None, name_source=None, description=None):
+    record = (await host.service.create_app_record(
+        owner_user_id="alice", name=name, name_source=name_source, description=description,
+        status="building", chat_app_id="factory-host", active_chat_id="review-chat",
+        active_workflow_id="ValueEngine", current_build_run={"build_id": "build-current", "phase": "genesis"},
+    ))["app"]
+    binding = RunBuildBinding(build_registry_id=record["build_registry_id"], target_app_id=record["app_id"],
+                              build_id="build-current", phase="genesis")
+    return record, binding
+
+
+async def test_approved_name_updates_same_record_without_changing_lifecycle_or_build(registry_host):
+    host = registry_host
+    record, binding = await _concept_target(host)
+    before = await host.collection.find_one({"_id": record["build_registry_id"]})
+    result = await host.service.apply_approved_concept_identity(
+        owner_user_id="alice", execution_app_id="factory-host", binding=binding, name="FocusSprint",
+    )
+    assert result["success"] is True
+    after = await host.collection.find_one({"_id": record["build_registry_id"]})
+    assert after["name"] == "FocusSprint"
+    assert after["name_status"] == "named"
+    assert after["name_source"] == "value_engine_concept"
+    assert {key: value for key, value in after.items() if key not in
+            {"name", "name_status", "name_source", "named_at", "updated_at"}} == {
+        key: value for key, value in before.items() if key not in
+        {"name", "name_status", "name_source", "named_at", "updated_at"}}
+    response = await host.http.get("/api/studio/apps", headers=host.headers("alice"))
+    assert response.status_code == 200, response.text
+    row = next(app for app in response.json()["apps"] if app["app_id"] == binding.target_app_id)
+    assert row["name"] == "FocusSprint"
+    assert row["name_source"] == "value_engine_concept"
+
+    assert row["name_status"] == "named"
+
+
+async def test_persisted_value_engine_approval_names_the_directory_record(registry_host, monkeypatch):
+    from factory_app.workflows.ValueEngine.tools import manifest
+    from mozaiksai.core.data.persistence.artifact_store import BuilderArtifactStore
+
+    host = registry_host
+    record, binding = await _concept_target(host)
+    before = await host.collection.find_one({"_id": record["build_registry_id"]})
+    store = BuilderArtifactStore()
+    monkeypatch.setattr(store, "_collection", AsyncMock(return_value=host.collection.database["Concepts"]))
+    monkeypatch.setattr(manifest, "BuilderArtifactStore", lambda: store)
+    monkeypatch.setattr(manifest, "persist_summary_artifact", AsyncMock())
+    monkeypatch.setattr(manifest, "AppRegistryService", lambda: host.service)
+
+    async def approve(_tool, payload, **kwargs):
+        assert (await host.collection.find_one({"_id": record["build_registry_id"]}))["name"] is None
+        return {"action": "approve", "approved": True, "review_id": payload["review_id"]}
+
+    monkeypatch.setattr(manifest, "use_ui_tool", approve)
+    context = {
+        "app_id": "factory-host", "user_id": "alice", "chat_id": "review-chat", "workflow_name": "ValueEngine",
+        "run_build_binding": binding.model_dump(), "structured_output": {
+            "app_name": "FocusSprint", "concept_overview": "A focus timer.", "core_features": ["Save focus sessions"],
+        },
+    }
+    assert (await manifest.save_value_manifest(context))["outcome"] == "approved"
+    assert (await store.get_concept(app_id=binding.target_app_id))["status"] == "approved"
+    after = await host.collection.find_one({"_id": record["build_registry_id"]})
+    assert after["current_build_run"] == before["current_build_run"]
+    assert after["build_runs"] == before["build_runs"]
+    response = await host.http.get("/api/studio/apps", headers=host.headers("alice"))
+    row = next(app for app in response.json()["apps"] if app["build_registry_id"] == binding.build_registry_id)
+    assert row["name"] == "FocusSprint"
+    assert row["name_source"] == "value_engine_concept"
+    assert after["description"] == "A focus timer."
+    assert row["description"] == "A focus timer."
+    overview = await host.http.get(
+        "/api/studio/overview?app_id=factory-host&build_registry_id=" + binding.build_registry_id,
+        headers=host.headers("alice"),
+    )
+    assert overview.status_code == 200, overview.text
+    projected = overview.json()["app"]
+    assert projected["description"] == "A focus timer."
+    assert projected["current_build_run"] == row["current_build_run"]
+    assert projected["active_chat_id"] == "review-chat"
+    assert projected["chat_app_id"] == "factory-host"
+    assert projected["destination"] == (
+        "/chat?workflow=ValueEngine&mode=workflow&chat_id=review-chat&app_id=factory-host"
+    )
+
+
+@pytest.mark.parametrize("name", [None, "", "  ", "Untitled app", "My app"])
+async def test_concept_name_requires_specific_product_name(registry_host, name):
+    host = registry_host
+    record, binding = await _concept_target(host)
+    before = await host.collection.find_one({"_id": record["build_registry_id"]})
+    with pytest.raises(ValueError, match="specific product name"):
+        await host.service.apply_approved_concept_identity(
+            owner_user_id="alice", execution_app_id="factory-host", binding=binding, name=name,
+        )
+    assert await host.collection.find_one({"_id": record["build_registry_id"]}) == before
+
+
+@pytest.mark.parametrize("field,value", [
+    ("owner_user_id", "bob"), ("execution_app_id", "foreign-host"),
+    ("build_registry_id", "foreign-registry"), ("target_app_id", "foreign-app"), ("build_id", "old-build"),
+])
+async def test_concept_name_rejects_foreign_or_stale_binding(registry_host, field, value):
+    host = registry_host
+    record, binding = await _concept_target(host)
+    before = await host.collection.find_one({"_id": record["build_registry_id"]})
+    args = {"owner_user_id": "alice", "execution_app_id": "factory-host", "binding": binding, "name": "FocusSprint"}
+    if field in {"owner_user_id", "execution_app_id"}:
+        args[field] = value
+    else:
+        args["binding"] = binding.model_copy(update={field: value})
+    assert (await host.service.apply_approved_concept_identity(**args))["success"] is False
+    assert await host.collection.find_one({"_id": record["build_registry_id"]}) == before
+    assert await host.collection.count_documents({}) == 1
+
+
+@pytest.mark.parametrize("source", ["manual", "imported_app"])
+async def test_concept_name_preserves_explicit_name_precedence(registry_host, source):
+    host = registry_host
+    record, binding = await _concept_target(host, name="Owner's chosen name", name_source=source)
+    before = await host.collection.find_one({"_id": record["build_registry_id"]})
+    assert (await host.service.apply_approved_concept_identity(
+        owner_user_id="alice", execution_app_id="factory-host", binding=binding, name="FocusSprint",
+    ))["success"] is True
+    assert await host.collection.find_one({"_id": record["build_registry_id"]}) == before
+
+
+@pytest.mark.parametrize("source", ["provisional", "manual", "imported_app"])
+async def test_approved_concept_preserves_existing_description(registry_host, source):
+    host = registry_host
+    record, binding = await _concept_target(
+        host, name=None if source == "provisional" else "Owner name", name_source=source,
+        description="Owner's explicit product description.",
+    )
+    result = await host.service.apply_approved_concept_identity(
+        owner_user_id="alice", execution_app_id="factory-host", binding=binding,
+        name="FocusSprint", description="An approved but different description.",
+    )
+    assert result["success"] is True
+    saved = await host.collection.find_one({"_id": record["build_registry_id"]})
+    assert saved["description"] == "Owner's explicit product description."
+    assert saved["name"] == ("FocusSprint" if source == "provisional" else "Owner name")
+
+
+@pytest.mark.parametrize("source", ["manual", "imported_app"])
+async def test_approved_concept_fills_empty_description_without_renaming(registry_host, source):
+    host = registry_host
+    record, binding = await _concept_target(host, name="Owner name", name_source=source)
+    before = await host.collection.find_one({"_id": record["build_registry_id"]})
+    result = await host.service.apply_approved_concept_identity(
+        owner_user_id="alice", execution_app_id="factory-host", binding=binding,
+        name="FocusSprint", description="  An approved focus timer.  ",
+    )
+    assert result["success"] is True
+    after = await host.collection.find_one({"_id": record["build_registry_id"]})
+    assert after["description"] == "An approved focus timer."
+    assert {key: value for key, value in after.items() if key not in {"description", "updated_at"}} == {
+        key: value for key, value in before.items() if key not in {"description", "updated_at"}
+    }
+
+
+async def test_concept_identity_cannot_overwrite_concurrent_description(registry_host, monkeypatch):
+    host = registry_host
+    record, binding = await _concept_target(host)
+    original = host.collection.find_one_and_update
+
+    async def describe_before_write(query, update, **kwargs):
+        await host.collection.update_one({"_id": record["build_registry_id"]}, {
+            "$set": {"description": "Concurrent owner description."},
+        })
+        return await original(query, update, **kwargs)
+
+    monkeypatch.setattr(host.collection, "find_one_and_update", describe_before_write)
+    result = await host.service.apply_approved_concept_identity(
+        owner_user_id="alice", execution_app_id="factory-host", binding=binding,
+        name="FocusSprint", description="Approved focus timer.",
+    )
+    assert result["success"] is False
+    saved = await host.collection.find_one({"_id": record["build_registry_id"]})
+    assert saved["description"] == "Concurrent owner description."
+    assert saved["name"] is None
+
+
+async def test_name_update_cannot_overwrite_concurrent_manual_rename(registry_host, monkeypatch):
+    host = registry_host
+    record, binding = await _concept_target(host)
+    original = host.collection.find_one_and_update
+
+    async def rename_before_write(query, update, **kwargs):
+        await host.collection.update_one({"_id": record["build_registry_id"]}, {"$set": {
+            "name": "Manual winner", "name_status": "named", "name_source": "manual",
+        }})
+        return await original(query, update, **kwargs)
+
+    monkeypatch.setattr(host.collection, "find_one_and_update", rename_before_write)
+    result = await host.service.apply_approved_concept_identity(
+        owner_user_id="alice", execution_app_id="factory-host", binding=binding, name="FocusSprint",
+    )
+    assert result["success"] is False
+    after = await host.collection.find_one({"_id": record["build_registry_id"]})
+    assert after["name"] == "Manual winner"
+    assert after["current_build_run"]["build_id"] == "build-current"
+
+
+async def test_name_update_cannot_touch_a_build_superseded_during_approval(registry_host, monkeypatch):
+    host = registry_host
+    record, binding = await _concept_target(host)
+    original = host.collection.find_one_and_update
+
+    async def supersede_before_write(query, update, **kwargs):
+        await host.collection.update_one({"_id": record["build_registry_id"]}, {
+            "$set": {"current_build_run.build_id": "new-build"},
+        })
+        return await original(query, update, **kwargs)
+
+    monkeypatch.setattr(host.collection, "find_one_and_update", supersede_before_write)
+    result = await host.service.apply_approved_concept_identity(
+        owner_user_id="alice", execution_app_id="factory-host", binding=binding, name="FocusSprint",
+    )
+    assert result["success"] is False
+    after = await host.collection.find_one({"_id": record["build_registry_id"]})
+    assert after["name"] is None
+    assert after["current_build_run"]["build_id"] == "new-build"
 
 
 async def test_another_user_cannot_take_over_existing_app_id(registry_host):
@@ -228,6 +740,36 @@ async def test_concurrent_different_owners_cannot_share_an_app_id(registry_host)
     assert await host.collection.count_documents({}) == 0
     for response in responses:
         assert response.status_code == 422
+
+
+async def test_existing_self_target_claim_is_atomic_and_does_not_reset_build(registry_host):
+    host = registry_host
+    claims = await asyncio.gather(*[
+        host.service.register_existing_app_record(
+            owner_user_id=owner, app_id="fixed-existing-app",
+            chat_app_id="fixed-existing-app", name="Existing App",
+        ) for owner in ("alice", "bob")
+    ], return_exceptions=True)
+    winners = [claim for claim in claims if isinstance(claim, dict)]
+    denials = [claim for claim in claims if isinstance(claim, ValueError)]
+    assert len(winners) == 1
+    assert len(denials) == 1
+    winner = winners[0]
+    owner = winner["owner_user_id"]
+    await host.collection.update_one(
+        {"app_id": "fixed-existing-app"},
+        {"$set": {
+            "lifecycle_state": "active",
+            "current_build_run": {"build_id": "build_1", "phase": "refinement"},
+        }},
+    )
+    before = await host.collection.find_one({"app_id": "fixed-existing-app"})
+    repeat = await host.service.register_existing_app_record(
+        owner_user_id=owner, app_id="fixed-existing-app",
+        chat_app_id="fixed-existing-app", name="Changed Name",
+    )
+    assert repeat["build_registry_id"] == winner["build_registry_id"]
+    assert await host.collection.find_one({"app_id": "fixed-existing-app"}) == before
 
 
 async def test_interrupted_creation_keeps_ownership_and_allows_owner_retry(registry_host, monkeypatch):

@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from mozaiksai.core.runtime.app.auth_contract import APP_AUTH_COMPONENTS
+from mozaiksai.core.runtime.app.studio_summary import build_app_list_entry
 
 
 def _workspace() -> Path:
@@ -37,7 +38,7 @@ def test_studio_host_exposes_build_endpoint_and_console_routes() -> None:
     assert '@app.put("/api/studio/apps/{build_registry_id}/status")' not in studio_source
     assert '@app.get("/api/studio/build")' in studio_source
     assert '@app.put("/api/studio/build")' in studio_source
-    assert 'build_shell_config(surface="studio")' in studio_source
+    assert 'build_shell_config(surface="studio", client_scope=request.scope)' in studio_source
     assert '"path": "/apps/new"' in manifest_source
     assert '"path": "/usage"' in manifest_source
     assert '"path": "/integrations"' in manifest_source
@@ -196,7 +197,9 @@ def test_apps_page_fetches_workspace_apps_endpoint() -> None:
     assert "manifest-declared default App Dashboard portal" in studio_page_source
     assert "getDefaultPortalRoute(payload, 'app')" in studio_page_source
     assert "location.pathname}/overview" not in studio_page_source
-    assert "AppRegistryService().resolve_build_binding" in binding_source
+    assert "from factory_app.app.modules.app_registry.backend.service import AppRegistryService" in binding_source
+    assert "registry = AppRegistryService()" in binding_source
+    assert "binding = await registry.resolve_build_binding(" in binding_source
     assert "persisted_binding=session_fields.get" in binding_source
     assert not (_workspace() / "factory_app/workflows/ValueEngine/tools/create_app_record.py").exists()
     assert not (_workspace() / "factory_app/workflows/AppGenerator/tools/update_app_record.py").exists()
@@ -229,13 +232,18 @@ def test_chat_page_defers_new_app_workflow_until_first_user_message() -> None:
     assert "nextParams.delete('defer_start')" in source
 
 
-def test_building_app_list_entry_routes_to_active_chat() -> None:
-    source = _read("mozaiksai/core/runtime/app/studio_summary.py")
-    assert '"chat_app_id": chat_app_id or None' in source
-    assert '"app_id": chat_scope' in source
-    assert 'f"/chat?{urlencode(resume_query)}"' in source
-    assert '"active_chat_id": active_chat_id or None' in source
-    assert '"active_workflow_id": active_workflow_id if active_chat_id else None' in source
+def test_building_app_with_workflow_metadata_requires_chat_before_resuming() -> None:
+    result = build_app_list_entry({
+        "app_id": "draft-app",
+        "chat_app_id": "factory-app",
+        "lifecycle_state": "building",
+        "current_build_run": {"active_workflow_id": "ValueEngine"},
+    })
+
+    assert result["chat_app_id"] == "factory-app"
+    assert result["active_workflow_id"] == "ValueEngine"
+    assert result["active_chat_id"] is None
+    assert result["destination"] == "/apps/draft-app/building"
 
 
 def test_workspace_layout_links_studio_and_hosting_sections() -> None:
@@ -385,3 +393,22 @@ def test_integrations_page_uses_shared_primitives_for_health_ui() -> None:
     assert "function MetricTile" not in source
     assert "function StatCard" not in source
 
+
+def test_apps_mobile_card_name_block_is_the_tap_target() -> None:
+    source = _read("factory_app/app/admin/pages/AppsPage.jsx")
+    app_cell = source[source.index("function AppCell("):source.index("const TrashIcon")]
+    mobile_item = source[source.index("function AppMobileItem("):source.index("function AppsTable(")]
+    table = source[source.index("function AppsTable("):]
+    # The mobile Open button is the whole name-and-description block: the
+    # aria-label keeps the "Open <name>" name and aria-describedby keeps the
+    # description announced.
+    assert 'aria-label={`Open ${row.name}`}' in app_cell
+    assert "aria-describedby={descriptionId}" in app_cell
+    assert "cursor-pointer" in app_cell
+    assert "min-h-11" in app_cell
+    # The mobile card itself is not clickable, so its inline actions need no
+    # propagation guard; desktop rows stay clickable, so theirs keep it.
+    assert "onClick=" not in mobile_item.split("<div className=\"flex items-start")[0]
+    assert "stopPropagation" not in mobile_item
+    assert "onRowClick={onOpen}" in table
+    assert table.count("e.stopPropagation()") == 3

@@ -120,6 +120,9 @@ jobs:
           context: .
           push: true
           tags: ${{ steps.meta.outputs.tag }}
+          build-contexts: |
+            node:20-slim=docker-image://public.ecr.aws/docker/library/node:20-slim
+            python:3.11-slim=docker-image://public.ecr.aws/docker/library/python:3.11-slim
           build-args: |
             VITE_OIDC_AUTHORITY=${{ vars.VITE_OIDC_AUTHORITY || secrets.VITE_OIDC_AUTHORITY }}
             VITE_OIDC_CLIENT_ID=${{ vars.VITE_OIDC_CLIENT_ID || secrets.VITE_OIDC_CLIENT_ID || '{{APP_NAME}}' }}

@@ -63,7 +63,7 @@ async def test_three_workflow_review_facts_survive_declared_projection(
         "bundle_path": str(build.archive.parent / "app"),
         "lifecycle_state": "review",
         "app_validation_status": validation,
-        "app_validation_strategy_used": "skip" if validation == "skipped" else "local",
+        "app_validation_strategy_used": "skip" if validation == "skipped" else "docker",
         "app_validation_preview_url": preview,
         "app_bundle_acceptance_status": acceptance,
         "integration_tests_passed": integration,
@@ -108,7 +108,7 @@ async def test_three_workflow_review_facts_survive_declared_projection(
     for key, value in expected.items():
         assert review[key] == value
     assert review["security_readiness_summary"]["success"] is True
-    assert review["can_promote"] is (validation != "failed" and missing in {None, "artifact_version_id", "bundle_path"})
+    assert review["can_promote"] is (validation == "passed" and missing in {None, "artifact_version_id", "bundle_path"})
     assert review["can_revise"] is (missing != "bundle_path")
 
 

@@ -56,6 +56,7 @@ def test_platform_router_produces_the_checked_in_entitlement_envelope(monkeypatc
     monkeypatch.setenv("AUTH_ENABLED", "false")
     platform_host.app.state.failed_module_names = []
     platform_host.app.state.module_action_surfaces = {}
+    monkeypatch.setattr(platform_host.app.state, "loaded_app_id", "fixture-app", raising=False)
     platform_host.app.state.executor_registry = SimpleNamespace(
         module_executor=_DenyingExecutor()
     )
@@ -115,7 +116,12 @@ TEMPLATE = REPO_ROOT / "factory_app" / "workflows" / "AppGenerator" / "tools" / 
 # Functions whose behavior the browser tests depend on. Compared body-for-body
 # rather than whole-file, because the fixture legitimately omits helpers the
 # fixture app does not use.
-SHARED_FUNCTIONS = ("parseErrorPayload", "isEntitlementRequiredError", "moduleAction")
+SHARED_FUNCTIONS = (
+    "parseErrorPayload",
+    "isInsufficientTokensError",
+    "isEntitlementRequiredError",
+    "moduleAction",
+)
 
 
 def _js_function_body(source: str, name: str) -> str:

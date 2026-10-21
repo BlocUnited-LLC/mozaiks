@@ -686,6 +686,9 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("MOZAIKS_APP_VALIDATION_STRATEGY", "skip")
+    monkeypatch.setattr(
+        validate_app_bundle_from_request.__globals__["app_runtime_smoke"], "resolve_smoke_mongo_uri", lambda: None,
+    )
     # A previously loaded app's regular package must not shadow this replay's
     # authored services package. The scoped path also restores loader additions.
     prior_app = tmp_path / "prior-app"
@@ -825,9 +828,10 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
         context_variables=ctx,
     )
 
-    assert validation["status"] == "success", validation["app_bundle_acceptance_result"]["failed_tests"]
-    assert validation["app_bundle_acceptance_result"]["status"] == "passed"
-    assert ctx.get("app_bundle_acceptance_status") == "passed"
+    assert validation["status"] == "failed"
+    assert validation["app_bundle_acceptance_result"]["status"] == "pending"
+    assert validation["app_bundle_acceptance_result"]["validation_evidence"]["failed"] == []
+    assert ctx.get("app_bundle_acceptance_status") == "pending"
     assert ctx.get("bundle_scan_result")["passed"] is True
     assert ctx.get("wiring_validation_result")["passed"] is True
     assert ctx.get("module_implementation_validation_result")["passed"] is True

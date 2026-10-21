@@ -8,7 +8,7 @@ from factory_app.workflows.AppGenerator.tools.app_build_plan import (
     _managed_facade_route_rules,
     _normalized_owned_paths,
 )
-from mozaiksai.core.workflow.generator_support.code_files import _page_file_stem
+from mozaiksai.core.workflow.generator_support.code_files import planned_page_path
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     all_module_actions,
     pack_owned_output_paths,
@@ -42,7 +42,7 @@ def drop_unapproved_page_data_sources(plan: dict[str, Any], context: Any) -> lis
     repairs: list[str] = []
     removed: dict[str, list[str]] = {}
     for page in plan.get("pages") or []:
-        path = f"ui/pages/{_page_file_stem(page)}.yaml"
+        path = planned_page_path(page)
         if path in pack_paths:
             continue
         for index, hint in enumerate(page.get("sections_hint") or []):

@@ -87,35 +87,48 @@ export function TransitionScreen({ transitionId, onNavigate, context }) {
   const titleId = useId();
   const descriptionId = useId();
 
-  // Fetch transition from API — re-runs on transitionId change or explicit retry
+  // Fetch transition from API — re-runs on transitionId change or explicit retry.
+  // Only the response for the current transitionId may land: a run_complete
+  // can set workflow_complete and then the journey's next transition within
+  // milliseconds, and a slower response for the superseded id would otherwise
+  // overwrite the screen while onNavigate resolves the current id.
   useEffect(() => {
-    if (!transitionId) return;
+    if (!transitionId) return undefined;
+    let current = true;
+    const controller = new AbortController();
     setLoading(true);
     setError(null);
     setTransition(null);
 
-    fetch(`/api/transitions/${encodeURIComponent(transitionId)}`)
+    fetch(`/api/transitions/${encodeURIComponent(transitionId)}`, { signal: controller.signal })
       .then((res) => {
         if (!res.ok) throw new Error(`Transition '${transitionId}' not found (${res.status})`);
         return res.json();
       })
       .then((data) => {
+        if (!current) return;
         setTransition(data);
         setLoading(false);
       })
       .catch((err) => {
+        if (!current || err?.name === 'AbortError') return;
         setError(err.message);
         setLoading(false);
       });
+
+    return () => {
+      current = false;
+      controller.abort();
+    };
   }, [transitionId, retryCount]);
 
   // Every resolution goes through here so no call site can forget to handle a
   // failure. Resolution is fire-and-forget at the click sites, so without this
   // the only other outcome is an unhandled rejection and a dead-looking button.
   const resolve = useCallback(
-    (option_id = null, contextVariables = {}) =>
+    (option_id = null, contextVariables = {}, launchOptions = {}) =>
       Promise.resolve()
-        .then(() => onNavigate?.(option_id, contextVariables))
+        .then(() => onNavigate?.(option_id, contextVariables, launchOptions))
         .catch((err) => setError(err?.message || 'Failed to resolve transition')),
     [onNavigate]
   );

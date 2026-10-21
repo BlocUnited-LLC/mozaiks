@@ -272,15 +272,7 @@ class TestVisibilityFilterHelper:
             "_notification_visibility_filter helper must be declared in the notifications router"
         )
 
-    def test_visibility_filter_checks_roles(self):
-        source = _NOTIFICATIONS_ROUTER_PY.read_text(encoding="utf-8")
-        idx = source.index("_notification_visibility_filter")
-        block = source[idx: idx + 600]
-        assert "audience.roles" in block, (
-            "_notification_visibility_filter must filter by audience.roles"
-        )
-
-    def test_visibility_filter_checks_user_ids_permissions_and_unscoped_global(self):
+    def test_visibility_filter_checks_user_ids_and_unscoped_global(self):
         from mozaiksai.core.auth.dependencies import UserPrincipal
         from mozaiksai.hosts.routers.notifications import _notification_visibility_filter
 
@@ -297,8 +289,8 @@ class TestVisibilityFilterHelper:
 
         assert {"actor.id": "user_1"} not in visibility
         assert {"audience.user_ids": "user_1"} in visibility
-        assert {"audience.roles": {"$in": ["operator"]}} in visibility
-        assert {"audience.permissions": {"$in": ["support.read"]}} in visibility
+        assert {"audience.roles": {"$in": ["operator"]}} not in visibility
+        assert {"audience.permissions": {"$in": ["support.read"]}} not in visibility
         assert {"audience.roles": {"$exists": False}} not in visibility
         assert {
             "$and": [

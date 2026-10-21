@@ -182,6 +182,16 @@ SOURCE_HYGIENE_ALLOWED_SNIPPETS: dict[str, tuple[str, ...]] = {
         "legacy rule that must not render",
     ),
 }
+_TEST_PYPI_UPLOAD_URL = "https://test.pypi.org/legacy/"
+
+
+def _source_hygiene_line_for_scan(relative: str, line: str) -> str:
+    # PyPA's exact TestPyPI upload endpoint uses a path that matches the
+    # terminology scan. Exempt only that endpoint in the release workflow;
+    # other matches on the same line must still fail.
+    if relative == ".github/workflows/release.yml":
+        return line.replace(_TEST_PYPI_UPLOAD_URL, "")
+    return line
 
 
 @dataclass(frozen=True)
@@ -256,8 +266,9 @@ def run_source_hygiene_scan() -> list[str]:
         for line_number, line in enumerate(text.splitlines(), start=1):
             if allowed_snippets and any(snippet in line for snippet in allowed_snippets):
                 continue
+            line_for_scan = _source_hygiene_line_for_scan(relative, line)
             for pattern in SOURCE_HYGIENE_FORBIDDEN:
-                if pattern.search(line):
+                if pattern.search(line_for_scan):
                     violations.append(f"{relative}:{line_number}: {line.strip()}")
                     break
     return violations

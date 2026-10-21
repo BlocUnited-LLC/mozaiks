@@ -227,8 +227,9 @@ git checkout main && git reset --hard origin/main
 git checkout -b cc/<description>  # cc/ = Claude Code, codex/ = Codex
 # ... work, commit -s ...
 git push -u origin cc/<description>
-gh pr create --title "..." --body "..."
-gh pr merge <number> --squash --delete-branch --auto   # auto-merge is enabled repo-wide; request it right away, don't wait on CI
+gh pr create --draft --title "..." --body-file <file>
+gh pr ready <number>   # once the work is complete and locally verified
+# no --auto: the maintainer merges the exact head an independent reviewer cleared
 ```
 
 Before opening the PR, run `ruff check .` and `pytest -q --no-cov` locally in
@@ -239,15 +240,17 @@ regression blocking everyone; fix it first with a small isolated hotfix PR.
 
 **Every commit must carry a DCO sign-off — use `git commit -s`, never plain
 `-m`.** See [DCO.md](DCO.md). A commit without a `Signed-off-by:` trailer
-fails the `dco` check, and that check is *not* in `main`'s required-checks
-list — `--auto` can merge right past a failing `dco` check, so a green
-auto-merge is not proof you signed off. Forgot on the last commit? Fix it
+fails the `dco` check, which branch protection requires, so a missing
+sign-off blocks the merge. Forgot on the last commit? Fix it
 before pushing with `git commit --amend -s --no-edit`; for several unsigned
 commits, `git rebase --signoff origin/main`.
 
 Ownership is per task, not per repo: both Claude Code and Codex work in both
 repos, concurrently. Claim work with an early draft PR after checking
-`gh pr list --state open`, and work in a worktree.
+`gh pr list --state open`, and work in a worktree. Keep one pull request per
+finished piece of work and close any pull request whose change landed
+elsewhere; see
+[Pull Request Volume, Review, And CI Cost](docs/agent-engineering-contract.md#pull-request-volume-review-and-ci-cost).
 
 See `.claude/rules/multi-agent-coordination.md` for full rules.
 
@@ -408,7 +411,7 @@ not land directly in active runtime paths.
 Workflow resolution is single-root by contract. A running host binds to one
 workflow root via `MOZAIKS_WORKFLOWS_PATH` rather than auto-merging app and
 factory roots. Studio defaults to `factory_app/workflows/`; product/app hosts
-prefer the workspace root's `workflows/`. The first-party
+use the workspace root's `workflows/` and serve none when it is absent. The first-party
 `factory_app/app` bundle should not check in a nested workflows directory.
 External hosted product workspaces define app-local workflows under
 `workflows/`, beside `app/`.

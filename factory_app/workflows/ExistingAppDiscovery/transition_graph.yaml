@@ -1,10 +1,41 @@
 # ExistingAppDiscovery Handoff Rules
 #
 # Pipeline:
-#   Host -> Mapper -> Planner -> (ecosystem/gradual_modernization) ModuleDecomposer -> Assembler -> user
-#                         -> (embed/bridge) Assembler -> user
+#   Host -> Mapper -> Planner -> (ecosystem/gradual_modernization) ModuleDecomposer -> Assembler -> terminate
+#                         -> (embed/bridge) Assembler -> terminate
 
 transition_rules:
+# Human replies return to the unfinished discovery stage. The runtime's
+# initial dispatch only starts the workflow; it is not a continuation route.
+- source_agent: user
+  target_agent: DiscoveryHostAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: identity_complete
+  condition_value: false
+  transition_target: AgentTarget
+
+- source_agent: user
+  target_agent: CapabilityMapperAgent
+  transition_type: condition
+  condition_type: context_expression
+  context_expression: "${identity_complete} and not ${capabilities_complete}"
+  transition_target: AgentTarget
+
+- source_agent: user
+  target_agent: IntegrationPlannerAgent
+  transition_type: condition
+  condition_type: context_expression
+  context_expression: "${identity_complete} and ${capabilities_complete} and not ${plan_complete}"
+  transition_target: AgentTarget
+
+- source_agent: user
+  target_agent: ModuleDecomposerAgent
+  transition_type: condition
+  condition_type: context_expression
+  context_expression: "${identity_complete} and ${capabilities_complete} and ${plan_complete} and ${adoption_level} in ['ecosystem', 'gradual_modernization'] and not ${decomposition_complete}"
+  transition_target: AgentTarget
+
 # ---------------------------------------------------------------------------
 # DiscoveryHostAgent
 # ---------------------------------------------------------------------------
@@ -48,33 +79,29 @@ transition_rules:
 - source_agent: IntegrationPlannerAgent
   target_agent: ModuleDecomposerAgent
   transition_type: condition
-  condition_type: context_equals
-  condition_key: adoption_level
-  condition_value: ecosystem
+  condition_type: context_expression
+  context_expression: "${plan_complete} and ${adoption_level} == 'ecosystem'"
   transition_target: AgentTarget
 
 - source_agent: IntegrationPlannerAgent
   target_agent: ModuleDecomposerAgent
   transition_type: condition
-  condition_type: context_equals
-  condition_key: adoption_level
-  condition_value: gradual_modernization
+  condition_type: context_expression
+  context_expression: "${plan_complete} and ${adoption_level} == 'gradual_modernization'"
   transition_target: AgentTarget
 
 - source_agent: IntegrationPlannerAgent
   target_agent: DiscoveryArtifactAssemblerAgent
   transition_type: condition
-  condition_type: context_equals
-  condition_key: adoption_level
-  condition_value: embed
+  condition_type: context_expression
+  context_expression: "${plan_complete} and ${adoption_level} == 'embed'"
   transition_target: AgentTarget
 
 - source_agent: IntegrationPlannerAgent
   target_agent: DiscoveryArtifactAssemblerAgent
   transition_type: condition
-  condition_type: context_equals
-  condition_key: adoption_level
-  condition_value: bridge
+  condition_type: context_expression
+  context_expression: "${plan_complete} and ${adoption_level} == 'bridge'"
   transition_target: AgentTarget
 
 # ---------------------------------------------------------------------------
@@ -97,6 +124,25 @@ transition_rules:
 # DiscoveryArtifactAssemblerAgent
 # ---------------------------------------------------------------------------
 - source_agent: DiscoveryArtifactAssemblerAgent
-  target_agent: user
+  target_agent: terminate
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: discovery_save_outcome
+  condition_value: saved
+  transition_target: TerminateTarget
+  termination_reason: workflow_complete
+
+- source_agent: DiscoveryArtifactAssemblerAgent
+  target_agent: terminate
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: discovery_save_outcome
+  condition_value: failed
+  transition_target: TerminateTarget
+  termination_reason: workflow_failed
+
+- source_agent: DiscoveryArtifactAssemblerAgent
+  target_agent: terminate
   transition_type: after_turn
-  transition_target: RevertToUserTarget
+  transition_target: TerminateTarget
+  termination_reason: workflow_failed

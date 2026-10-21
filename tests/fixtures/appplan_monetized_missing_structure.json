@@ -487,7 +487,8 @@
               "intent": "Overview of recent tasks",
               "config_hint": "{\"columns\": [\"task_id\", \"title\", \"status\"], \"api_endpoint\": \"/api/tasks\", \"selection\": \"none\"}"
             }
-          ]
+          ],
+          "ui_surface": "declarative_page"
         },
         {
           "name": "Task Management",
@@ -507,7 +508,8 @@
               "intent": "Form for creating and editing tasks",
               "config_hint": "{\"title\": \"Task Editor\", \"size\": \"medium\"}"
             }
-          ]
+          ],
+          "ui_surface": "declarative_page"
         },
         {
           "name": "User Authentication",
@@ -521,7 +523,8 @@
               "intent": "User login form",
               "config_hint": "{\"fields\": [{\"label\": \"Email\", \"name\": \"email\"}, {\"label\": \"Password\", \"name\": \"password\"}]}"
             }
-          ]
+          ],
+          "ui_surface": "declarative_page"
         },
         {
           "name": "Pricing",
@@ -535,7 +538,8 @@
               "intent": "Use billing_portal for list_plans, open_billing_portal.",
               "config_hint": "{\"title\": \"Pricing\"}"
             }
-          ]
+          ],
+          "ui_surface": "declarative_page"
         },
         {
           "name": "Billing",
@@ -549,7 +553,8 @@
               "intent": "Use billing_portal for get_subscription_status, list_plans, start_subscription_checkout, open_billing_portal.",
               "config_hint": "{\"title\": \"Billing\"}"
             }
-          ]
+          ],
+          "ui_surface": "declarative_page"
         },
         {
           "name": "Usage",
@@ -563,7 +568,8 @@
               "intent": "Use billing_portal for get_usage_status, get_token_status, start_token_top_up.",
               "config_hint": "{\"title\": \"Usage\"}"
             }
-          ]
+          ],
+          "ui_surface": "declarative_page"
         }
       ]
     },
@@ -1014,5 +1020,6 @@
       }
     },
     "readiness_profile": null
-  }
+  },
+  "fixture_schema_migration": "Fixture schema migration: ui_surface=declarative_page makes the prior declarative rendering assumption explicit; this field was not emitted by the recorded model."
 }

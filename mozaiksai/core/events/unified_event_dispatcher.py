@@ -19,11 +19,11 @@ import asyncio
 import inspect
 import uuid
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from logs.logging_config import get_core_logger, get_workflow_logger
 from mozaiksai.core.events.auto_tool_handler import AutoToolEventHandler
@@ -103,6 +103,34 @@ class ToolCallRequestEvent:
     category: str = field(default="tool_call")
 
 EventType = BusinessLogEvent | ToolCallRequestEvent | DomainEvent
+
+
+class EventDeliveryEvidence:
+    """Marker for payload-free listener receipts safe to return to an event producer."""
+
+
+@dataclass(frozen=True)
+class EventListenerOutcome:
+    """Internal, inspectable result from one registered event listener."""
+
+    index: int
+    listener: str
+    status: Literal["ok", "failed"]
+    result: EventDeliveryEvidence | None = None
+    error_type: str | None = None
+
+
+@dataclass(frozen=True)
+class EventDispatchOutcome:
+    """Synchronous fan-out receipt; it does not promise durable side effects."""
+
+    event_type: str
+    listeners: tuple[EventListenerOutcome, ...]
+
+    @property
+    def success(self) -> bool:
+        return bool(self.listeners) and all(listener.status == "ok" for listener in self.listeners)
+
 
 class EventHandler(ABC):
     @abstractmethod
@@ -223,6 +251,23 @@ class UnifiedEventDispatcher:
             return
         raise TypeError("Unsupported handler registration signature")
 
+    def unregister_handler(
+        self,
+        event_type: str,
+        handler: Callable[[dict[str, Any]], Awaitable[Any] | Any],
+    ) -> bool:
+        """Remove one specific listener without disturbing other subscribers."""
+        listeners = self._event_handlers.get(event_type)
+        if not listeners:
+            return False
+        for index, registered in enumerate(listeners):
+            if registered is handler:
+                listeners.pop(index)
+                if not listeners:
+                    del self._event_handlers[event_type]
+                return True
+        return False
+
     def register_runtime_handler(
         self,
         canonical_event_type: str,
@@ -231,7 +276,7 @@ class UnifiedEventDispatcher:
         """Register a handler for a canonical runtime event."""
         self.register_handler(canonical_event_type, handler)
 
-    async def emit(self, event_type: str, payload: dict[str, Any]) -> None:
+    async def emit(self, event_type: str, payload: dict[str, Any]) -> EventDispatchOutcome:
         validate_registered_identifier(
             SemanticCategory.EVENT,
             event_type,
@@ -240,7 +285,7 @@ class UnifiedEventDispatcher:
         listeners = list(self._event_handlers.get(event_type, []))
         if not listeners:
             logger.debug("No listeners registered for event_type=%s", event_type)
-            return
+            return EventDispatchOutcome(event_type=event_type, listeners=())
 
         # Avoid log spam for high-frequency runtime measurement events.
         if event_type.startswith("chat.usage_"):
@@ -248,30 +293,63 @@ class UnifiedEventDispatcher:
         else:
             logger.debug("[DISPATCH] Emitting event %s to %s listener(s)", event_type, len(listeners))
 
-        pending_results: list[Awaitable[Any]] = []
-        for listener in listeners:
+        outcomes: list[EventListenerOutcome | None] = [None] * len(listeners)
+        pending_results: list[tuple[int, Awaitable[Any]]] = []
+        for index, listener in enumerate(listeners):
             try:
                 result = listener(payload)
                 if inspect.isawaitable(result):
-                    pending_results.append(result)
+                    pending_results.append((index, result))
+                else:
+                    outcomes[index] = self._listener_outcome(index, listener, result)
             except Exception as exc:
                 logger.error("Event handler raised for %s: %s", event_type, exc, exc_info=True)
+                outcomes[index] = self._listener_outcome(index, listener, error=exc)
 
         if pending_results:
-            settled = await asyncio.gather(*pending_results, return_exceptions=True)
-            for outcome in settled:
-                if isinstance(outcome, Exception):
+            settled = await asyncio.gather(
+                *(result for _, result in pending_results), return_exceptions=True
+            )
+            for (index, _), outcome in zip(pending_results, settled, strict=True):
+                if isinstance(outcome, BaseException):
                     logger.error(
                         "Async event handler failure for %s: %s",
                         event_type,
                         outcome,
                         exc_info=True,
                     )
+                    outcomes[index] = self._listener_outcome(index, listeners[index], error=outcome)
+                else:
+                    outcomes[index] = self._listener_outcome(index, listeners[index], outcome)
 
         self.metrics.setdefault("custom_events_emitted", 0)
         self.metrics["custom_events_emitted"] += 1
         emitted_by_type = self.metrics.setdefault("custom_events_by_type", {})
         emitted_by_type[event_type] = emitted_by_type.get(event_type, 0) + 1
+        return EventDispatchOutcome(
+            event_type=event_type,
+            listeners=tuple(outcome for outcome in outcomes if outcome is not None),
+        )
+
+    @staticmethod
+    def _listener_outcome(
+        index: int,
+        listener: Callable[[dict[str, Any]], Awaitable[Any] | Any],
+        result: Any = None,
+        *,
+        error: BaseException | None = None,
+    ) -> EventListenerOutcome:
+        name = getattr(listener, "__qualname__", type(listener).__qualname__)
+        if error is not None:
+            return EventListenerOutcome(index, name, "failed", error_type=type(error).__name__)
+        try:
+            failed = result is False or (
+                isinstance(result, Mapping) and result.get("success") is False
+            ) or getattr(result, "success", None) is False
+        except Exception as exc:
+            return EventListenerOutcome(index, name, "failed", error_type=type(exc).__name__)
+        evidence = result if isinstance(result, EventDeliveryEvidence) else None
+        return EventListenerOutcome(index, name, "failed" if failed else "ok", result=evidence)
 
     async def dispatch(self, event: EventType) -> bool:
         start_time = datetime.now(UTC)

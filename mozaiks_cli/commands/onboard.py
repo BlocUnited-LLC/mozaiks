@@ -14,6 +14,7 @@ from mozaiks_cli.commands.init import (
     build_default_refinement_policy_config,
     build_default_shell_config,
     create_scaffold,
+    default_app_id,
 )
 from mozaiks_cli.studio_launcher import launch_studio
 from mozaiks_cli.workspace import (
@@ -32,8 +33,11 @@ PROVIDER_DEFAULT_MODELS = {
 }
 
 
-def run(args) -> None:
-    """Execute the onboard command."""
+def run(args) -> int:
+    """Execute the onboard command.
+
+    Returns the process exit code: 0 on success, 1 when onboarding refused.
+    """
     workspace_root = resolve_workspace_root(getattr(args, "directory", None))
     app_root = resolve_active_app_root(workspace_root)
     should_prompt = not bool(getattr(args, "non_interactive", False)) and sys.stdin is not None and not sys.stdin.closed
@@ -43,7 +47,7 @@ def run(args) -> None:
         if is_framework_repo_root(workspace_root):
             print(f"Error: refusing to scaffold inside framework repo root: {workspace_root}")
             print("Use --dir <workspace> to target an app workspace directory.")
-            return
+            return 1
 
         preset = getattr(args, "preset", None) or "chat"
         default_name = getattr(args, "name", None) or workspace_root.name or "my-app"
@@ -91,7 +95,11 @@ def run(args) -> None:
 
     _apply_app_config(app_config=app_config, app_name=app_name)
     _apply_ai_config(ai_config=ai_config, app_name=app_name, provider=provider, model=model)
-    refinement_policy_config = _apply_refinement_policy_config(refinement_policy_path)
+    try:
+        refinement_policy_config = _apply_refinement_policy_config(refinement_policy_path)
+    except ValueError as exc:
+        print(f"Error: {exc}")
+        return 1
 
     _write_json(app_json_path, app_config)
     print(f"Updated {app_json_path.relative_to(workspace_root)}")
@@ -133,6 +141,7 @@ def run(args) -> None:
             print(f"  Frontend: {result['frontend_url']}")
         else:
             print("  Frontend shell is unavailable outside the framework repo checkout.")
+    return 0
 
 
 def _missing_scaffold_surfaces(workspace_root: Path, app_root: Path) -> list[str]:
@@ -261,6 +270,14 @@ def _prompt_yes_no(
 def _apply_app_config(*, app_config: dict, app_name: str) -> None:
     app_config.pop("onboarding", None)
     app_config["appName"] = app_name
+    # Renaming the app keeps its identity; only a scaffold that never had an
+    # appId (created before init wrote one) receives one here.
+    has_app_id = any(
+        isinstance(app_config.get(key), str) and app_config[key].strip()
+        for key in ("appId", "app_id")
+    )
+    if not has_app_id:
+        app_config["appId"] = default_app_id(app_name)
     app_config.setdefault("startup", {}).setdefault("landing_spot", "/")
 
 
@@ -278,6 +295,10 @@ def _apply_ai_config(*, ai_config: dict, app_name: str, provider: str, model: st
 
 
 def _apply_refinement_policy_config(path: Path) -> dict:
+    from pydantic import ValidationError
+
+    from mozaiksai.control_plane.config import ControlPlaneConfig
+
     existing: dict = {}
     if path.exists():
         try:
@@ -289,6 +310,15 @@ def _apply_refinement_policy_config(path: Path) -> dict:
 
     merged = build_default_refinement_policy_config()
     merged.update(existing)
+    try:
+        ControlPlaneConfig.model_validate(merged)
+    except ValidationError as exc:
+        fields = sorted({".".join(map(str, error["loc"])) or "refinement_policy" for error in exc.errors()})
+        raise ValueError(
+            f"invalid refinement policy at {path}: {', '.join(fields)}. "
+            "Enabled capabilities need named llm_profile references to profiles with models; "
+            "remove inline capability llm_config."
+        ) from None
     return merged
 
 

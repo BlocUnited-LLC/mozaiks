@@ -1001,16 +1001,28 @@ class TestAuthProviderCheck:
             await run_startup_checks(_mongo_client=_MockPingClient())
 
     @pytest.mark.asyncio
-    async def test_demo_mode_boots_when_auth_enabled_unset_and_nothing_configured(self, monkeypatch):
-        """With AUTH_ENABLED unset and no auth env at all, demo mode still boots (dev contract)."""
+    async def test_demo_mode_refuses_to_boot_when_auth_enabled_unset_and_nothing_configured(self, monkeypatch):
+        """With AUTH_ENABLED unset and no auth env at all the host does not know
+        whom to serve: it refuses and names the explicit choices."""
         self._base_env(monkeypatch)
         monkeypatch.delenv("AUTH_ENABLED", raising=False)
+        monkeypatch.delenv("AUTH_ANON_ACCESS", raising=False)  # alone it is an explicit choice
+        monkeypatch.setenv("ENV", "development")
+        _isolate_environment_declaration(monkeypatch)
+
+        with pytest.raises(StartupConfigError, match="Authentication is not configured. Choose one"):
+            await run_startup_checks(_mongo_client=_MockPingClient())
+
+    @pytest.mark.asyncio
+    async def test_explicit_auth_off_boots_in_development(self, monkeypatch):
+        self._base_env(monkeypatch)
+        monkeypatch.setenv("AUTH_ENABLED", "false")
         monkeypatch.setenv("ENV", "development")
         _isolate_environment_declaration(monkeypatch)
 
         warnings = await run_startup_checks(_mongo_client=_MockPingClient())
 
-        assert not any("authentication configuration" in w.lower() for w in warnings)
+        assert not any("authentication" in w.lower() for w in warnings)
 
     @pytest.mark.asyncio
     async def test_fatal_when_auth_explicitly_disabled_in_production(self, monkeypatch):

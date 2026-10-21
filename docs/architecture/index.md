@@ -44,6 +44,7 @@ short contributor summary, not as a competing source of authority.
 
 ## App Contracts
 
+- [Multisurface Applications and Managed Delivery (ADR 0013)](../adr/0013-multisurface-applications-and-managed-delivery.md)
 - [Generated App Lifecycle Model](app/generated-app-lifecycle-model.md)
 - [Generated App Functional Acceptance](app/generated-app-functional-acceptance.md)
 - [Canonical App Structure](app/canonical-app-structure.md)
@@ -53,6 +54,7 @@ short contributor summary, not as a competing source of authority.
 - [Platform Navigation Contract](app/platform-navigation-contract.md)
 - [Account, Admin, and Platform Services](app/account-admin-and-platform-services.md)
 - [Generated App Deployment Contract](deployment/generated-app-deployment-contract.md)
+- [Android Workspace Delivery](targets/android-delivery.md)
 
 ## Runtime Authoring Contracts
 

@@ -10,6 +10,7 @@ workflow discovery paths used by a standalone app.
 | `project-hub` | Authenticated pages, persistent CRUD modules, and app data contracts |
 | `reporting-saas` | Subscription plans, assignment storage, and an entitlement-gated action |
 | `research-ops` | App-local workflow discovery, deterministic module actions, and an admin registry |
+| [`community`](community/README.md) | Interactive posts/comments/reactions, public-only contracts, author deletion, and real local browser/database acceptance |
 
 From the Mozaiks repository environment, run one app with:
 

@@ -120,8 +120,8 @@ layer.
 Workflow resolution is single-root by default.
 
 - Studio binds to `factory_app/workflows/` as the shared builder root
-- app/product hosts bind to the active app root's `workflows/` directory when
-  the app owns workflows there
+- app/product hosts bind to the active workspace's `workflows/` directory, and
+  serve no workflows when it is absent
 - `MOZAIKS_WORKFLOWS_PATH` may override the selected root explicitly
 
 The runtime does not auto-merge app and factory workflow roots in normal

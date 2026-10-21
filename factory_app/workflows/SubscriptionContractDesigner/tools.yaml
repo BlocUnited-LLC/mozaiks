@@ -4,7 +4,8 @@ tools:
     function: save_subscription_contract
     description: >-
       Validate and persist the provider-neutral generated-app subscription/token
-      contract, then request user confirmation when a chat UI is available. This
+      contract, requesting user confirmation when a chat UI is available except
+      for a validated explicit no-contract decision in autonomous mode. This
       tool never creates payment-provider resources, subscriptions, invoices,
       host-owned billing records, or token ledger entries.
     tool_type: UI_Tool
@@ -14,7 +15,7 @@ tools:
       context_key: subscription_contract_review_status
       attempts_key: subscription_contract_review_attempts
       result_field: review_status
-      values: [confirmed, not_requested_headless, changes_requested, blocked]
+      values: [confirmed, not_required, not_requested_headless, changes_requested, blocked]
       error_value: blocked
       max_attempts: 3
       retry_on: [changes_requested]

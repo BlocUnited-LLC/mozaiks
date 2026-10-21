@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +17,9 @@ from mozaiksai.core.app_context import (
     index_file_map,
     index_workspace_root,
     persist_app_context_index,
+    persist_app_context_payload_artifact,
 )
+from mozaiksai.core.artifacts.content_store import LocalArtifactContentStore
 from mozaiksai.core.artifacts.models import (
     ArtifactLifecycleStatus,
     ArtifactValidationStatus,
@@ -160,3 +164,51 @@ async def test_large_source_context_payload_is_externalized(monkeypatch: pytest.
     assert summary["content_size_bytes"] > 4_000_000
     assert metadata["externalized"] is True
     assert len(content.payloads) == 1
+
+
+@pytest.mark.asyncio
+async def test_large_app_context_refresh_preserves_historical_content(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    store = _MemoryArtifactStore()
+    content = LocalArtifactContentStore(tmp_path)
+    monkeypatch.setattr(indexer_module, "get_artifact_content_store", lambda: content)
+    family = "source_context_bundle"
+    key = "source_context_bundle"
+    legacy_ref = await content.put_bundle(
+        b"existing historical content",
+        app_id="app_large",
+        artifact_version_id=f"{family}-{key}",
+    )
+
+    async def save(payload: dict[str, str]) -> ArtifactVersionDoc:
+        return await persist_app_context_payload_artifact(
+            store=store,
+            app_id="app_large",
+            build_family=family,
+            build_key=key,
+            payload=payload,
+            path="app_context/source_context/source_context_bundle.json",
+            source_workflow="ExistingAppDiscovery",
+            source_chat_id=None,
+        )
+
+    first_payload = {"source": "a" * 4_000_000}
+    second_payload = {"source": "b" * 4_000_000}
+    first = await save(first_payload)
+    second = await save(second_payload)
+    repeated = await save(second_payload)
+
+    first_summary = first.commit_metadata.metadata["summary_payload"]
+    second_summary = second.commit_metadata.metadata["summary_payload"]
+    repeated_summary = repeated.commit_metadata.metadata["summary_payload"]
+    assert first_summary["content_ref"] != second_summary["content_ref"]
+    assert repeated_summary["content_ref"] == second_summary["content_ref"]
+    for artifact, payload in ((first, first_payload), (second, second_payload)):
+        summary = artifact.commit_metadata.metadata["summary_payload"]
+        raw = await content.get_bundle(summary["content_ref"])
+        assert json.loads(raw) == payload
+        assert hashlib.sha256(raw).hexdigest() == summary["content_sha256"]
+        assert summary["content_sha256"] == artifact.files_manifest[0].sha256
+    assert await content.get_bundle(legacy_ref) == b"existing historical content"

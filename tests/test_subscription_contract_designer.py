@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 import yaml
@@ -1209,6 +1210,119 @@ def _review_outcome_spec():
     tools = _read_yaml(SUBSCRIPTION_WORKFLOW / "tools.yaml")["tools"]
     entry = next(t for t in tools if t.get("function") == "save_subscription_contract")
     return ToolOutcomeSpec.model_validate(entry["outcome"])
+
+
+@pytest.mark.asyncio
+async def test_autonomous_no_contract_records_not_required_without_human_approval(monkeypatch):
+    from factory_app.workflows._shared.subscription_contract_context import (
+        inject_subscription_contract_context,
+    )
+    from factory_app.workflows.SubscriptionContractDesigner.tools import (
+        save_subscription_contract as module,
+    )
+    from mozaiksai.core.workflow.validation.tool_outcomes import wrap_tool_outcome
+
+    persist = AsyncMock(return_value=SimpleNamespace(id="av_no_contract"))
+    ui = AsyncMock(side_effect=AssertionError("An autonomous no-contract decision needs no approval"))
+    monkeypatch.setattr(module, "persist_summary_artifact", persist)
+    monkeypatch.setattr(module, "use_ui_tool", ui)
+    context = _live_designer_context_with(
+        {"coding_participation": "autonomous", "subscription_contract_review_response": {"approved": True}},
+        blueprint=_monetized_blueprint(likely=False), monetization_enabled=True, output=_no_contract_output(),
+    )
+    spec = _review_outcome_spec()
+    result = await wrap_tool_outcome(module.save_subscription_contract, spec)(context_variables=context)
+
+    assert result["success"] is True
+    assert result["review_status"] == context.get(spec.context_key) == "not_required"
+    assert context.get(spec.attempts_key) == 1
+    assert context.get("subscription_contract_review_response") is None
+    ui.assert_not_awaited()
+    saved = persist.call_args.kwargs["summary_payload"]
+    assert saved["contract_required"] is False
+    assert saved["user_confirmed"] is False
+    assert saved["review_status"] == "not_required"
+    assert "review_response" not in saved
+    assert saved["code_files"] == []
+    assert context.get("subscription_contract_artifact_version_id") == "av_no_contract"
+    agent = _generator_agent_stub("AppPlanAgent", {"subscription_contract": saved})
+    inject_subscription_contract_context(agent, [])
+    assert "No app-owned SaaS subscription contract is required" in agent.system_message
+    rules = _read_yaml(SUBSCRIPTION_WORKFLOW / "transition_graph.yaml")["transition_rules"]
+    route = next(rule for rule in rules if rule.get("condition_value") == result["review_status"])
+    assert route["transition_target"] == "TerminateTarget"
+    assert route["termination_reason"] == "workflow_complete"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", [None, "collaborative", "unknown", "Autonomous", "autonomous "])
+async def test_no_contract_keeps_review_without_exact_autonomous_mode(monkeypatch, mode):
+    from factory_app.workflows.SubscriptionContractDesigner.tools import (
+        save_subscription_contract as module,
+    )
+
+    persist = AsyncMock(return_value=SimpleNamespace(id="av_reviewed"))
+    ui = AsyncMock(return_value={"action": "request_changes", "approved": False, "requested_changes": "Keep reviewing"})
+    monkeypatch.setattr(module, "persist_summary_artifact", persist)
+    monkeypatch.setattr(module, "use_ui_tool", ui)
+    context = _live_designer_context_with(
+        {"coding_participation": mode}, blueprint=None, monetization_enabled=False, output=_no_contract_output(),
+    )
+    result = await module.save_subscription_contract(context)
+    assert result["review_status"] == "changes_requested"
+    ui.assert_awaited_once()
+    persist.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", ["required", "contradicted_noop", "nonempty_config", "nonempty_metering", "missing_decision"])
+async def test_autonomous_mode_never_bypasses_substantive_subscription_review(monkeypatch, case):
+    from factory_app.workflows.SubscriptionContractDesigner.tools import (
+        save_subscription_contract as module,
+    )
+
+    output = _sample_contract() if case == "required" else _no_contract_output()
+    if case == "nonempty_config":
+        output["subscription_config_file"] = _sample_contract()["subscription_config_file"]
+    elif case == "nonempty_metering":
+        output["metering_declarations"] = _sample_contract()["metering_declarations"]
+    elif case == "missing_decision":
+        output.pop("contract_required")
+    persist = AsyncMock()
+    ui = AsyncMock(return_value={"action": "request_changes", "approved": False})
+    monkeypatch.setattr(module, "persist_summary_artifact", persist)
+    monkeypatch.setattr(module, "use_ui_tool", ui)
+    context = _live_designer_context_with(
+        {"coding_participation": "autonomous"},
+        blueprint=_monetized_blueprint() if case in {"required", "contradicted_noop"} else None,
+        monetization_enabled=True, output=output,
+    )
+    result = await module.save_subscription_contract(context)
+    assert result["review_status"] == "changes_requested"
+    assert ui.await_count == (0 if case == "contradicted_noop" else 1)
+    persist.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_autonomous_no_contract_cannot_complete_after_persistence_failure(monkeypatch):
+    from factory_app.workflows.SubscriptionContractDesigner.tools import (
+        save_subscription_contract as module,
+    )
+    from mozaiksai.core.workflow.validation.tool_outcomes import wrap_tool_outcome
+
+    persist = AsyncMock(side_effect=RuntimeError("storage unavailable"))
+    ui = AsyncMock(side_effect=AssertionError("No approval is needed"))
+    monkeypatch.setattr(module, "persist_summary_artifact", persist)
+    monkeypatch.setattr(module, "use_ui_tool", ui)
+    context = _live_designer_context_with(
+        {"coding_participation": "autonomous"}, blueprint=None, monetization_enabled=False, output=_no_contract_output(),
+    )
+    result = await wrap_tool_outcome(module.save_subscription_contract, _review_outcome_spec())(context_variables=context)
+    assert result["review_status"] == "blocked"
+    assert context.get("subscription_contract_review_status") == "blocked"
+    assert context.get("subscription_contract") is None
+    persist.assert_awaited_once()
+    ui.assert_not_awaited()
 
 
 @pytest.mark.asyncio

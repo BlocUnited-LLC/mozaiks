@@ -4,19 +4,55 @@ Mozaiks uses a pluggable auth adapter system that works with any auth provider.
 
 ## Quick Start
 
-### Demo Mode (No Auth)
+### Running Without Authentication
 
-For local development or demos, disable auth entirely:
+A host with no authentication configuration at all refuses to start and names
+the choices below. To run without authentication, say so explicitly:
 
 ```bash
 AUTH_ENABLED=false
 ```
 
-All requests become anonymous users. No tokens required.
+Setting `AUTH_ANON_ACCESS` on its own is also an explicit choice, unless
+identity-provider settings are present: those turn authentication on, while
+`AUTH_ENABLED=false` keeps it off whatever else is set (and the host warns
+about the provider settings it ignores). Generated public apps ship
+`AUTH_ANON_ACCESS=public` this way.
+
+No tokens are required, and `AUTH_ANON_ACCESS` decides whom the host serves:
+
+| `AUTH_ANON_ACCESS` | Who is served | What they get |
+|---|---|---|
+| `local` (default) | requests from this machine only. Every other request gets no development access: routes that need an identity refuse it (HTTP 403, WebSocket closed with 1008), and routes that need none serve it like a request without credentials | development access: the anonymous user with `AUTH_ANON_ROLES` and the development scopes, dev personas (below), trusted module dispatch |
+| `public` | every client | an anonymous visitor: no roles, `AUTH_ANON_SCOPES` or `access_as_user` only, its own user id only, module permissions and entitlements enforced. Visitors share one identity: they see and change each other's chats and per-user records, and entitlements are checked against it. For public apps and their previews; Studio refuses it, and it cannot be combined with `AUTH_ANON_ROLES` |
+| `open` | every client that can reach the host | development access, as for `local`. Use it only where the network itself limits who can connect, for example a container whose port is published only on `127.0.0.1` (the host browser reaches a container through Docker's gateway, not as this machine) |
+
+A request is from this machine only when all of these hold, and the refusal
+names the one that failed:
+
+- its peer is a loopback address (IPv4, IPv6, or IPv4-mapped IPv6);
+- it carries no `X-Forwarded-For`, `X-Real-IP` or `Forwarded` header at all.
+  `local` is for a host your browser reaches directly; behind a reverse proxy
+  use authentication, `public` or `open`. The web shell's dev server adds
+  `X-Forwarded-For` only for clients on other machines;
+- its `Host` header, if any, names this machine: `localhost`, a `.localhost`
+  name, or a loopback IP literal. Open the app at `http://localhost:<port>` or
+  `http://127.0.0.1:<port>`, not at a name that merely resolves to 127.0.0.1;
+- its `Origin` header, if any, is an `http`/`https` origin on such a host, so
+  pages from other sites cannot use your browser to reach the host;
+- without an `Origin` header, it does not carry `Sec-Fetch-Site: cross-site`.
+  Browsers send no `Origin` on cross-site image and script loads or
+  navigations, which are GET requests, and some GET routes change state
+  (module dispatch, `/api/me`). Browsers without fetch metadata do not send
+  the header, so this rule cannot stop them.
+
+`mozaiks serve` and `mozaiks studio` refuse `local` on a `--listen` address
+other machines can reach.
 
 For local user-to-user testing, such as DM notifications, keep auth disabled
 but assign each browser profile a different dev persona. The no-auth dependency
-accepts these request-scoped overrides only when `AUTH_ENABLED=false`:
+accepts these request-scoped overrides only for requests with development
+access (`AUTH_ENABLED=false`, and this machine or `AUTH_ANON_ACCESS=open`):
 
 - Header: `X-Mozaiks-Dev-User-Id: dev_alice`
 - Cookie: `mozaiks_dev_user_id=dev_alice`
@@ -135,10 +171,60 @@ Different providers put user data in different JWT claims. Configure as needed:
 |----------|---------|-------------|
 | `AUTH_USER_ID_CLAIM` | `sub` | Claim containing user ID |
 | `AUTH_EMAIL_CLAIM` | `email` | Claim containing email |
+| `AUTH_EMAIL_VERIFIED_CLAIM` | `email_verified`, only while `AUTH_EMAIL_CLAIM` is `email` | Boolean claim saying the `AUTH_EMAIL_CLAIM` value is verified |
 | `AUTH_NAME_CLAIM` | `name` | Claim containing display name |
 | `AUTH_ROLES_CLAIM` | `roles` | Claim containing user roles |
 | `AUTH_SCOPES_CLAIM` | `scp` | Claim containing scopes |
 | `AUTH_SCOPES_FORMAT` | `space` | `space` (Azure) or `array` (Auth0) |
+
+### Admin allowlist needs a verified email
+
+An email in `app/app.json` `admins` grants the admin role only when the
+identity provider says that email is verified: the token's verified-email
+claim must be the JSON boolean `true`. A missing claim, `false`, or a string
+such as `"true"` grants nothing. Without this rule, anyone could register an
+account with an admin's address on a provider with open sign-up, before the
+admin does, and become an admin. Matching ignores case and is ASCII-only: a
+non-ASCII address, in the token or in `admins`, never matches, because case
+folding can turn one address into another.
+
+An admin role issued in the token needs no verified email, but the provider
+must issue it where the adapter reads it. The generic `jwt` adapter reads only
+the top-level claim named by `AUTH_ROLES_CLAIM` (default `roles`); it does not
+read Keycloak's nested `realm_access.roles`. The `keycloak` adapter reads
+`realm_access.roles` and the `resource_access` roles of `KEYCLOAK_CLIENT_ID`.
+The packaged Keycloak realm defines no `admin` role and no `roles` mapper, so
+on the packaged Compose stack (generic `jwt`) the working path is a verified
+email; see
+[Admin access and email verification](../../guides/self-hosting.md#admin-access-and-email-verification)
+for both options.
+
+| Provider | Verified-email claim |
+|----------|----------------------|
+| Generic JWT (`jwt`) | `AUTH_EMAIL_VERIFIED_CLAIM`. Unset, it is `email_verified` (the standard OIDC claim) while `AUTH_EMAIL_CLAIM` is `email`, and nothing otherwise. Keycloak access tokens carry `email_verified` through the `email` client scope. A provider that adds `email` to access tokens with a custom claim or action must add the verified flag the same way. |
+| Keycloak (`keycloak`) | `email_verified`, from the realm's built-in `email` client scope |
+| Supabase (`supabase`) | top-level `email_verified` only. Supabase does not issue one by default; add it with a custom access token hook. The copy inside `user_metadata` is writable by the user and never counts. |
+| No auth (`none`) | never verified. With authentication off, a request with development access still uses the allowlist for `AUTH_ANON_EMAIL` or a dev persona's `X-Mozaiks-Dev-Email`, since it can already take any role; or use `AUTH_ANON_ROLES=admin,user` |
+
+`email_verified` vouches for the `email` claim and nothing else. If you point
+`AUTH_EMAIL_CLAIM` at another claim, such as `preferred_username` or `upn`,
+and leave `AUTH_EMAIL_VERIFIED_CLAIM` unset, no email counts as verified, so
+`admins` never grants admin, and the backend logs an
+`AUTH_EMAIL_VERIFIED_CLAIM_UNSET` warning when it builds the adapter. A
+username is not a verified address: on a realm with open sign-up, anyone can
+choose an admin's address as their username. When you set both settings,
+Mozaiks trusts the pairing, so set `AUTH_EMAIL_VERIFIED_CLAIM` only to a
+boolean claim that vouches for the value of the `AUTH_EMAIL_CLAIM` claim.
+
+Microsoft Entra ID issues no `email_verified` claim. Grant admin there through
+an app role in the `roles` claim, or set `AUTH_EMAIL_VERIFIED_CLAIM` to an
+optional claim that vouches for the claim `AUTH_EMAIL_CLAIM` names in your
+tenant.
+
+A refused allowlisted email gets the same `403 Admin access required` as any
+other non-admin, so the response does not reveal which addresses are admins.
+The server logs an `ADMIN_EMAIL_UNVERIFIED` warning naming the user id and
+provider.
 
 ---
 
@@ -153,7 +239,8 @@ If `AUTH_PROVIDER` is not set, the system auto-detects based on environment vari
 | `KEYCLOAK_URL` + `KEYCLOAK_REALM` | `keycloak` |
 | `AUTH_JWKS_URL` + `AUTH_ISSUER` | `jwt` |
 | `MOZAIKS_OIDC_AUTHORITY` or `MOZAIKS_OIDC_DISCOVERY_URL` | `jwt` |
-| Nothing | `none` (demo mode) |
+| `AUTH_ANON_ACCESS` only (no provider above) | `none` (explicit, with that posture) |
+| Nothing | `none` (implicit demo mode: hosts refuse to start) |
 
 Resolution is canonical and fails closed. One parser
 (`mozaiksai.core.auth.adapters.registry.resolve_auth_config`) interprets the
@@ -191,11 +278,22 @@ adapter cache, and startup validation consume that same interpretation:
   `staging-eu`, `production-east`, `preview`, `qa`, or any custom value — an
   unrecognized environment never inherits development privilege. Unknown
   environments may still boot normally with authentication configured.
-- Demo mode (`none` without explicit disablement) applies only when no auth
-  configuration is present at all, in an environment that permits no-auth.
-  Security-sensitive bypasses (such as the billing fulfillment ingress)
-  additionally require *explicit* disablement — `AUTH_ENABLED=false` or
-  `AUTH_PROVIDER=none` — and are not available in implicit demo mode.
+- Implicit demo mode (`none` without explicit disablement) applies only when
+  no auth configuration is present at all. It serves nobody: hosts refuse to
+  start in it, whatever `MOZAIKS_STARTUP_CHECKS` says, and a request that
+  reaches one anyway (a host composed without its lifespan) is refused with
+  HTTP 401. Resolution itself still succeeds, so request-time predicates keep
+  working in processes that configure no auth.
+- Development privileges are bound to the principal when it is created, never
+  read from the process-wide auth switch. Anonymous roles, dev personas,
+  trusted module dispatch, naming other users, and the local branch of the
+  billing fulfillment ingress need a principal with development access
+  (`has_local_development_access`): an explicit disablement, an environment
+  that permits it, `AUTH_ANON_ACCESS` `local` or `open`, and, for `local`, a
+  request from this machine. Admin needs the `admin` role or the email
+  allowlist; authentication being off no longer lets a principal without
+  roles into the admin API. With development access and no `admin` role the
+  refusal says to set `AUTH_ANON_ROLES=admin,user`.
 
 ### ENV / ENVIRONMENT resolution
 
@@ -303,8 +401,10 @@ construction without the snapshot.
 Privileged HTTP surfaces can additionally require authenticated provenance:
 `UserPrincipal.is_authenticated` is true only for principals produced by
 validating a real bearer token against the configured adapter. Anonymous
-demo principals and request-scoped dev personas may carry admin-looking
-roles/scopes, but they are never authenticated provenance.
+principals with development access and request-scoped dev personas may carry
+admin-looking roles/scopes, but they are never authenticated provenance.
+`has_local_development_access` is true only for those two; an anonymous
+visitor (`AUTH_ANON_ACCESS=public`) has neither.
 
 ---
 
@@ -386,5 +486,8 @@ MOZAIKS_WS_ALLOW_QUERY_TOKEN=true   # never set this in production or staging
 
 Leave it `false` (the default) everywhere else. Production browser clients do not need
 it.
+
+The flag covers the WebSocket handshake only. HTTP routes read the token from the
+`Authorization: Bearer` header and never from the URL, whatever the flag says.
 
 ---

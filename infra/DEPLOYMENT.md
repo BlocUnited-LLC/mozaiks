@@ -65,8 +65,14 @@ Production-flavored repo compose:
 
 ```bash
 cd infra/compose
-docker compose -f docker-compose.prod.yml up -d
+docker compose --env-file ../../.env -f docker-compose.prod.yml up -d
 ```
+
+This requires `MOZAIKS_PROD_REALM_IMPORT_PATH` to point to an operator-owned
+realm JSON outside the repository. Production Compose validates its HTTPS
+browser callbacks and origins before Keycloak starts. The tracked realm has
+localhost callbacks for the local development stack only. See
+`docs/guides/self-hosting.md` for the first-boot import and existing-realm steps.
 
 ## Current Caveat
 

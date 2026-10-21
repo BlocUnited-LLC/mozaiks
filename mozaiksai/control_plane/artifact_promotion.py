@@ -930,11 +930,6 @@ async def _resolve_source_build_record(
         if hasattr(record_store, "get_build_record"):
             source_record: BuildRecord | None = await record_store.get_build_record(app_id=app_id, build_record_id=resolved_source_id)
             return source_record
-        elif hasattr(record_store, "get_build_record"):
-            doc = await record_store.get_build_record(app_id=app_id, build_record_id=resolved_source_id)
-            if doc is None:
-                return None
-            return BuildRecord.model_validate(doc.model_dump(mode="python") if hasattr(doc, "model_dump") else doc)
         return None
     if hasattr(record_store, "list_build_records"):
         records = await record_store.list_build_records(

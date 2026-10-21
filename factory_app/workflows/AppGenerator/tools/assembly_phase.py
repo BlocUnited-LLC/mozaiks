@@ -16,8 +16,10 @@ import logging
 from typing import Any
 
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
+    admitted_app_file_map,
     extract_code_file_entries_from_payload,
 )
+from factory_app.workflows.AppGenerator.tools.module_api_template import get_module_api_template
 from factory_app.workflows.AppGenerator.tools.render_auth_scaffold import materialize_auth_scaffold
 from mozaiksai.core.workflow.generator_support.code_files import (
     compile_data_contract,
@@ -27,11 +29,13 @@ from mozaiksai.core.workflow.generator_support.code_files import (
 from mozaiksai.core.workflow.generator_support.module_account_data import (
     materialize_module_account_handlers,
 )
+from mozaiksai.core.workflow.generator_support.module_action_inventory import pack_owned_outputs
 from mozaiksai.core.workflow.generator_support.module_policy import materialize_module_policies
 from mozaiksai.core.workflow.generator_support.module_read_actions import (
     materialize_module_read_implementations,
 )
 from mozaiksai.core.workflow.generator_support.module_write_actions import (
+    auth_contract_scopes,
     materialize_module_actions,
     materialize_module_schemas,
     materialize_module_write_implementations,
@@ -81,10 +85,25 @@ def _merge_code_files(
         subscription_contract=subscription_contract, context_variables=context_variables,
     )
     file_map = materialize_collection_auth(file_map, data_contract=data_contract)
+    # Selected pack manifests come from registered templates, never model tasks.
+    pack_paths = pack_owned_outputs(context_variables)
+    # Feature outputs may carry an auth edit alongside a module. Only the
+    # pre-merge admitted bundle (or the canonical scaffold) can approve scopes.
+    admitted_scopes = (
+        auth_contract_scopes(
+            admitted_app_file_map(context_variables),
+            app_build_plan=app_build_plan,
+            data_contract=data_contract,
+        ) if app_build_plan is not None else None
+    )
     file_map.update(materialize_module_actions(
         file_map, app_build_plan=app_build_plan, data_contract=data_contract,
         design_surface_map=design_surface_map,
         subscription_contract=subscription_contract,
+        declared_auth_scopes=admitted_scopes,
+        pack_owned_manifest_paths=frozenset(
+            path for path in pack_paths if path.startswith("modules/") and path.endswith("/module.yaml")
+        ),
     ))
     file_map.update(materialize_module_policies(file_map, data_contract))
     file_map.update(materialize_module_schemas(file_map, app_build_plan=app_build_plan, data_contract=data_contract))
@@ -96,6 +115,14 @@ def _merge_code_files(
         if task.get("task_type") == "business_services"
         for path in task.get("owned_paths") or []
     ]
+    # Models never own template paths. Canonical compilation still owns the
+    # declared CRUD/read methods inside admitted persistent template modules.
+    service_paths.extend(
+        path for path in pack_paths
+        if path in file_map and len(parts := path.split("/")) == 4
+        and parts[0] == "modules" and parts[2] == "backend"
+        and parts[3] in {"handler.py", "service.py", "repo.py"}
+    )
     file_map.update(materialize_module_read_implementations(
         file_map, app_build_plan=app_build_plan, data_contract=data_contract,
         subscription_contract=subscription_contract, owned_paths=service_paths,
@@ -106,6 +133,7 @@ def _merge_code_files(
     ))
     if "app.json" in file_map:
         file_map.update(materialize_auth_scaffold(file_map, data_contract=data_contract))
+        file_map.setdefault("ui/lib/moduleApi.js", get_module_api_template())
     return [{"filename": name, "content": content} for name, content in sorted(file_map.items())]
 
 

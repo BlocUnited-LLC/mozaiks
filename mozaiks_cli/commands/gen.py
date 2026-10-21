@@ -887,8 +887,8 @@ def run_interactive(args):
     default_strategy, default_reason = default_app_validation_strategy()
     _print("\nChoose app validation strategy:", style="bold")
     _print("  1. e2b   - Hosted sandbox validation")
-    _print("  2. local - Run validation on this machine")
-    _print("  3. skip  - Skip build validation")
+    _print("  2. docker - Local contained validation (pinned image required)")
+    _print("  3. skip   - Skip build validation")
     _print_info(f"Default: {default_strategy} ({default_reason})")
     strategy_input = input(f"Validation strategy [{default_strategy}]: ").strip().lower()
     if strategy_input:

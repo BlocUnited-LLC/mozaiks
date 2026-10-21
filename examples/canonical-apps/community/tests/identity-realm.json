@@ -1,0 +1,76 @@
+{
+  "realm": "common-ground",
+  "displayName": "Common Ground local acceptance",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "resetPasswordAllowed": false,
+  "roles": {"realm": [{"name": "user"}]},
+  "clientScopes": [
+    {
+      "name": "basic", "protocol": "openid-connect", "attributes": {"include.in.token.scope": "false"},
+      "protocolMappers": [
+        {"name": "Subject", "protocol": "openid-connect", "protocolMapper": "oidc-sub-mapper", "config": {"access.token.claim": "true", "introspection.token.claim": "true"}}
+      ]
+    },
+    {
+      "name": "profile", "protocol": "openid-connect", "attributes": {"include.in.token.scope": "true"},
+      "protocolMappers": [
+        {"name": "Full name", "protocol": "openid-connect", "protocolMapper": "oidc-full-name-mapper", "config": {"access.token.claim": "true", "id.token.claim": "true", "userinfo.token.claim": "true"}},
+        {"name": "Username", "protocol": "openid-connect", "protocolMapper": "oidc-usermodel-property-mapper", "config": {"user.attribute": "username", "claim.name": "preferred_username", "jsonType.label": "String", "access.token.claim": "true", "id.token.claim": "true", "userinfo.token.claim": "true"}}
+      ]
+    },
+    {
+      "name": "email", "protocol": "openid-connect", "attributes": {"include.in.token.scope": "true"},
+      "protocolMappers": [
+        {"name": "Email", "protocol": "openid-connect", "protocolMapper": "oidc-usermodel-property-mapper", "config": {"user.attribute": "email", "claim.name": "email", "jsonType.label": "String", "access.token.claim": "true", "id.token.claim": "true", "userinfo.token.claim": "true"}},
+        {"name": "Email verified", "protocol": "openid-connect", "protocolMapper": "oidc-usermodel-property-mapper", "config": {"user.attribute": "emailVerified", "claim.name": "email_verified", "jsonType.label": "boolean", "access.token.claim": "true", "id.token.claim": "true", "userinfo.token.claim": "true"}}
+      ]
+    },
+    {"name": "user_posts.read", "protocol": "openid-connect", "attributes": {"include.in.token.scope": "true"}},
+    {"name": "user_posts.create", "protocol": "openid-connect", "attributes": {"include.in.token.scope": "true"}},
+    {"name": "user_posts.react", "protocol": "openid-connect", "attributes": {"include.in.token.scope": "true"}}
+  ],
+  "clients": [{
+    "clientId": "common-ground",
+    "name": "Common Ground local browser",
+    "enabled": true,
+    "protocol": "openid-connect",
+    "publicClient": true,
+    "standardFlowEnabled": true,
+    "implicitFlowEnabled": false,
+    "directAccessGrantsEnabled": false,
+    "serviceAccountsEnabled": false,
+    "redirectUris": ["http://127.0.0.1:14443/auth/callback"],
+    "webOrigins": ["http://127.0.0.1:14443"],
+    "attributes": {
+      "pkce.code.challenge.method": "S256",
+      "post.logout.redirect.uris": "http://127.0.0.1:14443/*"
+    },
+    "defaultClientScopes": ["basic", "profile", "email", "user_posts.read", "user_posts.create", "user_posts.react"],
+    "protocolMappers": [
+      {
+        "name": "API audience",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-audience-mapper",
+        "config": {"included.custom.audience": "common-ground-api", "access.token.claim": "true", "id.token.claim": "false"}
+      },
+      {
+        "name": "App identity",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-hardcoded-claim-mapper",
+        "config": {"claim.name": "app_id", "claim.value": "common-ground", "jsonType.label": "String", "access.token.claim": "true", "id.token.claim": "true", "userinfo.token.claim": "true"}
+      },
+      {
+        "name": "Realm roles",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-usermodel-realm-role-mapper",
+        "config": {"claim.name": "roles", "jsonType.label": "String", "multivalued": "true", "access.token.claim": "true", "id.token.claim": "false", "userinfo.token.claim": "true"}
+      }
+    ]
+  }],
+  "users": [
+    {"username": "alice", "firstName": "Alice", "lastName": "Gardener", "email": "alice@example.test", "emailVerified": true, "enabled": true, "realmRoles": ["user"], "credentials": [{"type": "password", "value": "CommonGround-alice-local-1!", "temporary": false}]},
+    {"username": "bob", "firstName": "Bob", "lastName": "Neighbor", "email": "bob@example.test", "emailVerified": true, "enabled": true, "realmRoles": ["user"], "credentials": [{"type": "password", "value": "CommonGround-bob-local-1!", "temporary": false}]}
+  ]
+}

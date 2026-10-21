@@ -53,6 +53,9 @@ async def test_factory_materialized_app_builds_runs_and_is_terminated(monkeypatc
     monkeypatch.setenv("SANDBOX_MAX_SESSIONS", "1")
     monkeypatch.delenv("SANDBOX_TEMPLATE", raising=False)
     outputs = _typed_task_outputs(_load_models())
+    # Public app identity does not opt individual routes out of sign-in.
+    # Preview visitors must exercise the page's explicit public contract.
+    outputs["reports.page"]["pages"][0]["meta"] = {"requiresAuth": False}
     outputs["reports.page"]["pages"][0]["sections"][0]["config"]["data_key"] = "reports"
     outputs["reports.page"]["theme_config_patch"]["theme"].update(
         primary="teal", font="oxanium", font_heading="oxanium",
@@ -108,7 +111,7 @@ async def test_factory_materialized_app_builds_runs_and_is_terminated(monkeypatc
     print(f"{provider} smoke allocated session={session_id}", flush=True)
     try:
         await manager.sync(state.sandbox_id, [{"path": path, "content": text} for path, text in preview_files.items()], [])
-        await manager.start(state.sandbox_id)
+        state = await manager.start(state.sandbox_id)
         assert state.status == "running", state.last_error
         print(f"{provider} smoke preview={state.preview_url}", flush=True)
         health = await asyncio.to_thread(_request, f"{state.preview_url}/api/health")
@@ -129,6 +132,7 @@ async def test_factory_materialized_app_builds_runs_and_is_terminated(monkeypatc
             )
     finally:
         await manager.stop(state.sandbox_id)
-        assert not manager._sessions
+        with pytest.raises(KeyError):
+            await manager.require_owner(state.sandbox_id, app_id="factory", user_id="smoke")
         await _assert_absent(provider, session_id)
         print(f"{provider} smoke termination confirmed session={session_id}", flush=True)

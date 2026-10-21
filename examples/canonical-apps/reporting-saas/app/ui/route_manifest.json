@@ -1,5 +1,19 @@
 {
   "pages": [
+    {
+      "path": "/login",
+      "component": "LoginPage",
+      "label": "Sign in",
+      "navigation": { "include": false },
+      "meta": { "requiresAuth": false, "appShell": false, "title": "Sign in" }
+    },
+    {
+      "path": "/auth/callback",
+      "component": "AuthCallbackPage",
+      "label": "Completing sign in",
+      "navigation": { "include": false },
+      "meta": { "requiresAuth": false, "appShell": false, "title": "Completing sign in" }
+    },
     { "path": "/reports", "component": "SchemaPage", "label": "Reports", "schema": "reports" }
   ]
 }

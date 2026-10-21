@@ -50,7 +50,9 @@ from mozaiksai.core.runtime.app.loader import AppLoader, AppLoadError
 from mozaiksai.core.runtime.app.module_loader import ModuleLoadError
 from mozaiksai.core.runtime.composition.executor_registry import ExecutorRegistry
 from mozaiksai.core.runtime.composition.extensions import (
+    StartupServiceProfileError,
     mount_module_routers,
+    resolve_startup_service_profile,
     start_module_services,
     stop_services,
 )
@@ -84,6 +86,7 @@ from mozaiksai.core.session.launcher import (
 )
 from mozaiksai.core.workflow.paths import candidate_app_workflows_roots
 from mozaiksai.hosts import runtime as runtime_app
+from mozaiksai.hosts.source_path_policy import authorize_http_workflow_source_paths
 from mozaiksai.resources import resolve_factory_app_root
 from mozaiksai.version import __version__ as _API_VERSION
 
@@ -236,7 +239,9 @@ def _get_configured_entry_point() -> str | None:
 def _resolve_requested_workflow_name(requested_workflow_name: str | None) -> str:
     ordered_names = get_ordered_workflow_names()
     if not ordered_names:
-        raise HTTPException(status_code=503, detail="No runnable workflows are currently loaded.")
+        # An app that declares no workflows serves none; that is permanent, not
+        # a temporary outage.
+        raise HTTPException(status_code=404, detail="Workflow not found")
 
     requested = str(requested_workflow_name or "").strip()
     if requested and requested not in NON_RUNNABLE_WORKFLOW_IDS:
@@ -263,10 +268,14 @@ async def _platform_startup() -> None:
     from mozaiksai.core.auth.adapters.registry import validate_auth_provider_configuration
 
     validate_auth_provider_configuration()
+    startup_service_profile = resolve_startup_service_profile()
 
     app.state.startup_degraded = False
     app.state.startup_degraded_reason = None
     app.state.failed_module_names = []
+    app.state.loaded_app_root = None
+    app.state.loaded_app_id = None
+    app.state.loaded_app_name = None
     app_root = resolve_app_root()
     database_startup_policy = get_database_startup_policy()
     logger.info("DATABASE_STARTUP_POLICY: policy=%s app_root=%s", database_startup_policy, app_root)
@@ -274,6 +283,17 @@ async def _platform_startup() -> None:
         module_defaults_path = getattr(app.state, "module_defaults_path", None)
         load_options = {"module_defaults_path": module_defaults_path} if module_defaults_path else {}
         load_result = await AppLoader.load(str(app_root), **load_options)
+        app.state.loaded_app_root = app_root.resolve()
+        # Module dispatch, indexes, and migrations must use the same host app
+        # identity. app.json may omit appId (including generated bundles), so
+        # preserve the existing data-contract/default resolution in that case.
+        app.state.loaded_app_id = str(
+            (load_result.data_contract or {}).get("app_id")
+            or load_result.definition.config.get("appId")
+            or load_result.definition.config.get("app_id")
+            or _resolve_default_app_id()
+        ).strip()
+        app.state.loaded_app_name = load_result.definition.config.get("appName")
         app.state.subscriptions_config = load_result.subscriptions_config
         app.state.metrics_config = load_result.metrics_config
         app.state.page_schemas = {
@@ -285,12 +305,7 @@ async def _platform_startup() -> None:
         app.state.data_contract = load_result.data_contract
         persistence_enabled = database_persistence_is_enabled(database_startup_policy)
         if load_result.data_contract and persistence_enabled:
-            index_app_id = (
-                load_result.data_contract.get("app_id")
-                or load_result.definition.config.get("appId")
-                or load_result.definition.config.get("app_id")
-                or _resolve_default_app_id()
-            )
+            index_app_id = app.state.loaded_app_id
             try:
                 index_result = await apply_database_indexes(
                     load_result.data_contract,
@@ -326,12 +341,7 @@ async def _platform_startup() -> None:
         try:
             migrations = load_data_migrations(app_root)
             if migrations:
-                migration_app_id = (
-                    (load_result.data_contract or {}).get("app_id")
-                    or load_result.definition.config.get("appId")
-                    or load_result.definition.config.get("app_id")
-                    or _resolve_default_app_id()
-                )
+                migration_app_id = app.state.loaded_app_id
                 migration_count = await apply_data_migrations(
                     app_id=str(migration_app_id),
                     migrations=migrations,
@@ -415,6 +425,8 @@ async def _platform_startup() -> None:
                 event_emitter=dispatcher.emit,
                 entitlement_checker=entitlement_checker,
                 data_contract=load_result.data_contract,
+                # Mounted host default modules are bound by their own declarations.
+                platform_modules=load_result.platform_modules,
             )
             module_action_surfaces: dict[str, dict[str, str | None]] = {}
             module_ask_context_actions: dict[str, dict[str, bool]] = {}
@@ -437,6 +449,8 @@ async def _platform_startup() -> None:
                 failed_names = sorted(load_result.failed_module_names)
                 reason = f"MODULE_LOAD_PARTIAL: {len(failed_names)} module(s) failed to load"
                 logger.error("PLATFORM_DEGRADED: %s — %s", reason, ", ".join(failed_names))
+                if startup_service_profile == "worker":
+                    raise StartupServiceProfileError(reason)
                 app.state.startup_degraded = True
                 app.state.startup_degraded_reason = reason
                 app.state.failed_module_names = failed_names
@@ -449,24 +463,36 @@ async def _platform_startup() -> None:
                     logger.info("MODULE_EXTENSIONS_ROUTERS_MOUNTED: %s router(s)", n)
             except Exception as exc:
                 logger.error("MODULE_EXTENSIONS_ROUTER_MOUNT_FAILED: %s", exc)
+                if startup_service_profile == "worker":
+                    raise
                 if not app.state.startup_degraded:
                     app.state.startup_degraded = True
                     app.state.startup_degraded_reason = "MODULE_EXTENSIONS_ROUTER_MOUNT_FAILED"
 
             try:
-                module_services = await start_module_services(load_result.modules)
+                module_services = await start_module_services(
+                    load_result.modules, profile=startup_service_profile
+                )
                 _runtime_services.extend(module_services)
+            except StartupServiceProfileError:
+                raise
             except Exception as exc:
                 logger.error("MODULE_EXTENSIONS_SERVICES_NOT_STARTED: %s", exc)
                 if not app.state.startup_degraded:
                     app.state.startup_degraded = True
                     app.state.startup_degraded_reason = "MODULE_EXTENSIONS_SERVICES_NOT_STARTED"
+        elif startup_service_profile == "worker":
+            raise StartupServiceProfileError("Worker profile has no loaded modules")
 
+    except StartupServiceProfileError:
+        raise
     except DatabaseStartupError:
         raise
     except DatabaseStartupPolicyError:
         raise
     except AppLoadError as exc:
+        if startup_service_profile == "worker":
+            raise
         if str(exc).startswith("app.json not found"):
             logger.debug("APP_LOAD_SKIPPED: app.json not found for platform host")
         else:
@@ -474,12 +500,16 @@ async def _platform_startup() -> None:
             app.state.startup_degraded = True
             app.state.startup_degraded_reason = "APP_LOAD_ERROR"
     except ModuleLoadError as exc:
+        if startup_service_profile == "worker":
+            raise
         # A module contract is invalid — platform starts in degraded state so
         # health checks can surface this rather than hiding it as a warning.
         logger.error("APP_LOAD_FAILED_DEGRADED (ModuleLoadError): %s", exc)
         app.state.startup_degraded = True
         app.state.startup_degraded_reason = "MODULE_LOAD_ERROR"
     except Exception as exc:
+        if startup_service_profile == "worker":
+            raise
         # Unexpected error during app/module setup. Mark degraded so health
         # checks report the problem; do not swallow silently.
         logger.error("APP_LOAD_FAILED_DEGRADED (%s): %s", type(exc).__name__, exc)
@@ -494,19 +524,29 @@ async def _platform_startup() -> None:
 
 async def _platform_shutdown() -> None:
     global _runtime_services
-    if not _runtime_services:
-        return
     try:
-        await stop_services(_runtime_services)
-    except Exception as _shutdown_exc:
-        logger.warning("PLATFORM_RUNTIME_SERVICES_STOP_FAILED: %s", _shutdown_exc)
-    _runtime_services = []
+        if _runtime_services:
+            try:
+                await stop_services(_runtime_services)
+            except Exception as _shutdown_exc:
+                logger.warning("PLATFORM_RUNTIME_SERVICES_STOP_FAILED: %s", _shutdown_exc)
+    finally:
+        # Services may emit while stopping. Keep their module reactions attached
+        # until every stop hook has returned, including on failed startup.
+        _runtime_services = []
+        module_event_router = getattr(app.state, "module_event_router", None)
+        if module_event_router is not None:
+            module_event_router.unregister()
+            del app.state.module_event_router
+        app.state.loaded_app_root = None
+        app.state.loaded_app_id = None
+        app.state.loaded_app_name = None
 
 
 @asynccontextmanager
 async def platform_lifespan(_: FastAPI) -> AsyncIterator[None]:
-    await _platform_startup()
     try:
+        await _platform_startup()
         yield
     finally:
         await _platform_shutdown()
@@ -603,8 +643,8 @@ async def health_check(request: Request):
 
 
 @app.get("/api/shell-config")
-async def get_shell_config(surface: str | None = None):
-    return await build_shell_config(surface=surface or "platform")
+async def get_shell_config(request: Request, surface: str | None = None):
+    return await build_shell_config(surface=surface or "platform", client_scope=request.scope)
 
 
 @app.get("/api/me")
@@ -1821,7 +1861,9 @@ def _serialize_subscription_usage_limits(config: Any) -> dict[str, Any]:
         )
     token_wallets = [
         wallet.model_dump()
-        for wallet in getattr(config, "token_wallets", []) or []
+        for wallet in getattr(
+            config, "effective_token_wallets", getattr(config, "token_wallets", [])
+        ) or []
     ]
     usage_charge_policies = [
         policy.model_dump()
@@ -1855,15 +1897,19 @@ async def _current_user_token_wallet_summary(
     workspace_id: str | None = None,
     ensure_allowances: bool = False,
 ) -> dict[str, Any]:
-    if config is None or not getattr(config, "token_wallets", None):
+    if config is None or not getattr(
+        config, "effective_token_wallets", getattr(config, "token_wallets", None)
+    ):
         return {
             "wallets": [],
             "source": "none",
         }
 
+    from mozaiksai.core.tokens.plan_resolution import resolve_v2_wallet_plans
     from mozaiksai.core.tokens.wallet import get_token_wallet_ledger
 
     plan_id = getattr(config, "default_plan_id", None)
+    wallet_plans = None
     try:
         adapter = ConfiguredEntitlementAdapter(config=config)
         resolved_plan_id = await adapter.current_plan_id(
@@ -1874,6 +1920,15 @@ async def _current_user_token_wallet_summary(
         )
         if resolved_plan_id:
             plan_id = resolved_plan_id
+        if config.products:
+            wallet_plans = await resolve_v2_wallet_plans(
+                config=config,
+                entitlements=adapter,
+                app_id=app_id,
+                user_id=user_id,
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
+            )
     except Exception as exc:
         logger.debug("TOKEN_WALLET_PLAN_RESOLUTION_SKIPPED: %s", exc)
 
@@ -1885,6 +1940,7 @@ async def _current_user_token_wallet_summary(
         tenant_id=tenant_id,
         plan_id=plan_id,
         ensure_allowances=ensure_allowances,
+        wallet_plans=wallet_plans,
     )
 
 
@@ -2335,10 +2391,9 @@ async def start_chat(
 
     client_request_id = data.get("client_request_id")
     force_new = str(data.get("force_new", "false")).lower() in {"1", "true", "yes", "on"}
-    context_variables = validate_context_for_workflow(
-        workflow_name,
-        data.get("context_variables") if isinstance(data.get("context_variables"), dict) else {},
-    )
+    requested_context = data.get("context_variables") if isinstance(data.get("context_variables"), dict) else {}
+    authorize_http_workflow_source_paths(requested_context, principal=principal)
+    context_variables = validate_context_for_workflow(workflow_name, requested_context)
     trigger_meta = data.get("trigger_meta") if isinstance(data.get("trigger_meta"), dict) else {}
 
     idempotency_window_sec = int(os.getenv("CHAT_START_IDEMPOTENCY_SEC", "15"))
@@ -2488,9 +2543,6 @@ async def websocket_endpoint(
         await websocket.close(code=1008, reason="Invalid path parameter")
         return
 
-    requested_workflow_name = workflow_name
-    workflow_name = _resolve_requested_workflow_name(workflow_name)
-
     ws_user = await authenticate_websocket_with_path_binding(
         websocket,
         path_user_id=user_id,
@@ -2544,6 +2596,13 @@ async def websocket_endpoint(
             await websocket.close(code=1011, reason="Failed to prepare ask session")
         finally:
             _ask_session_registry.remove_session(ask_ws_id)
+        return
+
+    requested_workflow_name = workflow_name
+    try:
+        workflow_name = _resolve_requested_workflow_name(workflow_name)
+    except HTTPException:
+        await websocket.close(code=WS_CLOSE_POLICY_VIOLATION, reason="Workflow not found")
         return
 
     try:
@@ -2717,6 +2776,10 @@ async def websocket_endpoint(
 
             local_transport = runtime_app.simple_transport
             if not local_transport:
+                return
+            if await local_transport._passive_start_rejection(
+                chat_id=active_chat_id, app_id=app_id, user_id=user_id, workflow_name=workflow_name,
+            ) is not None:
                 return
 
             for _ in range(20):

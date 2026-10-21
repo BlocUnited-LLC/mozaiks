@@ -29,6 +29,7 @@ from typing import Any
 import yaml
 from pydantic import ValidationError as PydanticValidationError
 
+from factory_app.workflows._shared.generated_ui_contract import resolve_registered_component_files
 from factory_app.workflows._shared.hook_utils import workflow_context_path
 from factory_app.workflows.AppGenerator.tools.module_persistence_guard import (
     scan_module_persistence,
@@ -55,6 +56,7 @@ from mozaiksai.core.runtime.app.layout_validation import (
     layout_validation_errors,
     validate_file_map_layout,
 )
+from mozaiksai.core.runtime.app.module_loader import validate_action_timeout
 from mozaiksai.core.runtime.app.page_schema import (
     PageSchemaValidationError,
     validate_page_schema,
@@ -1024,6 +1026,57 @@ def _scan_mozaikspay_saas_contract(
     return errors
 
 
+def _scan_outcome_feedback_contract(files_map: dict[str, str]) -> list[str]:
+    """Keep the shipped feedback sink private and free from authored evidence writes."""
+    module_path = "modules/outcome_feedback/module.yaml"
+    if module_path not in files_map:
+        return []
+    from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
+    from mozaiksai.core.workflow.outcome_feedback import WorkflowFeedbackEvidence
+
+    try:
+        contract = json.loads(files_map.get("data/contract.json", "{}"))
+        collections = [
+            item for owner, kind, item in iter_data_contract_collections(contract)
+            if owner == "outcome_feedback" and kind == "module"
+        ]
+    except (ValueError, TypeError) as exc:
+        return [f"outcome_feedback requires an approved private data contract: {exc}"]
+    if len(collections) != 1 or collections[0].get("name") != "records":
+        return ["outcome_feedback requires exactly its approved records collection"]
+    collection = collections[0]
+    expected = {"scope": "app", "tenancy": "per_user", "owner_field": "user_id", "entity": "WorkflowFeedback"}
+    errors = []
+    if any(collection.get(key) != value for key, value in expected.items()):
+        errors.append("outcome_feedback.records requires app scope and per_user ownership of WorkflowFeedback")
+    lifecycle = collection.get("lifecycle")
+    if not isinstance(lifecycle, dict) or lifecycle.get("write_mode") != "workflow_write":
+        errors.append("outcome_feedback.records requires lifecycle.write_mode=workflow_write; arbitrary evidence CRUD is forbidden")
+    fields = {item.get("name") for item in collection.get("fields") or [] if isinstance(item, dict)}
+    missing = sorted((set(WorkflowFeedbackEvidence.model_fields) | {"feedback_id"}) - fields)
+    if missing:
+        errors.append(f"outcome_feedback.records must declare receipt fields for private storage and account export: {missing}")
+    try:
+        manifest = yaml.safe_load(files_map[module_path])
+        if not isinstance(manifest, dict):
+            raise ValueError("module must be an object")
+        actions = {action["id"] for action in manifest.get("actions") or []}
+        extra = actions - {"record_workflow_feedback", "list_my_feedback", "get_records", "list_records"}
+        if extra:
+            errors.append(f"outcome_feedback cannot expose authored evidence mutations: {sorted(extra)}")
+        record = next(action for action in manifest.get("actions") or [] if action["id"] == "record_workflow_feedback")
+        schema = record.get("input_schema") or {}
+        if (
+            set(schema.get("properties") or {}) != {"ui_event_id", "outcome_id"}
+            or set(schema.get("required") or []) != {"ui_event_id", "outcome_id"}
+            or schema.get("additionalProperties") is not False
+        ):
+            errors.append("outcome_feedback.record_workflow_feedback must accept only ui_event_id and outcome_id")
+    except (AttributeError, ValueError, TypeError, KeyError, StopIteration, yaml.YAMLError):
+        errors.append("outcome_feedback requires its declared receipt-only record action")
+    return errors
+
+
 def _scan_mozaiks_cloud_connector_contract(
     files_map: dict[str, Any],
     *,
@@ -1840,13 +1893,7 @@ def _scan_page_api_endpoint_alignment(files_map: dict[str, str]) -> list[str]:
 
 
 def _scan_route_manifest_component_files(files_map: dict[str, str]) -> list[str]:
-    """Validate that every component declared in ui/route_manifest.json has a
-    matching custom page file under ui/pages/custom/.
-
-    This catches the common generation failure where route_manifest.json is
-    written correctly but the corresponding JSX file is missing, which produces
-    a runtime 404 for every missing component.
-    """
+    """Resolve custom route keys through registered imports to existing pages."""
     errors: list[str] = []
     normalized = _normalized_files_map(files_map)
     manifest_raw = normalized.get("ui/route_manifest.json")
@@ -1862,13 +1909,10 @@ def _scan_route_manifest_component_files(files_map: dict[str, str]) -> list[str]
     if not isinstance(pages, list):
         return errors
 
-    # Collect custom page file stems that are actually present.
-    custom_page_stems: set[str] = set()
-    for path in normalized:
-        if path.startswith("ui/pages/custom/") and path.endswith(".jsx"):
-            stem = PurePosixPath(path).stem
-            if stem:
-                custom_page_stems.add(stem)
+    registered_files, registry_errors = resolve_registered_component_files(
+        normalized, source_label="ui/route_manifest.json:",
+    )
+    errors.extend(registry_errors)
 
     for i, page in enumerate(pages):
         if not isinstance(page, dict):
@@ -1879,18 +1923,22 @@ def _scan_route_manifest_component_files(files_map: dict[str, str]) -> list[str]
         # Shell-built-in components are always available — no custom JSX file required.
         if component in _SHELL_CORE_COMPONENTS or component in APP_AUTH_COMPONENTS:
             continue
-        if component not in custom_page_stems:
+        if not any(
+            path.startswith("ui/pages/custom/") and path.endswith(".jsx")
+            for path in registered_files.get(component, set())
+        ):
             route_path = str(page.get("path") or "<unknown>").strip()
             errors.append(
                 f"ui/route_manifest.json: pages[{i}] route '{route_path}' declares "
-                f"component '{component}' but ui/pages/custom/{component}.jsx is missing. "
-                f"The route will 404 at runtime."
+                f"component '{component}' but no registered import resolves to an existing "
+                "ui/pages/custom/*.jsx file. Preserve the approved page path and bind its "
+                "import to this component key in ui/index.js."
             )
     return errors
 
 
 def _scan_action_api_surface(files_map: dict[str, str]) -> list[str]:
-    """Validate that action api_surface values in module.yaml use the canonical vocabulary.
+    """Validate action exposure and execution metadata against the runtime contract.
 
     Only the four declared strings and actual null are canonical. Keep this
     diagnostic aligned with runtime ActionDef validation.
@@ -1921,6 +1969,12 @@ def _scan_action_api_surface(files_map: dict[str, str]) -> list[str]:
             if not isinstance(action, dict):
                 continue
             action_id = str(action.get("id") or "").strip()
+            try:
+                validate_action_timeout(action.get("timeout_seconds"))
+            except ValueError:
+                errors.append(
+                    f"{path}: action '{action_id}' timeout_seconds must be null or an integer from 1 through 3600."
+                )
             api_surface = action.get("api_surface")
             if api_surface is None:
                 continue
@@ -2305,6 +2359,7 @@ def scan_generated_bundle(
     except ValueError as exc:
         errors.append(str(exc))
     errors.extend(_scan_owned_collection_auth(scannable_files_map))
+    errors.extend(_scan_outcome_feedback_contract(scannable_files_map))
     errors.extend(scan_module_persistence(scannable_files_map))
     # Generation also requires the canonical frontend adapter artifact.
     auth_errors = _scan_auth_app_contract(scannable_files_map)

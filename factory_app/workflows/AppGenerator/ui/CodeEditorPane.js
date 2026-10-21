@@ -3,9 +3,10 @@
 // DESCRIPTION: Monaco code editor wrapper for AppWorkbench
 // ==============================================================================
 
-import React, { useCallback, useMemo, useState } from 'react';
-import Editor from '@monaco-editor/react';
+import React, { lazy, Suspense, useCallback, useMemo, useState } from 'react';
 import { Check, Copy, Maximize2, Minimize2 } from 'lucide-react';
+
+const Editor = lazy(() => import('./monacoEditor.js'));
 
 const languageMap = {
   js: 'javascript',
@@ -99,13 +100,15 @@ const CodeEditorPane = ({ filePath, content, onChange, config = {}, readOnly = f
       </div>
 
       <div className={expanded ? 'h-[calc(100%-44px)]' : 'h-[520px]'}>
-        <Editor
-          language={language}
-          value={content || ''}
-          theme={editorCfg.theme || 'vs-dark'}
-          options={options}
-          onChange={(val) => onChange?.(val ?? '')}
-        />
+        <Suspense fallback={<div role="status">Loading editor…</div>}>
+          <Editor
+            language={language}
+            value={content || ''}
+            theme={editorCfg.theme || 'vs-dark'}
+            options={options}
+            onChange={(val) => onChange?.(val ?? '')}
+          />
+        </Suspense>
       </div>
     </div>
   );

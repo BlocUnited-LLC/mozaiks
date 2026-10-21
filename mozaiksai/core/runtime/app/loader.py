@@ -62,6 +62,7 @@ from mozaiksai.core.runtime.persistence.intent_loader import (
     index_data_contract_by_entity,
     load_data_contract,
 )
+from mozaiksai.core.runtime.persistence.platform_modules import PlatformModuleDeclarations
 from mozaiksai.core.workflow.paths import candidate_app_workflows_roots
 
 logger = get_workflow_logger("app_loader")
@@ -80,6 +81,8 @@ class AppLoadResult:
         modules:              Loaded module handlers
         data_contract:        Parsed data contract, or None
         data_entities_by_key: Collection metadata indexed by (owner_id, declared entity).
+        platform_modules:     Collection declarations of the host default modules mounted
+                              into this workspace, or None when none are mounted
         subscriptions_config: Parsed subscriptions config, or None for non-SaaS apps
         metrics_config:       Parsed analytics config, or None when not declared
         auth_contract:        Validated app auth behavior, or None for public apps
@@ -91,6 +94,7 @@ class AppLoadResult:
     modules: list[LoadedModule] = field(default_factory=list)
     data_contract: dict[str, Any] | None = None
     data_entities_by_key: dict[tuple[str, str], dict[str, Any]] = field(default_factory=dict)
+    platform_modules: PlatformModuleDeclarations | None = None
     subscriptions_config: SubscriptionsConfig | None = None
     metrics_config: MetricsConfig | None = None
     auth_contract: AppAuthContract | None = None
@@ -117,7 +121,9 @@ class AppLoader:
             path: Root directory of the platform bundle.
             module_defaults_path: Optional host-owned app bundle supplying default modules.
                 Active app module folders override defaults by id. Other app families
-                (config, data, services, pages) remain owned by the active app root.
+                (config, data, services, pages) remain owned by the active app root;
+                the mounted defaults bring only their own data/contract.json
+                declarations, composed per module by persistence.
 
         Returns:
             AppLoadResult with parsed definition and loaded modules.
@@ -231,6 +237,10 @@ class AppLoader:
                     ", ".join(m.name for m in loaded_modules),
                 )
 
+        platform_modules = cls._load_platform_module_declarations(
+            base_path, module_defaults_path, loaded_modules, data_contract,
+        )
+
         try:
             action_index = build_page_action_index_from_module_contracts(base_path)
             action_index.update(build_page_action_index(loaded_modules))
@@ -253,6 +263,7 @@ class AppLoader:
             modules=loaded_modules,
             data_contract=data_contract,
             data_entities_by_key=data_entities_by_key,
+            platform_modules=platform_modules,
             subscriptions_config=subscriptions_config,
             metrics_config=metrics_config,
             auth_contract=auth_contract,
@@ -261,6 +272,48 @@ class AppLoader:
             failed_module_names=failed_module_names,
             module_load_errors=dict(module_loader.load_errors),
         )
+
+    @classmethod
+    def _load_platform_module_declarations(
+        cls,
+        base_path: Path,
+        module_defaults_path: str | None,
+        loaded_modules: list[LoadedModule],
+        workspace_contract: dict[str, Any] | None,
+    ) -> PlatformModuleDeclarations | None:
+        """Compose the data declarations of the host default modules actually mounted.
+
+        A default module the workspace overrides by id is not mounted, so its
+        declarations do not apply; the workspace contract governs its data.
+        """
+        if module_defaults_path is None:
+            return None
+        defaults_root = Path(module_defaults_path).resolve()
+        if defaults_root == base_path.resolve():
+            return None
+        mounted = sorted(
+            module.name for module in loaded_modules
+            if Path(module.path).resolve().parent.parent == defaults_root
+        )
+        if not mounted:
+            return None
+        try:
+            contract = load_data_contract(defaults_root)
+            declarations = PlatformModuleDeclarations(contract, mounted)
+            declarations.validate_workspace(workspace_contract)
+        except DataContractLoadError as exc:
+            raise AppLoadError(f"Invalid platform module data declarations in {defaults_root}: {exc}") from exc
+        if contract is None:
+            logger.warning(
+                "PLATFORM_MODULE_DATA_UNDECLARED: defaults_root=%s declares no data contract; "
+                "modules=%s may persist no collection",
+                defaults_root, mounted,
+            )
+        logger.info(
+            "PLATFORM_MODULE_DATA_COMPOSED: modules=%s collections=%s",
+            mounted, sorted(f"{owner}.{name}" for owner, name in declarations.collections),
+        )
+        return declarations
 
     @classmethod
     def _discover_workflow_names(cls, base_path: Path) -> list[str]:

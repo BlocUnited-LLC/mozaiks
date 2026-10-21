@@ -1016,6 +1016,8 @@ def test_valueengine_manifest_preserves_brand_intent_for_downstream_generators(m
     )
     store = SimpleNamespace(save_concept=AsyncMock(), finish_concept_review=AsyncMock(return_value=True))
     monkeypatch.setattr(module, "BuilderArtifactStore", lambda: store)
+    name_writer = AsyncMock(return_value={"success": True})
+    monkeypatch.setattr(module, "AppRegistryService", lambda: SimpleNamespace(apply_approved_concept_identity=name_writer))
     emitted = {}
     summary_artifact = {}
 
@@ -1075,6 +1077,7 @@ def test_valueengine_manifest_preserves_brand_intent_for_downstream_generators(m
     assert summary_artifact["artifact_kind"] == "concept"
     assert summary_artifact["summary_payload"]["app_name"] == "Mozaiks Social"
     assert summary_artifact["author_user_id"] == "user_123"
+    assert name_writer.await_args.kwargs["name"] == "Mozaiks Social"
 
 
 def test_valueengine_decompose_exposes_only_live_feature_context_tool() -> None:

@@ -643,7 +643,7 @@ def test_non_sign_in_page_on_platform_auth_surface_is_rejected_naming_the_app_ow
     context = ownership._context(managed=False)
     bundle = _auth_bundle()
     bundle["experience_spec"]["pages"].append({
-        "name": "Profile Settings", "route": route, "layout": "full-width", "intent": "Edit profile details.",
+        "name": "Profile Settings", "ui_surface": "declarative_page", "route": route, "layout": "full-width", "intent": "Edit profile details.",
         "sections": [{
             "id": "profile-form", "primitive": "Form" if fields else "PageHeader", "intent": "Edit the profile.",
             "config_hint": json.dumps({"fields": [{"name": name, "type": "string"} for name in fields]}) if fields else None,
@@ -667,7 +667,7 @@ def test_non_sign_in_page_names_every_candidate_or_the_existing_app_owner(persis
     bundle = _auth_bundle()
     ownership._add_surface(bundle, surface_id="tasks", name="Tasks", route="/tasks", entities=["Task"], actions=["update_task"])
     bundle["experience_spec"]["pages"].append({
-        "name": "Profile Settings", "route": "/profile", "layout": "full-width", "intent": "Edit profile details.",
+        "name": "Profile Settings", "ui_surface": "declarative_page", "route": "/profile", "layout": "full-width", "intent": "Edit profile details.",
         "sections": [{"id": "profile", "primitive": "PageHeader", "intent": "Profile.", "config_hint": None}],
     })
     auth = next(s for s in bundle["surface_map"]["surfaces"] if s["surface_id"] == "auth")
@@ -1089,7 +1089,7 @@ def test_app_named_reserved_claim_also_names_its_sign_in_pages(persistence):
         bundle, surface_id="accounts", name="Accounts", route="/accounts", entities=["AuthSession"], actions=[],
     )
     bundle["experience_spec"]["pages"].append({
-        "name": "Login", "route": "/login", "layout": "full-width", "intent": "Sign in.",
+        "name": "Login", "ui_surface": "declarative_page", "route": "/login", "layout": "full-width", "intent": "Sign in.",
         "sections": [{"id": "sign-in", "primitive": "PageHeader", "intent": "Sign in.", "config_hint": None}],
     })
     bundle["surface_map"]["surfaces"][-1]["owned_pages"] = ["Accounts", "Login"]
@@ -1111,7 +1111,7 @@ def test_reserved_claim_rejection_does_not_depend_on_surface_order(persistence, 
         entities=["Member", "AuthSession"], actions=["invite_member"],
     )
     bundle["experience_spec"]["pages"].append({
-        "name": "Profile Settings", "route": "/profile", "layout": "full-width", "intent": "Edit the profile.",
+        "name": "Profile Settings", "ui_surface": "declarative_page", "route": "/profile", "layout": "full-width", "intent": "Edit the profile.",
         "sections": [{"id": "profile", "primitive": "PageHeader", "intent": "Profile.", "config_hint": None}],
     })
     surfaces = {surface["surface_id"]: surface for surface in bundle["surface_map"]["surfaces"]}
@@ -1142,7 +1142,7 @@ def test_app_named_surface_whose_every_claim_is_reserved_normalizes_to_platform(
     })
     if sign_in_page:
         bundle["experience_spec"]["pages"].append({
-            "name": "Login", "route": "/login", "layout": "full-width", "intent": "Sign in.",
+            "name": "Login", "ui_surface": "declarative_page", "route": "/login", "layout": "full-width", "intent": "Sign in.",
             "sections": [{"id": "sign-in", "primitive": "PageHeader", "intent": "Sign in.", "config_hint": None}],
         })
 
@@ -1202,7 +1202,7 @@ def _users_page(columns=("user_id", "email", "created_at"), primitive="DataTable
         "fields": [{"name": name, "type": "text", "label": name} for name in form],
     }
     return {
-        "name": "Users", "route": "/users", "layout": "full-width", "intent": "Administer users.",
+        "name": "Users", "ui_surface": "declarative_page", "route": "/users", "layout": "full-width", "intent": "Administer users.",
         "sections": [
             {"id": "user-table", "primitive": primitive, "intent": "Users.", "config_hint": json.dumps(listing)},
             {"id": "create-user", "primitive": "Modal" if form is None else "Form", "intent": "Create a user.",
@@ -1294,7 +1294,7 @@ def test_platform_identity_is_recognized_by_what_the_surface_declares(
 
 @pytest.mark.parametrize("surface_id,surface_kind,entities,collections,page", [
     pytest.param("community_directory", "ui_only", ["User"], (), {
-        "name": "Member Directory", "route": "/members", "layout": "full-width", "intent": "Browse members.",
+        "name": "Member Directory", "ui_surface": "declarative_page", "route": "/members", "layout": "full-width", "intent": "Browse members.",
         "sections": [{"id": "members", "primitive": "DataTable", "intent": "Members.",
                       "config_hint": json.dumps({"columns": ["display_name", "avatar_url", "bio"]})}],
     }, id="user_entity_without_data_or_evidence"),
@@ -1302,7 +1302,7 @@ def test_platform_identity_is_recognized_by_what_the_surface_declares(
         ("session_id", "string"), ("user_id", "string"), ("name", "string"), ("active", "boolean"),
         ("expires_at", "datetime"), ("created_at", "datetime"),
     )),), {
-        "name": "Focus", "route": "/focus", "layout": "full-width", "intent": "Focus sessions.",
+        "name": "Focus", "ui_surface": "declarative_page", "route": "/focus", "layout": "full-width", "intent": "Focus sessions.",
         "sections": [{"id": "sessions", "primitive": "DataTable", "intent": "Sessions.",
                       "config_hint": json.dumps({"columns": ["name", "active", "expires_at"]})}],
     }, id="app_session_entity_of_claim_named_fields"),

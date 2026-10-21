@@ -1,5 +1,6 @@
 import { palettes } from '../ui/theme/palettes.js';
 import { fontImports } from '../ui/theme/fonts.js';
+import { generateThemeTokens, applyThemeTokens, getFontImports } from '../ui/theme/index.js';
 
 const THEME_TOKEN_DEFAULTS = {
   primitives: {
@@ -674,6 +675,7 @@ function buildSchemaChatTheme(config, basePath) {
     footer: fallback.footer,
     _basePath: basePath,
     _source: 'app-theme-bridge',
+    _appThemeConfig: config.theme,
   };
 }
 
@@ -746,6 +748,7 @@ function themeConfigToTheme(config, basePath) {
     footer: fallback.footer,
     _basePath: basePath,
     _source:   'config',
+    _appThemeConfig: config.theme,
   };
 }
 
@@ -753,14 +756,10 @@ function themeConfigToTheme(config, basePath) {
  * Apply App UI --mz-* tokens when the config response contains a `theme` key
  * (the schema-driven format from the active app root's brand/theme_config.json).
  *
- * Dynamically imports the token engine so this module stays usable in
- * environments where the theme module hasn't been bundled yet.
+ * Applied with the resolved chat theme, after the consumer accepts the load.
  */
-async function applyAppThemeTokens(themeConfig) {
+function applyAppThemeTokens(themeConfig) {
   try {
-    const { generateThemeTokens, applyThemeTokens, getFontImports } =
-      await import('../ui/theme/index.js');
-
     const tokens = generateThemeTokens(themeConfig);
     applyThemeTokens(tokens);
 
@@ -790,29 +789,23 @@ async function applyAppThemeTokens(themeConfig) {
  * Load theme from the declarative theme_config.json via backend API.
  * Falls back to BARE_FALLBACK_THEME when the API is unavailable.
  *
- * When the response contains a `theme` key (schema-driven format), the
- * --mz-* CSS token set is applied immediately for the App UI system.
- * The --color-* / --core-primitive-* variables are set via the
- * themeConfigToTheme path for chat UI.
+ * The resolved theme retains the App UI config so applyTheme sets both token
+ * families together. Loading alone must not repaint a newer active theme.
+ * A four-second request timeout uses the same fallback as a failed response.
  */
 async function loadThemeFromConfig() {
   const assetsPath = '/assets';
   const coreUrl = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_CORE_URL) || '';
   const baseUrl = coreUrl.replace(/\/+$/, '');
+  const controller = new AbortController();
+  const timeout = globalThis.setTimeout(() => controller.abort(), 4000);
 
   try {
     const url = baseUrl ? `${baseUrl}/api/theme-config` : '/api/theme-config';
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: controller.signal });
     if (!res.ok) throw new Error(`/api/theme-config returned ${res.status}`);
 
     const config = await res.json();
-
-    // Unified format: 'theme' key (App UI --mz-* tokens) coexists with
-    // top-level chat-shell tokens.
-    // Apply --mz-* tokens first, then continue to process chat-shell tokens.
-    if (config.theme && typeof config.theme === 'object') {
-      await applyAppThemeTokens(config.theme);
-    }
 
     // Top-level format (identity/assets/fonts/colors/shadows) drives
     // --color-* / --core-primitive-* tokens for chat UI.
@@ -832,6 +825,8 @@ async function loadThemeFromConfig() {
   } catch (err) {
     console.warn('⚠️ [THEME] Could not load theme config from API:', err.message);
     return { theme: BARE_FALLBACK_THEME, meta: { source: 'fallback', appId: 'default' } };
+  } finally {
+    globalThis.clearTimeout(timeout);
   }
 }
 
@@ -840,6 +835,7 @@ async function loadThemeFromConfig() {
 // ---------------------------------------------------------------------------
 
 const themeCache = new Map();
+let themeInitialization = 0;
 const CURRENT_APP_ID_STORAGE_KEY = 'mozaiks.current_app_id';
 
 function getAccessToken() {
@@ -862,10 +858,6 @@ function normalizeAppId(appId) {
   if (appId == null) return 'default';
   if (typeof appId === 'string') { const t = appId.trim(); return t.length > 0 ? t : 'default'; }
   return String(appId) || 'default';
-}
-
-function cacheTheme(appId, theme, meta = null) {
-  themeCache.set(appId, { theme, meta });
 }
 
 // ---------------------------------------------------------------------------
@@ -989,27 +981,38 @@ async function fetchPlatformOverrides(appId) {
  */
 export async function getTheme(appId = 'default') {
   const normalizedId = normalizeAppId(appId);
-  if (themeCache.has(normalizedId)) {
-    return themeCache.get(normalizedId).theme;
-  }
+  const cached = themeCache.get(normalizedId);
+  if (cached) return cached.theme || cached.promise;
 
-  // 1. Declarative theme_config.json — always load as the base
-  const brand = await loadThemeFromConfig();
-  let   theme = brand.theme;
-  let   meta  = brand.meta;
+  // Share pending loads as well as resolved themes across shell consumers.
+  const entry = {};
+  themeCache.set(normalizedId, entry);
+  entry.promise = (async () => {
+    const brand = await loadThemeFromConfig();
+    let theme = brand.theme;
+    let meta = brand.meta;
 
-  // 2. Platform API overrides (only when the endpoint exists)
-  const overrides = await fetchPlatformOverrides(normalizedId);
-  if (overrides) {
-    const overrideTheme = isSchemaThemeOverride(overrides.theme)
-      ? buildSchemaOverrideTheme(overrides.theme, theme)
-      : overrides.theme;
-    theme = deepMerge(theme, overrideTheme);
-    meta  = { ...meta, ...overrides.meta, source: 'brand+api' };
-  }
+    const overrides = await fetchPlatformOverrides(normalizedId);
+    if (overrides) {
+      const overrideTheme = isSchemaThemeOverride(overrides.theme)
+        ? buildSchemaOverrideTheme(overrides.theme, theme)
+        : overrides.theme;
+      theme = deepMerge(theme, overrideTheme);
+      meta = { ...meta, ...overrides.meta, source: 'brand+api' };
+    }
 
-  cacheTheme(normalizedId, theme, meta);
-  return theme;
+    entry.theme = theme;
+    entry.meta = meta;
+    return theme;
+  })().catch(error => {
+    if (themeCache.get(normalizedId) === entry) themeCache.delete(normalizedId);
+    throw error;
+  });
+  return entry.promise;
+}
+
+export function getCachedTheme(appId = 'default') {
+  return themeCache.get(normalizeAppId(appId))?.theme || null;
 }
 
 export function getThemeMetadata(appId = 'default') {
@@ -1033,9 +1036,10 @@ export function getCurrentAppId() {
 
 export async function initializeTheme(appId = 'default') {
   const normalizedId = normalizeAppId(appId);
+  const initialization = ++themeInitialization;
   try { localStorage.setItem(CURRENT_APP_ID_STORAGE_KEY, normalizedId); } catch (_) {}
   const theme = await getTheme(normalizedId);
-  applyTheme(theme);
+  if (initialization === themeInitialization && getCachedTheme(normalizedId) === theme) applyTheme(theme);
   return theme;
 }
 
@@ -1046,6 +1050,7 @@ export async function initializeTheme(appId = 'default') {
 export function applyTheme(theme) {
   try {
     const t = theme || BARE_FALLBACK_THEME;
+    if (t._appThemeConfig) applyAppThemeTokens(t._appThemeConfig);
 
     // Fonts
     const fonts = t.fonts || BARE_FALLBACK_THEME.fonts;

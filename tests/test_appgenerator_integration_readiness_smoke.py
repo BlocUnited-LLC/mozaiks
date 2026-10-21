@@ -125,9 +125,9 @@ class _FakeVaultBackend:
     def __init__(self) -> None:
         self.secrets = {}
 
-    async def store_secret(self, *, scope_id: str, service: str, secret_value: str, display_name=None, ttl_days: int = 30):
+    async def store_secret(self, *, scope: str, scope_id: str, service: str, secret_value: str, display_name=None, ttl_days: int = 30):
         del display_name, ttl_days
-        self.secrets[(scope_id, service)] = secret_value
+        self.secrets[(scope, scope_id, service)] = secret_value
         return {
             "success": True,
             "provider": "fake_vault",
@@ -135,8 +135,8 @@ class _FakeVaultBackend:
             "expires_at": "2026-06-01T00:00:00+00:00",
         }
 
-    async def get_secret(self, *, scope_id: str, service: str):
-        value = self.secrets.get((scope_id, service))
+    async def get_secret(self, *, scope: str, scope_id: str, service: str):
+        value = self.secrets.get((scope, scope_id, service))
         return {
             "success": value is not None,
             "provider": "fake_vault",
@@ -145,9 +145,9 @@ class _FakeVaultBackend:
             "expires_at": "2026-06-01T00:00:00+00:00" if value is not None else None,
         }
 
-    async def delete_secret(self, *, scope_id: str, service: str):
-        existed = (scope_id, service) in self.secrets
-        self.secrets.pop((scope_id, service), None)
+    async def delete_secret(self, *, scope: str, scope_id: str, service: str):
+        existed = (scope, scope_id, service) in self.secrets
+        self.secrets.pop((scope, scope_id, service), None)
         return {"success": existed, "provider": "fake_vault"}
 
 
@@ -337,7 +337,7 @@ async def test_appgenerator_integration_readiness_blocks_requests_saves_and_pass
         "endpoint_url": "https://analytics.example.test/events",
         "workspace_id": "workspace-neutral",
     }
-    assert vault.secrets[("app-analytics-smoke", "analytics_provider")] == SECRET_VALUE
+    assert vault.secrets[("app", "app-analytics-smoke", "analytics_provider")] == SECRET_VALUE
 
     assert SECRET_VALUE not in repr(request_payload)
     assert SECRET_VALUE not in repr(result)
@@ -503,7 +503,10 @@ async def test_studio_connector_read_response_redacts_secret_shaped_fields(monke
             }
         ]
 
-    monkeypatch.setattr(studio, "_resolve_studio_scope", lambda principal, app_id=None: (app_id, "user-operator"))
+    async def fake_owned_scope(principal, *, app_id=None):
+        return app_id, "user-operator"
+
+    monkeypatch.setattr(studio, "_resolve_owned_app_scope", fake_owned_scope)
     monkeypatch.setattr(studio, "list_connectors", fake_list_connectors)
 
     response = await studio.get_integration_connectors(app_id="app-analytics-smoke", principal=object())

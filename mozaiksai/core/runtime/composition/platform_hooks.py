@@ -58,6 +58,24 @@ Bundle keys (all optional):
         authenticated principal. It is persistence ownership authority; ordinary
         workspace_id remains dispatch metadata. Explicit None revokes workspace
         ownership, while omitting it preserves the authenticated token binding.
+        verified_tenant_id follows the same rules for the tenant: return it
+        only after verifying membership from the authenticated principal. It
+        keys module entitlement lookups and nothing else; ordinary tenant_id
+        remains dispatch metadata. Explicit None removes the token-bound
+        tenant, while omitting it preserves the authenticated token binding.
+        A hook that raises is skipped unless the caller resolves scope
+        fail-closed, so a hook that relies on removal must catch its own
+        lookup failures and return None. With AUTH_ANON_ACCESS=public the hook
+        also receives anonymous visitors (principal.is_authenticated is False),
+        who all share one user id: never return a verified key for them.
+
+    notification_scope_resolver
+                          async (*, principal, app_id) -> Optional[Dict[str, Any]]
+        Read-only assertion of one current app/user/tenant/workspace membership
+        and its roles/permissions for the notification inbox. No request-selected
+        workspace or default token grants are passed to this hook. The principal's
+        OIDC tenant may be a provider directory, not the app membership tenant.
+        Exactly one resolver may be registered; invalid results fail closed.
 
     workflow_ordering     (workflow_names: List[str]) -> List[str]
         Reorder the workflow list returned to the frontend (e.g. by journey
@@ -148,6 +166,7 @@ class PlatformExtensionBundle:
     chat_session_fields: Callable | None = None
     module_permission_resolver: Callable | None = None
     module_scope_resolver: Callable | None = None
+    notification_scope_resolver: Callable | None = None
     workflow_ordering: Callable | None = None
     workflow_name_resolver: Callable | None = None
     before_module_execution: Callable | None = None
@@ -161,6 +180,15 @@ def _clean_optional(value: Any) -> str | None:
     return text or None
 
 
+def _notification_grants(value: Any) -> list[str] | None:
+    if not isinstance(value, (list, tuple)) or len(value) > 64:
+        return None
+    if any(not isinstance(item, str) or not item or item != item.strip() or len(item) > 128
+           for item in value):
+        return None
+    return list(dict.fromkeys(value))
+
+
 _BUNDLE_KEYS = (
     "schema_version",
     "on_startup",
@@ -168,6 +196,7 @@ _BUNDLE_KEYS = (
     "chat_session_fields",
     "module_permission_resolver",
     "module_scope_resolver",
+    "notification_scope_resolver",
     "workflow_ordering",
     "workflow_name_resolver",
     "before_module_execution",
@@ -196,6 +225,7 @@ def _normalize_bundle(bundle: Any) -> PlatformExtensionBundle:
             chat_session_fields=bundle.get("chat_session_fields"),
             module_permission_resolver=bundle.get("module_permission_resolver"),
             module_scope_resolver=bundle.get("module_scope_resolver"),
+            notification_scope_resolver=bundle.get("notification_scope_resolver"),
             workflow_ordering=bundle.get("workflow_ordering"),
             workflow_name_resolver=bundle.get("workflow_name_resolver"),
             before_module_execution=bundle.get("before_module_execution"),
@@ -220,6 +250,7 @@ def _normalize_bundle(bundle: Any) -> PlatformExtensionBundle:
         chat_session_fields=getattr(bundle, "chat_session_fields", None),
         module_permission_resolver=getattr(bundle, "module_permission_resolver", None),
         module_scope_resolver=getattr(bundle, "module_scope_resolver", None),
+        notification_scope_resolver=getattr(bundle, "notification_scope_resolver", None),
         workflow_ordering=getattr(bundle, "workflow_ordering", None),
         workflow_name_resolver=getattr(bundle, "workflow_name_resolver", None),
         before_module_execution=getattr(bundle, "before_module_execution", None),
@@ -256,6 +287,7 @@ class PlatformHookRegistry:
         self._chat_session_fields_hooks: list[Callable] = []
         self._module_permission_resolver_hooks: list[Callable] = []
         self._module_scope_resolver_hooks: list[Callable] = []
+        self._notification_scope_resolver_hooks: list[Callable] = []
         self._workflow_ordering_hooks: list[Callable] = []
         self._workflow_name_resolver_hooks: list[Callable] = []
         self._before_module_execution_hooks: list[Callable] = []
@@ -325,6 +357,7 @@ class PlatformHookRegistry:
             "chat_session_fields": self._chat_session_fields_hooks,
             "module_permission_resolver": self._module_permission_resolver_hooks,
             "module_scope_resolver": self._module_scope_resolver_hooks,
+            "notification_scope_resolver": self._notification_scope_resolver_hooks,
             "workflow_ordering": self._workflow_ordering_hooks,
             "workflow_name_resolver": self._workflow_name_resolver_hooks,
             "before_module_execution": self._before_module_execution_hooks,
@@ -394,7 +427,7 @@ class PlatformHookRegistry:
         workflow_name: str,
         chat_id: str,
         *,
-        phase: Literal["prepare", "resume"] = "prepare",
+        phase: Literal["route", "prepare", "resume"] = "prepare",
         trigger_source: str = "chat",
         build_registry_id: str | None = None,
         source_chat_id: str | None = None,
@@ -405,6 +438,7 @@ class PlatformHookRegistry:
         References are requests, not authority. Hooks see a detached snapshot;
         a later extension may inspect but cannot replace an earlier binding.
         Resume validates persisted facts and cannot install a different value.
+        Route resolves an owned target without creating a build or chat.
         """
         from mozaiksai.core.session.build_binding import BuildTargetReference
 
@@ -516,7 +550,7 @@ class PlatformHookRegistry:
         tenant_id = _clean_optional(requested_scope.get("tenant_id"))
         workspace_id = _clean_optional(requested_scope.get("workspace_id"))
         permissions: list[str] = list(default_permissions) if default_permissions is not None else []
-        ownership_scope: dict[str, Any] = {}
+        verified_scope: dict[str, Any] = {}
 
         for hook in self._module_scope_resolver_hooks:
             try:
@@ -539,7 +573,9 @@ class PlatformHookRegistry:
                     res = await res
                 if isinstance(res, dict):
                     if "verified_workspace_id" in res:
-                        ownership_scope["_verified_workspace_id"] = _clean_optional(res["verified_workspace_id"])
+                        verified_scope["_verified_workspace_id"] = _clean_optional(res["verified_workspace_id"])
+                    if "verified_tenant_id" in res:
+                        verified_scope["_verified_tenant_id"] = _clean_optional(res["verified_tenant_id"])
                     if "app_id" in res:
                         app_id = str(res.get("app_id") or "")
                     if "user_id" in res:
@@ -577,8 +613,43 @@ class PlatformHookRegistry:
             "tenant_id": tenant_id,
             "workspace_id": workspace_id,
             "permissions": permissions,
-            **ownership_scope,
+            **verified_scope,
         }
+
+    async def call_notification_scope(
+        self, *, principal: Any, app_id: str,
+    ) -> dict[str, Any] | None:
+        """Ask one host resolver for a current membership; never promote token grants."""
+        if len(self._notification_scope_resolver_hooks) != 1 or not getattr(
+            principal, "is_authenticated", False
+        ):
+            return None
+        try:
+            result = self._notification_scope_resolver_hooks[0](
+                principal=principal, app_id=app_id,
+            )
+            if inspect.isawaitable(result):
+                result = await result
+        except Exception:
+            logger.warning("PLATFORM_HOOKS_NOTIFICATION_SCOPE_FAILED")
+            return None
+        required = {"app_id", "user_id", "tenant_id", "workspace_id", "roles", "permissions"}
+        if not isinstance(result, dict) or set(result) != required:
+            return None
+        for name in ("app_id", "user_id", "tenant_id", "workspace_id"):
+            value = result[name]
+            if not isinstance(value, str) or not value or value != value.strip():
+                return None
+        if result["app_id"] != app_id or result["user_id"] != getattr(principal, "user_id", None):
+            return None
+        bound_workspace = getattr(principal, "workspace_id", None)
+        if bound_workspace and result["workspace_id"] != bound_workspace:
+            return None
+        roles = _notification_grants(result["roles"])
+        permissions = _notification_grants(result["permissions"])
+        if roles is None or permissions is None:
+            return None
+        return {**result, "roles": roles, "permissions": permissions}
 
     async def call_before_module_execution(self, policy_input: Any) -> ModuleExecutionPolicyDecision:
         """Run fail-closed module execution policy hooks."""
@@ -722,6 +793,10 @@ class PlatformHookRegistry:
         return bool(self._module_scope_resolver_hooks)
 
     @property
+    def has_notification_scope_resolver(self) -> bool:
+        return bool(self._notification_scope_resolver_hooks)
+
+    @property
     def has_startup(self) -> bool:
         return bool(self._startup_hooks)
 
@@ -748,6 +823,7 @@ class PlatformHookRegistry:
             "chat_session_fields_hooks": len(self._chat_session_fields_hooks),
             "module_permission_resolver_hooks": len(self._module_permission_resolver_hooks),
             "module_scope_resolver_hooks": len(self._module_scope_resolver_hooks),
+            "notification_scope_resolver_hooks": len(self._notification_scope_resolver_hooks),
             "workflow_ordering_hooks": len(self._workflow_ordering_hooks),
             "workflow_name_resolver_hooks": len(self._workflow_name_resolver_hooks),
             "before_module_execution_hooks": len(self._before_module_execution_hooks),

@@ -1,0 +1,62 @@
+contract_id: outcome_feedback
+contract_type: build_pack_instructions
+selection_rules:
+  - id: explicit_end_user_feedback
+    when:
+      intent_any: [workflow ratings, user outcome feedback, agent helpfulness]
+    action: select_pack
+required_outputs:
+  - path: modules/outcome_feedback/module.yaml
+    owner: templates
+  - path: modules/outcome_feedback/backend/__init__.py
+    owner: templates
+  - path: modules/outcome_feedback/backend/handler.py
+    owner: templates
+  - path: modules/outcome_feedback/backend/service.py
+    owner: templates
+  - path: modules/outcome_feedback/backend/repo.py
+    owner: templates
+  - path: data/migrations/001_outcome_feedback_collections.json
+    owner: templates
+runtime_boundaries:
+  - id: app_owned_records
+    rule: >
+      Declare outcome_feedback.records in data/contract.json with scope=app,
+      tenancy=per_user, owner_field=user_id, entity=WorkflowFeedback, and a
+      required user_id field. Declare all evidence fields including the nested
+      response object so account export preserves them. Set lifecycle.write_mode
+      to workflow_write: this receipt sink must not receive generated create,
+      update or delete actions accepting caller-authored evidence. Set the
+      owning generated_module capability's primary_entities to WorkflowFeedback.
+      The canonical data compiler renders policy.py, schemas.py and
+      account_data_handler.py; do not generate parallel versions. Persist only verified runtime
+      receipts. The module accepts UI event and outcome identifiers, never
+      client-provided ratings, identities, transcripts, or provider data.
+  - id: authenticated_workflow
+    rule: >
+      A generated tool calls collect_workflow_feedback with runtime context,
+      its declared tool id, the declared producer agent, and a stable result id,
+      after delivering that result. It then dispatches
+      outcome_feedback.record_workflow_feedback with ui_event_id and outcome_id
+      using dispatch_workflow_module_action. The action requires workflow_tool
+      provenance and resolves the durable session-owned receipt.
+  - id: ui_reuse
+    rule: >
+      Declare workflow_primitive=outcome_feedback, component=OutcomeFeedback,
+      realization=shipped_component. No custom rating form or HTTP receiver.
+      Skip must remain available. Feedback cannot gate result delivery.
+  - id: evidence_quality
+    rule: >
+      One response per app/user/chat/outcome is counted. Preserve missing values.
+      A rating is a user's reported experience, not verified execution success.
+      Metrics need per-dimension response counts and eligible/invited/answered
+      denominators; a response collection alone cannot establish response rate.
+      Simulations, model judges, and operator reviews stay outside this collection.
+  - id: private_by_default
+    rule: >
+      Feedback stays with the app. Any cross-app export requires a separately
+      declared app-owned integration, scope, and policy. Never send feedback to
+      the generic framework telemetry emitter or copy a hosted product receiver.
+forbidden_outputs:
+  - path_prefix: services/outcome_feedback/
+facades: []

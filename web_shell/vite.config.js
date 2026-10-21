@@ -103,11 +103,15 @@ function tailwindSourceLinkType(target) {
 
 function ensureTailwindSourceLinks(entries) {
   const linkRoot = path.resolve(__dirname, '.mozaiks-tailwind-sources');
+  const required = process.env.MOZAIKS_REQUIRE_TAILWIND_SOURCE_LINKS === '1';
 
   try {
-    fs.rmSync(linkRoot, { recursive: true, force: true });
     fs.mkdirSync(linkRoot, { recursive: true });
+    for (const name of fs.readdirSync(linkRoot)) {
+      fs.rmSync(path.join(linkRoot, name), { recursive: true, force: true });
+    }
   } catch (error) {
+    if (required) throw error;
     console.warn(`[mozaiks-web-shell] Failed to prepare Tailwind source links: ${error.message}`);
     return linkRoot;
   }
@@ -119,11 +123,44 @@ function ensureTailwindSourceLinks(entries) {
       const linkPath = path.join(linkRoot, name);
       fs.symlinkSync(fs.realpathSync(target), linkPath, tailwindSourceLinkType(target));
     } catch (error) {
+      if (required) throw error;
       console.warn(`[mozaiks-web-shell] Failed to link Tailwind source '${name}': ${error.message}`);
     }
   }
 
   return linkRoot;
+}
+
+function isLoopbackAddress(address) {
+  return address === '::1' || address.startsWith('127.') || address.startsWith('::ffff:127.');
+}
+
+// The address of a client that is not on this machine, or null for a local one.
+function remoteClientAddress(req) {
+  const address = req.socket?.remoteAddress ?? '';
+  return isLoopbackAddress(address) ? null : address || 'unknown';
+}
+
+// Dev-proxy `configure` hook: give the backend the address of a client that is
+// not on this machine (see the proxy entries below).
+function markRemoteClients(proxy) {
+  // HTTP: 'start' is emitted for every proxied request before the outgoing
+  // request is built from req.headers. Not 'proxyReq': http-proxy-3 skips that
+  // event for a request that carries an Expect header, and never emits it on
+  // its fetch path (FORCE_FETCH_PATH=true), so such a request would arrive
+  // unmarked and look local.
+  proxy.on('start', (req) => {
+    const address = remoteClientAddress(req);
+    if (address) req.headers['x-forwarded-for'] = address;
+  });
+  // WebSocket upgrade: 'proxyReqWs' is emitted for every upgrade before the
+  // request is sent. Never forward another machine's request unmarked.
+  proxy.on('proxyReqWs', (proxyReq, req) => {
+    const address = remoteClientAddress(req);
+    if (!address) return;
+    if (proxyReq.headersSent) return proxyReq.destroy();
+    proxyReq.setHeader('X-Forwarded-For', address);
+  });
 }
 
 // Favicon — read from brand/theme_config.json if available (best-effort; runtime
@@ -187,8 +224,10 @@ export default defineConfig(({ mode }) => {
   const tailwindSourceLinkRoot = ensureTailwindSourceLinks([
     ['chat-ui-src', chatUiSrcRoot],
     ['factory-app-ui', path.resolve(factoryAppRoot, 'app/ui')],
+    ['factory-app-admin', path.resolve(factoryAppRoot, 'app/admin')],
     ['factory-workflows', factoryWorkflowsRoot],
     ['platform-ui', path.resolve(platformAppDir, 'ui')],
+    ['platform-admin', path.resolve(platformAppDir, 'admin')],
     ['platform-workflows', platformWorkflowRoot],
   ]);
   const viteFsAllow = Array.from(new Set([
@@ -236,6 +275,16 @@ export default defineConfig(({ mode }) => {
   cacheDir: path.join(__dirname, 'node_modules', '.vite-apps', createHash('sha256').update(platformAppDir).digest('hex').slice(0, 16)),
   plugins: [
     {
+      name: 'monaco-patched-sanitizer',
+      enforce: 'pre',
+      resolveId(source, importer) {
+        const sanitizer = path.resolve(__dirname, 'node_modules/monaco-editor/esm/vs/base/browser/domSanitize.js').replace(/\\/g, '/');
+        if (source === './dompurify/dompurify.js' && importer?.split('?', 1)[0].replace(/\\/g, '/') === sanitizer) {
+          return path.resolve(chatUiSrcRoot, 'utils/monacoDomPurify.js');
+        }
+      },
+    },
+    {
       name: 'mozaiks-app-extensions',
       resolveId(id) {
         if (id === '@platform/extensions') return '\0mozaiks-app-extensions';
@@ -255,15 +304,21 @@ export default defineConfig(({ mode }) => {
       name: 'jsx-in-js',
       enforce: 'pre',
       async transform(code, id) {
-      const isChatUiJs = /(?:[\\/]chat-ui[\\/]src[\\/]|[\\/]mozaiks_chat_ui[\\/]src[\\/]).*\.js$/.test(id);
+          // Asset requests belong to Vite's loaders, even when the asset is .js.
+          const request = id.split('#', 1)[0];
+          const queryIndex = request.indexOf('?');
+          const sourceId = (queryIndex < 0 ? request : request.slice(0, queryIndex)).replace(/\\/g, '/');
+          const query = new URLSearchParams(queryIndex < 0 ? '' : request.slice(queryIndex + 1));
+          if (id.startsWith('\0') || !sourceId.endsWith('.js') || query.has('raw') || query.has('url')) return;
+          const isChatUiJs = /(?:\/chat-ui\/src\/|\/mozaiks_chat_ui\/src\/).*\.js$/.test(sourceId);
         const isWorkflowOrModuleUiJs =
-          [platformWorkflowRoot, factoryWorkflowsRoot].some((root) => id.replace(/\\/g, '/').startsWith(root.replace(/\\/g, '/') + '/') && id.endsWith('.js')) ||
-          /[\\/]factory_app[\\/]workflows[\\/].*[\\/]ui[\\/].*\.js$/.test(id) ||
-          /[\\/]factory_app[\\/]app[\\/]workflows[\\/].*[\\/]ui[\\/].*\.js$/.test(id) ||
-          /[\\/]app[\\/](?:workflows|modules)[\\/].*[\\/]ui[\\/].*\.js$/.test(id);
+            [platformWorkflowRoot, factoryWorkflowsRoot].some((root) => sourceId.startsWith(root.replace(/\\/g, '/') + '/')) ||
+            /\/factory_app\/workflows\/.*\/ui\/.*\.js$/.test(sourceId) ||
+            /\/factory_app\/app\/workflows\/.*\/ui\/.*\.js$/.test(sourceId) ||
+            /\/app\/(?:workflows|modules)\/.*\/ui\/.*\.js$/.test(sourceId);
         const isProductUiJs =
-          /[\\/][^/\\]+-platform[\\/].*\.js$/.test(id) ||
-          id.replace(/\\/g, '/').startsWith(platformAppDirForward + '/');
+            /\/[^/]+-platform\/.*\.js$/.test(sourceId) ||
+            sourceId.startsWith(platformAppDirForward + '/');
         if (isChatUiJs || isWorkflowOrModuleUiJs || isProductUiJs) {
           return transformWithEsbuild(code, id, { loader: 'jsx', jsx: 'automatic', jsxImportSource: 'react' });
         }
@@ -340,9 +395,17 @@ export default defineConfig(({ mode }) => {
     fs: {
       allow: viteFsAllow,
     },
+    // With authentication off the backend grants development access
+    // (AUTH_ANON_ACCESS=local) only to requests from this machine, and treats
+    // ANY forwarding header as "not this machine". Every proxied request reaches
+    // it from this dev server's loopback connection, so markRemoteClients marks
+    // the clients that are elsewhere: another machine's request carries its
+    // address in X-Forwarded-For (replacing whatever it sent), while a browser
+    // on this machine passes through with no header added. (xfwd would add the
+    // header for every client and so refuse local browsers too.)
     proxy: {
-      '/api': { target: apiUrl, changeOrigin: true },
-      '/ws':  { target: apiUrl.replace('http', 'ws'), ws: true },
+      '/api': { target: apiUrl, changeOrigin: true, configure: markRemoteClients },
+      '/ws':  { target: apiUrl.replace('http', 'ws'), ws: true, configure: markRemoteClients },
     },
   },
 
@@ -381,13 +444,8 @@ export default defineConfig(({ mode }) => {
             return 'vendor-auth';
           }
 
-          if (
-            id.includes('/node_modules/@monaco-editor/') ||
-            id.includes('/node_modules/monaco-editor/')
-          ) {
-            return 'vendor-monaco';
-          }
-
+          // Monaco follows CodeEditorPane's lazy boundary. A forced vendor chunk
+          // pulls its sanitizer into the eager shared dependency graph.
           return undefined;
         },
       },
@@ -395,6 +453,9 @@ export default defineConfig(({ mode }) => {
   },
 
   optimizeDeps: {
+    // Keep Monaco's copied sanitizer import visible to the exact resolver above
+    // in dev as well as production, instead of prebundling its vendored copy.
+    exclude: ['monaco-editor'],
     rolldownOptions: {
       // Vite 8 uses Rolldown for dependency scanning before normal plugins run.
       // Several first-party UI files intentionally use JSX in .js modules, so

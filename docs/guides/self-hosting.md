@@ -36,6 +36,7 @@ docker build -t mozaiks -f infra/docker/Dockerfile .
 docker run -p 127.0.0.1:8000:8000 \
   -e ENV=development -e ENVIRONMENT=development \
   -e AUTH_ENABLED=false -e AUTH_ANON_ROLES=admin,user \
+  -e AUTH_ANON_ACCESS=open \
   -e MONGO_URI="mongodb://your-mongo-host:27017/mozaiks" \
   -e OPENAI_API_KEY="sk-..." \
   mozaiks
@@ -43,6 +44,14 @@ docker run -p 127.0.0.1:8000:8000 \
 
 The backend listens at **http://localhost:8000**. To use Studio in a browser,
 start the repository's web shell separately as described in Option 2.
+
+`AUTH_ANON_ACCESS=open` gives every client that can connect development
+access. A container needs it because your browser reaches the container
+through Docker's network gateway, not as the container's own machine. Keep the
+port published on `127.0.0.1` only, so that other machines cannot connect;
+every container on the same Docker network still can. On Linux, use Docker
+Engine 28.0 or later: older engines can let a machine on the same network
+reach a container's address directly despite a `127.0.0.1` publish.
 
 !!! note "Using Anthropic instead of OpenAI?"
     Set `LLM_PRIMARY_API_TYPE=anthropic` and replace `OPENAI_API_KEY` with
@@ -90,6 +99,16 @@ cp .env.example .env
 # For browser sign-in, set VITE_OIDC_CLIENT_ID=mozaiks-studio and
 # VITE_OIDC_AUTHORITY=http://localhost:8080/realms/mozaiks.
 ```
+
+To run the stack without authentication instead, set `AUTH_ENABLED=false`,
+`AUTH_ANON_ACCESS=open` and `MOZAIKS_APP_PORTS=127.0.0.1:8000:8000` in `.env`,
+for the same reason as in Option 1. `MOZAIKS_APP_PORTS` is how Compose
+publishes the app port. Unset, it is `8000:8000` (every interface), which suits
+the default authenticated stack; `127.0.0.1:8000:8000` keeps other machines
+out, although every container on the same Docker network can still connect.
+On Linux, use Docker Engine 28.0 or later: older engines can let a machine on
+the same network reach a container's address directly despite a `127.0.0.1`
+publish.
 
 Then start:
 
@@ -183,6 +202,18 @@ stack but hardened for a real server:
 - No default passwords — all secrets must be set explicitly
 - Keycloak runs in production mode (faster, no dev-mode warnings)
 - You must set `KC_HOSTNAME` to your actual domain
+- Keycloak requires a separate operator-owned realm import with HTTPS browser
+  callbacks and origins. The included local realm cannot pass the production check.
+
+Copy `factory_app/app/brand/realm-export.json` to a file **outside this repository**.
+In that copy, replace the `mozaiks-studio` client's local `redirectUris` and
+`webOrigins` with the exact HTTPS callback and origin for your deployed browser.
+Set `MOZAIKS_PROD_REALM_IMPORT_PATH` to the absolute path of that JSON file in
+the Compose `--env-file`. Keep the file private if it contains provider secrets.
+Set `KC_HOSTNAME` to the public Keycloak hostname and configure the browser's
+`VITE_OIDC_*` values and backend `AUTH_AUDIENCE` for those clients. The
+`keycloak-realm-check` service rejects missing imports, localhost or wildcard
+callbacks, non-HTTPS origins, and a local Keycloak hostname before Keycloak starts.
 
 ```bash
 cd infra/compose
@@ -201,7 +232,14 @@ Required environment variables for production (set these in `.env`):
 | `KC_ADMIN_PASSWORD` | Keycloak admin password |
 | `KC_DB_PASSWORD` | Password for Keycloak's internal Postgres database |
 | `KC_HOSTNAME` | Your public domain (e.g. `mozaiks.yourdomain.com`) |
+| `MOZAIKS_PROD_REALM_IMPORT_PATH` | Absolute path to the operator-owned Keycloak realm JSON, outside this repository. |
 | `AUTH_AUDIENCE` | `mozaiks-api` for the included realm, or your dedicated API audience. Compose requires this value and the runtime verifies it on every token. |
+
+Keycloak's `--import-realm` applies the file only when the realm does not already
+exist in its database. On an existing deployment, inspect and update the live
+Keycloak client redirects and origins through the Keycloak administration path;
+changing the JSON file alone does not migrate that realm. Verify an actual
+browser login and the expected token audience before opening access.
 
 !!! tip "Put Mozaiks behind a reverse proxy"
     In production, put a reverse proxy (nginx, Caddy, Traefik) in front of port
@@ -336,14 +374,15 @@ what — so Mozaiks doesn't have to build any of that itself.
 
 ### What Mozaiks pre-configures
 
-The Docker Compose stack imports the Mozaiks realm from
-`factory_app/app/brand/realm-export.json`. That file is a repo-local Keycloak
-seed for the OSS compose stack. It includes a public `mozaiks-studio` browser
-client and a separate `mozaiks-api` audience client. For a deployed browser, change
-the registered callback and web origin to your actual browser URL, and configure
-the public `VITE_OIDC_*` settings alongside backend auth settings. Generated apps carry provider-neutral
-auth behavior in `app/config/auth.yaml`; provider-specific realm export or
-social-login setup remains an operator/host concern.
+Local Compose imports `factory_app/app/brand/realm-export.json`. It is a
+repo-local Keycloak seed with a public `mozaiks-studio` browser client, a
+separate `mozaiks-api` audience client, and localhost browser callbacks.
+Production Compose imports only the operator-owned file named by
+`MOZAIKS_PROD_REALM_IMPORT_PATH`, after validating its HTTPS callbacks and
+origins. Configure public `VITE_OIDC_*` settings alongside backend auth settings.
+Generated apps carry provider-neutral auth behavior in `app/config/auth.yaml`;
+provider-specific realm export or social-login setup remains an operator/host
+concern.
 
 ### Token audience
 
@@ -372,6 +411,56 @@ issued to the realm's other clients. With the
 Do not use Keycloak's shared `account` audience for either setting. Tokens
 issued to unrelated clients can carry it, so it does not bind a token to
 the Mozaiks API.
+
+### Admin access and email verification
+
+An address in `app/app.json` `admins` grants admin only once Keycloak marks
+that email verified (the token's `email_verified` claim is `true`). The
+included local realm allows self-registration and has no mail server, so it
+does not verify email: a freshly registered account is not an admin, even with
+an allowlisted address. Otherwise anyone who registered first with an admin's
+address would become an admin.
+
+On the packaged Compose stack, mark the admin's email verified by hand:
+
+1. Open the Keycloak admin console at `http://localhost:8080/admin/` and sign
+   in as `KC_ADMIN_USER` with `KC_ADMIN_PASSWORD`. That account belongs to the
+   `master` realm.
+2. Open the realm list at the top of the left sidebar and choose **mozaiks**.
+   Accounts created through the Mozaiks sign-in page live in `mozaiks`, not in
+   `master`.
+3. Go to **Users**, search for the admin's address, and click the username.
+4. On the **Details** tab, turn **Email verified** on and click **Save**.
+5. Sign out of Mozaiks and sign in again. The new access token carries
+   `email_verified: true`.
+
+A role in the token is the other way to grant admin, but the packaged setup
+does not provide one. The realm defines no `admin` role, and the Compose
+backend uses the generic `jwt` provider. That provider reads roles only from
+the top-level claim named by `AUTH_ROLES_CLAIM` (default `roles`), not from
+Keycloak's `realm_access.roles`. To grant admin by role, in the `mozaiks`
+realm:
+
+1. **Realm roles → Create role**: name it `admin` and save.
+2. **Users → the user → Role mapping → Assign role**: assign the realm role
+   `admin`.
+3. **Clients → mozaiks-studio → Client scopes → mozaiks-studio-dedicated →
+   Add mapper → By configuration → User Realm Role**: set **Name** and
+   **Token Claim Name** to `roles`, keep **Multivalued** on, turn **Add to
+   access token** on, and save.
+4. Sign in again.
+
+The `keycloak` provider (`AUTH_PROVIDER=keycloak` with `KEYCLOAK_URL`,
+`KEYCLOAK_REALM` and `KEYCLOAK_CLIENT_ID`) reads `realm_access.roles` itself,
+so it needs the role but not the mapper.
+
+For a deployed realm, configure SMTP (**Realm settings → Email**) and turn on
+**Realm settings → Login → Verify email**, or turn off **User registration**
+and create accounts yourself. The packaged realm leaves verification off
+because Compose ships no mail server and Keycloak would block every login on
+an email it cannot send. See
+[Admin allowlist needs a verified email](../architecture/verified/auth-setup.md#admin-allowlist-needs-a-verified-email)
+for other providers.
 
 For detailed Keycloak configuration (custom domains, social login, external IdPs)
 see [Auth Setup](../architecture/verified/auth-setup.md).

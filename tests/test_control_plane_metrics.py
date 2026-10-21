@@ -1,6 +1,6 @@
 """Unit tests for mozaiksai.control_plane.metrics.
 
-Tests ControlPlaneBuildTimer, log_build_outcome, and check_token_usage
+Tests ControlPlaneBuildTimer and check_token_usage
 without any network calls, AG2 dependencies, or live LLMs.
 """
 from __future__ import annotations
@@ -13,7 +13,6 @@ from mozaiksai.control_plane.metrics import (
     ControlPlaneBuildTimer,
     _token_anomaly_threshold,
     check_token_usage,
-    log_build_outcome,
 )
 
 # ---------------------------------------------------------------------------
@@ -122,63 +121,6 @@ class TestControlPlaneBuildTimer:
                 pass
         end_records = [r for r in caplog.records if "cp_stage_end" in r.getMessage()]
         assert end_records
-
-
-# ---------------------------------------------------------------------------
-# log_build_outcome
-# ---------------------------------------------------------------------------
-
-
-class TestLogBuildOutcome:
-    def test_ok_outcome_logs_at_info(self, caplog):
-        with caplog.at_level(logging.INFO, logger="mozaiksai.control_plane.metrics"):
-            log_build_outcome(
-                outcome="ok",
-                request_id="req-1",
-                app_id="app-1",
-                change_class="patch",
-                workflow_sequence="app_revision",
-                duration_ms=500,
-            )
-        info_records = [r for r in caplog.records if "cp_build_outcome" in r.getMessage()]
-        assert info_records
-        record = info_records[0]
-        assert record.__dict__["cp_outcome"] == "ok"
-        assert record.__dict__["cp_change_class"] == "patch"
-        assert record.__dict__["cp_workflow_sequence"] == "app_revision"
-
-    def test_error_outcome_logs_at_warning(self, caplog):
-        with caplog.at_level(logging.WARNING, logger="mozaiksai.control_plane.metrics"):
-            log_build_outcome(
-                outcome="error",
-                request_id="req-2",
-                app_id="app-2",
-                error="LLM returned invalid JSON",
-            )
-        warn_records = [
-            r for r in caplog.records
-            if r.levelno >= logging.WARNING and "cp_build_outcome" in r.getMessage()
-        ]
-        assert warn_records
-        record = warn_records[0]
-        assert record.__dict__["cp_outcome"] == "error"
-        assert record.__dict__["cp_error"] == "LLM returned invalid JSON"
-
-    def test_skipped_outcome_logs_at_debug(self, caplog):
-        with caplog.at_level(logging.DEBUG, logger="mozaiksai.control_plane.metrics"):
-            log_build_outcome(outcome="skipped", request_id="req-3")
-        debug_records = [r for r in caplog.records if "cp_build_outcome" in r.getMessage()]
-        assert debug_records
-
-    def test_extra_fields_merged(self, caplog):
-        with caplog.at_level(logging.INFO, logger="mozaiksai.control_plane.metrics"):
-            log_build_outcome(
-                outcome="ok",
-                extra={"custom_field": "custom_value"},
-            )
-        info_records = [r for r in caplog.records if "cp_build_outcome" in r.getMessage()]
-        assert info_records
-        assert info_records[0].__dict__["custom_field"] == "custom_value"
 
 
 # ---------------------------------------------------------------------------

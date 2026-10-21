@@ -132,8 +132,9 @@ def test_profile_references_resolve() -> None:
     plan = _run_plan("Add an archive_project action to the projects module API.", "feature")
 
     assert plan.profiles.classifier == "classifier"
-    assert plan.profiles.planner_or_codegen == "planner_replanner"
-    assert plan.profiles.reviewer_validator == "reviewer_validator"
+    assert plan.profiles.planner_or_codegen == "impact_analyzer"
+    assert plan.profiles.surface_regeneration == "codegen"
+    assert plan.profiles.reviewer_validator is None
 
 
 def test_json_output_path_works(capsys) -> None:

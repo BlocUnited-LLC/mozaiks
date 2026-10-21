@@ -15,6 +15,10 @@
 
 param(
   [int]$Port = 8000,
+  # Loopback by default. -BindHost 0.0.0.0 listens on all interfaces, but with
+  # authentication off the backend refuses other machines unless
+  # AUTH_ANON_ACCESS=open.
+  [string]$BindHost = "127.0.0.1",
   [switch]$SkipInfra,
   [ValidateSet("example", "mongo")]
   [string]$InfraProfile = "example",
@@ -143,7 +147,7 @@ if ($pythonCmd -eq "python") {
   Write-Host "[backend] .venv not found; using Python from PATH." -ForegroundColor Yellow
 }
 
-$uvicornArgs = @("-m", "uvicorn", "mozaiksai.hosts.studio:app", "--host", "0.0.0.0", "--port", [string]$Port)
+$uvicornArgs = @("-m", "uvicorn", "mozaiksai.hosts.studio:app", "--host", $BindHost, "--port", [string]$Port)
 # Importing mozaiksai never reads a .env (#778). This launcher is the process
 # entry point, so it hands the repo .env to uvicorn, which loads it before the
 # app import without overriding anything already set in this shell.
@@ -152,7 +156,7 @@ if (Test-Path -LiteralPath $repoEnvFile) {
   $uvicornArgs += @("--env-file", $repoEnvFile)
 }
 
-Write-Host "[backend] Starting uvicorn on port $Port..." -ForegroundColor Cyan
+Write-Host "[backend] Starting uvicorn on $BindHost`:$Port..." -ForegroundColor Cyan
 Write-Host "[backend] Command: $pythonCmd $($uvicornArgs -join ' ')" -ForegroundColor DarkGray
 
 $backendExitCode = 0

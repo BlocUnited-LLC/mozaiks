@@ -19,6 +19,7 @@ from .generated_app import (
     GeneratedAppValidationRequest,
     GeneratedAppValidationResult,
     validate_generated_app_bundle,
+    validate_generated_app_candidate,
 )
 from .workspace import validate_app_workspace
 
@@ -38,4 +39,5 @@ __all__ = [
     "ValidationRun",
     "scan_functional_generated_app",
     "validate_generated_app_bundle",
+    "validate_generated_app_candidate",
 ]

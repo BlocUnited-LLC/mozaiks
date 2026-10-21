@@ -6,6 +6,7 @@
 import UserInputRequest from './UserInputRequest';
 import ShellUIToolRenderer from './ShellUIToolRenderer';
 import ApprovalCard from './ApprovalCard';
+import OutcomeFeedback from './OutcomeFeedback';
 import ChoicePicker from './ChoicePicker';
 import ConfirmationSummary from './ConfirmationSummary';
 import FormCard from './FormCard';
@@ -41,6 +42,7 @@ const CoreComponents = {
   UserInputRequest,
   ShellUIToolRenderer,
   ApprovalCard,
+  OutcomeFeedback,
   ChoicePicker,
   ConfirmationSummary,
   FormCard,
@@ -67,6 +69,7 @@ export {
   UserInputRequest,
   ShellUIToolRenderer,
   ApprovalCard,
+  OutcomeFeedback,
   ChoicePicker,
   ConfirmationSummary,
   FormCard,

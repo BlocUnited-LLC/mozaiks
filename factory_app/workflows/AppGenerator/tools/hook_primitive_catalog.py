@@ -30,7 +30,10 @@ def inject_primitive_catalog(agent: Any, messages: list[dict[str, Any]]) -> None
             "Rules:\n"
             "- Do not emit primitive names outside this shipped catalog.\n"
             "- Validate both top-level page sections and nested Grid child primitives against this catalog.\n"
-            "- If the page needs a richer UX, compose it from these shipped primitives instead of inventing a new primitive."
+            "- Compose shipped primitives only when they faithfully express the approved experience. "
+            "Otherwise preserve the approved custom_react_page realization and its bounded route contract; "
+            "if the approved realization is declarative, request design/plan repair before changing it. "
+            "Do not invent primitive names or weaken the experience to fit this catalog."
             "\n- The current approved app_build_plan overrides older design docs: preserve app name, field optionality, and requested scope."
             "\n- ui.modal.open/close actions set modal_id, never modalId. The id must name a Modal on the same page."
             "\n- Table actions pass the selected record into the modal as selected_row. Edit forms declare initial_values_key: selected_row."
@@ -45,6 +48,9 @@ def inject_primitive_catalog(agent: Any, messages: list[dict[str, Any]]) -> None
             "\n- Code writes and logs the bindings the contracts determine (cleared undeclared detail/trend keys, a metric id that names a returned field, a create/edit modal replacing a workflow button with no generated workflow, an Edit modal for a gated update action on a listed collection). Open choices fail with the valid options for every page at once."
             "\n- Every user-facing action with an entitlement_gate must be reachable from a page action or data binding. Give paid create/edit actions working forms and submit bindings."
             "\n- workflow actions may reference only workflows present in the supplied bundle artifacts. Do not invent a workflow for CRUD; use the declared module action."
+            "\n- Custom React pages use these same shipped component APIs. DataTable columns do not execute render/cell callbacks. Use actions with selection and onAction(actionId, selectedRows), or compose a semantic list with shared Buttons for per-item controls. Never hide required actions inside unsupported column props."
+            "\n- React state updater functions must stay pure: do not call moduleAction, start/stop timers, or set other state inside setState(previous => ...). React may call an updater more than once. Own asynchronous work in explicit event handlers or effects with cleanup."
+            "\n- If an interaction must persist a result exactly once, carry a stable operation identity through its declared action and require backend idempotency; component state alone cannot guarantee this across retries/reloads. Surface a failed save with a retry action instead of swallowing it. If the approved action contract cannot express the requirement, request repair of its owning contract."
         )
         update_agent_section(agent, _SURFACE_HEADER, format_ui_surface_taxonomy_guidance())
         update_agent_section(agent, _HEADER, body)

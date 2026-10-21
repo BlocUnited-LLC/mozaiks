@@ -241,9 +241,52 @@ class SessionStateStore:
         )
 
     async def upsert(self, state: SessionState) -> None:
+        if state.pending_harness_decision is not None:
+            # Approval snapshots and atomic consumption must compare the same
+            # canonical decision that load() reconstructs from the document.
+            pending = _coerce_pending_harness_decision(
+                asdict(state.pending_harness_decision), fallback=state.updated_at,
+            )
+            if pending is None:
+                raise ValueError("Pending harness decision requires a nonempty id, type, message, and rationale")
+            state.pending_harness_decision = pending
         coll = await self._coll()
         payload: dict[str, Any] = asdict(state)
         payload["_id"] = state.session_id
         payload["lifecycle_state"] = state.lifecycle_state.value
         payload["sequence_status"] = state.sequence_status.value
         await coll.update_one({"_id": state.session_id}, {"$set": payload}, upsert=True)
+
+    async def consume_pending_harness_decision(self, state: SessionState, *, explanation: str) -> bool:
+        """Clear precisely the decision read by this caller, once and without upsert."""
+        pending = state.pending_harness_decision
+        if pending is None:
+            return False
+        coll = await self._coll()
+        now = datetime.now(UTC)
+        result = await coll.update_one(
+            {
+                "_id": self.session_id_for_scope(state.app_id, state.user_id, state.target_app_id),
+                "app_id": state.app_id,
+                "user_id": state.user_id,
+                "target_app_id": state.target_app_id,
+                "lifecycle_state": SessionLifecycle.AWAITING_DECISION.value,
+                "active_revision_id": state.active_revision_id,
+                "active_change_request_id": state.active_change_request_id,
+                "pending_harness_decision": asdict(pending),
+            },
+            {"$set": {
+                "pending_harness_decision": None,
+                "lifecycle_state": SessionLifecycle.ACTIVE.value,
+                "last_route_explanation": explanation,
+                "updated_at": now,
+            }},
+            upsert=False,
+        )
+        if result.matched_count != 1:
+            return False
+        state.pending_harness_decision = None
+        state.lifecycle_state = SessionLifecycle.ACTIVE
+        state.last_route_explanation = explanation
+        state.updated_at = now
+        return True

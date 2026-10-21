@@ -115,6 +115,17 @@ env:
 # Secret references — values are loaded from Kubernetes Secrets, not stored here
 # ──────────────────────────────────────────────────────────────────────────────
 # Set secretName to a pre-existing Kubernetes Secret holding these keys.
+# Configure an identity provider: the host refuses to start with no auth
+# configuration at all. Put KEYCLOAK_URL, KEYCLOAK_REALM and KEYCLOAK_CLIENT_ID
+# in the secret (or set AUTH_* provider settings). Without authentication, the
+# pod does not start with AUTH_ANON_ACCESS=local (the default once
+# authentication is off): the chart serves on 0.0.0.0, an address other
+# machines can reach, and mozaiks serve refuses local there.
+# AUTH_ANON_ACCESS=open gives every client that can reach the pod development
+# access, including every other pod in the cluster: use it only with
+# ingress.enabled=false and a NetworkPolicy that limits the pod to trusted
+# clients. AUTH_ANON_ACCESS=public is refused while host.name is studio (the
+# default), because Studio manages workspaces and builds for whoever calls it.
 # Create the secret before deploying:
 #   kubectl create secret generic mozaiks-secrets \
 #     --from-literal=OPENAI_API_KEY=sk-... \
