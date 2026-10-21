@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -129,6 +128,16 @@ PROFILE_SHELL_ROUTE = {
     "component": "ProfilePage",
     "label": "Profile",
     "order": 998,
+    "title": "Profile",
+    "shellMode": "social",
+}
+
+
+PUBLIC_PROFILE_SHELL_ROUTE = {
+    "path": "/u/:username",
+    "component": "ProfilePage",
+    "label": "User Profile",
+    "order": 999,
     "title": "Profile",
     "shellMode": "social",
 }
@@ -848,6 +857,8 @@ def _apply_dynamic_shell_navigation(
         *_navigation_items_from_config(navigation, catalog),
         *_shortcut_navigation_items(shortcuts, catalog),
     ])
+    # The public profile path is a ``:username`` template, so no entry can link to it.
+    all_items = [item for item in all_items if item.get("path") != PUBLIC_PROFILE_SHELL_ROUTE["path"]]
 
     resolved: dict[str, Any] = {
         "desktop": {"header": [], "sidebar": [], "rail": []},
@@ -933,14 +944,8 @@ def _apply_dynamic_shell_navigation(
     }
 
 
-async def build_shell_config(
-    *, surface: str = "platform", client_scope: Mapping[str, Any] | None = None
-) -> dict:
-    """Compose app-shell config from platform-owned manifests.
-
-    ``client_scope`` is the requesting client's ASGI scope; the auth
-    projection uses it (see ``build_app_auth_projection``).
-    """
+async def build_shell_config(*, surface: str = "platform") -> dict:
+    """Compose app-shell config from platform-owned manifests."""
     app_root = resolve_app_root()
     ai_path = app_root / "config" / "ai.json"
 
@@ -953,7 +958,7 @@ async def build_shell_config(
     }
     app_manifest = _load_app_manifest()
     auth_contract = load_app_auth_contract(app_root, auth_required=app_manifest.get("authRequired", False))
-    result["auth"] = await build_app_auth_projection(auth_contract, client_scope=client_scope)
+    result["auth"] = await build_app_auth_projection(auth_contract)
     shell_shortcuts: dict[str, Any] | None = None
     shell_navigation: dict[str, Any] | None = None
     shell_chrome: dict[str, Any] | None = None
@@ -1052,22 +1057,31 @@ async def build_shell_config(
             },
         },
     )
-    _append_page_once(
-        pages,
-        {
-            "path": "/u/:username",
-            "component": "ProfilePage",
-            "label": "User Profile",
-            "order": 999,
-            "meta": {
-                "requiresAuth": True,
-                "title": "Profile",
-                "appShell": True,
-                "shellMode": "social",
-                "ai_context": "The user is viewing another user's public profile.",
+    # Public profiles belong to people who sign in, so the route exists only
+    # when the host has sign-in, whichever manifest declared it. It is a
+    # ``:username`` template, and this config is served before sign-in to every
+    # viewer, so it cannot name anyone's real profile: it is a deep-link target,
+    # never a navigation entry.
+    if result["auth"]["runtime"]["enabled"]:
+        _append_page_once(
+            pages,
+            {
+                "path": PUBLIC_PROFILE_SHELL_ROUTE["path"],
+                "component": PUBLIC_PROFILE_SHELL_ROUTE["component"],
+                "label": PUBLIC_PROFILE_SHELL_ROUTE["label"],
+                "order": PUBLIC_PROFILE_SHELL_ROUTE["order"],
+                "meta": {
+                    "requiresAuth": True,
+                    "title": PUBLIC_PROFILE_SHELL_ROUTE["title"],
+                    "appShell": True,
+                    "shellMode": PUBLIC_PROFILE_SHELL_ROUTE["shellMode"],
+                    "ai_context": "The user is viewing another user's public profile.",
+                    "navigation": {"include": False},
+                },
             },
-        },
-    )
+        )
+    else:
+        pages = [page for page in pages if page.get("path") != PUBLIC_PROFILE_SHELL_ROUTE["path"]]
     result["pages"] = _dedupe_and_sort_pages(pages)
 
     pages = result.get("pages", [])
