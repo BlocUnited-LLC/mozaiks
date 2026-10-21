@@ -5,9 +5,11 @@ import { useNavigation } from "../../providers/NavigationProvider";
 import { useNavigationActions } from "../../navigation/useNavigationActions";
 import {
   deriveShellActionContext,
+  filterPersonalAccountItems,
   getNavigationTargetKey,
   getUserRoles,
   isShellItemVisible,
+  isSignInAvailable,
   resolveShellAction,
   resolveShellActions,
 } from "../../navigation/shellActions";
@@ -157,6 +159,7 @@ const Header = ({
     header: navHeader,
     profile: navProfile,
     notifications: navNotifications,
+    auth: shellAuth,
   } = useNavigation();
   const handleNavigationItem = useNavigationActions();
   const { login, logout } = useChatUI();
@@ -177,10 +180,13 @@ const Header = ({
     [currentUser, location.pathname, location.search, route, shellMode, userRoles]
   );
   const headerActions = useMemo(
-    () => (Array.isArray(headerConfig.actions)
-      ? resolveShellActions(headerConfig.actions, shellActionContext)
-      : []),
-    [headerConfig.actions, shellActionContext]
+    () => filterPersonalAccountItems(
+      Array.isArray(headerConfig.actions)
+        ? resolveShellActions(headerConfig.actions, shellActionContext)
+        : [],
+      shellAuth,
+    ),
+    [headerConfig.actions, shellActionContext, shellAuth]
   );
   const visibleHeaderPages = useMemo(() => {
     const actionTargets = new Set(
@@ -189,20 +195,23 @@ const Header = ({
         .filter(Boolean)
     );
 
-    return headerPages.filter((item) => {
+    return filterPersonalAccountItems(headerPages, shellAuth).filter((item) => {
       if (!isShellItemVisible(item, userRoles)) return false;
       const target = getNavigationTargetKey(item);
       return !target || !actionTargets.has(target);
     });
-  }, [headerActions, headerPages, userRoles]);
+  }, [headerActions, headerPages, userRoles, shellAuth]);
   const primaryAction = useMemo(
     () => headerActions.find((item) => item?.variant === "gradient") || headerActions[0] || null,
     [headerActions]
   );
   const profileMenu = useMemo(
-    () => mergeProfileMenu(getDefaultProfileMenu(currentUser), profileConfig.menu)
-      .filter((item) => isShellItemVisible(item, userRoles)),
-    [currentUser, profileConfig.menu, userRoles]
+    () => filterPersonalAccountItems(
+      mergeProfileMenu(getDefaultProfileMenu(currentUser), profileConfig.menu)
+        .filter((item) => isShellItemVisible(item, userRoles)),
+      shellAuth,
+    ),
+    [currentUser, profileConfig.menu, userRoles, shellAuth]
   );
 
   const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -330,7 +339,8 @@ const Header = ({
   const notificationsIconSrc = resolveAssetSource(notificationsConfig.icon);
   const profileLabel = getUserLabel(currentUser, profileConfig.defaultLabel || "User");
   const profileSubLabel = getUserSubLabel(currentUser, profileConfig.sublabel || "");
-  const showProfile = profileConfig.show !== false;
+  // Without a sign-in system the menu keeps only non-personal entries; with none left there is nothing to open.
+  const showProfile = profileConfig.show !== false && (isSignInAvailable(shellAuth) || profileMenu.length > 0);
   const showNotifications = notificationsConfig.show !== false;
   const notificationsPath = notificationsConfig.path;
   const primaryActionLabel = primaryAction?.label || primaryAction?.id || "Action";
