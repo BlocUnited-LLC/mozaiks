@@ -3,13 +3,13 @@ import { DEFAULT_FOOTER_CONFIG } from "../../styles/themeProvider";
 import { useNavigation } from "../../providers/NavigationProvider";
 import { useNavigationActions } from "../../navigation/useNavigationActions";
 import { useChatUI } from "../../context/ChatUIContext";
-import { getUserRoles, isShellItemVisible } from "../../navigation/shellActions";
+import { filterPersonalAccountItems, getUserRoles, isShellItemVisible } from "../../navigation/shellActions";
 import "./header-styles.css";
 
 const isInternalHref = (value) => typeof value === "string" && value.startsWith("/");
 
 const Footer = () => {
-  const { footer: navFooter } = useNavigation();
+  const { footer: navFooter, auth: shellAuth } = useNavigation();
   const { user } = useChatUI();
   const handleNavigationItem = useNavigationActions();
   const footerConfig = { ...DEFAULT_FOOTER_CONFIG, ...navFooter };
@@ -17,7 +17,7 @@ const Footer = () => {
 
   if (footerConfig.visible === false) return null;
 
-  const links = (footerConfig.links || DEFAULT_FOOTER_CONFIG.links || [])
+  const links = filterPersonalAccountItems(footerConfig.links || DEFAULT_FOOTER_CONFIG.links || [], shellAuth)
     .filter((link) => isShellItemVisible(link, userRoles));
   if (links.length === 0) return null;
 

@@ -50,6 +50,13 @@ Profile must not render app/workspace management. Billing plans, subscriptions,
 entitlements, collaborators, deployments, build runs, app access, audit logs, and
 team/org settings belong in Admin Portal or Studio.
 
+Profile entry points exist only when someone can sign in. When the host runs
+with authentication disabled, the shell shows no Profile, Sign in, or Sign out
+entries in its menus, header, footer, or mobile bar, and the public profile
+route `/u/:username` is not registered. In local development `/me` says
+sign-in is not enabled instead of showing a profile; see
+[Shell System](../frontend/chat-ui/shell-system.md#shortcuts).
+
 Profile is never the org/workspace home. The org/workspace home belongs to
 Studio / Workspace Shell and can carry its own brand, app portfolio, and team
 management entries.

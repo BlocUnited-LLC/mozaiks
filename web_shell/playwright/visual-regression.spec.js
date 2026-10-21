@@ -39,12 +39,23 @@ const shellConfig = JSON.parse(
 const routeManifest = JSON.parse(
   fs.readFileSync(path.join(repoRoot, 'factory_app', 'app', 'ui', 'route_manifest.json'), 'utf8'),
 );
+// The profile menu /api/shell-config composes for Studio: shell.json profile
+// shortcuts plus the Admin Portal entry the host injects for admins.
+const composedProfile = {
+  show: true,
+  menu: [
+    { id: 'profile', label: 'Profile', action: 'navigate', path: '/me', order: 0 },
+    { id: 'admin-portal', label: 'Admin Portal', action: 'navigate', path: '/apps', requiresRole: 'admin' },
+    { id: 'signout', label: 'Sign Out', action: 'signout', order: 1 },
+  ],
+};
 const composedShellConfig = {
   auth: localDevelopmentAuth,
   ...shellConfig,
   appId: appConfig.appId,
   appName: appConfig.appName,
   pages: routeManifest.pages || [],
+  profile: composedProfile,
 };
 const appsPayload = {
   apps: [
