@@ -43,17 +43,11 @@ const composedShellConfig = {
   // Like the host: with sign-in disabled the public profile route is not registered.
   pages: [...(routeManifest.pages || []).filter((route) => route.path !== '/u/:username'), ...transitionRoutes],
 };
-const authEnabledShellConfig = {
+// Static shell configs without a host auth projection preserve configured
+// personal chrome; use this in layout-only tests without starting a login flow.
+const personalChromeShellConfig = {
   ...composedShellConfig,
-  auth: {
-    ...localDevelopmentAuth,
-    runtime: {
-      ...localDevelopmentAuth.runtime,
-      enabled: true,
-      provider: 'jwt',
-      local_development: false,
-    },
-  },
+  auth: null,
 };
 const dashboardPayload = {
   schema_version: 'mozaiks.dashboard.v1',
@@ -1480,7 +1474,7 @@ test('assistant panel follows the bottom bar in keyboard tab order', async ({ pa
 test('header menus stay above the open assistant panel on short desktop viewports', async ({ page, isMobile }) => {
   test.skip(isMobile, 'Desktop header menus and floating assistant only');
   await page.route('**/api/shell-config', async (route) => {
-    await route.fulfill({ json: authEnabledShellConfig });
+    await route.fulfill({ json: personalChromeShellConfig });
   });
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.goto('/apps');
@@ -1561,7 +1555,7 @@ test('five configured mobile tabs retain their labels beside Assistant', async (
   ];
   await page.route('**/api/shell-config', async (route) => {
     await route.fulfill({ json: {
-      ...authEnabledShellConfig,
+      ...personalChromeShellConfig,
       mobile: { bottomBar: { items: configured } },
     } });
   });
