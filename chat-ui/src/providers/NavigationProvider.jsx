@@ -22,6 +22,7 @@ const DEFAULT_NAVIGATION = {
   appId: null,
   surface: 'platform',
   landing_spot: '/',
+  auth: null,
   pages: [],
   header: { logo: { src: null, wordmark: null, alt: 'App', href: '/' }, pages: [], actions: [] },
   profile: {
@@ -201,6 +202,7 @@ const normalizeNavigationConfig = (navigation = {}) => ({
   ...DEFAULT_NAVIGATION,
   ...navigation,
   surface: typeof navigation.surface === 'string' ? navigation.surface : DEFAULT_NAVIGATION.surface,
+  auth: navigation.auth && typeof navigation.auth === 'object' ? navigation.auth : DEFAULT_NAVIGATION.auth,
   pages: Array.isArray(navigation.pages) ? navigation.pages : DEFAULT_NAVIGATION.pages,
   header: normalizeHeaderConfig(navigation.header),
   profile: normalizeProfileConfig(navigation.profile),
@@ -278,6 +280,7 @@ export const NavigationProvider = ({
             ...(shellConfig.appId ? { appId: shellConfig.appId } : {}),
             entry_point: shellConfig.entry_point,
             chat_startup_mode: shellConfig.chat_startup_mode || 'ask',
+            ...(shellConfig.auth ? { auth: shellConfig.auth } : {}),
             ...(shellConfig.pages?.length ? { pages: shellConfig.pages } : {}),
             ...(shellConfig.landing_spot ? { landing_spot: shellConfig.landing_spot } : {}),
             ...(shellConfig.header ? { header: shellConfig.header } : {}),
@@ -332,6 +335,8 @@ export const NavigationProvider = ({
     appName: navigation.appName || null,
     appId: navigation.appId || null,
     surface: navigation.surface || DEFAULT_NAVIGATION.surface,
+    // The host's verified auth projection; shell chrome reads sign-in availability from it.
+    auth: navigation.auth,
     landing_spot: navigation.landing_spot || '/',
     chat_startup_mode: navigation.chat_startup_mode || 'ask',  // "ask" or "workflow"
     entry_point: navigation.entry_point || null,
