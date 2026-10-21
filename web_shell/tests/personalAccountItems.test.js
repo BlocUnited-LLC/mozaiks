@@ -95,6 +95,7 @@ function renderShellComponent(file, navigation, props = {}) {
     '../../context/ChatUIContext': { useChatUI: () => ({ user: localUser, login: () => {}, logout: () => {} }) },
     'react-icons/fi': { FiMessageCircle: () => React.createElement('span') },
     './ShellNavigationIcon.jsx': {
+      __esModule: true,
       default: ({ fallback = '' }) => React.createElement('span', null, fallback),
       hasNamedIcon: () => false,
     },
