@@ -39,7 +39,7 @@ src/
 ├── pages/             ChatPage, AdminPage, AppAdminDashboard, ProfilePage, page hooks
 ├── platform/          Platform bridge for non-browser hosts (`@mozaiks/chat-ui/platform`)
 ├── primitives/        Core artifact renderers
-├── providers/         Config-driven BrandingProvider, NavigationProvider
+├── providers/         NavigationProvider (shell config from `/api/shell-config`)
 ├── registry/          Generic component registry
 ├── services/          Service initialization (API adapter selection)
 ├── session/           Chat session storage and workflow chat resolution

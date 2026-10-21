@@ -55,7 +55,7 @@ async def test_operator_readiness_pack_materializes_rendered_outputs_end_to_end(
                         "pack_source_path": str(OPERATOR_READINESS_PACK_ROOT),
                     }
                 ],
-                "build_tasks": [],
+                "build_tasks": [{"task_id": "seed"}],
             },
             "capability_packs": [
                 {
@@ -94,6 +94,35 @@ async def test_operator_readiness_pack_materializes_rendered_outputs_end_to_end(
 def test_readiness_template_requires_profile() -> None:
     with pytest.raises(ManagedCapabilityTemplateError, match="readiness_profile"):
         resolve_templates_for_pack(OPERATOR_READINESS_PACK_ROOT, "operator_readiness")
+
+
+def test_scanner_verifies_selected_pack_pins_without_rendering_context() -> None:
+    """The public validation facade has files and selected packs, not build context.
+
+    Declared-output layout checks need only the verified source, so they must
+    not require template variables; a stale selected pin must still fail.
+    """
+    from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import (
+        scan_generated_bundle,
+    )
+    from mozaiksai.core.validation.generated_app import (
+        GeneratedAppValidationRequest,
+        validate_generated_app_bundle,
+    )
+
+    pack = {"id": "operator_readiness", "pack_source_path": str(OPERATOR_READINESS_PACK_ROOT)}
+    files = {"docs/operations/undeclared.md": ""}
+    errors = scan_generated_bundle(files, capability_packs=[pack])
+    assert not any("could not render" in error for error in errors)
+    assert any("undeclared repository-support pack outputs" in error for error in errors)
+    result = validate_generated_app_bundle(GeneratedAppValidationRequest(files=files, capability_packs=[pack]))
+    assert not any("could not render" in item.message for item in result.diagnostics)
+
+    stale = {**pack, "digest": "sha256:" + "0" * 64}
+    assert any(
+        "selected digest does not match" in error
+        for error in scan_generated_bundle(files, capability_packs=[stale])
+    )
 
 
 def test_readiness_yaml_preserves_string_values() -> None:

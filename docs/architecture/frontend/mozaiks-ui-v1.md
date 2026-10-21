@@ -253,14 +253,17 @@ strict structured output          AppSchemaOutput / workflow UI CodeFiles — ty
   → functional validation         scan_functional_generated_app: no 404/501/NotImplemented,
                                   registered components only, endpoint shape rules
   → real runtime boot             app_runtime_load: AppLoader boots the assembled bundle;
-                                  Playwright render acceptance for the UI lane
+                                  Playwright: mocked rendering smoke; real-host acceptance
+                                  only on an owned launch (verified_owned_launch)
   → promotion                     the only path from generated/ staging into an active app root
 ```
 
 The quality gates are runtime state, not prompt prose: `app_ui_quality_status` and
 `workflow_ui_quality_status` must equal `passed` before assembly/delivery, and
-Playwright findings convert to structured `passed | needs_revision | blocked`
-production-readiness output. The LLM never chooses file locations (layout registry),
+Playwright findings convert to canonical `ValidationIssue` entries and one
+`accept | repair | block` decision through the shared acceptance controller.
+Only a real-host run on an owned launch can accept a candidate; a mocked run is a
+rendering smoke. The LLM never chooses file locations (layout registry),
 never invents primitives or components (§4 registries), and never bypasses a gate.
 
 ---

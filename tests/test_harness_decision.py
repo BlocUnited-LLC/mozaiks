@@ -113,6 +113,7 @@ def test_decision_policy_clarifies_low_confidence_scope() -> None:
         ),
         selected_paths=["app/ui/pages/Dashboard.jsx"],
         explicit_scope=False,
+        confirmation_required_paths=(),
     )
 
     assert decision.decision_type == "clarify_scope"
@@ -133,6 +134,7 @@ def test_decision_policy_auto_patch_for_high_confidence_scope() -> None:
         ),
         selected_paths=["app/ui/pages/Dashboard.jsx"],
         explicit_scope=False,
+        confirmation_required_paths=(),
     )
 
     assert decision.decision_type == "auto_patch"
@@ -159,6 +161,7 @@ def test_decision_policy_requires_confirmation_for_multi_file_scope() -> None:
             "app/ui/components/ExportPanel.jsx",
         ],
         explicit_scope=False,
+        confirmation_required_paths=(),
     )
 
     assert decision.decision_type == "clarify_scope"

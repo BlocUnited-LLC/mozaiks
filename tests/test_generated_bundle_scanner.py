@@ -10,6 +10,9 @@ from factory_app.workflows.AppGenerator.tools.deployment_contract import (
     generate_deployment_artifacts,
 )
 from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import scan_generated_bundle
+from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+    resolve_managed_capability_templates,
+)
 from mozaiksai.core.workflow.generator_support.subscription_data_contract import (
     ensure_subscription_assignment_stores,
 )
@@ -109,9 +112,19 @@ def _auth_routes_json() -> str:
 
 
 def _mozaikspay_pack() -> list[dict]:
-    # Include pack_source_path so _packs_providing() can load provides_capabilities
-    # from contract.yaml and correctly skip the entitlement_dispatch requirement.
+    # The verified source's contract.yaml provides subscription_write_path, which
+    # skips the entitlement_dispatch requirement.
     return [{"id": "mozaikspay", "capability_source": "managed_capability", "pack_source_path": str(_MOZAIKSPAY_PACK_ROOT)}]
+
+
+def _mozaikspay_template_files() -> dict[str, str]:
+    """The shipped MozaiksPay pack's materialized files and provenance."""
+    return {
+        item["filename"]: item["content"]
+        for item in resolve_managed_capability_templates(
+            _mozaikspay_pack(), context_variables={"build_timestamp": "2026-10-17T00:00:00Z"},
+        )
+    }
 
 
 def _valid_mozaikspay_saas_bundle(*, include_deployment: bool = True) -> dict[str, str]:
@@ -156,42 +169,6 @@ plans:
         amount: 100000
         cadence: monthly
 """,
-        "services/integrations/mozaikspay_client.py": """
-from mozaiksai.core.data.persistence.connector_store import ConnectorStore
-from mozaiksai.core.secrets import get_connector_vault_backend
-
-_CONNECTOR_SERVICE = "mozaikspay"
-MOZAIKSPAY_API_BASE = "MOZAIKSPAY_API_BASE"
-MOZAIKSPAY_API_KEY = "MOZAIKSPAY_API_KEY"
-MOZAIKSPAY_CLIENT_ID = "MOZAIKSPAY_CLIENT_ID"
-MOZAIKSPAY_CLIENT_SECRET = "MOZAIKSPAY_CLIENT_SECRET"
-
-class MozaiksPayClient:
-    async def get_subscription_status_for_scope(self, **scope):
-        return {"success": True, "scope": scope}
-
-    async def get_runtime_ai_usage(self, limit=500):
-        return {"success": True, "limit": limit}
-
-    async def create_billing_portal_session(self, **payload):
-        return {"success": True, "portal_url": "https://billing.example.test"}
-""",
-        "modules/billing_portal/module.yaml": """
-schema_version: mozaiks.module.v1
-module:
-  id: billing_portal
-  handler: backend.handler:BillingPortalHandler
-actions:
-  - id: get_subscription_status
-    handler_method: get_subscription_status
-  - id: get_usage_status
-    handler_method: get_usage_status
-  - id: list_plans
-    handler_method: list_plans
-    api_surface: public_readonly
-  - id: open_billing_portal
-    handler_method: open_billing_portal
-""",
         "modules/reports/module.yaml": """
 schema_version: mozaiks.module.v1
 module:
@@ -202,81 +179,9 @@ actions:
     handler_method: generate_report
     entitlement_gate: reports.generate
 """,
-        "modules/billing_portal/backend/handler.py": """
-class BillingPortalHandler:
-    pass
-""",
-        "modules/billing_portal/backend/service.py": """
-from services.integrations.mozaikspay_client import MozaiksPayClient
-
-class BillingPortalService:
-    async def get_subscription_status(self, ctx):
-        return await MozaiksPayClient().get_subscription_status_for_scope(user_id=ctx.user_id)
-
-    async def get_usage_status(self, ctx, limit=500):
-        return await MozaiksPayClient().get_runtime_ai_usage(limit=limit)
-
-    async def open_billing_portal(self, ctx, return_url):
-        return await MozaiksPayClient().create_billing_portal_session(return_url=return_url)
-""",
-        "modules/billing_portal/backend/schemas.py": """
-class SubscriptionStatus:
-    pass
-""",
-        "ui/pages/billing.yaml": """
-schema_version: mozaiks.app_page.v1
-name: billing
-route: /billing
-title: Billing
-page_type: record_list
-layout: full-width
-sections:
-  - id: subscription-status
-    primitive: DataTable
-    config:
-      columns:
-        - key: id
-          label: ID
-      api_endpoint: /api/modules/billing_portal/get_subscription_status
-  - id: billing-portal
-    primitive: DataTable
-    config:
-      columns:
-        - key: id
-          label: ID
-      api_endpoint: /api/modules/billing_portal/open_billing_portal
-""",
-        "ui/pages/usage.yaml": """
-schema_version: mozaiks.app_page.v1
-name: usage
-route: /usage
-title: Usage
-page_type: record_list
-layout: full-width
-sections:
-  - id: usage-status
-    primitive: DataTable
-    config:
-      columns:
-        - key: id
-          label: ID
-      api_endpoint: /api/modules/billing_portal/get_usage_status
-""",
-        "ui/pages/pricing.yaml": """
-schema_version: mozaiks.app_page.v1
-name: pricing
-route: /pricing
-title: Pricing
-page_type: landing
-layout: full-width
-sections:
-  - id: plan-catalog
-    primitive: PricingCatalog
-    config:
-      title: Plans
-      api_endpoint: /api/modules/billing_portal/list_plans
-""",
     }
+    # The MozaiksPay client, billing facade and pages are the verified pack templates, as assembly writes them.
+    files.update(_mozaikspay_template_files())
     files["data/contract.json"] = json.dumps(ensure_subscription_assignment_stores(
         {"version": "1", "surfaces": [], "shared_collections": []},
         {"contract_required": True, "subscription_config_file": yaml.safe_load(files["config/subscriptions.yaml"])},
@@ -468,17 +373,28 @@ def test_scan_generated_bundle_rejects_direct_managed_capability_endpoint_calls(
     """Backend service files are checked for direct calls to selected managed capability endpoints."""
     errors = scan_generated_bundle(
         {
-            "services/integrations/custompay_client.py": "class CustomPayClient: pass\n",
-            "modules/billing_portal/backend/service.py": (
-                'endpoint = "/api/modules/custompay/create_checkout_session"\n'
-                'other = "/api/modules/custompay/assign_plan"\n'
+            "services/integrations/mozaikspay_client.py": "class MozaiksPayClient: pass\n",
+            "modules/reports/backend/service.py": (
+                'endpoint = "/api/modules/mozaikspay/create_checkout_session"\n'
+                'other = "/api/modules/mozaikspay/assign_plan"\n'
             ),
         },
+        capability_packs=[{"id": "mozaikspay", "capability_source": "managed_capability"}],
+    )
+
+    assert any("/api/modules/mozaikspay/create_checkout_session" in error for error in errors)
+    assert any("/api/modules/mozaikspay/assign_plan" in error for error in errors)
+
+
+def test_scan_generated_bundle_refuses_a_managed_capability_no_verified_source_resolves() -> None:
+    """A managed capability the installed catalog does not ship is never admitted by its id alone."""
+    errors = scan_generated_bundle(
+        {"services/integrations/custompay_client.py": "class CustomPayClient: pass\n"},
         capability_packs=[{"id": "custompay", "capability_source": "managed_capability"}],
     )
 
-    assert any("/api/modules/custompay/create_checkout_session" in error for error in errors)
-    assert any("/api/modules/custompay/assign_plan" in error for error in errors)
+    assert len(errors) == 1
+    assert errors[0].startswith("Selected CapabilityPack output contract is invalid: Selected pack 'custompay'")
 
 
 def test_scan_generated_bundle_allows_managed_refund_adapter_call() -> None:
@@ -518,23 +434,27 @@ def test_scan_generated_bundle_rejects_selected_managed_capability_internals() -
     assert any("must not generate provider internals" in error for error in errors)
 
 
-def test_scan_generated_bundle_rejects_inline_pack_forbidden_output_prefixes() -> None:
+def test_scan_generated_bundle_reads_forbidden_output_prefixes_only_from_the_verified_contract() -> None:
+    """An inline forbidden_outputs row is no pack contract; the verified contract's prefixes apply."""
     errors = scan_generated_bundle(
         {
-            "services/integrations/testpay_client.py": "class TestPayClient: pass\n",
+            "services/integrations/mozaikspay_client.py": "class MozaiksPayClient: pass\n",
             "modules/provider_ledger/module.yaml": "module:\n  id: provider_ledger\n",
+            "modules/wallet/module.yaml": "module:\n  id: wallet\n",
         },
         capability_packs=[
             {
-                "id": "testpay",
+                "id": "mozaikspay",
                 "capability_source": "managed_capability",
                 "forbidden_outputs": [{"path_prefix": "modules/provider_ledger/"}],
             }
         ],
     )
 
-    assert any("forbidden output prefixes" in error for error in errors)
-    assert any("modules/provider_ledger/module.yaml" in error for error in errors)
+    forbidden = [error for error in errors if "forbidden output prefixes" in error]
+    assert len(forbidden) == 1, errors
+    assert "modules/wallet/module.yaml" in forbidden[0]
+    assert "modules/provider_ledger" not in forbidden[0]
 
 
 def test_scan_generated_bundle_rejects_mozaikspay_contract_forbidden_output_prefixes() -> None:
@@ -1111,17 +1031,18 @@ plans:
 """
 
 
-def test_scan_generated_bundle_skips_entitlement_dispatch_for_any_pack_providing_subscription_write_path_inline() -> None:
-    """Any managed pack with in-memory provides_capabilities: [subscription_write_path] exempts entitlement_dispatch."""
-    errors = scan_generated_bundle(
-        {"config/subscriptions.yaml": _ASSIGNMENT_STORE_SUBS_YAML},
-        capability_packs=[{
-            "id": "custombilling",
-            "capability_source": "managed_capability",
-            "provides_capabilities": ["subscription_write_path"],
-        }],
+def test_scan_generated_bundle_ignores_an_inline_subscription_write_path_claim() -> None:
+    """An inline provides_capabilities claim never exempts entitlement_dispatch; only a verified contract can."""
+    claim = {"capability_source": "managed_capability", "provides_capabilities": ["subscription_write_path"]}
+    unresolved = scan_generated_bundle(
+        {"config/subscriptions.yaml": _ASSIGNMENT_STORE_SUBS_YAML}, capability_packs=[{"id": "custombilling", **claim}],
     )
-    assert not any("entitlement_dispatch" in error for error in errors)
+    assert len(unresolved) == 1 and "Selected pack 'custombilling'" in unresolved[0], unresolved
+    # mozaiks_cloud's verified contract provides only its cloud write paths.
+    errors = scan_generated_bundle(
+        {"config/subscriptions.yaml": _ASSIGNMENT_STORE_SUBS_YAML}, capability_packs=[{"id": "mozaiks_cloud", **claim}],
+    )
+    assert any("entitlement_dispatch" in error and "assignment_store" in error for error in errors)
 
 
 def test_scan_generated_bundle_skips_entitlement_dispatch_for_mozaikspay_via_contract_file() -> None:
@@ -1148,7 +1069,7 @@ def test_scan_generated_bundle_does_not_skip_entitlement_dispatch_for_non_manage
     errors = scan_generated_bundle(
         {"config/subscriptions.yaml": _ASSIGNMENT_STORE_SUBS_YAML},
         capability_packs=[{
-            "id": "custombilling",
+            "id": "messaging",
             "capability_source": "operator_pack",
             "provides_capabilities": ["subscription_write_path"],
         }],

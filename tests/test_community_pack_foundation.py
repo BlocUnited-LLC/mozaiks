@@ -42,13 +42,29 @@ def _read_yaml(path: Path) -> dict[str, Any]:
     return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
 
-def _pack_descriptor(pack_dir: Path, pack_id: str) -> dict[str, Any]:
-    """Build a capability_packs descriptor from a local fixture pack directory."""
+def _pack_descriptor(pack_dir: Path, pack_id: str, *, verifiable: bool = True) -> dict[str, Any]:
+    """Build a capability_packs descriptor from a local fixture pack directory.
+
+    A community pack is an external source, so it is selected with the version
+    and digest its bytes verify to. A deliberately malformed pack cannot
+    verify: it gets placeholder pins, so the materializer's own integrity
+    check is what refuses it.
+    """
+    if verifiable:
+        from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+            verify_pack_integrity,
+        )
+
+        metadata = verify_pack_integrity(pack_dir, pack_id)
+        pins = {"version": metadata["version"], "digest": metadata["digest"]}
+    else:
+        pins = {"version": "0.1.0", "digest": "sha256:" + "0" * 64}
     return {
         "id": pack_id,
         "pack_id": pack_id,
         "pack_source_path": str(pack_dir),
         "capability_source": "generated_module",
+        **pins,
     }
 
 
@@ -61,6 +77,29 @@ def _materialize(*pack_descs: dict[str, Any]) -> list[dict[str, str]]:
 
 def _files_map(*pack_descs: dict[str, Any]) -> dict[str, str]:
     return {f["filename"]: f["content"] for f in _materialize(*pack_descs)}
+
+
+def _single_pack_bundle(pack_desc: dict[str, Any]) -> dict[str, str]:
+    """One pack's files plus the shared UI roots the canonical composer builds from its contribution."""
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        resolve_managed_capability_templates,
+    )
+    from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+        SHARED_UI_OUTPUT_PATHS,
+    )
+    from mozaiksai.core.workflow.generator_support.ui_registry_composition import (
+        compose_ui_registry,
+    )
+
+    contributions: list[dict[str, Any]] = []
+    files = {
+        f["filename"]: f["content"]
+        for f in resolve_managed_capability_templates([pack_desc], ui_contributions=contributions)
+    }
+    # The resolver holds shared roots back; assembly composes them from every contribution.
+    assert not SHARED_UI_OUTPUT_PATHS & set(files)
+    files.update(compose_ui_registry(contributions, files))
+    return files
 
 
 # ---------------------------------------------------------------------------
@@ -349,7 +388,7 @@ def test_catalog_schema_validation_rejects_untrusted_keys_at_materialization(
     templates_dir = pack_dir / "templates"
     templates_dir.mkdir()
 
-    desc = _pack_descriptor(pack_dir, "adversarial")
+    desc = _pack_descriptor(pack_dir, "adversarial", verifiable=False)
     with pytest.raises(ManagedCapabilityTemplateError, match="schema validation"):
         _materialize(desc)
 
@@ -369,7 +408,7 @@ def test_missing_declared_asset_rejected_before_materialization(tmp_path: Path) 
         encoding="utf-8",
     )
     with pytest.raises(PackIntegrityError, match="Declared pack asset not found"):
-        _materialize(_pack_descriptor(pack_dir, "missing_asset"))
+        _materialize(_pack_descriptor(pack_dir, "missing_asset", verifiable=False))
 
 
 def test_contract_unknown_runtime_affecting_field_rejected(tmp_path: Path) -> None:
@@ -391,7 +430,7 @@ def test_contract_unknown_runtime_affecting_field_rejected(tmp_path: Path) -> No
         encoding="utf-8",
     )
     with pytest.raises(PackIntegrityError, match="unsupported fields"):
-        _materialize(_pack_descriptor(pack_dir, "bad_contract"))
+        _materialize(_pack_descriptor(pack_dir, "bad_contract", verifiable=False))
 
 
 def test_declared_surface_ownership_allows_pack_materialization(tmp_path: Path) -> None:
@@ -439,7 +478,7 @@ def test_malformed_surface_ownership_rejected_before_pack_materialization(
     (pack_dir / "contract.yaml").write_text(yaml.safe_dump(contract), encoding="utf-8")
 
     with pytest.raises(PackIntegrityError, match=diagnostic):
-        _materialize(_pack_descriptor(pack_dir, "greetings"))
+        _materialize(_pack_descriptor(pack_dir, "greetings", verifiable=False))
 
 
 # ---------------------------------------------------------------------------
@@ -691,7 +730,7 @@ def test_bundle_scanner_accepts_valid_provenance_manifest() -> None:
     )
 
     greetings = _pack_descriptor(GREETINGS_PACK, "greetings")
-    files = _files_map(greetings)
+    files = _single_pack_bundle(greetings)
 
     errors = scan_generated_bundle(files)
     # No provenance-specific errors for a valid manifest
@@ -827,6 +866,33 @@ def test_different_pack_contents_produce_different_digest(tmp_path: Path) -> Non
     assert compute_pack_digest(pack_copy, "greetings") != before
 
 
+def test_the_digest_covers_contract_yaml_and_its_absence(tmp_path: Path) -> None:
+    """contract.yaml decides ownership and restrictions whether or not the context declares it, so deleting an
+    undeclared one changes the digest, and a contract-less pack never digests like the earlier rule, which
+    covered neither. A pack that declares its contract digests the same under both rules."""
+    from shutil import copytree
+
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        compute_pack_digest,
+        pre_contract_rule_digest,
+    )
+
+    assert pre_contract_rule_digest(GREETINGS_PACK, "greetings") is None
+    pack_copy = tmp_path / "greetings"
+    copytree(GREETINGS_PACK, pack_copy)
+    manifest = pack_copy / "context.yaml"
+    declared = "  - path: contract.yaml\n    kind: contract\n"
+    manifest.write_text(manifest.read_text(encoding="utf-8").replace(declared, ""), encoding="utf-8")
+    with_contract = compute_pack_digest(pack_copy, "greetings")
+    earlier_with_contract = pre_contract_rule_digest(pack_copy, "greetings")
+    (pack_copy / "contract.yaml").unlink()
+    without_contract = compute_pack_digest(pack_copy, "greetings")
+
+    assert without_contract != with_contract
+    assert pre_contract_rule_digest(pack_copy, "greetings") == earlier_with_contract
+    assert earlier_with_contract not in {with_contract, without_contract}
+
+
 def test_valid_local_pack_verifies_before_materialization() -> None:
     from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
         verify_pack_integrity,
@@ -844,7 +910,7 @@ def test_fixture_pack_passes_generated_bundle_validation() -> None:
     )
 
     greetings = _pack_descriptor(GREETINGS_PACK, "greetings")
-    files = _files_map(greetings)
+    files = _single_pack_bundle(greetings)
 
     errors = scan_generated_bundle(files)
     # Filter errors unrelated to our fixture (the fixture doesn't claim to be a

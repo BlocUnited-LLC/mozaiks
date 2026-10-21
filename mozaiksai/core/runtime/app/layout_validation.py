@@ -272,7 +272,8 @@ def layout_extensions_from_selected_packs(
             continue
         if str(pack.get("capability_source") or "").strip() != "managed_capability":
             continue
-        pack_id = str(pack.get("capability_pack_id") or pack.get("id") or pack.get("pack_id") or "").strip()
+        # The pack-identity precedence of the AppGenerator resolver's selected_pack_id.
+        pack_id = str(pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id") or "").strip()
         if not pack_id:
             continue
         for slot in (

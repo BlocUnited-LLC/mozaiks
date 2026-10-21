@@ -351,14 +351,23 @@ def test_monetized_training_plans_can_use_module_scoped_list_plans_action(persis
     assert training_data in detach(context.get("data_contract"))["surfaces"]
 
 
-def _search_pack(tmp_path) -> tuple[dict, list[dict]]:
-    """Exercise declared contract assets through the normal pack discovery path."""
+def _search_pack(tmp_path, monkeypatch) -> tuple[dict, list[dict]]:
+    """Exercise declared contract assets through the normal pack discovery path.
+
+    The pack is registered directly under the workspace build context
+    (``tmp_path``), which the launch loader resolves from the environment, so
+    the canonical resolver vouches for it as a workspace build-context pack.
+    """
+    monkeypatch.delenv("MOZAIKS_APP_WORKSPACE_PATH", raising=False)
+    monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(tmp_path))
     pack_root = tmp_path / "managed_search"
     pack_root.mkdir()
     config = {
         "context_id": "managed_search", "applies_to_workflows": ["DesignDocs", "AppGenerator"],
         "assets": [{"path": "contract.yaml", "kind": "contract"}],
         "pack": {"id": "managed_search", "version": "1.0.0", "status": "active", "capability_source": "managed_capability"},
+        # The projection the trusted loader registers packs through.
+        "projections": {"context_variables": {"capability_packs": {"from": "capability_packs"}}},
     }
     contract = {
         "contract_id": "managed_search", "contract_type": "build_pack_instructions",
@@ -378,10 +387,10 @@ def _search_pack(tmp_path) -> tuple[dict, list[dict]]:
 
 
 @pytest.mark.parametrize("selected", [False, True])
-def test_custom_pack_ownership_only_applies_when_selected(persistence, tmp_path, selected):
+def test_custom_pack_ownership_only_applies_when_selected(persistence, tmp_path, monkeypatch, selected):
     _, store_factory, _ = persistence
     context = _context(managed=False)
-    descriptor, contracts = _search_pack(tmp_path)
+    descriptor, contracts = _search_pack(tmp_path, monkeypatch)
     context.set("operator_contracts", contracts)
     context.set("capability_packs", [descriptor] if selected else [])
     bundle = inventory._bundle(pricing=False)
@@ -401,9 +410,9 @@ def test_custom_pack_ownership_only_applies_when_selected(persistence, tmp_path,
         assert detach(context.get("design_surface_map")) == bundle["surface_map"]
 
 
-def test_custom_pack_facade_with_declared_action_saves_through_real_bridge(persistence, tmp_path):
+def test_custom_pack_facade_with_declared_action_saves_through_real_bridge(persistence, tmp_path, monkeypatch):
     context = _context(managed=False)
-    descriptor, _ = _search_pack(tmp_path)
+    descriptor, _ = _search_pack(tmp_path, monkeypatch)
     context.set("capability_packs", [descriptor])
     bundle = inventory._bundle(pricing=False)
     _add_surface(
@@ -419,11 +428,27 @@ def test_custom_pack_facade_with_declared_action_saves_through_real_bridge(persi
     assert detach(context.get("experience_spec")) == bundle["experience_spec"]
 
 
-def test_malformed_selected_ownership_contract_is_not_silently_ignored(persistence, tmp_path):
+def test_an_unverifiable_selected_managed_pack_refuses_the_design(persistence, tmp_path, monkeypatch):
+    """A selected managed pack outside every authority is never silently omitted: the save is refused."""
     _, store_factory, _ = persistence
     context = _context(managed=False)
-    descriptor, contracts = _search_pack(tmp_path)
-    contract = contracts[0]
+    descriptor, contracts = _search_pack(tmp_path, monkeypatch)
+    monkeypatch.delenv("MOZAIKS_BUILD_CONTEXT_PATH")
+    context.set("operator_contracts", contracts)
+    context.set("capability_packs", [descriptor])
+
+    result = inventory._save(context, inventory._bundle(pricing=False))
+
+    _assert_refused(context, result, store_factory, owner="managed_search")
+    assert "Selected managed pack 'managed_search' cannot be verified" in result["error"]
+    assert "not in a workspace build context" in result["error"]
+
+
+def test_malformed_selected_ownership_contract_is_not_silently_ignored(persistence, tmp_path, monkeypatch):
+    _, store_factory, _ = persistence
+    context = _context(managed=False)
+    descriptor, contracts = _search_pack(tmp_path, monkeypatch)
+    contract = {key: value for key, value in contracts[0].items() if key != "source_path"}
     contract["surface_ownership"] = None
     (tmp_path / "managed_search/contract.yaml").write_text(yaml.safe_dump(contract), encoding="utf-8")
     context.set("capability_packs", [descriptor])

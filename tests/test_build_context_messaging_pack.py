@@ -9,7 +9,8 @@ Verifies that:
 - Backend files compile and use canonical persistence pattern
 - Service emits domain.messages.* events
 - Notification contract covers message_sent; no notification delivery worker generated
-- Profile tab declared for the DM inbox
+- Profile tab declared for the DM inbox; it renders only its list_threads data
+- Messaging UI reads only app theme tokens and titles its page through PageHeader
 - AppGenerator capability_directory and capability_routing wire the pack correctly
 - No announcement, contacts, or monolithic messaging module generated
 """
@@ -17,10 +18,13 @@ Verifies that:
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+from factory_app.workflows._shared.generated_ui_contract import audit_generated_react_files
 
 WORKSPACE = Path(__file__).resolve().parents[1]
 BUILD_CONTEXT = WORKSPACE / "factory_app" / "build_context"
@@ -170,34 +174,31 @@ def test_messages_contract_declares_account_data_handler_as_required_output() ->
 # Data migration
 # ---------------------------------------------------------------------------
 
-def test_messaging_data_migration_declares_stable_collection_aliases() -> None:
+def test_messaging_data_migration_declares_canonical_collection_operations() -> None:
     migration_path = TEMPLATES / "data" / "migrations" / "001_messaging_collections.json"
     assert migration_path.exists()
     migration = json.loads(migration_path.read_text(encoding="utf-8"))
 
-    aliases = {
-        collection["data_alias"]
-        for surface in migration.get("surfaces", [])
-        for collection in surface.get("collections", [])
+    collections = {
+        (operation["module_id"], operation["entity_name"])
+        for operation in migration["operations"] if operation["type"] == "ensure_collection"
     }
-    assert aliases == {
-        "messages.threads",
-        "messages.messages",
-        "messages.thread_reads",
-    }
+    assert collections == {("messages", name) for name in ("threads", "messages", "thread_reads")}
+    assert migration["schema_version"] == "mozaiks.data_migration.v1"
+    assert {operation["type"] for operation in migration["operations"]} == {"ensure_collection", "ensure_index"}
+    assert "surfaces" not in migration
 
 
 def test_messaging_read_state_index_includes_scope() -> None:
     migration_path = TEMPLATES / "data" / "migrations" / "001_messaging_collections.json"
     migration = json.loads(migration_path.read_text(encoding="utf-8"))
-    collections = {
-        collection["data_alias"]: collection
-        for surface in migration.get("surfaces", [])
-        for collection in surface.get("collections", [])
+    read_indexes = {
+        operation["index"]["name"]: operation["index"]
+        for operation in migration["operations"]
+        if operation["type"] == "ensure_index" and operation["entity_name"] == "thread_reads"
     }
-    read_indexes = {index["name"]: index for index in collections["messages.thread_reads"]["indexes"]}
 
-    assert [key["field"] for key in read_indexes["reads_by_thread_user"]["keys"]] == [
+    assert [key[0] for key in read_indexes["reads_by_thread_user"]["keys"]] == [
         "scope_type",
         "scope_id",
         "thread_id",
@@ -301,6 +302,48 @@ def test_messaging_ui_component_exists() -> None:
     assert "get_thread" in source
     assert "send_message" in source
     assert "href={`/messages" not in source
+
+
+MESSAGING_UI_FILES = (
+    TEMPLATES / "ui" / "pages" / "custom" / "Messages.jsx",
+    TEMPLATES / "ui" / "components" / "MessagingProfileTab.jsx",
+)
+
+
+def test_messaging_ui_reads_only_theme_tokens_without_fallbacks() -> None:
+    theme_provider = _read_text(WORKSPACE / "chat-ui" / "src" / "styles" / "themeProvider.js")
+    theme_tokens = set(re.findall(r"setColorVar\(root,\s*'([a-z0-9-]+)'", theme_provider))
+    assert {
+        "color-border", "color-primary", "color-error", "color-surface-alt",
+        "color-text-primary", "color-text-secondary",
+    } <= theme_tokens
+
+    for path in MESSAGING_UI_FILES:
+        source = _read_text(path)
+        reads = re.findall(r"var\(--([A-Za-z0-9-]+)([^)]*)\)", source)
+        assert reads, path.name
+        for name, rest in reads:
+            assert name in theme_tokens, f"{path.name} reads --{name}, which the app theme never sets"
+            assert not rest.strip(), f"{path.name} gives --{name} a fixed fallback; the theme always sets it"
+        assert not re.search(r"#[0-9A-Fa-f]{3,8}\b", source), path.name
+        audit = audit_generated_react_files([{"filename": path.name, "content": source}])
+        assert not [warning for warning in audit if "hardcodes" in warning], audit
+
+
+def test_messages_page_title_uses_the_page_title_role() -> None:
+    source = _read_text(MESSAGING_UI_FILES[0])
+    assert 'import { PageHeader } from "@mozaiks/chat-ui/ui";' in source
+    assert re.search(r'<PageHeader\b[^>]*\btitle="Messages"', source)
+    assert "<h1" not in source
+
+
+def test_messaging_profile_tab_renders_only_its_list_threads_data() -> None:
+    profile = _read_yaml(TEMPLATES / "modules" / "messages" / "contracts" / "profile.yaml")
+    assert [tab["action"] for tab in profile["tabs"]] == ["list_threads"]
+    source = _read_text(MESSAGING_UI_FILES[1]).lower()
+    # list_threads returns only {threads, total}; the social pack owns the friends tab.
+    assert "friend" not in source
+    assert "create_thread" not in source
 
 
 # ---------------------------------------------------------------------------

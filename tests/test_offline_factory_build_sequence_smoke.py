@@ -210,7 +210,9 @@ async def test_offline_build_sequence_smoke_persists_agent_and_app_artifact_chai
     assert app_inputs["theme_capture"] == theme_capture.id
     assert app_inputs["workflow_bundle"] == workflow_bundle.id
     assert "brand" not in app_inputs
-    assert app_call["lifecycle_status"] == ArtifactLifecycleStatus.CURRENT
+    # The first build is a draft for review: it becomes current only through an authorized acceptance.
+    assert app_call["lifecycle_status"] == ArtifactLifecycleStatus.DRAFT
+    assert "acceptance" not in app_call["commit_metadata"]["metadata"]
     assert app_call["validation_status"] == ArtifactValidationStatus.PASSED
 
 
@@ -243,6 +245,8 @@ async def test_offline_factory_artifact_lineage_smoke_hydrates_workflow_metadata
     )
     assert result["artifact_lineage"]["app_bundle_inputs"]["theme_capture"] == result["artifact_lineage"]["theme_capture_id"]
     assert result["artifact_lineage"]["app_bundle_inputs"]["workflow_bundle"] == result["artifact_lineage"]["workflow_bundle_id"]
+    assert result["artifact_lineage"]["app_bundle_lifecycle_status"] == "draft"
+    assert "app_bundle" not in result["artifact_lineage"]["current_refs"]
     assert result["hydration"]["status"] == "hydrated"
     assert result["hydration"]["source"] == "workflow_bundle_artifact"
     assert result["workflow_integration_metadata"]["source_artifact_version_id"] == result["artifact_lineage"]["workflow_bundle_id"]
@@ -354,6 +358,8 @@ def test_real_store_factory_artifact_lineage_smoke_hydrates_workflow_metadata() 
         "subscription_contract": result["artifact_lineage"]["subscription_contract_id"],
     }
     assert result["artifact_lineage"]["app_bundle_inputs"]["workflow_bundle"] == result["artifact_lineage"]["workflow_bundle_id"]
+    assert result["artifact_lineage"]["app_bundle_lifecycle_status"] == "draft"
+    assert "app_bundle" not in result["artifact_lineage"]["current_refs"]
     assert result["hydration"]["status"] == "hydrated"
     assert result["hydration"]["source"] == "workflow_bundle_artifact"
     assert result["workflow_integration_metadata"]["source_artifact_version_id"] == result["artifact_lineage"]["workflow_bundle_id"]
@@ -395,6 +401,8 @@ def test_live_real_store_factory_artifact_lineage_smoke_hydrates_live_workflow_m
     assert result["live_agentgenerator"]["semantic_drift"]["valid"] is True
     assert int((result["live_agentgenerator"]["task_run_trace"] or {}).get("max_overlap") or 0) >= 2
     assert result["artifact_lineage"]["app_bundle_inputs"]["workflow_bundle"] == result["artifact_lineage"]["workflow_bundle_id"]
+    assert result["artifact_lineage"]["app_bundle_lifecycle_status"] == "draft"
+    assert "app_bundle" not in result["artifact_lineage"]["current_refs"]
     assert result["hydration"]["status"] == "hydrated"
     assert result["hydration"]["source"] == "workflow_bundle_artifact"
     assert result["workflow_integration_metadata"]["source"] == "live_agentgenerator_pack_smoke"

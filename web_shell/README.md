@@ -154,15 +154,15 @@ not load `tailwind.config.js` through `@config`, because packaged Docker builds
 copy `web_shell/` beside dependency trees where automatic or previous JavaScript
 configuration source detection can scan the wrong context.
 
-`vite.config.js` creates `web_shell/.mozaiks-tailwind-sources/` at startup with
-links to chat UI, Factory UI/admin/workflows, and the active app UI, admin, and
-workflow roots. The `app/admin/` link matters: admin pages are reached through
-`app/ui/index.js`, and a class used only there (for example the hover tint on
-the mobile cards of the support and usage pages) is emitted into the built
-stylesheet only because that directory is scanned. Do not write Tailwind class
-names in this README: `styles.css` scans `web_shell/` itself, so a class named
-here would reach the stylesheet even without the link. The link directory is
-generated local state and is ignored by git.
+`vite.config.js` enumerates the real source files under chat UI, Factory
+UI/admin/workflows, and the active app UI, admin, and workflow roots, then adds
+an exact `@source` directive for each one before Tailwind runs. Exact file
+registration is required for pip-installed Windows layouts, where Tailwind does
+not traverse the directory junctions that previously represented those roots.
+The `app/admin/` files matter: admin pages are reached through `app/ui/index.js`,
+and a class used only there is emitted only when those files are registered.
+Do not use Tailwind class examples in this README: `styles.css` still scans
+`web_shell/` itself, so documentation text can otherwise add unused utilities.
 
 ## What You Usually Edit
 

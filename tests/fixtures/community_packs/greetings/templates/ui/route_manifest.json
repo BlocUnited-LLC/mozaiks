@@ -4,7 +4,7 @@
       "id": "greetings",
       "label": "Greetings",
       "path": "/greetings",
-      "component": "SchemaPage",
+      "component": "GreetingsPage",
       "order": 10,
       "navigation": {
         "include": true,

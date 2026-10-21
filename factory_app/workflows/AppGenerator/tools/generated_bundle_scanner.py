@@ -35,8 +35,20 @@ from factory_app.workflows.AppGenerator.tools.module_persistence_guard import (
     scan_module_persistence,
 )
 from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+    AUTHORITY_FACTORY_BUILD_CONTEXT,
+    AUTHORITY_INSTALLED,
+    AUTHORITY_SELECTED_PINS,
+    AUTHORITY_WORKSPACE_BUILD_CONTEXT,
     ManagedCapabilityTemplateError,
+    PackIntegrityError,
+    declared_output_owners,
+    pack_identity,
     resolve_declared_pack_output_paths,
+    selected_pack_id,
+    static_pack_templates,
+    verified_pack_data_contracts,
+    verified_pack_template_inventory,
+    verified_selected_pack_sources,
 )
 from mozaiksai.core.runtime.app.auth_contract import (
     APP_AUTH_COMPONENTS,
@@ -71,9 +83,14 @@ from mozaiksai.core.runtime.app.paths import (
     noncanonical_app_root_paths,
     unsafe_app_paths,
 )
+from mozaiksai.core.runtime.app.theme_contract import validate_page_title_theme
+from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import (
     compile_data_contract,
     data_contract_requires_auth,
+)
+from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    SHARED_PACK_OUTPUT_PATHS,
 )
 from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
     capability_id_for_feature,
@@ -85,6 +102,7 @@ from mozaiksai.core.workflow.generator_support.persistence_artifacts import (
 from mozaiksai.core.workflow.generator_support.subscription_data_contract import (
     ensure_subscription_assignment_stores,
 )
+from mozaiksai.core.workflow.generator_support.ui_registry_composition import SHELL_ROUTE_COMPONENTS
 
 # ---------------------------------------------------------------------------
 # Patterns
@@ -199,22 +217,10 @@ _CANONICAL_REACTION_TARGET_KINDS = frozenset(
 # declared in the bundle's events.yaml and must be skipped during closure checks.
 _PLATFORM_EVENT_NAMESPACES = ("hosted.", "platform.", "mozaiks.")
 
-# Shell-built-in component names registered in chat-ui/src/registry/coreComponents.js.
-# These components are always available in the Mozaiks shell without a custom JSX file.
-# Route manifest entries referencing these names do NOT require a ui/pages/custom/*.jsx file.
-_SHELL_CORE_COMPONENTS = frozenset(
-    {
-        "ChatPage",
-        "SchemaPage",
-        "LauncherScreen",
-        "ConfirmScreen",
-        "ProfilePage",
-        "WorkflowCompletion",
-        "TokenStatusTab",
-        "AdminMyUsagePanel",
-        "AdminAppUsagePanel",
-    }
-)
+# The shell's routable core pages (a subset of chat-ui/src/registry/coreComponents.js), shared with
+# UI registry composition. A route manifest entry naming one does NOT require a ui/pages/custom/*.jsx
+# file; one naming any other core component does.
+_SHELL_ROUTE_COMPONENTS = SHELL_ROUTE_COMPONENTS
 
 
 def _is_scannable(path: str) -> bool:
@@ -461,11 +467,8 @@ def _scan_security_secret_contract(files_map: dict[str, str]) -> list[str]:
 
 
 def _pack_id_from_descriptor(pack: Any) -> str:
-    if not isinstance(pack, dict):
-        return ""
-    return str(
-        pack.get("capability_pack_id") or pack.get("id") or pack.get("pack_id") or ""
-    ).strip()
+    """The resolver's one pack-identity precedence (``id``, ``pack_id``, ``capability_pack_id``)."""
+    return selected_pack_id(pack)
 
 
 def _selected_managed_capability_ids(capability_packs: list[dict[str, Any]] | None) -> set[str]:
@@ -497,20 +500,17 @@ def _packs_providing(
     capability_packs: list[dict[str, Any]] | None,
     capability: str,
 ) -> list[dict[str, Any]]:
-    """Return pack descriptors that declare they provide the given capability.
+    """Return pack descriptors whose contract declares that they provide the given capability.
 
-    Checks the in-memory ``provides_capabilities`` list first; if absent,
-    falls back to loading ``provides_capabilities`` from
-    ``pack_source_path/contract.yaml``.  This lets operator packs declare
-    their capabilities without the OSS scanner hardcoding any pack name.
+    The capability comes only from ``provides_capabilities`` in the
+    ``contract.yaml`` at the row's ``pack_source_path``. The scanner passes
+    resolved rows, whose path is the verified source; a caller's inline
+    ``provides_capabilities`` claim grants nothing. This lets operator packs
+    declare their capabilities without the OSS scanner hardcoding any pack name.
     """
     result: list[dict[str, Any]] = []
     for pack in capability_packs or []:
         if not isinstance(pack, dict):
-            continue
-        inline = pack.get("provides_capabilities")
-        if isinstance(inline, list) and capability in inline:
-            result.append(pack)
             continue
         raw_source_path = str(pack.get("pack_source_path") or "").strip()
         if not raw_source_path:
@@ -538,6 +538,10 @@ def _normalized_forbidden_output_prefix(value: Any) -> str:
 
 
 def _forbidden_output_prefixes_from_pack(pack: dict[str, Any]) -> list[str]:
+    """Forbidden output prefixes from the ``contract.yaml`` at the row's (verified) ``pack_source_path``.
+
+    A caller's inline ``forbidden_outputs`` is not a pack contract and is not read.
+    """
     prefixes: list[str] = []
 
     def add_many(items: Any) -> None:
@@ -547,8 +551,6 @@ def _forbidden_output_prefixes_from_pack(pack: dict[str, Any]) -> list[str]:
             prefix = _normalized_forbidden_output_prefix(item)
             if prefix and prefix not in prefixes:
                 prefixes.append(prefix)
-
-    add_many(pack.get("forbidden_outputs"))
 
     raw_source_path = str(pack.get("pack_source_path") or "").strip()
     if raw_source_path:
@@ -1611,11 +1613,14 @@ def _scan_auth_app_contract(
         pages = route_manifest.get("pages") if isinstance(route_manifest, dict) else None
         validate_app_auth_route_bindings(contract, pages)
     except (TypeError, ValueError) as exc:
-        errors.append(
-            str(exc)
-            if isinstance(exc, AppAuthContractError)
-            else "ui/route_manifest.json must be valid JSON for auth routes"
-        )
+        if not isinstance(exc, AppAuthContractError):
+            errors.append("ui/route_manifest.json must be valid JSON for auth routes")
+        elif str(exc).startswith("Auth routes."):
+            # A login or callback route binding is declared in the route manifest:
+            # the path routes the diagnostic to that file's owner for repair.
+            errors.append(f"ui/route_manifest.json: {exc}")
+        else:
+            errors.append(str(exc))
     if not require_generated_adapter:
         return errors
 
@@ -1754,7 +1759,7 @@ def _scan_pack_provenance_manifest(files_map: dict[str, str]) -> list[str]:
     missing_keys = _PROVENANCE_REQUIRED_KEYS - set(manifest.keys())
     for key in sorted(missing_keys):
         errors.append(f"{_PACK_PROVENANCE_PATH}: missing required field '{key}'")
-    unknown_keys = sorted(set(manifest.keys()) - _PROVENANCE_REQUIRED_KEYS)
+    unknown_keys = sorted(set(manifest.keys()) - _PROVENANCE_REQUIRED_KEYS - {"composed_outputs"})
     for key in unknown_keys:
         errors.append(f"{_PACK_PROVENANCE_PATH}: unsupported field '{key}'")
 
@@ -1794,6 +1799,43 @@ def _scan_pack_provenance_manifest(files_map: dict[str, str]) -> list[str]:
                     errors.append(
                         f"{_PACK_PROVENANCE_PATH}: packs[{i}].materialized_owned_files must be a JSON array"
                     )
+                for file in files if isinstance(files, list) else []:
+                    if isinstance(file, dict) and file.get("path") in SHARED_PACK_OUTPUT_PATHS:
+                        errors.append(
+                            f"{_PACK_PROVENANCE_PATH}: packs[{i}] claims shared composition root "
+                            f"{file['path']!r} as an exclusive materialized_owned_files entry. A shared root is "
+                            "composed from the app's and every pack's declarations and recorded under "
+                            "composed_outputs; this provenance predates composition. Reassemble the app to "
+                            "recompose its shared roots."
+                        )
+
+    composed = manifest.get("composed_outputs", {})
+    if not isinstance(composed, dict):
+        errors.append(f"{_PACK_PROVENANCE_PATH}: composed_outputs must be a JSON object")
+    else:
+        identities = {"pack_id", "version", "source", "digest"}
+        pack_entries = [entry for entry in packs if isinstance(entry, dict)] if isinstance(packs, list) else []
+        for path, contributors in composed.items():
+            location = f"{_PACK_PROVENANCE_PATH}: composed_outputs[{path!r}]"
+            if path not in SHARED_PACK_OUTPUT_PATHS or path not in files_map:
+                errors.append(f"{location} must identify a present shared composition root")
+            if not isinstance(contributors, list) or not contributors:
+                errors.append(f"{location} must contain pack contributors")
+                continue
+            seen = set()
+            for contributor in contributors:
+                if not isinstance(contributor, dict) or set(contributor) != identities or not all(
+                    isinstance(value, str) and value for value in contributor.values()
+                ):
+                    errors.append(f"{location} contributor must contain pack_id, version, source, and digest")
+                    continue
+                pack_id = contributor["pack_id"]
+                matches = [entry for entry in pack_entries if entry.get("pack_id") == pack_id]
+                if len(matches) != 1 or any(matches[0].get(key) != contributor[key] for key in identities):
+                    errors.append(f"{location} contributor must match one selected pack identity")
+                if pack_id in seen:
+                    errors.append(f"{location} contains duplicate contributors")
+                seen.add(pack_id)
 
     return errors
 
@@ -1921,7 +1963,7 @@ def _scan_route_manifest_component_files(files_map: dict[str, str]) -> list[str]
         if not component:
             continue
         # Shell-built-in components are always available — no custom JSX file required.
-        if component in _SHELL_CORE_COMPONENTS or component in APP_AUTH_COMPONENTS:
+        if component in _SHELL_ROUTE_COMPONENTS or component in APP_AUTH_COMPONENTS:
             continue
         if not any(
             path.startswith("ui/pages/custom/") and path.endswith(".jsx")
@@ -2113,7 +2155,9 @@ def _layout_extensions_for_selected_packs(
             continue
         for path in sorted(resolve_declared_pack_output_paths([pack])):
             prior_owner = claimed_paths.get(path)
-            if prior_owner is not None and prior_owner != pack_id:
+            # Shared roots have several contributors by design; composition and
+            # composed_outputs provenance validate them. Every other path is exclusive.
+            if prior_owner is not None and prior_owner != pack_id and path not in SHARED_PACK_OUTPUT_PATHS:
                 raise ManagedCapabilityTemplateError(
                     f"Selected packs '{prior_owner}' and '{pack_id}' both declare "
                     f"output path {path!r}; duplicate pack output claims fail closed"
@@ -2249,10 +2293,12 @@ def _scan_planned_data_fields(
     if error or not actual:
         return [error or "data/contract.json: missing approved data contract."]
     try:
+        inventory = verified_pack_template_inventory(context_variables=context_variables)
         planned = compile_data_contract(
             planned, subscription_contract=subscription_contract, context_variables=context_variables,
+            pack_data_contracts=verified_pack_data_contracts(inventory),
         )
-    except ValueError as exc:
+    except (ValueError, ManagedCapabilityTemplateError) as exc:
         return [f"data/contract.json: {exc}"]
     collections = {
         (surface["surface_id"], collection["name"]): collection
@@ -2295,22 +2341,238 @@ def _scan_owned_collection_auth(files_map: dict[str, str]) -> list[str]:
     return []
 
 
+class _ResolvedPackContext:
+    """Read-only view of a caller context whose pack selection is the scan's resolved rows."""
+
+    def __init__(self, base: Any, capability_packs: list[dict[str, Any]]) -> None:
+        self._base = base
+        self._capability_packs = capability_packs
+
+    def get(self, key: str, default: Any = None) -> Any:
+        if key == "capability_packs":
+            return self._capability_packs
+        return self._base.get(key, default)
+
+
+def _resolved_pack_context(context_variables: Any, resolved_rows: list[dict[str, Any]]) -> Any:
+    """The caller's context with its pack selection replaced by the resolved, verified rows."""
+    if context_variables is None:
+        return {"capability_packs": resolved_rows}
+    if isinstance(context_variables, dict):
+        return {**context_variables, "capability_packs": resolved_rows}
+    return _ResolvedPackContext(context_variables, resolved_rows)
+
+
+def _context_pack_selection(context_variables: Any) -> list[dict[str, Any]]:
+    """The build context's own pack selection: its capability_packs, else its AppBuildPlan's."""
+    if context_variables is None:
+        return []
+    rows = detach(context_variables.get("capability_packs")) or []
+    if not rows:
+        plan = detach(context_variables.get("app_build_plan")) or {}
+        rows = (plan.get("capability_packs") or []) if isinstance(plan, dict) else []
+    return [dict(row) for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
+
+
+def _resolve_scan_packs(
+    capability_packs: list[dict[str, Any]] | None, context_variables: Any,
+) -> list[dict[str, Any]]:
+    """Resolve the scan's selected packs to verified entries (see ``verified_selected_pack_sources``).
+
+    A build context that selects packs is authoritative. A caller row for one
+    of its packs adds nothing but pins, which must equal the resolved identity;
+    a caller row for any other pack resolves on its own, without a source path
+    of its own (one the context never selected and compared). Without a
+    context selection the caller's rows are the selection. Rows that claim no
+    pack and resolve nowhere (planned generated modules) select nothing.
+    """
+    caller_rows = [dict(pack) for pack in capability_packs or [] if isinstance(pack, dict)]
+    context_rows = _context_pack_selection(context_variables)
+    rows = caller_rows
+    if context_rows:
+        selected_ids = {selected_pack_id(row) for row in context_rows}
+        outside = [row for row in caller_rows if selected_pack_id(row) not in selected_ids]
+        injected = sorted({selected_pack_id(row) or "<unnamed>" for row in outside if row.get("pack_source_path")})
+        if injected:
+            raise PackIntegrityError(
+                f"explicit capability_packs rows {injected} carry a pack_source_path outside the verified pack "
+                "selection of the build context. Select those packs in the build context so their source is "
+                "verified, or select them without a source path so installed state or the installed factory "
+                "catalog resolves them."
+            )
+        rows = [*context_rows, *outside]
+    entries = verified_selected_pack_sources(rows, context_variables=context_variables)
+    by_id = {entry["pack_id"]: entry for entry in entries}
+    for row in caller_rows:
+        entry = by_id.get(selected_pack_id(row))
+        if entry is None:
+            continue
+        for key in ("version", "digest"):
+            pinned = row.get(key)
+            if pinned is not None and pinned != "" and str(pinned) != entry[key]:
+                raise PackIntegrityError(
+                    f"Pack '{entry['pack_id']}' selected {key} does not match freshly verified source: the "
+                    f"caller row pins {pinned!r}, the {entry['resolution']} source is {entry[key]!r}."
+                )
+    return entries
+
+
+def _resolved_pack_rows(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Selection rows for the pack-aware checks, built only from verified entries.
+
+    Each names the verified source, the pack's declared ``capability_source``
+    and its identity; no caller field (inline ``provides_capabilities`` or
+    ``forbidden_outputs``, a claimed ``capability_source``) carries over.
+    """
+    return [
+        {
+            "id": entry["pack_id"],
+            "capability_source": entry["capability_source"],
+            "pack_source_path": entry["source_path"],
+            **pack_identity(entry),
+        }
+        for entry in entries
+    ]
+
+
+def _provenance_pack_records(files_map: dict[str, str]) -> list[tuple[int, dict[str, Any]]]:
+    try:
+        manifest = json.loads(files_map.get(_PACK_PROVENANCE_PATH) or "{}")
+    except (TypeError, ValueError):
+        return []  # The provenance schema scan reports the invalid manifest.
+    packs = manifest.get("packs") if isinstance(manifest, dict) else None
+    return [(index, entry) for index, entry in enumerate(packs or []) if isinstance(entry, dict)] if isinstance(
+        packs, list
+    ) else []
+
+
+def _normalized_text(value: str) -> str:
+    """Text with CRLF and CR line endings as LF, so a checkout's line endings never decide a comparison."""
+    return value.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _template_bytes_match(path: str, actual: Any, rendered: str, managed_owners: set[str]) -> bool:
+    if not isinstance(actual, str):
+        return False
+    if _normalized_text(actual) == _normalized_text(rendered):
+        return True
+    if path.startswith("data/migrations/") and path.endswith(".json"):
+        # Assembly compiles a migration template (headers, index names, managed owners); compare that form.
+        try:
+            compiled = materialize_data_migrations({path: rendered}, managed_owners=managed_owners)[path]
+            return bool(json.loads(actual) == json.loads(compiled))
+        except (TypeError, ValueError):
+            return False
+    return False
+
+
+# A revision of the build re-materializes its packs and becomes the app's build once accepted; a
+# regenerated app is a new parentless draft, which acceptance refuses while the app has an accepted build.
+_PACK_REMEDIES = {
+    AUTHORITY_FACTORY_BUILD_CONTEXT: (
+        "This pack ships with the installed mozaiks package: run an AppGenerator revision of the build, and accept "
+        "it, so assembly re-materializes the pack at this version."
+    ),
+    AUTHORITY_INSTALLED: (
+        "Run an AppGenerator revision of the build with this pack version, or upgrade the installed component "
+        "through the pack lifecycle."
+    ),
+    AUTHORITY_SELECTED_PINS: (
+        "Run an AppGenerator revision of the build from the pinned source, or select the source and pins the bundle "
+        "was built from."
+    ),
+    AUTHORITY_WORKSPACE_BUILD_CONTEXT: (
+        "This pack is registered in the workspace build context: run an AppGenerator revision of the build, and "
+        "accept it, so assembly re-materializes the pack at this version, or restore the registered pack the bundle "
+        "was built from."
+    ),
+}
+
+
+def _scan_resolved_pack_outputs(
+    files_map: dict[str, str],
+    entries: list[dict[str, Any]],
+    *,
+    managed_owners: set[str],
+) -> list[str]:
+    """Hold the bundle to each resolved pack's verified identity and template content.
+
+    The bundle's provenance cannot vouch for itself. Every provenance entry for
+    a resolved pack must record that pack's resolved version; the digest it
+    records is not compared, because the pack digest hashes the source's raw
+    bytes and so differs between checkouts with different line endings. The
+    content is rechecked instead: every template-owned output the pack ships
+    (shared composition roots aside) must be present, and the output of every
+    static template (one that renders without build-time context, any file
+    but ``.j2``) must equal the verified template text, line endings
+    normalized. A ``.j2`` output renders from the build's template variables,
+    which this check does not have, so nothing is rendered here: it is
+    verified through the pack's declared outputs and its pinned identity.
+    """
+    errors: list[str] = []
+    records = _provenance_pack_records(files_map)
+    for entry in entries:
+        pack_id = entry["pack_id"]
+        label = (
+            f"selected pack '{pack_id}' {entry['version']} ({entry['digest']}, resolved from "
+            f"{entry['resolution']}, vouched for by {entry['authority']})"
+        )
+        remedy = _PACK_REMEDIES[entry["authority"]]
+        for index, record in records:
+            if record.get("pack_id") != pack_id:
+                continue
+            if record.get("version") != entry["version"]:
+                errors.append(
+                    f"{_PACK_PROVENANCE_PATH}: packs[{index}] records pack '{pack_id}' with version "
+                    f"{record.get('version')!r}, but the {label} differs. {remedy}"
+                )
+        source = Path(entry["source_path"])
+        try:
+            static, context_outputs = static_pack_templates(source, pack_id)
+            owners = declared_output_owners(source)
+        except ManagedCapabilityTemplateError as exc:
+            errors.append(f"Selected pack '{pack_id}' templates cannot be read to verify the bundle: {exc}")
+            continue
+        for path in sorted({*static, *context_outputs}):
+            if path in SHARED_PACK_OUTPUT_PATHS or owners.get(path, "templates") != "templates":
+                continue
+            if path not in files_map:
+                errors.append(f"{path}: template-owned output of the {label} is missing. {remedy}")
+            elif path in static and not _template_bytes_match(path, files_map[path], static[path], managed_owners):
+                errors.append(
+                    f"{path}: differs from the verified template of the {label}. A template-owned pack output "
+                    f"must be the verified template content, whatever the bundle's provenance records. {remedy}"
+                )
+    return errors
+
+
 def scan_generated_bundle(
     files_map: dict[str, str],
     *,
     capability_packs: list[dict[str, Any]] | None = None,
     planned_data_contract: dict[str, Any] | None = None,
     subscription_contract: dict[str, Any] | None = None,
+    context_variables: Any = None,
     require_deployment_artifacts: bool = False,
+    resolved_capability_packs: list[dict[str, str]] | None = None,
 ) -> list[str]:
     """Scan files_map for forbidden patterns.
 
     Returns a list of human-readable error strings.
     An empty list means the bundle is clean and safe to deliver.
 
+    Selected packs are resolved first (``_resolve_scan_packs``); an
+    unresolvable, unverified or mismatched pack selection is the only error
+    returned. Every pack-aware check then reads only the resolved rows and
+    their verified contracts. When ``resolved_capability_packs`` is a list,
+    the verified identity ``{pack_id, version, digest, source, resolution, authority}``
+    of each selected pack is appended to it.
+
     Checks applied per file type:
     - All scannable files: raw provider secret key literals.
-    - .mozaiks/pack_provenance.json: schema validation when present.
+    - .mozaiks/pack_provenance.json: schema validation when present, and each
+      resolved pack's recorded version (the digest is a same-host value and is not compared).
+    - Template-owned outputs of each resolved pack: present, with the verified bytes.
     - ui/route_manifest.json: required path/component fields; component file existence.
     - ui/pages/*.yaml (schema-native): required fields, canonical page_type, canonical primitives,
       api_endpoint → module/action closure.
@@ -2319,9 +2581,14 @@ def scan_generated_bundle(
       target-kind-specific required fields.
     """
     try:
-        selected_layout_extensions = _layout_extensions_for_selected_packs(capability_packs)
+        entries = _resolve_scan_packs(capability_packs, context_variables)
+        resolved_rows = _resolved_pack_rows(entries)
+        selected_layout_extensions = _layout_extensions_for_selected_packs(resolved_rows)
     except ManagedCapabilityTemplateError as exc:
         return [f"Selected CapabilityPack output contract is invalid: {exc}"]
+    if resolved_capability_packs is not None:
+        resolved_capability_packs.extend(pack_identity(entry) for entry in entries)
+    persistence_context = _resolved_pack_context(context_variables, resolved_rows)
     layout_report = validate_file_map_layout(
         files_map,
         selected_extensions=selected_layout_extensions,
@@ -2330,27 +2597,35 @@ def scan_generated_bundle(
     errors.extend(
         _scan_declared_pack_repo_support_outputs(
             files_map,
-            capability_packs=capability_packs,
+            capability_packs=resolved_rows,
         )
     )
     scannable_files_map = filter_layout_scannable_file_map(files_map, layout_report)
+    # Scanner inputs are bundle-relative; layout rejects a workspace-prefixed copy.
+    theme_path = "brand/theme_config.json"
+    if theme_path in scannable_files_map:
+        try:
+            validate_page_title_theme(json.loads(scannable_files_map[theme_path]))
+        except ValueError as exc:
+            errors.append(f"{theme_path}: {exc}")
     errors.extend(
         _scan_canonical_app_paths(
             scannable_files_map,
-            capability_packs=capability_packs,
+            capability_packs=resolved_rows,
         )
     )
     errors.extend(error for error in scan_app_contracts(scannable_files_map) if error not in errors)
     errors.extend(_scan_planned_user_data_scope(scannable_files_map, capability_packs))
     errors.extend(_scan_subscription_assignment_storage(scannable_files_map))
-    persistence_context = {"capability_packs": capability_packs or []}
     errors.extend(_scan_planned_data_fields(
         scannable_files_map, planned_data_contract, subscription_contract=subscription_contract,
         context_variables=persistence_context,
     ))
+    managed_owners: set[str] = set()
     try:
+        managed_owners = managed_data_owners(persistence_context)
         compiled_migrations = materialize_data_migrations(
-            scannable_files_map, managed_owners=managed_data_owners(persistence_context),
+            scannable_files_map, managed_owners=managed_owners,
         )
         for path, content in scannable_files_map.items():
             if path.startswith("data/migrations/") and path.endswith(".json"):
@@ -2365,41 +2640,42 @@ def scan_generated_bundle(
     auth_errors = _scan_auth_app_contract(scannable_files_map)
     errors.extend(error for error in auth_errors if error not in errors)
     errors.extend(_scan_pack_provenance_manifest(scannable_files_map))
+    errors.extend(_scan_resolved_pack_outputs(files_map, entries, managed_owners=managed_owners))
     errors.extend(_scan_route_manifest_component_files(scannable_files_map))
     errors.extend(
         _scan_selected_managed_capability_boundaries(
             scannable_files_map,
-            capability_packs=capability_packs,
+            capability_packs=resolved_rows,
         )
     )
     errors.extend(
         _scan_managed_setup_provider_leaks(
             scannable_files_map,
-            capability_packs=capability_packs,
+            capability_packs=resolved_rows,
         )
     )
     errors.extend(
         _scan_token_wallets_require_mozaikspay(
             scannable_files_map,
-            capability_packs=capability_packs,
+            capability_packs=resolved_rows,
         )
     )
     errors.extend(
         _scan_mozaikspay_saas_contract(
             scannable_files_map,
-            capability_packs=capability_packs,
+            capability_packs=resolved_rows,
         )
     )
     errors.extend(
         _scan_mozaiks_cloud_connector_contract(
             scannable_files_map,
-            capability_packs=capability_packs,
+            capability_packs=resolved_rows,
         )
     )
     errors.extend(
         _scan_self_hosted_entitlement_dispatch_contract(
             scannable_files_map,
-            capability_packs=capability_packs,
+            capability_packs=resolved_rows,
         )
     )
     if require_deployment_artifacts:

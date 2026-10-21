@@ -10,8 +10,9 @@ from tests.test_appgenerator_entitlement_mapping import MODULE_PATH, _context
 
 def _partial_context(*, failed="module_contract", owned_path=MODULE_PATH):
     context = _context()
+    # support_files completed and module_contract failed; both are planned tasks.
     context.set("app_build_plan", {
-        "build_tasks": [{"task_id": "module_contract", "owned_paths": [owned_path]}],
+        "build_tasks": [{"task_id": "module_contract", "owned_paths": [owned_path]}, {"task_id": "support_files"}],
     })
     context.set("app_task_batch_results", {
         "support_files": {"code_files": [{"filename": "README.md", "content": "# Tasks\n"}]},

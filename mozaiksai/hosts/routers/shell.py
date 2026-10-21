@@ -21,6 +21,7 @@ from mozaiksai.core.runtime.app.page_schema import (
     load_and_validate_page_schema,
     safe_page_schema_error_detail,
 )
+from mozaiksai.core.runtime.app.theme_contract import validate_page_title_theme
 from mozaiksai.core.workflow.paths import resolve_active_app_root
 from mozaiksai.resources import resolve_factory_brand_root
 
@@ -75,9 +76,14 @@ async def get_theme_config():
     if not config_path.exists():
         raise HTTPException(status_code=404, detail="Theme config not found")
     try:
-        return json.loads(config_path.read_text(encoding="utf-8"))
+        config = json.loads(config_path.read_text(encoding="utf-8"))
     except Exception as exc:
         raise HTTPException(status_code=500, detail="Failed to read theme config") from exc
+    try:
+        validate_page_title_theme(config)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return config
 
 
 @router.get("/api/themes/{app_id}")

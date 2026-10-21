@@ -8,6 +8,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, NamedTuple
 
+import yaml
+
 from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
 from mozaiksai.core.session.build_context import (
     BuildContextError,
@@ -21,6 +23,11 @@ from mozaiksai.resources import resolve_factory_app_root
 
 logger = logging.getLogger(__name__)
 
+# Pack templates contribute declarations to these app-wide compiler outputs;
+# they cannot exclusively own a worker's contribution at the same path.
+SHARED_UI_OUTPUT_PATHS = frozenset({"ui/index.js", "ui/route_manifest.json"})
+SHARED_PACK_OUTPUT_PATHS = SHARED_UI_OUTPUT_PATHS | {"data/contract.json"}
+
 
 def _bundle_relative_path(raw: Any) -> str | None:
     """Normalize a declared pack output path; reject anything outside the bundle."""
@@ -30,7 +37,13 @@ def _bundle_relative_path(raw: Any) -> str | None:
     while path.startswith("./"):
         path = path[2:]
     parts = [part for part in path.split("/") if part]
-    if not parts or path.startswith("/") or ".." in parts or ":" in parts[0]:
+    if (
+        not parts
+        or path.startswith("/")
+        or ".." in parts
+        or ":" in parts[0]
+        or any(part.startswith(".") or part == "__pycache__" for part in parts)
+    ):
         return None
     return "/".join(parts)
 
@@ -214,17 +227,30 @@ def approved_workflow_surface_ids(context_variables: Any) -> list[str]:
 
 
 def managed_pack_contracts(context_variables: Any) -> list[dict[str, Any]]:
-    """Resolve selected managed contracts through their declared build-context assets."""
+    """The contract declarations of the selected managed packs, read only from verified sources.
+
+    Each selected row (and each managed pack a design surface references from
+    the installed factory catalog without selecting it) goes through the
+    canonical resolver first (:func:`_verified_pack_entry`: pins compared,
+    authority recorded). A resolved pack is managed when its own context
+    declares ``managed_capability``, whatever the row claims, as the bundle
+    scanner decides, and its declarations come from the verified source's
+    declared contract assets. A row that claims ``managed_capability`` always
+    claims a pack, so it either verifies or refuses.
+    A row's own inline ``facades`` are never read. Its consumers enforce what
+    a managed pack owns (surface ownership, managed data owners, facade
+    actions), so a row claiming ``managed_capability`` that the resolver refuses is never silently
+    omitted: this raises ``ValueError`` with the resolver's diagnostic.
+    """
     if context_variables is None:
         return []
-    packs = detach(context_variables.get("capability_packs")) or []
-    contracts = detach(context_variables.get("operator_contracts")) or []
+    packs = [dict(pack) for pack in detach(context_variables.get("capability_packs")) or [] if isinstance(pack, Mapping)]
     surface_map = detach(context_variables.get("design_surface_map")) or {}
     referenced = {
         pack_id for surface in surface_map.get("surfaces") or []
         for pack_id in surface.get("source_capability_packs") or []
     }
-    selected = {pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id") for pack in packs}
+    selected = {_row_pack_id(pack) for pack in packs}
     factory_root = resolve_factory_app_root()
     for pack_id in referenced - selected:
         if not isinstance(pack_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", pack_id) or factory_root is None:
@@ -235,23 +261,21 @@ def managed_pack_contracts(context_variables: Any) -> list[dict[str, Any]]:
             packs.append({**config.get("pack", {}), "pack_source_path": str(registry.parent)})
     result: list[dict[str, Any]] = []
     for pack in packs:
-        if pack.get("capability_source") != "managed_capability" or pack.get("status", "active") != "active":
+        if pack.get("status", "active") != "active":
             continue
-        pack_id = pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id")
-        source = pack.get("pack_source_path")
-        if source:
-            root = Path(source)
-            config = load_build_context(root / "context.yaml")
-            declarations = load_contract_descriptors(root, config)
-        else:
-            declarations = [
-                contract for contract in contracts
-                if contract.get("contract_id") == pack_id
-                or (contract.get("canonical_provider") or {}).get("provider_pack_id") == pack_id
-            ]
-        if not declarations and pack.get("facades"):
-            declarations = [{**pack, "contract_id": pack_id}]
-        result.extend(declarations)
+        claims_managed = pack.get("capability_source") == "managed_capability"
+        entry, refusal = _verified_pack_entry(pack, context_variables)
+        if refusal is not None:
+            if not claims_managed:
+                continue  # Assembly refuses it; it claims no managed ownership to enforce here.
+            raise ValueError(
+                f"Selected managed pack '{_row_pack_id(pack) or '<unnamed>'}' cannot be verified, so what it "
+                f"owns cannot be read: {refusal}"
+            )
+        if entry is None or entry.get("capability_source") != "managed_capability":
+            continue  # Selects no pack, or the pack's own declaration is not managed.
+        root = Path(entry["source_path"])
+        result.extend(load_contract_descriptors(root, load_build_context(root / "context.yaml")))
     return result
 
 
@@ -273,17 +297,61 @@ class _SelectedPack(NamedTuple):
     root: Path | None
     config: Mapping[str, Any] | None
     contracts: list[dict[str, Any]]
+    # The verified identity (pack_id, version, digest, source, resolution, authority); None when the row
+    # selects no pack and its declarations come from the projected operator contracts.
+    identity: dict[str, str] | None = None
+
+
+def _row_pack_id(pack: Mapping[str, Any]) -> str:
+    """The resolver's one pack-identity precedence (``selected_pack_id``)."""
+    return str(pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id") or "").strip()
+
+
+def _verified_pack_entry(pack: Mapping[str, Any], context_variables: Any) -> tuple[dict[str, Any] | None, str | None]:
+    """The canonical resolver's verified selection for one row, as ``(entry, refusal)``.
+
+    The resolver lives with the AppGenerator assembly that applies the
+    templates; it is imported here so planning reads exactly the packs
+    assembly materializes, id-only rows included, and only after the same
+    verification: the source's fresh version and digest compared with the
+    row's pins, and the authority that vouches for it recorded. ``(entry,
+    None)`` for a verified pack; ``(None, None)`` for a row that selects no
+    pack; ``(None, diagnostic)`` for a row the resolver refuses, from which
+    nothing is read (assembly refuses it with the same diagnostic).
+    """
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        ManagedCapabilityTemplateError,
+        verified_pack_selection,
+    )
+
+    try:
+        return verified_pack_selection(dict(pack), context_variables=context_variables), None
+    except (ManagedCapabilityTemplateError, BuildContextError, OSError, yaml.YAMLError) as exc:
+        logger.warning(
+            "SELECTED_PACK_UNRESOLVED pack=%s: %s; nothing is read from it, and assembly refuses it",
+            _row_pack_id(pack) or "<unnamed>", exc,
+        )
+        return None, str(exc)
 
 
 def _selected_packs(context_variables: Any) -> list[_SelectedPack]:
     """Every selected pack whose templates assembly applies, with its contract declarations.
 
     Assembly reads the selected packs from ``capability_packs`` and falls back to
-    the approved plan's packs. A pack with a source path is read from disk, and
-    its own ``context.yaml`` says whether it is active; a pack selected by id
-    alone is read from the ``operator_contracts`` the build context projected,
-    the same way the managed facade inventory resolves it.
+    the approved plan's packs, and resolves and verifies each row with its
+    canonical pack resolver (:func:`_verified_pack_entry`): the row's own source
+    path, the workspace's installed component, or, for an id-only row that
+    claims a pack (such as the default MozaiksPay row of an OSS SaaS plan), the
+    installed factory catalog. A verified pack is read from its verified
+    source, and its own ``context.yaml`` says whether it is active. A row the
+    resolver refuses contributes nothing: no unverified source or contract
+    stands in for it. A row that selects no pack is read from the
+    ``operator_contracts`` the build context projected.
     """
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        pack_identity,
+    )
+
     if context_variables is None:
         return []
     packs = detach(context_variables.get("capability_packs")) or []
@@ -295,19 +363,23 @@ def _selected_packs(context_variables: Any) -> list[_SelectedPack]:
     for pack in packs:
         if not isinstance(pack, Mapping):
             continue
-        pack_id = str(pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id") or "")
-        source = pack.get("pack_source_path")
-        root = Path(str(source)) if source else None
-        if root is not None and (root / "context.yaml").is_file():
+        pack_id = _row_pack_id(pack)
+        entry, refusal = _verified_pack_entry(pack, context_variables)
+        if refusal is not None:
+            continue
+        if entry is not None:
+            root = Path(entry["source_path"])
             try:
                 config = load_build_context(root / "context.yaml")
                 pack_block = config.get("pack")
                 declared: Mapping[str, Any] = pack_block if isinstance(pack_block, Mapping) else {}
                 if str(declared.get("status") or "active") != "active":
                     continue
-                result.append(_SelectedPack(pack_id, root, config, load_contract_descriptors(root, config)))
+                result.append(_SelectedPack(
+                    entry["pack_id"], root, config, load_contract_descriptors(root, config), pack_identity(entry),
+                ))
             except (BuildContextError, OSError) as exc:
-                # Assembly reports an unusable pack; authoring keeps checking its pages.
+                # Assembly reports an unusable pack; nothing unverified stands in for it.
                 logger.warning("selected pack %s could not be read: %s", root, exc)
             continue
         result.append(_SelectedPack(pack_id, None, None, [
@@ -354,7 +426,7 @@ class PackOwnedOutput(NamedTuple):
 
 
 def pack_owned_outputs(context_variables: Any) -> dict[str, PackOwnedOutput]:
-    """Bundle paths the selected packs write from their templates, by path.
+    """Exclusive bundle paths selected packs write from templates, by path.
 
     Pack-owned outputs are never model work: plan review builds no task for
     them, a worker's copy is discarded, and assembly takes them only from the
@@ -362,7 +434,8 @@ def pack_owned_outputs(context_variables: Any) -> dict[str, PackOwnedOutput]:
     at every assembly. An ``owner: workspace`` entry the pack ships a template
     for is written at genesis and then belongs to the workspace, so it is
     pack-owned only in a genesis build. Any other owner (``generator``) names
-    work the pack asks a model to author.
+    work the pack asks a model to author. Shared composition roots retain app
+    task ownership; their verified pack contributions are merged at assembly.
     """
     if context_variables is None:
         return {}
@@ -373,7 +446,7 @@ def pack_owned_outputs(context_variables: Any) -> dict[str, PackOwnedOutput]:
             for entry in contract.get("required_outputs") or []:
                 owner = str(entry.get("owner") or "templates").strip() if isinstance(entry, Mapping) else "templates"
                 path = _bundle_relative_path(entry.get("path") if isinstance(entry, Mapping) else entry)
-                if not path:
+                if not path or path in SHARED_PACK_OUTPUT_PATHS:
                     continue
                 if owner == "workspace":
                     if not genesis or pack.root is None or pack.config is None:

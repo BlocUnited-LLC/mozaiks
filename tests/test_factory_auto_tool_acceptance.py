@@ -19,6 +19,7 @@ emission, and no stripped "clean" payload accepted later.
 
 from __future__ import annotations
 
+import sys
 import types
 from enum import Enum
 from pathlib import Path
@@ -105,6 +106,11 @@ class _Logger:
 
 @pytest.fixture
 def factory_manager():
+    namespaces = ("workflows", "factory_app.workflows")
+    saved_modules = {
+        name: module for name, module in sys.modules.items()
+        if any(name == prefix or name.startswith(prefix + ".") for prefix in namespaces)
+    }
     saved_manager_state = dict(workflow_manager.__dict__)
     saved_structured = (
         dict(_so._workflow_models),
@@ -129,6 +135,17 @@ def factory_manager():
         _so._workflow_registries.update(saved_structured[1])
         _so._workflow_structured_agents.update(saved_structured[2])
         _so._provider_response_model_cache.update(saved_structured[3])
+        # Reloading a workflow refreshes its tool modules. Restore the module
+        # and package identities that later tests captured at collection, so
+        # their fixtures patch and catch the same objects the code uses.
+        for name in list(sys.modules):
+            if any(name == prefix or name.startswith(prefix + ".") for prefix in namespaces):
+                sys.modules.pop(name, None)
+        sys.modules.update(saved_modules)
+        for name, module in saved_modules.items():
+            parent, _, child = name.rpartition(".")
+            if parent in sys.modules:
+                setattr(sys.modules[parent], child, module)
 
 
 @pytest.fixture

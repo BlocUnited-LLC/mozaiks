@@ -9,7 +9,7 @@ import yaml
 
 from factory_app.workflows.AppGenerator.tools import assemble_app_tasks as assemble_module
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
-from tests.factory_context import factory_context
+from tests.factory_context import factory_context, planned_tasks
 
 
 def _load_ui_quality_module():
@@ -398,6 +398,7 @@ async def test_assemble_app_tasks_merges_schema_artifacts_and_task_batch_outputs
             "app_ui_quality_status": "passed",
             "app_schema_ready": True,
             "generated_app_dir": str(app_dir),
+            "app_task_batch_items": planned_tasks("tickets_module"),
             "app_task_batch_results": {
                 "tickets_module": {
                     "code_files": [
@@ -438,6 +439,7 @@ async def test_assemble_app_tasks_accepts_task_batch_outputs_without_schema_qual
         {
             "app_id": "support",
             "app_task_batch_status": "completed",
+            "app_task_batch_items": planned_tasks("tickets_module"),
             "app_task_batch_results": {
                 "_meta": {
                     "status": "completed",

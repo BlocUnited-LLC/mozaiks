@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import pytest
@@ -48,17 +49,17 @@ def _write_context(root: Path, name: str, config: dict) -> None:
 
 
 @pytest.fixture
-def registered_payments_root(tmp_path: Path) -> Path:
-    """Use the shipped public contract, including its declared integration metadata."""
+def registered_payments_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """The shipped public pack registered in a workspace build context, as an operator registers it.
+
+    Its contract keeps the declared integration metadata. The launch loader
+    resolves the workspace root from the environment, and the canonical
+    resolver vouches for a pack registered directly under it.
+    """
     root = tmp_path / "build_context"
-    config = yaml.safe_load((PAYMENTS_CONTEXT / "context.yaml").read_text(encoding="utf-8"))
-    _write_context(root, "mozaikspay", config)
-    for asset in config["assets"]:
-        if asset["kind"] == "contract":
-            relative = asset["path"]
-            (root / "mozaikspay" / relative).write_text(
-                (PAYMENTS_CONTEXT / relative).read_text(encoding="utf-8"), encoding="utf-8",
-            )
+    shutil.copytree(PAYMENTS_CONTEXT, root / "mozaikspay", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    monkeypatch.delenv("MOZAIKS_APP_WORKSPACE_PATH", raising=False)
+    monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(root))
     return root
 
 

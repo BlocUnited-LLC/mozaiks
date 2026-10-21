@@ -163,12 +163,15 @@ created later from inside Studio.
 ### 5. Start your Genesis Build
 
 In Studio (`http://127.0.0.1:3000/apps`), click `Create App`, then describe
-what you want to build. The workflow walks you through the build steps and stages the
-generated artifacts for review. In-progress builds stay in **Apps**, so you can
-always pick up where you left off.
+what you want to build. The workflow walks you through the build steps and saves
+the generated app as a draft for review. In-progress builds stay in **Apps**, so
+you can always pick up where you left off.
 
-After promotion, describe any later change to start a Refinement Run against the
-app you already have. See [Genesis Builds and Refinement Runs](https://docs.mozaiks.ai/getting-started/genesis-builds-and-refinement-runs/)
+Generating and validating the draft does not accept it. Review it, then click
+**Accept this draft** when it is right: that makes it your app's current build.
+**Activate this version** then promotes the accepted build into the running app.
+After you accept it, describe any later change to start a Refinement Run against
+the app you already have. See [Genesis Builds and Refinement Runs](https://docs.mozaiks.ai/getting-started/genesis-builds-and-refinement-runs/)
 for examples ranging from a typo fix to a major product rethink.
 
 ### Troubleshooting

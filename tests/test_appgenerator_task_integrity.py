@@ -430,9 +430,16 @@ def test_schema_repair_uses_frozen_scope_and_preserves_deterministic_scaffolds(t
             manifest=_base_manifest(), pages=[{**_base_page(), "title": "Scoped repair"}],
             context_variables=bridge,
         )
+    from factory_app.workflows.AppGenerator.tools.code_file_utils import admitted_app_file_map
+
     assert "repair rejected" not in result
     assert bridge.get("bundle_repair_result")["active"]["status"] == "responded"
-    assert bridge.get("generated_files")["provenance.yaml"] == before["generated_files"]["provenance.yaml"]
-    assert bridge.get("generated_files")["config/ai.json"] == before["generated_files"]["config/ai.json"]
+    # The repair reaches the admitted overlay; generated_files stays the last assembled bundle.
+    assert bridge.get("generated_files") == before["generated_files"]
+    admitted = admitted_app_file_map(bridge)
+    assert admitted["provenance.yaml"] == before["generated_files"]["provenance.yaml"]
+    assert admitted["config/ai.json"] == before["generated_files"]["config/ai.json"]
+    assert yaml.safe_load(admitted["ui/pages/Dashboard.yaml"])["title"] == "Scoped repair"
     updates = bridge.consume_authorized_context_updates(policy=policy, run_identity=run)
-    assert {"generated_files", "code_files", "bundle_repair_result"}.issubset(updates["set"])
+    assert {"code_files", "bundle_repair_result"}.issubset(updates["set"])
+    assert "generated_files" not in updates["set"]

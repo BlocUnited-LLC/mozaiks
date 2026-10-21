@@ -36,6 +36,7 @@ from factory_app.workflows._shared.workflow_integration import (
 from factory_app.workflows.AppGenerator.tools import app_runtime_smoke
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     admitted_app_file_map,
+    load_revision_baseline,
 )
 from factory_app.workflows.AppGenerator.tools.hydrate_app_revision_context import (
     revision_asset_evidence,
@@ -234,7 +235,7 @@ async def _resolve_files(
             _context_get(context_variables, "app_id"),
         )
     return (
-        admitted_app_file_map(context_variables),
+        admitted_app_file_map(context_variables, revision_baseline=await load_revision_baseline(context_variables)),
         _context_get(context_variables, "chat_id"),
         _context_get(context_variables, "app_id"),
     )
@@ -878,7 +879,6 @@ def _canonical_build_environment(root: str) -> dict[str, str]:
         "VITE_MOZAIKS_HOST": "platform",
         "PYTHON_DOTENV_DISABLED": "1",
         "CI": "1",
-        "MOZAIKS_REQUIRE_TAILWIND_SOURCE_LINKS": "1",
     }
 
 
@@ -1944,7 +1944,9 @@ async def run_app_bundle_acceptance_gate(
     if files is not None:
         generated_files = explicit_files
     else:
-        generated_files = admitted_app_file_map(context_variables)
+        generated_files = admitted_app_file_map(
+            context_variables, revision_baseline=await load_revision_baseline(context_variables),
+        )
     selected_capability_packs = (
         [pack for pack in capability_packs if isinstance(pack, dict)]
         if isinstance(capability_packs, list)
@@ -1977,15 +1979,18 @@ async def run_app_bundle_acceptance_gate(
     if "app.json" not in generated_files:
         required_bundle_errors.append("Generated app bundles must include app.json.")
 
+    resolved_capability_packs: list[dict[str, str]] = []
     scanner_errors = scan_generated_bundle(
         generated_files,
         capability_packs=selected_capability_packs,
         planned_data_contract=_context_get(context_variables, "data_contract"),
         subscription_contract=resolve_subscription_contract(context_variables),
+        context_variables=context_variables,
         require_deployment_artifacts=_requires_deployment_artifacts(
             generated_files,
             context_variables,
         ),
+        resolved_capability_packs=resolved_capability_packs,
     )
     planned_diagnostics = planned_artifact_diagnostics(context_variables, generated_files)
     all_scan_errors = [*required_bundle_errors, *scanner_errors]
@@ -2020,9 +2025,10 @@ async def run_app_bundle_acceptance_gate(
     _context_set(context_variables, "wiring_validation_result", wiring_result)
     module_implementation_result = validate_module_implementation_contract(generated_files)
     runtime_quality_result = _runtime_quality_result(generated_files)
+    # The functional checks see the packs the scanner resolved and verified, never the raw selection rows.
     functional_diagnostics = scan_functional_generated_app(
         generated_files,
-        capability_packs=selected_capability_packs,
+        capability_packs=[{"id": identity["pack_id"], **identity} for identity in resolved_capability_packs],
     )
     functional_errors = [item for item in functional_diagnostics if item.severity == "error"]
     functional_result = {
@@ -2212,6 +2218,8 @@ async def run_app_bundle_acceptance_gate(
         "skipped_checks": skipped_checks,
         "failed_tests": failed_tests,
         "warnings": warnings,
+        # The identities the bundle was verified against; the recorded build pins workspace packs to them.
+        "resolved_capability_packs": resolved_capability_packs,
         **subresults,
     }
     repair_diagnostics = [
@@ -2556,15 +2564,21 @@ async def validate_app_bundle_from_request(
     if not isinstance(commands, list):
         commands = None
 
-    if "app.json" in admitted_app_file_map(context_variables):
+    # A repair copy of a pack-composed UI root composes against the bound revision
+    # source read from its verified record, never only this process's memory of it.
+    revision_baseline = await load_revision_baseline(context_variables)
+    if "app.json" in admitted_app_file_map(context_variables, revision_baseline=revision_baseline):
         try:
-            await save_auth_scaffold(context_variables)
+            await save_auth_scaffold(context_variables, revision_baseline=revision_baseline)
         except (AppAuthContractError, json.JSONDecodeError):
             # Keep invalid artifacts intact for the gate's diagnostics and repair routing.
             pass
+        if revision_baseline is None:
+            # The scaffold may have saved the first overlay copy of a pack-composed root.
+            revision_baseline = await load_revision_baseline(context_variables)
     # Validate one materialized snapshot and commit it after asynchronous checks.
     # The shared bridge can be hydrated by other AG2 packet observers while we await.
-    materialized_files = admitted_app_file_map(context_variables)
+    materialized_files = admitted_app_file_map(context_variables, revision_baseline=revision_baseline)
     materialized_overlay = _context_get(context_variables, "code_files", [])
     materialized_deletions = _context_get(context_variables, "deleted_files", [])
     acceptance_result = await run_app_bundle_acceptance_gate(

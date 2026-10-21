@@ -292,7 +292,7 @@ def test_app_fields_on_auth_move_to_only_module_without_being_removed(persistenc
 
 
 @pytest.mark.parametrize("collision", ["managed_pack", "platform_hint"])
-def test_competing_canonical_owners_are_rejected(persistence, tmp_path, collision):
+def test_competing_canonical_owners_are_rejected(persistence, tmp_path, monkeypatch, collision):
     _, store_factory, _ = persistence
     context = ownership._context(managed=True)
     if collision == "platform_hint":
@@ -302,8 +302,8 @@ def test_competing_canonical_owners_are_rejected(persistence, tmp_path, collisio
         }]
         context.set("concept_blueprint", blueprint)
     else:
-        descriptor, contracts = ownership._search_pack(tmp_path)
-        contract = contracts[0]
+        descriptor, contracts = ownership._search_pack(tmp_path, monkeypatch)
+        contract = {key: value for key, value in contracts[0].items() if key != "source_path"}
         contract["surface_ownership"][0].update(
             surface_ids=["subscription_management"], entity_names=["Subscription"],
             collection_names=["subscriptions"], state_field_names=["status"],
@@ -393,11 +393,11 @@ def test_appointment_session_action_stays_app_owned(persistence):
     assert expected_data in detach(context.get("data_contract"))["surfaces"]
 
 
-def test_managed_ownership_without_facade_is_rejected(persistence, tmp_path):
+def test_managed_ownership_without_facade_is_rejected(persistence, tmp_path, monkeypatch):
     _, store_factory, _ = persistence
     context = ownership._context(managed=False)
-    descriptor, contracts = ownership._search_pack(tmp_path)
-    contract = contracts[0]
+    descriptor, contracts = ownership._search_pack(tmp_path, monkeypatch)
+    contract = {key: value for key, value in contracts[0].items() if key != "source_path"}
     del contract["surface_ownership"][0]["facade_module"]
     (tmp_path / "managed_search/contract.yaml").write_text(yaml.safe_dump(contract), encoding="utf-8")
     context.set("capability_packs", [descriptor])

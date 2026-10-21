@@ -45,10 +45,13 @@ Purpose:
 
 Runner:
 
-- `scripts/generated_ui_acceptance.py`
-- `npm --prefix web_shell run test:generated-ui:app`
+- `scripts/generated_ui_acceptance.py`, the only runner whose result is a
+  controller decision
+- `npm --prefix web_shell run test:generated-ui:app` runs the same mocked
+  Playwright specifications directly, as a local rendering smoke with no
+  controller result
 
-Output:
+Output of `scripts/generated_ui_acceptance.py`:
 
 - `validation_run` with ordered gate results and canonical issues
 - `repair_decision` with `accept`, `repair`, or `block`
@@ -70,7 +73,10 @@ Browser findings are structured:
 
 The canonical acceptance controller owns the bounded routing decision:
 
-- `accept` -> continue delivery
+- `accept` -> continue delivery, only for a real-host run on an owned launch
+  (`runtime_identity: verified_owned_launch`); an `accept` in
+  `mocked_rendering_smoke` mode is rendering smoke evidence and accepts no
+  candidate
 - `repair` -> revise generated artifacts within budget
 - `block` -> user/operator review
 
@@ -79,8 +85,8 @@ The canonical acceptance controller owns the bounded routing decision:
 The AG2 gate is a contract gate. It tells agents what to fix before a broken UI
 is assembled.
 
-The browser gate is an acceptance gate. It proves that the assembled UI behaves
-inside the actual shell.
+The browser gate interprets evidence for its declared workload. Mocked rendering
+does not prove module effects, authorization, persistence or real-host behavior.
 
 Keeping them separate prevents noisy retry loops. Playwright is not registered
 as a live AppGenerator tool or handoff. A primitive violation should not require
@@ -89,20 +95,20 @@ catalog rules.
 
 ## Current Playwright Targets
 
-Fixture acceptance:
+Fixture rendering smoke:
 
 ```powershell
 npm --prefix web_shell run test:generated-ui
 ```
 
-Generated app root acceptance:
+Generated app root rendering smoke:
 
 ```powershell
 $env:MOZAIKS_GENERATED_UI_APP_ROOT="generated/apps/{app_id}/{build_id}/app"
 npm --prefix web_shell run test:generated-ui:app
 ```
 
-Structured readiness output:
+Structured rendering-smoke result:
 
 ```powershell
 python scripts/generated_ui_acceptance.py `
@@ -110,6 +116,180 @@ python scripts/generated_ui_acceptance.py `
   --output generated-ui-acceptance.json
 ```
 
-The generated app root acceptance target is intentionally generic. It verifies
-that each declarative page route renders without browser-level regressions. It
-does not replace product-specific E2E tests.
+The default mode is `mocked_rendering_smoke`. The generic specification uses
+mocked shell/API responses and visits declarative routes. Its result is rendering
+smoke evidence, not full-app or custom-JSX acceptance, and it never accepts a
+candidate: only a real-host run on an owned launch can. The Playwright
+configuration retries no test in either mode, so a run that passes only on a
+retry is never recorded as a pass.
+
+The Python runner rejects missing/malformed JSON, inconsistent reporter totals,
+zero executed cases, required skips and failed attempts (including a later retry
+that passes). It uses the existing `ValidationRegistry` and
+`AcceptanceController`; it does not maintain a second repair state machine.
+Harness, coverage and identity failures use that controller with zero automatic
+repair attempts and no page-worker repair owner. Actual render failures retain
+the existing bounded `AppSchemaAgent` repair decision.
+
+### Reviewed real-host route probes
+
+`--mode real_host` uses an already-running loopback frontend and real shell/API
+responses. The caller owns process startup, isolation, synthetic data and cleanup.
+This mode does not start or admit executable generated code. It requires a clean,
+committed OSS checkout, an app bundle and a reviewed JSON test profile:
+
+```json
+{
+  "candidate": {
+    "app_id": "example",
+    "revision": "accepted-revision",
+    "source_sha": "<40 lowercase hex characters>",
+    "bundle_sha256": "<bundle_digest(app_root)>"
+  },
+  "routes": [
+    {"path": "/tasks", "component": "SchemaPage", "schema": "tasks", "kind": "declarative", "heading": "Tasks"},
+    {"path": "/board", "component": "TaskBoard", "kind": "custom", "heading": "Planning board"},
+    {"path": "/me", "component": "ProfilePage", "kind": "extension", "excluded_reason": "Separate account regression profile"}
+  ],
+  "cases": [
+    {"id": "route:/tasks", "route": "/tasks", "project": "generated-desktop"},
+    {"id": "route:/tasks", "route": "/tasks", "project": "generated-mobile"},
+    {"id": "route:/board", "route": "/board", "project": "generated-desktop"},
+    {"id": "route:/board", "route": "/board", "project": "generated-mobile"}
+  ]
+}
+```
+
+This is an illustrative test profile, not a generated-app schema or a runnable
+fixture. Its route inventory must match the actual composed shell, including
+auth, workflow and extension routes. Non-app exclusions require a reason before
+execution. Declarative/custom app routes cannot be excluded. Required routes need
+a reviewed heading and a case in both projects; parameterized routes also need a
+matching concrete `visit_path`. Existing schema and custom-registration owners
+validate app routes before dispatch. Missing files, registrations, routes, cases
+or mismatched local identities fail the gate.
+
+```powershell
+python scripts/generated_ui_acceptance.py `
+  --mode real_host --app-root "<admitted app>" --profile "<reviewed profile.json>" `
+  --base-url "http://127.0.0.1:<port>" --output "<receipt.json>"
+```
+
+Optional `--storage-state` uses existing legitimate browser authentication; keep
+that file private. It only restores Playwright-supported state, not
+`sessionStorage`. The current Mozaiks OIDC adapter uses `sessionStorage`, so its
+trusted app-specific specification must complete the existing real UI sign-in.
+Optional `--spec` selects a trusted app-specific specification
+under `web_shell/playwright/generated-ui/`. The default specification only checks
+actual shell identity/route registration, navigation, reviewed headings and browser
+errors. It does not prove create/edit, keyboard interactions or persisted effects.
+Product cases must exercise those real actions and emit the same `mozaiks.case_id`,
+`mozaiks.route`, `mozaiks.run_id` and `mozaiks.candidate` annotations after success.
+The runner checks exact case/project counts, run correlation and candidate values.
+Both runner and browser verify the reviewed profile hash; the runner rechecks
+profile, checkout and app bytes after execution. Direct Playwright exit zero is
+not an acceptance-controller result.
+
+The external-host CLI cannot attest that the running
+backend and compiled frontend use the locally reviewed source and bundle. Echoed
+candidate annotations are not runtime provenance. It therefore always reports
+`runtime_identity: not_evaluated` and an identity finding through the canonical
+controller; aggregate `success` remains false even when `route_probe_passed` is
+true. There is no CLI flag or serialized receipt to bypass this gate. Route
+counts and failures remain available independently.
+
+The existing Community local acceptance driver can also run a generated workspace
+through `run(args, evidence, exercise=...)`. It starts disposable Mongo, Keycloak
+and the platform host with explicit environments. Its `frontend_preview` context
+builds that same app and owns a strict-port Vite preview. An in-process
+`OwnedBrowserLaunch.from_driver(...)` connects those process handles and launch
+inputs to `run_playwright_acceptance(..., owned_launch=...)`. The runner verifies
+the clean source commit (`source_sha`), pre-launch bundle bytes, child
+origins/auth settings, live processes and served build bytes before and after
+the browser workload.
+This controlled local path can report `runtime_identity: verified_owned_launch`;
+it is not an attestation against a hostile local process owner. No launch input
+binds the profile's candidate `revision`, so the receipt keeps it out of the
+verified `launch` block and reports it under `unverified_caller_annotations`.
+
+Run the opt-in paired scripted fixture from a clean committed checkout with
+isolated Python/frontend dependencies, cached `mongo:7` and
+`quay.io/keycloak/keycloak:26.0` images, and Playwright Chromium installed:
+
+```powershell
+$env:PYTHON_DOTENV_DISABLED='1'
+$env:MOZAIKS_PAIRED_BROWSER='1'
+.venv/Scripts/python.exe -m pytest tests/test_paired_experience_browser.py -q --no-cov --reruns 0
+```
+
+Each presentation gets a fresh database and real Keycloak browser sign-in.
+Unique local evidence directories retain the profile, exact app bytes, raw
+browser report, screenshots/traces and controller result, including failures.
+The synthetic identity environment is private local test material. The fixture
+proves only its declared routes and interactions; it is scripted AG2 generation,
+not live-model generation. It selects the verified Messaging pack before plan
+admission and records its version, digest and actual composed outputs. The fixture
+explicitly approves Messaging read/write scopes in its app auth contract before
+admission. Its private synthetic issuer follows that validated auth intent;
+module permissions cannot grant themselves scopes. Runtime authorization remains
+enabled. Pack browser cases exercise persisted
+conversation actions and reject a non-participant. Projects, Tasks and the board
+use bounded server paging and literal search, with more records than the API's
+default first-page limit. Desktop board tests
+exercise pointer drag and keyboard status changes; mobile uses the native status
+control. Touch dragging is not established. Inherited profile changes persist
+through `/api/me`, and assistant session setup is exercised without sending model
+requests or starting workflows.
+
+Browser success does not replace `validate_generated_app_candidate`. The
+canonical candidate validator also checks reachable declared write actions,
+module quality, contained loading, real runtime behavior and compilation. The
+create, list and get smoke checks resolve response members from each action's
+declared output schema and still match the returned identity to a real stored
+record. Undeclared, ambiguous or malformed response members fail the check,
+including a get response that the isolation and not-found checks could
+otherwise read as empty; a 404 for a missing record still passes. The
+module quality owner treats TODO comments, docstrings and explanatory messages
+as unfinished code while allowing the exact `todo` domain value in defaults and
+enumerations; other placeholder and fake-data checks remain unchanged.
+
+The opt-in `tests/test_paired_browser_refinement.py` uses a saved accepted B
+browser candidate, validates it with the canonical Docker strategy, saves it
+through the existing artifact owner and submits the selected board source to
+the authorized Studio refinement endpoint. Only the AG2 provider responses are
+scripted. Mongo/GridFS, JWT checks, owner checks, scoped finalization and candidate
+validation remain real. It saves a child review draft, verifies all unaffected
+source bytes, and runs the child through the same owned browser acceptance with
+mobile bottom-panel assertions. Only after that passes does the authenticated
+owner accept the draft through the existing endpoint. It does not promote the
+app. Before the board refinement, the harness changes the app-owned Messaging
+handler. An inferred scope returns a confirmation question that leaves the
+accepted baseline current; the owner's confirmation applies it. A scripted
+handler that the extension grammar rejects stores no child and leaves the
+accepted build current, and the owner's explicit retry applies. Each child is
+accepted. A confirmation proposed before the retry's accepted change is
+refused with 409. A sibling saved from the board child's parent is refused with
+409 after the board child is accepted. Each step's decision, invalidation, child
+ids and refusal detail are recorded in `backend-steps.json` and `result.json`.
+The pack-inclusive child repeats the same pack behavior and records hashes
+for changed and retained files, including pack outputs, contracts and routes.
+The paired baseline has no app-owned `brand/theme_config.json` and inherits the
+framework theme, recorded as `theme_source: inherited_framework`, so this run
+does not exercise app-theme or page-title preservation. The effective provider
+requests capture the worker's saved source and read-only design/pack context.
+Upstream design documents absent from this scripted fixture are explicitly
+marked absent. This route integration does not qualify
+full Studio startup or live-model creativity.
+
+```powershell
+$env:MOZAIKS_PAIRED_REFINEMENT='1'
+$env:MOZAIKS_PAIRED_BROWSER_BASELINE='<accepted B evidence directory>'
+$env:MOZAIKS_APP_RUNTIME_IMAGE_ID='sha256:<canonical local image digest>'
+$env:MOZAIKS_PAIRED_VALIDATOR_SOURCE_SHA='<verified image source commit>'
+.venv/Scripts/python.exe -m pytest tests/test_paired_browser_refinement.py -q --no-cov --reruns 0
+```
+
+Keep source inspection, authored fixtures, scripted AG2 output, admitted
+materialization, real-host interactions, actual refinement and live-model output
+as separate evidence categories. A complete route probe is only one part of
+the application's declared acceptance workload.
