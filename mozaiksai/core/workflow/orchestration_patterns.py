@@ -367,6 +367,7 @@ async def _dispatch_agent_packet_output(
     wf_logger: Any,
 ) -> None:
     """Validate and dispatch this turn's output before AG2 folds its packet."""
+    from .outputs.rejection_audit import packet_turn_key
     from .outputs.runtime_events import emit_validated_agent_output
 
     model_cls = _structured_model_for_agent(structured_registry, agent_name)
@@ -386,7 +387,7 @@ async def _dispatch_agent_packet_output(
         app_id=app_id,
         user_id=user_id,
         turn_sequence=0,
-        turn_idempotency_key=f"{chat_id}:{channel_id}:{agent_name}:{causation_id}",
+        turn_idempotency_key=packet_turn_key(chat_id, channel_id, agent_name, causation_id),
         context_vars_dict=snapshot,
         context_bridge=context_bridge,
         structured_registry={agent_name: model_cls},
@@ -514,6 +515,7 @@ async def _run_ag2_network_phase(
     context_variables: dict[str, Any],
     structured_registry: dict[str, Any],
     max_turns: int,
+    user_id: str | None = None,
     agent_text_context_deriver: Callable[[str, str], dict[str, Any]] | None = None,
     knowledge_store: Any = None,
     context_authority_policy: Any = None,
@@ -535,6 +537,7 @@ async def _run_ag2_network_phase(
             initial_message=None if resume_existing_only else initial_message,
             context_variables=context_variables,
             structured_registry=structured_registry,
+            user_id=user_id,
             max_turns=max_turns,
             agent_text_context_deriver=agent_text_context_deriver,
             agent_output_handler=agent_output_handler,
@@ -1143,6 +1146,7 @@ async def run_workflow_orchestration(
             agent_output_handler=_before_agent_packet,
             idle_timeout_seconds=idle_timeout_seconds,
             structured_registry=structured_registry,
+            user_id=user_id,
             max_turns=max_turns,
             agent_text_context_deriver=agent_text_context_deriver,
             knowledge_store=knowledge_store,
