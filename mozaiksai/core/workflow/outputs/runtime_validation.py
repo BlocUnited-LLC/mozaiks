@@ -5,10 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from functools import lru_cache
-from typing import Any, get_args
+from types import UnionType
+from typing import Annotated, Any, Union, get_args, get_origin
 
 from pydantic import BaseModel, ValidationError
 
@@ -45,61 +45,77 @@ def _output_digest(data: Any) -> str:
     return hashlib.sha256(canonical.encode("utf-8", "replace")).hexdigest()
 
 
-def _nested_models(annotation: Any) -> list[type[BaseModel]]:
-    """Every BaseModel class mentioned anywhere inside a type annotation."""
+def _unwrap(annotation: Any) -> Any:
+    """Strip ``Annotated`` and ``Optional``; ``None`` when the shape is ambiguous."""
 
+    while True:
+        origin = get_origin(annotation)
+        if origin is Annotated:
+            annotation = get_args(annotation)[0]
+        elif origin is Union or origin is UnionType:
+            options = [arg for arg in get_args(annotation) if arg is not type(None)]
+            if len(options) != 1:
+                return None
+            annotation = options[0]
+        else:
+            return annotation
+
+
+def _step(annotation: Any, segment: Any) -> tuple[str, Any]:
+    """One validation-path segment: the text safe to record, and the next type.
+
+    Only what the schema itself proves is kept: a declared field of a model, or
+    an index into a list or tuple. Mapping keys, undeclared keys, union tags and
+    anything on an unrecognised shape are model-controlled text and become the
+    sentinel; ``None`` as the next type makes every later segment a sentinel too.
+    """
+
+    annotation = _unwrap(annotation)
+    origin, args = get_origin(annotation), get_args(annotation)
     if isinstance(annotation, type) and issubclass(annotation, BaseModel):
-        return [annotation]
-    models: list[type[BaseModel]] = []
-    for arg in get_args(annotation):
-        models.extend(_nested_models(arg))
-    return models
+        if annotation.__pydantic_root_model__ or not isinstance(segment, str):
+            return _REDACTED_FIELD, None
+        matches = [
+            info
+            for name, info in annotation.model_fields.items()
+            if segment == name or segment == info.alias or segment == info.validation_alias
+        ]
+        if len(matches) == 1:
+            return segment, matches[0].annotation
+        return _REDACTED_FIELD, None
+    if origin in (dict, Mapping) and len(args) == 2:
+        return _REDACTED_FIELD, args[1]
+    if origin in (list, set, frozenset, Sequence) and args:
+        element = args[0]
+    elif origin is tuple and args:
+        position = segment if isinstance(segment, int) and not isinstance(segment, bool) else -1
+        if args[-1] is Ellipsis:
+            element = args[0]
+        elif 0 <= position < len(args):
+            element = args[position]
+        else:
+            return _REDACTED_FIELD, None
+    else:
+        return _REDACTED_FIELD, None
+    if isinstance(segment, int) and not isinstance(segment, bool) and segment >= 0:
+        return str(segment), element
+    return _REDACTED_FIELD, None
 
 
-@lru_cache(maxsize=256)
-def declared_field_names(model_cls: type[BaseModel]) -> frozenset[str]:
-    """Field names and aliases declared by ``model_cls`` and the models nested in it.
-
-    This is the only vocabulary an audit record may quote from a validation
-    path: it comes from the schema, never from the model's output.
-    """
-
-    names: set[str] = set()
-    seen: set[type[BaseModel]] = set()
-    pending = [model_cls]
-    while pending:
-        current = pending.pop()
-        if current in seen:
-            continue
-        seen.add(current)
-        for name, info in current.model_fields.items():
-            names.add(name)
-            for alias in (info.alias, info.validation_alias):
-                if isinstance(alias, str):
-                    names.add(alias)
-            pending.extend(_nested_models(info.annotation))
-    return frozenset(names)
-
-
-def _failure_fields(exc: ValidationError, declared: frozenset[str]) -> tuple[str, ...]:
-    """``<field path>:<error type>`` pairs, bounded and free of model-controlled text.
-
-    A path segment survives only if it is a list index or a declared field
-    name. Anything else (an undeclared key the model added, a key inside an open
-    dict, a union tag) is replaced by a fixed sentinel rather than truncated.
-    """
+def _failure_fields(exc: ValidationError, model_cls: type[BaseModel]) -> tuple[str, ...]:
+    """Bounded ``<schema-proven path>:<error type>`` pairs; never input values."""
 
     fields: list[str] = []
     for item in exc.errors(include_input=False, include_context=False, include_url=False):
-        parts = [
-            str(part)
-            if isinstance(part, int) and not isinstance(part, bool)
-            else part
-            if isinstance(part, str) and part in declared
-            else _REDACTED_FIELD
-            for part in item.get("loc", ())
-        ]
+        parts: list[str] = []
+        annotation: Any = model_cls
+        for segment in item.get("loc", ()):
+            label, annotation = _step(annotation, segment)
+            parts.append(label)
         error_type = str(item.get("type", ""))
+        if parts and error_type in {"extra_forbidden", "invalid_key"}:
+            # The final segment is the offending key itself, whatever it is named.
+            parts[-1] = _REDACTED_FIELD
         if _SAFE_ERROR_TYPE.fullmatch(error_type) is None:
             error_type = "unknown"
         fields.append(f"{'.'.join(parts) or '<root>'}:{error_type}")
@@ -188,7 +204,7 @@ def validate_agent_structured_output(
             if isinstance(exc, ValidationError)
             else "validation_error",
             failure_fields=(
-                _failure_fields(exc, declared_field_names(model_cls))
+                _failure_fields(exc, model_cls)
                 if isinstance(exc, ValidationError)
                 else ()
             ),

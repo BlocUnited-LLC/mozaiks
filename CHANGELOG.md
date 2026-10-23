@@ -18,12 +18,15 @@ This project follows a practical pre-1.0 changelog format:
   `agent.output.rejected` audit record from the runtime turn, network WAL, and
   task-batch paths, attributed to the initiating user. The record carries the
   agent, workflow, chat, trace id, failure category, error types with the
-  declared field names they apply to, and a SHA-256 digest of the reply. Field
-  names the model supplied (undeclared keys, keys inside open objects) are
-  replaced by `<redacted-field>`; the reply and Pydantic's input-quoting
-  message are never stored. A packet seen by both the turn and WAL checks is
-  recorded once. Validation still fails closed, and an audit failure cannot
-  change that.
+  field paths they apply to, and a SHA-256 digest of the reply. A path keeps
+  only what the schema proves (declared fields and list or tuple indexes);
+  mapping keys and any component the schema cannot prove become
+  `<redacted-field>`. The reply and Pydantic's input-quoting message are never
+  stored. A packet checked by both the turn and the WAL is deduplicated on a
+  best-effort basis: the cache is per process and holds 4,096 entries, so an
+  eviction or a restart can record the same rejection twice. This is not a
+  durable or cross-process exactly-once guarantee. Validation still fails
+  closed, and an audit failure cannot change that.
 
 ### Changed
 

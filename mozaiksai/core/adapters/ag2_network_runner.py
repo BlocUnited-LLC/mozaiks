@@ -356,8 +356,6 @@ class AG2NetworkRunnerRequest:
     initial_message: str | None
     context_variables: Mapping[str, Any] = field(default_factory=dict)
     structured_registry: Mapping[str, Any] = field(default_factory=dict)
-    # Verified initiating identity; used only to attribute audit records.
-    user_id: str | None = None
     max_turns: int | None = None
     idle_timeout_seconds: float = DEFAULT_IDLE_TIMEOUT_SECONDS
     agent_text_context_deriver: Callable[[str, str], Mapping[str, Any]] | None = None
@@ -397,6 +395,9 @@ class AG2NetworkRunnerRequest:
     # Declared by orchestrator.yaml: the context key whose text explains why
     # the transition graph ended the run as workflow_failed.
     failure_message_key: str | None = None
+    # Verified initiating identity; used only to attribute audit records.
+    # Last, so it cannot shift the positions of existing fields.
+    user_id: str | None = None
 
 
 @dataclass(slots=True)

@@ -712,3 +712,134 @@ async def test_audit_logger_records_trusted_scope_when_supplied() -> None:
 
     assert inserted[0]["tenant_id"] == "tenant-1"
     assert inserted[0]["workspace_id"] == "ws-1"
+
+
+# ---------------------------------------------------------------------------
+# Audit paths follow schema position; request positions stay stable
+# ---------------------------------------------------------------------------
+
+CARD = 4111111111111111
+
+
+class _IntKeys(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    payload: dict[int, int]
+
+
+class _Open(BaseModel):
+    items: list[int]
+    payload: dict[str, int]
+
+
+class _OptionalNested(BaseModel):
+    item: _Item | None
+    by_name: dict[str, _Item]
+
+
+class _Tuples(BaseModel):
+    pair: tuple[int, str]
+    rest: tuple[int, ...]
+
+
+class _Ambiguous(BaseModel):
+    x: int | list[int]
+
+
+@pytest.mark.parametrize(
+    ("model", "reply", "expected"),
+    [
+        (_IntKeys, {"payload": {CARD: SECRET}}, ("payload.<redacted-field>:int_parsing",)),
+        (_IntKeys, {"payload": {}, CARD: SECRET}, ("<redacted-field>:invalid_key",)),
+        (
+            _IntKeys,
+            json.dumps({"payload": {str(CARD): SECRET}}),
+            ("payload.<redacted-field>:int_parsing",),
+        ),
+        (_Open, {"items": [], "payload": {"items": SECRET}}, ("payload.<redacted-field>:int_parsing",)),
+        (_Open, {"items": [], "payload": {"payload": SECRET}}, ("payload.<redacted-field>:int_parsing",)),
+        (_OptionalNested, {"item": {"name": 5}, "by_name": {}}, ("item.name:string_type",)),
+        (
+            _OptionalNested,
+            {"item": None, "by_name": {SECRET: {"name": 5}}},
+            ("by_name.<redacted-field>.name:string_type",),
+        ),
+        (_Tuples, {"pair": [1, 2], "rest": [1]}, ("pair.1:string_type",)),
+        (_Tuples, {"pair": [1, "a"], "rest": [1, "x"]}, ("rest.1:int_parsing",)),
+        (
+            _Ambiguous,
+            {"x": [SECRET]},
+            (
+                "x.<redacted-field>:int_type",
+                "x.<redacted-field>.<redacted-field>:int_parsing",
+            ),
+        ),
+    ],
+    ids=[
+        "int-map-key",
+        "int-extra-key",
+        "json-numeric-key",
+        "open-map-key-equals-sibling-field",
+        "open-map-key-equals-own-field",
+        "optional-nested-model",
+        "model-valued-map",
+        "tuple-fixed",
+        "tuple-variadic",
+        "ambiguous-union",
+    ],
+)
+async def test_audit_paths_follow_schema_position_in_the_serialized_record(
+    audit_docs: list[dict[str, Any]],
+    model: type[BaseModel],
+    reply: Any,
+    expected: tuple[str, ...],
+) -> None:
+    validation = validate_agent_structured_output(
+        agent_name="PositionAgent", reply=reply, structured_registry={"PositionAgent": model}
+    )
+    assert validation is not None and not validation.validation_passed
+
+    await audit_structured_output_rejection(validation, **_context(user_id="trusted-user"))
+
+    (document,) = audit_docs
+    assert validation.failure_fields == expected
+    assert tuple(document["extra"]["failure_fields"]) == expected
+    serialized = json.dumps(document, default=str)
+    assert SECRET not in serialized
+    assert str(CARD) not in serialized
+    assert document["actor_id"] == "trusted-user"
+    assert document["inputs_hash"] == validation.output_digest
+
+
+def test_network_request_keeps_existing_positional_fields() -> None:
+    request = AG2NetworkRunnerRequest(
+        "Flow", "chat", "app", {}, [], "Planner", "Start", {}, {}, 7, 8.0
+    )
+
+    assert request.max_turns == 7
+    assert request.idle_timeout_seconds == 8.0
+    assert request.user_id is None
+
+
+def test_network_request_user_id_is_keyword_identity_not_context() -> None:
+    request = AG2NetworkRunnerRequest(
+        workflow_name="Flow",
+        chat_id="chat",
+        app_id="app",
+        agents={},
+        transition_rules=[],
+        initial_agent_name="Planner",
+        initial_message="Start",
+        context_variables={"user_id": "untrusted-model-context"},
+        user_id="trusted-user",
+    )
+
+    assert request.user_id == "trusted-user"
+    assert request.max_turns is None
+
+
+def test_user_id_is_the_last_field_of_both_runner_requests() -> None:
+    import dataclasses
+
+    for request_type in (AG2NetworkRunnerRequest, AG2TaskBatchRunnerRequest):
+        assert dataclasses.fields(request_type)[-1].name == "user_id"
