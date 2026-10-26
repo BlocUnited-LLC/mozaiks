@@ -1,0 +1,951 @@
+name: CI
+
+on:
+  push:
+    branches: [main, codex/f042b-linux-20261026]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The full pytest suite, split into 8 deterministic shards that run in
+  # parallel jobs. scripts/ci/split_tests.py partitions the top-level
+  # collection units of tests/ exhaustively, and each shard preserves the
+  # relative alphabetical file order of the previous single-job run (the suite
+  # has latent inter-file ordering hazards, so order preservation is load-
+  # bearing — see the script docstring). Coverage is measured per shard,
+  # combined and gated at the same 70% threshold in the fan-in `test` job
+  # below, which keeps the required-check name `test` unchanged.
+  test-shard:
+    if: github.ref != 'refs/heads/codex/f042b-linux-20261026'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Start MongoDB from public mirror
+        run: bash scripts/ci/mongo_service.sh start
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Run tests
+        env:
+          MONGO_URI: mongodb://localhost:27017/test_mozaiks
+          ENV: test
+          AUTH_ENABLED: "false"
+          OPENAI_API_KEY: "sk-test-placeholder"
+        # --cov-fail-under=0 defers the coverage gate to the fan-in job: one
+        # shard only runs a quarter of the suite, so a per-shard threshold
+        # would be meaningless. --durations=20 records the slowest tests so
+        # suite-time regressions stay attributable.
+        run: |
+          pytest $(python scripts/ci/split_tests.py --shard "${{ matrix.shard }}" --num-shards 8) \
+            -v --durations=20 --cov=mozaiksai --cov-report=term --cov-fail-under=0
+          mv .coverage "coverage-data-shard-${{ matrix.shard }}"
+
+      - name: Upload coverage data
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-shard-${{ matrix.shard }}
+          path: coverage-data-shard-${{ matrix.shard }}
+          retention-days: 1
+          if-no-files-found: error
+
+  acp-isolation-proof:
+    # The real Docker cases are opt-in in normal pytest collection. Build the
+    # credential-free proof and preview images and run them on every PR and push.
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ github.ref == 'refs/heads/codex/f042b-linux-20261026' && 60 || 30 }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+
+      # One frozen, inspected public campaign. Not ordinary required CI.
+      - name: Setup qualification Python
+        if: github.ref == 'refs/heads/codex/f042b-linux-20261026'
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.13.7'
+
+      - name: Verify frozen qualification inputs
+        if: github.ref == 'refs/heads/codex/f042b-linux-20261026'
+        env:
+          EXPECTED_MANIFEST: 2beb2c5d0756e12790b8145265260099a7cbf840aadc988fe35e090ba70ce127
+        run: |
+          test "$GITHUB_EVENT_NAME" = push
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          mkdir "$RUNNER_TEMP/f042b-source" "$RUNNER_TEMP/f042b-receipts"
+          python - <<'PY'
+          import hashlib, json, os, re, tarfile
+          from pathlib import Path, PurePosixPath
+          root = Path("qualification")
+          data = (root / "manifest.json").read_bytes()
+          assert hashlib.sha256(data).hexdigest() == os.environ["EXPECTED_MANIFEST"]
+          manifest = json.loads(data)
+          assert manifest["branch"] == "codex/f042b-linux-20261026"
+          assert manifest["attempt"] in (1, 2, 3)
+          assert all(re.fullmatch("[0-9a-f]{40}", manifest[key]) for key in ("source_sha", "source_tree"))
+          source = Path(os.environ["RUNNER_TEMP"]) / "f042b-source"
+          for name, digest in manifest["inputs"].items():
+              assert PurePosixPath(name).name == name
+              assert hashlib.sha256((root / name).read_bytes()).hexdigest() == digest
+          with tarfile.open(root / "source.tar.gz") as archive:
+              members = archive.getmembers()
+              assert len({m.name for m in members}) == len(members)
+              assert {m.name for m in members} == set(manifest["files"])
+              for member in members:
+                  path = PurePosixPath(member.name)
+                  assert member.isfile() and not path.is_absolute() and ".." not in path.parts
+                  assert not set(path.parts) & {".git", ".local", ".claude", ".codex", "node_modules"}
+                  data = archive.extractfile(member).read()
+                  assert hashlib.sha256(data).hexdigest() == manifest["files"][member.name]
+                  target = source / member.name
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  target.write_bytes(data)
+          (source / "mozaiksai/_build_revision.json").write_text(json.dumps(
+              {"schema_version": "mozaiks.source_revision.v1", "commit": manifest["source_sha"]}))
+          receipt = {key: manifest[key] for key in ("source_sha", "source_tree", "attempt", "inputs")}
+          receipt.update(controller_sha=os.environ["GITHUB_SHA"], run_id=os.environ["GITHUB_RUN_ID"],
+                         manifest_sha256=hashlib.sha256((root / "manifest.json").read_bytes()).hexdigest())
+          (Path(os.environ["RUNNER_TEMP"]) / "f042b-receipts/identities.json").write_text(json.dumps(receipt, indent=2))
+          PY
+
+      - name: Inspect and install the single frozen qualification distribution
+        if: github.ref == 'refs/heads/codex/f042b-linux-20261026'
+        env:
+          PIP_NO_CACHE_DIR: '1'
+          PYTHON_DOTENV_DISABLED: '1'
+        run: |
+          cd "$RUNNER_TEMP/f042b-source"
+          mkdir dist
+          cp "$GITHUB_WORKSPACE"/qualification/mozaiks-*.whl "$GITHUB_WORKSPACE"/qualification/mozaiks-*.tar.gz dist/
+          python scripts/package_content_guard.py dist/*.whl dist/*.tar.gz
+          python -m venv "$RUNNER_TEMP/f042b-consumer"
+          "$RUNNER_TEMP/f042b-consumer/bin/python" -m pip install dist/*.whl 'pytest==9.1.1' 'pytest-asyncio==1.4.0' 'httpx==0.28.1' 'openai==3.37.0' 'pydantic==2.14.1' pytest-mock pytest-cov pytest-rerunfailures ruff
+          "$RUNNER_TEMP/f042b-consumer/bin/python" -m pip check
+          "$RUNNER_TEMP/f042b-consumer/bin/python" -m pip freeze > "$RUNNER_TEMP/f042b-receipts/dependencies.txt"
+          cp dist/* "$RUNNER_TEMP/f042b-receipts/"
+          mkdir "$RUNNER_TEMP/f042b-fixtures"
+          cp -r tests scripts examples "$RUNNER_TEMP/f042b-fixtures/"
+          cp "$GITHUB_WORKSPACE/qualification/installed_origins.py" "$RUNNER_TEMP/f042b-fixtures/"
+          cd "$RUNNER_TEMP/f042b-fixtures"
+          env -i PATH="$PATH" PYTHON_DOTENV_DISABLED=1 PYTHONDONTWRITEBYTECODE=1             "$RUNNER_TEMP/f042b-consumer/bin/python" -I "$GITHUB_WORKSPACE/qualification/installed_check.py"             "$RUNNER_TEMP/f042b-source" "$RUNNER_TEMP/f042b-receipts"
+          env -i PATH="$PATH" PYTHON_DOTENV_DISABLED=1 PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 MOZAIKS_TEST_REAL_STUDIO_LINEAGE=1 \
+            "$RUNNER_TEMP/f042b-consumer/bin/python" -B -m pytest --collect-only -q -p no:cacheprovider -p pytest_asyncio.plugin -o addopts= -o log_file= \
+            tests/test_refinement_acceptance_real_mongo.py::test_real_paired_projects_tasks_acceptance > "$RUNNER_TEMP/f042b-receipts/paired-collection.txt"
+
+      - name: Build clean contained candidate using the established preview recipe
+        if: github.ref == 'refs/heads/codex/f042b-linux-20261026'
+        run: |
+          cd "$RUNNER_TEMP/f042b-source"
+          cp "$GITHUB_WORKSPACE/qualification/Dockerfile" ./Dockerfile.qualification
+          cp "$GITHUB_WORKSPACE/qualification/constraints.txt" ./constraints.txt
+          docker build -f Dockerfile.qualification -t f042b-candidate:local . > "$RUNNER_TEMP/f042b-image-build.log" 2>&1
+          docker image inspect f042b-candidate:local --format '{{.Id}}' > "$RUNNER_TEMP/f042b-receipts/image-id.txt"
+          docker image inspect f042b-candidate:local --format '{{json .Config.Labels}}' > "$RUNNER_TEMP/f042b-receipts/image-labels.json"
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges=true             --entrypoint python f042b-candidate:local -m pip list --format=freeze > "$RUNNER_TEMP/f042b-receipts/image-dependencies.txt"
+          docker pull quay.io/keycloak/keycloak@sha256:09a381c715ab0b111835b70f2905955274843a219c6f27efb348e4d9f4086858
+          docker image inspect quay.io/keycloak/keycloak@sha256:09a381c715ab0b111835b70f2905955274843a219c6f27efb348e4d9f4086858             --format '{{.Id}}' > "$RUNNER_TEMP/f042b-receipts/identity-image-id.txt"
+
+      - name: Qualify independent platform and secure browser once
+        if: github.ref == 'refs/heads/codex/f042b-linux-20261026'
+        run: |
+          uname -a > "$RUNNER_TEMP/f042b-receipts/platform.txt"
+          free -b >> "$RUNNER_TEMP/f042b-receipts/platform.txt"
+          df -B1 "$RUNNER_TEMP" >> "$RUNNER_TEMP/f042b-receipts/platform.txt"
+          python - <<'PY'
+          import json, os, time
+          from pathlib import Path
+          rows = []
+          for _ in range(1000):
+              rows.append([time.time_ns(), time.monotonic_ns(), time.clock_gettime_ns(time.CLOCK_MONOTONIC_RAW)])
+              time.sleep(.01)
+          (Path(os.environ["RUNNER_TEMP"]) / "f042b-receipts/native-clocks.json").write_text(json.dumps(rows))
+          assert all(all(b[i] >= a[i] for i in range(3)) for a, b in zip(rows, rows[1:]))
+          assert all(abs((b[0]-a[0])-(b[2]-a[2])) < 50_000_000 for a, b in zip(rows, rows[1:]))
+          PY
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges=true             --security-opt "seccomp=$GITHUB_WORKSPACE/qualification/observer-seccomp.json"             --tmpfs /tmp:rw,nosuid,size=256m --shm-size=64m --pids-limit=256 --memory=1g --memory-swap=1g --cpus=1             --workdir /opt/mozaiks/web_shell --env HOME=/tmp --entrypoint node f042b-candidate:local             -e "const {chromium}=require('@playwright/test');(async()=>{const b=await chromium.launch({chromiumSandbox:true});const p=await b.newPage();await p.goto('about:blank');console.log(JSON.stringify({browser:b.version(),sandbox:true,uid:process.getuid()}));await b.close()})().catch(e=>{console.error(e.name);process.exit(1)})"             > "$RUNNER_TEMP/f042b-receipts/sandbox.json"
+
+      - name: Start run-owned transactional Mongo
+        if: github.ref == 'refs/heads/codex/f042b-linux-20261026'
+        env:
+          CI_MONGO_NAME: f042b-ci-${{ github.run_id }}
+          CI_MONGO_PORT: '52741'
+          CI_MONGO_REPLICA: f042b-linux
+          CI_MONGO_IMAGE: mongo@sha256:b096b4cb9269f3ebcf363be63f1c50920f786879d03a1890347a3bf33f1f0df0
+        run: bash "$RUNNER_TEMP/f042b-source/scripts/ci/mongo_service.sh" start
+
+      - name: Execute both installed paired nodes without retries
+        if: github.ref == 'refs/heads/codex/f042b-linux-20261026'
+        run: |
+          cd "$RUNNER_TEMP/f042b-fixtures"
+          env -i PATH="$PATH" CI=true ENV=test PYTHON_DOTENV_DISABLED=1 PYTHONDONTWRITEBYTECODE=1 \
+            PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 F042B_ORIGIN_RECEIPT="$RUNNER_TEMP/f042b-receipts/loaded-origins.json" \
+            LOGS_BASE_DIR="$RUNNER_TEMP/f042b-runtime-logs" AG2_RUNTIME_LOG_FILE="$RUNNER_TEMP/f042b-ag2.log" \
+            MOZAIKS_TEST_REFINEMENT_MONGO_URI=mongodb://127.0.0.1:52741 MOZAIKS_REQUIRE_REAL_MONGO=1 \
+            MOZAIKS_TEST_REAL_STUDIO_LINEAGE=1 MOZAIKS_APP_RUNTIME_IMAGE_ID="$(cat "$RUNNER_TEMP/f042b-receipts/image-id.txt")" \
+            MOZAIKS_TEST_IDENTITY_IMAGE="$(cat "$RUNNER_TEMP/f042b-receipts/identity-image-id.txt")" \
+            MOZAIKS_BROWSER_OBSERVER_SECCOMP="$GITHUB_WORKSPACE/qualification/observer-seccomp.json" \
+            "$RUNNER_TEMP/f042b-consumer/bin/python" -B -m pytest -q -ra --tb=no --show-capture=no -x \
+            -p no:cacheprovider -p pytest_asyncio.plugin -p installed_origins -o addopts= -o log_file= \
+            --junitxml="$RUNNER_TEMP/f042b-paired.xml" --basetemp="$RUNNER_TEMP/f042b-paired" \
+            tests/test_refinement_acceptance_real_mongo.py::test_real_paired_projects_tasks_acceptance \
+            > "$RUNNER_TEMP/f042b-paired.log" 2>&1
+
+      - name: Export bounded sanitized qualification evidence
+        id: qualification_evidence
+        if: always() && github.ref == 'refs/heads/codex/f042b-linux-20261026'
+        run: |
+          python qualification/export_evidence.py "$RUNNER_TEMP"
+          test "$(du -sb "$RUNNER_TEMP/f042b-receipts" | cut -f1)" -le 104857600
+
+      - name: Remove only this runner's task containers
+        if: always() && github.ref == 'refs/heads/codex/f042b-linux-20261026'
+        run: |
+          # This fresh GitHub VM has no shared/local task services.
+          # The existing contained owner removes its own UUID app/observer/issuer.
+          name="f042b-ci-$GITHUB_RUN_ID"
+          if docker container inspect "$name" >/dev/null 2>&1; then docker rm -f "$name"; fi
+          docker ps -a --format '{{.Names}}' > "$RUNNER_TEMP/f042b-receipts/remaining-containers.txt"
+          test ! -s "$RUNNER_TEMP/f042b-receipts/remaining-containers.txt"
+
+      - name: Upload only bounded safe receipts
+        if: always() && github.ref == 'refs/heads/codex/f042b-linux-20261026' && steps.qualification_evidence.outcome == 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: f042b-${{ github.run_id }}
+          path: ${{ runner.temp }}/f042b-receipts/
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Setup Python
+        if: github.ref != 'refs/heads/codex/f042b-linux-20261026'
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install test dependencies
+        if: github.ref != 'refs/heads/codex/f042b-linux-20261026'
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Pull preview base from public mirror
+        if: github.ref != 'refs/heads/codex/f042b-linux-20261026'
+        run: bash scripts/ci/pull_public_image.sh public.ecr.aws/docker/library/node:24-bookworm-slim node:24-bookworm-slim
+
+      - name: Build offline ACP proof image
+        if: github.ref != 'refs/heads/codex/f042b-linux-20261026'
+        run: |
+          docker build --build-context node:24-bookworm-slim=docker-image://public.ecr.aws/docker/library/node:24-bookworm-slim -f infra/docker/Dockerfile.preview -t mozaiks-sandbox:local .
+          docker build -f infra/docker/Dockerfile.acp-proof -t mozaiks-acp-proof:local .
+
+      - name: Capture built preview image ID
+        if: github.ref != 'refs/heads/codex/f042b-linux-20261026'
+        id: preview_image
+        run: |
+          image_id=$(docker image inspect --format '{{.Id}}' mozaiks-sandbox:local)
+          if [[ ! "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo 'Preview image did not resolve to a local sha256 ID' >&2
+            exit 1
+          fi
+          printf 'image_id=%s\n' "$image_id" >> "$GITHUB_OUTPUT"
+
+      - name: Capture built proof image ID
+        if: github.ref != 'refs/heads/codex/f042b-linux-20261026'
+        id: proof_image
+        run: |
+          image_id=$(docker image inspect --format '{{.Id}}' mozaiks-acp-proof:local)
+          if [[ ! "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo 'Offline ACP proof image did not resolve to a local sha256 ID' >&2
+            exit 1
+          fi
+          printf 'image_id=%s\n' "$image_id" >> "$GITHUB_OUTPUT"
+
+      - name: Run real Docker isolation proof
+        if: github.ref != 'refs/heads/codex/f042b-linux-20261026'
+        env:
+          MOZAIKS_RUN_REPOSITORY_DOCKER_PROOF: '1'
+          MOZAIKS_REPOSITORY_DOCKER_PROOF_IMAGE_ID: ${{ steps.proof_image.outputs.image_id }}
+        run: |
+          python -m pytest -q --no-cov --reruns 0 \
+            --junitxml=/tmp/acp-isolation-proof.xml \
+            tests/test_repository_docker_executor.py::test_real_offline_proof_image_uses_host_executor \
+            tests/test_repository_docker_executor.py::test_real_offline_proof_image_executes_exact_operation_grant
+          python - <<'PY'
+          from xml.etree import ElementTree
+
+          cases = ElementTree.parse('/tmp/acp-isolation-proof.xml').findall('.//testcase')
+          if len(cases) != 3 or any(case.find('skipped') is not None for case in cases):
+              raise SystemExit(f'Expected three executed Docker proof cases; found {len(cases)} cases')
+          PY
+
+      - name: Run generated Docker build acceptance proof
+        if: github.ref != 'refs/heads/codex/f042b-linux-20261026'
+        env:
+          MOZAIKS_TEST_CONTAINED_SMOKE_IMAGE: ${{ steps.preview_image.outputs.image_id }}
+        run: |
+          python -m pytest -q --no-cov --reruns 0 \
+            --junitxml=/tmp/generated-build-proof.xml \
+            tests/test_canonical_app_build_validation.py::test_real_docker_build_includes_generated_tailwind_class \
+            tests/test_app_acceptance_isolation.py::test_generated_acceptance_uses_local_docker_with_poisoned_client_settings \
+            tests/test_app_acceptance_isolation.py::test_generated_gate_admits_only_pinned_contained_evidence
+          python - <<'PY'
+          from xml.etree import ElementTree
+
+          cases = ElementTree.parse('/tmp/generated-build-proof.xml').findall('.//testcase')
+          if len(cases) != 3 or any(case.find('skipped') is not None for case in cases):
+              raise SystemExit(f'Expected three executed generated Docker cases; found {len(cases)} cases')
+          PY
+
+  test:
+    # Fan-in gate for the shard matrix and real Docker proofs. Holds
+    # the required-check name `test`, then enforces combined coverage.
+    runs-on: ubuntu-latest
+    needs: [test-shard, acp-isolation-proof]
+    # always() so either dependency failing cannot leave this job skipped — a
+    # skipped required check would satisfy branch protection.
+    if: always() && github.ref != 'refs/heads/codex/f042b-linux-20261026'
+    steps:
+      - name: Fail unless every shard succeeded
+        if: needs.test-shard.result != 'success'
+        run: |
+          echo "test-shard result: ${{ needs.test-shard.result }}" >&2
+          exit 1
+
+      - name: Fail unless the real Docker isolation proof succeeded
+        if: needs.acp-isolation-proof.result != 'success'
+        run: |
+          echo "acp-isolation-proof result: ${{ needs.acp-isolation-proof.result }}" >&2
+          exit 1
+
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        # Same install as the shards so the coverage data format and source
+        # analysis match exactly.
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Download shard coverage data
+        uses: actions/download-artifact@v8
+        with:
+          pattern: coverage-shard-*
+          merge-multiple: true
+
+      - name: Combine coverage and enforce threshold
+        # Fails closed on incomplete coverage evidence: exactly one artifact
+        # per shard must exist, and each must combine cleanly. Combining one
+        # input per invocation is load-bearing — a multi-file `coverage
+        # combine` skips an unreadable data file with only a warning, while a
+        # single unreadable input leaves the invocation with no usable data,
+        # which is a hard error.
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          artifacts=(coverage-data-shard-*)
+          if [ "${#artifacts[@]}" -ne 8 ]; then
+            echo "expected exactly 8 shard coverage artifacts, found ${#artifacts[@]}: ${artifacts[*]-none}" >&2
+            exit 1
+          fi
+          for k in 0 1 2 3 4 5 6 7; do
+            # -s: a zero-byte artifact must fail too — coverage combine
+            # silently treats an empty data file as "no data yet".
+            if [ ! -s "coverage-data-shard-$k" ]; then
+              echo "missing or empty coverage data artifact for shard $k" >&2
+              exit 1
+            fi
+          done
+          for k in 0 1 2 3 4 5 6 7; do
+            coverage combine --append "coverage-data-shard-$k"
+          done
+          coverage xml -o coverage.xml
+          coverage report --fail-under=70
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v7
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          files: ./coverage.xml
+          fail_ci_if_error: false
+
+  secret-scan:
+    if: github.ref != 'refs/heads/codex/f042b-linux-20261026'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install gitleaks
+        run: |
+          VERSION="8.18.4"
+          wget -q "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" -O gitleaks.tar.gz
+          tar -xzf gitleaks.tar.gz gitleaks
+          sudo mv gitleaks /usr/local/bin/gitleaks
+
+      - name: Scan for secrets
+        # --redact masks found secrets in CI output.
+        # --log-opts=HEAD restricts the scan to this ref's own history; without it,
+        # gitleaks defaults to `--all` and flags unrelated open branches' commits
+        # (e.g. other PRs' intentional fake-secret test fixtures), failing every PR.
+        # To ignore a historical false positive, add its fingerprint to .gitleaksignore.
+        run: gitleaks detect --source . --log-level warn --log-opts="HEAD" --redact
+
+  dependency-audit:
+    if: github.ref != 'refs/heads/codex/f042b-linux-20261026'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install package + audit tool
+        run: |
+          python -m pip install --upgrade pip "setuptools>=83.0.0"
+          python -m pip install -e ".[dev]"
+          python -m pip install --upgrade "setuptools>=83.0.0" pip-audit
+
+      - name: Audit Python dependencies
+        # Fails if any known vulnerability is found in the installed environment.
+        # To ignore a specific advisory while a fix is unavailable, add:
+        #   --ignore-vuln GHSA-XXXX-YYYY-ZZZZ
+        run: pip-audit --progress-spinner off
+
+  lint:
+    if: github.ref != 'refs/heads/codex/f042b-linux-20261026'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Validate Keycloak realm config
+        run: |
+          python - <<'PY'
+          import json, sys
+          path = "factory_app/app/brand/realm-export.json"
+          try:
+              with open(path) as f:
+                  realm = json.load(f)
+          except Exception as e:
+              print(f"FAIL: {path} is not valid JSON: {e}", file=sys.stderr)
+              sys.exit(1)
+          required = ["realm", "enabled"]
+          missing = [k for k in required if k not in realm]
+          if missing:
+              print(f"FAIL: {path} is missing required fields: {missing}", file=sys.stderr)
+              sys.exit(1)
+          if realm.get("realm") != "mozaiks":
+              print(f"FAIL: expected realm='mozaiks', got '{realm.get('realm')}'", file=sys.stderr)
+              sys.exit(1)
+          print(f"OK: {path} is valid (realm={realm['realm']}, enabled={realm['enabled']})")
+          PY
+
+      - name: Source hygiene scan
+        # Enforces the repo's clean-source terminology policy (see
+        # SOURCE_HYGIENE_FORBIDDEN in scripts/production_readiness_gate.py).
+        # Loaded by file path (like tests/test_production_readiness_gate.py)
+        # since scripts/ is not a package.
+        run: |
+          python - <<'PY'
+          import importlib.util
+          import sys
+          from pathlib import Path
+
+          file_path = Path("scripts/production_readiness_gate.py").resolve()
+          spec = importlib.util.spec_from_file_location("production_readiness_gate", file_path)
+          module = importlib.util.module_from_spec(spec)
+          sys.modules[spec.name] = module
+          spec.loader.exec_module(module)
+
+          violations = module.run_source_hygiene_scan()
+          if violations:
+              print("Source hygiene scan failed:", file=sys.stderr)
+              for violation in violations[:50]:
+                  print(f"  {violation}", file=sys.stderr)
+              if len(violations) > 50:
+                  print(f"  ... {len(violations) - 50} more", file=sys.stderr)
+              sys.exit(1)
+          print("Source hygiene scan passed.")
+          PY
+
+      - name: Governance guardrails
+        run: python scripts/governance_guardrails.py --all --errors-only
+
+      - name: Run ruff
+        run: ruff check . --output-format=github
+
+      - name: Run mypy
+        run: mypy mozaiksai/ factory_app/ --ignore-missing-imports --disable-error-code=import-untyped
+
+  frontend:
+    if: github.ref != 'refs/heads/codex/f042b-linux-20261026'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web_shell
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: |
+            web_shell/package-lock.json
+            chat-ui/package-lock.json
+
+      - name: Install chat UI dependencies
+        working-directory: chat-ui
+        run: npm ci
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Workflow UI inheritance contract
+        run: npm run test:workflow-ui
+
+      - name: Support profile panel contract
+        run: npm run test:support-panel
+
+      - name: Test wiring guard
+        run: npm run test:wiring
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_GC: "1"
+
+      - name: UI contract tests
+        run: npm run test:ui-contracts
+
+      - name: Browser auth contract
+        run: npm run test:auth
+
+      - name: Concept review interactions
+        run: npm run test:concept-review
+
+      - name: Factory review, retry, preview and generated page contracts
+        run: npm run test:factory-contracts
+
+      - name: Responsive smoke
+        run: npm run test:responsive-smoke
+        env:
+          MOZAIKS_FACTORY_APP_PATH: ${{ github.workspace }}/factory_app
+          MOZAIKS_CHAT_UI_PATH: ${{ github.workspace }}/chat-ui
+
+      - name: Factory sign-in acceptance
+        run: npm run test:auth-browser
+        env:
+          MOZAIKS_FACTORY_APP_PATH: ${{ github.workspace }}/factory_app
+          MOZAIKS_CHAT_UI_PATH: ${{ github.workspace }}/chat-ui
+
+      - name: Onboarding demo smoke
+        run: npm run test:onboarding-demo -- --project desktop-chromium
+        env:
+          MOZAIKS_FACTORY_APP_PATH: ${{ github.workspace }}/factory_app
+          MOZAIKS_CHAT_UI_PATH: ${{ github.workspace }}/chat-ui
+
+      - name: Build
+        run: npm run build
+        env:
+          MOZAIKS_FACTORY_APP_PATH: ${{ github.workspace }}/factory_app
+          MOZAIKS_CHAT_UI_PATH: ${{ github.workspace }}/chat-ui
+
+  visual-regression:
+    if: github.ref != 'refs/heads/codex/f042b-linux-20261026'
+    # Visual regression comparison against committed Playwright screenshot baselines.
+    # Baselines live in web_shell/playwright/snapshots/ and must be committed to source control.
+    #
+    # To create/update baselines locally:
+    #   cd web_shell
+    #   npx playwright test --config playwright.visual.config.js --update-snapshots
+    # Then commit the updated web_shell/playwright/snapshots/ directory.
+    #
+    runs-on: ubuntu-latest
+    needs: frontend
+    defaults:
+      run:
+        working-directory: web_shell
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: |
+            web_shell/package-lock.json
+            chat-ui/package-lock.json
+
+      - name: Install chat UI dependencies
+        working-directory: chat-ui
+        run: npm ci
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_GC: "1"
+
+      - name: Visual regression
+        run: npx playwright test --config playwright.visual.config.js
+        env:
+          MOZAIKS_FACTORY_APP_PATH: ${{ github.workspace }}/factory_app
+          MOZAIKS_CHAT_UI_PATH: ${{ github.workspace }}/chat-ui
+
+      - name: Upload visual diff artifacts
+        uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: visual-regression-diffs
+          path: web_shell/playwright-report-visual/
+          retention-days: 14
+
+  package:
+    if: github.ref != 'refs/heads/codex/f042b-linux-20261026'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # Throwaway MongoDB server for the installed first-run smoke below.
+      - name: Start MongoDB from public mirror
+        run: bash scripts/ci/mongo_service.sh start
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Build wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --wheel
+
+      - name: Check wheel publication boundaries
+        run: python scripts/package_content_guard.py dist/*.whl
+
+      - name: Install wheel in clean venv
+        run: |
+          python -m venv .pkg-venv
+          . .pkg-venv/bin/activate
+          pip install dist/*.whl
+
+      - name: Verify optional ACP and E2B wheel extras
+        run: |
+          . .pkg-venv/bin/activate
+          wheel_path="$(realpath dist/*.whl)"
+          python -m pip install "${wheel_path}[acp-coding,e2b]"
+          python -m pip check
+          cd /tmp
+          python -I - <<'PY'
+          from importlib import import_module
+          from importlib.metadata import metadata, version
+          from pathlib import Path
+          import sysconfig
+
+          extras = set(metadata("mozaiks").get_all("Provides-Extra") or ())
+          required = {"acp-coding", "e2b"}
+          if not required.issubset(extras):
+              raise SystemExit(f"Wheel missing optional extras: {sorted(required - extras)}")
+
+          site_packages = Path(sysconfig.get_paths()["purelib"]).resolve()
+          for name in (
+              "acp",
+              "ag2.acp",
+              "e2b_code_interpreter",
+              "mozaiksai.control_plane.implementations.acp_coding_provider",
+              "mozaiksai.core.adapters.e2b_sandbox",
+          ):
+              module = import_module(name)
+              module_path = Path(module.__file__).resolve()
+              if not module_path.is_relative_to(site_packages):
+                  raise SystemExit(f"Optional module imported outside installed wheel: {module_path}")
+
+          from mozaiksai.core.adapters.e2b_sandbox import Sandbox
+
+          if Sandbox is None:
+              raise SystemExit("Installed E2B adapter could not import its optional SDK")
+          print(
+              "Optional wheel extras import offline:",
+              f"ag2={version('ag2')}",
+              f"agent-client-protocol={version('agent-client-protocol')}",
+              f"e2b-code-interpreter={version('e2b-code-interpreter')}",
+          )
+          PY
+
+      - name: Verify E2B adapter tests with optional SDK installed
+        run: |
+          . .pkg-venv/bin/activate
+          python -m pip install pytest pytest-asyncio
+          python -m pytest -q -o addopts= \
+            tests/test_e2b_sandbox_adapter.py \
+            tests/test_e2b_sandbox_teardown.py
+
+      - name: Smoke installed CLI
+        run: |
+          . .pkg-venv/bin/activate
+          mozaiks --version
+          mozaiks quickstart --help
+          cd /tmp
+          python -m mozaiks --version
+          python -m mozaiks studio --help
+          python -m mozaiks quickstart --help
+
+      - name: Verify packaged resources
+        run: |
+          . .pkg-venv/bin/activate
+          mkdir -p /tmp/mozaiks-package-smoke
+          cd /tmp/mozaiks-package-smoke
+          python - <<'PY'
+          from pathlib import Path
+          from mozaiksai.resources import (
+              resolve_chat_ui_src_root,
+              resolve_factory_brand_root,
+              resolve_factory_workflows_root,
+              resolve_web_shell_root,
+          )
+
+          resources = {
+              "factory_workflows": resolve_factory_workflows_root(),
+              "factory_brand": resolve_factory_brand_root(),
+              "web_shell": resolve_web_shell_root(),
+              "chat_ui_src": resolve_chat_ui_src_root(),
+          }
+
+          for name, path in resources.items():
+              assert path is not None, f"{name} did not resolve"
+              resolved = Path(path)
+              assert resolved.exists(), f"{name} path missing: {resolved}"
+              assert "site-packages" in str(resolved), f"{name} resolved to non-installed path: {resolved}"
+
+          print("Packaged resources resolved from site-packages")
+          PY
+
+      - name: Verify installed Android export provenance
+        run: |
+          . .pkg-venv/bin/activate
+          cd /tmp/mozaiks-package-smoke
+          python - <<'PY'
+          import os
+          from factory_app.workflows.AppGenerator.tools.android_delivery import _framework_snapshot
+
+          files, framework = _framework_snapshot()
+          assert framework["commit"] == os.environ["GITHUB_SHA"]
+          assert "web_shell/vite.config.js" in files
+          assert "chat-ui/src/auth/authAdapter.js" in files
+          print("Installed Android exporter is bound to the wheel's exact source revision")
+          PY
+
+      - name: Verify standalone workspace composition
+        run: |
+          . .pkg-venv/bin/activate
+          python scripts/verify_installed_workspace.py \
+            --installed-root "$VIRTUAL_ENV" \
+            --workspace /tmp/mozaiks-workspace-composition
+
+      - name: Setup Node for installed browser contract
+        uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+
+      - name: Verify installed browser auth
+        run: |
+          . .pkg-venv/bin/activate
+          cd /tmp/mozaiks-package-smoke
+          python - <<'PY'
+          import os
+          import subprocess
+          from mozaiksai.resources import resolve_chat_ui_src_root, resolve_web_shell_root
+
+          shell = resolve_web_shell_root()
+          ui = resolve_chat_ui_src_root()
+          assert shell is not None and ui is not None
+          subprocess.run(
+              ["node", "--test", str(shell / "tests" / "authAdapter.test.js")],
+              env={**os.environ, "MOZAIKS_CHAT_UI_PATH": str(ui.parent)},
+              check=True,
+          )
+          PY
+
+      - name: Smoke packaged scaffold init
+        run: |
+          . .pkg-venv/bin/activate
+          mkdir -p /tmp/mozaiks-package-init
+          mozaiks init chat --name "CI Package Smoke" --dir /tmp/mozaiks-package-init
+          test -f /tmp/mozaiks-package-init/app/brand/theme_config.json
+
+      - name: Smoke installed first run (init, serve, ready, shell-config)
+        # Starts the installed app the way a new user does: scrubbed env, a
+        # fresh scaffold, `mozaiks serve` on the platform and studio hosts.
+        env:
+          MOZAIKS_FIRST_RUN_SMOKE_MONGO_URI: mongodb://localhost:27017/ci_first_run_smoke
+        run: |
+          . .pkg-venv/bin/activate
+          mkdir -p /tmp/mozaiks-first-run
+          cd /tmp/mozaiks-first-run
+          python "$GITHUB_WORKSPACE/scripts/smoke_installed_first_run.py" \
+            --work-dir /tmp/mozaiks-first-run
+
+  infra-build:
+    if: github.ref != 'refs/heads/codex/f042b-linux-20261026'
+    # Proves the repo-local infra/ artifacts and a representative generated-app
+    # Dockerfile actually build and run, instead of only being reviewed by hand. See
+    # docs/architecture/deployment/oss-infra-and-generated-app-deployment.md.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Start MongoDB from public mirror
+        # The generated-app container reaches this service through the host
+        # gateway; other jobs keep their disposable MongoDB port on loopback.
+        env:
+          CI_MONGO_BIND_ADDRESS: 0.0.0.0
+        run: bash scripts/ci/mongo_service.sh start
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install generated-app smoke dependencies
+        run: |
+          python -m pip install --upgrade pip wheel
+          python -m pip install -e ".[dev]"
+
+      - name: Pull repo host base from public mirror
+        run: bash scripts/ci/pull_public_image.sh public.ecr.aws/docker/library/python:3.13-slim python:3.13-slim
+
+      - name: Build repo host image
+        run: docker build --build-context python:3.13-slim=docker-image://public.ecr.aws/docker/library/python:3.13-slim -t mozaiks-repo-host:ci -f infra/docker/Dockerfile .
+
+      - name: Smoke-run repo host image
+        run: |
+          docker run -d --name mozaiks-repo-host-smoke \
+            --network host \
+            -e AUTH_ENABLED=false \
+            -e AUTH_ANON_ACCESS=open \
+            -e RATE_LIMIT_ENABLED=false \
+            -e OPENAI_API_KEY=sk-test-placeholder \
+            -e MONGO_URI=mongodb://localhost:27017/ci_mozaiks \
+            mozaiks-repo-host:ci
+
+          for i in $(seq 1 20); do
+            if curl -sf http://localhost:8000/api/health > /tmp/health.json; then
+              echo "Repo host image is healthy:"
+              cat /tmp/health.json
+              exit 0
+            fi
+            sleep 3
+          done
+
+          echo "Repo host image did not become healthy in time" >&2
+          docker logs mozaiks-repo-host-smoke
+          exit 1
+
+      - name: Show container logs on failure
+        if: failure()
+        run: docker logs mozaiks-repo-host-smoke || true
+
+      - name: Stop smoke container
+        if: always()
+        run: docker rm -f mozaiks-repo-host-smoke || true
+
+      - name: Build and smoke-run representative generated app
+        env:
+          MOZAIKS_RUN_GENERATED_APP_DOCKER_SMOKE: '1'
+        run: pytest -q --no-cov --reruns 0 tests/test_generated_app_container_smoke.py
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: v3.14.4
+
+      - name: Lint Helm chart
+        run: helm lint infra/helm/mozaiks
+
+      - name: Render Helm chart
+        run: helm template mozaiks infra/helm/mozaiks > /tmp/mozaiks-helm-rendered.yaml
+
+      - name: Verify rendered health probe paths
+        # Regression guard for the /api/health/liveness vs /api/health/live
+        # probe-path drift fixed in infra/helm/mozaiks/values.yaml.
+        run: |
+          grep -q "path: /api/health/live$" /tmp/mozaiks-helm-rendered.yaml
+          grep -q "path: /api/health/readiness$" /tmp/mozaiks-helm-rendered.yaml
