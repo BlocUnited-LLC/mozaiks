@@ -66,10 +66,11 @@ with zipfile.ZipFile(next(Path("/tmp/wheels").glob("*.whl"))) as wheel:
             continue
         assert (installed / name).read_bytes() == wheel.read(name), name
         source_name = name.replace("mozaiks_chat_ui/", "chat-ui/", 1)
+        source_path = Path("/opt/mozaiks") / source_name
         if source_name == "mozaiksai/_build_revision.json":
-            assert json.loads(Path(source_name).read_bytes()) == json.loads(wheel.read(name))
+            assert json.loads(source_path.read_bytes()) == json.loads(wheel.read(name))
         else:
-            assert Path(source_name).read_bytes() == wheel.read(name), source_name
+            assert source_path.read_bytes() == wheel.read(name), source_name
 print("Installed wheel and image source payloads are byte-identical; source-image proof, not installed-only")
 PY
 LABEL io.mozaiks.browser.source_sha="b4e1d01637e4a9f68a05e9bf8746d291cf0bebf7"

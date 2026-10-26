@@ -1,5 +1,5 @@
 {
-  "attempt": 1,
+  "attempt": 2,
   "branch": "codex/f042b-linux-20261026",
   "files": {
     "LICENSE": "48eb7a54fb4bff337b115e3d87d71fca4c671390ec5143e3a06ef87df77e44a7",
@@ -2002,7 +2002,7 @@
     "tests/test_context_schema.py": "17f11841856b0a14e2a1813db63de576fe7fb007761275de6c15dc6b8537c24a",
     "tests/test_context_utils.py": "a06acbc39f7807d57ab99ec949936293f7a5dc4d9c576fa9639cb73048d13146",
     "tests/test_context_variables_helpers.py": "970ea54799daf0fd370f96309d0797777543d26f710a1f45f95533b2fd90bee5",
-    "tests/test_continuous_deterministic_materialization.py": "ad917c2a2c3c42daf395a1a281bd601b133eeeebfba10117e3cc913c4029516d",
+    "tests/test_continuous_deterministic_materialization.py": "049ed592da3adcfc15828e5d97dc6cb75a1e6d23252420b641216b0ce25966e7",
     "tests/test_contract_file_needs_its_typed_field.py": "48af722e622bfdafd692aeb3f5f96d9ac1a60cc9aad88b459fa3de4dc91a68cc",
     "tests/test_contract_identity.py": "0db6d01084932510af5af0191e136778feb19309038932e346530a786207c45a",
     "tests/test_contract_surface_planner.py": "9502029eb42af131936a27d612d91a9f412d7743aa5297e52a144c90a46f7222",
@@ -2369,7 +2369,7 @@
     "tests/test_registered_hooks_match_their_runners.py": "a5ad48effb85ad9a7af19f76793274f2caafe1d3f6ede63eee26234eb8a82f17",
     "tests/test_relationship_contract.py": "e09af85a78821bf7d69efd1e0c643b5c9ab5e457bc244f02446606002e742f10",
     "tests/test_release_packaging_contract.py": "02db3cc2bdfd9ad4f06567f3e8c43c523f55a046345b07b8d00eba18a1ac7450",
-    "tests/test_release_workflow_contract.py": "6f3755c29c317e09322f373138fa8bd60ce877bb0b1a83977f01992c04881e9d",
+    "tests/test_release_workflow_contract.py": "17950b776e9e3536ab011647e1e9a36381abe2f433315cfc9350acec00141956",
     "tests/test_renderer_input_closure.py": "1f6eadbf033e5c2c2386d08825539ac31b8fc9c6e4d6fa88578d2b52d83abc10",
     "tests/test_repository_acp_usage.py": "cb309c3f741f3dd0abbba0ed8cc7880eefe964333704b760c1d195364251b707",
     "tests/test_repository_docker_executor.py": "4c09bc6474344aebb958badc5284849d424f3b34616dbcb2594f78da86deaf02",
@@ -2490,11 +2490,11 @@
     "tests/test_startup_validation.py": "ed6868771d561f3cd7da9c68666062805136dddaf63b72d4ab88e010eee0225e",
     "tests/test_state_machine_archetype_drift_guards.py": "832938c98eb8b3573858c3edf80920c5efc6125277ccb0817c93a583955ba7ad",
     "tests/test_storefront_commerce_service.py": "bb4fc27c56151d33238e3a403ef948eb804b523167eff36b7352e3d08ede9907",
-    "tests/test_storefront_custom_delta.py": "ca7999fc85140bb3bc696dfcdb5f381a184b81c26cc260a13557b09600925f97",
+    "tests/test_storefront_custom_delta.py": "31deacdbdfb54b5cd66d548aade07289696db5a9272b2abb80ec08c6dc0c7305",
     "tests/test_storefront_delivery_continuity.py": "3e374a99b19065af92060a31cbda278d78e44552972e43bde0d075e9051cc391",
     "tests/test_storefront_management_routes.py": "150b09b3f6ab8cffc589eee7bf065d7ca336df0a7a8ab348b89aa361994b7195",
     "tests/test_storefront_materialization.py": "6c37c92bc1043804a1a65619fba51fc1f567df88c2fba408c56bad44392bb7ef",
-    "tests/test_storefront_recipe.py": "c9f3babd4441a30607aff9317950342b59d6d33ae83060550058d82628c2d4c6",
+    "tests/test_storefront_recipe.py": "a9122167ceab4d5936b1235b61b0c0af9f305190e41e2964ca8aaf649fd51b73",
     "tests/test_storefront_refinement_lineage.py": "8830bf35ba3720fc012a1b96758b0c223db2b06211fe564ef982f189cf32c1c1",
     "tests/test_storefront_semantic_handoff.py": "f8f21e4e6dde23139863d779971faf486cd0b6d9654d22fbd38c15fadf96f4be",
     "tests/test_structured_output_cache_invalidation.py": "e97902d519fa0cc0f08d13f8c1a7dda72d6905b4896f6ed305b904dbcc8b599f",
@@ -2791,17 +2791,18 @@
     "web_shell/workflowUi.js": "58cd4799a89c163a85af730a5416b05ceb21976c91c68a4e52dd352013df4d42"
   },
   "inputs": {
-    "Dockerfile": "e62ecbb556b625b5d3b4066e7476455df4ce581c54994005dfb18d224209f9cf",
+    "Dockerfile": "286f13388046c26fe83b44926f2473bbb0f1b363d16e6ca45bf2d05a3f1c957e",
     "constraints.txt": "ede783cf0eae9c30de698ebda9f7b60b9c643dc84a41c69a774da8509f91a25a",
-    "export_evidence.py": "992e39d0e8e0b5d4d3f90dcf1098d3bfe34e208c4ab7aabbe8b1f6c223733427",
+    "export_evidence.py": "27b4e5e764fa85b6dc4590890cc5910cca3cc66a8174a85f26479cb1cc140575",
     "installed_check.py": "c1723410979abdb46ef5d4b7bb1a04efa2d6d0376655375983f7b5acc57d1856",
     "installed_origins.py": "5e6d1ad567a34b6ada28e9fbfea15ced9fd90d170aabcc70cfe0dcf90e350727",
     "mozaiks-0.2.0-py3-none-any.whl": "702af79671913d226a1b2bc6dc25d7c1f5fabdb4c64fcd88f4257d691d57eb38",
     "mozaiks-0.2.0.tar.gz": "5a7a6366232248a0c009b0133c0a644d17384d3ec30c4a873c2f2b61d4fc85e8",
     "observer-seccomp.json": "8f3b2fa3fdf50c6e6f8f25a51d32d3d4148fac534b35130dcb013ca2e87d57b7",
-    "source.tar.gz": "56cdeac273a089960f08be792757130037ee74d79bec8c6d2a41f3dbcecbc82e"
+    "source.tar.gz": "97d5a514e0402cdb07ca06930399927c92da8bc39d6b711d1f4b9e1200049efb"
   },
+  "package_source_sha": "b4e1d01637e4a9f68a05e9bf8746d291cf0bebf7",
   "schema_version": "mozaiks.qualification_input_manifest.v1",
-  "source_sha": "b4e1d01637e4a9f68a05e9bf8746d291cf0bebf7",
-  "source_tree": "6e00a366474f488926526a3dd382329f3aadf145"
+  "source_sha": "42a01550c08f143a58889c1d4b70198b57d1d5eb",
+  "source_tree": "9efcbdfb77bad87f918fd845449978cbb9bae5ee"
 }

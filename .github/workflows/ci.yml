@@ -95,7 +95,7 @@ jobs:
       - name: Verify frozen qualification inputs
         if: github.ref == 'refs/heads/codex/f042b-linux-20261026'
         env:
-          EXPECTED_MANIFEST: 2beb2c5d0756e12790b8145265260099a7cbf840aadc988fe35e090ba70ce127
+          EXPECTED_MANIFEST: dcdd6ea298f0fb98d072ed172a1c3d2aac438fedc8ce84021a20db217823a0ed
         run: |
           test "$GITHUB_EVENT_NAME" = push
           test "$GITHUB_RUN_ATTEMPT" = 1
@@ -109,7 +109,7 @@ jobs:
           manifest = json.loads(data)
           assert manifest["branch"] == "codex/f042b-linux-20261026"
           assert manifest["attempt"] in (1, 2, 3)
-          assert all(re.fullmatch("[0-9a-f]{40}", manifest[key]) for key in ("source_sha", "source_tree"))
+          assert all(re.fullmatch("[0-9a-f]{40}", manifest[key]) for key in ("source_sha", "source_tree", "package_source_sha"))
           source = Path(os.environ["RUNNER_TEMP"]) / "f042b-source"
           for name, digest in manifest["inputs"].items():
               assert PurePosixPath(name).name == name
@@ -128,8 +128,8 @@ jobs:
                   target.parent.mkdir(parents=True, exist_ok=True)
                   target.write_bytes(data)
           (source / "mozaiksai/_build_revision.json").write_text(json.dumps(
-              {"schema_version": "mozaiks.source_revision.v1", "commit": manifest["source_sha"]}))
-          receipt = {key: manifest[key] for key in ("source_sha", "source_tree", "attempt", "inputs")}
+              {"schema_version": "mozaiks.source_revision.v1", "commit": manifest["package_source_sha"]}))
+          receipt = {key: manifest[key] for key in ("source_sha", "source_tree", "package_source_sha", "attempt", "inputs")}
           receipt.update(controller_sha=os.environ["GITHUB_SHA"], run_id=os.environ["GITHUB_RUN_ID"],
                          manifest_sha256=hashlib.sha256((root / "manifest.json").read_bytes()).hexdigest())
           (Path(os.environ["RUNNER_TEMP"]) / "f042b-receipts/identities.json").write_text(json.dumps(receipt, indent=2))
@@ -156,7 +156,7 @@ jobs:
           cd "$RUNNER_TEMP/f042b-fixtures"
           env -i PATH="$PATH" PYTHON_DOTENV_DISABLED=1 PYTHONDONTWRITEBYTECODE=1             "$RUNNER_TEMP/f042b-consumer/bin/python" -I "$GITHUB_WORKSPACE/qualification/installed_check.py"             "$RUNNER_TEMP/f042b-source" "$RUNNER_TEMP/f042b-receipts"
           env -i PATH="$PATH" PYTHON_DOTENV_DISABLED=1 PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 MOZAIKS_TEST_REAL_STUDIO_LINEAGE=1 \
-            "$RUNNER_TEMP/f042b-consumer/bin/python" -B -m pytest --collect-only -q -p no:cacheprovider -p pytest_asyncio.plugin -o addopts= -o log_file= \
+            "$RUNNER_TEMP/f042b-consumer/bin/python" -B -m pytest --collect-only -q -p no:cacheprovider -p pytest_asyncio.plugin -o asyncio_mode=auto -o asyncio_default_fixture_loop_scope=function -o addopts= -o log_file= \
             tests/test_refinement_acceptance_real_mongo.py::test_real_paired_projects_tasks_acceptance > "$RUNNER_TEMP/f042b-receipts/paired-collection.txt"
 
       - name: Build clean contained candidate using the established preview recipe
@@ -212,7 +212,7 @@ jobs:
             MOZAIKS_TEST_IDENTITY_IMAGE="$(cat "$RUNNER_TEMP/f042b-receipts/identity-image-id.txt")" \
             MOZAIKS_BROWSER_OBSERVER_SECCOMP="$GITHUB_WORKSPACE/qualification/observer-seccomp.json" \
             "$RUNNER_TEMP/f042b-consumer/bin/python" -B -m pytest -q -ra --tb=no --show-capture=no -x \
-            -p no:cacheprovider -p pytest_asyncio.plugin -p installed_origins -o addopts= -o log_file= \
+            -p no:cacheprovider -p pytest_asyncio.plugin -p installed_origins -o asyncio_mode=auto -o asyncio_default_fixture_loop_scope=function -o addopts= -o log_file= \
             --junitxml="$RUNNER_TEMP/f042b-paired.xml" --basetemp="$RUNNER_TEMP/f042b-paired" \
             tests/test_refinement_acceptance_real_mongo.py::test_real_paired_projects_tasks_acceptance \
             > "$RUNNER_TEMP/f042b-paired.log" 2>&1

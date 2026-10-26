@@ -2,6 +2,7 @@
 import base64
 import hashlib
 import json
+import re
 import sys
 from pathlib import Path
 from xml.etree import ElementTree
@@ -10,10 +11,20 @@ root = Path(sys.argv[1]).resolve()
 out = root / "f042b-receipts"
 out.mkdir(exist_ok=True)
 summary = {"pytest": [], "stages": [], "limit_bytes": 104857600}
+# Only the trusted dependency/source image build is eligible. Never copy pytest,
+# app, issuer or browser logs. No secret/build-arg/token is passed to this build.
+build_log = root / "f042b-image-build.log"
+if build_log.exists():
+    data = build_log.read_bytes()
+    assert len(data) <= 10 * 1024 * 1024, "Required build log exceeds bound; no silent truncation"
+    assert not re.search(rb"(?:ghp_|gho_|github_pat_|sk-proj-|sk-ant-)[A-Za-z0-9_-]{25,}|https?://[^\s/]+:[^\s/]+@", data)
+    (out / "trusted-image-build.log").write_bytes(data)
 xml = root / "f042b-paired.xml"
 if xml.exists():
     for case in ElementTree.parse(xml).findall(".//testcase"):
+        failures = [child for child in case if child.tag in {"failure", "error"}]
         summary["pytest"].append({"name": case.get("name"), "seconds": case.get("time"),
+            "failure_locations": sorted(set(re.findall(r"(?:tests|factory_app|mozaiksai)/[A-Za-z0-9_./-]+\.py:[0-9]+", "\n".join(child.text or "" for child in failures)))),
             "status": next((key for key in ("failure", "error", "skipped") if case.find(key) is not None), "passed")})
 for path in sorted((root / "f042b-paired").rglob("*-diagnostic.json")):
     raw = json.loads(path.read_text())
@@ -26,9 +37,11 @@ for path in sorted((root / "f042b-paired").rglob("*-diagnostic.json")):
         event = json.loads(line[len(prefix):])
         if event.get("event") != "outcome":
             continue
-        item = {key: event.get(key) for key in ("check", "status", "request_digest", "source_content_sha256",
+        details = event.get("details", {})
+        item = {key: event.get(key) for key in ("check", "status")}
+        item.update({key: details.get(key) for key in ("request_digest", "source_content_sha256",
             "observer_run_id", "run_id", "image_id", "exit_code", "browser_execution", "coverage",
-            "observer_resources", "observer_storage_peaks", "browser_failure_signals") if key in event}
+            "observer_resources", "observer_storage_peaks", "browser_failure_signals") if key in details})
         if event.get("check") == "requirement.browser":
             # Finite public identity and outcome projection, excluding error text,
             # stdout, request URLs, auth storage, realm import and callback state.
@@ -55,7 +68,7 @@ for path in sorted((root / "f042b-paired").rglob("*-diagnostic.json")):
                             "results": [{key: result.get(key) for key in ("status", "duration", "retry")} for result in test.get("results", [])]})
                 for child in suite.get("suites", []):
                     visit(child)
-            visit(event.get("report", {}))
+            visit(details.get("report", {}))
             item["tests"] = tests
         stage["checks"].append(item)
     summary["stages"].append(stage)
