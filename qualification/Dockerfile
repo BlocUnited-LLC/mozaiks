@@ -73,7 +73,7 @@ with zipfile.ZipFile(next(Path("/tmp/wheels").glob("*.whl"))) as wheel:
             assert source_path.read_bytes() == wheel.read(name), source_name
 print("Installed wheel and image source payloads are byte-identical; source-image proof, not installed-only")
 PY
-LABEL io.mozaiks.browser.source_sha="35826c28960b0e36a4119896b27085fdfc19be2e"
+LABEL io.mozaiks.browser.source_sha="03e9351fe2dec05cb38f8887a1656d89b129f519"
 LABEL io.mozaiks.browser.spec_sha256="e6d81e062e661852470371cedcbe93b5da6d910444174141060d8aeb55cc64b1"
 LABEL io.mozaiks.browser.paired_spec_sha256="4f2612ee4cdc4a5245f96d21da3d2c4fd132ae0788fe72f84fd2dc6ad5f93063"
 LABEL io.mozaiks.browser.helper_sha256="9dca5b755fbfdcb2f06fdc6a55babc7e9fdcefab36149065f8520ec048493a73"

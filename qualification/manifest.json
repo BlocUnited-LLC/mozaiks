@@ -1,5 +1,5 @@
 {
-  "attempt": 1,
+  "attempt": 2,
   "branch": "codex/f042b-linux-20261026",
   "campaign": "f042b-live-20261026",
   "files": {
@@ -718,7 +718,7 @@
     "factory_app/workflows/ThemeCapture/ui/index.js": "098d349ff7448ed854a261e0cd757c80d8bde64c88e541e4c6651084c89f520d",
     "factory_app/workflows/ThemeCapture/ui_config.yaml": "12caee2e8d8575305eddc3cd3dcd862dfb727b318e52875b62934746e84ae91d",
     "factory_app/workflows/ValueEngine/__init__.py": "abdcfe9e3f1f6dcf2109b7ec402bd5b146494f67424dbc0cdc792ec0e8c5e048",
-    "factory_app/workflows/ValueEngine/agents.yaml": "4a9d9d45e23fe831c4e0ad59022ad1065882e7a5945de8efe88a90ac9758a54c",
+    "factory_app/workflows/ValueEngine/agents.yaml": "1368e68a2dc426d45145491752af9f031ca3e7c70be6c38eebb2a82dce71858d",
     "factory_app/workflows/ValueEngine/context_variables.yaml": "bd51f1bcc20a7d1db21553cf6ebf570ad3f78f45fbac01956e05449b4b3b1257",
     "factory_app/workflows/ValueEngine/middleware.yaml": "a6ac9fd1e111bd297c09cd59a6154062bb9b0586f117cf8d748cd27304d80c56",
     "factory_app/workflows/ValueEngine/orchestrator.yaml": "1302e01ffc3f9c99099e39c5d96a9d7219a03a475290e70269913e8a1104294a",
@@ -2610,7 +2610,7 @@
     "tests/test_value_engine_contracts.py": "e19181f29b0795dbdee0ba403ab17021bc8dfc5d1c881ead08197db51c24f527",
     "tests/test_value_engine_requirement_inventory.py": "320da5b5be52725446f462e13132cfb399229f1cab1f53a3f910888e983bdacb",
     "tests/test_value_interview_readiness.py": "145b5f0b43e243bb69333cc446df4801439e0b19c4bb3b087d9a66a5fe745aa3",
-    "tests/test_valueengine_prompt_matches_its_schema.py": "55ff0bf4a3befcfb74cff84fdc00708a9aeaf8eadef6233c0f48e5a19303968b",
+    "tests/test_valueengine_prompt_matches_its_schema.py": "d973ca3a53d7d7f9c938401eb8b9b7476dbfd6d0b224a60432f94ba3c1f92daf",
     "tests/test_web_shell_live_smoke.py": "9fc0493d4b97d7894ac09bc3e28fd7036bab20859722ee54a7b292132d799e5e",
     "tests/test_web_shell_vite_config.py": "fb3b0a5656450af341789dbbf763a2acdd8291dbb084cd3d79687c88f774529a",
     "tests/test_websocket_subprotocol_auth.py": "42d273e0a816cb32f4b9cff9a4ce49367dc70222a94d551b2f9cce0f6d8dad2b",
@@ -2793,20 +2793,20 @@
     "web_shell/workflowUi.js": "58cd4799a89c163a85af730a5416b05ceb21976c91c68a4e52dd352013df4d42"
   },
   "inputs": {
-    "Dockerfile": "40ddadd0847982d841c3775d17d69ab35fbc8d25240bcfa3522b7118749de041",
+    "Dockerfile": "7e14be240dd5a55cdc95d024af409b2eaa207d9f35b5a5c2049d0c8252c4fc95",
     "constraints.txt": "ede783cf0eae9c30de698ebda9f7b60b9c643dc84a41c69a774da8509f91a25a",
     "export_evidence.py": "86a1c2143b0fbba4695174f5dd1b64a8dbe8aa437f722c319e8d7c1fd2d0fbec",
     "installed_check.py": "c1723410979abdb46ef5d4b7bb1a04efa2d6d0376655375983f7b5acc57d1856",
     "installed_origins.py": "5e6d1ad567a34b6ada28e9fbfea15ced9fd90d170aabcc70cfe0dcf90e350727",
-    "live-inputs.json": "1cf4bb201075dd965ed2b10186be54f78dd7e16d261630ee5d39e227f39318ed",
-    "mozaiks-0.2.0-py3-none-any.whl": "8a722e8cb74239f6f9d48adc337e393b78255a837d415b788eb235060e2dcfbb",
-    "mozaiks-0.2.0.tar.gz": "830890c7cef04ab236d6c75122a5a83e01fe2b11b7d8ff36985fa0f9283abb12",
+    "live-inputs.json": "f19eab62dfa49d0dc5b04c89bd46f0ddc4f6f2072cbaeed41a5f67cd6fe22a70",
+    "mozaiks-0.2.0-py3-none-any.whl": "893ea64126391eb37f4659fc1fb252994f2b372748020d5b1e344baee181b472",
+    "mozaiks-0.2.0.tar.gz": "23cdc98aa704ba5b939d989367cf866ea7c8a806541c89d3219cc44c64072b06",
     "observer-seccomp.json": "8f3b2fa3fdf50c6e6f8f25a51d32d3d4148fac534b35130dcb013ca2e87d57b7",
-    "source.tar.gz": "c1e78efdbd97797780ba4947acb6543b8bb3bcf0e42dadfa39a19c394c92386a",
+    "source.tar.gz": "2e20540ba0243cdf2e05aa3c2f7beec0450473a28076fe2602896a19d7d9fe29",
     "test_export_evidence.py": "d1d47c65079d64a8119bea2f5b1260f7138924296eb5e2683afd0e9f58e9cbfb"
   },
-  "package_source_sha": "35826c28960b0e36a4119896b27085fdfc19be2e",
+  "package_source_sha": "03e9351fe2dec05cb38f8887a1656d89b129f519",
   "schema_version": "mozaiks.qualification_input_manifest.v1",
-  "source_sha": "85016d43e341a929dd28fa72f834cf4153beae3d",
-  "source_tree": "c1e08e82b5e9f18aa70c7891bfe21b7e82db8b4d"
+  "source_sha": "03e9351fe2dec05cb38f8887a1656d89b129f519",
+  "source_tree": "48bdbdcf586590f3d8a61887ef5acaeeecb3648d"
 }
