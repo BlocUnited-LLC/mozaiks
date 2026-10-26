@@ -19,7 +19,7 @@ jobs:
   # collection units of tests/ exhaustively, and each shard preserves the
   # relative alphabetical file order of the previous single-job run (the suite
   # has latent inter-file ordering hazards, so order preservation is load-
-  # bearing — see the script docstring). Coverage is measured per shard,
+  # bearing â€” see the script docstring). Coverage is measured per shard,
   # combined and gated at the same 70% threshold in the fan-in `test` job
   # below, which keeps the required-check name `test` unchanged.
   test-shard:
@@ -77,6 +77,7 @@ jobs:
     # The real Docker cases are opt-in in normal pytest collection. Build the
     # credential-free proof and preview images and run them on every PR and push.
     runs-on: ubuntu-latest
+    environment: ${{ github.ref == 'refs/heads/codex/f042b-linux-20261026' && 'f042b-live-openai-20261026' || '' }}
     timeout-minutes: ${{ github.ref == 'refs/heads/codex/f042b-linux-20261026' && 60 || 30 }}
     steps:
       - name: Checkout
@@ -92,10 +93,19 @@ jobs:
         with:
           python-version: '3.13.7'
 
+      - name: Install pinned task evidence encryption utility
+        if: github.ref == 'refs/heads/codex/f042b-linux-20261026'
+        run: |
+          mkdir "$RUNNER_TEMP/f042bl-age"
+          curl --fail --silent --show-error --location https://github.com/FiloSottile/age/releases/download/v1.3.2/age-v1.3.2-linux-amd64.tar.gz -o "$RUNNER_TEMP/f042bl-age/age.tar.gz"
+          echo 'cbe24006683f8eb669266162894b9a522a1af52f2665fbc63a4bb032ed26ac10  '"$RUNNER_TEMP/f042bl-age/age.tar.gz" | sha256sum --check --status
+          tar -xzf "$RUNNER_TEMP/f042bl-age/age.tar.gz" -C "$RUNNER_TEMP/f042bl-age" age/age
+          test "$("$RUNNER_TEMP/f042bl-age/age/age" --version)" = v1.3.2
+
       - name: Verify frozen qualification inputs
         if: github.ref == 'refs/heads/codex/f042b-linux-20261026'
         env:
-          EXPECTED_MANIFEST: fd8199ad15e3aace9c69ad5be9a77a0b1561edc11dc136caf5594b4801a9f4e5
+          EXPECTED_MANIFEST: 929f1143932dd5b2e3e71ad1f88d94959a34aa609fdab1fde9205c8ce6f2caac
         run: |
           test "$GITHUB_EVENT_NAME" = push
           test "$GITHUB_RUN_ATTEMPT" = 1
@@ -108,6 +118,8 @@ jobs:
           assert hashlib.sha256(data).hexdigest() == os.environ["EXPECTED_MANIFEST"]
           manifest = json.loads(data)
           assert manifest["branch"] == "codex/f042b-linux-20261026"
+          assert manifest["campaign"] == "f042b-live-20261026"
+          assert "live-inputs.json" in manifest["inputs"]
           assert manifest["attempt"] in (1, 2, 3)
           assert all(re.fullmatch("[0-9a-f]{40}", manifest[key]) for key in ("source_sha", "source_tree", "package_source_sha"))
           source = Path(os.environ["RUNNER_TEMP"]) / "f042b-source"
@@ -155,9 +167,9 @@ jobs:
           cp "$GITHUB_WORKSPACE/qualification/installed_origins.py" "$RUNNER_TEMP/f042b-fixtures/"
           cd "$RUNNER_TEMP/f042b-fixtures"
           env -i PATH="$PATH" PYTHON_DOTENV_DISABLED=1 PYTHONDONTWRITEBYTECODE=1             "$RUNNER_TEMP/f042b-consumer/bin/python" -I "$GITHUB_WORKSPACE/qualification/installed_check.py"             "$RUNNER_TEMP/f042b-source" "$RUNNER_TEMP/f042b-receipts"
-          env -i PATH="$PATH" PYTHON_DOTENV_DISABLED=1 PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 MOZAIKS_TEST_REAL_STUDIO_LINEAGE=1 \
+          env -i PATH="$PATH" PYTHON_DOTENV_DISABLED=1 PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
             "$RUNNER_TEMP/f042b-consumer/bin/python" -B -m pytest --collect-only -q -p no:cacheprovider -p pytest_asyncio.plugin -o asyncio_mode=auto -o asyncio_default_fixture_loop_scope=function -o addopts= -o log_file= \
-            tests/test_refinement_acceptance_real_mongo.py::test_real_paired_projects_tasks_acceptance > "$RUNNER_TEMP/f042b-receipts/paired-collection.txt"
+            tests/test_run_live_workflow_smoke_runtime_host.py::test_live_genesis_campaign > "$RUNNER_TEMP/f042b-receipts/live-collection.txt"
 
       - name: Build clean contained candidate using the established preview recipe
         if: github.ref == 'refs/heads/codex/f042b-linux-20261026'
@@ -200,28 +212,51 @@ jobs:
           CI_MONGO_IMAGE: mongo@sha256:b096b4cb9269f3ebcf363be63f1c50920f786879d03a1890347a3bf33f1f0df0
         run: bash "$RUNNER_TEMP/f042b-source/scripts/ci/mongo_service.sh" start
 
-      - name: Execute both installed paired nodes without retries
+      - name: Execute the bounded real Genesis and refinement campaign
         if: github.ref == 'refs/heads/codex/f042b-linux-20261026'
+        env:
+          OPENAI_API_KEY: ${{ secrets.F042BL_OPENAI_API_KEY_20261026 }}
         run: |
           cd "$RUNNER_TEMP/f042b-fixtures"
-          env -i PATH="$PATH" CI=true ENV=test PYTHON_DOTENV_DISABLED=1 PYTHONDONTWRITEBYTECODE=1 \
-            PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 F042B_ORIGIN_RECEIPT="$RUNNER_TEMP/f042b-receipts/loaded-origins.json" \
-            LOGS_BASE_DIR="$RUNNER_TEMP/f042b-runtime-logs" AG2_RUNTIME_LOG_FILE="$RUNNER_TEMP/f042b-ag2.log" \
-            MOZAIKS_TEST_REFINEMENT_MONGO_URI=mongodb://127.0.0.1:52741 MOZAIKS_REQUIRE_REAL_MONGO=1 \
-            MOZAIKS_TEST_REAL_STUDIO_LINEAGE=1 MOZAIKS_APP_RUNTIME_IMAGE_ID="$(cat "$RUNNER_TEMP/f042b-receipts/image-id.txt")" \
-            MOZAIKS_TEST_IDENTITY_IMAGE="$(cat "$RUNNER_TEMP/f042b-receipts/identity-image-id.txt")" \
-            MOZAIKS_BROWSER_OBSERVER_SECCOMP="$GITHUB_WORKSPACE/qualification/observer-seccomp.json" \
-            "$RUNNER_TEMP/f042b-consumer/bin/python" -B -m pytest -q -ra --tb=no --show-capture=no -x \
-            -p no:cacheprovider -p pytest_asyncio.plugin -p installed_origins -o asyncio_mode=auto -o asyncio_default_fixture_loop_scope=function -o addopts= -o log_file= \
-            --junitxml="$RUNNER_TEMP/f042b-paired.xml" --basetemp="$RUNNER_TEMP/f042b-paired" \
-            tests/test_refinement_acceptance_real_mongo.py::test_real_paired_projects_tasks_acceptance \
-            > "$RUNNER_TEMP/f042b-paired.log" 2>&1
+          umask 077
+          python - <<'PY' > "$RUNNER_TEMP/f042bl-controller-local-only.log" 2>&1
+          import os
+          from pathlib import Path
+          temp = Path(os.environ['RUNNER_TEMP'])
+          workspace = Path(os.environ['GITHUB_WORKSPACE'])
+          assert os.environ.get('OPENAI_API_KEY'), 'required task credential absent'
+          # In-memory environment selection, never a secret-bearing argv/env-file.
+          env = {key: os.environ[key] for key in ('PATH', 'OPENAI_API_KEY', 'RUNNER_TEMP', 'GITHUB_WORKSPACE', 'GITHUB_SHA', 'GITHUB_RUN_ID', 'GITHUB_REF', 'GITHUB_RUN_ATTEMPT')}
+          env.update(CI='true', ENV='test', PYTHON_DOTENV_DISABLED='1', PYTHONDONTWRITEBYTECODE='1',
+              PYTEST_DISABLE_PLUGIN_AUTOLOAD='1', DEFAULT_LLM_MODEL='gpt-4o-mini', OPENAI_BASE_URL='https://api.openai.com/v1',
+              MOZAIKS_LIVE_CAMPAIGN='f042b-live-20261026', MOZAIKS_REQUIRE_REAL_MONGO='1', MONGO_URI='mongodb://127.0.0.1:52741',
+              MOZAIKS_LIVE_INPUTS=str(workspace/'qualification/live-inputs.json'),
+              MOZAIKS_EVIDENCE_AGE=str(temp/'f042bl-age/age/age'),
+              F042B_ORIGIN_RECEIPT=str(temp/'f042b-receipts/loaded-origins.json'),
+              LOGS_BASE_DIR=str(temp/'f042bl-runtime-local-only'), AG2_RUNTIME_LOG_FILE=str(temp/'f042bl-ag2-local-only.log'),
+              MOZAIKS_APP_RUNTIME_IMAGE_ID=(temp/'f042b-receipts/image-id.txt').read_text().strip(),
+              MOZAIKS_TEST_IDENTITY_IMAGE=(temp/'f042b-receipts/identity-image-id.txt').read_text().strip(),
+              MOZAIKS_BROWSER_OBSERVER_SECCOMP=str(workspace/'qualification/observer-seccomp.json'))
+          python = str(temp/'f042b-consumer/bin/python')
+          args = [python, '-B', '-m', 'pytest', '-q', '--tb=no', '--show-capture=no', '-x',
+              '-p', 'no:cacheprovider', '-p', 'pytest_asyncio.plugin', '-p', 'installed_origins',
+              '-o', 'asyncio_mode=auto', '-o', 'asyncio_default_fixture_loop_scope=function', '-o', 'addopts=', '-o', 'log_file=',
+              '--junitxml='+str(temp/'f042b-paired.xml'), '--basetemp='+str(temp/'f042bl-live'),
+              'tests/test_run_live_workflow_smoke_runtime_host.py::test_live_genesis_campaign']
+          os.execve(python, args, env)
+          PY
 
       - name: Export bounded sanitized qualification evidence
         id: qualification_evidence
         if: always() && github.ref == 'refs/heads/codex/f042b-linux-20261026'
         run: |
-          python qualification/export_evidence.py "$RUNNER_TEMP"
+          cd "$RUNNER_TEMP/f042b-fixtures"
+          PYTHONPATH="$RUNNER_TEMP/f042b-fixtures" "$RUNNER_TEMP/f042b-consumer/bin/python" "$GITHUB_WORKSPACE/qualification/export_evidence.py" "$RUNNER_TEMP" \
+            --selection "$RUNNER_TEMP/f042bl-private/selection.json" \
+            --age "$RUNNER_TEMP/f042bl-age/age/age" \
+            --recipient age1vvcnzq66ujctrj2cq2l9mnv4f7ce6x4t58dgnqfu3es57ns69ets6hjg7z
+          test -s "$RUNNER_TEMP/f042b-receipts/private-evidence.age"
+          test -s "$RUNNER_TEMP/f042b-receipts/encrypted-evidence.json"
           test "$(du -sb "$RUNNER_TEMP/f042b-receipts" | cut -f1)" -le 104857600
 
       - name: Remove only this runner's task containers
@@ -238,8 +273,18 @@ jobs:
         if: always() && github.ref == 'refs/heads/codex/f042b-linux-20261026' && steps.qualification_evidence.outcome == 'success'
         uses: actions/upload-artifact@v7
         with:
-          name: f042b-${{ github.run_id }}
-          path: ${{ runner.temp }}/f042b-receipts/
+          name: f042bl-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/f042b-receipts/identities.json
+            ${{ runner.temp }}/f042b-receipts/paired-summary.json
+            ${{ runner.temp }}/f042b-receipts/encrypted-evidence.json
+            ${{ runner.temp }}/f042b-receipts/private-evidence.age
+            ${{ runner.temp }}/f042b-receipts/loaded-origins.json
+            ${{ runner.temp }}/f042b-receipts/sandbox.json
+            ${{ runner.temp }}/f042b-receipts/native-clocks.json
+            ${{ runner.temp }}/f042b-receipts/image-id.txt
+            ${{ runner.temp }}/f042b-receipts/image-labels.json
+            ${{ runner.temp }}/f042b-receipts/identity-image-id.txt
           retention-days: 1
           if-no-files-found: error
 
@@ -329,7 +374,7 @@ jobs:
     # the required-check name `test`, then enforces combined coverage.
     runs-on: ubuntu-latest
     needs: [test-shard, acp-isolation-proof]
-    # always() so either dependency failing cannot leave this job skipped — a
+    # always() so either dependency failing cannot leave this job skipped â€” a
     # skipped required check would satisfy branch protection.
     if: always() && github.ref != 'refs/heads/codex/f042b-linux-20261026'
     steps:
@@ -372,7 +417,7 @@ jobs:
       - name: Combine coverage and enforce threshold
         # Fails closed on incomplete coverage evidence: exactly one artifact
         # per shard must exist, and each must combine cleanly. Combining one
-        # input per invocation is load-bearing — a multi-file `coverage
+        # input per invocation is load-bearing â€” a multi-file `coverage
         # combine` skips an unreadable data file with only a warning, while a
         # single unreadable input leaves the invocation with no usable data,
         # which is a hard error.
@@ -385,7 +430,7 @@ jobs:
             exit 1
           fi
           for k in 0 1 2 3 4 5 6 7; do
-            # -s: a zero-byte artifact must fail too — coverage combine
+            # -s: a zero-byte artifact must fail too â€” coverage combine
             # silently treats an empty data file as "no data yet".
             if [ ! -s "coverage-data-shard-$k" ]; then
               echo "missing or empty coverage data artifact for shard $k" >&2
