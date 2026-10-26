@@ -263,4 +263,3 @@ if __name__ == '__main__':
     except Exception:
         print('{"evidence_export":"failed","upload_allowed":false}')
         sys.exit(1)
-
