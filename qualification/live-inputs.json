@@ -1,15 +1,21 @@
 {
   "campaign": "f042b-live-20261026",
+  "schema_version": "mozaiks.live_campaign_input.v2",
+  "source_id": "f042b-live-20261026",
+  "revision": 1,
+  "scope_review": "approved",
+  "attempt": 3,
+  "complete_categories": ["core_features", "constraints", "non_goals"],
   "brief": "Build a private project-management workspace for a small team. Owners and members need projects and tasks, useful search/paging, and a desktop planning board with keyboard-accessible interactions. Provide private Messaging using the established capability. Outsiders and unauthenticated visitors must not read or change protected work. Persist changes across reloads. Use the existing theme system and shipped assets for a distinctive space-inspired interface that works on desktop and mobile. Keep Projects, Board and Messages reachable through the app's normal navigation. Build the actual application, not a mock screen. No payments, external integrations, or AI assistant inside the generated app are required in this scenario.",
   "requirements": [
-    {"id":"LIVE-01","criterion":"Owners and members can create, read and update projects and tasks; changes survive reload."},
-    {"id":"LIVE-02","criterion":"Project/task search finds matching work, excludes nonmatches and supports paging."},
-    {"id":"LIVE-03","criterion":"Desktop planning board supports genuine task interactions using keyboard and pointer."},
-    {"id":"LIVE-04","criterion":"Private Messaging uses the shipped capability; authorized participants can send and read, outsiders cannot."},
-    {"id":"LIVE-05","criterion":"Outsiders and unauthenticated visitors cannot read or mutate protected projects/tasks."},
-    {"id":"LIVE-06","criterion":"Space-inspired theme uses the existing theme system/shipped assets; desktop and mobile remain usable."},
-    {"id":"LIVE-07","criterion":"Projects, Board and Messages are reachable through normal application navigation."},
-    {"id":"LIVE-08","criterion":"Canonical app contains no embedded Factory, build-context or refinement machinery; no payment/external integration/output AI feature."}
+    {"id":"LIVE-01","source":"core_features","criterion":"Owners and members can create, read and update projects and tasks; changes survive reload."},
+    {"id":"LIVE-02","source":"core_features","criterion":"Project/task search finds matching work, excludes nonmatches and supports paging."},
+    {"id":"LIVE-03","source":"core_features","criterion":"Desktop planning board supports genuine task interactions using keyboard and pointer."},
+    {"id":"LIVE-04","source":"core_features","criterion":"Private Messaging uses the shipped capability; authorized participants can send and read, outsiders cannot."},
+    {"id":"LIVE-05","source":"constraints","criterion":"Outsiders and unauthenticated visitors cannot read or mutate protected projects/tasks."},
+    {"id":"LIVE-06","source":"core_features","criterion":"Space-inspired theme uses the existing theme system/shipped assets; desktop and mobile remain usable."},
+    {"id":"LIVE-07","source":"core_features","criterion":"Projects, Board and Messages are reachable through normal application navigation."},
+    {"id":"LIVE-08","source":"constraints","criterion":"Canonical app contains no embedded Factory, build-context or refinement machinery; no payment/external integration/output AI feature."}
   ],
   "refinements": [
     "In Messaging, collapse repeated ordinary spaces in a message body. Preserve tabs and line breaks. Leave everything else unchanged.",
@@ -22,7 +28,7 @@
     "https://developers.openai.com/api/docs/models/gpt-4.1"
   ],
   "request_budget": {
-    "max_usd":"24.996212920","max_requests":76,
+    "max_usd":"24.991900150","max_requests":72,
     "models": {
       "gpt-4o-mini":{"input_per_million":"0.15","output_per_million":"0.60","context_tokens":128000,"output_tokens":16384},
       "gpt-4.1-2025-04-14":{"input_per_million":"2.00","output_per_million":"8.00","context_tokens":1047576,"output_tokens":32768}

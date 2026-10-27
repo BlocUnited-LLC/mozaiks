@@ -105,7 +105,7 @@ jobs:
       - name: Verify frozen qualification inputs
         if: github.ref == 'refs/heads/codex/f042b-linux-20261026'
         env:
-          EXPECTED_MANIFEST: f140a4a2e078035682d8255dd0a8b5cef2ac15ffee5f31ce7eec8a3c49c13061
+          EXPECTED_MANIFEST: aa16eed11d10b9ab6e437ae716b5ac1d9b27498418036faf92273065f239828a
         run: |
           test "$GITHUB_EVENT_NAME" = push
           test "$GITHUB_RUN_ATTEMPT" = 1
