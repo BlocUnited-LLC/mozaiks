@@ -277,7 +277,7 @@ sequence where AppGenerator hands off to SecurityReadiness:
 | Workflow | Purpose |
 |----------|---------|
 | `AppMediaGenerator` | The build's app media step described above. |
-| `BrandAssetGeneratorWorkflow` | Standalone logo workflow outside every build sequence. Its `promote_brand_asset` writes a legacy role-keyed manifest that AppGenerator rejects; it is retired together with the hosted product test that still imports it. |
+| `BrandAssetGeneratorWorkflow` | Standalone logo workflow outside every build sequence. Its `promote_brand_asset` writes a role-keyed manifest shape that AppGenerator rejects; it is retired together with the hosted product test that still imports it. |
 
 Apps build their own promote-side tools on these primitives. A workflow that
 attaches generated media to an app's own records supplies that tool itself;
