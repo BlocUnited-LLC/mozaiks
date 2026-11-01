@@ -34,36 +34,36 @@ definitions:
       default: null
   app_validation_status:
     type: string
-    writer_ids: [transition_router]
-    description: AppGenerator validation result, carried unchanged to AppReview.
+    writer_ids: [transition_router, deterministic_tool]
+    description: Whole-app validation result for the current published bundle.
     source:
       type: state
       default: null
   app_validation_strategy_used:
     type: string
-    writer_ids: [transition_router]
-    description: Validation strategy used by AppGenerator, carried unchanged to AppReview.
+    writer_ids: [transition_router, deterministic_tool]
+    description: Validation strategy used for the current published bundle.
     source:
       type: state
       default: null
   app_validation_preview_url:
     type: string
-    writer_ids: [transition_router]
-    description: Optional preview URL from AppGenerator validation, carried unchanged.
+    writer_ids: [transition_router, deterministic_tool]
+    description: Optional preview URL; cleared when media replaces the validated bundle.
     source:
       type: state
       default: null
   integration_tests_passed:
     type: boolean
-    writer_ids: [transition_router]
-    description: AppGenerator integration result, carried unchanged; missing evidence remains null.
+    writer_ids: [transition_router, deterministic_tool]
+    description: Fresh integration result for the current bundle; missing evidence remains null.
     source:
       type: state
       default: null
   app_bundle_acceptance_status:
     type: string
-    writer_ids: [transition_router]
-    description: AppGenerator deterministic acceptance result, carried unchanged.
+    writer_ids: [transition_router, deterministic_tool]
+    description: Deterministic acceptance result for the current published bundle.
     source:
       type: state
       default: null

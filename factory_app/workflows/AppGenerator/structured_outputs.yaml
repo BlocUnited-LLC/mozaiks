@@ -4127,7 +4127,7 @@ models:
     fields:
       asset_id:
         type: str
-        description: asset_manifest entry id this image shows. Must exist in the emitted or existing asset_manifest.
+        description: Exact asset_manifest entry id this image shows. Must exist in the emitted or existing asset_manifest. Use 1-128 ASCII letters, digits, dots, underscores or hyphens, starting with a letter or digit; no trailing dot or reserved filename.
       alt:
         type: union
         variants:
@@ -5542,7 +5542,7 @@ models:
     fields:
       asset_id:
         type: str
-        description: Stable identifier used by ui/pages schemas and shell config to reference this asset.
+        description: Stable identifier unique case-insensitively within the manifest. Use 1-128 ASCII letters, digits, dots, underscores or hyphens, starting with a letter or digit; no trailing dot or reserved filename (CON, PRN, AUX, NUL, COM1-9, LPT1-9).
       kind:
         type: str
         description: Asset category such as logo, icon, hero_image, illustration, or video.
@@ -5588,7 +5588,7 @@ models:
         variants:
         - str
         - 'null'
-        description: Absolute URL when source is remote.
+        description: Absolute HTTP(S) URL without embedded credentials when source is remote.
       alt:
         type: union
         variants:

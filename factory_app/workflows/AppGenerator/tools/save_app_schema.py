@@ -33,6 +33,7 @@ from factory_app.workflows.AppGenerator.tools.task_integrity import (
     mark_repair_responded,
     validate_repair_candidate,
 )
+from mozaiksai.core.runtime.app.asset_manifest import asset_manifest_index
 from mozaiksai.core.runtime.app.page_schema import (
     PageSchemaValidationError,
     validate_page_schema,
@@ -355,13 +356,12 @@ def _validate_asset_manifest(asset_manifest: Any) -> None:
     assets = asset_manifest.get("assets")
     if not isinstance(assets, list):
         raise ValueError("asset_manifest.assets must be a list")
+    asset_manifest_index(asset_manifest)
 
     for index, asset in enumerate(assets):
         path = f"asset_manifest.assets[{index}]"
         if not isinstance(asset, dict):
             raise ValueError(f"{path} must be an object")
-        if not _is_non_empty_string(asset.get("asset_id")):
-            raise ValueError(f"{path}.asset_id is required")
         if not _is_non_empty_string(asset.get("kind")):
             raise ValueError(f"{path}.kind is required")
 
@@ -1643,6 +1643,20 @@ def save_app_schema(
         rendered_files = {
             path: _app_artifact_target(staging, path).read_text(encoding="utf-8") for path in rendered_paths
         }
+        try:
+            manifest_path = staging / "config/asset_manifest.json"
+            asset_index = asset_manifest_index(
+                json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.is_file() else None,
+            )
+            for page in page_list:
+                validate_page_schema(page, asset_ids=asset_index.keys())
+        except (ValueError, PageSchemaValidationError) as exc:
+            message = str(exc)
+            if isinstance(exc, PageSchemaValidationError):
+                message = "; ".join(f"{item.location}: {item.code}" for item in exc.diagnostics)
+            if mark_repair_rejected(context_variables, message):
+                return f"App schema repair rejected: {message}"
+            raise ValueError(message) from exc
 
     active_repair = (detach(_context_get(context_variables, "bundle_repair_result")) or {}).get("active")
     if isinstance(active_repair, dict):

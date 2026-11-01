@@ -609,6 +609,11 @@
           "workflows": [
             "AppGenerator"
           ]
+        },
+        {
+          "workflows": [
+            "AppMediaGenerator"
+          ]
         }
       ]
     },
@@ -629,6 +634,11 @@
           "workflows": [
             "AppGenerator"
           ]
+        },
+        {
+          "workflows": [
+            "AppMediaGenerator"
+          ]
         }
       ]
     },
@@ -648,6 +658,11 @@
         {
           "workflows": [
             "AppGenerator"
+          ]
+        },
+        {
+          "workflows": [
+            "AppMediaGenerator"
           ]
         }
       ]
@@ -674,6 +689,11 @@
         {
           "workflows": [
             "AppGenerator"
+          ]
+        },
+        {
+          "workflows": [
+            "AppMediaGenerator"
           ]
         }
       ]
@@ -709,6 +729,11 @@
           "workflows": [
             "AppGenerator"
           ]
+        },
+        {
+          "workflows": [
+            "AppMediaGenerator"
+          ]
         }
       ]
     },
@@ -722,6 +747,11 @@
         {
           "workflows": [
             "AppGenerator"
+          ]
+        },
+        {
+          "workflows": [
+            "AppMediaGenerator"
           ]
         }
       ]
@@ -743,6 +773,11 @@
           "workflows": [
             "AppGenerator"
           ]
+        },
+        {
+          "workflows": [
+            "AppMediaGenerator"
+          ]
         }
       ]
     },
@@ -757,6 +792,11 @@
         {
           "workflows": [
             "AppGenerator"
+          ]
+        },
+        {
+          "workflows": [
+            "AppMediaGenerator"
           ]
         }
       ]

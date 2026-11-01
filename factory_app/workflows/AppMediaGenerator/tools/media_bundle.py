@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from mozaiksai.core.runtime.app.asset_manifest import asset_manifest_index
+
 ASSET_MANIFEST_PATH = "config/asset_manifest.json"
 # Ceiling on images made per build; planned entries past it keep their placeholder.
 MAX_GENERATED_IMAGES = 8
@@ -21,6 +23,10 @@ def parse_asset_manifest(files: dict[str, Any]) -> dict[str, Any] | None:
         raise ValueError(f"{ERROR_PREFIX}_asset_manifest_invalid") from exc
     if not isinstance(manifest, dict) or not isinstance(manifest.get("assets"), list):
         raise ValueError(f"{ERROR_PREFIX}_asset_manifest_invalid")
+    try:
+        asset_manifest_index(manifest)
+    except ValueError as exc:
+        raise ValueError(f"{ERROR_PREFIX}_asset_manifest_invalid") from exc
     return manifest
 
 

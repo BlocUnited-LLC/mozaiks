@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from pathlib import Path
 from typing import Any, Literal, get_args
 
@@ -21,6 +21,7 @@ from pydantic import (
 )
 from pydantic_core import PydanticCustomError
 
+from mozaiksai.core.runtime.app.asset_manifest import asset_manifest_index, validate_asset_id
 from mozaiksai.core.runtime.app.module_loader import LoadedModule
 from mozaiksai.core.workflow.ui_primitives import get_page_ui_primitive_names
 
@@ -303,6 +304,8 @@ class AppImageConfig(PageContractModel):
     alt: str | None = None
     caption: str | None = None
     variant: Literal["banner", "inline"] | None = None
+
+    _asset_id = field_validator("asset_id")(validate_asset_id)
 
 
 class AppSkeletonConfig(PageContractModel):
@@ -737,6 +740,7 @@ def load_and_validate_page_schema(
     expected_name: str | None = None,
     action_index: Mapping[str, frozenset[str]] | None = None,
     ask_context_index: Mapping[str, frozenset[str]] | None = None,
+    asset_ids: Collection[str] | None = None,
 ) -> AppPageSchema:
     try:
         raw = yaml.safe_load(page_path.read_text(encoding="utf-8"))
@@ -762,6 +766,7 @@ def load_and_validate_page_schema(
         )
     return validate_page_schema(
         raw, expected_name=expected_name, action_index=action_index, ask_context_index=ask_context_index,
+        asset_ids=asset_ids,
     )
 
 
@@ -771,6 +776,7 @@ def validate_page_schema(
     expected_name: str | None = None,
     action_index: Mapping[str, frozenset[str]] | None = None,
     ask_context_index: Mapping[str, frozenset[str]] | None = None,
+    asset_ids: Collection[str] | None = None,
 ) -> AppPageSchema:
     try:
         page = AppPageSchema.model_validate(dict(schema))
@@ -798,9 +804,30 @@ def validate_page_schema(
         )
     diagnostics.extend(_validate_action_closure(page, action_index, ask_context_index))
     diagnostics.extend(_validate_interaction_contracts(page))
+    if asset_ids is not None:
+        diagnostics.extend(_validate_asset_references(page.model_dump(), asset_ids))
     if diagnostics:
         raise PageSchemaValidationError(diagnostics)
     return page
+
+
+def _validate_asset_references(page: dict[str, Any], asset_ids: Collection[str]) -> list[PageSchemaDiagnostic]:
+    diagnostics: list[PageSchemaDiagnostic] = []
+
+    def visit(section: dict[str, Any], location: str) -> None:
+        config = section["config"]
+        if section["primitive"] == "Image" and config["asset_id"] not in asset_ids:
+            diagnostics.append(PageSchemaDiagnostic(
+                code="page_schema.unknown_asset", location=f"{location}.config.asset_id",
+                message="Image asset_id must reference an entry in config/asset_manifest.json.",
+            ))
+        if section["primitive"] in {"Grid", "Modal"}:
+            for index, child in enumerate(config.get("children") or []):
+                visit(child, f"{location}.config.children[{index}]")
+
+    for index, section in enumerate(page["sections"]):
+        visit(section, f"$.sections[{index}]")
+    return diagnostics
 
 
 def _validate_interaction_contracts(page: AppPageSchema) -> list[PageSchemaDiagnostic]:
@@ -904,9 +931,18 @@ def load_app_page_schemas(
                 ))
         if diagnostics:
             raise PageSchemaValidationError(diagnostics)
+    assets_path = base_path / "config/asset_manifest.json"
+    try:
+        assets = asset_manifest_index(json.loads(assets_path.read_text(encoding="utf-8")) if assets_path.is_file() else None)
+    except (OSError, ValueError) as exc:
+        raise PageSchemaValidationError([PageSchemaDiagnostic(
+            code="page_schema.invalid_asset_manifest", location="$.assets",
+            message="Asset manifest has invalid or duplicate asset identities or URLs.",
+        )]) from exc
     pages = {
         name: load_and_validate_page_schema(
             path, expected_name=name, action_index=action_index, ask_context_index=ask_context_index,
+            asset_ids=assets.keys(),
         )
         for name, path in discover_page_schema_paths(base_path).items()
     }

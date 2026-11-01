@@ -1358,6 +1358,30 @@ def test_save_app_schema_writes_and_merges_asset_manifest(monkeypatch, tmp_path:
     assert "config/asset_manifest.json" in result
 
 
+@pytest.mark.parametrize("manifest_source", ["emitted", "existing"])
+def test_save_app_schema_checks_images_against_the_effective_manifest(monkeypatch, tmp_path, manifest_source):
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
+    page = {**_base_page(), "sections": [
+        {"id": "hero", "primitive": "Image", "config": {"asset_id": "hero"}},
+    ]}
+    with pytest.raises(ValueError, match="page_schema.unknown_asset"):
+        save_app_schema_module.save_app_schema(manifest=_base_manifest(), pages=[page], context_variables=_Context())
+    assert not (tmp_path / "ui/pages/Dashboard.yaml").exists()
+    assets = {"version": "1.0", "assets": [
+        {"asset_id": "hero", "kind": "illustration", "source": "generated", "brief": "Brand art"},
+    ]}
+    if manifest_source == "existing":
+        (tmp_path / "config").mkdir(exist_ok=True)
+        (tmp_path / "config/asset_manifest.json").write_text(json.dumps(assets), encoding="utf-8")
+    context = _Context()
+    result = save_app_schema_module.save_app_schema(
+        manifest=_base_manifest(), pages=[page], context_variables=context,
+        asset_manifest=assets if manifest_source == "emitted" else None,
+    )
+    assert "rejected" not in result
+    assert context.get("app_schema_ready") is True
+
+
 @pytest.mark.parametrize("shared", [False, True])
 def test_save_app_schema_writes_data_contract_from_context(monkeypatch, tmp_path: Path, shared: bool) -> None:
     from mozaiksai.core.workflow.agents.factory import _workflow_tool_invocation

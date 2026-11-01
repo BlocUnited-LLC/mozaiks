@@ -121,23 +121,26 @@ def test_upload_placeholder_is_labeled_and_escapes_the_brief() -> None:
     assert "<b>" not in svg and "&lt;b&gt;" in svg
 
 
-def test_every_build_sequence_makes_media_between_generation_and_security_review() -> None:
+def test_every_app_generation_sequence_makes_media_before_any_security_review() -> None:
     graph = load_global_pack_graph(REPO_ROOT / "factory_app" / "workflows")
     assert graph is not None
     with_media = []
     for sequence in graph.journeys:
         steps = [step.workflows for step in sequence.steps if step.workflows]
-        pairs = list(zip(steps, steps[1:], strict=False))
-        assert (["AppGenerator"], ["SecurityReadiness"]) not in pairs, sequence.id
+        if ["AppGenerator"] in steps:
+            generation = steps.index(["AppGenerator"])
+            assert steps[generation + 1] == ["AppMediaGenerator"], sequence.id
         if ["AppMediaGenerator"] in steps:
             position = steps.index(["AppMediaGenerator"])
-            assert steps[position - 1: position + 2] == [
-                ["AppGenerator"], ["AppMediaGenerator"], ["SecurityReadiness"],
-            ], sequence.id
+            assert steps[position - 1] == ["AppGenerator"], sequence.id
+            if ["SecurityReadiness"] in steps:
+                assert steps[position + 1] == ["SecurityReadiness"], sequence.id
             with_media.append(sequence.id)
     assert sorted(with_media) == [
-        "brownfield_module_generation", "brownfield_overlay_generation", "build",
-        "conceptual_replan", "full_rebuild",
+        "app_revision", "app_surface_revision", "brownfield_module_generation",
+        "brownfield_overlay_generation", "build", "conceptual_replan", "design_revision",
+        "full_rebuild", "subscription_patch", "subscription_revision", "theme_patch",
+        "theme_revision", "workflow_revision",
     ]
     entry = next(item for item in graph.workflows if item.id == "AppMediaGenerator")
     assert entry.dependencies == ["AppGenerator"]

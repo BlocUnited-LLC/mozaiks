@@ -12,11 +12,16 @@
  * neutral placeholder instead of a broken image.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import platform from '../../platform/index.js';
 import { cn } from '../lib/cn.js';
 
 export function Image({ asset_id: assetId, alt, caption, variant = 'inline', className }) {
   const [failed, setFailed] = useState(false);
+  const configuredBaseUrl = platform.getConfigOverrides()?.api?.baseUrl;
+  const baseUrl = configuredBaseUrl === '' ? '' : platform.resolveHttpUrl({ explicitUrl: configuredBaseUrl });
+  const src = `${baseUrl || ''}/api/app-assets/${encodeURIComponent(assetId || '')}`;
+  useEffect(() => setFailed(false), [src]);
   const banner = variant === 'banner';
   const frame = cn(
     'w-full overflow-hidden rounded-xl border border-border bg-muted',
@@ -36,7 +41,7 @@ export function Image({ asset_id: assetId, alt, caption, variant = 'inline', cla
       ) : (
         <div className={frame}>
           <img
-            src={`/api/app-assets/${encodeURIComponent(assetId)}`}
+            src={src}
             alt={alt || ''}
             loading="lazy"
             onError={() => setFailed(true)}

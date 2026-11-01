@@ -13,10 +13,11 @@ import re
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
 from mozaiksai.core.auth.dependencies import validate_path_id
 from mozaiksai.core.metrics.usage_instrumentation import record_page_view
+from mozaiksai.core.runtime.app.asset_manifest import validate_asset_id, validate_asset_url
 from mozaiksai.core.runtime.app.page_schema import (
     PageSchemaValidationError,
     load_and_validate_page_schema,
@@ -129,14 +130,20 @@ def _app_asset_entry(app_root: Path, asset_id: str) -> dict | None:
 
 @router.get("/api/app-assets/{asset_id}")
 async def get_app_asset(asset_id: str):
-    """Serve an image the active app's asset_manifest declares with a bundle path."""
-    if not re.fullmatch(r"[A-Za-z0-9_.-]+", asset_id):
-        raise HTTPException(status_code=400, detail="Invalid asset id")
+    """Serve a declared bundle image or redirect to its HTTP(S) location."""
+    try:
+        validate_asset_id(asset_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid asset id") from exc
     app_root = resolve_active_app_root().resolve()
     entry = _app_asset_entry(app_root, asset_id)
     rel_path = entry.get("path") if entry else None
     if not isinstance(rel_path, str) or not rel_path.strip():
-        raise HTTPException(status_code=404, detail="Asset not available")
+        try:
+            url = validate_asset_url(entry.get("url") if entry else None)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="Asset not available") from exc
+        return RedirectResponse(url, status_code=302, headers=_APP_ASSET_HEADERS)
     file_path = (app_root / rel_path).resolve()
     media_type = _APP_ASSET_MEDIA_TYPES.get(file_path.suffix.lower())
     if not file_path.is_relative_to(app_root) or media_type is None or not file_path.is_file():

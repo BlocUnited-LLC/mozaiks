@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
 from factory_app.workflows._shared.platform import build_lifecycle as hooks
+from mozaiksai.core.workflow.execution.lifecycle import LifecycleToolManager, LifecycleTrigger
+from mozaiksai.core.workflow.pack.config import (
+    get_workflow_sequence,
+    load_global_pack_graph,
+    normalize_step_groups,
+)
 from mozaiksai.core.workflow.pack.schema import parse_global_pack_graph
 
 BINDING = {
@@ -198,4 +205,64 @@ async def test_telemetry_remains_anonymized(monkeypatch):
     payload = emitted.call_args.args[0]
     assert payload["build_id_hash"]
     assert "appreg_1" not in str(payload)
+
+
+def test_media_workflow_loads_the_shared_build_lifecycle_hooks(monkeypatch):
+    from mozaiksai.core.workflow.execution import lifecycle
+
+    workflow = Path(__file__).resolve().parents[1] / "factory_app/workflows/AppMediaGenerator"
+    monkeypatch.setattr(lifecycle, "resolve_workflow_path", lambda name: workflow)
+    manager = LifecycleToolManager("AppMediaGenerator")
+    manager.load_lifecycle_tools()
+    for trigger, function in (
+        (LifecycleTrigger.ON_START, "emit_build_started"),
+        (LifecycleTrigger.ON_COMPLETE, "emit_build_completed"),
+        (LifecycleTrigger.ON_FAIL, "emit_build_failed"),
+    ):
+        assert len(manager.tools[trigger]) == 1
+        tool = manager.tools[trigger][0]
+        assert tool.function == function
+        assert tool.callable.__name__ == function
+        assert (workflow / tool.file).resolve() == workflow.parent / "_shared/platform/build_lifecycle.py"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sequence_id,terminal", [
+    ("app_revision", True), ("app_surface_revision", True), ("design_revision", True),
+    ("subscription_patch", True), ("subscription_revision", True), ("workflow_revision", True),
+    ("theme_patch", True), ("theme_revision", True), ("build", False), ("full_rebuild", False),
+])
+@pytest.mark.parametrize("published", [False, True])
+async def test_media_completes_only_terminal_sequences_with_the_current_artifact(state, monkeypatch, sequence_id, terminal, published):
+    root = Path(__file__).resolve().parents[1] / "factory_app/workflows"
+    graph = load_global_pack_graph(root)
+    sequence = get_workflow_sequence(graph, sequence_id)
+    groups = normalize_step_groups(sequence.steps)
+    state.session.update(journey_key=sequence_id, journey_position=groups.index(["AppMediaGenerator"]))
+    monkeypatch.setattr(hooks, "load_global_pack_graph", lambda: graph)
+    artifact_id = "media-child" if published else "unchanged-parent"
+    current_artifact = AsyncMock(return_value={
+        "artifactVersionId": artifact_id,
+        "exportDownloadUrl": hooks.build_export_download_url(
+            build_registry_id="appreg_1", artifact_version_id=artifact_id,
+        ),
+    })
+    monkeypatch.setattr(hooks, "get_build_artifacts", current_artifact)
+
+    await hooks.emit_build_completed(
+        **CALL, workflow_name="AppMediaGenerator",
+        context_variables={"app_media_summary": {"published": published}, "app_media_complete": True},
+    )
+
+    if terminal:
+        assert state.events.call_args.kwargs["event_type"] == "build.completed"
+        assert state.events.call_args.kwargs["payload"]["artifacts"]["artifactVersionId"] == artifact_id
+        assert state.registry.update_build_status.call_args.kwargs["status"] == "review"
+        assert state.registry.update_build_status.call_args.kwargs["expected_build_id"] == "build_1"
+        assert state.telemetry[0]["status"] == "completed"
+    else:
+        current_artifact.assert_not_awaited()
+        state.events.assert_not_awaited()
+        state.registry.update_build_status.assert_not_awaited()
+        assert state.telemetry == []
 

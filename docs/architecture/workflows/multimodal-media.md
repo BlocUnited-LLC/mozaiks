@@ -253,11 +253,20 @@ AppGenerator plans the images an app's pages show; it does not make them.
   or dish) and is reserved for the owner to supply; it is never AI art.
 - Pages show an entry with the `Image` primitive: `{asset_id, alt, caption,
   variant: banner|inline}`. The host serves bundle images at
-  `GET /api/app-assets/{asset_id}` from the entry's `path`; a planned entry
-  answers 404 and the primitive shows a neutral placeholder.
+  `GET /api/app-assets/{asset_id}` from the entry's `path`. An entry with only
+  an absolute HTTP(S) `url` redirects the browser there without fetching it on
+  the server; credentials and unsupported URL schemes are rejected. The
+  primitive uses the configured backend origin, including a proxy path prefix.
+  A planned entry answers 404 and shows a neutral placeholder; changing its
+  `asset_id` retries the new image.
+- Asset IDs are 1–128 ASCII letters, digits, dots, underscores, or hyphens,
+  begin with a letter or digit, and cannot end with a dot or use a Windows
+  reserved filename. IDs are unique without regard to case. Every `Image`
+  reference must resolve to the emitted or existing manifest; planned
+  generated/uploaded entries remain valid while their media is being produced.
 
-`AppMediaGenerator` runs after AppGenerator and before SecurityReadiness in every
-sequence where AppGenerator hands off to SecurityReadiness:
+`AppMediaGenerator` runs immediately after AppGenerator in full builds and scoped
+revisions, before SecurityReadiness when the sequence includes that review:
 
 1. A `before_chat` hook reads the planned `generated` entries (at most eight)
    and brand context from the bound build's current bundle.
@@ -268,9 +277,15 @@ sequence where AppGenerator hands off to SecurityReadiness:
    maker per job; a failed job leaves its slot planned and never fails the build.
 4. `publish_app_media` writes each image under `ui/assets/`, a labeled SVG
    placeholder for each `uploaded` entry, and the updated manifest into a new
-   **draft child version** of the app bundle, then points the registry's current
-   build at it. SecurityReadiness, AppReview, preview, and download read that
-   version. A rerun finds no planned entries and changes nothing.
+   **draft child version** of the app bundle. Before registering the child, the
+   existing candidate validator checks the complete bundle, including the raw
+   image bytes, through contained runtime acceptance and a fresh build. The new
+   evidence replaces the parent's validation evidence and binds the exact image
+   hashes. The registry update compares the expected parent artifact version so
+   a concurrent revision cannot be overwritten. SecurityReadiness, AppReview,
+   preview, and download read the resulting version. A rerun finds no planned
+   entries and changes nothing. The existing build lifecycle hooks emit completion
+   when media is the sequence's terminal step.
 
 ## Reference Workflows
 

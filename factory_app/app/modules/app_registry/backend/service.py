@@ -316,6 +316,7 @@ class AppRegistryService:
         active_workflow_id: str | None = None,
         current_build_run: dict[str, Any] | None = None,
         expected_build_id: str | None = None,
+        expected_artifact_version_id: str | None = None,
         expected_lifecycle_state: str | None = None,
         expected_active_chat_id: str | None | EllipsisType = ...,
     ) -> dict[str, Any]:
@@ -340,6 +341,7 @@ class AppRegistryService:
             active_workflow_id=payload["active_workflow_id"],
             current_build_run=payload["current_build_run"],
             expected_build_id=expected_build_id,
+            expected_artifact_version_id=expected_artifact_version_id,
             expected_lifecycle_state=expected_lifecycle_state,
             expected_active_chat_id=expected_active_chat_id,
         )

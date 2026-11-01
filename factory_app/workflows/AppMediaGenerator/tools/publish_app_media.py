@@ -23,6 +23,7 @@ from factory_app.workflows.AppMediaGenerator.tools.media_bundle import (
     parse_asset_manifest,
     planned_generated_entries,
 )
+from mozaiksai.control_plane.contracts import safe_artifact_relpath
 from mozaiksai.core.artifacts.content_store import get_artifact_content_store
 from mozaiksai.core.artifacts.models import (
     ArtifactLifecycleStatus,
@@ -33,6 +34,8 @@ from mozaiksai.core.artifacts.models import (
 from mozaiksai.core.artifacts.store import get_artifact_store
 from mozaiksai.core.media.store import get_media_asset_store
 from mozaiksai.core.media.types import GeneratedMediaAsset
+from mozaiksai.core.utils.path_containment import contains_symlink_component, resolve_inside
+from mozaiksai.core.validation.generated_app import validate_generated_app_candidate
 from mozaiksai.core.workflow.agents.factory import active_workflow_tool_run
 from mozaiksai.core.workflow.context.frozen import detach
 
@@ -46,6 +49,8 @@ _PLACEHOLDER_SIZE = {"square": (1024, 1024), "landscape": (1536, 1024), "portrai
 _PARENT_ONLY_METADATA = (
     "artifact_path", "workspace_dir", "content_ref", "content_backend", "content_digest",
     "accepted_file_manifest", "acceptance", "bundle_mode",
+    "app_bundle_acceptance", "validation_evidence", "app_validation_result",
+    "integration_test_result", "validation_result", "validation_status", "validation_strategy",
 )
 
 
@@ -73,7 +78,7 @@ def _latest_asset_by_task(assets: list[GeneratedMediaAsset]) -> dict[str, Genera
 
 def _placeholder_svg(entry: dict[str, Any]) -> str:
     width, height = _PLACEHOLDER_SIZE.get(entry.get("aspect") or "", (1024, 1024))
-    label = escape(str(entry.get("alt") or entry.get("brief") or entry["asset_id"]))[:120]
+    label = escape(str(entry.get("alt") or entry.get("brief") or entry["asset_id"])[:120])
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
         f'viewBox="0 0 {width} {height}" role="img" aria-label="Photo to upload: {label}">'
@@ -100,8 +105,17 @@ def _archive(bundle_name: str, files: dict[str, str | bytes]) -> bytes:
 
 
 def _stage(directory: Path, files: dict[str, str | bytes]) -> None:
+    destinations: list[tuple[Path, str | bytes]] = []
+    seen: set[str] = set()
     for path, content in files.items():
-        target = directory / PurePosixPath(path)
+        if safe_artifact_relpath(path) != path or path.casefold() in seen:
+            raise ValueError(f"{ERROR_PREFIX}_unsafe_asset_path")
+        if contains_symlink_component(directory, path):
+            raise ValueError(f"{ERROR_PREFIX}_unsafe_asset_path")
+        target = resolve_inside(directory, directory / PurePosixPath(path))
+        seen.add(path.casefold())
+        destinations.append((target, content))
+    for target, content in destinations:
         target.parent.mkdir(parents=True, exist_ok=True)
         if isinstance(content, bytes):
             target.write_bytes(content)
@@ -114,6 +128,7 @@ async def _register_media_version(
     parent: BuildRecord,
     files: dict[str, str | bytes],
     overlay: dict[str, Any],
+    validation: dict[str, Any],
     chat_id: str,
     user_id: str,
 ) -> tuple[BuildRecord, str]:
@@ -136,6 +151,12 @@ async def _register_media_version(
         "artifact_path": str(zip_path.resolve()),
         "workspace_dir": str(app_dir.resolve()),
         "media_overlay": overlay,
+        "validation_result": validation,
+        "validation_status": validation["validation_status"],
+        "validation_strategy": validation["validation_strategy"],
+        "app_bundle_acceptance": validation["app_bundle_acceptance_result"],
+        "validation_evidence": validation["app_bundle_acceptance_result"].get("validation_evidence"),
+        "app_validation_result": validation["app_validation_result"],
     })
     content_store = get_artifact_content_store()
     if content_store.backend_name != "local":
@@ -159,11 +180,9 @@ async def _register_media_version(
         source_workflow=WORKFLOW_NAME,
         source_chat_id=chat_id,
         lifecycle_status=ArtifactLifecycleStatus.DRAFT,
-        validation_status=parent.validation_status,
-        app_validation_status=parent.app_validation_status,
-        app_validation_strategy=parent.app_validation_strategy,
-        sandbox_session_id=parent.sandbox_session_id,
-        sandbox_provider=parent.sandbox_provider,
+        validation_status=validation["validation_status"],
+        app_validation_status=validation["app_validation_result"]["validation_status"],
+        app_validation_strategy=validation["validation_strategy"],
         commit_metadata={
             "message": f"{WORKFLOW_NAME}: {bundle_name}",
             "author_user_id": user_id,
@@ -202,6 +221,7 @@ async def publish_app_media(context_variables: Any = None) -> dict[str, Any]:
     placeholders: list[str] = []
     missing: list[str] = []
     overlay_assets: list[dict[str, Any]] = []
+    existing_paths = {path.casefold() for path in files}
     for entry in (manifest or {}).get("assets", []):
         if not is_planned(entry):
             continue
@@ -211,6 +231,8 @@ async def publish_app_media(context_variables: Any = None) -> dict[str, Any]:
             data = await get_media_asset_store().get_asset_content(asset)
             suffix = _EXTENSION_BY_TYPE.get(asset.media_type) or mimetypes.guess_extension(asset.media_type) or ".png"
             path = f"{ASSET_DIR}/{asset_id}{suffix}"
+            if path.casefold() in existing_paths:
+                return _finish(context_variables, {"published": False, "error": f"{ERROR_PREFIX}_asset_path_collision"})
             files[path] = data
             entry["path"] = path
             entry["tags"] = sorted({*(entry.get("tags") or []), "ai_generated"})
@@ -221,6 +243,8 @@ async def publish_app_media(context_variables: Any = None) -> dict[str, Any]:
             })
         elif entry.get("source") == "uploaded":
             path = f"{ASSET_DIR}/placeholders/{asset_id}.svg"
+            if path.casefold() in existing_paths:
+                return _finish(context_variables, {"published": False, "error": f"{ERROR_PREFIX}_asset_path_collision"})
             files[path] = _placeholder_svg(entry)
             entry["path"] = path
             entry["tags"] = sorted({*(entry.get("tags") or []), "placeholder"})
@@ -245,8 +269,22 @@ async def publish_app_media(context_variables: Any = None) -> dict[str, Any]:
         "asset_manifest_sha256": hashlib.sha256(manifest_text.encode("utf-8")).hexdigest(),
     }
     try:
+        validation = await validate_generated_app_candidate(
+            files=files,
+            app_id=parent.app_id,
+            validation_strategy=parent.app_validation_strategy,
+            capability_packs=parent.commit_metadata.metadata.get("capability_packs") or [],
+        )
+        acceptance = validation.get("app_bundle_acceptance_result") or {}
+        build_validation = validation.get("app_validation_result") or {}
+        if not (
+            validation.get("validation_status") == "passed"
+            and acceptance.get("status") == "passed" and acceptance.get("passed") is True
+            and build_validation.get("validation_status") == "passed"
+        ):
+            return _finish(context_variables, {"published": False, "error": f"{ERROR_PREFIX}_validation_failed"})
         child, bundle_path = await _register_media_version(
-            parent=parent, files=files, overlay=overlay, chat_id=chat_id, user_id=user_id,
+            parent=parent, files=files, overlay=overlay, validation=validation, chat_id=chat_id, user_id=user_id,
         )
     except (OSError, ValueError, RuntimeError) as exc:
         logger.warning("App media version registration failed: %s", exc)
@@ -275,6 +313,7 @@ async def publish_app_media(context_variables: Any = None) -> dict[str, Any]:
             "bundle_path": bundle_path,
         },
         expected_build_id=binding.build_id,
+        expected_artifact_version_id=parent.id,
     )
     if not update.get("success"):
         return _finish(context_variables, {"published": False, "error": f"{ERROR_PREFIX}_build_superseded"})
@@ -282,6 +321,11 @@ async def publish_app_media(context_variables: Any = None) -> dict[str, Any]:
     context_variables.set("artifact_version_id", child.id)
     context_variables.set("bundle_path", bundle_path)
     context_variables.set("lifecycle_state", "review")
+    context_variables.set("app_validation_status", build_validation["validation_status"])
+    context_variables.set("app_validation_strategy_used", validation["validation_strategy"])
+    context_variables.set("app_validation_preview_url", None)
+    context_variables.set("integration_tests_passed", True)
+    context_variables.set("app_bundle_acceptance_status", acceptance["status"])
     return _finish(context_variables, {
         "published": True,
         "generated": generated,
