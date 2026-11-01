@@ -49,6 +49,7 @@ _NEW_PRIMITIVES = (
     "AlertBanner",
     "ActionButton",
     "FileList",
+    "Image",
 )
 
 _ALL_SHIPPED = (
@@ -63,6 +64,7 @@ _ALL_SHIPPED = (
     "FileList",
     "Form",
     "Grid",
+    "Image",
     "InlineEmptyState",
     "LoadingState",
     "Metric",

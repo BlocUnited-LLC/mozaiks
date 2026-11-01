@@ -57,7 +57,7 @@ validation and promotion path used by other coding providers.
 
 The current ACP adapter would launch a local subprocess. Scoped files and a
 post-run diff check limit what Mozaiks accepts, but they do not isolate that
-process from host files or disk-based agent logins. AG2 1.1.2 also services a
+process from host files or disk-based agent logins. AG2 1.2.2 also services a
 direct ACP terminal request despite ``allow_terminal=False`` and would give
 that child the host environment. The shipped provider therefore refuses its
 default local execution path even if ACP is enabled in policy. An isolated

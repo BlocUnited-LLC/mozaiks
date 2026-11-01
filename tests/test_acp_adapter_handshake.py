@@ -83,7 +83,7 @@ def test_real_acp_adapter_initializes_in_disposable_offline_container(
             "acp_version": "0.12.1",
             "adapter": adapter,
             "adapter_version": version,
-            "ag2_version": "1.1.2",
+            "ag2_version": "1.2.2",
             "agent_name": name,
             "agent_version": version,
             "node_version": "v22.23.3",

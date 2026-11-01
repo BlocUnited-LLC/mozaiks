@@ -21,6 +21,7 @@ def test_component_and_page_primitive_catalogs_match_runtime_exports() -> None:
         "FileList",
         "Form",
         "Grid",
+        "Image",
         "InlineEmptyState",
         "LoadingState",
         "Metric",

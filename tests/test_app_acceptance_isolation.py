@@ -20,15 +20,15 @@ def _files() -> dict[str, str]:
     return {"app.json": '{"id":"fixture","name":"Fixture"}'}
 
 
-def _source_digest(files: dict[str, str]) -> str:
-    digests = {path: hashlib.sha256(content.encode("utf-8")).hexdigest()
+def _source_digest(files: dict[str, str | bytes]) -> str:
+    digests = {path: hashlib.sha256(content.encode("utf-8") if isinstance(content, str) else content).hexdigest()
                for path, content in files.items()}
     return hashlib.sha256(json.dumps(
         digests, sort_keys=True, separators=(",", ":"),
     ).encode("utf-8")).hexdigest()
 
 
-def _observed_pass(files: dict[str, str], image_id: str) -> dict:
+def _observed_pass(files: dict[str, str | bytes], image_id: str) -> dict:
     return {
         "contract_version": "1.0", "status": "passed", "passed": True,
         "results": [{"check": "boot.http_ready", "status": "passed"}],

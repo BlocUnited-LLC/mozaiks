@@ -372,7 +372,7 @@ agents:
       intended brand/experience posture. Every field maps directly to the ExperienceSpec
       structured output model — no freeform prose, no YAML strings.
 
-      Available primitives: PageHeader, ResourceTable, SummaryStrip, InlineEmptyState, LoadingState, ErrorState, Panel, SurfaceCard, StatusPill, Metric, SegmentedBar, DataTable, Form, Grid, Button, Modal, Alert, Skeleton, Empty, Timeline, CodeBlock, ProgressTracker, AlertBanner, ActionButton, FileList
+      Available primitives: PageHeader, ResourceTable, SummaryStrip, InlineEmptyState, LoadingState, ErrorState, Panel, SurfaceCard, StatusPill, Metric, SegmentedBar, DataTable, Form, Grid, Button, Modal, Alert, Image, Skeleton, Empty, Timeline, CodeBlock, ProgressTracker, AlertBanner, ActionButton, FileList
       Available layouts: grid, sidebar, full-width, split
 
       ExperienceSpec shape (output as the `experience_spec` JSON field):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import warnings
 from copy import deepcopy
 
 import httpx
@@ -107,10 +108,10 @@ def test_conflicting_output_limits_are_rejected():
 
 
 def test_unconfigured_limits_keep_ag2_defaults():
-    from ag2.config import OpenAIConfig
+    from ag2.config import OpenAICompletionsConfig
 
     actual = llm_config_to_ag2_config({"config_list": [{"model": "test"}]})
-    defaults = OpenAIConfig(model="test")
+    defaults = OpenAICompletionsConfig(model="test")
     assert actual.max_retries == defaults.max_retries
     assert actual.max_completion_tokens == defaults.max_completion_tokens
     assert actual.max_tokens == defaults.max_tokens
@@ -125,6 +126,7 @@ async def test_limit_reaches_provider_http_through_real_ag2_agent(limit):
 
     def respond(request):
         assert request.url.host == "provider.invalid"
+        assert request.url.path == "/v1/chat/completions"
         body = json.loads(request.content)
         requests.append(body)
         return httpx.Response(200, json={
@@ -147,11 +149,59 @@ async def test_limit_reaches_provider_http_through_real_ag2_agent(limit):
             limit: 128,
             "max_retries": 0,
         }).copy(http_client=http)
-        async with Agent("bounded", config=config).run("Complete the task.") as run:
-            await run.result()
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            async with Agent("bounded", config=config).run("Complete the task.") as run:
+                await run.result()
 
     assert len(requests) == 1
     assert requests[0][limit] == 128
+
+
+@pytest.mark.asyncio
+async def test_anthropic_shared_temperature_is_omitted_from_provider_request():
+    pytest.importorskip("anthropic")
+    import httpx2
+    from ag2 import Agent
+
+    requests = []
+
+    def respond(request):
+        assert request.url.host == "provider.invalid"
+        assert request.url.path == "/v1/messages"
+        requests.append(json.loads(request.content))
+        return httpx2.Response(200, json={
+            "id": "anthropic-completion",
+            "type": "message",
+            "role": "assistant",
+            "model": "test-model",
+            "content": [{"type": "text", "text": "Complete."}],
+            "stop_reason": "end_turn",
+            "stop_sequence": None,
+            "usage": {"input_tokens": 1, "output_tokens": 1},
+        })
+
+    source = {
+        "config_list": [{"api_type": "anthropic", "model": "test-model", "api_key": "test"}],
+        "temperature": 0.2,
+        "streaming": False,
+        "max_tokens": 128,
+        "max_retries": 0,
+    }
+    original = deepcopy(source)
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(respond)) as http:
+        config = llm_config_to_ag2_config(source).copy(
+            base_url="https://provider.invalid", http_client=http,
+        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            async with Agent("bounded", config=config).run("Complete the task.") as run:
+                await run.result()
+
+    assert source == original
+    assert len(requests) == 1
+    assert requests[0]["max_tokens"] == 128
+    assert not {"temperature", "top_p", "top_k"}.intersection(requests[0])
 
 
 @pytest.mark.asyncio

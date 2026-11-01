@@ -30,6 +30,7 @@ export { StageFunnel }     from './StageFunnel.jsx';
 export { Button }          from './Button.jsx';
 export { Modal }           from './Modal.jsx';
 export { Alert }           from './Alert.jsx';
+export { Image }           from './Image.jsx';
 export { ContentRail }     from './ContentRail.jsx';
 export { Skeleton, Empty } from './Skeleton.jsx';
 export { default as ArtifactLoadingState } from './ArtifactLoadingState.jsx';

@@ -211,7 +211,9 @@ def planned_artifact_diagnostics(context: Any, files: dict[str, str]) -> list[di
     return diagnostics
 
 
-def artifact_snapshot_digest(context: Any, files: dict[str, str]) -> str:
+def artifact_snapshot_digest(
+    context: Any, files: dict[str, str], *, binary_assets: dict[str, bytes] | None = None,
+) -> str:
     """Bind acceptance to its approved inputs and the exact exported contents."""
     revision = (
         _get(context, "build_mode") == "revision"
@@ -224,6 +226,10 @@ def artifact_snapshot_digest(context: Any, files: dict[str, str]) -> str:
         "binding": _get(context, "run_build_binding"),
         "files": files,
     }
+    if binary_assets:
+        snapshot["binary_assets"] = {
+            path: hashlib.sha256(content).hexdigest() for path, content in binary_assets.items()
+        }
     if revision:
         snapshot["revision_source_artifact_version_id"] = (
             _get(context, "revision_source_artifact_version_id") or _get(context, "artifact_version_id")

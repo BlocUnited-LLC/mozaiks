@@ -52,3 +52,10 @@ def test_ag2_dependency_declarations_and_installed_runtime_match() -> None:
     assert _requirements_txt_ag2_version() == declared_version
     assert _watchpoint_ag2_baseline() == declared_version
     assert importlib.metadata.version("ag2") == declared_version
+
+
+def test_acp_images_use_the_same_ag2_baseline_as_the_host() -> None:
+    (declared_version,) = set(_declared_ag2_versions())
+    for name in ("Dockerfile.acp-proof", "Dockerfile.acp-adapters"):
+        source = (ROOT / "infra" / "docker" / name).read_text(encoding="utf-8")
+        assert re.findall(r'ag2\[acp\]==([^"\s]+)', source) == [declared_version], name

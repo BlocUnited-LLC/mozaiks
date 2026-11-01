@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
@@ -186,7 +187,7 @@ def validate_generated_app_bundle(
 
 async def validate_generated_app_candidate(
     *,
-    files: dict[str, str],
+    files: Mapping[str, str | bytes],
     app_id: str,
     validation_strategy: str | None = None,
     timeout_seconds: int = 120,
@@ -208,7 +209,7 @@ async def validate_generated_app_candidate(
         run_app_bundle_acceptance_gate,
         validate_app_build,
     )
-    from mozaiksai.core.runtime.app.paths import is_safe_app_path
+    from mozaiksai.core.runtime.app.paths import APP_BINARY_ASSET_SUFFIXES, is_safe_app_path
     from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
         resolve_app_validation_strategy,
     )
@@ -233,9 +234,10 @@ async def validate_generated_app_candidate(
         str(path) for path, content in snapshot.items()
         if not is_safe_app_path(path) or str(PurePosixPath(path)) != path
         or path.strip() != path or path == "." or any(char in path for char in ("\\", ":", "\x00"))
-        or not isinstance(content, str)
+        or not isinstance(content, (str, bytes))
+        or (isinstance(content, bytes) and PurePosixPath(path).suffix.lower() not in APP_BINARY_ASSET_SUFFIXES)
     ]
-    if invalid or "app.json" not in snapshot:
+    if invalid or not isinstance(snapshot.get("app.json"), str):
         result["validation_status"] = "failed"
         result["errors"] = [
             "Candidate validation requires a complete canonical app bundle with app.json and safe file paths."
@@ -248,9 +250,13 @@ async def validate_generated_app_candidate(
 
     # Fresh context deliberately carries no Genesis task evidence or parent
     # validation. Copies prevent a helper's context write-back changing bytes.
+    text_files = {path: content for path, content in snapshot.items() if isinstance(content, str)}
+    binary_assets = {path: content for path, content in snapshot.items() if isinstance(content, bytes)}
+    binary_kwargs: dict[str, Any] = {"runtime_binary_assets": dict(binary_assets)} if binary_assets else {}
     acceptance = await run_app_bundle_acceptance_gate(
-        files=dict(snapshot), context_variables={"app_id": app_id},
+        files=dict(text_files), context_variables={"app_id": app_id},
         capability_packs=deepcopy(capability_packs or []),
+        **binary_kwargs,
     )
     result["app_bundle_acceptance_result"] = acceptance
     if acceptance.get("status") != "passed" or acceptance.get("passed") is not True:
@@ -262,9 +268,10 @@ async def validate_generated_app_candidate(
         return result
 
     build = await validate_app_build(
-        files=dict(snapshot), validation_strategy=strategy,
+        files=dict(text_files), validation_strategy=strategy,
         start_dev_server=False, timeout_seconds=timeout_seconds,
         context_variables={"app_id": app_id},
+        **binary_kwargs,
     )
     result["app_validation_result"] = _trim_validation_result(build)
     build_status = build.get("validation_status")

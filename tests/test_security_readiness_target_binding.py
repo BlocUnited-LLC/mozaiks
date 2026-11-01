@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock
 import pytest
 import yaml
 
-from factory_app.workflows.SecurityReadiness.tools import build_artifact
+from factory_app.workflows._shared.platform import current_build
 from factory_app.workflows.SecurityReadiness.tools.inspect_generated_app_security import (
     inspect_generated_app_security,
 )
@@ -65,8 +65,8 @@ def security_build_fixture(monkeypatch, tmp_path):
 
     registry = SimpleNamespace(get_app_record=AsyncMock(side_effect=get_record))
     store = SimpleNamespace(get_build_record=AsyncMock(side_effect=get_artifact))
-    monkeypatch.setattr(build_artifact, "AppRegistryService", lambda: registry)
-    monkeypatch.setattr(build_artifact, "get_artifact_store", lambda: store)
+    monkeypatch.setattr(current_build, "AppRegistryService", lambda: registry)
+    monkeypatch.setattr(current_build, "get_artifact_store", lambda: store)
 
     def add(files=None, *, project="project_a", entries=None):
         bridge = security_bridge(project)

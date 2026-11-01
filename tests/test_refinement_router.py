@@ -263,7 +263,7 @@ async def test_refinement_router_derives_route_from_workflow_sequence() -> None:
     assert decision.workflow_id == "DesignDocs"
     assert decision.workflow_sequence == "app_surface_revision"
     assert decision.impact_set.workflow_sequence == "app_surface_revision"
-    assert decision.impact_set.affected_workflows == ["DesignDocs", "AppGenerator"]
+    assert decision.impact_set.affected_workflows == ["DesignDocs", "AppGenerator", "AppMediaGenerator"]
     assert decision.context_seed["workflow_sequence"] == "app_surface_revision"
 
 
